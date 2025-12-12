@@ -77,10 +77,10 @@ This approach produces the same result as the previous example.
 [source]
 ----
 [cols=2*]
-|====
+|===
 |The default separator in PSV tables is the {vbar} character.
 |The {vbar} character is often referred to as a "`pipe`".
-|====
+|===
 ----
 
 Escaping each cell separator character that appears in the content of a cell can be tedious.
