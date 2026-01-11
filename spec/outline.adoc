@@ -1392,6 +1392,8 @@ See https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/s
 * target model:
 * attrlist model:
 
+shorthand for targeting a blank window/new tab
+
 === Cross reference macros
 
 * type: inline element
@@ -1401,6 +1403,8 @@ See https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/s
 * variant: xref
 * target model:
 * attrlist model:
+
+should support shorthand for targeting a blank window/new tab like the link macro
 
 === STEM macro
 
