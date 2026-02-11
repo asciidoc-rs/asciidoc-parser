@@ -9,6 +9,9 @@ https://github.com/asciidoctor/asciidoc-docs/commits/main[commit history].
 Added::
 * Document the `window` attribute of the xref macro
 
+Changed::
+* Clarify that `indent` attribute on verbatim block ignored if at least one line is not indented
+
 == Published Q4 2025
 
 Added::
