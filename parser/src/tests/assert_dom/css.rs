@@ -776,7 +776,7 @@ mod tests {
         // Test that :not() properly excludes matching elements.
         let excluded = query_css(&vdom, "div:not(.nonexistent)");
         assert!(
-            excluded.len() >= 1,
+            !excluded.is_empty(),
             "Should find divs that don't have .nonexistent class"
         );
     }
