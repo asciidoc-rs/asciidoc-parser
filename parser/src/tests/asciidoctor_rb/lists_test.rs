@@ -4133,16 +4133,19 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn line_attached_by_continuation_is_appended_as_paragraph_if_term_has_no_inline_description()
          {
-            let _doc = Parser::default().parse("== Lists\n\nterm1::\n+\npara\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p', output, 0");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"paragraph\"]', output, 1");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"paragraph\"]/p[text()=\"para\"]', output, 1"
+            let doc = Parser::default().parse("== Lists\n\nterm1::\n+\npara\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p", 0);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/*[@class=\"paragraph\"]", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"paragraph\"]/p[text()=\"para\"]",
+                1,
             );
         }
 
