@@ -4643,25 +4643,37 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn line_attached_by_continuation_is_appended_as_paragraph_if_term_has_inline_description_followed_by_detached_block()
          {
-            let _doc = Parser::default()
+            let doc = Parser::default()
                 .parse("== Lists\n\nterm1:: def1\n+\npara\n\n****\ndetached\n****\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p[text()=\"def1\"]', output, 1");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"paragraph\"]', output, 1"
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p[text()=\"def1\"]", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"paragraph\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"paragraph\"]/p[text()=\"para\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"paragraph\"]/p[text()=\"para\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]/following-sibling::*[@class=\"sidebarblock\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"sidebarblock\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]/following-sibling::*[@class=\"sidebarblock\"]//p[text()=\"detached\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"sidebarblock\"]//p[text()=\"detached\"]",
+                1,
             );
         }
 
