@@ -111,6 +111,11 @@ impl<'src> ListItem<'src> {
             {
                 // Block attribute line breaks the list.
                 marker_mi.after
+            } else if next_line_mi.item.data().starts_with("[[")
+                && next_line_mi.item.data().ends_with("]]")
+            {
+                // Block anchor line breaks the list.
+                marker_mi.after
             } else {
                 let next_line_metadata = BlockMetadata {
                     title_source: None,
@@ -237,8 +242,11 @@ impl<'src> ListItem<'src> {
                 }
             }
 
-            // A block attribute line without a continuation marker breaks the list.
-            if !continuation_active && metadata.item.attrlist.is_some() {
+            // A block attribute line or block anchor without a continuation marker
+            // breaks the list.
+            if !continuation_active
+                && (metadata.item.attrlist.is_some() || metadata.item.anchor.is_some())
+            {
                 break;
             }
 
