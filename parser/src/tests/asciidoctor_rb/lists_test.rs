@@ -4730,6 +4730,8 @@ mod description_lists_redux {
 
         #[test]
         #[ignore]
+        // TODO (https://github.com/scouten/asciidoc-parser/issues/474):
+        // Enable this test when rulers are implemented.
         fn ruler_offset_by_blank_line_divides_lists_because_item_has_text() {
             let _doc = Parser::default().parse("== Lists\n\nterm1:: def1\n\n'''\n\nterm2:: def2\n");
             todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 2");
