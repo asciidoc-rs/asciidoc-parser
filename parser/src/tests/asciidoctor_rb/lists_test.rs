@@ -3863,23 +3863,32 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn appends_line_attached_by_continuation_as_block_if_item_has_no_inline_description_followed_by_block()
          {
-            let _doc =
+            let doc =
                 Parser::default().parse("== Lists\n\nterm1::\n+\npara\n\n....\nliteral\n....\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p', output, 0");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"paragraph\"]', output, 1");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"paragraph\"]/p[text()=\"para\"]', output, 1"
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p", 0);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/*[@class=\"paragraph\"]", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"paragraph\"]/p[text()=\"para\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]/following-sibling::*[@class=\"literalblock\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"literalblock\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]/following-sibling::*[@class=\"literalblock\"]//pre[text()=\"literal\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"literalblock\"]//pre[text()=\"literal\"]",
+                1,
             );
         }
 

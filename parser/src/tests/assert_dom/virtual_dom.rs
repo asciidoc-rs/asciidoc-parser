@@ -5,7 +5,7 @@
 //! HTML equivalents, enabling XPath-like queries for test assertions.
 
 use crate::{
-    Document,
+    Document, HasSpan,
     blocks::{
         Block, Break, CompoundDelimitedBlock, IsBlock, ListBlock, ListItem, ListItemMarker,
         ListType, MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock,
@@ -462,15 +462,50 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
                         let has_multiple_blocks = nested.len() > 1;
 
+                        // Check if the first block was attached via list
+                        // continuation (+). When content is from continuation,
+                        // paragraphs should be wrapped in div.paragraph.
+                        let first_block_from_continuation =
+                            nested.first().map_or(false, |first_block| {
+                                let item_span = list_item.span();
+                                let marker_span = list_item.list_item_marker().span();
+
+                                let marker_end_offset =
+                                    marker_span.byte_offset() + marker_span.data().len();
+
+                                let first_block_offset = first_block.span().byte_offset();
+
+                                let item_start = item_span.byte_offset();
+
+                                if first_block_offset > marker_end_offset
+                                    && marker_end_offset >= item_start
+                                {
+                                    let start = marker_end_offset - item_start;
+                                    let end = first_block_offset - item_start;
+
+                                    if end <= item_span.data().len() {
+                                        let between = &item_span.data()[start..end];
+                                        between.lines().any(|line| line.trim() == "+")
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            });
+
                         for (index, child) in nested.iter().enumerate() {
                             let child_vdom = child.to_virtual_dom();
 
-                            // Wrap paragraphs in div.paragraph when they appear after other blocks.
-                            if has_multiple_blocks
-                                && index > 0
-                                && child_vdom.tag == "p"
+                            // Wrap paragraphs in div.paragraph when they
+                            // appear after other blocks or when the first
+                            // block was attached via continuation.
+                            let should_wrap = child_vdom.tag == "p"
                                 && child_vdom.classes.is_empty()
-                            {
+                                && ((has_multiple_blocks && index > 0)
+                                    || (index == 0 && first_block_from_continuation));
+
+                            if should_wrap {
                                 let wrapper = VirtualNode::new("div")
                                     .with_class("paragraph")
                                     .with_child(child_vdom);
@@ -669,7 +704,10 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
             let pre = VirtualNode::new("pre").with_child(code);
             node.children.push(pre);
         } else {
-            let pre = VirtualNode::new("pre");
+            let mut pre = VirtualNode::new("pre");
+            if let Some(content) = raw.rendered_content() {
+                pre = pre.with_text(content);
+            }
             node.children.push(pre);
         }
     }
