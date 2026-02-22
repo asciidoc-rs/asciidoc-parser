@@ -4222,16 +4222,22 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn delimited_block_breaks_list_even_when_term_has_no_inline_description() {
-            let _doc = Parser::default().parse("== Lists\n\nterm1::\n====\ndetached\n====\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 0");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]/following-sibling::*[@class=\"exampleblock\"]', output, 1"
+            let doc = Parser::default().parse("== Lists\n\nterm1::\n====\ndetached\n====\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 0);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"exampleblock\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]/following-sibling::*[@class=\"exampleblock\"]//p[text()=\"detached\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"exampleblock\"]//p[text()=\"detached\"]",
+                1,
             );
         }
 

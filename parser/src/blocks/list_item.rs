@@ -4,8 +4,8 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, ContentModel, IsBlock, ListBlock, ListItemMarker, SimpleBlock,
-        metadata::BlockMetadata,
+        Block, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItemMarker,
+        RawDelimitedBlock, SimpleBlock, metadata::BlockMetadata,
     },
     internal::debug::DebugSliceReference,
     span::MatchedItem,
@@ -99,6 +99,11 @@ impl<'src> ListItem<'src> {
             } else if ListItemMarker::parse(next_source, parser).is_some() {
                 // Next line is another list item marker (possibly a sibling term).
                 // Don't parse it as content; let the list parser handle it.
+                marker_mi.after
+            } else if RawDelimitedBlock::is_valid_delimiter(&next_line_mi.item)
+                || CompoundDelimitedBlock::is_valid_delimiter(&next_line_mi.item)
+            {
+                // Delimited block breaks the list.
                 marker_mi.after
             } else {
                 let next_line_metadata = BlockMetadata {
