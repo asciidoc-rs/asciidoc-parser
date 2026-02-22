@@ -237,6 +237,11 @@ impl<'src> ListItem<'src> {
                 }
             }
 
+            // A block attribute line without a continuation marker breaks the list.
+            if !continuation_active && metadata.item.attrlist.is_some() {
+                break;
+            }
+
             // If there's block metadata but no block, just discard it and continue.
             if metadata
                 .item

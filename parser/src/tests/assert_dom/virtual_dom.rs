@@ -285,8 +285,15 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
         && simple.declared_style().is_none()
         && simple.style() == SimpleBlockStyle::Paragraph
     {
-        let p_node = block.to_virtual_dom();
+        let mut p_node = block.to_virtual_dom();
         let mut wrapper = VirtualNode::new("div").with_class("paragraph");
+
+        // Roles and ID belong on the wrapper div, not the inner <p>.
+        wrapper.classes.extend(p_node.classes.drain(..));
+        if p_node.id.is_some() {
+            wrapper.id = p_node.id.take();
+        }
+
         wrapper.children.push(p_node);
         parent.children.push(wrapper);
     } else {

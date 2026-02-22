@@ -4277,12 +4277,15 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn block_attribute_line_above_paragraph_that_breaks_a_dlist_is_not_duplicated() {
-            let _doc = Parser::default().parse("== Lists\n\nterm:: desc\n[.rolename]\ndetached\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]/following-sibling::*[@class=\"paragraph rolename\"]', output, 1"
+            let doc = Parser::default().parse("== Lists\n\nterm:: desc\n[.rolename]\ndetached\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"paragraph rolename\"]",
+                1,
             );
         }
 
