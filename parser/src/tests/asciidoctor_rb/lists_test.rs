@@ -4162,15 +4162,17 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn attached_paragraph_is_terminated_by_adjacent_sibling_description_list_term() {
+            // Comment ported from Ruby Asciidoctor tests:
             // FIXME: this is a negative test; the behavior should be the other way around.
-            let _doc =
+            let doc =
                 Parser::default().parse("term1:: def\n+\nmore description\nnot a term:: def\n");
-            todo!("assert_css: '.dlist > dl > dt', output, 2");
-            todo!("assert_css: '.dlist > dl > dd', output, 2");
-            todo!("assert_css: '.dlist > dl > dd > .paragraph', output, 1");
-            todo!("refute_includes output, 'not a term:: def'");
+
+            assert_css(&doc, ".dlist > dl > dt", 2);
+            assert_css(&doc, ".dlist > dl > dd", 2);
+            assert_css(&doc, ".dlist > dl > dd > .paragraph", 1);
+
+            refute_output_contains(&doc, "not a term:: def");
         }
 
         #[test]
