@@ -105,6 +105,12 @@ impl<'src> ListItem<'src> {
             {
                 // Delimited block breaks the list.
                 marker_mi.after
+            } else if next_line_mi.item.data().starts_with('[')
+                && !next_line_mi.item.data().starts_with("[[")
+                && next_line_mi.item.data().ends_with(']')
+            {
+                // Block attribute line breaks the list.
+                marker_mi.after
             } else {
                 let next_line_metadata = BlockMetadata {
                     title_source: None,
