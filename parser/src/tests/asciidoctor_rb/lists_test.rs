@@ -3928,13 +3928,13 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn appends_list_if_item_has_no_inline_description() {
-            let _doc = Parser::default().parse("== Lists\n\nterm1::\n\n* one\n* two\n* three\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p', output, 0");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd//ul/li', output, 3");
+            let doc = Parser::default().parse("== Lists\n\nterm1::\n\n* one\n* two\n* three\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p", 0);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd//ul/li", 3);
         }
 
         #[test]
