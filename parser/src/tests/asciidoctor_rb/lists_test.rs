@@ -4047,20 +4047,31 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn appends_list_and_paragraph_block_when_line_following_list_attached_by_continuation() {
-            let _doc = Parser::default()
+            let doc = Parser::default()
                 .parse("== Lists\n\nterm1::\n\n* one\n* two\n* three\n\n+\npara\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p', output, 0");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/ul/li', output, 3");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/following-sibling::*[@class=\"paragraph\"]', output, 1"
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p", 0);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/ul/li",
+                3,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/following-sibling::*[@class=\"paragraph\"]/p[text()=\"para\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/following-sibling::*[@class=\"paragraph\"]",
+                1,
+            );
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/following-sibling::*[@class=\"paragraph\"]/p[text()=\"para\"]",
+                1,
             );
         }
 
