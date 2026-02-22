@@ -4553,11 +4553,13 @@ mod description_lists_redux {
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p[text()=\"def1\"]", 1);
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]/following-sibling::*[@class=\"paragraph\"]",
                 1,
             );
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]/following-sibling::*[@class=\"paragraph\"]/p[text()=\"detached\"]",
