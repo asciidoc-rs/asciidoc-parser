@@ -4741,11 +4741,15 @@ mod description_lists_redux {
         #[ignore]
         fn block_title_offset_by_blank_line_divides_lists_and_becomes_title_of_second_list_because_item_has_text()
          {
-            let _doc =
+            let doc =
                 Parser::default().parse("== Lists\n\nterm1:: def1\n\n.title\n\nterm2:: def2\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 2");
-            todo!(
-                "assert_xpath: '(//*[@class=\"dlist\"])[2]/*[@class=\"title\"][text()=\"title\"]', output, 1"
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 2);
+
+            assert_xpath(
+                &doc,
+                "(//*[@class=\"dlist\"])[2]/*[@class=\"title\"][text()=\"title\"]",
+                1,
             );
         }
     }
