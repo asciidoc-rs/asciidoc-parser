@@ -3950,18 +3950,51 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn appends_indented_list_to_first_term_that_is_adjacent_to_second_term() {
-            let _doc = Parser::default().parse("== Lists\n\nlabel 1::\n  description 1\n\n  * one\n  * two\n  * three\nlabel 2::\n  description 2\n\nparagraph\n");
-            todo!("assert_css: '.dlist > dl', output, 1");
-            todo!("assert_css: '.dlist dt', output, 2");
-            todo!(
-                "assert_xpath: '(//*[@class=\"dlist\"]//dt)[1][normalize-space(text())=\"label 1\"]', output, 1"
+            let doc = Parser::default().parse("== Lists\n\nlabel 1::\n  description 1\n\n  * one\n  * two\n  * three\nlabel 2::\n  description 2\n\nparagraph\n");
+
+            assert_css(&doc, ".dlist > dl", 1);
+            assert_css(&doc, ".dlist dt", 2);
+
+            assert_xpath(
+                &doc,
+                "(//*[@class=\"dlist\"]//dt)[1][normalize-space(text())=\"label 1\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '(//*[@class=\"dlist\"]//dt)[2][normalize-space(text())=\"label 2\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "(//*[@class=\"dlist\"]//dt)[2][normalize-space(text())=\"label 2\"]",
+                1,
             );
-            todo!("additional assertions");
+
+            assert_css(&doc, ".dlist dd", 2);
+
+            assert_xpath(
+                &doc,
+                "(//*[@class=\"dlist\"]//dd)[1]/p[text()=\"description 1\"]",
+                1,
+            );
+
+            assert_xpath(
+                &doc,
+                "(//*[@class=\"dlist\"]//dd)[2]/p[text()=\"description 2\"]",
+                1,
+            );
+
+            assert_xpath(
+                &doc,
+                "(//*[@class=\"dlist\"]//dd)[1]/p/following-sibling::*[@class=\"ulist\"]",
+                1,
+            );
+
+            assert_xpath(
+                &doc,
+                "(//*[@class=\"dlist\"]//dd)[1]/p/following-sibling::*[@class=\"ulist\"]//li",
+                3,
+            );
+
+            assert_css(&doc, ".dlist + .paragraph", 1);
         }
 
         #[test]
