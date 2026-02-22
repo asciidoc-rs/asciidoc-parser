@@ -4330,15 +4330,15 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn multiple_block_attribute_lines_above_nested_list_does_not_break_list() {
-            let _doc = Parser::default().parse("Operating Systems::\n[[variants]]\n[horizontal]\n  Linux::: Fedora\n  BSD::: OpenBSD\n\nCloud Providers::\n  PaaS::: OpenShift\n  IaaS::: AWS\n");
-            todo!("assert_xpath: '//dl', output, 2");
-            todo!("assert_xpath: '/*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '(//dl)[1]/dd', output, 2");
-            todo!("assert_xpath: '(//dl)[1]/dd/*[@id=\"variants\"]', output, 1");
-            todo!("assert_xpath: '((//dl)[1]/dd)[1]//table', output, 1");
-            todo!("assert_xpath: '((//dl)[1]/dd)[2]//table', output, 0");
+            let doc = Parser::default().parse("Operating Systems::\n[[variants]]\n[horizontal]\n  Linux::: Fedora\n  BSD::: OpenBSD\n\nCloud Providers::\n  PaaS::: OpenShift\n  IaaS::: AWS\n");
+
+            assert_xpath(&doc, "//dl", 2);
+            assert_xpath(&doc, "/*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "(//dl)[1]/dd", 2);
+            assert_xpath(&doc, "(//dl)[1]/dd/*[@id=\"variants\"]", 1);
+            assert_xpath(&doc, "((//dl)[1]/dd)[1]//table", 1);
+            assert_xpath(&doc, "((//dl)[1]/dd)[2]//table", 0);
         }
 
         #[test]
