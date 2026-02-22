@@ -4076,24 +4076,38 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn first_continued_line_associated_with_nested_list_item_and_second_continued_line_associated_with_term()
          {
-            let _doc = Parser::default()
+            let doc = Parser::default()
                 .parse("== Lists\n\nterm1::\n* one\n+\nnested list para\n\n+\nterm1 para\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p', output, 0");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/ul/li', output, 1");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/ul/li/*[@class=\"paragraph\"]/p[text()=\"nested list para\"]', output, 1"
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p", 0);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/ul/li",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/following-sibling::*[@class=\"paragraph\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/ul/li/*[@class=\"paragraph\"]/p[text()=\"nested list para\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/following-sibling::*[@class=\"paragraph\"]/p[text()=\"term1 para\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/following-sibling::*[@class=\"paragraph\"]",
+                1,
+            );
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"ulist\"]/following-sibling::*[@class=\"paragraph\"]/p[text()=\"term1 para\"]",
+                1,
             );
         }
 
