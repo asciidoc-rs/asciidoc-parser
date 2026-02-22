@@ -4112,17 +4112,23 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn literal_line_attached_by_continuation_swallows_adjacent_line_that_looks_like_term() {
-            let _doc = Parser::default().parse("== Lists\n\nterm1::\n+\n  literal\nnotnestedterm:::\n+\n  literal\nnotnestedterm:::\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p', output, 0");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"literalblock\"]', output, 2"
+            let doc = Parser::default().parse("== Lists\n\nterm1::\n+\n  literal\nnotnestedterm:::\n+\n  literal\nnotnestedterm:::\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p", 0);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"literalblock\"]",
+                2,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/*[@class=\"literalblock\"]//pre[text()=\"  literal\\nnotnestedterm:::\"]', output, 2"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/*[@class=\"literalblock\"]//pre[text()=\"  literal\nnotnestedterm:::\"]",
+                2,
             );
         }
 
