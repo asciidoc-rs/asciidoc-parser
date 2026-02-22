@@ -3901,21 +3901,25 @@ mod description_lists_redux {
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p", 0);
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/*[@class=\"literalblock\"]",
                 1,
             );
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/*[@class=\"literalblock\"]//pre[text()=\"literal\"]",
                 1,
             );
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]/following-sibling::*[@class=\"literalblock\"]",
                 1,
             );
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]/following-sibling::*[@class=\"literalblock\"]//pre[text()=\"detached\"]",
