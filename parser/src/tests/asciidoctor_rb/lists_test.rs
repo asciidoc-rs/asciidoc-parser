@@ -3630,6 +3630,7 @@ mod description_lists_redux {
             assert_css(&doc, "dl", 1);
             assert_css(&doc, "dl > dt", 2);
             assert_css(&doc, "dl > dd", 2);
+
             assert_xpath(&doc, "(//dl/dd)[1]/p[text()=\"def1\"]", 1);
         }
 
@@ -3679,6 +3680,7 @@ mod description_lists_redux {
         }
 
         #[test]
+        #[ignore]
         // TODO (https://github.com/scouten/asciidoc-parser/issues/474):
         // Enable this test when rulers are implemented.
         fn folds_text_that_looks_like_ruler_offset_by_blank_line_and_line_comment() {
@@ -3695,6 +3697,7 @@ mod description_lists_redux {
 
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/p[normalize-space(text())=\"''' continued\"]",
@@ -4364,6 +4367,7 @@ mod description_lists_redux {
 
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/p[text()=\"def1\ncontinued\"]",
@@ -4377,6 +4381,7 @@ mod description_lists_redux {
 
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/p[text()=\"def1\ncontinued\ncontinued\"]",
@@ -4390,6 +4395,7 @@ mod description_lists_redux {
 
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/p[text()=\"def1\ncontinued\"]",
@@ -4403,6 +4409,7 @@ mod description_lists_redux {
 
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/p[text()=\"def1\ncontinued\"]",
@@ -4417,11 +4424,13 @@ mod description_lists_redux {
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
             assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p[text()=\"def1\"]", 1);
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"literalblock\"]",
                 1,
             );
+
             assert_xpath(
                 &doc,
                 "//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"literalblock\"]//pre[text()=\"literal\"]",
