@@ -3938,15 +3938,15 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn appends_list_to_first_term_when_followed_immediately_by_second_term() {
-            let _doc = Parser::default()
+            let doc = Parser::default()
                 .parse("== Lists\n\nterm1::\n\n* one\n* two\n* three\nterm2:: def2\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 2");
-            todo!("assert_xpath: '(//*[@class=\"dlist\"]//dd)[1]/p', output, 0");
-            todo!("assert_xpath: '(//*[@class=\"dlist\"]//dd)[1]//ul/li', output, 3");
-            todo!("assert_xpath: '(//*[@class=\"dlist\"]//dd)[2]/p[text()=\"def2\"]', output, 1");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 2);
+            assert_xpath(&doc, "(//*[@class=\"dlist\"]//dd)[1]/p", 0);
+            assert_xpath(&doc, "(//*[@class=\"dlist\"]//dd)[1]//ul/li", 3);
+            assert_xpath(&doc, "(//*[@class=\"dlist\"]//dd)[2]/p[text()=\"def2\"]", 1);
         }
 
         #[test]
