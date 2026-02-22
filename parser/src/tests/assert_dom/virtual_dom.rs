@@ -447,10 +447,9 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
     // Add style class to the list element if present.
     // Skip for horizontal dlists since they use a different rendering.
-    if !is_horizontal
-        && let Some(style) = list.declared_style() {
-            list_element = list_element.with_class(style);
-        }
+    if !is_horizontal && let Some(style) = list.declared_style() {
+        list_element = list_element.with_class(style);
+    }
 
     for item in list.nested_blocks() {
         // For description lists, we need to create two peer nodes: dt and dd
@@ -577,10 +576,9 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
     // Add style class to the wrapper if present (explicit style overrides marker
     // style). Skip for horizontal dlists since wrapper already has hdlist class.
-    if !is_horizontal
-        && let Some(style) = list.declared_style() {
-            wrapper = wrapper.with_class(style);
-        }
+    if !is_horizontal && let Some(style) = list.declared_style() {
+        wrapper = wrapper.with_class(style);
+    }
 
     for role in list.roles() {
         wrapper = wrapper.with_class(role);
