@@ -76,7 +76,17 @@ impl<'src> ListItem<'src> {
             // Description list items can have empty content on the same line as the marker.
             // The content may be on subsequent lines, so we try to parse from the next
             // non-empty line.
-            let next_source = marker_mi.after.discard_empty_lines();
+            let mut next_source = marker_mi.after.discard_empty_lines();
+
+            // Skip comment lines (// but not ///) between term and continuation/content.
+            loop {
+                let peek = next_source.take_normalized_line();
+                if peek.item.data().starts_with("//") && !peek.item.data().starts_with("///") {
+                    next_source = peek.after.discard_empty_lines();
+                } else {
+                    break;
+                }
+            }
 
             // Check for continuation marker before parsing. If a continuation marker is
             // present, skip directly to the main loop which handles continuations properly.
