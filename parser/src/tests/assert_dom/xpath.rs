@@ -546,7 +546,9 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
                 final_results.extend(children_results);
             }
         }
-        final_results
+
+        // Deduplicate since the same node may be reachable from multiple ancestors.
+        deduplicate_nodes(final_results)
     } else {
         // Simple tag match or tag with predicate.
         // Extract base selector and predicate parts.

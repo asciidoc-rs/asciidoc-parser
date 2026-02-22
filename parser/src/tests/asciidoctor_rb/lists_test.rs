@@ -4568,16 +4568,44 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn nested_term_with_description_does_not_consume_following_heading() {
-            let _doc = Parser::default().parse(
-                "== Lists\n\nterm::\n  def\n  nestedterm;;\n    nesteddef\n\nDetached\n~~~~~~~~\n",
+            let doc = Parser::default()
+                .parse("== Lists\n\nterm::\n  def\n  nestedterm;;\n    nesteddef\n\n=== Detached");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 2);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 2);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl//dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl//dl/dt", 1);
+
+            assert_xpath(
+                &doc,
+                "((//*[@class=\"dlist\"])[1]//dd)[1]/p[text()=\"def\"]",
+                1,
             );
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 2");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 2");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl//dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl//dl/dt', output, 1");
-            todo!("additional assertions");
+
+            assert_xpath(
+                &doc,
+                "((//*[@class=\"dlist\"])[1]//dd)[1]/p/following-sibling::*[@class=\"dlist\"]",
+                1,
+            );
+
+            assert_xpath(
+                &doc,
+                "((//*[@class=\"dlist\"])[1]//dd)[1]/p/following-sibling::*[@class=\"dlist\"]//dd/p[text()=\"nesteddef\"]",
+                1,
+            );
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"sect2\"]",
+                1,
+            );
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"sect2\"]/h3[text()=\"Detached\"]",
+                1,
+            );
         }
 
         #[test]
