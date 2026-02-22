@@ -404,10 +404,20 @@ fn simple_block_to_node<'a>(block: &'a SimpleBlock<'a>) -> VirtualNode {
 }
 
 fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
+    // Horizontal description lists render as tables instead of dl elements.
+    let is_horizontal =
+        list.type_() == ListType::Description && list.declared_style() == Some("horizontal");
+
     let (list_tag, base_class) = match list.type_() {
         ListType::Unordered => ("ul", "ulist"),
         ListType::Ordered => ("ol", "olist"),
-        ListType::Description => ("dl", "dlist"),
+        ListType::Description => {
+            if is_horizontal {
+                ("table", "hdlist")
+            } else {
+                ("dl", "dlist")
+            }
+        }
     };
 
     let mut list_element = VirtualNode::new(list_tag);
@@ -436,93 +446,116 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
     }
 
     // Add style class to the list element if present.
-    if let Some(style) = list.declared_style() {
-        list_element = list_element.with_class(style);
+    // Skip for horizontal dlists since they use a different rendering.
+    if !is_horizontal {
+        if let Some(style) = list.declared_style() {
+            list_element = list_element.with_class(style);
+        }
     }
 
     for item in list.nested_blocks() {
-        // For description lists, we need to create two peer nodes: dt and dd.
+        // For description lists, we need to create two peer nodes: dt and dd
+        // (or tr/td for horizontal lists).
         if list.type_() == ListType::Description {
             if let Block::ListItem(list_item) = item {
                 // Create dt node for the term.
                 if let ListItemMarker::DefinedTerm { term, .. } = list_item.list_item_marker() {
-                    let mut dt_node = VirtualNode::new("dt");
+                    if is_horizontal {
+                        // Horizontal description lists render as table rows.
+                        let mut tr_node = VirtualNode::new("tr");
 
-                    for role in list_item.roles() {
-                        dt_node = dt_node.with_class(role);
-                    }
+                        let td_term = VirtualNode::new("td")
+                            .with_class("hdlist1")
+                            .with_html_content(term.rendered().to_string());
+                        tr_node.children.push(td_term);
 
-                    if let Some(id) = list_item.id() {
-                        dt_node = dt_node.with_id(id);
-                    }
+                        let mut td_def = VirtualNode::new("td").with_class("hdlist2");
+                        let nested = list_item.nested_blocks().collect::<Vec<_>>();
+                        for child in &nested {
+                            td_def.children.push(child.to_virtual_dom());
+                        }
+                        tr_node.children.push(td_def);
 
-                    // Set the term text.
-                    dt_node = dt_node.with_html_content(term.rendered().to_string());
-                    list_element.children.push(dt_node);
+                        list_element.children.push(tr_node);
+                    } else {
+                        let mut dt_node = VirtualNode::new("dt");
 
-                    // Create dd node for the definition, but only if the item has content.
-                    // Multiple consecutive terms can share a single definition.
-                    let nested = list_item.nested_blocks().collect::<Vec<_>>();
+                        for role in list_item.roles() {
+                            dt_node = dt_node.with_class(role);
+                        }
 
-                    if !nested.is_empty() {
-                        let mut dd_node = VirtualNode::new("dd");
+                        if let Some(id) = list_item.id() {
+                            dt_node = dt_node.with_id(id);
+                        }
 
-                        let has_multiple_blocks = nested.len() > 1;
+                        // Set the term text.
+                        dt_node = dt_node.with_html_content(term.rendered().to_string());
+                        list_element.children.push(dt_node);
 
-                        // Check if the first block was attached via list
-                        // continuation (+). When content is from continuation,
-                        // paragraphs should be wrapped in div.paragraph.
-                        let first_block_from_continuation =
-                            nested.first().is_some_and(|first_block| {
-                                let item_span = list_item.span();
-                                let marker_span = list_item.list_item_marker().span();
+                        // Create dd node for the definition, but only if the item has content.
+                        // Multiple consecutive terms can share a single definition.
+                        let nested = list_item.nested_blocks().collect::<Vec<_>>();
 
-                                let marker_end_offset =
-                                    marker_span.byte_offset() + marker_span.data().len();
+                        if !nested.is_empty() {
+                            let mut dd_node = VirtualNode::new("dd");
 
-                                let first_block_offset = first_block.span().byte_offset();
+                            let has_multiple_blocks = nested.len() > 1;
 
-                                let item_start = item_span.byte_offset();
+                            // Check if the first block was attached via list
+                            // continuation (+). When content is from continuation,
+                            // paragraphs should be wrapped in div.paragraph.
+                            let first_block_from_continuation =
+                                nested.first().is_some_and(|first_block| {
+                                    let item_span = list_item.span();
+                                    let marker_span = list_item.list_item_marker().span();
 
-                                if first_block_offset > marker_end_offset
-                                    && marker_end_offset >= item_start
-                                {
-                                    let start = marker_end_offset - item_start;
-                                    let end = first_block_offset - item_start;
+                                    let marker_end_offset =
+                                        marker_span.byte_offset() + marker_span.data().len();
 
-                                    if end <= item_span.data().len() {
-                                        let between = &item_span.data()[start..end];
-                                        between.lines().any(|line| line.trim() == "+")
+                                    let first_block_offset = first_block.span().byte_offset();
+
+                                    let item_start = item_span.byte_offset();
+
+                                    if first_block_offset > marker_end_offset
+                                        && marker_end_offset >= item_start
+                                    {
+                                        let start = marker_end_offset - item_start;
+                                        let end = first_block_offset - item_start;
+
+                                        if end <= item_span.data().len() {
+                                            let between = &item_span.data()[start..end];
+                                            between.lines().any(|line| line.trim() == "+")
+                                        } else {
+                                            false
+                                        }
                                     } else {
                                         false
                                     }
+                                });
+
+                            for (index, child) in nested.iter().enumerate() {
+                                let child_vdom = child.to_virtual_dom();
+
+                                // Wrap paragraphs in div.paragraph when they
+                                // appear after other blocks or when the first
+                                // block was attached via continuation.
+                                let should_wrap = child_vdom.tag == "p"
+                                    && child_vdom.classes.is_empty()
+                                    && ((has_multiple_blocks && index > 0)
+                                        || (index == 0 && first_block_from_continuation));
+
+                                if should_wrap {
+                                    let wrapper = VirtualNode::new("div")
+                                        .with_class("paragraph")
+                                        .with_child(child_vdom);
+                                    dd_node.children.push(wrapper);
                                 } else {
-                                    false
+                                    dd_node.children.push(child_vdom);
                                 }
-                            });
-
-                        for (index, child) in nested.iter().enumerate() {
-                            let child_vdom = child.to_virtual_dom();
-
-                            // Wrap paragraphs in div.paragraph when they
-                            // appear after other blocks or when the first
-                            // block was attached via continuation.
-                            let should_wrap = child_vdom.tag == "p"
-                                && child_vdom.classes.is_empty()
-                                && ((has_multiple_blocks && index > 0)
-                                    || (index == 0 && first_block_from_continuation));
-
-                            if should_wrap {
-                                let wrapper = VirtualNode::new("div")
-                                    .with_class("paragraph")
-                                    .with_child(child_vdom);
-                                dd_node.children.push(wrapper);
-                            } else {
-                                dd_node.children.push(child_vdom);
                             }
-                        }
 
-                        list_element.children.push(dd_node);
+                            list_element.children.push(dd_node);
+                        }
                     }
                 }
             }
@@ -544,9 +577,11 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
     }
 
     // Add style class to the wrapper if present (explicit style overrides marker
-    // style).
-    if let Some(style) = list.declared_style() {
-        wrapper = wrapper.with_class(style);
+    // style). Skip for horizontal dlists since wrapper already has hdlist class.
+    if !is_horizontal {
+        if let Some(style) = list.declared_style() {
+            wrapper = wrapper.with_class(style);
+        }
     }
 
     for role in list.roles() {
