@@ -4176,14 +4176,15 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn attached_styled_paragraph_does_not_break_on_adjacent_nested_description_list_term() {
-            let _doc = Parser::default()
+            let doc = Parser::default()
                 .parse("term1:: def\n+\n[quote]\nmore description\nnot a term::: def\n");
-            todo!("assert_css: '.dlist > dl > dt', output, 1");
-            todo!("assert_css: '.dlist > dl > dd', output, 1");
-            todo!("assert_css: '.dlist > dl > dd > .quoteblock', output, 1");
-            todo!("assert_includes output, 'not a term::: def'");
+
+            assert_css(&doc, ".dlist > dl > dt", 1);
+            assert_css(&doc, ".dlist > dl > dd", 1);
+            assert_css(&doc, ".dlist > dl > dd > .quoteblock", 1);
+
+            assert_output_contains(&doc, "not a term::: def");
         }
 
         #[test]
