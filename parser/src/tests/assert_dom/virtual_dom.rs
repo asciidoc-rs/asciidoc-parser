@@ -466,7 +466,7 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
                         // continuation (+). When content is from continuation,
                         // paragraphs should be wrapped in div.paragraph.
                         let first_block_from_continuation =
-                            nested.first().map_or(false, |first_block| {
+                            nested.first().is_some_and(|first_block| {
                                 let item_span = list_item.span();
                                 let marker_span = list_item.list_item_marker().span();
 
