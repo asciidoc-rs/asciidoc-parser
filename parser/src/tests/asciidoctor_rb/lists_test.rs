@@ -4242,13 +4242,16 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn block_attribute_line_above_delimited_block_that_breaks_a_dlist_is_not_duplicated() {
-            let _doc = Parser::default()
+            let doc = Parser::default()
                 .parse("== Lists\n\nterm:: desc\n[.rolename]\n----\ndetached\n----\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]/following-sibling::*[@class=\"listingblock rolename\"]', output, 1"
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]/following-sibling::*[@class=\"listingblock rolename\"]",
+                1,
             );
         }
 

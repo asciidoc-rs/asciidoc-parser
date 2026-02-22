@@ -221,6 +221,16 @@ impl<'src> ListItem<'src> {
                 break;
             }
 
+            // A delimited block without a continuation marker breaks the list.
+            if !continuation_active {
+                let next_block_line = metadata.item.block_start.take_normalized_line().item;
+                if RawDelimitedBlock::is_valid_delimiter(&next_block_line)
+                    || CompoundDelimitedBlock::is_valid_delimiter(&next_block_line)
+                {
+                    break;
+                }
+            }
+
             // If there's block metadata but no block, just discard it and continue.
             if metadata
                 .item
