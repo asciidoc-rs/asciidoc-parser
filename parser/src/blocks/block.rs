@@ -397,8 +397,8 @@ impl<'src> Block<'src> {
             }
 
             // The following check disables that spin loop.
-            let simple_block_mi = if parent_list_markers.is_some() {
-                SimpleBlock::parse_for_list_item(&metadata, parser, is_continuation)
+            let simple_block_mi = if let Some(plm) = parent_list_markers {
+                SimpleBlock::parse_for_list_item(&metadata, parser, is_continuation, plm)
             } else {
                 SimpleBlock::parse(&metadata, parser)
             };
@@ -423,8 +423,8 @@ impl<'src> Block<'src> {
         }
 
         // If no other block kind matches, we can always use SimpleBlock.
-        let simple_block_mi = if parent_list_markers.is_some() {
-            SimpleBlock::parse_for_list_item(&metadata, parser, is_continuation)
+        let simple_block_mi = if let Some(plm) = parent_list_markers {
+            SimpleBlock::parse_for_list_item(&metadata, parser, is_continuation, plm)
         } else {
             SimpleBlock::parse(&metadata, parser)
         };

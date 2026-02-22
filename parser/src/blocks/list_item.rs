@@ -64,9 +64,12 @@ impl<'src> ListItem<'src> {
 
         // For description lists, the content after the marker can be empty.
         // For other list types, we require content.
-        let mut next = if let Some(simple_block_mi) =
-            SimpleBlock::parse_for_list_item(&no_metadata, parser, false)
-        {
+        let mut next = if let Some(simple_block_mi) = SimpleBlock::parse_for_list_item(
+            &no_metadata,
+            parser,
+            false,
+            &list_markers_including_peer,
+        ) {
             blocks.push(Block::Simple(simple_block_mi.item));
             simple_block_mi.after
         } else if matches!(marker, ListItemMarker::DefinedTerm { .. }) {

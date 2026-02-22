@@ -74,6 +74,7 @@ impl<'src> SimpleBlock<'src> {
             false,
             false,
             parser,
+            &[],
         )?;
 
         Some(MatchedItem {
@@ -98,6 +99,7 @@ impl<'src> SimpleBlock<'src> {
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,
         is_continuation: bool,
+        parent_list_markers: &[ListItemMarker<'src>],
     ) -> Option<MatchedItem<'src, Self>> {
         let MatchedItem {
             item: (content, style),
@@ -109,6 +111,7 @@ impl<'src> SimpleBlock<'src> {
             false,
             is_continuation,
             parser,
+            parent_list_markers,
         )?;
 
         Some(MatchedItem {
@@ -147,6 +150,7 @@ impl<'src> SimpleBlock<'src> {
             true,
             false,
             parser,
+            &[],
         )?;
 
         Some(MatchedItem {
@@ -174,7 +178,7 @@ impl<'src> SimpleBlock<'src> {
         let MatchedItem {
             item: (content, style),
             after,
-        } = parse_lines(source, &None, false, false, false, parser)?;
+        } = parse_lines(source, &None, false, false, false, parser, &[])?;
 
         let source = content.original();
 
@@ -220,6 +224,7 @@ fn parse_lines<'src>(
     force_paragraph_style: bool,
     preserve_literal_indent: bool,
     parser: &Parser,
+    parent_list_markers: &[ListItemMarker<'src>],
 ) -> Option<MatchedItem<'src, (Content<'src>, SimpleBlockStyle)>> {
     let source_after_whitespace = source.discard_whitespace();
     let first_line_indent = source_after_whitespace.col() - 1;
@@ -349,9 +354,21 @@ fn parse_lines<'src>(
                 stop_for_list_items && (!indented_literal_mode || line.col() == 1);
 
             if should_check_for_list_marker
-                && let Some(_marker) = ListItemMarker::parse(line, parser)
+                && let Some(marker_mi) = ListItemMarker::parse(line, parser)
             {
-                break;
+                // In description list continuation context, don't stop for
+                // deeper-nested description list markers (e.g., ::: when the
+                // current context is ::). They are treated as paragraph text.
+                let is_deeper_nested_dlist = preserve_literal_indent
+                    && !parent_list_markers.is_empty()
+                    && matches!(marker_mi.item, ListItemMarker::DefinedTerm { .. })
+                    && !parent_list_markers
+                        .iter()
+                        .any(|p| p.is_match_for(&marker_mi.item));
+
+                if !is_deeper_nested_dlist {
+                    break;
+                }
             }
 
             if line.data() == "+" {
