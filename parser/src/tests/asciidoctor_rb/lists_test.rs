@@ -4529,6 +4529,8 @@ mod description_lists_redux {
 
         #[test]
         #[ignore]
+        // TODO (https://github.com/scouten/asciidoc-parser/issues/474):
+        // Enable this test when rulers are implemented.
         fn appends_literal_line_attached_by_continuation_as_block_if_item_has_inline_description_followed_by_ruler()
          {
             let _doc = Parser::default().parse("== Lists\n\nterm1:: def1\n+\n  literal\n\n'''\n");
