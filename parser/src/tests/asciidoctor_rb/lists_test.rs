@@ -4321,12 +4321,12 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn block_attribute_lines_above_nested_list_with_style_does_not_break_list() {
-            let _doc = Parser::default().parse("TODO List::\n* get groceries\nGrocery List::\n[square]\n* bread\n* milk\n* lettuce\n");
-            todo!("assert_xpath: '//dl', output, 1");
-            todo!("assert_xpath: '(//dl)[1]/dd', output, 2");
-            todo!("assert_xpath: '((//dl)[1]/dd)[2]//ul[@class=\"square\"]', output, 1");
+            let doc = Parser::default().parse("TODO List::\n* get groceries\nGrocery List::\n[square]\n* bread\n* milk\n* lettuce\n");
+
+            assert_xpath(&doc, "//dl", 1);
+            assert_xpath(&doc, "(//dl)[1]/dd", 2);
+            assert_xpath(&doc, "((//dl)[1]/dd)[2]//ul[@class=\"square\"]", 1);
         }
 
         #[test]
