@@ -228,6 +228,94 @@ impl<'src> ListItem<'src> {
                 continue;
             }
 
+            // If no list marker found directly after metadata, try extending
+            // metadata past empty lines. This handles block attribute lines
+            // (anchors, attrlists) separated by empty lines above nested lists.
+            if !metadata.item.is_empty() {
+                let mut ext_block_start = metadata.item.block_start;
+                let mut ext_anchor = metadata.item.anchor;
+                let mut ext_anchor_reftext = metadata.item.anchor_reftext;
+                let mut ext_attrlist = metadata.item.attrlist.clone();
+                let mut ext_title_source = metadata.item.title_source;
+                let mut ext_title = metadata.item.title.clone();
+
+                // Try to consume additional metadata past empty lines.
+                loop {
+                    let gap = ext_block_start.discard_empty_lines();
+                    if gap == ext_block_start {
+                        break;
+                    }
+
+                    let more_maw = BlockMetadata::parse(gap, parser);
+                    if more_maw.item.is_empty() {
+                        ext_block_start = gap;
+                        break;
+                    }
+
+                    // Merge additional metadata.
+                    if ext_anchor.is_none() {
+                        ext_anchor = more_maw.item.anchor;
+                        ext_anchor_reftext = more_maw.item.anchor_reftext;
+                    }
+
+                    if ext_attrlist.is_none() {
+                        ext_attrlist = more_maw.item.attrlist;
+                    }
+
+                    if ext_title_source.is_none() {
+                        ext_title_source = more_maw.item.title_source;
+                        ext_title = more_maw.item.title;
+                    }
+
+                    ext_block_start = more_maw.item.block_start;
+                }
+
+                if let Some(ext_marker_mi) = ListItemMarker::parse(ext_block_start, parser) {
+                    let new_item_marker = ext_marker_mi.item;
+
+                    if marker.is_match_for(&new_item_marker) {
+                        next = ext_block_start;
+                        break;
+                    }
+
+                    if parent_list_markers
+                        .iter()
+                        .any(|parent| parent.is_match_for(&new_item_marker))
+                    {
+                        next = ext_block_start;
+                        break;
+                    }
+
+                    // Found a nested list after metadata separated by empty lines.
+                    let ext_metadata = BlockMetadata {
+                        title_source: ext_title_source,
+                        title: ext_title,
+                        anchor: ext_anchor,
+                        anchor_reftext: ext_anchor_reftext,
+                        attrlist: ext_attrlist,
+                        source: metadata.item.source,
+                        block_start: ext_block_start,
+                    };
+
+                    let mut nested_list_markers = parent_list_markers.to_owned();
+                    nested_list_markers.push(marker.clone());
+
+                    let nested_list_mi = ListBlock::parse_inside_list(
+                        &ext_metadata,
+                        &nested_list_markers,
+                        parser,
+                        warnings,
+                    )?;
+
+                    blocks.push(Block::List(nested_list_mi.item));
+
+                    next = nested_list_mi.after;
+                    continuation_active = false;
+                    next_block_must_be_indented = true;
+                    continue;
+                }
+            }
+
             if next_block_must_be_indented && !is_indented {
                 break;
             }

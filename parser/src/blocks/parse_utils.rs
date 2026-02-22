@@ -34,6 +34,10 @@ where
         if let Some(mi) = maw.item {
             source = mi.after;
             blocks.push(mi.item);
+        } else {
+            // Safety net: if Block::parse returns None for non-empty input,
+            // skip a line to avoid an infinite loop.
+            source = source.take_normalized_line().after.discard_empty_lines();
         }
     }
 
