@@ -4678,18 +4678,24 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
         fn line_attached_by_continuation_offset_by_line_comment_is_appended_as_paragraph_if_term_has_inline_description()
          {
-            let _doc = Parser::default().parse("== Lists\n\nterm1:: def1\n// comment\n+\npara\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p[text()=\"def1\"]', output, 1");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"paragraph\"]', output, 1"
+            let doc = Parser::default().parse("== Lists\n\nterm1:: def1\n// comment\n+\npara\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p[text()=\"def1\"]", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"paragraph\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"paragraph\"]/p[text()=\"para\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"paragraph\"]/p[text()=\"para\"]",
+                1,
             );
         }
 
