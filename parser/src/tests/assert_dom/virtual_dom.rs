@@ -289,7 +289,7 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
         let mut wrapper = VirtualNode::new("div").with_class("paragraph");
 
         // Roles and ID belong on the wrapper div, not the inner <p>.
-        wrapper.classes.extend(p_node.classes.drain(..));
+        wrapper.classes.append(&mut p_node.classes);
         if p_node.id.is_some() {
             wrapper.id = p_node.id.take();
         }
@@ -447,11 +447,10 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
     // Add style class to the list element if present.
     // Skip for horizontal dlists since they use a different rendering.
-    if !is_horizontal {
-        if let Some(style) = list.declared_style() {
+    if !is_horizontal
+        && let Some(style) = list.declared_style() {
             list_element = list_element.with_class(style);
         }
-    }
 
     for item in list.nested_blocks() {
         // For description lists, we need to create two peer nodes: dt and dd
@@ -578,11 +577,10 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
     // Add style class to the wrapper if present (explicit style overrides marker
     // style). Skip for horizontal dlists since wrapper already has hdlist class.
-    if !is_horizontal {
-        if let Some(style) = list.declared_style() {
+    if !is_horizontal
+        && let Some(style) = list.declared_style() {
             wrapper = wrapper.with_class(style);
         }
-    }
 
     for role in list.roles() {
         wrapper = wrapper.with_class(role);
