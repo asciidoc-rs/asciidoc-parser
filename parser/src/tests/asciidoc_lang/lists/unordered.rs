@@ -895,6 +895,7 @@ See xref:separating.adoc[] for more details.
     }
 }
 
+#[rustfmt::skip] // Used because this mod has deeply-nested data structures that cause the formatter to slow down significantly.
 mod nested {
     use std::collections::HashMap;
 
