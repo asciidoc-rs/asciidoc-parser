@@ -5057,6 +5057,8 @@ mod callout_lists {
 }
 
 mod checklists {
+    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/481):
+    // Enable these tests when checklists are implemented.
     use crate::Parser;
 
     #[test]
