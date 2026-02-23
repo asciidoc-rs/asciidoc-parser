@@ -5109,13 +5109,187 @@ mod checklists {
 }
 
 mod lists_model {
-    use crate::Parser;
+    use std::collections::HashMap;
+
+    use pretty_assertions_sorted::assert_eq;
+
+    use crate::{
+        Parser,
+        blocks::{ListType, SimpleBlockStyle},
+        tests::prelude::*,
+    };
 
     #[test]
-    #[ignore]
     fn content_should_return_items_in_list() {
-        let _doc = Parser::default().parse("* one\n* two\n* three\n");
-        todo!("document_from_string test");
+        let doc = Parser::default().parse("* one\n* two\n* three\n");
+
+        assert_eq!(
+            doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::List(ListBlock {
+                    type_: ListType::Unordered,
+                    items: &[
+                        Block::ListItem(ListItem {
+                            marker: ListItemMarker::Asterisks(Span {
+                                data: "*",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },),
+                            blocks: &[Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "one",
+                                        line: 1,
+                                        col: 3,
+                                        offset: 2,
+                                    },
+                                    rendered: "one",
+                                },
+                                source: Span {
+                                    data: "one",
+                                    line: 1,
+                                    col: 3,
+                                    offset: 2,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),],
+                            source: Span {
+                                data: "* one",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),
+                        Block::ListItem(ListItem {
+                            marker: ListItemMarker::Asterisks(Span {
+                                data: "*",
+                                line: 2,
+                                col: 1,
+                                offset: 6,
+                            },),
+                            blocks: &[Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "two",
+                                        line: 2,
+                                        col: 3,
+                                        offset: 8,
+                                    },
+                                    rendered: "two",
+                                },
+                                source: Span {
+                                    data: "two",
+                                    line: 2,
+                                    col: 3,
+                                    offset: 8,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),],
+                            source: Span {
+                                data: "* two",
+                                line: 2,
+                                col: 1,
+                                offset: 6,
+                            },
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),
+                        Block::ListItem(ListItem {
+                            marker: ListItemMarker::Asterisks(Span {
+                                data: "*",
+                                line: 3,
+                                col: 1,
+                                offset: 12,
+                            },),
+                            blocks: &[Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "three",
+                                        line: 3,
+                                        col: 3,
+                                        offset: 14,
+                                    },
+                                    rendered: "three",
+                                },
+                                source: Span {
+                                    data: "three",
+                                    line: 3,
+                                    col: 3,
+                                    offset: 14,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),],
+                            source: Span {
+                                data: "* three",
+                                line: 3,
+                                col: 1,
+                                offset: 12,
+                            },
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),
+                    ],
+                    source: Span {
+                        data: "* one\n* two\n* three",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    title_source: None,
+                    title: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
+                source: Span {
+                    data: "* one\n* two\n* three",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog {
+                    refs: HashMap::from([]),
+                    reftext_to_id: HashMap::from([]),
+                },
+            }
+        );
     }
 
     #[test]
