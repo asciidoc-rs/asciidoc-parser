@@ -4756,6 +4756,8 @@ mod description_lists_redux {
 }
 
 mod callout_lists {
+    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
+    // Implement these tests once callouts are implemented.
     use crate::Parser;
 
     #[test]
