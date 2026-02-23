@@ -207,6 +207,20 @@ impl<'src> ListItem<'src> {
                 // We haven't encountered this marker before. Add a new nesting level. The new
                 // list will be a child block of this list item.
 
+                // But if we're after a blank line and the block is not indented
+                // (and no continuation is active), and there is a block attribute
+                // line or anchor before the new list marker, break the list
+                // instead of nesting. A blank line followed by a block attribute
+                // line signals the start of a new, separate list.
+                if next_block_must_be_indented
+                    && !is_indented
+                    && !continuation_active
+                    && !blocks.is_empty()
+                    && (metadata.item.attrlist.is_some() || metadata.item.anchor.is_some())
+                {
+                    break;
+                }
+
                 let mut nested_list_markers = parent_list_markers.to_owned();
                 nested_list_markers.push(marker.clone());
 
