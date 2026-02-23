@@ -5412,77 +5412,10 @@ mod lists_model {
         );
     }
 
-    #[test]
-    #[ignore]
-    fn outline_should_return_true_for_unordered_list() {
-        let _doc = Parser::default().parse("* one\n* two\n* three\n");
-        todo!("document_from_string test");
-    }
+    // Skip tests related to outline? and simple? methods in Ruby interface.
 
-    #[test]
-    #[ignore]
-    fn outline_should_return_true_for_ordered_list() {
-        let _doc = Parser::default().parse(". one\n. two\n. three\n");
-        todo!("document_from_string test");
-    }
-
-    #[test]
-    #[ignore]
-    fn outline_should_return_false_for_description_list() {
-        let _doc = Parser::default().parse("label:: desc");
-        todo!("document_from_string test");
-    }
-
-    #[test]
-    #[ignore]
-    fn simple_should_return_true_for_list_item_with_no_nested_blocks() {
-        let _doc = Parser::default().parse("* one\n* two\n* three\n");
-        todo!("document_from_string test");
-    }
-
-    #[test]
-    #[ignore]
-    fn simple_should_return_true_for_list_item_with_nested_outline_list() {
-        let _doc =
-            Parser::default().parse("* one\n  ** more about one\n  ** and more\n* two\n* three\n");
-        todo!("document_from_string test");
-    }
-
-    #[test]
-    #[ignore]
-    fn simple_should_return_false_for_list_item_with_block_content() {
-        let _doc = Parser::default()
-            .parse("* one\n+\n----\nlisting block in list item 1\n----\n* two\n* three\n");
-        todo!("document_from_string test");
-    }
-
-    #[test]
-    #[ignore]
-    fn should_allow_text_of_listitem_to_be_assigned() {
-        let _doc = Parser::default().parse("* one\n* two\n* three\n");
-        todo!("document_from_string test");
-    }
-
-    #[test]
-    #[ignore]
-    fn id_and_role_assigned_to_ulist_item_in_model_are_transmitted_to_output() {
-        let _doc = Parser::default().parse("* one\n* two\n* three\n");
-        todo!("document_from_string test");
-    }
-
-    #[test]
-    #[ignore]
-    fn id_and_role_assigned_to_olist_item_in_model_are_transmitted_to_output() {
-        let _doc = Parser::default().parse(". one\n. two\n. three\n");
-        todo!("document_from_string test");
-    }
-
-    #[test]
-    #[ignore]
-    fn should_allow_api_control_over_substitutions_applied_to_listitem_text() {
-        let _doc = Parser::default().parse("* *one*\n* _two_\n* `three`\n* #four#\n");
-        todo!("document_from_string test");
-    }
+    // Skip test describing mutability of data model. The Rust parser's data
+    // structures are intentionally immutable.
 
     #[test]
     #[ignore]
