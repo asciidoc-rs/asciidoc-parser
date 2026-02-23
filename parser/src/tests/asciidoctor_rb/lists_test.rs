@@ -5418,10 +5418,248 @@ mod lists_model {
     // structures are intentionally immutable.
 
     #[test]
-    #[ignore]
     fn should_set_lineno_to_line_number_in_source_where_list_starts() {
-        let _doc =
+        let doc =
             Parser::default().parse("* bullet 1\n** bullet 1.1\n*** bullet 1.1.1\n* bullet 2\n");
-        todo!("document_from_string test");
+
+        assert_eq!(
+            &doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::List(ListBlock {
+                    type_: ListType::Unordered,
+                    items: &[
+                        Block::ListItem(ListItem {
+                            marker: ListItemMarker::Asterisks(Span {
+                                data: "*",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },),
+                            blocks: &[
+                                Block::Simple(SimpleBlock {
+                                    content: Content {
+                                        original: Span {
+                                            data: "bullet 1",
+                                            line: 1,
+                                            col: 3,
+                                            offset: 2,
+                                        },
+                                        rendered: "bullet 1",
+                                    },
+                                    source: Span {
+                                        data: "bullet 1",
+                                        line: 1,
+                                        col: 3,
+                                        offset: 2,
+                                    },
+                                    style: SimpleBlockStyle::Paragraph,
+                                    title_source: None,
+                                    title: None,
+                                    anchor: None,
+                                    anchor_reftext: None,
+                                    attrlist: None,
+                                },),
+                                Block::List(ListBlock {
+                                    type_: ListType::Unordered,
+                                    items: &[Block::ListItem(ListItem {
+                                        marker: ListItemMarker::Asterisks(Span {
+                                            data: "**",
+                                            line: 2,
+                                            col: 1,
+                                            offset: 11,
+                                        },),
+                                        blocks: &[
+                                            Block::Simple(SimpleBlock {
+                                                content: Content {
+                                                    original: Span {
+                                                        data: "bullet 1.1",
+                                                        line: 2,
+                                                        col: 4,
+                                                        offset: 14,
+                                                    },
+                                                    rendered: "bullet 1.1",
+                                                },
+                                                source: Span {
+                                                    data: "bullet 1.1",
+                                                    line: 2,
+                                                    col: 4,
+                                                    offset: 14,
+                                                },
+                                                style: SimpleBlockStyle::Paragraph,
+                                                title_source: None,
+                                                title: None,
+                                                anchor: None,
+                                                anchor_reftext: None,
+                                                attrlist: None,
+                                            },),
+                                            Block::List(ListBlock {
+                                                type_: ListType::Unordered,
+                                                items: &[Block::ListItem(ListItem {
+                                                    marker: ListItemMarker::Asterisks(Span {
+                                                        data: "***",
+                                                        line: 3,
+                                                        col: 1,
+                                                        offset: 25,
+                                                    },),
+                                                    blocks: &[Block::Simple(SimpleBlock {
+                                                        content: Content {
+                                                            original: Span {
+                                                                data: "bullet 1.1.1",
+                                                                line: 3,
+                                                                col: 5,
+                                                                offset: 29,
+                                                            },
+                                                            rendered: "bullet 1.1.1",
+                                                        },
+                                                        source: Span {
+                                                            data: "bullet 1.1.1",
+                                                            line: 3,
+                                                            col: 5,
+                                                            offset: 29,
+                                                        },
+                                                        style: SimpleBlockStyle::Paragraph,
+                                                        title_source: None,
+                                                        title: None,
+                                                        anchor: None,
+                                                        anchor_reftext: None,
+                                                        attrlist: None,
+                                                    },),],
+                                                    source: Span {
+                                                        data: "*** bullet 1.1.1",
+                                                        line: 3,
+                                                        col: 1,
+                                                        offset: 25,
+                                                    },
+                                                    anchor: None,
+                                                    anchor_reftext: None,
+                                                    attrlist: None,
+                                                },),],
+                                                source: Span {
+                                                    data: "*** bullet 1.1.1",
+                                                    line: 3,
+                                                    col: 1,
+                                                    offset: 25,
+                                                },
+                                                title_source: None,
+                                                title: None,
+                                                anchor: None,
+                                                anchor_reftext: None,
+                                                attrlist: None,
+                                            },),
+                                        ],
+                                        source: Span {
+                                            data: "** bullet 1.1\n*** bullet 1.1.1",
+                                            line: 2,
+                                            col: 1,
+                                            offset: 11,
+                                        },
+                                        anchor: None,
+                                        anchor_reftext: None,
+                                        attrlist: None,
+                                    },),],
+                                    source: Span {
+                                        data: "** bullet 1.1\n*** bullet 1.1.1",
+                                        line: 2,
+                                        col: 1,
+                                        offset: 11,
+                                    },
+                                    title_source: None,
+                                    title: None,
+                                    anchor: None,
+                                    anchor_reftext: None,
+                                    attrlist: None,
+                                },),
+                            ],
+                            source: Span {
+                                data: "* bullet 1\n** bullet 1.1\n*** bullet 1.1.1",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),
+                        Block::ListItem(ListItem {
+                            marker: ListItemMarker::Asterisks(Span {
+                                data: "*",
+                                line: 4,
+                                col: 1,
+                                offset: 42,
+                            },),
+                            blocks: &[Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "bullet 2",
+                                        line: 4,
+                                        col: 3,
+                                        offset: 44,
+                                    },
+                                    rendered: "bullet 2",
+                                },
+                                source: Span {
+                                    data: "bullet 2",
+                                    line: 4,
+                                    col: 3,
+                                    offset: 44,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),],
+                            source: Span {
+                                data: "* bullet 2",
+                                line: 4,
+                                col: 1,
+                                offset: 42,
+                            },
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),
+                    ],
+                    source: Span {
+                        data: "* bullet 1\n** bullet 1.1\n*** bullet 1.1.1\n* bullet 2",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    title_source: None,
+                    title: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
+                source: Span {
+                    data: "* bullet 1\n** bullet 1.1\n*** bullet 1.1.1\n* bullet 2",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog {
+                    refs: HashMap::from([]),
+                    reftext_to_id: HashMap::from([]),
+                },
+            }
+        );
     }
 }
