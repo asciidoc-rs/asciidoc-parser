@@ -5115,7 +5115,8 @@ mod lists_model {
 
     use crate::{
         Parser,
-        blocks::{ListType, SimpleBlockStyle},
+        blocks::{ContentModel, ListType, SimpleBlockStyle},
+        content::SubstitutionGroup,
         tests::prelude::*,
     };
 
@@ -5293,11 +5294,122 @@ mod lists_model {
     }
 
     #[test]
-    #[ignore]
     fn list_item_should_be_the_parent_of_block_attached_to_a_list_item() {
-        let _doc =
+        let doc =
             Parser::default().parse("* list item 1\n+\n----\nlisting block in list item 1\n----\n");
-        todo!("document_from_string test");
+
+        assert_eq!(
+            &doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::List(ListBlock {
+                    type_: ListType::Unordered,
+                    items: &[Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },),
+                        blocks: &[
+                            Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "list item 1",
+                                        line: 1,
+                                        col: 3,
+                                        offset: 2,
+                                    },
+                                    rendered: "list item 1",
+                                },
+                                source: Span {
+                                    data: "list item 1",
+                                    line: 1,
+                                    col: 3,
+                                    offset: 2,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),
+                            Block::RawDelimited(RawDelimitedBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "listing block in list item 1",
+                                        line: 4,
+                                        col: 1,
+                                        offset: 21,
+                                    },
+                                    rendered: "listing block in list item 1",
+                                },
+                                content_model: ContentModel::Verbatim,
+                                context: "listing",
+                                source: Span {
+                                    data: "----\nlisting block in list item 1\n----",
+                                    line: 3,
+                                    col: 1,
+                                    offset: 16,
+                                },
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                                substitution_group: SubstitutionGroup::Verbatim,
+                            },),
+                        ],
+                        source: Span {
+                            data: "* list item 1\n+\n----\nlisting block in list item 1\n----",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "* list item 1\n+\n----\nlisting block in list item 1\n----",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    title_source: None,
+                    title: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
+                source: Span {
+                    data: "* list item 1\n+\n----\nlisting block in list item 1\n----",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog {
+                    refs: HashMap::from([]),
+                    reftext_to_id: HashMap::from([]),
+                },
+            }
+        );
     }
 
     #[test]
