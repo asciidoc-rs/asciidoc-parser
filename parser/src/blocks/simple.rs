@@ -281,53 +281,59 @@ fn parse_lines<'src>(
     let mut filtered_lines: Vec<&'src str> = vec![];
     let mut skipped_comment_line = false;
 
-    // For literal blocks when preserve_literal_indent is set, we need to calculate
-    // minimum indentation first to determine if we should strip anything.
-    // If any line has 0 indentation, preserve all indentation.
-    let strip_indent = if preserve_literal_indent && style == SimpleBlockStyle::Literal {
-        // Two-pass approach: first collect lines to find minimum indentation.
-        let mut scan = source;
-        let mut min_indent = first_line_indent;
-        let mut line_count = 0;
+    // Determine how much indentation to strip from literal paragraphs.
+    // In definition list continuations, use minimum indentation across all
+    // lines to preserve relative indent. In outline list continuations and
+    // non-continuation contexts, strip based on the first line's indent.
+    let in_definition_list = parent_list_markers
+        .iter()
+        .any(|m| matches!(m, ListItemMarker::DefinedTerm { .. }));
 
-        while let Some(line_mi) = scan.take_non_empty_line() {
-            let line = line_mi.item;
+    let strip_indent =
+        if preserve_literal_indent && style == SimpleBlockStyle::Literal && in_definition_list {
+            // Two-pass approach: find minimum indentation across all lines.
+            let mut scan = source;
+            let mut min_indent = first_line_indent;
+            let mut line_count = 0;
 
-            // Apply same stop conditions as the main loop.
-            if line_count > 0 {
-                if line.data() == "+" {
-                    break;
+            while let Some(line_mi) = scan.take_non_empty_line() {
+                let line = line_mi.item;
+
+                // Apply same stop conditions as the main loop.
+                if line_count > 0 {
+                    if line.data() == "+" {
+                        break;
+                    }
+
+                    if line.starts_with('[') && line.ends_with(']') {
+                        break;
+                    }
+
+                    if (line.starts_with('/')
+                        || line.starts_with('-')
+                        || line.starts_with('.')
+                        || line.starts_with('+')
+                        || line.starts_with('=')
+                        || line.starts_with('*')
+                        || line.starts_with('_'))
+                        && (RawDelimitedBlock::is_valid_delimiter(&line)
+                            || CompoundDelimitedBlock::is_valid_delimiter(&line))
+                    {
+                        break;
+                    }
                 }
 
-                if line.starts_with('[') && line.ends_with(']') {
-                    break;
+                if let Some(n) = line.position(|c| c != ' ' && c != '\t') {
+                    min_indent = min_indent.min(n);
                 }
 
-                if (line.starts_with('/')
-                    || line.starts_with('-')
-                    || line.starts_with('.')
-                    || line.starts_with('+')
-                    || line.starts_with('=')
-                    || line.starts_with('*')
-                    || line.starts_with('_'))
-                    && (RawDelimitedBlock::is_valid_delimiter(&line)
-                        || CompoundDelimitedBlock::is_valid_delimiter(&line))
-                {
-                    break;
-                }
+                line_count += 1;
+                scan = line_mi.after;
             }
-
-            if let Some(n) = line.position(|c| c != ' ' && c != '\t') {
-                min_indent = min_indent.min(n);
-            }
-
-            line_count += 1;
-            scan = line_mi.after;
-        }
-        min_indent
-    } else {
-        first_line_indent
-    };
+            min_indent
+        } else {
+            first_line_indent
+        };
 
     while let Some(line_mi) = next.take_non_empty_line() {
         let mut line = line_mi.item;
@@ -353,20 +359,20 @@ fn parse_lines<'src>(
             let should_check_for_list_marker =
                 stop_for_list_items && (!indented_literal_mode || line.col() == 1);
 
+            // If we've already started accumulating content for this list item paragraph,
+            // we don't stop for list markers at any level other than our own or a parent
+            // level.
             if should_check_for_list_marker
                 && let Some(marker_mi) = ListItemMarker::parse(line, parser)
             {
                 // In description list continuation context, don't stop for
                 // deeper-nested description list markers (e.g., ::: when the
                 // current context is ::). They are treated as paragraph text.
-                let is_deeper_nested_dlist = preserve_literal_indent
-                    && !parent_list_markers.is_empty()
-                    && matches!(marker_mi.item, ListItemMarker::DefinedTerm { .. })
-                    && !parent_list_markers
-                        .iter()
-                        .any(|p| p.is_match_for(&marker_mi.item));
+                let is_ancestor_list = parent_list_markers
+                    .iter()
+                    .any(|p| p.is_match_for(&marker_mi.item));
 
-                if !is_deeper_nested_dlist {
+                if is_ancestor_list || !preserve_literal_indent {
                     break;
                 }
             }

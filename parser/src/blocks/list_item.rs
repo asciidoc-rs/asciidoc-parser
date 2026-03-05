@@ -366,18 +366,11 @@ impl<'src> ListItem<'src> {
 
             // A list item does not terminate if subsequent blocks are indented (i.e. use
             // literal syntax).
-            //
-            // For description lists with continuation, use minimum indentation logic to
-            // determine if indentation should be stripped. If any line has 0 indentation,
-            // preserve all indentation.
-            let is_dlist_continuation =
-                continuation_active && matches!(marker, ListItemMarker::DefinedTerm { .. });
-
             let indented_block_maw = Block::parse_for_list_item(
                 next,
                 parser,
                 &list_markers_including_peer,
-                is_dlist_continuation,
+                continuation_active,
             );
             warnings.extend(indented_block_maw.warnings);
 
