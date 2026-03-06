@@ -11,6 +11,7 @@ Added::
 
 Changed::
 * Clarify that `indent` attribute on verbatim block ignored if at least one line is not indented
+* Clarify that the preface for a multipart book may be defined as either a level 0 or level 1 section
 
 == Published Q4 2025
 
