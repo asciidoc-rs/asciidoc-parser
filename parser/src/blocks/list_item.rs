@@ -70,7 +70,11 @@ impl<'src> ListItem<'src> {
             false,
             &list_markers_including_peer,
         ) {
-            blocks.push(Block::Simple(simple_block_mi.item));
+            // If the principal text is empty (e.g. from {empty} attribute reference),
+            // drop it from the parse tree.
+            if !simple_block_mi.item.content().is_empty() {
+                blocks.push(Block::Simple(simple_block_mi.item));
+            }
             simple_block_mi.after
         } else if matches!(marker, ListItemMarker::DefinedTerm { .. }) {
             // Description list items can have empty content on the same line as the marker.
