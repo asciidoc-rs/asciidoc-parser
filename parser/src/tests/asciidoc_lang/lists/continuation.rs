@@ -759,7 +759,7 @@ include::example$complex.adoc[tag=cont]
 "#
         );
 
-        let doc: crate::Document<'_> = Parser::default().parse("* The header in AsciiDoc must start with a document title.\n+\nThe header is optional.");
+        let doc = Parser::default().parse("* The header in AsciiDoc must start with a document title.\n+\nThe header is optional.");
 
         assert_eq!(
             doc,
@@ -1878,11 +1878,30 @@ The only limitation of this technique is that the content itself may not contain
     }
 }
 
-non_normative!(
-    r#"
+mod drop_principal_text {
+    use std::collections::HashMap;
+
+    use pretty_assertions_sorted::assert_eq;
+
+    use crate::{
+        Parser,
+        blocks::{ContentModel, ListType, SimpleBlockStyle},
+        content::SubstitutionGroup,
+        tests::prelude::{inline_file_handler::InlineFileHandler, *},
+    };
+
+    non_normative!(
+        r#"
 [#drop-principal-text]
 == Drop the principal text
 
+"#
+    );
+
+    #[test]
+    fn use_empty_attribute() {
+        verifies!(
+            r#"
 If the principal text of a list item is empty, the node for the principal text is dropped.
 This is how you can get the first block (such as a listing block) to line up with the list marker.
 You can make the principal text empty by using the `+{empty}+` attribute reference.
@@ -1901,6 +1920,149 @@ Here's how the source is rendered:
 include::example$complex.adoc[tag=complex-only]
 ====
 
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ". {empty}\n+\n----\nprint(\"one\")\n----\n. {empty}\n+\n----\nprint(\"one\")\n----",
+        );
+
+        assert_eq!(
+            doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::List(ListBlock {
+                    type_: ListType::Ordered,
+                    items: &[
+                        Block::ListItem(ListItem {
+                            marker: ListItemMarker::Dots(Span {
+                                data: ".",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },),
+                            blocks: &[Block::RawDelimited(RawDelimitedBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "print(\"one\")",
+                                        line: 4,
+                                        col: 1,
+                                        offset: 17,
+                                    },
+                                    rendered: "print(\"one\")",
+                                },
+                                content_model: ContentModel::Verbatim,
+                                context: "listing",
+                                source: Span {
+                                    data: "----\nprint(\"one\")\n----",
+                                    line: 3,
+                                    col: 1,
+                                    offset: 12,
+                                },
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                                substitution_group: SubstitutionGroup::Verbatim,
+                            },),],
+                            source: Span {
+                                data: ". {empty}\n+\n----\nprint(\"one\")\n----",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),
+                        Block::ListItem(ListItem {
+                            marker: ListItemMarker::Dots(Span {
+                                data: ".",
+                                line: 6,
+                                col: 1,
+                                offset: 35,
+                            },),
+                            blocks: &[Block::RawDelimited(RawDelimitedBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "print(\"one\")",
+                                        line: 9,
+                                        col: 1,
+                                        offset: 52,
+                                    },
+                                    rendered: "print(\"one\")",
+                                },
+                                content_model: ContentModel::Verbatim,
+                                context: "listing",
+                                source: Span {
+                                    data: "----\nprint(\"one\")\n----",
+                                    line: 8,
+                                    col: 1,
+                                    offset: 47,
+                                },
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                                substitution_group: SubstitutionGroup::Verbatim,
+                            },),],
+                            source: Span {
+                                data: ". {empty}\n+\n----\nprint(\"one\")\n----",
+                                line: 6,
+                                col: 1,
+                                offset: 35,
+                            },
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),
+                    ],
+                    source: Span {
+                        data: ". {empty}\n+\n----\nprint(\"one\")\n----\n. {empty}\n+\n----\nprint(\"one\")\n----",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    title_source: None,
+                    title: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
+                source: Span {
+                    data: ". {empty}\n+\n----\nprint(\"one\")\n----\n. {empty}\n+\n----\nprint(\"one\")\n----",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog {
+                    refs: HashMap::from([]),
+                    reftext_to_id: HashMap::from([]),
+                },
+            }
+        );
+    }
+}
+
+non_normative!(
+    r#"
 [#attach-to-ancestor-list]
 == Attach blocks to an ancestor list
 
