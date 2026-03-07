@@ -1,4 +1,3 @@
-#![allow(unused)] // TEMPORARY while building
 use crate::tests::prelude::*;
 
 track_file!("docs/modules/lists/pages/continuation.adoc");
@@ -1885,9 +1884,9 @@ mod drop_principal_text {
 
     use crate::{
         Parser,
-        blocks::{ContentModel, ListType, SimpleBlockStyle},
+        blocks::{ContentModel, ListType},
         content::SubstitutionGroup,
-        tests::prelude::{inline_file_handler::InlineFileHandler, *},
+        tests::prelude::*,
     };
 
     non_normative!(
@@ -2068,9 +2067,8 @@ mod attach_to_ancestor_list {
 
     use crate::{
         Parser,
-        blocks::{ContentModel, ListType, SimpleBlockStyle},
-        content::SubstitutionGroup,
-        tests::prelude::{inline_file_handler::InlineFileHandler, *},
+        blocks::{ListType, SimpleBlockStyle},
+        tests::prelude::*,
     };
 
     non_normative!(
