@@ -63,8 +63,6 @@ fn basic_example() {
 
     verifies!(
         r#"
-
-
 Here's an example of a description list that identifies parts of a computer:
 
 ----

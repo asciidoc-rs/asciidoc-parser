@@ -1110,7 +1110,7 @@ include::example$complex.adoc[tag=complex]
             r#"
 Notice that we inserted an empty line after the attached paragraph block.
 That's because only a sibling list item can interrupt a paragraph.
-            "#
+"#
         );
 
         let doc: crate::Document<'_> =
