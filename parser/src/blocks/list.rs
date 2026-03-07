@@ -517,6 +517,11 @@ mod tests {
     fn list_type_impl_debug() {
         assert_eq!(format!("{:#?}", ListType::Unordered), "ListType::Unordered");
         assert_eq!(format!("{:#?}", ListType::Ordered), "ListType::Ordered");
+
+        assert_eq!(
+            format!("{:#?}", ListType::Description),
+            "ListType::Description"
+        );
     }
 
     #[test]
