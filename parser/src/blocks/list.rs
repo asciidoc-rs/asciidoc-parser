@@ -988,6 +988,83 @@ mod tests {
     }
 
     #[test]
+    fn orphaned_title_after_continuation_is_discarded() {
+        // Exercises the "If there's block metadata but no block, just discard
+        // it and continue." path in ListItem::parse (circa line 368 of
+        // list_item.rs). A `+` continuation followed by a block title (`.Title`)
+        // and then an empty line means the title is orphaned (no block
+        // immediately follows). The title metadata is discarded and the
+        // subsequent paragraph is parsed as a continuation block.
+        let list = list_parse("* item one\n+\n.Title\n\nsecond paragraph").unwrap();
+
+        // The list should have one item.
+        let mut items = list.item.nested_blocks();
+        let item = items.next().unwrap();
+        assert!(items.next().is_none());
+
+        // The item should have two blocks: the principal text and the
+        // continuation paragraph. The orphaned `.Title` should be discarded.
+        let blocks: Vec<_> = item.nested_blocks().collect();
+        assert_eq!(blocks.len(), 2);
+
+        // First block is the principal text.
+        assert_eq!(
+            blocks[0],
+            &Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "item one",
+                        line: 1,
+                        col: 3,
+                        offset: 2,
+                    },
+                    rendered: "item one",
+                },
+                source: Span {
+                    data: "item one",
+                    line: 1,
+                    col: 3,
+                    offset: 2,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            })
+        );
+
+        // Second block is the continuation paragraph (no title attached).
+        assert_eq!(
+            blocks[1],
+            &Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "second paragraph",
+                        line: 5,
+                        col: 1,
+                        offset: 21,
+                    },
+                    rendered: "second paragraph",
+                },
+                source: Span {
+                    data: "second paragraph",
+                    line: 5,
+                    col: 1,
+                    offset: 21,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            })
+        );
+    }
+
+    #[test]
     fn block_list_enum_case() {
         let mut parser = crate::Parser::default();
 
