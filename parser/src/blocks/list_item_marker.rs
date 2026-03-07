@@ -435,8 +435,8 @@ static LIST_ITEM_MARKER: LazyLock<Regex> = LazyLock::new(|| {
                 |\u{2022}               # Bullet character • (unordered list)
                 |\d+\.                  # Digits followed by dot (numbered list)
                 |[a-zA-Z]\.             # Letter followed by dot (alpha list)
-                |[ivx]+\)               # Lowercase Roman numerals followed by )
-                |[IVX]+\)               # Uppercase Roman numerals followed by )
+                |[ivxlcdm]+\)           # Lowercase Roman numerals followed by )
+                |[IVXLCDM]+\)           # Uppercase Roman numerals followed by )
             )
             [\ \t]                  # Required whitespace after marker
         "#,
