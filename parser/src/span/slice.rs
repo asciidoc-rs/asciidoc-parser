@@ -8,17 +8,23 @@ use super::Span;
 impl<'src> Span<'src> {
     /// Returns the requested subrange of this input span.
     pub(crate) fn slice(&self, range: Range<usize>) -> Self {
-        self.slice_internal(&self.data[range])
+        self.data
+            .get(range)
+            .map_or(*self, |s| self.slice_internal(s))
     }
 
     /// Returns the requested subrange of this input span.
     pub(crate) fn slice_from(&self, range: RangeFrom<usize>) -> Self {
-        self.slice_internal(&self.data[range])
+        self.data
+            .get(range)
+            .map_or(*self, |s| self.slice_internal(s))
     }
 
     /// Returns the requested subrange of this input span.
     pub(crate) fn slice_to(&self, range: RangeTo<usize>) -> Self {
-        self.slice_internal(&self.data[range])
+        self.data
+            .get(range)
+            .map_or(*self, |s| self.slice_internal(s))
     }
 
     /// Returns the first position where `predicate` returns `true`.
@@ -46,7 +52,7 @@ impl<'src> Span<'src> {
             };
         }
 
-        let old_data = &self.data[..offset];
+        let old_data = self.data.get(..offset).unwrap_or(self.data);
         let new_line_iter = Memchr::new(b'\n', old_data.as_bytes());
 
         let mut lines_to_add = 0;
