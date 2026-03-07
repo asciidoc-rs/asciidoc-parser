@@ -927,6 +927,16 @@ mod tests {
     }
 
     #[test]
+    fn marker_with_no_content() {
+        // Exercises the `break` in `parse_inside_list` when
+        // `ListItemMarker::parse` succeeds but `ListItem::parse`
+        // returns `None` (marker present, no content after it).
+        assert!(list_parse("- ").is_none());
+        assert!(list_parse("* ").is_none());
+        assert!(list_parse(". ").is_none());
+    }
+
+    #[test]
     fn block_list_enum_case() {
         let mut parser = crate::Parser::default();
 
