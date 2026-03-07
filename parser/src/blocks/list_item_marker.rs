@@ -108,7 +108,8 @@ impl<'src> ListItemMarker<'src> {
             {
                 Self::ArabicNumeral(marker)
             } else {
-                todo!("Not handled yet: {}", &captures[1]);
+                // Regex and if-else chain should be exhaustive. If not, treat as non-match.
+                return None;
             };
 
             Some(MatchedItem { item, after })
@@ -429,7 +430,8 @@ static LIST_ITEM_MARKER: LazyLock<Regex> = LazyLock::new(|| {
                 |\u{2022}               # Bullet character • (unordered list)
                 |\d+\.                  # Digits followed by dot (numbered list)
                 |[a-zA-Z]\.             # Letter followed by dot (alpha list)
-                |[IVXivx]+\)            # Roman numerals followed by ) (Roman list)
+                |[ivx]+\)               # Lowercase Roman numerals followed by )
+                |[IVX]+\)               # Uppercase Roman numerals followed by )
             )
             [\ \t]                  # Required whitespace after marker
         "#,
