@@ -648,6 +648,12 @@ mod tests {
     }
 
     #[test]
+    fn non_description_list_marker_with_no_content() {
+        // A non-description-list marker with no content after it returns None.
+        assert!(li_parse("* ").is_none());
+    }
+
+    #[test]
     fn asterisks() {
         assert!(li_parse("*").is_none());
         assert!(li_parse("*xyz").is_none());
