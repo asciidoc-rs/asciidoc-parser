@@ -538,7 +538,6 @@ For ordered lists, this means the numbering will be continuous rather than resta
         fn empty_line_new_block() {
             verifies!(
                 r#"
-
 If an empty line after a list item is followed by the start of a block, such as a paragraph or delimited block rather than another list item, the list will terminate at this point.
 If this happens, you'll notice that a subsequent list item will be placed into a new list.
 For ordered lists, that means the numbering will restart (at 1).
