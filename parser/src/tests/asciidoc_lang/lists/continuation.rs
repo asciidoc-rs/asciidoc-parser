@@ -1716,7 +1716,6 @@ include::example$complex.adoc[tag=complex-o]
     fn open_block_for_include() {
         verifies!(
             r#"
-
 The open block wrapper is also useful if you're including content from a shared file into a list item.
 For example:
 
@@ -2575,7 +2574,6 @@ include::example$complex.adoc[tag=complex-parent]
     fn empty_line_moves_up() {
         verifies!(
             r#"
-
 Each empty line that precedes the list continuation signals a move up one level of nesting.
 Here's an example that shows how to attach a paragraph to a grandparent list item using two leading empty lines:
 
