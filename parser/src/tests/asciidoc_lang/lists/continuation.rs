@@ -1328,7 +1328,7 @@ That's because only a sibling list item can interrupt a paragraph.
             r#"
 If the next list item had been a nested list item instead of a sibling, this empty line would have been required.
 Otherwise, the nested list marker and text would have just become the next line of the paragraph.
-            "#
+"#
         );
 
         let doc: crate::Document<'_> =
