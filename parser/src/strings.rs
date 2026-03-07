@@ -79,9 +79,18 @@ impl TryFrom<&str> for InlineStr {
         let len = s.len();
         if len <= MAX_INLINE_STR_LEN {
             let mut inner = [0u8; MAX_INLINE_STR_LEN];
+
+            debug_assert!(
+                len <= MAX_INLINE_STR_LEN,
+                "InlineStr: len {} exceeds MAX_INLINE_STR_LEN {}",
+                len,
+                MAX_INLINE_STR_LEN
+            );
+
             if let Some(dest) = inner.get_mut(..len) {
                 dest.copy_from_slice(s.as_bytes());
             }
+
             let len = len as u8;
             Ok(Self { inner, len })
         } else {
