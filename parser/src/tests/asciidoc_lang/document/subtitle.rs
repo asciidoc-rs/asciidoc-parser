@@ -3,7 +3,7 @@ use crate::tests::prelude::*;
 track_file!("docs/modules/document/pages/subtitle.adoc");
 
 // TO DO: Consider adding support for subtitle parsing?
-// (https://github.com/scouten/asciidoc-parser/issues/382)
+// (https://github.com/asciidoc-rs/asciidoc-parser/issues/382)
 
 // Possible this will never be supported in this crate, so treating this page as
 // non-normative.

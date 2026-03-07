@@ -395,7 +395,7 @@ mod default_special_characters_substitution {
 
         todo!("Write test once table parsing is implemented");
 
-        // Blocked on https://github.com/scouten/asciidoc-parser/issues/296:
+        // Blocked on https://github.com/asciidoc-rs/asciidoc-parser/issues/296:
         // Implement table parsing
     }
 

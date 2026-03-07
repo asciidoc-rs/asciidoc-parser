@@ -105,7 +105,7 @@ image::document-title.png[Title of document]
         );
     }
 
-    // TO DO (https://github.com/scouten/asciidoc-parser/issues/380):
+    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/380):
     // Add option to support multiple level-0 headings.
     non_normative!(
         r#"

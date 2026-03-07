@@ -1,6 +1,6 @@
 // EXPERIMENT: Use no-op macros to indicate spec coverage.
 
-// These macros are read by the parser in scouten/asciidoc-parser-coverage.
+// These macros are read by the temporary parser in the sdd folder.
 
 // Use the track_file macro to indicate which .adoc spec file is being tracked.
 macro_rules! track_file( ($($tt:tt)*) => {} );

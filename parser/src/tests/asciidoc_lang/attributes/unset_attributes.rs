@@ -177,7 +177,7 @@ All of the sections below where the attribute is unset will not be numbered.
             InterpretedValue::Value("all".to_owned())
         );
 
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/328):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/328):
         // Differentiate between numbers on and numbers off when we can.
     }
 }

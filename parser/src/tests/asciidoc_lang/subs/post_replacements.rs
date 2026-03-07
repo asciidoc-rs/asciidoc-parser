@@ -67,7 +67,7 @@ mod default_post_replacements_substitution {
     #[ignore]
     #[test]
     fn attribute_entry_values() {
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/307):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/307):
         // Search for an example of post-replacement mattering for attribute values.
         //
         // No test here because I don't know how to test this.
@@ -342,14 +342,14 @@ mod default_post_replacements_substitution {
 
         todo!("Write test once table parsing is implemented");
 
-        // Blocked on https://github.com/scouten/asciidoc-parser/issues/296:
+        // Blocked on https://github.com/asciidoc-rs/asciidoc-parser/issues/296:
         // Implement table parsing
     }
 
     #[ignore]
     #[test]
     fn titles() {
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/308):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/308):
         //
         // Not sure if a block title can span multiple lines. If so, what does that
         // syntax look like and how does it interact with post-replacement substitution?

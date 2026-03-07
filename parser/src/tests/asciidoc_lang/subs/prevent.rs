@@ -30,7 +30,7 @@ mod escape_with_backslashes {
     #[ignore]
     #[test]
     fn punctuation() {
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/316):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/316):
         // Some of the macros described here are not yet implemented, so this test can't
         // work properly.
         to_do_verifies!(

@@ -468,7 +468,7 @@ mod bulleted_lists {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/456):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/456):
         // Enable this test when admonitions are implemented.
         fn an_admonition_paragraph_attached_by_a_line_continuation_to_a_list_item_with_wrapped_text_should_produce_admonition()
          {
@@ -488,7 +488,7 @@ mod bulleted_lists {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/456):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/456):
         // Enable this test when admonitions are implemented.
         fn paragraph_like_blocks_attached_to_an_ancestor_list_item_by_a_list_continuation_should_produce_blocks()
          {
@@ -501,7 +501,7 @@ mod bulleted_lists {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/311):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
         // Enable this test when callouts are implemented.
         fn should_not_inherit_block_attributes_from_previous_block_when_block_is_attached_using_a_list_continuation()
          {
@@ -836,7 +836,7 @@ mod bulleted_lists {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/461):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/461):
         // Enable this test when xref replacement refactoring is complete.
         fn should_discover_anchor_at_start_of_unordered_list_item_text_and_register_it_as_a_reference()
          {
@@ -852,7 +852,7 @@ mod bulleted_lists {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/461):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/461):
         // Enable this test when xref replacement refactoring is complete.
         fn should_discover_anchor_at_start_of_ordered_list_item_text_and_register_it_as_a_reference()
          {
@@ -864,9 +864,9 @@ mod bulleted_lists {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/461):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/461):
         // Enable this test when xref replacement refactoring is complete.
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/311):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
         // Enable this test when callouts are implemented.
         fn should_discover_anchor_at_start_of_callout_list_item_text_and_register_it_as_a_reference()
          {
@@ -2324,7 +2324,7 @@ mod description_lists_dlist {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/474):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/474):
         // Enable this test when rulers are implemented.
         fn a_ruler_between_elements_should_divide_them_into_separate_lists() {
             let _doc = Parser::default().parse("term1:: def1\n\n'''\n\nterm2:: def2\n");
@@ -3681,7 +3681,7 @@ mod description_lists_redux {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/474):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/474):
         // Enable this test when rulers are implemented.
         fn folds_text_that_looks_like_ruler_offset_by_blank_line_and_line_comment() {
             let doc = Parser::default().parse("== Lists\n\nterm1::\n\n// comment\n'''\n");
@@ -3847,7 +3847,7 @@ mod description_lists_redux {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/474):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/474):
         // Enable this test when rulers are implemented.
         fn appends_line_attached_by_continuation_as_block_if_item_has_no_inline_description_followed_by_ruler()
          {
@@ -4529,7 +4529,7 @@ mod description_lists_redux {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/474):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/474):
         // Enable this test when rulers are implemented.
         fn appends_literal_line_attached_by_continuation_as_block_if_item_has_inline_description_followed_by_ruler()
          {
@@ -4730,7 +4730,7 @@ mod description_lists_redux {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/scouten/asciidoc-parser/issues/474):
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/474):
         // Enable this test when rulers are implemented.
         fn ruler_offset_by_blank_line_divides_lists_because_item_has_text() {
             let _doc = Parser::default().parse("== Lists\n\nterm1:: def1\n\n'''\n\nterm2:: def2\n");

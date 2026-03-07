@@ -152,7 +152,7 @@ mod default_macros_substitution {
     #[ignore]
     #[test]
     fn macros() {
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/305):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/305):
         // I can't concieve of how macro substitutions can be applied _within_
         // macros. Deferring for now.
 
@@ -323,7 +323,7 @@ mod default_macros_substitution {
 
         todo!("Write test once table parsing is implemented");
 
-        // Blocked on https://github.com/scouten/asciidoc-parser/issues/296:
+        // Blocked on https://github.com/asciidoc-rs/asciidoc-parser/issues/296:
         // Implement table parsing
     }
 

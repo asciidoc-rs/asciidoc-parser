@@ -42,7 +42,7 @@ impl<'src> CompoundDelimitedBlock<'src> {
             return true;
         }
 
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/145):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/145):
         // Seek spec clarity: Do the characters after the fourth char
         // have to match the first four?
 
@@ -68,7 +68,7 @@ impl<'src> CompoundDelimitedBlock<'src> {
         let delimiter = metadata.block_start.take_normalized_line();
         let maybe_delimiter_text = delimiter.item.data();
 
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/146):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/146):
         // Seek spec clarity on whether three hyphens can be used to
         // delimit an open block. Assuming yes for now.
         let context = match maybe_delimiter_text
