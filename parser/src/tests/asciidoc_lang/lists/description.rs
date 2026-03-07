@@ -1,0 +1,101 @@
+use crate::tests::prelude::*;
+
+track_file!("docs/modules/lists/pages/description.adoc");
+
+non_normative!(
+    r#"
+= Description Lists
+:keywords: dlist, definition list, labeled list
+
+A description list (often abbreviated as dlist in AsciiDoc) is an association list that consists of one or more terms (or sets of terms) that each have a description.
+This list type is useful when you have a list of terms that you want to emphasize and describe with text or other supporting content.
+
+NOTE: You may know this list variation by the antiquated term _definition list_.
+The preferred term is now _description list_, which matches the terminology used by the https://html.spec.whatwg.org/multipage/grouping-content.html#the-dl-element[HTML specification^].
+
+== Anatomy
+
+A description list item marks the beginning of a description list.
+Each item in a description list consists of:
+
+* one or more terms, each followed by a term delimiter (typically a double colon, `::`, unless the list is nested)
+* one space or newline character
+* the description in the form of text, attached blocks, or both
+
+If a term has an anchor, the anchor must be defined at the start of the same line as the term.
+
+The first term defines which term delimiter is used for the description list.
+The terms for the remaining entries at that level must use the same delimiter.
+
+The valid set of term delimiters is fixed.
+When the term delimiter is changed, that term begins a new, nested description list (similar to how ordered and unordered lists work).
+The available term delimiters you can use for this purpose are as follows:
+
+* `::`
+* `:::`
+* `::::`
+* `;;`
+
+There's no direct correlation between the number of characters in the delimiter and the nesting level.
+Each time you change delimiters (selected from this set), it introduces a new level of nesting.
+This is how list depth is implied in a language with a left-aligned syntax.
+It's customary to use the delimiters in the order shown above to provide a hint that the list is nested at a certain level.
+
+== Basic description list
+
+Here's an example of a description list that identifies parts of a computer:
+
+----
+include::example$description.adoc[tag=base]
+----
+
+By default, the content of each item is displayed below the label when rendered.
+Here's a preview of how this list is rendered:
+
+.A basic description list
+====
+include::example$description.adoc[tag=base]
+====
+
+== Mixing lists
+
+The content of a description list can be any AsciiDoc element.
+For instance, we could split up a grocery list by aisle, using description list terms for the aisle names.
+
+----
+include::example$description.adoc[tag=base-mix]
+----
+
+====
+include::example$description.adoc[tag=base-mix]
+====
+
+Description lists are quite lenient about whitespace, so you can spread the items out and even indent the content if that makes it more readable for you:
+
+----
+include::example$description.adoc[tag=base-mix-alt]
+----
+
+== Nested description list
+
+[#three-hybrid]
+Finally, you can mix and match the three list types within a single hybrid list.
+The AsciiDoc syntax tries hard to infer the relationships between the items that are most intuitive to us humans.
+
+Here's a list that mixes description, ordered, and unordered lists.
+Notice how the term delimiter is changed from `::` to `:::` to create a nested description list.
+
+----
+include::example$description.adoc[tag=3-mix]
+----
+
+Here's how the list is rendered:
+
+.A hybrid list
+====
+include::example$description.adoc[tag=3-mix]
+====
+
+You can include more xref:continuation.adoc[compound content in a list item] as well.
+"#
+);
