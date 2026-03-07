@@ -300,10 +300,8 @@ fn parse_lines<'src>(
                 let line = line_mi.item;
 
                 // Apply same stop conditions as the main loop.
-                if line_count > 0 {
-                    if line.data() == "+" {
-                        break;
-                    }
+                if line_count > 0 && line.data() == "+" {
+                    break;
                 }
 
                 if let Some(n) = line.position(|c| c != ' ' && c != '\t') {
