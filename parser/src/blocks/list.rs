@@ -296,6 +296,7 @@ impl std::fmt::Debug for ListType {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing)]
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 

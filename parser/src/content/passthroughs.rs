@@ -488,6 +488,7 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing)]
     #![allow(clippy::unwrap_used)]
 
     use pretty_assertions_sorted::assert_eq;

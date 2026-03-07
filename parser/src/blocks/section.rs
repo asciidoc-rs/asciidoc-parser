@@ -470,8 +470,10 @@ impl SectionNumber {
 
         if self.components.len() < level {
             self.components.resize(level, 1);
-        } else if level > 0 {
-            self.components[level - 1] += 1;
+        } else if level > 0
+            && let Some(component) = self.components.get_mut(level - 1)
+        {
+            *component += 1;
         }
     }
 

@@ -57,7 +57,7 @@ impl<'src> Span<'src> {
         }
         let last_index = last_index.map_or(0, |v| v + 1);
 
-        let col = num_chars(&old_data.as_bytes()[last_index..]);
+        let col = old_data.as_bytes().get(last_index..).map_or(0, num_chars);
 
         Self {
             data: slice_data,
