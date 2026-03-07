@@ -300,14 +300,6 @@ impl<'src> Block<'src> {
                 && let Some(mi_section_block) =
                     SectionBlock::parse(&metadata, parser, &mut warnings)
             {
-                // New section blocks terminate a list.
-                if parent_list_markers.is_some() {
-                    return MatchAndWarnings {
-                        item: None,
-                        warnings: vec![],
-                    };
-                }
-
                 // A line starting with `=` or `#` might be some other kind of block, so we
                 // continue quietly if `SectionBlock` parser rejects this block.
 
