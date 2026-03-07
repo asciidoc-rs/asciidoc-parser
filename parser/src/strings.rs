@@ -79,7 +79,18 @@ impl TryFrom<&str> for InlineStr {
         let len = s.len();
         if len <= MAX_INLINE_STR_LEN {
             let mut inner = [0u8; MAX_INLINE_STR_LEN];
-            inner[..len].copy_from_slice(s.as_bytes());
+
+            debug_assert!(
+                len <= MAX_INLINE_STR_LEN,
+                "InlineStr: len {} exceeds MAX_INLINE_STR_LEN {}",
+                len,
+                MAX_INLINE_STR_LEN
+            );
+
+            if let Some(dest) = inner.get_mut(..len) {
+                dest.copy_from_slice(s.as_bytes());
+            }
+
             let len = len as u8;
             Ok(Self { inner, len })
         } else {
@@ -93,7 +104,10 @@ impl Deref for InlineStr {
 
     fn deref(&self) -> &str {
         let len = self.len as usize;
-        from_utf8(&self.inner[..len]).unwrap_or_default()
+        self.inner
+            .get(..len)
+            .and_then(|bytes| from_utf8(bytes).ok())
+            .unwrap_or_default()
     }
 }
 

@@ -8,17 +8,44 @@ use super::Span;
 impl<'src> Span<'src> {
     /// Returns the requested subrange of this input span.
     pub(crate) fn slice(&self, range: Range<usize>) -> Self {
-        self.slice_internal(&self.data[range])
+        debug_assert!(
+            self.data.get(range.clone()).is_some(),
+            "slice: range {:?} is out of bounds for data of length {}",
+            range,
+            self.data.len()
+        );
+
+        self.data
+            .get(range)
+            .map_or(*self, |s| self.slice_internal(s))
     }
 
     /// Returns the requested subrange of this input span.
     pub(crate) fn slice_from(&self, range: RangeFrom<usize>) -> Self {
-        self.slice_internal(&self.data[range])
+        debug_assert!(
+            self.data.get(range.clone()).is_some(),
+            "slice_from: range {:?} is out of bounds for data of length {}",
+            range,
+            self.data.len()
+        );
+
+        self.data
+            .get(range)
+            .map_or(*self, |s| self.slice_internal(s))
     }
 
     /// Returns the requested subrange of this input span.
     pub(crate) fn slice_to(&self, range: RangeTo<usize>) -> Self {
-        self.slice_internal(&self.data[range])
+        debug_assert!(
+            self.data.get(range).is_some(),
+            "slice_to: range {:?} is out of bounds for data of length {}",
+            range,
+            self.data.len()
+        );
+
+        self.data
+            .get(range)
+            .map_or(*self, |s| self.slice_internal(s))
     }
 
     /// Returns the first position where `predicate` returns `true`.
@@ -31,6 +58,7 @@ impl<'src> Span<'src> {
                 return Some(o);
             }
         }
+
         None
     }
 
@@ -46,7 +74,14 @@ impl<'src> Span<'src> {
             };
         }
 
-        let old_data = &self.data[..offset];
+        debug_assert!(
+            offset <= self.data.len(),
+            "slice_internal: offset {} is out of bounds for data of length {}",
+            offset,
+            self.data.len()
+        );
+
+        let old_data = self.data.get(..offset).unwrap_or(self.data);
         let new_line_iter = Memchr::new(b'\n', old_data.as_bytes());
 
         let mut lines_to_add = 0;
@@ -55,9 +90,9 @@ impl<'src> Span<'src> {
             lines_to_add += 1;
             last_index = Some(i);
         }
-        let last_index = last_index.map_or(0, |v| v + 1);
 
-        let col = num_chars(&old_data.as_bytes()[last_index..]);
+        let last_index = last_index.map_or(0, |v| v + 1);
+        let col = old_data.as_bytes().get(last_index..).map_or(0, num_chars);
 
         Self {
             data: slice_data,

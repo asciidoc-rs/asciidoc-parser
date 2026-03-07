@@ -1,4 +1,5 @@
 #![allow(clippy::expect_used)]
+#![allow(clippy::indexing_slicing)]
 #![allow(clippy::panic)]
 #![allow(clippy::unwrap_used)]
 
