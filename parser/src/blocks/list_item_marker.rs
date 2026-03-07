@@ -189,6 +189,11 @@ impl<'src> ListItemMarker<'src> {
             return;
         }
 
+        // NOTE: Code coverage for the remainder of this function will be
+        // missing until we complete MAJOR REFACTOR: Split parsing and
+        // inline substitution steps.
+        // (See https://github.com/asciidoc-rs/asciidoc-parser/issues/461.)
+
         // Detect leading inline anchor pattern: [[id]] or [[id,reftext]]
         if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term_text) {
             let id = &captures[1];
