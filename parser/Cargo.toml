@@ -10,7 +10,7 @@ name = "asciidoc-parser"
 readme = "../README.md"
 repository = "https://github.com/asciidoc-rs/asciidoc-parser"
 rust-version = "1.88.0"
-version = "0.14.3"
+version = "0.14.4"
 
 [dependencies]
 bytecount = "0.6.7"
