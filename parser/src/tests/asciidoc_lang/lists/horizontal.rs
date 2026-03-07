@@ -1,0 +1,41 @@
+use crate::tests::prelude::*;
+
+track_file!("docs/modules/lists/pages/horizontal.adoc");
+
+// This entire page is considered non-normative because the horizontal style
+// only affects rendering and this crate doesn't do rendering.
+non_normative!(
+    r#"
+= Horizontal Description List
+
+If you want the first term and description of an item to start on the same line (i.e., horizontal arrangement), add the horizontal style to the description list.
+
+[.wrap]
+----
+include::example$description.adoc[tag=base-horz]
+----
+
+====
+include::example$description.adoc[tag=base-horz]
+====
+
+By default, the term and description columns will be sized automatically.
+If the content is not arranged in the way that you want, you need to adjust the width distribution.
+
+You can control the width of the term and description columns using the (improperly named) `labelwidth` and `itemwidth` attributes on the list, respectively.
+Both attributes are optional.
+The value of each attribute is a number from 0 to 100 (a unitless percentage).
+If both attributes are specified, their values should add up to 100.
+
+[.wrap]
+----
+include::example$description.adoc[tag=widths]
+----
+
+====
+include::example$description.adoc[tag=widths]
+====
+
+When converting to HTML, you can assign a role to the description list instead to control the column widths using CSS.
+"#
+);

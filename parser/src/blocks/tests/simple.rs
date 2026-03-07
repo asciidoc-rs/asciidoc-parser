@@ -1040,3 +1040,261 @@ fn unterminated_block_anchor() {
         }
     );
 }
+
+// The following tests exercise the `is_section_header` function
+// (called from `parse_lines`) via full parse trees. A comment line
+// (`// ...`) sets `skipped_comment_line = true`, and the next
+// non-empty line is checked by `is_section_header`. If it looks
+// like a section header, the paragraph terminates before that line.
+
+#[test]
+fn comment_then_asciidoc_level_2_header_terminates_paragraph() {
+    // Exercises `is_section_header` for `=== ` (3 equals).
+    let mut parser = Parser::default();
+
+    let mi = crate::blocks::Block::parse(
+        crate::Span::new("paragraph\n// comment\n=== Section\n\ncontent"),
+        &mut parser,
+    )
+    .unwrap_if_no_warnings()
+    .unwrap();
+
+    assert_eq!(
+        mi.item,
+        Block::Simple(SimpleBlock {
+            content: Content {
+                original: Span {
+                    data: "paragraph\n// comment",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                rendered: "paragraph",
+            },
+            source: Span {
+                data: "paragraph\n// comment",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },
+            style: SimpleBlockStyle::Paragraph,
+            title_source: None,
+            title: None,
+            anchor: None,
+            anchor_reftext: None,
+            attrlist: None,
+        })
+    );
+
+    assert_eq!(
+        mi.after,
+        Span {
+            data: "=== Section\n\ncontent",
+            line: 3,
+            col: 1,
+            offset: 21,
+        }
+    );
+}
+
+#[test]
+fn comment_then_markdown_level_1_header_terminates_paragraph() {
+    // Exercises `is_section_header` for `## ` (2 hashes).
+    let mut parser = Parser::default();
+
+    let mi = crate::blocks::Block::parse(
+        crate::Span::new("paragraph\n// comment\n## Section\n\ncontent"),
+        &mut parser,
+    )
+    .unwrap_if_no_warnings()
+    .unwrap();
+
+    assert_eq!(
+        mi.item,
+        Block::Simple(SimpleBlock {
+            content: Content {
+                original: Span {
+                    data: "paragraph\n// comment",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                rendered: "paragraph",
+            },
+            source: Span {
+                data: "paragraph\n// comment",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },
+            style: SimpleBlockStyle::Paragraph,
+            title_source: None,
+            title: None,
+            anchor: None,
+            anchor_reftext: None,
+            attrlist: None,
+        })
+    );
+
+    assert_eq!(
+        mi.after,
+        Span {
+            data: "## Section\n\ncontent",
+            line: 3,
+            col: 1,
+            offset: 21,
+        }
+    );
+}
+
+#[test]
+fn comment_then_markdown_level_2_header_terminates_paragraph() {
+    // Exercises `is_section_header` for `### ` (3 hashes).
+    let mut parser = Parser::default();
+
+    let mi = crate::blocks::Block::parse(
+        crate::Span::new("paragraph\n// comment\n### Section\n\ncontent"),
+        &mut parser,
+    )
+    .unwrap_if_no_warnings()
+    .unwrap();
+
+    assert_eq!(
+        mi.item,
+        Block::Simple(SimpleBlock {
+            content: Content {
+                original: Span {
+                    data: "paragraph\n// comment",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                rendered: "paragraph",
+            },
+            source: Span {
+                data: "paragraph\n// comment",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },
+            style: SimpleBlockStyle::Paragraph,
+            title_source: None,
+            title: None,
+            anchor: None,
+            anchor_reftext: None,
+            attrlist: None,
+        })
+    );
+
+    assert_eq!(
+        mi.after,
+        Span {
+            data: "### Section\n\ncontent",
+            line: 3,
+            col: 1,
+            offset: 21,
+        }
+    );
+}
+
+#[test]
+fn comment_then_equals_without_space_does_not_terminate_paragraph() {
+    // Exercises the `false` return from `is_section_header` when
+    // `==` is not followed by a space.
+    let mut parser = Parser::default();
+
+    let mi = crate::blocks::Block::parse(
+        crate::Span::new("paragraph\n// comment\n==nospace"),
+        &mut parser,
+    )
+    .unwrap_if_no_warnings()
+    .unwrap();
+
+    assert_eq!(
+        mi.item,
+        Block::Simple(SimpleBlock {
+            content: Content {
+                original: Span {
+                    data: "paragraph\n// comment\n==nospace",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                rendered: "paragraph\n==nospace",
+            },
+            source: Span {
+                data: "paragraph\n// comment\n==nospace",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },
+            style: SimpleBlockStyle::Paragraph,
+            title_source: None,
+            title: None,
+            anchor: None,
+            anchor_reftext: None,
+            attrlist: None,
+        })
+    );
+
+    assert_eq!(
+        mi.after,
+        Span {
+            data: "",
+            line: 3,
+            col: 10,
+            offset: 30,
+        }
+    );
+}
+
+#[test]
+fn comment_then_hashes_without_space_does_not_terminate_paragraph() {
+    // Exercises the `false` return from `is_section_header` when
+    // `##` is not followed by a space.
+    let mut parser = Parser::default();
+
+    let mi = crate::blocks::Block::parse(
+        crate::Span::new("paragraph\n// comment\n##nospace"),
+        &mut parser,
+    )
+    .unwrap_if_no_warnings()
+    .unwrap();
+
+    assert_eq!(
+        mi.item,
+        Block::Simple(SimpleBlock {
+            content: Content {
+                original: Span {
+                    data: "paragraph\n// comment\n##nospace",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                rendered: "paragraph\n##nospace",
+            },
+            source: Span {
+                data: "paragraph\n// comment\n##nospace",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },
+            style: SimpleBlockStyle::Paragraph,
+            title_source: None,
+            title: None,
+            anchor: None,
+            anchor_reftext: None,
+            attrlist: None,
+        })
+    );
+
+    assert_eq!(
+        mi.after,
+        Span {
+            data: "",
+            line: 3,
+            col: 10,
+            offset: 30,
+        }
+    );
+}

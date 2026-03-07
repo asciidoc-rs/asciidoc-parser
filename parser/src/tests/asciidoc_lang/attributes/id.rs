@@ -209,7 +209,7 @@ mod block_assignment {
 
     use crate::{
         Parser,
-        blocks::{IsBlock, SimpleBlockStyle},
+        blocks::{IsBlock, ListType, SimpleBlockStyle},
         tests::prelude::*,
     };
 
@@ -248,27 +248,98 @@ In the shorthand syntax, you prefix the name with a hash (`#`) in the first posi
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // NOTE: This test will have to be revised when we support lists.
-
         assert_eq!(
             mi.item,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
-                        data: "* Goal 1\n* Goal 2",
-                        line: 2,
-                        col: 1,
-                        offset: 9,
-                    },
-                    rendered: "* Goal 1\n* Goal 2",
-                },
+            Block::List(ListBlock {
+                type_: ListType::Unordered,
+                items: &[
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 2,
+                            col: 1,
+                            offset: 9,
+                        },),
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "Goal 1",
+                                    line: 2,
+                                    col: 3,
+                                    offset: 11,
+                                },
+                                rendered: "Goal 1",
+                            },
+                            source: Span {
+                                data: "Goal 1",
+                                line: 2,
+                                col: 3,
+                                offset: 11,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "* Goal 1",
+                            line: 2,
+                            col: 1,
+                            offset: 9,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 3,
+                            col: 1,
+                            offset: 18,
+                        },),
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "Goal 2",
+                                    line: 3,
+                                    col: 3,
+                                    offset: 20,
+                                },
+                                rendered: "Goal 2",
+                            },
+                            source: Span {
+                                data: "Goal 2",
+                                line: 3,
+                                col: 3,
+                                offset: 20,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "* Goal 2",
+                            line: 3,
+                            col: 1,
+                            offset: 18,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                ],
                 source: Span {
                     data: "[#goals]\n* Goal 1\n* Goal 2",
                     line: 1,
                     col: 1,
                     offset: 0,
                 },
-                style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
                 anchor: None,
@@ -276,8 +347,8 @@ In the shorthand syntax, you prefix the name with a hash (`#`) in the first posi
                 attrlist: Some(Attrlist {
                     attributes: &[ElementAttribute {
                         name: None,
+                        value: "#goals",
                         shorthand_items: &["#goals"],
-                        value: "#goals"
                     },],
                     anchor: None,
                     source: Span {
@@ -285,9 +356,9 @@ In the shorthand syntax, you prefix the name with a hash (`#`) in the first posi
                         line: 1,
                         col: 2,
                         offset: 1,
-                    }
-                })
-            })
+                    },
+                },),
+            },)
         );
     }
 
@@ -316,36 +387,107 @@ In the longhand syntax, you use a standard named attribute.
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // NOTE: This test will have to be revised when we support lists.
-
         assert_eq!(
             mi.item,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
-                        data: "* Goal 1\n* Goal 2",
-                        line: 2,
-                        col: 1,
-                        offset: 11,
-                    },
-                    rendered: "* Goal 1\n* Goal 2",
-                },
+            Block::List(ListBlock {
+                type_: ListType::Unordered,
+                items: &[
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 2,
+                            col: 1,
+                            offset: 11,
+                        },),
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "Goal 1",
+                                    line: 2,
+                                    col: 3,
+                                    offset: 13,
+                                },
+                                rendered: "Goal 1",
+                            },
+                            source: Span {
+                                data: "Goal 1",
+                                line: 2,
+                                col: 3,
+                                offset: 13,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "* Goal 1",
+                            line: 2,
+                            col: 1,
+                            offset: 11,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 3,
+                            col: 1,
+                            offset: 20,
+                        },),
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "Goal 2",
+                                    line: 3,
+                                    col: 3,
+                                    offset: 22,
+                                },
+                                rendered: "Goal 2",
+                            },
+                            source: Span {
+                                data: "Goal 2",
+                                line: 3,
+                                col: 3,
+                                offset: 22,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "* Goal 2",
+                            line: 3,
+                            col: 1,
+                            offset: 20,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                ],
                 source: Span {
                     data: "[id=goals]\n* Goal 1\n* Goal 2",
                     line: 1,
                     col: 1,
                     offset: 0,
                 },
-                style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
                     attributes: &[ElementAttribute {
-                        name: Some("id"),
+                        name: Some("id",),
+                        value: "goals",
                         shorthand_items: &[],
-                        value: "goals"
                     },],
                     anchor: None,
                     source: Span {
@@ -384,27 +526,98 @@ In the block anchor syntax, you surround the name with double square brackets:
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // NOTE: This test will have to be revised when we support lists.
-
         assert_eq!(
             mi.item,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
-                        data: "* Goal 1\n* Goal 2",
-                        line: 2,
-                        col: 1,
-                        offset: 10,
-                    },
-                    rendered: "* Goal 1\n* Goal 2",
-                },
+            Block::List(ListBlock {
+                type_: ListType::Unordered,
+                items: &[
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 2,
+                            col: 1,
+                            offset: 10,
+                        },),
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "Goal 1",
+                                    line: 2,
+                                    col: 3,
+                                    offset: 12,
+                                },
+                                rendered: "Goal 1",
+                            },
+                            source: Span {
+                                data: "Goal 1",
+                                line: 2,
+                                col: 3,
+                                offset: 12,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "* Goal 1",
+                            line: 2,
+                            col: 1,
+                            offset: 10,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 3,
+                            col: 1,
+                            offset: 19,
+                        },),
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "Goal 2",
+                                    line: 3,
+                                    col: 3,
+                                    offset: 21,
+                                },
+                                rendered: "Goal 2",
+                            },
+                            source: Span {
+                                data: "Goal 2",
+                                line: 3,
+                                col: 3,
+                                offset: 21,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "* Goal 2",
+                            line: 3,
+                            col: 1,
+                            offset: 19,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                ],
                 source: Span {
                     data: "[[goals]]\n* Goal 1\n* Goal 2",
                     line: 1,
                     col: 1,
                     offset: 0,
                 },
-                style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
                 anchor: Some(Span {

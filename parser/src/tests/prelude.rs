@@ -5,6 +5,7 @@
 pub(crate) use crate::{
     blocks::SectionType,
     tests::{
+        assert_dom::*,
         fixtures::{attributes::*, blocks::*, content::*, document::*, parser::*, warnings::*, *},
         sdd::*,
     },

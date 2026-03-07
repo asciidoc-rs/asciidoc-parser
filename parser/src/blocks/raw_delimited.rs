@@ -68,22 +68,28 @@ impl<'src> RawDelimitedBlock<'src> {
             return None;
         }
 
-        let (content_model, context, mut substitution_group) =
-            match delimiter.item.data().as_bytes().split_at(4).0 {
-                b"////" => (ContentModel::Raw, "comment", SubstitutionGroup::None),
-                b"----" => (
-                    ContentModel::Verbatim,
-                    "listing",
-                    SubstitutionGroup::Verbatim,
-                ),
-                b"...." => (
-                    ContentModel::Verbatim,
-                    "literal",
-                    SubstitutionGroup::Verbatim,
-                ),
-                b"++++" => (ContentModel::Raw, "pass", SubstitutionGroup::Pass),
-                _ => return None,
-            };
+        let (content_model, context, mut substitution_group) = match delimiter
+            .item
+            .data()
+            .split_at_checked(delimiter.item.data().len().min(4))?
+            .0
+        {
+            "////" => (ContentModel::Raw, "comment", SubstitutionGroup::None),
+            "----" => (
+                ContentModel::Verbatim,
+                "listing",
+                SubstitutionGroup::Verbatim,
+            ),
+            "...." => (
+                ContentModel::Verbatim,
+                "literal",
+                SubstitutionGroup::Verbatim,
+            ),
+            "++++" => (ContentModel::Raw, "pass", SubstitutionGroup::Pass),
+            _ => {
+                return None;
+            }
+        };
 
         if !Self::is_valid_delimiter(&delimiter.item) {
             return None;

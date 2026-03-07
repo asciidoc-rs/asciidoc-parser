@@ -114,7 +114,7 @@ mod error_cases {
 
     use crate::{
         Parser,
-        blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
+        blocks::{ContentModel, IsBlock, ListType, SimpleBlockStyle, metadata::BlockMetadata},
         content::SubstitutionGroup,
         span::HasSpan,
         tests::prelude::*,
@@ -473,9 +473,7 @@ mod error_cases {
     }
 
     #[test]
-    #[allow(non_snake_case)]
-    fn TEMP_not_title() {
-        // IMPORTANT: This test will fail once we implement support for list items.
+    fn list_item_not_title() {
         let mut parser = Parser::default();
 
         let mi = crate::blocks::Block::parse(crate::Span::new(". abc\ndef"), &mut parser)
@@ -484,29 +482,60 @@ mod error_cases {
 
         assert_eq!(
             mi.item,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
+            Block::List(ListBlock {
+                type_: ListType::Ordered,
+                items: &[Block::ListItem(ListItem {
+                    marker: ListItemMarker::Dots(Span {
+                        data: ".",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },),
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "abc\ndef",
+                                line: 1,
+                                col: 3,
+                                offset: 2,
+                            },
+                            rendered: "abc\ndef",
+                        },
+                        source: Span {
+                            data: "abc\ndef",
+                            line: 1,
+                            col: 3,
+                            offset: 2,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
                         data: ". abc\ndef",
                         line: 1,
                         col: 1,
                         offset: 0,
                     },
-                    rendered: ". abc\ndef",
-                },
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
                 source: Span {
                     data: ". abc\ndef",
                     line: 1,
                     col: 1,
                     offset: 0,
                 },
-                style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
-            })
+            },)
         );
 
         assert_eq!(

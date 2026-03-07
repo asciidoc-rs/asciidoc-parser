@@ -171,9 +171,9 @@ impl<'src> BlockMetadata<'src> {
         }
     }
 
-    /// Return `true` if both `title` and `attrlist` are empty.
+    /// Return `true` if title, anchor, and attrlist are all empty.
     pub(crate) fn is_empty(&self) -> bool {
-        self.title.is_none() && self.attrlist.is_none()
+        self.title.is_none() && self.anchor.is_none() && self.attrlist.is_none()
     }
 
     /// Return `true` if this block metadata has either the `discrete` or

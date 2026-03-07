@@ -32,7 +32,7 @@ where
         }
 
         if let Some(mi) = maw.item {
-            source = mi.after;
+            source = mi.after.discard_empty_lines();
             blocks.push(mi.item);
         }
     }

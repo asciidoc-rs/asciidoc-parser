@@ -101,9 +101,10 @@ To help you determine whether a particular syntax pattern requires an unconstrai
 "#
         );
 
-        let doc = Parser::default().parse(r#"** bold **"#);
+        // NOTE: Inserted `xyz` prefix to prevent this being parsed as a list.
+        let doc = Parser::default().parse(r#"xyz ** bold **"#);
         let sb = super::first_simple_block(&doc);
-        assert_eq!(sb.content().rendered(), "<strong> bold </strong>");
+        assert_eq!(sb.content().rendered(), "xyz <strong> bold </strong>");
     }
 
     #[test]

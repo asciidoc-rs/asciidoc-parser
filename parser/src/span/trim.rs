@@ -2,9 +2,14 @@ use super::Span;
 
 impl Span<'_> {
     /// Return a [`Span`] that is the same as the source, but with any trailing
-    /// whitespace removed.
+    /// space or tab characters removed.
     pub(crate) fn trim_trailing_whitespace(&self) -> Self {
-        let new_len = self.data.trim_end().len();
+        // IMPORTANT: We don't use `str::trim_end` because Rust's definition of
+        // whitespace doesn't match Asciidoc's definition.
+        let new_len = self
+            .data
+            .trim_end_matches([' ', '\t', '\n', '\r', '\x0C', '\x0B'])
+            .len();
         self.slice(0..new_len)
     }
 

@@ -84,17 +84,21 @@ impl<'src> Document<'src> {
             let mut has_content_blocks = false;
             let mut preamble_split_index: Option<usize> = None;
 
-            for (index, block) in blocks.iter().enumerate() {
-                match block {
-                    Block::DocumentAttribute(_) => (),
-                    Block::Section(_) => {
-                        if has_content_blocks {
-                            preamble_split_index = Some(index);
+            // Only look for preamble content if document has a title.
+            // Asciidoctor only creates a preamble when there's a document title.
+            if header.title().is_some() {
+                for (index, block) in blocks.iter().enumerate() {
+                    match block {
+                        Block::DocumentAttribute(_) => (),
+                        Block::Section(_) => {
+                            if has_content_blocks {
+                                preamble_split_index = Some(index);
+                            }
+                            break;
                         }
-                        break;
-                    }
-                    _ => {
-                        has_content_blocks = true;
+                        _ => {
+                            has_content_blocks = true;
+                        }
                     }
                 }
             }

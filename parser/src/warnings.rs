@@ -76,6 +76,9 @@ pub enum WarningType {
 
     #[error("Section heading level exceeds maximum (maximum 5, found {0})")]
     SectionHeadingLevelExceedsMaximum(usize),
+
+    #[error("List item index: expected {0}, got {1}")]
+    ListItemOutOfSequence(String, String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -142,6 +145,12 @@ impl std::fmt::Debug for WarningType {
             WarningType::SectionHeadingLevelExceedsMaximum(found) => f
                 .debug_tuple("WarningType::SectionHeadingLevelExceedsMaximum")
                 .field(found)
+                .finish(),
+
+            WarningType::ListItemOutOfSequence(expected, actual) => f
+                .debug_tuple("WarningType::ListItemOutOfSequence")
+                .field(expected)
+                .field(actual)
                 .finish(),
         }
     }
@@ -386,6 +395,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::SectionHeadingLevelExceedsMaximum(6)"
+                );
+            }
+
+            #[test]
+            fn list_item_out_of_sequence() {
+                let warning = WarningType::ListItemOutOfSequence("y".to_string(), "z".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::ListItemOutOfSequence(\"y\", \"z\")"
                 );
             }
         }

@@ -615,7 +615,7 @@ Let's consider `options` when combined with other attributes.
 
     use crate::{
         Parser,
-        blocks::{IsBlock, SimpleBlockStyle},
+        blocks::{IsBlock, ListType, SimpleBlockStyle},
         content::SubstitutionGroup,
         tests::prelude::*,
     };
@@ -650,27 +650,132 @@ The role and options attributes can be set in either order, i.e., `[horizontal%s
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // IMPORTANT: This test will have to be revised when we support attribute lists.
-
         assert_eq!(
             mi.item,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
-                        data: "property 1:: does stuff\nproperty 2:: does different stuff",
-                        line: 2,
-                        col: 1,
-                        offset: 29,
-                    },
-                    rendered: "property 1:: does stuff\nproperty 2:: does different stuff",
-                },
+            Block::List(ListBlock {
+                type_: ListType::Description,
+                items: &[
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::DefinedTerm {
+                            term: Content {
+                                original: Span {
+                                    data: "property 1",
+                                    line: 2,
+                                    col: 1,
+                                    offset: 29,
+                                },
+                                rendered: "property 1",
+                            },
+                            marker: Span {
+                                data: "::",
+                                line: 2,
+                                col: 11,
+                                offset: 39,
+                            },
+                            source: Span {
+                                data: "property 1::",
+                                line: 2,
+                                col: 1,
+                                offset: 29,
+                            },
+                        },
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "does stuff",
+                                    line: 2,
+                                    col: 14,
+                                    offset: 42,
+                                },
+                                rendered: "does stuff",
+                            },
+                            source: Span {
+                                data: "does stuff",
+                                line: 2,
+                                col: 14,
+                                offset: 42,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "property 1:: does stuff",
+                            line: 2,
+                            col: 1,
+                            offset: 29,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::DefinedTerm {
+                            term: Content {
+                                original: Span {
+                                    data: "property 2",
+                                    line: 3,
+                                    col: 1,
+                                    offset: 53,
+                                },
+                                rendered: "property 2",
+                            },
+                            marker: Span {
+                                data: "::",
+                                line: 3,
+                                col: 11,
+                                offset: 63,
+                            },
+                            source: Span {
+                                data: "property 2::",
+                                line: 3,
+                                col: 1,
+                                offset: 53,
+                            },
+                        },
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "does different stuff",
+                                    line: 3,
+                                    col: 14,
+                                    offset: 66,
+                                },
+                                rendered: "does different stuff",
+                            },
+                            source: Span {
+                                data: "does different stuff",
+                                line: 3,
+                                col: 14,
+                                offset: 66,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "property 2:: does different stuff",
+                            line: 3,
+                            col: 1,
+                            offset: 53,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                ],
                 source: Span {
                     data: "[horizontal.properties%step]\nproperty 1:: does stuff\nproperty 2:: does different stuff",
                     line: 1,
                     col: 1,
                     offset: 0,
                 },
-                style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
                 anchor: None,
@@ -678,8 +783,8 @@ The role and options attributes can be set in either order, i.e., `[horizontal%s
                 attrlist: Some(Attrlist {
                     attributes: &[ElementAttribute {
                         name: None,
-                        shorthand_items: &["horizontal", ".properties", "%step"],
-                        value: "horizontal.properties%step"
+                        value: "horizontal.properties%step",
+                        shorthand_items: &["horizontal", ".properties", "%step"]
                     },],
                     anchor: None,
                     source: Span {
@@ -739,27 +844,132 @@ property 2:: does different stuff
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // IMPORTANT: This test will have to be revised when we support attribute lists.
-
         assert_eq!(
             mi.item,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
-                        data: "property 1:: does stuff\nproperty 2:: does different stuff",
-                        line: 2,
-                        col: 1,
-                        offset: 39,
-                    },
-                    rendered: "property 1:: does stuff\nproperty 2:: does different stuff",
-                },
+            Block::List(ListBlock {
+                type_: ListType::Description,
+                items: &[
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::DefinedTerm {
+                            term: Content {
+                                original: Span {
+                                    data: "property 1",
+                                    line: 2,
+                                    col: 1,
+                                    offset: 39,
+                                },
+                                rendered: "property 1",
+                            },
+                            marker: Span {
+                                data: "::",
+                                line: 2,
+                                col: 11,
+                                offset: 49,
+                            },
+                            source: Span {
+                                data: "property 1::",
+                                line: 2,
+                                col: 1,
+                                offset: 39,
+                            },
+                        },
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "does stuff",
+                                    line: 2,
+                                    col: 14,
+                                    offset: 52,
+                                },
+                                rendered: "does stuff",
+                            },
+                            source: Span {
+                                data: "does stuff",
+                                line: 2,
+                                col: 14,
+                                offset: 52,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "property 1:: does stuff",
+                            line: 2,
+                            col: 1,
+                            offset: 39,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::DefinedTerm {
+                            term: Content {
+                                original: Span {
+                                    data: "property 2",
+                                    line: 3,
+                                    col: 1,
+                                    offset: 63,
+                                },
+                                rendered: "property 2",
+                            },
+                            marker: Span {
+                                data: "::",
+                                line: 3,
+                                col: 11,
+                                offset: 73,
+                            },
+                            source: Span {
+                                data: "property 2::",
+                                line: 3,
+                                col: 1,
+                                offset: 63,
+                            },
+                        },
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "does different stuff",
+                                    line: 3,
+                                    col: 14,
+                                    offset: 76,
+                                },
+                                rendered: "does different stuff",
+                            },
+                            source: Span {
+                                data: "does different stuff",
+                                line: 3,
+                                col: 14,
+                                offset: 76,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "property 2:: does different stuff",
+                            line: 3,
+                            col: 1,
+                            offset: 63,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                ],
                 source: Span {
                     data: "[horizontal,role=properties,opts=step]\nproperty 1:: does stuff\nproperty 2:: does different stuff",
                     line: 1,
                     col: 1,
                     offset: 0,
                 },
-                style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
                 anchor: None,
@@ -768,18 +978,18 @@ property 2:: does different stuff
                     attributes: &[
                         ElementAttribute {
                             name: None,
+                            value: "horizontal",
                             shorthand_items: &["horizontal"],
-                            value: "horizontal"
                         },
                         ElementAttribute {
-                            name: Some("role"),
+                            name: Some("role",),
+                            value: "properties",
                             shorthand_items: &[],
-                            value: "properties"
                         },
                         ElementAttribute {
-                            name: Some("opts"),
+                            name: Some("opts",),
+                            value: "step",
                             shorthand_items: &[],
-                            value: "step"
                         },
                     ],
                     anchor: None,

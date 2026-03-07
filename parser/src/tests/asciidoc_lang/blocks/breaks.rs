@@ -51,7 +51,6 @@ include::partial$thematic-breaks.adoc[]
 fn page_break_syntax() {
     verifies!(
         r#"
-    r#"
 include::partial$page-breaks.adoc[]
 "#
     );
