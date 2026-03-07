@@ -873,7 +873,7 @@ include::example$complex.adoc[tag=cont]
 
     #[test]
     fn complex() {
-        non_normative!(
+        verifies!(
             r#"
 Using a list continuation, you can attach any number of block elements to a list item.
 Unless the block is inside a delimited block which itself has been attached, each block must be preceded by a list continuation to form a chain of blocks.
