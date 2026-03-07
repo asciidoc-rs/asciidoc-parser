@@ -178,8 +178,17 @@ impl<'src> ListItem<'src> {
                     next = next.discard_empty_lines();
                     next_block_must_be_indented = true;
                     continue;
-                } else {
+                } else if blocks.len() > 1 {
+                    // Item already has content beyond principal text (e.g.,
+                    // continuation-attached blocks or nested lists). Consume
+                    // all blank lines at this level.
                     next = next.discard_empty_lines();
+                    break;
+                } else {
+                    // Item has only principal text. Consume one blank line
+                    // per level to support ancestor list continuation, where
+                    // each blank line signals moving up one nesting level.
+                    next = next_line_mi.after;
                     break;
                 }
             }
