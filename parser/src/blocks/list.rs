@@ -890,6 +890,52 @@ mod tests {
     }
 
     #[test]
+    fn parent_marker_after_metadata_separated_by_empty_lines() {
+        // Exercises the parent_list_markers check in ListItem::parse
+        // (circa line 308) where a list marker found after extending metadata
+        // past empty lines matches a grandparent marker.
+        //
+        // Input: three nesting levels, then [[anchor]] + blank line + * marker.
+        // The *** item should recognize * as a grandparent marker and break.
+        let list =
+            list_parse("* grandparent\n** parent\n*** nested\n[[anchor]]\n\n* back to grandparent")
+                .unwrap();
+
+        // Outer list has two * items.
+        assert_eq!(list.item.nested_blocks().count(), 2);
+        assert_eq!(list.item.type_(), ListType::Unordered);
+
+        let mut outer_items = list.item.nested_blocks();
+
+        // First outer item should contain a nested ** list.
+        let first_outer = outer_items.next().unwrap();
+        let first_outer_blocks: Vec<_> = first_outer.nested_blocks().collect();
+        assert_eq!(first_outer_blocks.len(), 2); // SimpleBlock + ListBlock
+
+        // The nested ** list should have one item.
+        let nested_list = &first_outer_blocks[1];
+        assert_eq!(nested_list.nested_blocks().count(), 1);
+
+        // That ** item should contain a nested *** list.
+        let parent_item = nested_list.nested_blocks().next().unwrap();
+        let parent_blocks: Vec<_> = parent_item.nested_blocks().collect();
+        assert_eq!(parent_blocks.len(), 2); // SimpleBlock + ListBlock
+
+        // The *** list should have one item.
+        let innermost_list = &parent_blocks[1];
+        assert_eq!(innermost_list.nested_blocks().count(), 1);
+
+        // The *** item should have only its principal text.
+        let innermost_item = innermost_list.nested_blocks().next().unwrap();
+        assert_eq!(innermost_item.nested_blocks().count(), 1);
+
+        // Second outer item is "back to grandparent".
+        let second_outer = outer_items.next().unwrap();
+        assert_eq!(second_outer.nested_blocks().count(), 1);
+        assert!(outer_items.next().is_none());
+    }
+
+    #[test]
     fn marker_style_single_dot() {
         let list = list_parse(". Item one\n. Item two\n").unwrap();
         assert_eq!(list.item.marker_style(), Some("arabic"));
