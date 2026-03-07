@@ -318,7 +318,7 @@ include::example$section.adoc[tag=b-base]
     );
 }
 
-// TODO (https://github.com/scouten/asciidoc-parser/issues/380):
+// TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/380):
 // Option to support multiple level-0 headings.
 // Ignoring this rule for now.
 non_normative!(

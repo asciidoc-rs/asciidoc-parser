@@ -141,7 +141,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
     #[ignore]
     #[test]
     fn callouts() {
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/311):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
         // Implement this test when implementing callouts.
         to_do_verifies!(
             r#"
@@ -614,7 +614,7 @@ include::example$subs.adoc[tag=subs-add]
     #[ignore]
     #[test]
     fn example_subtract() {
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/311):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
         // Implement this test when implementing callouts.
 
         to_do_verifies!(
@@ -634,7 +634,7 @@ include::example$subs.adoc[tag=subs-sub]
     #[ignore]
     #[test]
     fn plus_before_or_after() {
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/311):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
         // Implement this test when implementing callouts.
 
         to_do_verifies!(

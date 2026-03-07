@@ -2539,7 +2539,7 @@ mod macros {
     #[test]
     fn todo_issue_272_inline_interactive() {
         // TO DO: Implement `inline` and `interactive` options for SVG images.
-        // https://github.com/scouten/asciidoc-parser/issues/272
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/272
         todo!(
             "{}",
             r###"
@@ -5872,7 +5872,7 @@ mod passthroughs {
         #[test]
         fn not_implemented() {
             todo!("Review Ruby Asciidoctor test suite for `context 'Math macros'`");
-            // See https://github.com/scouten/asciidoc-parser/issues/261.
+            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/261.
         }
     }
 }

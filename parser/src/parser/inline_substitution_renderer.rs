@@ -513,7 +513,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             .named_attribute("format")
             .map(|format| format.value());
 
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/277):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/277):
         // Enforce non-safe mode. Add this contraint to following `if` clause:
         // `&& node.document.safe < SafeMode::SECURE`
 
@@ -566,7 +566,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         if false {
             todo!(
-                // TO DO (https://github.com/scouten/asciidoc-parser/issues/277):
+                // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/277):
                 "Port this when implementing safe modes: {}",
                 r#"
 				if (doc = @document).safe < SafeMode::SECURE && (doc.attr? 'data-uri')

@@ -37,7 +37,7 @@ impl<'src> RawDelimitedBlock<'src> {
     pub(crate) fn is_valid_delimiter(line: &Span<'src>) -> bool {
         let data = line.data();
 
-        // TO DO (https://github.com/scouten/asciidoc-parser/issues/145):
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/145):
         // Seek spec clarity: Do the characters after the fourth char
         // have to match the first four?
 
