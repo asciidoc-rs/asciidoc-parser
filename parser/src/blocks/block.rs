@@ -349,18 +349,6 @@ impl<'src> Block<'src> {
             // spin in a loop (for example, `parse_blocks_until`) thinking there will be
             // another block, but there isn't.
 
-            // TEMPORARY: Don't take a line comment if in list item mode.
-            // We'll need to revisit this when we figure out how to handle line comments.
-            if parent_list_markers.is_some()
-                && metadata.block_start.starts_with("//")
-                && !metadata.block_start.starts_with("///")
-            {
-                return MatchAndWarnings {
-                    item: None,
-                    warnings: vec![],
-                };
-            }
-
             // The following check disables that spin loop.
             let simple_block_mi = if let Some(plm) = parent_list_markers {
                 SimpleBlock::parse_for_list_item(&metadata, parser, is_continuation, plm)
