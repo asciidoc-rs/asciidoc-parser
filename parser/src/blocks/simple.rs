@@ -540,6 +540,29 @@ mod tests {
     }
 
     #[test]
+    fn style_enum_impl_debug() {
+        assert_eq!(
+            format!("{:?}", SimpleBlockStyle::Paragraph),
+            "SimpleBlockStyle::Paragraph"
+        );
+
+        assert_eq!(
+            format!("{:?}", SimpleBlockStyle::Literal),
+            "SimpleBlockStyle::Literal"
+        );
+
+        assert_eq!(
+            format!("{:?}", SimpleBlockStyle::Listing),
+            "SimpleBlockStyle::Listing"
+        );
+
+        assert_eq!(
+            format!("{:?}", SimpleBlockStyle::Source),
+            "SimpleBlockStyle::Source"
+        );
+    }
+
+    #[test]
     fn empty_source() {
         let mut parser = Parser::default();
         assert!(crate::blocks::SimpleBlock::parse(&BlockMetadata::new(""), &mut parser).is_none());
