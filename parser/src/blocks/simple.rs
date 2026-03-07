@@ -304,23 +304,6 @@ fn parse_lines<'src>(
                     if line.data() == "+" {
                         break;
                     }
-
-                    if line.starts_with('[') && line.ends_with(']') {
-                        break;
-                    }
-
-                    if (line.starts_with('/')
-                        || line.starts_with('-')
-                        || line.starts_with('.')
-                        || line.starts_with('+')
-                        || line.starts_with('=')
-                        || line.starts_with('*')
-                        || line.starts_with('_'))
-                        && (RawDelimitedBlock::is_valid_delimiter(&line)
-                            || CompoundDelimitedBlock::is_valid_delimiter(&line))
-                    {
-                        break;
-                    }
                 }
 
                 if let Some(n) = line.position(|c| c != ' ' && c != '\t') {
