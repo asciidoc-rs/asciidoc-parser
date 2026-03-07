@@ -2061,8 +2061,20 @@ include::example$complex.adoc[tag=complex-only]
     }
 }
 
-non_normative!(
-    r#"
+mod attach_to_ancestor_list {
+    use std::collections::HashMap;
+
+    use pretty_assertions_sorted::assert_eq;
+
+    use crate::{
+        Parser,
+        blocks::{ContentModel, ListType, SimpleBlockStyle},
+        content::SubstitutionGroup,
+        tests::prelude::{inline_file_handler::InlineFileHandler, *},
+    };
+
+    non_normative!(
+        r#"
 [#attach-to-ancestor-list]
 == Attach blocks to an ancestor list
 
@@ -2071,8 +2083,20 @@ There are two ways to express this composition in the AsciiDoc syntax.
 You can either enclose the child list in an open block, or you can use insert empty lines above the list continuation to first escape from the nesting.
 Let's look at enclosing the child list in an open block first, since that is the preferred method.
 
+"#
+    );
+
+    #[test]
+    fn enclose_in_open_block() {
+        non_normative!(
+            r#"
 === Enclose in open block
 
+"#
+        );
+
+        verifies!(
+            r#"
 If you plan to attach blocks to a list item as a sibling of a nested list, the most robust way of creating that structure is to enclose the nested list in an open block.
 That way, it's clear where the nested list ends and the current list item continues.
 
@@ -2095,6 +2119,253 @@ The main limitation of this approach is that it can only be used once in the hie
 That's because the open block itself cannot be nested.
 If you require more control, then you must use the ancestor list continuation.
 
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "* grandparent list item\n+\n--\n** parent list item\n*** child list item\n--\n+\nparagraph attached to grandparent list item",
+        );
+
+        assert_eq!(
+            doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::List(ListBlock {
+                    type_: ListType::Unordered,
+                    items: &[Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },),
+                        blocks: &[
+                            Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "grandparent list item",
+                                        line: 1,
+                                        col: 3,
+                                        offset: 2,
+                                    },
+                                    rendered: "grandparent list item",
+                                },
+                                source: Span {
+                                    data: "grandparent list item",
+                                    line: 1,
+                                    col: 3,
+                                    offset: 2,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),
+                            Block::CompoundDelimited(CompoundDelimitedBlock {
+                                blocks: &[Block::List(ListBlock {
+                                    type_: ListType::Unordered,
+                                    items: &[Block::ListItem(ListItem {
+                                        marker: ListItemMarker::Asterisks(Span {
+                                            data: "**",
+                                            line: 4,
+                                            col: 1,
+                                            offset: 29,
+                                        },),
+                                        blocks: &[
+                                            Block::Simple(SimpleBlock {
+                                                content: Content {
+                                                    original: Span {
+                                                        data: "parent list item",
+                                                        line: 4,
+                                                        col: 4,
+                                                        offset: 32,
+                                                    },
+                                                    rendered: "parent list item",
+                                                },
+                                                source: Span {
+                                                    data: "parent list item",
+                                                    line: 4,
+                                                    col: 4,
+                                                    offset: 32,
+                                                },
+                                                style: SimpleBlockStyle::Paragraph,
+                                                title_source: None,
+                                                title: None,
+                                                anchor: None,
+                                                anchor_reftext: None,
+                                                attrlist: None,
+                                            },),
+                                            Block::List(ListBlock {
+                                                type_: ListType::Unordered,
+                                                items: &[Block::ListItem(ListItem {
+                                                    marker: ListItemMarker::Asterisks(Span {
+                                                        data: "***",
+                                                        line: 5,
+                                                        col: 1,
+                                                        offset: 49,
+                                                    },),
+                                                    blocks: &[Block::Simple(SimpleBlock {
+                                                        content: Content {
+                                                            original: Span {
+                                                                data: "child list item",
+                                                                line: 5,
+                                                                col: 5,
+                                                                offset: 53,
+                                                            },
+                                                            rendered: "child list item",
+                                                        },
+                                                        source: Span {
+                                                            data: "child list item",
+                                                            line: 5,
+                                                            col: 5,
+                                                            offset: 53,
+                                                        },
+                                                        style: SimpleBlockStyle::Paragraph,
+                                                        title_source: None,
+                                                        title: None,
+                                                        anchor: None,
+                                                        anchor_reftext: None,
+                                                        attrlist: None,
+                                                    },),],
+                                                    source: Span {
+                                                        data: "*** child list item",
+                                                        line: 5,
+                                                        col: 1,
+                                                        offset: 49,
+                                                    },
+                                                    anchor: None,
+                                                    anchor_reftext: None,
+                                                    attrlist: None,
+                                                },),],
+                                                source: Span {
+                                                    data: "*** child list item",
+                                                    line: 5,
+                                                    col: 1,
+                                                    offset: 49,
+                                                },
+                                                title_source: None,
+                                                title: None,
+                                                anchor: None,
+                                                anchor_reftext: None,
+                                                attrlist: None,
+                                            },),
+                                        ],
+                                        source: Span {
+                                            data: "** parent list item\n*** child list item",
+                                            line: 4,
+                                            col: 1,
+                                            offset: 29,
+                                        },
+                                        anchor: None,
+                                        anchor_reftext: None,
+                                        attrlist: None,
+                                    },),],
+                                    source: Span {
+                                        data: "** parent list item\n*** child list item",
+                                        line: 4,
+                                        col: 1,
+                                        offset: 29,
+                                    },
+                                    title_source: None,
+                                    title: None,
+                                    anchor: None,
+                                    anchor_reftext: None,
+                                    attrlist: None,
+                                },),],
+                                context: "open",
+                                source: Span {
+                                    data: "--\n** parent list item\n*** child list item\n--",
+                                    line: 3,
+                                    col: 1,
+                                    offset: 26,
+                                },
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),
+                            Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "paragraph attached to grandparent list item",
+                                        line: 8,
+                                        col: 1,
+                                        offset: 74,
+                                    },
+                                    rendered: "paragraph attached to grandparent list item",
+                                },
+                                source: Span {
+                                    data: "paragraph attached to grandparent list item",
+                                    line: 8,
+                                    col: 1,
+                                    offset: 74,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),
+                        ],
+                        source: Span {
+                            data: "* grandparent list item\n+\n--\n** parent list item\n*** child list item\n--\n+\nparagraph attached to grandparent list item",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "* grandparent list item\n+\n--\n** parent list item\n*** child list item\n--\n+\nparagraph attached to grandparent list item",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    title_source: None,
+                    title: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
+                source: Span {
+                    data: "* grandparent list item\n+\n--\n** parent list item\n*** child list item\n--\n+\nparagraph attached to grandparent list item",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog {
+                    refs: HashMap::from([]),
+                    reftext_to_id: HashMap::from([]),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn ancestor_list_continuation() {
+        verifies!(
+            r#"
 === Ancestor list continuation
 
 Normally, a list continuation will attach a block to the current list item.
@@ -2125,6 +2396,181 @@ Here's how the source is rendered:
 include::example$complex.adoc[tag=complex-parent]
 ====
 
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "* parent list item\n** child list item\n\n+\nparagraph attached to parent list item",
+        );
+
+        assert_eq!(
+            doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::List(ListBlock {
+                    type_: ListType::Unordered,
+                    items: &[Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },),
+                        blocks: &[
+                            Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "parent list item",
+                                        line: 1,
+                                        col: 3,
+                                        offset: 2,
+                                    },
+                                    rendered: "parent list item",
+                                },
+                                source: Span {
+                                    data: "parent list item",
+                                    line: 1,
+                                    col: 3,
+                                    offset: 2,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),
+                            Block::List(ListBlock {
+                                type_: ListType::Unordered,
+                                items: &[Block::ListItem(ListItem {
+                                    marker: ListItemMarker::Asterisks(Span {
+                                        data: "**",
+                                        line: 2,
+                                        col: 1,
+                                        offset: 19,
+                                    },),
+                                    blocks: &[Block::Simple(SimpleBlock {
+                                        content: Content {
+                                            original: Span {
+                                                data: "child list item",
+                                                line: 2,
+                                                col: 4,
+                                                offset: 22,
+                                            },
+                                            rendered: "child list item",
+                                        },
+                                        source: Span {
+                                            data: "child list item",
+                                            line: 2,
+                                            col: 4,
+                                            offset: 22,
+                                        },
+                                        style: SimpleBlockStyle::Paragraph,
+                                        title_source: None,
+                                        title: None,
+                                        anchor: None,
+                                        anchor_reftext: None,
+                                        attrlist: None,
+                                    },),],
+                                    source: Span {
+                                        data: "** child list item",
+                                        line: 2,
+                                        col: 1,
+                                        offset: 19,
+                                    },
+                                    anchor: None,
+                                    anchor_reftext: None,
+                                    attrlist: None,
+                                },),],
+                                source: Span {
+                                    data: "** child list item",
+                                    line: 2,
+                                    col: 1,
+                                    offset: 19,
+                                },
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),
+                            Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "paragraph attached to parent list item",
+                                        line: 5,
+                                        col: 1,
+                                        offset: 41,
+                                    },
+                                    rendered: "paragraph attached to parent list item",
+                                },
+                                source: Span {
+                                    data: "paragraph attached to parent list item",
+                                    line: 5,
+                                    col: 1,
+                                    offset: 41,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),
+                        ],
+                        source: Span {
+                            data: "* parent list item\n** child list item\n\n+\nparagraph attached to parent list item",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "* parent list item\n** child list item\n\n+\nparagraph attached to parent list item",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    title_source: None,
+                    title: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
+                source: Span {
+                    data: "* parent list item\n** child list item\n\n+\nparagraph attached to parent list item",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog {
+                    refs: HashMap::from([]),
+                    reftext_to_id: HashMap::from([]),
+                },
+            }
+        );
+    }
+
+    non_normative!(
+        r#"
 Each empty line that precedes the list continuation signals a move up one level of nesting.
 Here's an example that shows how to attach a paragraph to a grandparent list item using two leading empty lines:
 
@@ -2139,6 +2585,13 @@ Here's how the source is rendered:
 ====
 include::example$complex.adoc[tag=complex-grandparent]
 ====
+
+"#
+    );
+}
+
+non_normative!(
+    r#"
 
 == Summary
 
