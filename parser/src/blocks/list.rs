@@ -704,6 +704,187 @@ mod tests {
     }
 
     #[test]
+    fn metadata_merged_across_empty_lines_for_nested_list() {
+        // Exercises the `if ext_anchor.is_none()` merge path in
+        // ListItem::parse (circa line 283 of list_item.rs).
+        let list = list_parse("* Foo\n[loweralpha]\n\n[[anchor]]\n. Boo\n* Blech").unwrap();
+
+        assert_eq!(
+            list.item,
+            ListBlock {
+                type_: ListType::Unordered,
+                items: &[
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },),
+                        blocks: &[
+                            Block::Simple(SimpleBlock {
+                                content: Content {
+                                    original: Span {
+                                        data: "Foo",
+                                        line: 1,
+                                        col: 3,
+                                        offset: 2,
+                                    },
+                                    rendered: "Foo",
+                                },
+                                source: Span {
+                                    data: "Foo",
+                                    line: 1,
+                                    col: 3,
+                                    offset: 2,
+                                },
+                                style: SimpleBlockStyle::Paragraph,
+                                title_source: None,
+                                title: None,
+                                anchor: None,
+                                anchor_reftext: None,
+                                attrlist: None,
+                            },),
+                            Block::List(ListBlock {
+                                type_: ListType::Ordered,
+                                items: &[Block::ListItem(ListItem {
+                                    marker: ListItemMarker::Dots(Span {
+                                        data: ".",
+                                        line: 5,
+                                        col: 1,
+                                        offset: 31,
+                                    },),
+                                    blocks: &[Block::Simple(SimpleBlock {
+                                        content: Content {
+                                            original: Span {
+                                                data: "Boo",
+                                                line: 5,
+                                                col: 3,
+                                                offset: 33,
+                                            },
+                                            rendered: "Boo",
+                                        },
+                                        source: Span {
+                                            data: "Boo",
+                                            line: 5,
+                                            col: 3,
+                                            offset: 33,
+                                        },
+                                        style: SimpleBlockStyle::Paragraph,
+                                        title_source: None,
+                                        title: None,
+                                        anchor: None,
+                                        anchor_reftext: None,
+                                        attrlist: None,
+                                    },),],
+                                    source: Span {
+                                        data: ". Boo",
+                                        line: 5,
+                                        col: 1,
+                                        offset: 31,
+                                    },
+                                    anchor: None,
+                                    anchor_reftext: None,
+                                    attrlist: None,
+                                },),],
+                                source: Span {
+                                    data: "[loweralpha]\n\n[[anchor]]\n. Boo",
+                                    line: 2,
+                                    col: 1,
+                                    offset: 6,
+                                },
+                                title_source: None,
+                                title: None,
+                                anchor: Some(Span {
+                                    data: "anchor",
+                                    line: 4,
+                                    col: 3,
+                                    offset: 22,
+                                },),
+                                anchor_reftext: None,
+                                attrlist: Some(Attrlist {
+                                    attributes: &[ElementAttribute {
+                                        name: None,
+                                        value: "loweralpha",
+                                        shorthand_items: &["loweralpha"],
+                                    },],
+                                    anchor: None,
+                                    source: Span {
+                                        data: "loweralpha",
+                                        line: 2,
+                                        col: 2,
+                                        offset: 7,
+                                    },
+                                },),
+                            },),
+                        ],
+                        source: Span {
+                            data: "* Foo\n[loweralpha]\n\n[[anchor]]\n. Boo",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                    Block::ListItem(ListItem {
+                        marker: ListItemMarker::Asterisks(Span {
+                            data: "*",
+                            line: 6,
+                            col: 1,
+                            offset: 37,
+                        },),
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "Blech",
+                                    line: 6,
+                                    col: 3,
+                                    offset: 39,
+                                },
+                                rendered: "Blech",
+                            },
+                            source: Span {
+                                data: "Blech",
+                                line: 6,
+                                col: 3,
+                                offset: 39,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        source: Span {
+                            data: "* Blech",
+                            line: 6,
+                            col: 1,
+                            offset: 37,
+                        },
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                ],
+                source: Span {
+                    data: "* Foo\n[loweralpha]\n\n[[anchor]]\n. Boo\n* Blech",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                title_source: None,
+                title: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            }
+        );
+    }
+
+    #[test]
     fn marker_style_single_dot() {
         let list = list_parse(". Item one\n. Item two\n").unwrap();
         assert_eq!(list.item.marker_style(), Some("arabic"));
