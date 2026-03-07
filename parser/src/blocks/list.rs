@@ -744,4 +744,39 @@ mod tests {
         let list = list_parse("* Item one\n* Item two\n").unwrap();
         assert_eq!(list.item.marker_style(), None);
     }
+
+    #[test]
+    fn block_list_enum_case() {
+        let mut parser = crate::Parser::default();
+
+        let mi = crate::blocks::Block::parse(crate::Span::new("- blah"), &mut parser)
+            .unwrap_if_no_warnings()
+            .unwrap();
+
+        assert!(matches!(mi.item, crate::blocks::Block::List(_)));
+
+        assert_eq!(mi.item.content_model(), ContentModel::Compound);
+        assert!(mi.item.rendered_content().is_none());
+        assert_eq!(mi.item.raw_context().as_ref(), "list");
+        assert_eq!(mi.item.nested_blocks().count(), 1);
+        assert!(mi.item.title_source().is_none());
+        assert!(mi.item.title().is_none());
+        assert!(mi.item.anchor().is_none());
+        assert!(mi.item.anchor_reftext().is_none());
+        assert!(mi.item.attrlist().is_none());
+        assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
+
+        assert_eq!(
+            mi.item.span(),
+            Span {
+                data: "- blah",
+                line: 1,
+                col: 1,
+                offset: 0,
+            }
+        );
+
+        let debug_str = format!("{:?}", mi.item);
+        assert!(debug_str.starts_with("Block::List("));
+    }
 }
