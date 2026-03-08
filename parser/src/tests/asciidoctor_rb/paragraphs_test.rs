@@ -5,8 +5,6 @@
 // limitation of `asciidoc-parser` crate) and alternate (non-HTML) back ends.
 
 mod normal {
-    use std::collections::HashMap;
-
     use crate::{Parser, blocks::SimpleBlockStyle, document::RefType, tests::prelude::*};
 
     #[test]
@@ -1375,8 +1373,6 @@ mod normal {
 }
 
 mod literal {
-    use std::collections::HashMap;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]

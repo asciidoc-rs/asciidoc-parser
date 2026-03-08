@@ -23,8 +23,6 @@ The main focus of the syntax covered on this page is to keep the list continuous
 );
 
 mod multiline_principal_text {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{ListType, SimpleBlockStyle},
@@ -333,8 +331,6 @@ An empty line between two list items will not break the list.
     );
 
     mod empty_lines {
-        use std::collections::HashMap;
-
         use crate::{
             Parser,
             blocks::{ListType, SimpleBlockStyle},
@@ -707,8 +703,6 @@ For ordered lists, this will ensure that the numbering continues from one list i
 }
 
 mod list_continuation {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{ContentModel, ListType, SimpleBlockStyle},
@@ -1870,8 +1864,6 @@ The only limitation of this technique is that the content itself may not contain
 }
 
 mod drop_principal_text {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{ContentModel, ListType},
@@ -2051,8 +2043,6 @@ include::example$complex.adoc[tag=complex-only]
 }
 
 mod attach_to_ancestor_list {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{ListType, SimpleBlockStyle},

@@ -16,8 +16,6 @@ Right now, we're just aiming to get a sense of what makes up an AsciiDoc documen
 );
 
 mod documents {
-    use std::collections::HashMap;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

@@ -14,8 +14,6 @@ The block form uses two colons (`::`), whereas the inline form only uses one (`:
 );
 
 mod block_image_macro {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{MediaType, SimpleBlockStyle},

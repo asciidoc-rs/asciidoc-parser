@@ -902,8 +902,6 @@ The id (`#`) shorthand can be used on inline quoted text.
 }
 
 mod anchor {
-    use std::collections::HashMap;
-
     use crate::{Parser, blocks::SimpleBlockStyle, document::RefType, tests::prelude::*};
 
     non_normative!(
