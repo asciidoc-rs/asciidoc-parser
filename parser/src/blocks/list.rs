@@ -188,14 +188,7 @@ impl<'src> ListBlock<'src> {
     /// - 4 dots: upperalpha (A, B, C, ...)
     /// - 5 dots: upperroman (I, II, III, ...)
     pub fn marker_style(&self) -> Option<&'static str> {
-        let first_marker = self
-            .items
-            .iter()
-            .filter_map(|i| match i {
-                Block::ListItem(i) => Some(i.list_item_marker()),
-                _ => None,
-            })
-            .next()?;
+        let first_marker = self.items.first()?.as_list_item()?.list_item_marker();
 
         match first_marker {
             ListItemMarker::Dots(span) => {

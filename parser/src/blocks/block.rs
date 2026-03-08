@@ -429,6 +429,15 @@ impl<'src> Block<'src> {
             });
         }
     }
+
+    /// Returns a reference to the inner [`ListItem`] if this is a
+    /// `Block::ListItem`, or `None` otherwise.
+    pub(crate) fn as_list_item(&self) -> Option<&ListItem<'src>> {
+        match self {
+            Self::ListItem(li) => Some(li),
+            _ => None,
+        }
+    }
 }
 
 impl<'src> IsBlock<'src> for Block<'src> {
