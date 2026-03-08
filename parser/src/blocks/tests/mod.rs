@@ -2,6 +2,7 @@
 //! Many of these tests are repeated from the tests for the individual block
 //! types.
 
+#![allow(clippy::indexing_slicing)]
 #![allow(clippy::panic)]
 #![allow(clippy::unwrap_used)]
 
