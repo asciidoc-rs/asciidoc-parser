@@ -539,7 +539,6 @@ mod tests {
     mod quoted_string {
         use crate::{
             attributes::{AttrlistContext, element_attribute::ParseShorthand},
-            parser::ModificationContext,
             strings::CowStr,
             tests::prelude::*,
         };

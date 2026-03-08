@@ -494,8 +494,7 @@ mod tests {
         blocks::{Block, IsBlock},
         parser::{
             CharacterReplacementType, IconRenderParams, ImageRenderParams,
-            InlineSubstitutionRenderer, LinkRenderParams, ModificationContext, QuoteScope,
-            QuoteType, SpecialCharacter,
+            InlineSubstitutionRenderer, LinkRenderParams, QuoteScope, QuoteType, SpecialCharacter,
         },
         tests::prelude::*,
     };

@@ -435,7 +435,7 @@ If you set a built-in attribute and leave its value empty, the AsciiDoc processo
 }
 
 mod where_declared {
-    use crate::{blocks::IsBlock, parser::ModificationContext, tests::prelude::*};
+    use crate::{blocks::IsBlock, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -551,7 +551,7 @@ See the xref:document-attributes-ref.adoc[] for where in a document each attribu
 }
 
 mod defining_without_attribute_entry {
-    use crate::{blocks::IsBlock, parser::ModificationContext, tests::prelude::*};
+    use crate::{blocks::IsBlock, tests::prelude::*};
 
     // Non-normative because we have a different API and no CLI.
     non_normative!(
