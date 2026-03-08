@@ -797,7 +797,7 @@ fn break_to_node<'a>(break_: &'a Break<'a>) -> VirtualNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Parser;
+    use crate::tests::prelude::*;
 
     #[test]
     fn empty_document() {

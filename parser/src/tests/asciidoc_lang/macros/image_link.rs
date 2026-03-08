@@ -13,7 +13,6 @@ You can turn an image into a link by using the `link` attribute.
 
 mod link_attribute {
     use crate::{
-        Parser,
         blocks::{MediaType, SimpleBlockStyle},
         tests::prelude::*,
     };
@@ -282,7 +281,7 @@ image:apply.jpg[Apply,link=https://apply.example.org] today!
 }
 
 mod link_controls {
-    use crate::{Parser, blocks::MediaType, tests::prelude::*};
+    use crate::{blocks::MediaType, tests::prelude::*};
 
     non_normative!(
         r#"

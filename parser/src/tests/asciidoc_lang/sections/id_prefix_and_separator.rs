@@ -13,7 +13,7 @@ These characters can be customized with the `idprefix` and `idseparator` attribu
 );
 
 mod prefix {
-    use crate::{Parser, document::RefType, tests::prelude::*};
+    use crate::{document::RefType, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -241,7 +241,7 @@ In this case, we recommend either using a non-empty value of `idprefix` or assig
 }
 
 mod separator {
-    use crate::{Parser, document::RefType, tests::prelude::*};
+    use crate::{document::RefType, tests::prelude::*};
 
     non_normative!(
         r#"

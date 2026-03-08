@@ -668,7 +668,7 @@ mod tests {
     }
 
     mod example {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -1015,7 +1015,7 @@ mod tests {
     }
 
     mod sidebar {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -1043,7 +1043,7 @@ mod tests {
     }
 
     mod table {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -1327,7 +1327,7 @@ mod tests {
     }
 
     mod quote {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {

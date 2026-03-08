@@ -16,7 +16,7 @@ In most output formats, the specified width is obeyed unless the image would exc
 );
 
 mod width_and_height_attributes {
-    use crate::{Parser, blocks::MediaType, tests::prelude::*};
+    use crate::{blocks::MediaType, tests::prelude::*};
 
     non_normative!(
         r#"

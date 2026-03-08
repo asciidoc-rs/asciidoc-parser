@@ -25,7 +25,6 @@ There are two approaches you can take when positioning your images:
 
 mod positioning_attributes {
     use crate::{
-        Parser,
         blocks::{MediaType, SimpleBlockStyle},
         tests::prelude::*,
     };
@@ -232,7 +231,6 @@ It's far better to use CSS classes for these sorts of things, which map to roles
 
 mod positioning_roles {
     use crate::{
-        Parser,
         blocks::{MediaType, SimpleBlockStyle},
         tests::prelude::*,
     };

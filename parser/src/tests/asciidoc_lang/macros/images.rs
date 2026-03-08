@@ -15,7 +15,6 @@ The block form uses two colons (`::`), whereas the inline form only uses one (`:
 
 mod block_image_macro {
     use crate::{
-        Parser,
         blocks::{MediaType, SimpleBlockStyle},
         document::RefType,
         tests::prelude::*,
@@ -512,7 +511,6 @@ To turn off figure caption labels and numbers, unset the `figure-caption` attrib
 
 mod inline_image_macro {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

@@ -13,7 +13,7 @@ This page covers the anatomy of the icon macro, how the target is resolved, and 
 );
 
 mod anatomy {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
         r#"

@@ -2667,8 +2667,8 @@ mod tests {
 
     mod section_numbering {
         use crate::{
-            Parser,
             blocks::{Block, IsBlock},
+            tests::prelude::*,
         };
 
         #[test]

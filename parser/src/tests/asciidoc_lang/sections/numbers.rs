@@ -1,6 +1,4 @@
-use crate::{
-    Parser, blocks::IsBlock, document::RefType, parser::ModificationContext, tests::prelude::*,
-};
+use crate::{blocks::IsBlock, document::RefType, parser::ModificationContext, tests::prelude::*};
 
 track_file!("docs/modules/sections/pages/numbers.adoc");
 

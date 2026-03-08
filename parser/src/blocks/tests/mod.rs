@@ -108,9 +108,9 @@ mod impl_debug {
 
 mod as_list_item {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         span::Span,
+        tests::prelude::*,
     };
 
     #[test]
