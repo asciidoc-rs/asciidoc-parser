@@ -1,4 +1,4 @@
-use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
 track_file!("docs/modules/attributes/pages/reference-attributes.adoc");
 
@@ -286,7 +286,7 @@ Our servers don't like them either.
 }
 
 mod escape_attribute_reference {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
         r#"

@@ -14,7 +14,6 @@ It covers the shorthand syntax, the limitations of that syntax, and when it's ne
 
 mod single_and_double_quotation_mark_syntax {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -124,7 +123,6 @@ In that case, it's necessary to input the curved quotation marks directly using 
 
 mod apostrophe_syntax {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

@@ -15,7 +15,6 @@ non_normative!(
 
 mod substitutions {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -88,7 +87,6 @@ The special characters substitution step searches for three characters (`<`, `>`
 
 mod default_special_characters_substitution {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -419,7 +417,6 @@ mod default_special_characters_substitution {
 
 mod specialchars_substitution_value {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         parser::ModificationContext,
         tests::prelude::*,

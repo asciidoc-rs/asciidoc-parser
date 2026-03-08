@@ -141,7 +141,6 @@ mod error_cases {
     use std::ops::Deref;
 
     use crate::{
-        Parser,
         blocks::{ContentModel, IsBlock, ListType, SimpleBlockStyle, metadata::BlockMetadata},
         content::SubstitutionGroup,
         span::HasSpan,

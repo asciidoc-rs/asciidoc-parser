@@ -33,7 +33,6 @@ mod assign_roles_to_blocks {
     );
 
     use crate::{
-        Parser,
         blocks::{IsBlock, SimpleBlockStyle},
         tests::prelude::*,
     };
@@ -410,7 +409,6 @@ This longhand syntax can also be used on inline macros, but it cannot be used wi
 
 mod assign_roles_to_formatted_inline_elements {
     use crate::{
-        Parser,
         blocks::{IsBlock, SimpleBlockStyle},
         tests::prelude::*,
     };

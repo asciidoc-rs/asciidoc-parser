@@ -16,7 +16,6 @@ This page covers the formatting marks that AsciiDoc provides and the rules for a
 
 mod formatting_terms_and_concepts {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

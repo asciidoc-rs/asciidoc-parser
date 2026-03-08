@@ -1,5 +1,4 @@
 use crate::{
-    Parser,
     blocks::{ContentModel, SimpleBlockStyle},
     content::SubstitutionGroup,
     tests::prelude::*,

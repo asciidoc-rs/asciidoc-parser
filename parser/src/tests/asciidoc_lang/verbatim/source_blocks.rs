@@ -1,4 +1,4 @@
-use crate::{Parser, blocks::ContentModel, content::SubstitutionGroup, tests::prelude::*};
+use crate::{blocks::ContentModel, content::SubstitutionGroup, tests::prelude::*};
 
 track_file!("docs/modules/verbatim/pages/source-blocks.adoc");
 

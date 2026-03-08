@@ -121,7 +121,6 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        Parser,
         blocks::{BreakType, ContentModel, IsBlock, metadata::BlockMetadata},
         content::SubstitutionGroup,
         tests::prelude::*,

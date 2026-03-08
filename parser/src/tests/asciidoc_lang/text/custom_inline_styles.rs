@@ -11,7 +11,6 @@ non_normative!(
 
 mod custom_style_syntax {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

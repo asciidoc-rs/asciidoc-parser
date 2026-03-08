@@ -1,5 +1,4 @@
 use crate::{
-    Parser,
     blocks::SimpleBlockStyle,
     document::RefType,
     tests::prelude::{inline_file_handler::InlineFileHandler, *},

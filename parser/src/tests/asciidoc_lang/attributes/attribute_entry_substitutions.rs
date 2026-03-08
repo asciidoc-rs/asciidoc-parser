@@ -1,5 +1,4 @@
 use crate::{
-    Parser,
     blocks::{IsBlock, SimpleBlockStyle},
     tests::prelude::*,
 };
@@ -53,7 +52,6 @@ That means that any inline formatting in an attribute value isn't interpreted be
 
 mod change_subs_when_assigning {
     use crate::{
-        Parser,
         blocks::{ContentModel, IsBlock},
         content::{SubstitutionGroup, SubstitutionStep},
         tests::prelude::*,
@@ -269,7 +267,6 @@ If the macro is absent, the value is processed with the header substitution grou
 
 mod attributes_defined_outside_document {
     use crate::{
-        Parser,
         blocks::{IsBlock, SimpleBlockStyle},
         tests::prelude::*,
     };

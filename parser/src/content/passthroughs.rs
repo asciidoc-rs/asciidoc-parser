@@ -492,7 +492,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        Parser,
         blocks::SimpleBlockStyle,
         content::{Passthroughs, SubstitutionGroup, SubstitutionStep, passthroughs::Passthrough},
         parser::ModificationContext,

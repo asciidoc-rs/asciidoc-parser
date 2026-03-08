@@ -500,7 +500,6 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        Parser,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
         content::SubstitutionGroup,
         tests::prelude::*,

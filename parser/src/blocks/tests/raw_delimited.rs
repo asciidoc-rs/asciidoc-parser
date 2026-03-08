@@ -1,6 +1,5 @@
 mod parse {
     use crate::{
-        Parser,
         blocks::{ContentModel, SimpleBlockStyle},
         content::SubstitutionGroup,
         tests::prelude::*,
@@ -204,7 +203,6 @@ mod parse {
 
 mod comment {
     use crate::{
-        Parser,
         blocks::{ContentModel, IsBlock},
         content::SubstitutionGroup,
         tests::prelude::*,
@@ -451,7 +449,6 @@ mod comment {
 
 mod listing {
     use crate::{
-        Parser,
         blocks::{ContentModel, IsBlock},
         content::SubstitutionGroup,
         span::HasSpan,
@@ -732,7 +729,6 @@ mod listing {
 
 mod pass {
     use crate::{
-        Parser,
         blocks::{ContentModel, IsBlock},
         content::SubstitutionGroup,
         span::HasSpan,

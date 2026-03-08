@@ -1,4 +1,4 @@
-use crate::{Parser, tests::prelude::*};
+use crate::tests::prelude::*;
 
 track_file!("docs/modules/attributes/pages/custom-attributes.adoc");
 
@@ -14,7 +14,7 @@ When you find yourself typing the same text repeatedly, or text that often needs
 );
 
 mod user_defined_names {
-    use crate::{Parser, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     verifies!(
         r#"

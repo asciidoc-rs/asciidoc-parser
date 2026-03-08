@@ -368,7 +368,6 @@ mod tests {
 
     mod parse {
         use crate::{
-            Parser,
             blocks::{SimpleBlockStyle, metadata::BlockMetadata},
             tests::prelude::*,
             warnings::WarningType,
@@ -524,7 +523,6 @@ mod tests {
 
     mod example {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,
@@ -976,7 +974,6 @@ mod tests {
 
     mod open {
         use crate::{
-            Parser,
             blocks::{BreakType, ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,
@@ -1363,7 +1360,6 @@ mod tests {
 
     mod sidebar {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,
@@ -1857,7 +1853,6 @@ mod tests {
 
     mod quote {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,

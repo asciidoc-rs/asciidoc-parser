@@ -1,5 +1,4 @@
 use crate::{
-    Parser,
     blocks::{BreakType, IsBlock, SimpleBlockStyle},
     tests::prelude::*,
 };

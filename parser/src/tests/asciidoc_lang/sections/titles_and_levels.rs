@@ -1,5 +1,5 @@
 use crate::{
-    Parser, blocks::SimpleBlockStyle, document::RefType, tests::prelude::*, warnings::WarningType,
+    blocks::SimpleBlockStyle, document::RefType, tests::prelude::*, warnings::WarningType,
 };
 
 track_file!("docs/modules/sections/pages/titles-and-levels.adoc");

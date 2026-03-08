@@ -15,7 +15,7 @@ The built-in attribute names are listed in the xref:document-attributes-ref.adoc
 );
 
 mod valid_user_defined_names {
-    use crate::{Parser, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     verifies!(
         r#"

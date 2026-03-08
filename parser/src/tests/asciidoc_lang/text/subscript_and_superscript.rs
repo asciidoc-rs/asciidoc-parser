@@ -16,7 +16,6 @@ The size and precise placement of the text depends on the font and other stylesh
 
 mod subscript_and_superscript_syntax {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

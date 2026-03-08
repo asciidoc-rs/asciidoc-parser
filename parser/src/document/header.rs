@@ -189,7 +189,7 @@ impl std::fmt::Debug for Header<'_> {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use crate::{Parser, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     #[test]
     fn impl_clone() {

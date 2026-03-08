@@ -12,7 +12,7 @@ An xref:index.adoc#unconstrained[unconstrained formatting pair] is often used to
 );
 
 mod use_unconstrained {
-    use crate::{Parser, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -170,7 +170,6 @@ To help you determine whether a particular syntax pattern requires an unconstrai
 
 mod unconstrained_pair_edge_cases {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -393,7 +392,6 @@ For details, follow https://github.com/asciidoctor/asciidoctor/issues/61[Asciido
 
 mod escape_unconstrained_formatting_marks {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

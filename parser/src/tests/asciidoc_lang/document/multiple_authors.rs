@@ -1,4 +1,4 @@
-use crate::{Parser, tests::prelude::*};
+use crate::tests::prelude::*;
 
 track_file!("docs/modules/document/pages/multiple-authors.adoc");
 

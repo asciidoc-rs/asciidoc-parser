@@ -5,7 +5,7 @@
 // limitation of `asciidoc-parser` crate) and alternate (non-HTML) back ends.
 
 mod dispatcher {
-    use crate::{Parser, blocks::SimpleBlockStyle, parser::ModificationContext, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, parser::ModificationContext, tests::prelude::*};
 
     #[test]
     fn apply_normal_substitutions() {
@@ -93,7 +93,6 @@ mod dispatcher {
 
 mod quotes {
     use crate::{
-        Parser,
         blocks::SimpleBlockStyle,
         content::{SubstitutionGroup, SubstitutionStep},
         parser::ModificationContext,
@@ -1546,7 +1545,7 @@ mod quotes {
 
 mod macros {
     use crate::{
-        Parser, blocks::SimpleBlockStyle, content::SubstitutionStep, parser::ModificationContext,
+        blocks::SimpleBlockStyle, content::SubstitutionStep, parser::ModificationContext,
         strings::CowStr, tests::prelude::*,
     };
 
@@ -4493,7 +4492,6 @@ mod macros {
 
 mod passthroughs {
     use crate::{
-        Parser,
         blocks::SimpleBlockStyle,
         content::{Passthroughs, SubstitutionGroup, SubstitutionStep, passthroughs::Passthrough},
         parser::{ModificationContext, QuoteType},
@@ -5871,8 +5869,7 @@ mod passthroughs {
 
 mod replacements {
     use crate::{
-        Parser, blocks::SimpleBlockStyle, content::SubstitutionStep, strings::CowStr,
-        tests::prelude::*,
+        blocks::SimpleBlockStyle, content::SubstitutionStep, strings::CowStr, tests::prelude::*,
     };
 
     #[test]
@@ -6114,7 +6111,7 @@ foo&#8201;&#8212;&#8201;"#;
 }
 
 mod post_replacements {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]
     fn line_break_inserted_after_line_with_line_break_character() {

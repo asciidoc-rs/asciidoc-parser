@@ -16,7 +16,6 @@ Therefore, the AsciiDoc language provides a mechanism for altering the substitut
 
 mod subs_attribute {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -367,7 +366,6 @@ It can only be applied to a leaf block, which is any block that cannot have chil
 
 mod set_subs_attribute_on_block {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -475,7 +473,6 @@ You can avoid having to do this by using incremental substitutions instead, whic
 
 mod add_remove_steps {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

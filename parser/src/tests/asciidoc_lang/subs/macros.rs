@@ -20,7 +20,6 @@ The macros step replaces a macro's content with the appropriate built-in and use
 
 mod default_macros_substitution {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -353,7 +352,6 @@ mod default_macros_substitution {
 
 mod macros_substitution_value {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
