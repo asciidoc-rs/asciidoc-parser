@@ -917,7 +917,7 @@ mod tests {
     }
 
     mod listing {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
