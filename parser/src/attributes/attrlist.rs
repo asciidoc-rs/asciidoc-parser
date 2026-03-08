@@ -1324,7 +1324,7 @@ mod tests {
     }
 
     mod id {
-        use crate::{HasSpan, attributes::AttrlistContext, tests::prelude::*};
+        use crate::{attributes::AttrlistContext, tests::prelude::*};
 
         #[test]
         fn via_shorthand_syntax() {
@@ -1542,7 +1542,7 @@ mod tests {
     }
 
     mod roles {
-        use crate::{HasSpan, attributes::AttrlistContext, tests::prelude::*};
+        use crate::{attributes::AttrlistContext, tests::prelude::*};
 
         #[test]
         fn via_shorthand_syntax() {
@@ -2058,7 +2058,7 @@ mod tests {
     }
 
     mod options {
-        use crate::{HasSpan, attributes::AttrlistContext, tests::prelude::*};
+        use crate::{attributes::AttrlistContext, tests::prelude::*};
 
         #[test]
         fn via_shorthand_syntax() {

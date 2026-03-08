@@ -1,8 +1,8 @@
 use std::{cmp::PartialEq, fmt};
 
-use crate::{
-    HasSpan,
-    tests::fixtures::{Span, document::InterpretedValue},
+use crate::tests::{
+    fixtures::{Span, document::InterpretedValue},
+    prelude::*,
 };
 
 #[derive(Eq, PartialEq)]

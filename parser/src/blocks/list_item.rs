@@ -508,7 +508,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        HasSpan,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
         span::MatchedItem,
         tests::prelude::*,

@@ -300,7 +300,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        HasSpan,
         blocks::{ContentModel, IsBlock, ListType, SimpleBlockStyle, metadata::BlockMetadata},
         content::SubstitutionGroup,
         span::MatchedItem,

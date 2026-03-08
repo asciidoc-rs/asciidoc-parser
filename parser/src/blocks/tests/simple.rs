@@ -1,7 +1,6 @@
 use std::ops::Deref;
 
 use crate::{
-    HasSpan,
     blocks::{ContentModel, IsBlock, SimpleBlockStyle},
     content::SubstitutionGroup,
     tests::prelude::*,

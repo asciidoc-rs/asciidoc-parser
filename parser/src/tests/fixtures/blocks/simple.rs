@@ -2,8 +2,10 @@ use std::fmt;
 
 use crate::{
     blocks::{IsBlock, SimpleBlockStyle},
-    span::HasSpan,
-    tests::fixtures::{Span, attributes::Attrlist, content::Content},
+    tests::{
+        fixtures::{Span, attributes::Attrlist, content::Content},
+        prelude::*,
+    },
 };
 
 #[derive(Eq, PartialEq)]
