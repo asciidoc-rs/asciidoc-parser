@@ -6,11 +6,11 @@ This is an effort to write a semantic parser for the [AsciiDoc language](https:/
 
 As of October 2025 this crate is ready for experimental projects, but still has significant gaps in language coverage that render it not yet suitable for production applications. I don’t list work items that I’ve not yet started; work items that are _partially_ implemented are documented with the [**to do** tag](https://github.com/asciidoc-rs/asciidoc-parser/issues?q=is%3Aissue%20state%3Aopen%20label%3Ato-do) in GitHub. Follow that for the most current status for planned development.
 
-You’re welcome to follow along and contribute with the understanding that I may or may not drive this project a mature (1.0) release.
+You’re welcome to follow along and contribute with the understanding that I may or may not drive this project to a mature (1.0) release.
 
 ## Why do this?
 
-Most of all this is a fun project and exercises architectural and project design skills that are different from my [day job](https://opensource.contentauthenticity.org). As part of that work, I write [technical standards for the Creator Assertions Working Group](https://cawg.io/specs/) in Asciidoc and [Antora](https://antora.org).
+Most of all this is a fun project that exercises different architectural and project design skills from my [day job](https://opensource.contentauthenticity.org). As part of that work, I write [technical standards for the Creator Assertions Working Group](https://cawg.io/specs/) in Asciidoc and [Antora](https://antora.org).
 
 Once the parser is sufficiently built out, I have a few projects I’d like to build out that depend on it:
 
