@@ -1,7 +1,4 @@
-use crate::{
-    blocks::{ListType, SimpleBlockStyle},
-    tests::prelude::*,
-};
+use crate::{blocks::ListType, tests::prelude::*};
 
 track_file!("docs/modules/lists/pages/qanda.adoc");
 

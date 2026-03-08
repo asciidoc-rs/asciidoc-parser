@@ -42,7 +42,7 @@ When linking to an email address, you can use the specialized xref:mailto-macro.
 );
 
 mod encode_reserved_characters {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -141,7 +141,7 @@ Depending on the capabilities of the web application, the space character can be
 }
 
 mod hide_uri_scheme {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"

@@ -73,10 +73,7 @@ An element attribute is defined using an attribute list on an element, or an ava
 );
 
 mod macros {
-    use crate::{
-        blocks::{MediaType, SimpleBlockStyle},
-        tests::prelude::*,
-    };
+    use crate::{blocks::MediaType, tests::prelude::*};
 
     non_normative!(
         r#"

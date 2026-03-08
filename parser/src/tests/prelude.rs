@@ -6,7 +6,7 @@ pub(crate) use std::collections::HashMap;
 
 pub(crate) use crate::{
     HasSpan, Parser,
-    blocks::SectionType,
+    blocks::{SectionType, SimpleBlockStyle},
     content::SubstitutionGroup,
     tests::{
         assert_dom::*,

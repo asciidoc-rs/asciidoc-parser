@@ -90,7 +90,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        blocks::{ContentModel, IsBlock, SimpleBlockStyle},
+        blocks::{ContentModel, IsBlock},
         tests::prelude::*,
     };
 

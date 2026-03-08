@@ -40,11 +40,7 @@ Unlike document attributes, element attributes are defined directly on the eleme
 );
 
 mod attrlist {
-    use crate::{
-        attributes::AttrlistContext,
-        blocks::{MediaType, SimpleBlockStyle},
-        tests::prelude::*,
-    };
+    use crate::{attributes::AttrlistContext, blocks::MediaType, tests::prelude::*};
 
     non_normative!(
         r#"

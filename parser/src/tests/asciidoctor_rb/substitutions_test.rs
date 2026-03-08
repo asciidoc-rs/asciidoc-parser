@@ -5,7 +5,7 @@
 // limitation of `asciidoc-parser` crate) and alternate (non-HTML) back ends.
 
 mod dispatcher {
-    use crate::{blocks::SimpleBlockStyle, parser::ModificationContext, tests::prelude::*};
+    use crate::{parser::ModificationContext, tests::prelude::*};
 
     #[test]
     fn apply_normal_substitutions() {
@@ -93,8 +93,7 @@ mod dispatcher {
 
 mod quotes {
     use crate::{
-        blocks::SimpleBlockStyle, content::SubstitutionStep, parser::ModificationContext,
-        strings::CowStr, tests::prelude::*,
+        content::SubstitutionStep, parser::ModificationContext, strings::CowStr, tests::prelude::*,
     };
 
     #[test]
@@ -1542,8 +1541,7 @@ mod quotes {
 
 mod macros {
     use crate::{
-        blocks::SimpleBlockStyle, content::SubstitutionStep, parser::ModificationContext,
-        strings::CowStr, tests::prelude::*,
+        content::SubstitutionStep, parser::ModificationContext, strings::CowStr, tests::prelude::*,
     };
 
     #[test]
@@ -4489,7 +4487,6 @@ mod macros {
 
 mod passthroughs {
     use crate::{
-        blocks::SimpleBlockStyle,
         content::{Passthroughs, SubstitutionStep, passthroughs::Passthrough},
         parser::{ModificationContext, QuoteType},
         tests::prelude::*,
@@ -5865,9 +5862,7 @@ mod passthroughs {
 }
 
 mod replacements {
-    use crate::{
-        blocks::SimpleBlockStyle, content::SubstitutionStep, strings::CowStr, tests::prelude::*,
-    };
+    use crate::{content::SubstitutionStep, strings::CowStr, tests::prelude::*};
 
     #[test]
     fn unescapes_xml_entities() {
@@ -6108,7 +6103,7 @@ foo&#8201;&#8212;&#8201;"#;
 }
 
 mod post_replacements {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     #[test]
     fn line_break_inserted_after_line_with_line_break_character() {

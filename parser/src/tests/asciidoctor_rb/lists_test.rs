@@ -37,11 +37,7 @@ mod bulleted_lists {
     use crate::tests::prelude::*;
 
     mod simple_lists {
-        use crate::{
-            blocks::{ListType, SimpleBlockStyle},
-            document::RefType,
-            tests::prelude::*,
-        };
+        use crate::{blocks::ListType, document::RefType, tests::prelude::*};
 
         #[test]
         fn dash_elements_with_no_blank_lines() {
@@ -5105,7 +5101,7 @@ mod checklists {
 
 mod lists_model {
     use crate::{
-        blocks::{ContentModel, ListType, SimpleBlockStyle},
+        blocks::{ContentModel, ListType},
         tests::prelude::*,
     };
 

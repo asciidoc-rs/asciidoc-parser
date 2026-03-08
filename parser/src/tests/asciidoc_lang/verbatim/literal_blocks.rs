@@ -1,7 +1,4 @@
-use crate::{
-    blocks::{ContentModel, SimpleBlockStyle},
-    tests::prelude::*,
-};
+use crate::{blocks::ContentModel, tests::prelude::*};
 
 track_file!("docs/modules/verbatim/pages/literal-blocks.adoc");
 

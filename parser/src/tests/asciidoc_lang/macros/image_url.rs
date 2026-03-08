@@ -13,10 +13,7 @@ You can reference images served from any URL (e.g., your blog, an image hosting 
 );
 
 mod image_url_targets {
-    use crate::{
-        blocks::{MediaType, SimpleBlockStyle},
-        tests::prelude::*,
-    };
+    use crate::{blocks::MediaType, tests::prelude::*};
 
     non_normative!(
         r#"

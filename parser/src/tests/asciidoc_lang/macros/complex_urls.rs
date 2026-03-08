@@ -1,4 +1,4 @@
-use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+use crate::tests::prelude::*;
 
 track_file!("docs/modules/macros/pages/complex-urls.adoc");
 
