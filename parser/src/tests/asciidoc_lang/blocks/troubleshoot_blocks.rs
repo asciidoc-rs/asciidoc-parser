@@ -1,4 +1,4 @@
-use crate::{tests::prelude::*, warnings::WarningType};
+use crate::tests::prelude::*;
 
 track_file!("docs/modules/blocks/pages/troubleshoot-blocks.adoc");
 

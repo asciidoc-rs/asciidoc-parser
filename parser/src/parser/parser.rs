@@ -498,7 +498,6 @@ mod tests {
             QuoteType, SpecialCharacter,
         },
         tests::prelude::*,
-        warnings::WarningType,
     };
 
     #[test]

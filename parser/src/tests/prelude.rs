@@ -13,4 +13,5 @@ pub(crate) use crate::{
         fixtures::{attributes::*, blocks::*, content::*, document::*, parser::*, warnings::*, *},
         sdd::*,
     },
+    warnings::WarningType,
 };

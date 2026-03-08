@@ -522,7 +522,6 @@ mod tests {
     use crate::{
         blocks::{IsBlock, metadata::BlockMetadata, section::SectionType},
         tests::prelude::*,
-        warnings::WarningType,
     };
 
     #[test]
@@ -591,7 +590,6 @@ mod tests {
                 ContentModel, IsBlock, MediaType, metadata::BlockMetadata, section::SectionType,
             },
             tests::prelude::*,
-            warnings::WarningType,
         };
 
         #[test]
@@ -1507,7 +1505,6 @@ mod tests {
                 ContentModel, IsBlock, MediaType, metadata::BlockMetadata, section::SectionType,
             },
             tests::prelude::*,
-            warnings::WarningType,
         };
 
         #[test]
