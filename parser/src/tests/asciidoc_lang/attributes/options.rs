@@ -25,8 +25,6 @@ You can assign one or more options to a block using the shorthand or formal synt
 "#
     );
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{IsBlock, SimpleBlockStyle},
@@ -610,8 +608,6 @@ mod using_options_with_other_attributes {
 Let's consider `options` when combined with other attributes.
 "#
     );
-
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{
         Parser,

@@ -31,8 +31,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod trim_trailing_whitespace {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -112,8 +110,6 @@ mod tests {
     }
 
     mod trim_trailing_line_end {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]

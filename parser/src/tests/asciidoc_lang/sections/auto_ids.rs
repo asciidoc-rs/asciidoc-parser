@@ -18,8 +18,6 @@ This page explains how the ID is derived and how to control this behavior.
 mod how_a_section_id_is_computed {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{SimpleBlockStyle, metadata::BlockMetadata},
@@ -474,8 +472,6 @@ As a result, the processor is not able to lookup the reference and therefore mus
 }
 mod disable_automatic_section_id_generation {
     use std::collections::HashMap;
-
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{Parser, document::RefType, tests::prelude::*};
 

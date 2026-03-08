@@ -749,8 +749,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod special_characters {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             content::{Content, SubstitutionStep},
@@ -801,8 +799,6 @@ mod tests {
     }
 
     mod quotes {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             content::{Content, SubstitutionStep},
@@ -869,8 +865,6 @@ mod tests {
     }
 
     mod attribute_references {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             content::{Content, SubstitutionStep},
@@ -945,8 +939,6 @@ mod tests {
     }
 
     mod callouts {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             content::{Content, SubstitutionStep},

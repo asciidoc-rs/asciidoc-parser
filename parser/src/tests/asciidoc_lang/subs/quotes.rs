@@ -16,8 +16,6 @@ non_normative!(
 );
 
 mod quotes {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -236,8 +234,6 @@ Happy werewolves are <strong>really</strong> slobbery.
 }
 
 mod default_quotes_substitution {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -563,8 +559,6 @@ mod default_quotes_substitution {
 }
 
 mod quotes_substitution_value {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

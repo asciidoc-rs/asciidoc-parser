@@ -12,8 +12,6 @@ This page breaks down the difference between positional and named attributes on 
 );
 
 mod positional_attribute {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{IsBlock, ListType, SimpleBlockStyle, metadata::BlockMetadata},
@@ -607,8 +605,6 @@ Formatted text does not support a style, so the first and only positional attrib
 }
 
 mod named_attribute {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -945,8 +941,6 @@ If enclosing quotes are used, they are dropped from the parsed value and the pre
 }
 
 mod attribute_list_parsing {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*, warnings::WarningType};
 
     non_normative!(

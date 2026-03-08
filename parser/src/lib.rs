@@ -28,3 +28,8 @@ pub mod strings;
 mod tests;
 
 mod warnings;
+
+// Use `pretty_assertion_sorted`'s version of `assert_eq` across the board.
+#[cfg(test)]
+#[macro_use]
+extern crate pretty_assertions_sorted;

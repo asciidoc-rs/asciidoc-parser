@@ -367,8 +367,6 @@ mod tests {
     }
 
     mod parse {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             blocks::{SimpleBlockStyle, metadata::BlockMetadata},
@@ -525,8 +523,6 @@ mod tests {
     }
 
     mod example {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
@@ -979,8 +975,6 @@ mod tests {
     }
 
     mod open {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             blocks::{BreakType, ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
@@ -1368,8 +1362,6 @@ mod tests {
     }
 
     mod sidebar {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
@@ -1864,8 +1856,6 @@ mod tests {
     }
 
     mod quote {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},

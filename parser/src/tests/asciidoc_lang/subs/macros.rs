@@ -19,8 +19,6 @@ The macros step replaces a macro's content with the appropriate built-in and use
 );
 
 mod default_macros_substitution {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -354,8 +352,6 @@ mod default_macros_substitution {
 }
 
 mod macros_substitution_value {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

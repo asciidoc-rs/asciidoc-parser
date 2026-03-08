@@ -240,8 +240,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod from_custom_string {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             content::{Content, SubstitutionGroup, SubstitutionStep},

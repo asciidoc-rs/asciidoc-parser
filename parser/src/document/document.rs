@@ -211,8 +211,6 @@ mod tests {
 
     use std::{collections::HashMap, ops::Deref};
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, IsBlock, MediaType, SimpleBlockStyle},

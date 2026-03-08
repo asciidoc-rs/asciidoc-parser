@@ -14,8 +14,6 @@ This page covers the anatomy of the link macro, when it's required, and how to u
 );
 
 mod anatomy {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -108,8 +106,6 @@ Like all inline macros, the link macro can be escaped using a leading backslash 
 }
 
 mod link_to_relative_file {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -267,8 +263,6 @@ Note that when linking to a relative file, even if it's an HTML file, the link t
 }
 
 mod when_to_use {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

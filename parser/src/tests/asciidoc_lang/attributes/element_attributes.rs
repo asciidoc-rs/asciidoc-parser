@@ -40,8 +40,6 @@ Unlike document attributes, element attributes are defined directly on the eleme
 );
 
 mod attrlist {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         HasSpan, Parser,
         attributes::AttrlistContext,

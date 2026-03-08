@@ -14,8 +14,6 @@ mod section;
 mod simple;
 
 mod content_model {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::blocks::ContentModel;
 
     #[test]
@@ -141,8 +139,6 @@ mod as_list_item {
 
 mod error_cases {
     use std::ops::Deref;
-
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{
         Parser,

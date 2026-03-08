@@ -138,8 +138,6 @@ static NON_NUMERIC_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, Span};
 
     #[test]

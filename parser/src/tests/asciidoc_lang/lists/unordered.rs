@@ -22,8 +22,6 @@ They can also be interleaved with other types of lists.
 mod basic {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ListType, SimpleBlockStyle},
@@ -898,8 +896,6 @@ See xref:separating.adoc[] for more details.
 #[rustfmt::skip] // Used because this mod has deeply-nested data structures that cause the formatter to slow down significantly.
 mod nested {
     use std::collections::HashMap;
-
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{
         Parser,

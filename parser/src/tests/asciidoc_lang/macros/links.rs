@@ -42,8 +42,6 @@ When linking to an email address, you can use the specialized xref:mailto-macro.
 );
 
 mod encode_reserved_characters {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -143,8 +141,6 @@ Depending on the capabilities of the web application, the space character can be
 }
 
 mod hide_uri_scheme {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

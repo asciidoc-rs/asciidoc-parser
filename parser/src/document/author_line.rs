@@ -64,8 +64,6 @@ impl<'src> HasSpan<'src> for AuthorLine<'src> {
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, parser::ModificationContext, tests::prelude::*};
 
     #[test]

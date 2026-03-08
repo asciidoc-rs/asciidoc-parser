@@ -13,8 +13,6 @@ non_normative!(
 mod basic {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ListType, SimpleBlockStyle},
@@ -1220,8 +1218,6 @@ include::example$ordered.adoc[tag=base-t]
 mod nested {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ListType, SimpleBlockStyle},
@@ -2407,8 +2403,6 @@ For instance, to start an alphabetic list at letter "c", set the numeration styl
 
 mod escaping {
     use std::collections::HashMap;
-
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 

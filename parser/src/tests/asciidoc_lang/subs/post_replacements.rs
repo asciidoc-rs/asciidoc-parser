@@ -1,5 +1,3 @@
-use pretty_assertions_sorted::assert_eq;
-
 use crate::{
     Parser,
     blocks::{Block, IsBlock},
@@ -42,8 +40,6 @@ The line break character, `{plus}`, is replaced when the `post_replacements` sub
 }
 
 mod default_post_replacements_substitution {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -377,8 +373,6 @@ mod default_post_replacements_substitution {
 }
 
 mod post_replacements_substitution_value {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

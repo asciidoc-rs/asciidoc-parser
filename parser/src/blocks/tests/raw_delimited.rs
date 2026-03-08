@@ -1,6 +1,4 @@
 mod parse {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, SimpleBlockStyle},
@@ -205,8 +203,6 @@ mod parse {
 }
 
 mod comment {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, IsBlock},
@@ -454,8 +450,6 @@ mod comment {
 }
 
 mod listing {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, IsBlock},
@@ -737,8 +731,6 @@ mod listing {
 }
 
 mod pass {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, IsBlock},

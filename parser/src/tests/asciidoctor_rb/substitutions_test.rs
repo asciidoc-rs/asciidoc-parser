@@ -5,8 +5,6 @@
 // limitation of `asciidoc-parser` crate) and alternate (non-HTML) back ends.
 
 mod dispatcher {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, parser::ModificationContext, tests::prelude::*};
 
     #[test]
@@ -94,8 +92,6 @@ mod dispatcher {
 }
 
 mod quotes {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::SimpleBlockStyle,
@@ -1549,8 +1545,6 @@ mod quotes {
 }
 
 mod macros {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser, blocks::SimpleBlockStyle, content::SubstitutionStep, parser::ModificationContext,
         strings::CowStr, tests::prelude::*,
@@ -4498,8 +4492,6 @@ mod macros {
 }
 
 mod passthroughs {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::SimpleBlockStyle,
@@ -5878,8 +5870,6 @@ mod passthroughs {
 }
 
 mod replacements {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser, blocks::SimpleBlockStyle, content::SubstitutionStep, strings::CowStr,
         tests::prelude::*,
@@ -6124,8 +6114,6 @@ foo&#8201;&#8212;&#8201;"#;
 }
 
 mod post_replacements {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]
@@ -6317,8 +6305,6 @@ mod post_replacements {
 }
 
 mod resolve_subs {
-    // use pretty_assertions_sorted::assert_eq;
-
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby() {

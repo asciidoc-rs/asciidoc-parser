@@ -144,8 +144,6 @@ pub trait HasSpan<'src> {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use pretty_assertions_sorted::assert_eq;
-
     #[test]
     fn simple_case() {
         let span = crate::Span::new(r#"{"hello": "world 🙌"}"#);
@@ -188,8 +186,6 @@ mod tests {
     }
 
     mod split_at_match_non_empty {
-        use pretty_assertions_sorted::assert_eq;
-
         #[test]
         fn empty_source() {
             let s = crate::Span::default();

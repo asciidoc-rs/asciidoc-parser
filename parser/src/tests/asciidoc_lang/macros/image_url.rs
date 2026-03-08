@@ -13,8 +13,6 @@ You can reference images served from any URL (e.g., your blog, an image hosting 
 );
 
 mod image_url_targets {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{MediaType, SimpleBlockStyle},

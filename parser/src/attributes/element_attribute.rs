@@ -382,7 +382,6 @@ fn cowstr_from_source_and_span<'src>(source: &CowStr<'src>, span: &Span<'_>) -> 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{
         Parser,
@@ -539,8 +538,6 @@ mod tests {
     }
 
     mod quoted_string {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             attributes::{AttrlistContext, element_attribute::ParseShorthand},
@@ -918,8 +915,6 @@ mod tests {
     }
 
     mod named {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             attributes::{AttrlistContext, element_attribute::ParseShorthand},
@@ -1117,8 +1112,6 @@ mod tests {
     }
 
     mod parse_with_shorthand {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             attributes::{AttrlistContext, element_attribute::ParseShorthand},

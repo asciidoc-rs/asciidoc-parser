@@ -178,8 +178,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod take_ident {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -364,8 +362,6 @@ mod tests {
     }
 
     mod take_attr_name {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -492,8 +488,6 @@ mod tests {
     }
 
     mod take_user_attr_name {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -641,8 +635,6 @@ mod tests {
     }
 
     mod take_quoted_string {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -821,8 +813,6 @@ mod tests {
     }
 
     mod trim_remainder {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         fn advanced_span(source: &'static str, skip: usize) -> crate::Span<'static> {

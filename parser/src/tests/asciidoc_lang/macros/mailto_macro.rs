@@ -13,8 +13,6 @@ The mailto macro is a specialization of the xref:url-macro.adoc[URL macro] that 
 );
 
 mod link_text_and_named_attributes {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -242,8 +240,6 @@ To learn more about how the attributes are parsed, refer to xref:link-macro-attr
 }
 
 mod subject_and_body {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

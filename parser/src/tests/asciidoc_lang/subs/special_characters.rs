@@ -14,8 +14,6 @@ non_normative!(
 );
 
 mod substitutions {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -89,8 +87,6 @@ The special characters substitution step searches for three characters (`<`, `>`
 }
 
 mod default_special_characters_substitution {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -422,8 +418,6 @@ mod default_special_characters_substitution {
 }
 
 mod specialchars_substitution_value {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

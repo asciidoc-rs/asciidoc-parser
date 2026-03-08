@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use pretty_assertions_sorted::assert_eq;
-
 use crate::{Parser, blocks::ContentModel, content::SubstitutionGroup, tests::prelude::*};
 
 track_file!("docs/modules/verbatim/pages/source-blocks.adoc");

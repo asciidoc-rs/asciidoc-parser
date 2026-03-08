@@ -20,8 +20,6 @@ This page introduces the URL macro, when you would want to use it, and how it di
 mod from_url_to_macro {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -259,8 +257,6 @@ A more common reason is to specify custom link text.
 }
 
 mod custom_link_text {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -415,8 +411,6 @@ include::example$url.adoc[tag=text]
 }
 
 mod link_attributes {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

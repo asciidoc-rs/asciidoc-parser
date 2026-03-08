@@ -5111,8 +5111,6 @@ mod checklists {
 mod lists_model {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, ListType, SimpleBlockStyle},

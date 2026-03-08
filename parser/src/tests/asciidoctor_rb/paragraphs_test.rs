@@ -7,8 +7,6 @@
 mod normal {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, document::RefType, tests::prelude::*};
 
     #[test]
@@ -1378,8 +1376,6 @@ mod normal {
 
 mod literal {
     use std::collections::HashMap;
-
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 

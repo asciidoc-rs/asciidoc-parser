@@ -15,8 +15,6 @@ The size and precise placement of the text depends on the font and other stylesh
 );
 
 mod subscript_and_superscript_syntax {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

@@ -10,8 +10,6 @@ non_normative!(
 );
 
 mod shorthand_values {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -172,8 +170,6 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
 }
 
 mod apply_substitutions_to_inline_text {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

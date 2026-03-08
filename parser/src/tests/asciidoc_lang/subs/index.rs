@@ -59,8 +59,6 @@ For convenience, these types are grouped and ordered into substitution groups.
 );
 
 mod substitution_groups {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::IsBlock, content::SubstitutionGroup, tests::prelude::*};
 
     non_normative!(

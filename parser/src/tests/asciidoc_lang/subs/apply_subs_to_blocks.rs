@@ -15,8 +15,6 @@ Therefore, the AsciiDoc language provides a mechanism for altering the substitut
 );
 
 mod subs_attribute {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -368,8 +366,6 @@ It can only be applied to a leaf block, which is any block that cannot have chil
 }
 
 mod set_subs_attribute_on_block {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -478,8 +474,6 @@ You can avoid having to do this by using incremental substitutions instead, whic
 }
 
 mod add_remove_steps {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

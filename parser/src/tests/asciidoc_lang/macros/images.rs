@@ -16,8 +16,6 @@ The block form uses two colons (`::`), whereas the inline form only uses one (`:
 mod block_image_macro {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{MediaType, SimpleBlockStyle},
@@ -515,8 +513,6 @@ To turn off figure caption labels and numbers, unset the `figure-caption` attrib
 }
 
 mod inline_image_macro {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

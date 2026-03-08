@@ -1,5 +1,3 @@
-use pretty_assertions_sorted::assert_eq;
-
 use crate::{Parser, tests::prelude::*};
 
 track_file!("docs/modules/attributes/pages/wrap-values.adoc");

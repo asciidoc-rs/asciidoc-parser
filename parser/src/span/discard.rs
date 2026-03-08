@@ -24,8 +24,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod discard {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -100,8 +98,6 @@ mod tests {
     }
 
     mod discard_whitespace {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -176,8 +172,6 @@ mod tests {
     }
 
     mod discard_all {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
