@@ -434,7 +434,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        HasSpan, attributes::AttrlistContext, parser::ModificationContext, tests::prelude::*,
+        attributes::AttrlistContext, parser::ModificationContext, tests::prelude::*,
         warnings::WarningType,
     };
 
