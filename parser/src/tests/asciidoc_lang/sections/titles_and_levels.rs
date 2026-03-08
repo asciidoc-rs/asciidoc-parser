@@ -1,4 +1,4 @@
-use crate::{document::RefType, tests::prelude::*, warnings::WarningType};
+use crate::{document::RefType, tests::prelude::*};
 
 track_file!("docs/modules/sections/pages/titles-and-levels.adoc");
 

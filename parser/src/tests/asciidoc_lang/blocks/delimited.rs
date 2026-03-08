@@ -1,7 +1,6 @@
 use crate::{
     blocks::{ContentModel, IsBlock},
     tests::prelude::*,
-    warnings::WarningType,
 };
 
 track_file!("docs/modules/blocks/pages/delimited.adoc");

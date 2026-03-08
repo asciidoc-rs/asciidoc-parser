@@ -542,7 +542,6 @@ mod tests {
             parser::ModificationContext,
             strings::CowStr,
             tests::prelude::*,
-            warnings::WarningType,
         };
 
         #[test]
@@ -1113,7 +1112,6 @@ mod tests {
             attributes::{AttrlistContext, element_attribute::ParseShorthand},
             strings::CowStr,
             tests::prelude::*,
-            warnings::WarningType,
         };
 
         #[test]

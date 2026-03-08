@@ -215,7 +215,6 @@ mod tests {
         blocks::{ContentModel, IsBlock, MediaType},
         document::RefType,
         tests::prelude::*,
-        warnings::WarningType,
     };
 
     #[test]

@@ -939,7 +939,7 @@ If enclosing quotes are used, they are dropped from the parsed value and the pre
 }
 
 mod attribute_list_parsing {
-    use crate::{tests::prelude::*, warnings::WarningType};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"

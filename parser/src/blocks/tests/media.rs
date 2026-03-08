@@ -3,7 +3,6 @@ use std::ops::Deref;
 use crate::{
     blocks::{ContentModel, IsBlock, MediaType},
     tests::prelude::*,
-    warnings::WarningType,
 };
 
 // NOTE: The "error" cases from the MediaBlock parser test suite are not

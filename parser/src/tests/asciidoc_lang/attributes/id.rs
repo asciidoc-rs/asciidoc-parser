@@ -26,7 +26,7 @@ Likewise, you can assign an ID to a list item by using an anchor (`[[]]`) at the
 );
 
 mod valid_id_characters {
-    use crate::{tests::prelude::*, warnings::WarningType};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"

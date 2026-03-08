@@ -3,7 +3,7 @@ use std::ops::Deref;
 use crate::{
     blocks::{ContentModel, IsBlock, MediaType},
     tests::prelude::*,
-    warnings::{MatchAndWarnings, WarningType},
+    warnings::MatchAndWarnings,
 };
 
 #[test]

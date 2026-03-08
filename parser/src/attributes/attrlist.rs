@@ -433,10 +433,7 @@ pub(crate) enum AttrlistContext {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use crate::{
-        attributes::AttrlistContext, parser::ModificationContext, tests::prelude::*,
-        warnings::WarningType,
-    };
+    use crate::{attributes::AttrlistContext, parser::ModificationContext, tests::prelude::*};
 
     #[test]
     fn impl_clone() {

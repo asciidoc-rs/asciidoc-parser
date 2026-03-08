@@ -231,7 +231,6 @@ mod tests {
         blocks::{ContentModel, IsBlock},
         parser::ModificationContext,
         tests::prelude::*,
-        warnings::WarningType,
     };
 
     #[test]

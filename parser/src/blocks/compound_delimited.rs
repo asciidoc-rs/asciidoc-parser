@@ -367,7 +367,7 @@ mod tests {
     }
 
     mod parse {
-        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*, warnings::WarningType};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn err_invalid_delimiter() {

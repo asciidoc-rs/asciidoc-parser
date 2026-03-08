@@ -143,7 +143,7 @@ mod error_cases {
     use crate::{
         blocks::{ContentModel, IsBlock, ListType, metadata::BlockMetadata},
         tests::prelude::*,
-        warnings::{MatchAndWarnings, WarningType},
+        warnings::MatchAndWarnings,
     };
 
     #[test]
