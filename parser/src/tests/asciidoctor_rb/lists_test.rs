@@ -5106,7 +5106,6 @@ mod checklists {
 mod lists_model {
     use crate::{
         blocks::{ContentModel, ListType, SimpleBlockStyle},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 

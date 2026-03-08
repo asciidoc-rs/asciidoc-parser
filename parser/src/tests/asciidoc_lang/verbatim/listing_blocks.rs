@@ -1,6 +1,6 @@
 use crate::{
     blocks::{ContentModel, IsBlock, SimpleBlockStyle},
-    content::{SubstitutionGroup, SubstitutionStep},
+    content::SubstitutionStep,
     parser::ModificationContext,
     tests::prelude::*,
 };

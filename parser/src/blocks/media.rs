@@ -212,7 +212,6 @@ mod tests {
 
     use crate::{
         blocks::{ContentModel, IsBlock, MediaType, metadata::BlockMetadata},
-        content::SubstitutionGroup,
         tests::prelude::*,
         warnings::WarningType,
     };

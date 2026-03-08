@@ -241,7 +241,7 @@ mod tests {
 
     mod from_custom_string {
         use crate::{
-            content::{Content, SubstitutionGroup, SubstitutionStep},
+            content::{Content, SubstitutionStep},
             strings::CowStr,
             tests::prelude::*,
         };
@@ -591,11 +591,7 @@ mod tests {
     }
 
     mod normal {
-        use crate::{
-            content::{Content, SubstitutionGroup},
-            strings::CowStr,
-            tests::prelude::*,
-        };
+        use crate::{content::Content, strings::CowStr, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -686,10 +682,7 @@ mod tests {
 
     mod attribute_entry_value {
         use crate::{
-            content::{Content, SubstitutionGroup},
-            parser::ModificationContext,
-            strings::CowStr,
-            tests::prelude::*,
+            content::Content, parser::ModificationContext, strings::CowStr, tests::prelude::*,
         };
 
         #[test]
@@ -766,11 +759,7 @@ mod tests {
     }
 
     mod header {
-        use crate::{
-            content::{Content, SubstitutionGroup},
-            strings::CowStr,
-            tests::prelude::*,
-        };
+        use crate::{content::Content, strings::CowStr, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -846,11 +835,7 @@ mod tests {
     }
 
     mod title {
-        use crate::{
-            content::{Content, SubstitutionGroup},
-            strings::CowStr,
-            tests::prelude::*,
-        };
+        use crate::{content::Content, strings::CowStr, tests::prelude::*};
 
         #[test]
         fn empty() {

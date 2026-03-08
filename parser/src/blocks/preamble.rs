@@ -91,7 +91,6 @@ mod tests {
 
     use crate::{
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 

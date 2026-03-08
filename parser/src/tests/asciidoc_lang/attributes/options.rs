@@ -610,7 +610,6 @@ Let's consider `options` when combined with other attributes.
 
     use crate::{
         blocks::{IsBlock, ListType, SimpleBlockStyle},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 

@@ -493,7 +493,7 @@ mod tests {
 
     use crate::{
         blocks::SimpleBlockStyle,
-        content::{Passthroughs, SubstitutionGroup, SubstitutionStep, passthroughs::Passthrough},
+        content::{Passthroughs, SubstitutionStep, passthroughs::Passthrough},
         parser::ModificationContext,
         tests::prelude::*,
     };

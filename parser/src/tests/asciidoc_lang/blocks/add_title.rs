@@ -1,6 +1,5 @@
 use crate::{
     blocks::{ContentModel, SimpleBlockStyle},
-    content::SubstitutionGroup,
     tests::prelude::*,
 };
 

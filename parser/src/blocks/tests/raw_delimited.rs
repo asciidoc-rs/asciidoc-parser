@@ -1,7 +1,6 @@
 mod parse {
     use crate::{
         blocks::{ContentModel, SimpleBlockStyle},
-        content::SubstitutionGroup,
         tests::prelude::*,
         warnings::WarningType,
     };
@@ -204,7 +203,6 @@ mod parse {
 mod comment {
     use crate::{
         blocks::{ContentModel, IsBlock},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 
@@ -450,7 +448,6 @@ mod comment {
 mod listing {
     use crate::{
         blocks::{ContentModel, IsBlock},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 
@@ -729,7 +726,6 @@ mod listing {
 mod pass {
     use crate::{
         blocks::{ContentModel, IsBlock},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 

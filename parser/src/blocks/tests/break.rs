@@ -2,7 +2,6 @@ use std::ops::Deref;
 
 use crate::{
     blocks::{BreakType, ContentModel, IsBlock, SimpleBlockStyle},
-    content::SubstitutionGroup,
     tests::prelude::*,
 };
 
