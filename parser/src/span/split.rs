@@ -44,8 +44,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod into_parse_result {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -102,8 +100,6 @@ mod tests {
     }
 
     mod split_at_match_non_empty {
-        use pretty_assertions_sorted::assert_eq;
-
         #[test]
         fn empty_source() {
             let s = crate::Span::default();

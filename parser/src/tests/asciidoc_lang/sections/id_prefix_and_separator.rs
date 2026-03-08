@@ -15,8 +15,6 @@ These characters can be customized with the `idprefix` and `idseparator` attribu
 mod prefix {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, document::RefType, tests::prelude::*};
 
     non_normative!(
@@ -246,8 +244,6 @@ In this case, we recommend either using a non-empty value of `idprefix` or assig
 
 mod separator {
     use std::collections::HashMap;
-
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{Parser, document::RefType, tests::prelude::*};
 

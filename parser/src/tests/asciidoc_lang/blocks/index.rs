@@ -57,8 +57,6 @@ The circumstance is determined by the context and style, and in the case of a de
 mod context {
     use std::ops::Deref;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, IsBlock, is_built_in_context},
@@ -522,8 +520,6 @@ In the converter, these blocks must be accessed from their parent block.
 }
 
 mod block_style {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, IsBlock},

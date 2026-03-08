@@ -26,8 +26,6 @@ Likewise, you can assign an ID to a list item by using an anchor (`[[]]`) at the
 );
 
 mod valid_id_characters {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*, warnings::WarningType};
 
     non_normative!(
@@ -205,8 +203,6 @@ NOTE: Section pending
 }
 
 mod block_assignment {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{IsBlock, ListType, SimpleBlockStyle},
@@ -752,8 +748,6 @@ This is necessary since the `.` character in the shorthand syntax is the delimit
 }
 
 mod inline_assignment {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -909,8 +903,6 @@ The id (`#`) shorthand can be used on inline quoted text.
 
 mod anchor {
     use std::collections::HashMap;
-
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{Parser, blocks::SimpleBlockStyle, document::RefType, tests::prelude::*};
 

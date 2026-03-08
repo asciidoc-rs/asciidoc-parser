@@ -189,8 +189,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod warning {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::warnings::{Warning, WarningType};
 
         #[test]
@@ -208,8 +206,6 @@ mod tests {
 
     mod warning_type {
         mod impl_debug {
-            use pretty_assertions_sorted::assert_eq;
-
             use crate::warnings::WarningType;
 
             #[test]
@@ -411,8 +407,6 @@ mod tests {
     }
 
     mod match_and_warnings {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::warnings::{MatchAndWarnings, Warning, WarningType};
 
         #[test]

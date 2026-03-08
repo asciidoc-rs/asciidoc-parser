@@ -15,8 +15,6 @@ The built-in attribute names are listed in the xref:document-attributes-ref.adoc
 );
 
 mod valid_user_defined_names {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, tests::prelude::*};
 
     verifies!(

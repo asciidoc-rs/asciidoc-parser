@@ -73,8 +73,6 @@ An element attribute is defined using an attribute list on an element, or an ava
 );
 
 mod macros {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{MediaType, SimpleBlockStyle},

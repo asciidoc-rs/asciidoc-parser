@@ -13,8 +13,6 @@ This page covers the anatomy of the icon macro, how the target is resolved, and 
 );
 
 mod anatomy {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

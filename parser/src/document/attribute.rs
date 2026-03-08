@@ -227,8 +227,6 @@ mod tests {
 
     use std::ops::Deref;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         HasSpan, Parser,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
@@ -801,8 +799,6 @@ mod tests {
 
     mod interpreted_value {
         mod impl_debug {
-            use pretty_assertions_sorted::assert_eq;
-
             use crate::document::InterpretedValue;
 
             #[test]

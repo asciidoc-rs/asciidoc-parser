@@ -120,8 +120,6 @@ mod tests {
 
     use std::ops::Deref;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{BreakType, ContentModel, IsBlock, metadata::BlockMetadata},
@@ -425,8 +423,6 @@ mod tests {
 
     mod break_type {
         mod impl_debug {
-            use pretty_assertions_sorted::assert_eq;
-
             use crate::blocks::BreakType;
 
             #[test]

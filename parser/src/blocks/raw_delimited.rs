@@ -382,8 +382,6 @@ mod tests {
     }
 
     mod parse {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser, blocks::metadata::BlockMetadata, tests::prelude::*, warnings::WarningType,
         };
@@ -459,8 +457,6 @@ mod tests {
     }
 
     mod comment {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
@@ -703,8 +699,6 @@ mod tests {
     }
 
     mod listing {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
@@ -1135,8 +1129,6 @@ mod tests {
     }
 
     mod pass {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{
             Parser,
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},

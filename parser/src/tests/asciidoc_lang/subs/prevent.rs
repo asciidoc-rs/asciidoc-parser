@@ -12,8 +12,6 @@ The AsciiDoc syntax offers several approaches for preventing substitutions from 
 );
 
 mod escape_with_backslashes {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -138,8 +136,6 @@ include::example$subs.adoc[tag=double-slash]
 }
 
 mod passthrough {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

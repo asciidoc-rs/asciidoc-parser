@@ -48,8 +48,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod take_prefix {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -124,8 +122,6 @@ mod tests {
     }
 
     mod take_whitespace {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -260,8 +256,6 @@ mod tests {
     }
 
     mod take_whitespace_with_newline {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -396,8 +390,6 @@ mod tests {
     }
 
     mod take_required_whitespace {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -466,8 +458,6 @@ mod tests {
     }
 
     mod take_while {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]

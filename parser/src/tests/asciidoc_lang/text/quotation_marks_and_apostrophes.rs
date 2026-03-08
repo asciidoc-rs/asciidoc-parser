@@ -13,8 +13,6 @@ It covers the shorthand syntax, the limitations of that syntax, and when it's ne
 );
 
 mod single_and_double_quotation_mark_syntax {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -125,8 +123,6 @@ In that case, it's necessary to input the curved quotation marks directly using 
 }
 
 mod apostrophe_syntax {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

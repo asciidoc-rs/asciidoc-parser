@@ -1,5 +1,3 @@
-use pretty_assertions_sorted::assert_eq;
-
 use crate::{
     Parser,
     blocks::{IsBlock, SimpleBlockStyle},
@@ -54,8 +52,6 @@ That means that any inline formatting in an attribute value isn't interpreted be
 }
 
 mod change_subs_when_assigning {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, IsBlock},
@@ -272,8 +268,6 @@ If the macro is absent, the value is processed with the header substitution grou
 }
 
 mod attributes_defined_outside_document {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{IsBlock, SimpleBlockStyle},

@@ -1,5 +1,3 @@
-use pretty_assertions_sorted::assert_eq;
-
 use crate::{
     Parser,
     blocks::{ContentModel, IsBlock, SimpleBlockStyle},
@@ -491,8 +489,6 @@ The structural container provides a default context and expected content model, 
 }
 
 mod nesting_blocks {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{ContentModel, SimpleBlockStyle},

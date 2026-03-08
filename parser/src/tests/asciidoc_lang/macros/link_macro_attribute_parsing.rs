@@ -13,8 +13,6 @@ This page explains the conditions when this occurs and how to write the link tex
 );
 
 mod link_text_alongside_named_attributes {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -477,8 +475,6 @@ It also recognizes a handful of attributes that are specific to the link macro.
 }
 
 mod target_separate_window {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

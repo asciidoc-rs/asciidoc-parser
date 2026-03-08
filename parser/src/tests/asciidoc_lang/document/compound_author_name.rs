@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use pretty_assertions_sorted::assert_eq;
-
 use crate::{Parser, blocks::SimpleBlockStyle, document::RefType, tests::prelude::*};
 
 track_file!("docs/modules/document/pages/compound-author-name.adoc");

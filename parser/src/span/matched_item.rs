@@ -68,8 +68,6 @@ where
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use pretty_assertions_sorted::assert_eq;
-
     mod impl_default {
 
         #[test]

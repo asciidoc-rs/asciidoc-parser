@@ -18,8 +18,6 @@ Attribute references are replaced with the values of the attribute they referenc
 );
 
 mod default_attributes_substitution {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -351,8 +349,6 @@ mod default_attributes_substitution {
 }
 
 mod attributes_substitution_value {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

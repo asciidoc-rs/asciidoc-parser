@@ -13,8 +13,6 @@ This page documents the recognized URL schemes and how to disable this behavior 
 );
 
 mod url_schemes_for_autolinks {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -569,8 +567,6 @@ This allows the theming system (e.g., CSS) to recognize autolinks (and other bar
 }
 
 mod email_autolinks {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]
@@ -649,8 +645,6 @@ For email address which do not conform to these restriction, you can use the xre
 }
 
 mod escaping_urls_and_email_addresses {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]

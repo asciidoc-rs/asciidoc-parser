@@ -1,6 +1,4 @@
 mod parse {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*, warnings::WarningType};
 
     #[test]
@@ -203,8 +201,6 @@ mod parse {
 }
 
 mod example {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         HasSpan, Parser,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
@@ -785,8 +781,6 @@ mod example {
 }
 
 mod open {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         HasSpan, Parser,
         blocks::{BreakType, ContentModel, IsBlock, SimpleBlockStyle},
@@ -1188,8 +1182,6 @@ mod open {
 }
 
 mod sidebar {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         HasSpan, Parser,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
@@ -1592,8 +1584,6 @@ mod sidebar {
 }
 
 mod quote {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         HasSpan, Parser,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},

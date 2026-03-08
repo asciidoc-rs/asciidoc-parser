@@ -519,8 +519,6 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{IsBlock, metadata::BlockMetadata, section::SectionType},
@@ -588,8 +586,6 @@ mod tests {
 
     mod asciidoc_style_headers {
         use std::ops::Deref;
-
-        use pretty_assertions_sorted::assert_eq;
 
         use crate::{
             Parser,
@@ -1509,8 +1505,6 @@ mod tests {
 
     mod markdown_style_headings {
         use std::ops::Deref;
-
-        use pretty_assertions_sorted::assert_eq;
 
         use crate::{
             Parser,
@@ -3080,8 +3074,6 @@ mod tests {
 
     mod discrete_headings {
         use std::ops::Deref;
-
-        use pretty_assertions_sorted::assert_eq;
 
         use crate::{
             HasSpan, Parser,

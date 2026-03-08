@@ -89,8 +89,6 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         HasSpan, Parser,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},

@@ -772,8 +772,6 @@ mod tests {
     //! development (SDD) for macro parsing.
 
     mod inline_link {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
         #[test]
@@ -1224,8 +1222,6 @@ mod tests {
     }
 
     mod link_macro {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
         #[test]
@@ -1501,8 +1497,6 @@ mod tests {
     }
 
     mod inline_anchor {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
         #[test]

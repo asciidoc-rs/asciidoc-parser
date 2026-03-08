@@ -432,7 +432,6 @@ pub(crate) enum AttrlistContext {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
-    use pretty_assertions_sorted::assert_eq;
 
     use crate::{
         HasSpan, Parser, attributes::AttrlistContext, parser::ModificationContext,
@@ -1325,8 +1324,6 @@ mod tests {
     }
 
     mod id {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{HasSpan, Parser, attributes::AttrlistContext, tests::prelude::*};
 
         #[test]
@@ -1545,8 +1542,6 @@ mod tests {
     }
 
     mod roles {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{HasSpan, Parser, attributes::AttrlistContext, tests::prelude::*};
 
         #[test]
@@ -2063,8 +2058,6 @@ mod tests {
     }
 
     mod options {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::{HasSpan, Parser, attributes::AttrlistContext, tests::prelude::*};
 
         #[test]

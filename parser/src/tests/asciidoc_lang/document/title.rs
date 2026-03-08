@@ -13,8 +13,6 @@ Like all elements of the document header, the document title is optional.
 );
 
 mod title_syntax {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -142,8 +140,6 @@ The author and revision information isn't shown below the document title in the 
 );
 
 mod reference_doctitle {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

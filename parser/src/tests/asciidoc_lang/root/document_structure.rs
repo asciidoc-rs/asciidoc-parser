@@ -18,8 +18,6 @@ Right now, we're just aiming to get a sense of what makes up an AsciiDoc documen
 mod documents {
     use std::collections::HashMap;
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -352,8 +350,6 @@ Documents can range from a single sentence to a multi-part book.
 }
 
 mod lines {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]

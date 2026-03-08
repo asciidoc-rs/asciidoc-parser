@@ -1,5 +1,3 @@
-use pretty_assertions_sorted::assert_eq;
-
 use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
 track_file!("docs/modules/macros/pages/complex-urls.adoc");

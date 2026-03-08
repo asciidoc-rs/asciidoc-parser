@@ -18,8 +18,6 @@ non_normative!(
 );
 
 mod replacements {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -277,8 +275,6 @@ These attributes and their corresponding output are listed in xref:attributes:ch
 }
 
 mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},
@@ -606,8 +602,6 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
 }
 
 mod replacements_substitution_value {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{
         Parser,
         blocks::{Block, IsBlock},

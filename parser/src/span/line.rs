@@ -131,8 +131,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod take_line {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -327,8 +325,6 @@ mod tests {
     }
 
     mod take_normalized_line {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -549,8 +545,6 @@ mod tests {
     }
 
     mod take_non_empty_line {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -731,8 +725,6 @@ mod tests {
     }
 
     mod take_empty_line {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -923,8 +915,6 @@ mod tests {
     }
 
     mod discard_empty_lines {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]
@@ -1086,8 +1076,6 @@ mod tests {
     }
 
     mod take_line_with_continuation {
-        use pretty_assertions_sorted::assert_eq;
-
         use crate::tests::prelude::*;
 
         #[test]

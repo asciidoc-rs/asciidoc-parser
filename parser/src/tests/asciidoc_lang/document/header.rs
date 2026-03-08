@@ -13,8 +13,6 @@ The document header encapsulates the document title, author and revision informa
 );
 
 mod structure {
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
@@ -376,8 +374,6 @@ Since the document title is optional, it's possible for the header to only consi
 }
 
 mod header_end {
-    // use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

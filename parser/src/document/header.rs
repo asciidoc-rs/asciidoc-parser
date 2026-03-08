@@ -189,8 +189,6 @@ impl std::fmt::Debug for Header<'_> {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use pretty_assertions_sorted::assert_eq;
-
     use crate::{Parser, tests::prelude::*};
 
     #[test]
