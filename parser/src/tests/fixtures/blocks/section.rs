@@ -1,13 +1,15 @@
 use std::fmt;
 
 use crate::{
-    HasSpan,
     blocks::{IsBlock, SectionType},
-    tests::fixtures::{
-        Span,
-        attributes::Attrlist,
-        blocks::{Block, SectionNumber},
-        content::Content,
+    tests::{
+        fixtures::{
+            Span,
+            attributes::Attrlist,
+            blocks::{Block, SectionNumber},
+            content::Content,
+        },
+        prelude::*,
     },
 };
 

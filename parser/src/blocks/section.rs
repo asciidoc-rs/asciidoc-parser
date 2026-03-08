@@ -3073,7 +3073,6 @@ mod tests {
         use std::ops::Deref;
 
         use crate::{
-            HasSpan,
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata, section::SectionType},
             content::SubstitutionGroup,
             tests::prelude::*,

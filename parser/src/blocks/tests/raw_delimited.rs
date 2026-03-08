@@ -451,7 +451,6 @@ mod listing {
     use crate::{
         blocks::{ContentModel, IsBlock},
         content::SubstitutionGroup,
-        span::HasSpan,
         tests::prelude::*,
     };
 
@@ -731,7 +730,6 @@ mod pass {
     use crate::{
         blocks::{ContentModel, IsBlock},
         content::SubstitutionGroup,
-        span::HasSpan,
         tests::prelude::*,
     };
 

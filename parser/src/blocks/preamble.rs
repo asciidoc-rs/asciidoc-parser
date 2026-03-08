@@ -90,7 +90,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        HasSpan,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
         content::SubstitutionGroup,
         tests::prelude::*,

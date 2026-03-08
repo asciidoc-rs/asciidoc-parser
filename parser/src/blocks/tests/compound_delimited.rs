@@ -202,7 +202,6 @@ mod parse {
 
 mod example {
     use crate::{
-        HasSpan,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
         content::SubstitutionGroup,
         tests::prelude::*,
@@ -782,7 +781,6 @@ mod example {
 
 mod open {
     use crate::{
-        HasSpan,
         blocks::{BreakType, ContentModel, IsBlock, SimpleBlockStyle},
         tests::prelude::*,
     };
@@ -1183,7 +1181,6 @@ mod open {
 
 mod sidebar {
     use crate::{
-        HasSpan,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
         tests::prelude::*,
     };
@@ -1585,7 +1582,6 @@ mod sidebar {
 
 mod quote {
     use crate::{
-        HasSpan,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
         tests::prelude::*,
         warnings::WarningType,

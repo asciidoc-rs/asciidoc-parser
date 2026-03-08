@@ -1,6 +1,6 @@
 use std::{cmp::PartialEq, fmt};
 
-use crate::{HasSpan, tests::fixtures::Span};
+use crate::tests::{fixtures::Span, prelude::*};
 
 #[derive(Eq, PartialEq)]
 pub(crate) struct RevisionLine {
