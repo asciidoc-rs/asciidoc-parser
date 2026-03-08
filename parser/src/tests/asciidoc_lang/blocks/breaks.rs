@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     Parser,
     blocks::{BreakType, IsBlock, SimpleBlockStyle},

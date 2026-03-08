@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{Parser, document::RefType, tests::prelude::*};
 
 track_file!("docs/modules/sections/pages/appendix.adoc");

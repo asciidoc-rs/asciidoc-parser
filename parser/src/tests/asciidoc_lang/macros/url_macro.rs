@@ -18,8 +18,6 @@ This page introduces the URL macro, when you would want to use it, and how it di
 );
 
 mod from_url_to_macro {
-    use std::collections::HashMap;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

@@ -284,8 +284,6 @@ fn parse_maybe_attrlist_line<'src>(
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use std::collections::HashMap;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]

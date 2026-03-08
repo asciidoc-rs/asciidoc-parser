@@ -37,8 +37,6 @@ mod bulleted_lists {
     use crate::{Parser, tests::prelude::*};
 
     mod simple_lists {
-        use std::collections::HashMap;
-
         use crate::{
             Parser,
             blocks::{ListType, SimpleBlockStyle},
@@ -2141,8 +2139,6 @@ mod description_lists_dlist {
     use crate::{Parser, tests::prelude::*};
 
     mod simple_lists {
-        use std::collections::HashMap;
-
         use super::*;
         use crate::blocks::{ListType, SimpleBlockStyle};
 
@@ -5109,8 +5105,6 @@ mod checklists {
 }
 
 mod lists_model {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{ContentModel, ListType, SimpleBlockStyle},

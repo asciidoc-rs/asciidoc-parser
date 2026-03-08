@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{Parser, blocks::ContentModel, content::SubstitutionGroup, tests::prelude::*};
 
 track_file!("docs/modules/verbatim/pages/source-blocks.adoc");

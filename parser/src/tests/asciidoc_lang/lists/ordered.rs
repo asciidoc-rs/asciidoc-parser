@@ -11,8 +11,6 @@ non_normative!(
 );
 
 mod basic {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{ListType, SimpleBlockStyle},
@@ -1216,8 +1214,6 @@ include::example$ordered.adoc[tag=base-t]
 
 #[rustfmt::skip] // Used because this mod has deeply-nested data structures that cause the formatter to slow down significantly.
 mod nested {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{ListType, SimpleBlockStyle},
@@ -2402,8 +2398,6 @@ For instance, to start an alphabetic list at letter "c", set the numeration styl
 );
 
 mod escaping {
-    use std::collections::HashMap;
-
     use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(

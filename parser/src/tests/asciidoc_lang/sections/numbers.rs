@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     Parser, blocks::IsBlock, document::RefType, parser::ModificationContext, tests::prelude::*,
 };

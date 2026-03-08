@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
 track_file!("docs/modules/blocks/pages/hard-line-breaks.adoc");

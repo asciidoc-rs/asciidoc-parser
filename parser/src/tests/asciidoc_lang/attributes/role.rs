@@ -409,8 +409,6 @@ This longhand syntax can also be used on inline macros, but it cannot be used wi
 }
 
 mod assign_roles_to_formatted_inline_elements {
-    use std::collections::HashMap;
-
     use crate::{
         Parser,
         blocks::{IsBlock, SimpleBlockStyle},
