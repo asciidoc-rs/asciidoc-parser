@@ -229,7 +229,6 @@ mod tests {
 
     use crate::{
         blocks::{ContentModel, IsBlock},
-        parser::ModificationContext,
         tests::prelude::*,
     };
 

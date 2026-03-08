@@ -8,6 +8,7 @@ pub(crate) use crate::{
     HasSpan, Parser,
     blocks::{SectionType, SimpleBlockStyle},
     content::SubstitutionGroup,
+    parser::ModificationContext,
     tests::{
         assert_dom::*,
         fixtures::{attributes::*, blocks::*, content::*, document::*, parser::*, warnings::*, *},

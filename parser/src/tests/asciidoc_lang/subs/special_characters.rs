@@ -418,7 +418,6 @@ mod default_special_characters_substitution {
 mod specialchars_substitution_value {
     use crate::{
         blocks::{Block, IsBlock},
-        parser::ModificationContext,
         tests::prelude::*,
     };
 

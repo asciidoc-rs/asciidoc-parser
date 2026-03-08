@@ -5,7 +5,7 @@
 // limitation of `asciidoc-parser` crate) and alternate (non-HTML) back ends.
 
 mod dispatcher {
-    use crate::{parser::ModificationContext, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     #[test]
     fn apply_normal_substitutions() {
@@ -92,9 +92,7 @@ mod dispatcher {
 }
 
 mod quotes {
-    use crate::{
-        content::SubstitutionStep, parser::ModificationContext, strings::CowStr, tests::prelude::*,
-    };
+    use crate::{content::SubstitutionStep, strings::CowStr, tests::prelude::*};
 
     #[test]
     fn single_line_double_quoted_string() {
@@ -1540,9 +1538,7 @@ mod quotes {
 }
 
 mod macros {
-    use crate::{
-        content::SubstitutionStep, parser::ModificationContext, strings::CowStr, tests::prelude::*,
-    };
+    use crate::{content::SubstitutionStep, strings::CowStr, tests::prelude::*};
 
     #[test]
     fn a_single_line_link_macro_should_be_interpreted_as_a_link() {

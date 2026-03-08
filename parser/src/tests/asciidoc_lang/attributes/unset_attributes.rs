@@ -13,7 +13,7 @@ Document attributes--built-in, boolean, and custom--can be unset in the document
 );
 
 mod unset_in_header {
-    use crate::{document::InterpretedValue, parser::ModificationContext, tests::prelude::*};
+    use crate::{document::InterpretedValue, tests::prelude::*};
 
     non_normative!(
         r#"
