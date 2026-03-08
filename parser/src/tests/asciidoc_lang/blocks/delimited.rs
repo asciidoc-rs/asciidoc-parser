@@ -1,5 +1,5 @@
 use crate::{
-    blocks::{ContentModel, IsBlock, SimpleBlockStyle},
+    blocks::{ContentModel, IsBlock},
     tests::prelude::*,
     warnings::WarningType,
 };
@@ -487,11 +487,7 @@ The structural container provides a default context and expected content model, 
 }
 
 mod nesting_blocks {
-    use crate::{
-        blocks::{ContentModel, SimpleBlockStyle},
-        content::SubstitutionGroup,
-        tests::prelude::*,
-    };
+    use crate::{blocks::ContentModel, content::SubstitutionGroup, tests::prelude::*};
 
     non_normative!(
         r#"

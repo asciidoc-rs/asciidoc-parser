@@ -17,9 +17,7 @@ This page explains how the ID is derived and how to control this behavior.
 
 mod how_a_section_id_is_computed {
     use crate::{
-        blocks::{SimpleBlockStyle, metadata::BlockMetadata},
-        document::RefType,
-        parser::ModificationContext,
+        blocks::metadata::BlockMetadata, document::RefType, parser::ModificationContext,
         tests::prelude::*,
     };
 

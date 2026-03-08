@@ -26,7 +26,7 @@ Likewise, you can assign an ID to a list item by using an anchor (`[[]]`) at the
 );
 
 mod valid_id_characters {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*, warnings::WarningType};
+    use crate::{tests::prelude::*, warnings::WarningType};
 
     non_normative!(
         r#"
@@ -204,7 +204,7 @@ NOTE: Section pending
 
 mod block_assignment {
     use crate::{
-        blocks::{IsBlock, ListType, SimpleBlockStyle},
+        blocks::{IsBlock, ListType},
         tests::prelude::*,
     };
 
@@ -747,7 +747,7 @@ This is necessary since the `.` character in the shorthand syntax is the delimit
 }
 
 mod inline_assignment {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -901,7 +901,7 @@ The id (`#`) shorthand can be used on inline quoted text.
 }
 
 mod anchor {
-    use crate::{blocks::SimpleBlockStyle, document::RefType, tests::prelude::*};
+    use crate::{document::RefType, tests::prelude::*};
 
     non_normative!(
         r#"

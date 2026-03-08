@@ -12,10 +12,7 @@ You can turn an image into a link by using the `link` attribute.
 );
 
 mod link_attribute {
-    use crate::{
-        blocks::{MediaType, SimpleBlockStyle},
-        tests::prelude::*,
-    };
+    use crate::{blocks::MediaType, tests::prelude::*};
 
     non_normative!(
         r#"

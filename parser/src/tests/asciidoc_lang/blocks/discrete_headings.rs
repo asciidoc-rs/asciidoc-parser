@@ -1,4 +1,4 @@
-use crate::{blocks::SimpleBlockStyle, document::RefType, tests::prelude::*};
+use crate::{document::RefType, tests::prelude::*};
 
 track_file!("docs/modules/blocks/pages/discrete-headings.adoc");
 

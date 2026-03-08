@@ -1,5 +1,5 @@
 mod parse {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*, warnings::WarningType};
+    use crate::{tests::prelude::*, warnings::WarningType};
 
     #[test]
     fn err_invalid_delimiter() {
@@ -202,7 +202,7 @@ mod parse {
 
 mod example {
     use crate::{
-        blocks::{ContentModel, IsBlock, SimpleBlockStyle},
+        blocks::{ContentModel, IsBlock},
         tests::prelude::*,
     };
 
@@ -780,7 +780,7 @@ mod example {
 
 mod open {
     use crate::{
-        blocks::{BreakType, ContentModel, IsBlock, SimpleBlockStyle},
+        blocks::{BreakType, ContentModel, IsBlock},
         tests::prelude::*,
     };
 
@@ -1180,7 +1180,7 @@ mod open {
 
 mod sidebar {
     use crate::{
-        blocks::{ContentModel, IsBlock, SimpleBlockStyle},
+        blocks::{ContentModel, IsBlock},
         tests::prelude::*,
     };
 
@@ -1581,7 +1581,7 @@ mod sidebar {
 
 mod quote {
     use crate::{
-        blocks::{ContentModel, IsBlock, SimpleBlockStyle},
+        blocks::{ContentModel, IsBlock},
         tests::prelude::*,
         warnings::WarningType,
     };

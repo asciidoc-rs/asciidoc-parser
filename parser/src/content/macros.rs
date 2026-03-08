@@ -772,7 +772,7 @@ mod tests {
     //! development (SDD) for macro parsing.
 
     mod inline_link {
-        use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+        use crate::tests::prelude::*;
 
         #[test]
         fn escape_angle_bracket_autolink_before_lt() {
@@ -1222,7 +1222,7 @@ mod tests {
     }
 
     mod link_macro {
-        use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+        use crate::tests::prelude::*;
 
         #[test]
         fn escape_link_macro() {
@@ -1497,7 +1497,7 @@ mod tests {
     }
 
     mod inline_anchor {
-        use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+        use crate::tests::prelude::*;
 
         #[test]
         fn inline_ref_double_brackets() {

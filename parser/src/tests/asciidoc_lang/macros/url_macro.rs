@@ -18,7 +18,7 @@ This page introduces the URL macro, when you would want to use it, and how it di
 );
 
 mod from_url_to_macro {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -255,7 +255,7 @@ A more common reason is to specify custom link text.
 }
 
 mod custom_link_text {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -409,7 +409,7 @@ include::example$url.adoc[tag=text]
 }
 
 mod link_attributes {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"

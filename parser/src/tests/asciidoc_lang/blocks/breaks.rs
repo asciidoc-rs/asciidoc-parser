@@ -1,5 +1,5 @@
 use crate::{
-    blocks::{BreakType, IsBlock, SimpleBlockStyle},
+    blocks::{BreakType, IsBlock},
     tests::prelude::*,
 };
 

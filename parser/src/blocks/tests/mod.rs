@@ -141,7 +141,7 @@ mod error_cases {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{ContentModel, IsBlock, ListType, SimpleBlockStyle, metadata::BlockMetadata},
+        blocks::{ContentModel, IsBlock, ListType, metadata::BlockMetadata},
         tests::prelude::*,
         warnings::{MatchAndWarnings, WarningType},
     };

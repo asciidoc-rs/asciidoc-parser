@@ -25,10 +25,7 @@ You can assign one or more options to a block using the shorthand or formal synt
 "#
     );
 
-    use crate::{
-        blocks::{IsBlock, SimpleBlockStyle},
-        tests::prelude::*,
-    };
+    use crate::{blocks::IsBlock, tests::prelude::*};
 
     #[test]
     fn shorthand_syntax_single() {
@@ -609,7 +606,7 @@ Let's consider `options` when combined with other attributes.
     );
 
     use crate::{
-        blocks::{IsBlock, ListType, SimpleBlockStyle},
+        blocks::{IsBlock, ListType},
         tests::prelude::*,
     };
 

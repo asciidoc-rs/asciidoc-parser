@@ -228,7 +228,7 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{ContentModel, IsBlock, SimpleBlockStyle},
+        blocks::{ContentModel, IsBlock},
         parser::ModificationContext,
         tests::prelude::*,
         warnings::WarningType,

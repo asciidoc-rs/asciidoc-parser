@@ -13,7 +13,7 @@ This page breaks down the difference between positional and named attributes on 
 
 mod positional_attribute {
     use crate::{
-        blocks::{IsBlock, ListType, SimpleBlockStyle, metadata::BlockMetadata},
+        blocks::{IsBlock, ListType, metadata::BlockMetadata},
         tests::prelude::*,
     };
 
@@ -603,7 +603,7 @@ Formatted text does not support a style, so the first and only positional attrib
 }
 
 mod named_attribute {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -939,7 +939,7 @@ If enclosing quotes are used, they are dropped from the parsed value and the pre
 }
 
 mod attribute_list_parsing {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*, warnings::WarningType};
+    use crate::{tests::prelude::*, warnings::WarningType};
 
     non_normative!(
         r#"

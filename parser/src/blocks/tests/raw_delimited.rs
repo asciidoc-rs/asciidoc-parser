@@ -1,9 +1,5 @@
 mod parse {
-    use crate::{
-        blocks::{ContentModel, SimpleBlockStyle},
-        tests::prelude::*,
-        warnings::WarningType,
-    };
+    use crate::{blocks::ContentModel, tests::prelude::*, warnings::WarningType};
 
     #[test]
     fn err_invalid_delimiter() {

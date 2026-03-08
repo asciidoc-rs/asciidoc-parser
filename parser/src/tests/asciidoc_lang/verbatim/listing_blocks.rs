@@ -1,5 +1,5 @@
 use crate::{
-    blocks::{ContentModel, IsBlock, SimpleBlockStyle},
+    blocks::{ContentModel, IsBlock},
     content::SubstitutionStep,
     parser::ModificationContext,
     tests::prelude::*,

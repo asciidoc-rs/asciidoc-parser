@@ -508,7 +508,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
+        blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
         span::MatchedItem,
         tests::prelude::*,
         warnings::Warning,

@@ -14,11 +14,7 @@ The block form uses two colons (`::`), whereas the inline form only uses one (`:
 );
 
 mod block_image_macro {
-    use crate::{
-        blocks::{MediaType, SimpleBlockStyle},
-        document::RefType,
-        tests::prelude::*,
-    };
+    use crate::{blocks::MediaType, document::RefType, tests::prelude::*};
 
     non_normative!(
         r#"

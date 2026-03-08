@@ -5,7 +5,7 @@
 // limitation of `asciidoc-parser` crate) and alternate (non-HTML) back ends.
 
 mod normal {
-    use crate::{blocks::SimpleBlockStyle, document::RefType, tests::prelude::*};
+    use crate::{document::RefType, tests::prelude::*};
 
     #[test]
     fn should_treat_plain_text_separated_by_blank_lines_as_paragraphs() {
@@ -1373,7 +1373,7 @@ mod normal {
 }
 
 mod literal {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     #[test]
     fn single_line_literal_paragraphs() {

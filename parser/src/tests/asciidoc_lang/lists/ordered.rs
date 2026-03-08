@@ -11,10 +11,7 @@ non_normative!(
 );
 
 mod basic {
-    use crate::{
-        blocks::{ListType, SimpleBlockStyle},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ListType, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -1214,7 +1211,7 @@ include::example$ordered.adoc[tag=base-t]
 #[rustfmt::skip] // Used because this mod has deeply-nested data structures that cause the formatter to slow down significantly.
 mod nested {
     use crate::{
-        blocks::{ListType, SimpleBlockStyle},
+        blocks::{ListType},
         tests::prelude::*,
     };
 
@@ -2396,7 +2393,7 @@ For instance, to start an alphabetic list at letter "c", set the numeration styl
 );
 
 mod escaping {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"

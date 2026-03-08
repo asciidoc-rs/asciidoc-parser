@@ -23,10 +23,7 @@ The main focus of the syntax covered on this page is to keep the list continuous
 );
 
 mod multiline_principal_text {
-    use crate::{
-        blocks::{ListType, SimpleBlockStyle},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ListType, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -330,10 +327,7 @@ An empty line between two list items will not break the list.
     );
 
     mod empty_lines {
-        use crate::{
-            blocks::{ListType, SimpleBlockStyle},
-            tests::prelude::*,
-        };
+        use crate::{blocks::ListType, tests::prelude::*};
 
         non_normative!(
             r#"
@@ -1863,7 +1857,6 @@ The only limitation of this technique is that the content itself may not contain
 mod drop_principal_text {
     use crate::{
         blocks::{ContentModel, ListType},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 
@@ -2039,10 +2032,7 @@ include::example$complex.adoc[tag=complex-only]
 }
 
 mod attach_to_ancestor_list {
-    use crate::{
-        blocks::{ListType, SimpleBlockStyle},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ListType, tests::prelude::*};
 
     non_normative!(
         r#"

@@ -588,8 +588,7 @@ mod tests {
 
         use crate::{
             blocks::{
-                ContentModel, IsBlock, MediaType, SimpleBlockStyle, metadata::BlockMetadata,
-                section::SectionType,
+                ContentModel, IsBlock, MediaType, metadata::BlockMetadata, section::SectionType,
             },
             tests::prelude::*,
             warnings::WarningType,
@@ -1505,8 +1504,7 @@ mod tests {
 
         use crate::{
             blocks::{
-                ContentModel, IsBlock, MediaType, SimpleBlockStyle, metadata::BlockMetadata,
-                section::SectionType,
+                ContentModel, IsBlock, MediaType, metadata::BlockMetadata, section::SectionType,
             },
             tests::prelude::*,
             warnings::WarningType,

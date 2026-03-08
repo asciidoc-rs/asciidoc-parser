@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use crate::{
-    blocks::{BreakType, ContentModel, IsBlock, SimpleBlockStyle},
+    blocks::{BreakType, ContentModel, IsBlock},
     tests::prelude::*,
 };
 

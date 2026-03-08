@@ -13,7 +13,7 @@ The document header encapsulates the document title, author and revision informa
 );
 
 mod structure {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -374,7 +374,7 @@ Since the document title is optional, it's possible for the header to only consi
 }
 
 mod header_end {
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"

@@ -284,7 +284,7 @@ fn parse_maybe_attrlist_line<'src>(
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     #[test]
     fn metadata_order_title_anchor_attrlist() {
