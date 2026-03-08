@@ -122,7 +122,6 @@ mod tests {
 
     use crate::{
         blocks::{BreakType, ContentModel, IsBlock, metadata::BlockMetadata},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 

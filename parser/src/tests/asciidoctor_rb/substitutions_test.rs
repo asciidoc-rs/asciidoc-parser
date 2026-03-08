@@ -93,11 +93,8 @@ mod dispatcher {
 
 mod quotes {
     use crate::{
-        blocks::SimpleBlockStyle,
-        content::{SubstitutionGroup, SubstitutionStep},
-        parser::ModificationContext,
-        strings::CowStr,
-        tests::prelude::*,
+        blocks::SimpleBlockStyle, content::SubstitutionStep, parser::ModificationContext,
+        strings::CowStr, tests::prelude::*,
     };
 
     #[test]
@@ -4493,7 +4490,7 @@ mod macros {
 mod passthroughs {
     use crate::{
         blocks::SimpleBlockStyle,
-        content::{Passthroughs, SubstitutionGroup, SubstitutionStep, passthroughs::Passthrough},
+        content::{Passthroughs, SubstitutionStep, passthroughs::Passthrough},
         parser::{ModificationContext, QuoteType},
         tests::prelude::*,
     };

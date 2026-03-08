@@ -213,7 +213,6 @@ mod tests {
 
     use crate::{
         blocks::{ContentModel, IsBlock, MediaType, SimpleBlockStyle},
-        content::SubstitutionGroup,
         document::RefType,
         tests::prelude::*,
         warnings::WarningType,

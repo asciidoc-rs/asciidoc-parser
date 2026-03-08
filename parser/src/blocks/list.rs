@@ -301,7 +301,6 @@ mod tests {
 
     use crate::{
         blocks::{ContentModel, IsBlock, ListType, SimpleBlockStyle, metadata::BlockMetadata},
-        content::SubstitutionGroup,
         span::MatchedItem,
         tests::prelude::*,
         warnings::Warning,

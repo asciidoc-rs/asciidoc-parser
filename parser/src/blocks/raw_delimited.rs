@@ -457,7 +457,6 @@ mod tests {
     mod comment {
         use crate::{
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
-            content::SubstitutionGroup,
             tests::prelude::*,
         };
 
@@ -698,7 +697,7 @@ mod tests {
     mod listing {
         use crate::{
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
-            content::{SubstitutionGroup, SubstitutionStep},
+            content::SubstitutionStep,
             tests::prelude::*,
         };
 
@@ -1127,7 +1126,6 @@ mod tests {
     mod pass {
         use crate::{
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
-            content::SubstitutionGroup,
             tests::prelude::*,
         };
 

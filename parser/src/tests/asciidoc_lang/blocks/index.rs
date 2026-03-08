@@ -59,7 +59,6 @@ mod context {
 
     use crate::{
         blocks::{ContentModel, IsBlock, is_built_in_context},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 
@@ -521,7 +520,6 @@ In the converter, these blocks must be accessed from their parent block.
 mod block_style {
     use crate::{
         blocks::{ContentModel, IsBlock},
-        content::SubstitutionGroup,
         tests::prelude::*,
     };
 
