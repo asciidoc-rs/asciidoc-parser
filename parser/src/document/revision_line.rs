@@ -138,7 +138,7 @@ static NON_NUMERIC_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use crate::{Parser, Span};
+    use crate::{Span, tests::prelude::*};
 
     #[test]
     fn v_prefix_standalone() {

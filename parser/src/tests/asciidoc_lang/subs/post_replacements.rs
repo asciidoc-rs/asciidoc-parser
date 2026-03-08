@@ -1,5 +1,4 @@
 use crate::{
-    Parser,
     blocks::{Block, IsBlock},
     tests::prelude::*,
 };
@@ -41,7 +40,6 @@ The line break character, `{plus}`, is replaced when the `post_replacements` sub
 
 mod default_post_replacements_substitution {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -374,7 +372,6 @@ mod default_post_replacements_substitution {
 
 mod post_replacements_substitution_value {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

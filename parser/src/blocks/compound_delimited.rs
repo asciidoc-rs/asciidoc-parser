@@ -198,7 +198,7 @@ impl std::fmt::Debug for CompoundDelimitedBlock<'_> {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use crate::{Parser, blocks::metadata::BlockMetadata};
+    use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
     mod is_valid_delimiter {
         use crate::blocks::CompoundDelimitedBlock;
@@ -368,7 +368,6 @@ mod tests {
 
     mod parse {
         use crate::{
-            Parser,
             blocks::{SimpleBlockStyle, metadata::BlockMetadata},
             tests::prelude::*,
             warnings::WarningType,
@@ -495,7 +494,7 @@ mod tests {
     }
 
     mod comment {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -524,7 +523,6 @@ mod tests {
 
     mod example {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,
@@ -919,7 +917,7 @@ mod tests {
     }
 
     mod listing {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -947,7 +945,7 @@ mod tests {
     }
 
     mod literal {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -976,7 +974,6 @@ mod tests {
 
     mod open {
         use crate::{
-            Parser,
             blocks::{BreakType, ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,
@@ -1363,7 +1360,6 @@ mod tests {
 
     mod sidebar {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,
@@ -1746,7 +1742,7 @@ mod tests {
     }
 
     mod table {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -1828,7 +1824,7 @@ mod tests {
     }
 
     mod pass {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -1857,7 +1853,6 @@ mod tests {
 
     mod quote {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, SimpleBlockStyle, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,

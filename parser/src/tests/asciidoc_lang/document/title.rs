@@ -13,7 +13,7 @@ Like all elements of the document header, the document title is optional.
 );
 
 mod title_syntax {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -140,7 +140,7 @@ The author and revision information isn't shown below the document title in the 
 );
 
 mod reference_doctitle {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
         r#"

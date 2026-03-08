@@ -11,7 +11,6 @@ non_normative!(
 
 mod shorthand_values {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };
@@ -171,7 +170,6 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
 
 mod apply_substitutions_to_inline_text {
     use crate::{
-        Parser,
         blocks::{Block, IsBlock},
         tests::prelude::*,
     };

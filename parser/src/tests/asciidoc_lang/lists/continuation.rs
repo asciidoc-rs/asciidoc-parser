@@ -24,7 +24,6 @@ The main focus of the syntax covered on this page is to keep the list continuous
 
 mod multiline_principal_text {
     use crate::{
-        Parser,
         blocks::{ListType, SimpleBlockStyle},
         tests::prelude::*,
     };
@@ -332,7 +331,6 @@ An empty line between two list items will not break the list.
 
     mod empty_lines {
         use crate::{
-            Parser,
             blocks::{ListType, SimpleBlockStyle},
             tests::prelude::*,
         };
@@ -704,7 +702,6 @@ For ordered lists, this will ensure that the numbering continues from one list i
 
 mod list_continuation {
     use crate::{
-        Parser,
         blocks::{ContentModel, ListType, SimpleBlockStyle},
         content::SubstitutionGroup,
         tests::prelude::{inline_file_handler::InlineFileHandler, *},
@@ -1865,7 +1862,6 @@ The only limitation of this technique is that the content itself may not contain
 
 mod drop_principal_text {
     use crate::{
-        Parser,
         blocks::{ContentModel, ListType},
         content::SubstitutionGroup,
         tests::prelude::*,
@@ -2044,7 +2040,6 @@ include::example$complex.adoc[tag=complex-only]
 
 mod attach_to_ancestor_list {
     use crate::{
-        Parser,
         blocks::{ListType, SimpleBlockStyle},
         tests::prelude::*,
     };

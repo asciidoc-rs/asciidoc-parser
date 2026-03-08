@@ -26,7 +26,6 @@ You can assign one or more options to a block using the shorthand or formal synt
     );
 
     use crate::{
-        Parser,
         blocks::{IsBlock, SimpleBlockStyle},
         tests::prelude::*,
     };
@@ -610,7 +609,6 @@ Let's consider `options` when combined with other attributes.
     );
 
     use crate::{
-        Parser,
         blocks::{IsBlock, ListType, SimpleBlockStyle},
         content::SubstitutionGroup,
         tests::prelude::*,

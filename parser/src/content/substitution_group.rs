@@ -241,9 +241,9 @@ mod tests {
 
     mod from_custom_string {
         use crate::{
-            Parser,
             content::{Content, SubstitutionGroup, SubstitutionStep},
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]
@@ -592,9 +592,9 @@ mod tests {
 
     mod normal {
         use crate::{
-            Parser,
             content::{Content, SubstitutionGroup},
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]
@@ -686,10 +686,10 @@ mod tests {
 
     mod attribute_entry_value {
         use crate::{
-            Parser,
             content::{Content, SubstitutionGroup},
             parser::ModificationContext,
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]
@@ -767,9 +767,9 @@ mod tests {
 
     mod header {
         use crate::{
-            Parser,
             content::{Content, SubstitutionGroup},
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]
@@ -847,9 +847,9 @@ mod tests {
 
     mod title {
         use crate::{
-            Parser,
             content::{Content, SubstitutionGroup},
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]

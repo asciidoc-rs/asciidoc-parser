@@ -1,4 +1,4 @@
-use crate::{Parser, document::RefType, tests::prelude::*};
+use crate::{document::RefType, tests::prelude::*};
 
 track_file!("docs/modules/sections/pages/appendix.adoc");
 

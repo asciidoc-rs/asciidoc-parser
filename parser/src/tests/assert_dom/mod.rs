@@ -136,7 +136,7 @@ pub(crate) use xpath::query_xpath;
 mod tests {
     mod xpath {
         use super::super::*;
-        use crate::Parser;
+        use crate::tests::prelude::*;
 
         #[test]
         fn assert_xpath_success() {
@@ -178,7 +178,7 @@ mod tests {
 
     mod css {
         use super::super::*;
-        use crate::Parser;
+        use crate::tests::prelude::*;
 
         #[test]
         fn assert_css_success() {
@@ -195,7 +195,7 @@ mod tests {
 
     mod refute_output_contains {
         use super::super::*;
-        use crate::Parser;
+        use crate::tests::prelude::*;
 
         #[test]
         fn succeeds_when_no_such_content() {

@@ -1,4 +1,4 @@
-use crate::{Parser, document::InterpretedValue, tests::prelude::*};
+use crate::{document::InterpretedValue, tests::prelude::*};
 
 track_file!("docs/modules/attributes/pages/boolean-attributes.adoc");
 

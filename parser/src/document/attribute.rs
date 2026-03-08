@@ -228,7 +228,7 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        HasSpan, Parser,
+        HasSpan,
         blocks::{ContentModel, IsBlock, SimpleBlockStyle},
         content::SubstitutionGroup,
         parser::ModificationContext,

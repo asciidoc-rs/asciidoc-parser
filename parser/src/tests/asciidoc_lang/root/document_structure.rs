@@ -16,7 +16,7 @@ Right now, we're just aiming to get a sense of what makes up an AsciiDoc documen
 );
 
 mod documents {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -348,7 +348,7 @@ Documents can range from a single sentence to a multi-part book.
 }
 
 mod lines {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]
     fn section_title() {

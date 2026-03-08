@@ -257,9 +257,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        Parser,
         parser::{SourceLine, preprocessor::preprocess},
-        tests::fixtures::inline_file_handler::InlineFileHandler,
+        tests::{fixtures::inline_file_handler::InlineFileHandler, prelude::*},
     };
 
     #[test]

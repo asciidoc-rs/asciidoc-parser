@@ -382,9 +382,7 @@ mod tests {
     }
 
     mod parse {
-        use crate::{
-            Parser, blocks::metadata::BlockMetadata, tests::prelude::*, warnings::WarningType,
-        };
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*, warnings::WarningType};
 
         #[test]
         fn err_invalid_delimiter() {
@@ -458,7 +456,6 @@ mod tests {
 
     mod comment {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,
@@ -671,7 +668,7 @@ mod tests {
     }
 
     mod example {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -700,7 +697,6 @@ mod tests {
 
     mod listing {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
             content::{SubstitutionGroup, SubstitutionStep},
             tests::prelude::*,
@@ -1019,7 +1015,7 @@ mod tests {
     }
 
     mod sidebar {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -1047,7 +1043,7 @@ mod tests {
     }
 
     mod table {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {
@@ -1130,7 +1126,6 @@ mod tests {
 
     mod pass {
         use crate::{
-            Parser,
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
             content::SubstitutionGroup,
             tests::prelude::*,
@@ -1332,7 +1327,7 @@ mod tests {
     }
 
     mod quote {
-        use crate::{Parser, blocks::metadata::BlockMetadata};
+        use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
 
         #[test]
         fn empty() {

@@ -1,5 +1,4 @@
 use crate::{
-    Parser,
     blocks::{ContentModel, IsBlock, MediaType, SimpleBlockStyle},
     tests::prelude::*,
 };

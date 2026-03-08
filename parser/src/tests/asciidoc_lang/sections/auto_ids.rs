@@ -17,7 +17,6 @@ This page explains how the ID is derived and how to control this behavior.
 
 mod how_a_section_id_is_computed {
     use crate::{
-        Parser,
         blocks::{SimpleBlockStyle, metadata::BlockMetadata},
         document::RefType,
         parser::ModificationContext,
@@ -469,7 +468,7 @@ As a result, the processor is not able to lookup the reference and therefore mus
     );
 }
 mod disable_automatic_section_id_generation {
-    use crate::{Parser, document::RefType, tests::prelude::*};
+    use crate::{document::RefType, tests::prelude::*};
 
     non_normative!(
         r#"

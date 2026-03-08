@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Parser, attributes::Attrlist, parser::IncludeFileHandler};
+use crate::{attributes::Attrlist, parser::IncludeFileHandler, tests::prelude::*};
 
 #[derive(Debug)]
 pub(crate) struct InlineFileHandler(HashMap<&'static str, &'static str>);

@@ -572,7 +572,7 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use crate::{HasSpan, Parser, span::MatchedItem, tests::prelude::*};
+    use crate::{HasSpan, span::MatchedItem, tests::prelude::*};
 
     fn lim_parse<'a>(
         source: &'a str,

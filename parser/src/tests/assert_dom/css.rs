@@ -607,7 +607,7 @@ fn unescape_css_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Parser, tests::assert_dom::virtual_dom::ToVirtualDom};
+    use crate::tests::{assert_dom::virtual_dom::ToVirtualDom, prelude::*};
 
     #[test]
     fn query_all_paragraphs() {

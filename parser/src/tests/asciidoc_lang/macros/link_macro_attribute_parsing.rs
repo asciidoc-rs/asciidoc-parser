@@ -13,7 +13,7 @@ This page explains the conditions when this occurs and how to write the link tex
 );
 
 mod link_text_alongside_named_attributes {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -475,7 +475,7 @@ It also recognizes a handful of attributes that are specific to the link macro.
 }
 
 mod target_separate_window {
-    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
+    use crate::{blocks::SimpleBlockStyle, tests::prelude::*};
 
     non_normative!(
         r#"

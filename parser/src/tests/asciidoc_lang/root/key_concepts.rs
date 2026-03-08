@@ -74,7 +74,6 @@ An element attribute is defined using an attribute list on an element, or an ava
 
 mod macros {
     use crate::{
-        Parser,
         blocks::{MediaType, SimpleBlockStyle},
         tests::prelude::*,
     };

@@ -384,7 +384,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        Parser,
         attributes::{AttrlistContext, element_attribute::ParseShorthand},
         strings::CowStr,
         tests::prelude::*,
@@ -539,7 +538,6 @@ mod tests {
 
     mod quoted_string {
         use crate::{
-            Parser,
             attributes::{AttrlistContext, element_attribute::ParseShorthand},
             parser::ModificationContext,
             strings::CowStr,
@@ -916,7 +914,6 @@ mod tests {
 
     mod named {
         use crate::{
-            Parser,
             attributes::{AttrlistContext, element_attribute::ParseShorthand},
             strings::CowStr,
             tests::prelude::*,
@@ -1113,7 +1110,6 @@ mod tests {
 
     mod parse_with_shorthand {
         use crate::{
-            Parser,
             attributes::{AttrlistContext, element_attribute::ParseShorthand},
             strings::CowStr,
             tests::prelude::*,

@@ -13,9 +13,7 @@ Document attributes--built-in, boolean, and custom--can be unset in the document
 );
 
 mod unset_in_header {
-    use crate::{
-        Parser, document::InterpretedValue, parser::ModificationContext, tests::prelude::*,
-    };
+    use crate::{document::InterpretedValue, parser::ModificationContext, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -120,7 +118,7 @@ This is an attribute that is set and assigned a default value of `Example` autom
 }
 
 mod unset_in_body {
-    use crate::{Parser, document::InterpretedValue, tests::prelude::*};
+    use crate::{document::InterpretedValue, tests::prelude::*};
 
     non_normative!(
         r#"

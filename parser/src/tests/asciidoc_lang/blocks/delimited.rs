@@ -1,5 +1,4 @@
 use crate::{
-    Parser,
     blocks::{ContentModel, IsBlock, SimpleBlockStyle},
     content::SubstitutionGroup,
     tests::prelude::*,
@@ -490,7 +489,6 @@ The structural container provides a default context and expected content model, 
 
 mod nesting_blocks {
     use crate::{
-        Parser,
         blocks::{ContentModel, SimpleBlockStyle},
         content::SubstitutionGroup,
         tests::prelude::*,

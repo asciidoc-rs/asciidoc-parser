@@ -64,7 +64,7 @@ impl<'src> HasSpan<'src> for AuthorLine<'src> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Parser, parser::ModificationContext, tests::prelude::*};
+    use crate::{parser::ModificationContext, tests::prelude::*};
 
     #[test]
     fn empty_line() {

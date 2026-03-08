@@ -520,7 +520,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        Parser,
         blocks::{IsBlock, metadata::BlockMetadata, section::SectionType},
         tests::prelude::*,
         warnings::WarningType,
@@ -588,7 +587,6 @@ mod tests {
         use std::ops::Deref;
 
         use crate::{
-            Parser,
             blocks::{
                 ContentModel, IsBlock, MediaType, SimpleBlockStyle, metadata::BlockMetadata,
                 section::SectionType,
@@ -1507,7 +1505,6 @@ mod tests {
         use std::ops::Deref;
 
         use crate::{
-            Parser,
             blocks::{
                 ContentModel, IsBlock, MediaType, SimpleBlockStyle, metadata::BlockMetadata,
                 section::SectionType,
@@ -2670,8 +2667,8 @@ mod tests {
 
     mod section_numbering {
         use crate::{
-            Parser,
             blocks::{Block, IsBlock},
+            tests::prelude::*,
         };
 
         #[test]
@@ -3076,7 +3073,7 @@ mod tests {
         use std::ops::Deref;
 
         use crate::{
-            HasSpan, Parser,
+            HasSpan,
             blocks::{ContentModel, IsBlock, metadata::BlockMetadata, section::SectionType},
             content::SubstitutionGroup,
             tests::prelude::*,

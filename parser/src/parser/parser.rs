@@ -490,7 +490,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        Parser,
         attributes::Attrlist,
         blocks::{Block, IsBlock},
         parser::{

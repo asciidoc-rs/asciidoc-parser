@@ -434,8 +434,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        HasSpan, Parser, attributes::AttrlistContext, parser::ModificationContext,
-        tests::prelude::*, warnings::WarningType,
+        HasSpan, attributes::AttrlistContext, parser::ModificationContext, tests::prelude::*,
+        warnings::WarningType,
     };
 
     #[test]
@@ -1324,7 +1324,7 @@ mod tests {
     }
 
     mod id {
-        use crate::{HasSpan, Parser, attributes::AttrlistContext, tests::prelude::*};
+        use crate::{HasSpan, attributes::AttrlistContext, tests::prelude::*};
 
         #[test]
         fn via_shorthand_syntax() {
@@ -1542,7 +1542,7 @@ mod tests {
     }
 
     mod roles {
-        use crate::{HasSpan, Parser, attributes::AttrlistContext, tests::prelude::*};
+        use crate::{HasSpan, attributes::AttrlistContext, tests::prelude::*};
 
         #[test]
         fn via_shorthand_syntax() {
@@ -2058,7 +2058,7 @@ mod tests {
     }
 
     mod options {
-        use crate::{HasSpan, Parser, attributes::AttrlistContext, tests::prelude::*};
+        use crate::{HasSpan, attributes::AttrlistContext, tests::prelude::*};
 
         #[test]
         fn via_shorthand_syntax() {

@@ -59,7 +59,7 @@ For convenience, these types are grouped and ordered into substitution groups.
 );
 
 mod substitution_groups {
-    use crate::{Parser, blocks::IsBlock, content::SubstitutionGroup, tests::prelude::*};
+    use crate::{blocks::IsBlock, content::SubstitutionGroup, tests::prelude::*};
 
     non_normative!(
         r#"

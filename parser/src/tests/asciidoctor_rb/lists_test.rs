@@ -34,11 +34,10 @@
 #![allow(unused_imports)]
 
 mod bulleted_lists {
-    use crate::{Parser, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     mod simple_lists {
         use crate::{
-            Parser,
             blocks::{ListType, SimpleBlockStyle},
             document::RefType,
             tests::prelude::*,
@@ -1833,7 +1832,7 @@ mod bulleted_lists {
 }
 
 mod ordered_lists {
-    use crate::{Parser, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     mod simple_lists {
         use super::*;
@@ -2136,7 +2135,7 @@ mod ordered_lists {
 }
 
 mod description_lists_dlist {
-    use crate::{Parser, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     mod simple_lists {
         use super::*;
@@ -3586,7 +3585,7 @@ mod description_lists_dlist {
 }
 
 mod description_lists_redux {
-    use crate::{Parser, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     mod label_without_text_on_same_line {
         use super::*;
@@ -4754,7 +4753,7 @@ mod description_lists_redux {
 mod callout_lists {
     // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
     // Implement these tests once callouts are implemented.
-    use crate::Parser;
+    use crate::tests::prelude::*;
 
     #[test]
     #[ignore]
@@ -5055,7 +5054,7 @@ mod callout_lists {
 mod checklists {
     // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/481):
     // Enable these tests when checklists are implemented.
-    use crate::Parser;
+    use crate::tests::prelude::*;
 
     #[test]
     #[ignore]
@@ -5106,7 +5105,6 @@ mod checklists {
 
 mod lists_model {
     use crate::{
-        Parser,
         blocks::{ContentModel, ListType, SimpleBlockStyle},
         content::SubstitutionGroup,
         tests::prelude::*,

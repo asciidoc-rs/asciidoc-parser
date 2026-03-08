@@ -212,7 +212,6 @@ mod tests {
     use std::{collections::HashMap, ops::Deref};
 
     use crate::{
-        Parser,
         blocks::{ContentModel, IsBlock, MediaType, SimpleBlockStyle},
         content::SubstitutionGroup,
         document::RefType,

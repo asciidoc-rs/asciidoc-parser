@@ -750,9 +750,9 @@ mod tests {
 
     mod special_characters {
         use crate::{
-            Parser,
             content::{Content, SubstitutionStep},
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]
@@ -800,9 +800,9 @@ mod tests {
 
     mod quotes {
         use crate::{
-            Parser,
             content::{Content, SubstitutionStep},
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]
@@ -866,9 +866,9 @@ mod tests {
 
     mod attribute_references {
         use crate::{
-            Parser,
             content::{Content, SubstitutionStep},
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]
@@ -940,9 +940,9 @@ mod tests {
 
     mod callouts {
         use crate::{
-            Parser,
             content::{Content, SubstitutionStep},
             strings::CowStr,
+            tests::prelude::*,
         };
 
         #[test]
