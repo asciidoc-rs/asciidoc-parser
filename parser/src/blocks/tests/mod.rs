@@ -2,6 +2,7 @@
 //! Many of these tests are repeated from the tests for the individual block
 //! types.
 
+#![allow(clippy::indexing_slicing)]
 #![allow(clippy::panic)]
 #![allow(clippy::unwrap_used)]
 
@@ -104,6 +105,37 @@ mod impl_debug {
 
         let debug_output = format!("{:?}", mi.item);
         assert!(debug_output.starts_with("Block::Break"));
+    }
+}
+
+mod as_list_item {
+    use crate::{
+        Parser,
+        blocks::{Block, IsBlock},
+        span::Span,
+    };
+
+    #[test]
+    fn returns_some_for_list_item() {
+        let mut parser = Parser::default();
+        let mi = Block::parse(Span::new("* item one"), &mut parser)
+            .unwrap_if_no_warnings()
+            .unwrap();
+
+        // The parsed block is a List; its first nested block is a ListItem.
+        let list_items: Vec<_> = mi.item.nested_blocks().collect();
+        assert!(list_items[0].as_list_item().is_some());
+    }
+
+    #[test]
+    fn returns_none_for_non_list_item() {
+        let mut parser = Parser::default();
+        let mi = Block::parse(Span::new("Just a paragraph."), &mut parser)
+            .unwrap_if_no_warnings()
+            .unwrap();
+
+        // A simple paragraph block is not a ListItem.
+        assert!(mi.item.as_list_item().is_none());
     }
 }
 
