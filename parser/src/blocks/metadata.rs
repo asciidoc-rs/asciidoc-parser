@@ -284,7 +284,9 @@ fn parse_maybe_attrlist_line<'src>(
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use crate::tests::prelude::*;
+    use std::collections::HashMap;
+
+    use crate::{Parser, blocks::SimpleBlockStyle, tests::prelude::*};
 
     #[test]
     fn metadata_order_title_anchor_attrlist() {
@@ -402,5 +404,110 @@ mod tests {
             }
         );
         assert!(metadata.attrlist.is_some());
+    }
+
+    #[test]
+    fn title_does_not_extend_via_plus_syntax() {
+        let doc: crate::Document<'_> =
+            Parser::default().parse(".Title abc +\ndef\n****\nStuff > nonsense\n****");
+
+        assert_eq!(
+            doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[
+                    Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "def",
+                                line: 2,
+                                col: 1,
+                                offset: 13,
+                            },
+                            rendered: "def",
+                        },
+                        source: Span {
+                            data: ".Title abc +\ndef",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: Some(Span {
+                            data: "Title abc +",
+                            line: 1,
+                            col: 2,
+                            offset: 1,
+                        },),
+                        title: Some("Title abc +",),
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                    Block::CompoundDelimited(CompoundDelimitedBlock {
+                        blocks: &[Block::Simple(SimpleBlock {
+                            content: Content {
+                                original: Span {
+                                    data: "Stuff > nonsense",
+                                    line: 4,
+                                    col: 1,
+                                    offset: 22,
+                                },
+                                rendered: "Stuff &gt; nonsense",
+                            },
+                            source: Span {
+                                data: "Stuff > nonsense",
+                                line: 4,
+                                col: 1,
+                                offset: 22,
+                            },
+                            style: SimpleBlockStyle::Paragraph,
+                            title_source: None,
+                            title: None,
+                            anchor: None,
+                            anchor_reftext: None,
+                            attrlist: None,
+                        },),],
+                        context: "sidebar",
+                        source: Span {
+                            data: "****\nStuff > nonsense\n****",
+                            line: 3,
+                            col: 1,
+                            offset: 17,
+                        },
+                        title_source: None,
+                        title: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),
+                ],
+                source: Span {
+                    data: ".Title abc +\ndef\n****\nStuff > nonsense\n****",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog {
+                    refs: HashMap::from([]),
+                    reftext_to_id: HashMap::from([]),
+                },
+            }
+        );
     }
 }
