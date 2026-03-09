@@ -58,7 +58,7 @@ mod context {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{ContentModel, IsBlock, is_built_in_context},
+        blocks::{ContentModel, is_built_in_context},
         tests::prelude::*,
     };
 
@@ -518,10 +518,7 @@ In the converter, these blocks must be accessed from their parent block.
 }
 
 mod block_style {
-    use crate::{
-        blocks::{ContentModel, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ContentModel, tests::prelude::*};
 
     non_normative!(
         r#"

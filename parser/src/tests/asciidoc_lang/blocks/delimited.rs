@@ -1,7 +1,4 @@
-use crate::{
-    blocks::{ContentModel, IsBlock},
-    tests::prelude::*,
-};
+use crate::{blocks::ContentModel, tests::prelude::*};
 
 track_file!("docs/modules/blocks/pages/delimited.adoc");
 

@@ -1,8 +1,4 @@
-use crate::{
-    blocks::{ContentModel, IsBlock},
-    content::SubstitutionStep,
-    tests::prelude::*,
-};
+use crate::{blocks::ContentModel, content::SubstitutionStep, tests::prelude::*};
 
 track_file!("docs/modules/verbatim/pages/listing-blocks.adoc");
 

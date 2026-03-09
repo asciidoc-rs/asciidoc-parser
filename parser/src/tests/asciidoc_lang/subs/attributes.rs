@@ -18,10 +18,7 @@ Attribute references are replaced with the values of the attribute they referenc
 );
 
 mod default_attributes_substitution {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -348,10 +345,7 @@ mod default_attributes_substitution {
 }
 
 mod attributes_substitution_value {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

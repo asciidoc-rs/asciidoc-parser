@@ -1,7 +1,4 @@
-use crate::{
-    blocks::{Block, IsBlock},
-    tests::prelude::*,
-};
+use crate::{blocks::Block, tests::prelude::*};
 
 track_file!("docs/modules/subs/pages/post-replacements.adoc");
 
@@ -39,10 +36,7 @@ The line break character, `{plus}`, is replaced when the `post_replacements` sub
 }
 
 mod default_post_replacements_substitution {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -371,10 +365,7 @@ mod default_post_replacements_substitution {
 }
 
 mod post_replacements_substitution_value {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

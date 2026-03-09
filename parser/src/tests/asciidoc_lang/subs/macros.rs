@@ -19,10 +19,7 @@ The macros step replaces a macro's content with the appropriate built-in and use
 );
 
 mod default_macros_substitution {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -351,10 +348,7 @@ mod default_macros_substitution {
 }
 
 mod macros_substitution_value {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

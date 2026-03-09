@@ -15,10 +15,7 @@ The size and precise placement of the text depends on the font and other stylesh
 );
 
 mod subscript_and_superscript_syntax {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     #[test]
     fn basic_syntax() {

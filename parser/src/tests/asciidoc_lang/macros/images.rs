@@ -506,10 +506,7 @@ To turn off figure caption labels and numbers, unset the `figure-caption` attrib
 }
 
 mod inline_image_macro {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

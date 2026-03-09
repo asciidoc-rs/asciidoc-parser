@@ -32,7 +32,7 @@ mod assign_roles_to_blocks {
 "#
     );
 
-    use crate::{blocks::IsBlock, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -405,7 +405,7 @@ This longhand syntax can also be used on inline macros, but it cannot be used wi
 }
 
 mod assign_roles_to_formatted_inline_elements {
-    use crate::{blocks::IsBlock, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"

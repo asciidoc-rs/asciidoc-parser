@@ -211,7 +211,7 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{ContentModel, IsBlock, MediaType, metadata::BlockMetadata},
+        blocks::{ContentModel, MediaType, metadata::BlockMetadata},
         tests::prelude::*,
     };
 

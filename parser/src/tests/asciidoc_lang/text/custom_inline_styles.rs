@@ -10,10 +10,7 @@ non_normative!(
 );
 
 mod custom_style_syntax {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     #[test]
     fn built_in_role() {

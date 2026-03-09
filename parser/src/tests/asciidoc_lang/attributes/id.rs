@@ -203,10 +203,7 @@ NOTE: Section pending
 }
 
 mod block_assignment {
-    use crate::{
-        blocks::{IsBlock, ListType},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ListType, tests::prelude::*};
 
     non_normative!(
         r#"

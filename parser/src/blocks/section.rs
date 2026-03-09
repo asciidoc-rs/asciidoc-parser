@@ -520,7 +520,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        blocks::{IsBlock, metadata::BlockMetadata, section::SectionType},
+        blocks::{metadata::BlockMetadata, section::SectionType},
         tests::prelude::*,
     };
 
@@ -586,9 +586,7 @@ mod tests {
         use std::ops::Deref;
 
         use crate::{
-            blocks::{
-                ContentModel, IsBlock, MediaType, metadata::BlockMetadata, section::SectionType,
-            },
+            blocks::{ContentModel, MediaType, metadata::BlockMetadata, section::SectionType},
             tests::prelude::*,
         };
 
@@ -1501,9 +1499,7 @@ mod tests {
         use std::ops::Deref;
 
         use crate::{
-            blocks::{
-                ContentModel, IsBlock, MediaType, metadata::BlockMetadata, section::SectionType,
-            },
+            blocks::{ContentModel, MediaType, metadata::BlockMetadata, section::SectionType},
             tests::prelude::*,
         };
 
@@ -2659,10 +2655,7 @@ mod tests {
     }
 
     mod section_numbering {
-        use crate::{
-            blocks::{Block, IsBlock},
-            tests::prelude::*,
-        };
+        use crate::{blocks::Block, tests::prelude::*};
 
         #[test]
         fn single_section_with_sectnums() {
@@ -3066,7 +3059,7 @@ mod tests {
         use std::ops::Deref;
 
         use crate::{
-            blocks::{ContentModel, IsBlock, metadata::BlockMetadata, section::SectionType},
+            blocks::{ContentModel, metadata::BlockMetadata, section::SectionType},
             tests::prelude::*,
         };
 

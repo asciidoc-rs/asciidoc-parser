@@ -720,10 +720,7 @@ mod listing {
 }
 
 mod pass {
-    use crate::{
-        blocks::{ContentModel, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ContentModel, tests::prelude::*};
 
     #[test]
     fn empty() {
