@@ -18,10 +18,7 @@ non_normative!(
 );
 
 mod replacements {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -274,10 +271,7 @@ These attributes and their corresponding output are listed in xref:attributes:ch
 }
 
 mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -600,10 +594,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
 }
 
 mod replacements_substitution_value {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

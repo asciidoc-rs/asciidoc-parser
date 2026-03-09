@@ -13,7 +13,7 @@ This page breaks down the difference between positional and named attributes on 
 
 mod positional_attribute {
     use crate::{
-        blocks::{IsBlock, ListType, metadata::BlockMetadata},
+        blocks::{ListType, metadata::BlockMetadata},
         tests::prelude::*,
     };
 

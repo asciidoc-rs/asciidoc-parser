@@ -10,10 +10,7 @@ non_normative!(
 );
 
 mod shorthand_values {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -169,10 +166,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
 }
 
 mod apply_substitutions_to_inline_text {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

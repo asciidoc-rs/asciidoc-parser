@@ -1,7 +1,4 @@
-use crate::{
-    blocks::{BreakType, IsBlock},
-    tests::prelude::*,
-};
+use crate::{blocks::BreakType, tests::prelude::*};
 
 track_file!("docs/modules/blocks/pages/breaks.adoc");
 

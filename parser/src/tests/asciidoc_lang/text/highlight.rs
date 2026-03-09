@@ -1,7 +1,4 @@
-use crate::{
-    blocks::{Block, IsBlock},
-    tests::prelude::*,
-};
+use crate::{blocks::Block, tests::prelude::*};
 
 track_file!("docs/modules/text/pages/highlight.adoc");
 

@@ -519,7 +519,7 @@ mod tests {
 
     mod example {
         use crate::{
-            blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
+            blocks::{ContentModel, metadata::BlockMetadata},
             tests::prelude::*,
         };
 
@@ -969,7 +969,7 @@ mod tests {
 
     mod open {
         use crate::{
-            blocks::{BreakType, ContentModel, IsBlock, metadata::BlockMetadata},
+            blocks::{BreakType, ContentModel, metadata::BlockMetadata},
             tests::prelude::*,
         };
 
@@ -1354,7 +1354,7 @@ mod tests {
 
     mod sidebar {
         use crate::{
-            blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
+            blocks::{ContentModel, metadata::BlockMetadata},
             tests::prelude::*,
         };
 
@@ -1846,7 +1846,7 @@ mod tests {
 
     mod quote {
         use crate::{
-            blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
+            blocks::{ContentModel, metadata::BlockMetadata},
             tests::prelude::*,
         };
 

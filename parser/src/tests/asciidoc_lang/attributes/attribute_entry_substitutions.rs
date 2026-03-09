@@ -1,4 +1,4 @@
-use crate::{blocks::IsBlock, tests::prelude::*};
+use crate::tests::prelude::*;
 
 track_file!("docs/modules/attributes/pages/attribute-entry-substitutions.adoc");
 
@@ -48,11 +48,7 @@ That means that any inline formatting in an attribute value isn't interpreted be
 }
 
 mod change_subs_when_assigning {
-    use crate::{
-        blocks::{ContentModel, IsBlock},
-        content::SubstitutionStep,
-        tests::prelude::*,
-    };
+    use crate::{blocks::ContentModel, content::SubstitutionStep, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -263,7 +259,7 @@ If the macro is absent, the value is processed with the header substitution grou
 }
 
 mod attributes_defined_outside_document {
-    use crate::{blocks::IsBlock, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     // Non-normative because we have a different API and no CLI.
     non_normative!(

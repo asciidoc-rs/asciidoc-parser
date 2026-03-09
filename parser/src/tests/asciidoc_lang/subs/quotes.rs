@@ -16,10 +16,7 @@ non_normative!(
 );
 
 mod quotes {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -233,10 +230,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 }
 
 mod default_quotes_substitution {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -557,10 +551,7 @@ mod default_quotes_substitution {
 }
 
 mod quotes_substitution_value {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

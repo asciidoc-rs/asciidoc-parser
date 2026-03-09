@@ -201,10 +201,7 @@ mod parse {
 }
 
 mod example {
-    use crate::{
-        blocks::{ContentModel, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ContentModel, tests::prelude::*};
 
     #[test]
     fn empty() {
@@ -780,7 +777,7 @@ mod example {
 
 mod open {
     use crate::{
-        blocks::{BreakType, ContentModel, IsBlock},
+        blocks::{BreakType, ContentModel},
         tests::prelude::*,
     };
 
@@ -1179,10 +1176,7 @@ mod open {
 }
 
 mod sidebar {
-    use crate::{
-        blocks::{ContentModel, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ContentModel, tests::prelude::*};
 
     #[test]
     fn empty() {

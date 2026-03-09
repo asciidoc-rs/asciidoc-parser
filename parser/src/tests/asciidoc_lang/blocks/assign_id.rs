@@ -1,4 +1,4 @@
-use crate::{blocks::IsBlock, tests::prelude::*};
+use crate::tests::prelude::*;
 
 track_file!("docs/modules/blocks/pages/assign-id.adoc");
 

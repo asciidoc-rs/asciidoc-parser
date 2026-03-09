@@ -13,10 +13,7 @@ It covers the shorthand syntax, the limitations of that syntax, and when it's ne
 );
 
 mod single_and_double_quotation_mark_syntax {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     #[test]
     fn single_and_double_straight_quotation_marks_syntax() {
@@ -122,10 +119,7 @@ In that case, it's necessary to input the curved quotation marks directly using 
 }
 
 mod apostrophe_syntax {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

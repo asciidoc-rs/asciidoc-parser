@@ -12,10 +12,7 @@ The AsciiDoc syntax offers several approaches for preventing substitutions from 
 );
 
 mod escape_with_backslashes {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
@@ -135,10 +132,7 @@ include::example$subs.adoc[tag=double-slash]
 }
 
 mod passthrough {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"

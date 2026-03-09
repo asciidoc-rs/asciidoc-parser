@@ -227,10 +227,7 @@ mod tests {
 
     use std::ops::Deref;
 
-    use crate::{
-        blocks::{ContentModel, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ContentModel, tests::prelude::*};
 
     #[test]
     fn impl_clone() {

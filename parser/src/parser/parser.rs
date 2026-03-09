@@ -491,7 +491,7 @@ mod tests {
 
     use crate::{
         attributes::Attrlist,
-        blocks::{Block, IsBlock},
+        blocks::Block,
         parser::{
             CharacterReplacementType, IconRenderParams, ImageRenderParams,
             InlineSubstitutionRenderer, LinkRenderParams, QuoteScope, QuoteType, SpecialCharacter,

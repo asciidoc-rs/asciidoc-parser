@@ -89,10 +89,7 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use crate::{
-        blocks::{ContentModel, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::ContentModel, tests::prelude::*};
 
     fn doc_fixture() -> crate::Document<'static> {
         Parser::default().parse("= Document Title\n\nSome early words go here.\n\n== First Section")

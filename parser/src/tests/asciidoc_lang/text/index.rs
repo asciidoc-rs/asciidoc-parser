@@ -15,10 +15,7 @@ This page covers the formatting marks that AsciiDoc provides and the rules for a
 );
 
 mod formatting_terms_and_concepts {
-    use crate::{
-        blocks::{Block, IsBlock},
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, tests::prelude::*};
 
     non_normative!(
         r#"
