@@ -37,6 +37,7 @@ pub fn replace_with_lookahead<'h, LR: LookaheadReplacer>(
                 LookaheadResult::SkipAheadAndRetry(n) => {
                     assert!(n > 0);
                     haystack = &haystack[m.start() + n..];
+                    last_match = 0;
                     continue 'retry;
                 }
             }

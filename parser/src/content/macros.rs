@@ -292,10 +292,14 @@ impl Replacer for InlineLinkReplacer<'_> {
             return;
         }
 
-        let mut target = format!(
-            "{scheme}{link_text}",
-            link_text = caps.get(4).map(|m| m.as_str()).unwrap_or_else(|| &caps[7])
-        );
+        // Group 4 = formal macro target, group 7 = bare link, group 6 = URL
+        // before &gt; (may match without the &lt; prefix of group 2).
+        let url_part = caps.get(4)
+            .or_else(|| caps.get(7))
+            .or_else(|| caps.get(6))
+            .map(|m| m.as_str())
+            .unwrap_or("");
+        let mut target = format!("{scheme}{url_part}");
 
         let mut suffix = "".to_owned();
         let mut link_text: Option<String> = None;
@@ -322,17 +326,20 @@ impl Replacer for InlineLinkReplacer<'_> {
                 return;
             }
 
-            let tail = &caps[8];
-            if tail == ";" || tail == ":" {
-                // Move trailing semicolon or colon and adjacent ) if it exists
-                // out of the URL.
-                target.truncate(target.len() - 1);
-                suffix = tail.to_owned();
-
-                if target.ends_with(')') {
+            // Group 8 only exists when group 7 (bare link) matched.
+            // When group 6 matched without group 2 (angle-bracketed URL but &lt;
+            // was not the prefix), skip the tail/suffix adjustment entirely.
+            if let Some(tail) = caps.get(8).map(|m| m.as_str())
+                && (tail == ";" || tail == ":") {
+                    // Move trailing semicolon or colon and adjacent ) if it exists
+                    // out of the URL.
                     target.truncate(target.len() - 1);
-                    suffix = format!("){suffix}");
-                }
+                    suffix = tail.to_owned();
+
+                    if target.ends_with(')') {
+                        target.truncate(target.len() - 1);
+                        suffix = format!("){suffix}");
+                    }
             }
         }
 
