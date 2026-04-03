@@ -4,6 +4,11 @@ This document summarizes the changes introduced to the AsciiDoc Language Documen
 For a detailed view of what's changed, refer to the repository's
 https://github.com/asciidoctor/asciidoc-docs/commits/main[commit history].
 
+== Published Q2 2026
+
+Added::
+* Add examples for how to avoid first line of paragraph from being matched as a block attribute line
+
 == Published Q1 2026
 
 Added::
