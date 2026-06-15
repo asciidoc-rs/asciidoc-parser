@@ -75,12 +75,3 @@ Thus, the delimited block form is preferred, especially when creating a verbatim
 The following table identifies the built-in block styles, their delimiter syntax, purposes, and the substitutions performed on their contents.
 
 include::partial$block-name-table.adoc[]
-
-////
-This table shows the substitutions performed by each substitution group referenced in the previous table.
-
-include::partial$subs-group-table.adoc[]
-
-OMG. What does this random tip apply to????
-TIP: Surround an attribute value with single quotes in order to apply normal substitutions.
-////
