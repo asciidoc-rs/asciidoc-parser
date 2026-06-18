@@ -217,6 +217,8 @@ static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
             ( [^\s\[\]]+ )                                    # capture group 4: target
             \[ ( | .*?[^\\] ) \]                              # capture group 5: attrlist
           | ( [^\s]+? ) &gt;                                  # capture group 6: URL inside <>
+                                                              # (Ruby gates this with a `\2` back-ref to
+                                                              # group 2; unsupported here - see issue #503)
           | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )              # capture group 7: bare link,
                                                               # capture group 8: trailing char
         )
@@ -292,13 +294,29 @@ impl Replacer for InlineLinkReplacer<'_> {
             return;
         }
 
-        // Group 4 = formal macro target, group 7 = bare link, group 6 = URL
-        // before &gt; (may match without the &lt; prefix of group 2).
-        let url_part = caps.get(4)
-            .or_else(|| caps.get(7))
-            .or_else(|| caps.get(6))
-            .map(|m| m.as_str())
-            .unwrap_or("");
+        // Groups 4, 6, and 7 are mutually exclusive regex alternatives;
+        // exactly one will be Some(_) when we reach this point.
+        // Group 4 = formal macro target (URL before '['), group 7 = bare link.
+        //
+        // Group 6 is the URL captured before a `&gt;`. When the `&lt;` prefix is
+        // also present (group 2), the angle-bracketed-URL case is handled earlier
+        // and returns. Reaching here with group 6 means a stray `&gt;` with no
+        // matching `&lt;`; Asciidoctor treats that as a bare link that keeps the
+        // literal `&gt;`, then strips trailing punctuation via the rule below
+        // (e.g. `https://example.org>` renders with href `https://example.org&gt`
+        // and the `;` left outside the link).
+        //
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/503):
+        // Group 6 should never participate without group 2. Ruby gates it with a
+        // `\2` back-reference, which the `regex` crate can't express, so it can
+        // fire spuriously here and a stray `&gt;` followed by more punctuation
+        // (e.g. `>;`) still diverges from Asciidoctor.
+        let url_part = caps
+            .get(4)
+            .map(|m| m.as_str().to_owned())
+            .or_else(|| caps.get(7).map(|m| m.as_str().to_owned()))
+            .or_else(|| caps.get(6).map(|m| format!("{}&gt;", m.as_str())))
+            .unwrap_or_default();
         let mut target = format!("{scheme}{url_part}");
 
         let mut suffix = "".to_owned();
@@ -326,20 +344,18 @@ impl Replacer for InlineLinkReplacer<'_> {
                 return;
             }
 
-            // Group 8 only exists when group 7 (bare link) matched.
-            // When group 6 matched without group 2 (angle-bracketed URL but &lt;
-            // was not the prefix), skip the tail/suffix adjustment entirely.
-            if let Some(tail) = caps.get(8).map(|m| m.as_str())
-                && (tail == ";" || tail == ":") {
-                    // Move trailing semicolon or colon and adjacent ) if it exists
-                    // out of the URL.
-                    target.truncate(target.len() - 1);
-                    suffix = tail.to_owned();
+            // Strip a trailing ';' or ':' (and an adjacent ')') out of a bare
+            // URL. Keying off the target's final character rather than capture
+            // group 8 covers both the bare-link case (group 7) and the stray
+            // `&gt;` case (group 6, whose reconstructed URL ends in ';').
+            if let Some(tail) = target.chars().last().filter(|c| *c == ';' || *c == ':') {
+                target.truncate(target.len() - 1);
+                suffix = tail.to_string();
 
-                    if target.ends_with(')') {
-                        target.truncate(target.len() - 1);
-                        suffix = format!("){suffix}");
-                    }
+                if target.ends_with(')') {
+                    target.truncate(target.len() - 1);
+                    suffix = format!("){suffix}");
+                }
             }
         }
 

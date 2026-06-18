@@ -161,4 +161,34 @@ TheRiver 1980
             LookaheadResult::SkipAheadAndRetry(3)
         }
     }
+
+    struct ContinueThenSkip {}
+
+    impl LookaheadReplacer for ContinueThenSkip {
+        fn replace_append(
+            &mut self,
+            caps: &Captures<'_>,
+            dst: &mut String,
+            _after: &str,
+        ) -> LookaheadResult {
+            if &caps[0] == "A" {
+                dst.push('a');
+                LookaheadResult::Continue
+            } else {
+                dst.push('b');
+                LookaheadResult::SkipAheadAndRetry(1)
+            }
+        }
+    }
+
+    #[test]
+    fn skip_ahead_after_continue() {
+        // Regression: a Continue match advances last_match to a nonzero offset,
+        // then a SkipAheadAndRetry slices the haystack forward. Without resetting
+        // last_match the next gap-fill indexes the new, shorter haystack with a
+        // stale offset -> panic.
+        let re = Regex::new(r"[AB]").unwrap();
+        let new = replace_with_lookahead(&re, "xAyBzBw", ContinueThenSkip {});
+        assert_eq!(new, "xaybzbw");
+    }
 }

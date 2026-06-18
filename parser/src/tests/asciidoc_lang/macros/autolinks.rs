@@ -834,3 +834,51 @@ The `subs` attribute is only recognized on a leaf block, such as a paragraph.
         );
     }
 }
+
+mod pr498 {
+    use crate::tests::prelude::*;
+
+    #[test]
+    fn bare_url_with_trailing_gt_no_lt_prefix() {
+        // Regression for https://github.com/asciidoc-rs/asciidoc-parser/pull/498:
+        // a bare URL followed by '>' (rendered to &gt;) but NOT preceded by '<'
+        // fires capture group 6 with group 2 unset. Previously this panicked on
+        // the direct `&caps[7]` / `&caps[8]` indexing in InlineLinkReplacer.
+        //
+        // Expected output matches Ruby Asciidoctor 2.0.23, which treats the stray
+        // `&gt;` as part of a bare link (keeping `&gt` in the URL) and leaves the
+        // trailing `;` outside the link.
+        let doc = Parser::default().parse("See https://example.org> for details.");
+
+        let rendered = doc
+            .nested_blocks()
+            .next()
+            .unwrap()
+            .rendered_content()
+            .unwrap();
+
+        assert_eq!(
+            rendered,
+            r#"See <a href="https://example.org&gt" class="bare">https://example.org&gt</a>; for details."#
+        );
+    }
+
+    #[test]
+    fn multiple_bare_urls_with_trailing_gt() {
+        // Two group-6 matches in a row also exercised the skip/retry path; verify
+        // both URLs render and no panic occurs. Output matches Ruby Asciidoctor.
+        let doc = Parser::default().parse("a https://example.org> b https://example.com> c");
+
+        let rendered = doc
+            .nested_blocks()
+            .next()
+            .unwrap()
+            .rendered_content()
+            .unwrap();
+
+        assert_eq!(
+            rendered,
+            r#"a <a href="https://example.org&gt" class="bare">https://example.org&gt</a>; b <a href="https://example.com&gt" class="bare">https://example.com&gt</a>; c"#
+        );
+    }
+}
