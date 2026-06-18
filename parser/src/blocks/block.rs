@@ -10,6 +10,7 @@ use crate::{
     },
     content::SubstitutionGroup,
     document::{Attribute, RefType},
+    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -435,6 +436,64 @@ impl<'src> Block<'src> {
         match self {
             Self::ListItem(li) => Some(li),
             _ => None,
+        }
+    }
+
+    /// Resolve any deferred cross-references in this block and its descendants,
+    /// using `resolver` to map targets to destinations and `renderer` to render
+    /// the resulting links. Unresolved targets are reported in `warnings`.
+    pub(crate) fn resolve_references(
+        &mut self,
+        resolver: &dyn ReferenceResolver,
+        renderer: &dyn InlineSubstitutionRenderer,
+        warnings: &mut Vec<ReferenceWarning>,
+    ) {
+        match self {
+            Self::Simple(b) => b
+                .content_mut()
+                .resolve_references(resolver, renderer, warnings),
+
+            Self::RawDelimited(b) => b
+                .content_mut()
+                .resolve_references(resolver, renderer, warnings),
+
+            Self::Section(b) => {
+                b.section_title_mut()
+                    .resolve_references(resolver, renderer, warnings);
+                for child in b.nested_blocks_mut() {
+                    child.resolve_references(resolver, renderer, warnings);
+                }
+            }
+
+            Self::List(b) => {
+                for item in b.items_mut() {
+                    item.resolve_references(resolver, renderer, warnings);
+                }
+            }
+
+            Self::ListItem(b) => {
+                if let Some(term) = b.marker_mut().term_mut() {
+                    term.resolve_references(resolver, renderer, warnings);
+                }
+                for child in b.nested_blocks_mut() {
+                    child.resolve_references(resolver, renderer, warnings);
+                }
+            }
+
+            Self::CompoundDelimited(b) => {
+                for child in b.nested_blocks_mut() {
+                    child.resolve_references(resolver, renderer, warnings);
+                }
+            }
+
+            Self::Preamble(b) => {
+                for child in b.nested_blocks_mut() {
+                    child.resolve_references(resolver, renderer, warnings);
+                }
+            }
+
+            // These block types carry no cross-reference-bearing content.
+            Self::Media(_) | Self::Break(_) | Self::DocumentAttribute(_) => {}
         }
     }
 }

@@ -197,6 +197,16 @@ impl<'src> SectionBlock<'src> {
     pub fn section_number(&'src self) -> Option<&'src SectionNumber> {
         self.section_number.as_ref()
     }
+
+    /// Return a mutable reference to the section title content.
+    pub(crate) fn section_title_mut(&mut self) -> &mut Content<'src> {
+        &mut self.section_title
+    }
+
+    /// Return a mutable slice of this section's child blocks.
+    pub(crate) fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.blocks
+    }
 }
 
 impl<'src> IsBlock<'src> for SectionBlock<'src> {

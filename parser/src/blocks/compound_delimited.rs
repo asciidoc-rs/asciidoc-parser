@@ -139,6 +139,13 @@ impl<'src> CompoundDelimitedBlock<'src> {
     }
 }
 
+impl<'src> CompoundDelimitedBlock<'src> {
+    /// Return a mutable slice of this block's child blocks.
+    pub(crate) fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.blocks
+    }
+}
+
 impl<'src> IsBlock<'src> for CompoundDelimitedBlock<'src> {
     fn content_model(&self) -> ContentModel {
         ContentModel::Compound

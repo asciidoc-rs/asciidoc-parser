@@ -118,6 +118,32 @@ impl Parser {
     /// [`warnings()`]: Document::warnings
     /// [`attribute_value()`]: Self::attribute_value
     pub fn parse(&mut self, source: &str) -> Document<'static> {
+        let mut document = self.parse_deferred(source);
+
+        // Resolve cross-references against this document's own catalog. For
+        // multi-document workflows, use `parse_deferred` and resolve later with
+        // a caller-supplied resolver via `Document::resolve_references`.
+        document.resolve_against_own_catalog(&*self.renderer);
+
+        document
+    }
+
+    /// Parse a UTF-8 string as an AsciiDoc document, leaving cross-references
+    /// unresolved.
+    ///
+    /// This behaves like [`parse()`], except it does not resolve
+    /// cross-references (`<<id>>`, `xref:id[…]`). The returned [`Document`]
+    /// carries its references in a deferred state; resolve them later with
+    /// [`Document::resolve_references`].
+    ///
+    /// This is the entry point for multi-document workflows (e.g. Antora-style
+    /// site generation): parse every document with this method, build a combined
+    /// index from each document's [`catalog()`], then resolve each document
+    /// against that index. This crate does not merge catalogs itself.
+    ///
+    /// [`parse()`]: Self::parse
+    /// [`catalog()`]: Document::catalog
+    pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
         let (preprocessed_source, source_map) = preprocess(source, self);
 
         // NOTE: `Document::parse` will transfer the catalog to itself at the end of the
@@ -681,6 +707,14 @@ mod tests {
 
         fn render_anchor(&self, id: &str, _reftext: Option<String>, dest: &mut String) {
             dest.push_str(&format!("[ANCHOR:{}]", id));
+        }
+
+        fn render_xref(
+            &self,
+            params: &crate::parser::XrefRenderParams,
+            dest: &mut String,
+        ) {
+            dest.push_str(&format!("[XREF:{}]", params.target));
         }
     }
 

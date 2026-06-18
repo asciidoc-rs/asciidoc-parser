@@ -2,7 +2,7 @@ use std::{fmt::Debug, sync::LazyLock};
 
 use regex::Regex;
 
-use crate::{Parser, attributes::Attrlist};
+use crate::{Parser, attributes::Attrlist, parser::ResolvedReference};
 
 /// An implementation of `InlineSubstitutionRenderer` is used when converting
 /// the basic raw text of a simple block to the format which will ultimately be
@@ -149,6 +149,14 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// The rendered should write an appropriate rendering of the specified
     /// anchor with ID and possible ref text (only used by some renderers).
     fn render_anchor(&self, id: &str, reftext: Option<String>, dest: &mut String);
+
+    /// Renders a cross-reference.
+    ///
+    /// When [`XrefRenderParams::resolved`] is `Some`, the reference resolved to
+    /// a destination; the renderer should link to it. When it is `None`, the
+    /// reference could not be resolved and the renderer should emit a sensible
+    /// fallback (e.g. a link to the raw target with bracketed text).
+    fn render_xref(&self, params: &XrefRenderParams, dest: &mut String);
 }
 
 /// Specifies which special character is being replaced in a call to
@@ -324,6 +332,19 @@ pub struct LinkRenderParams<'a> {
 pub enum LinkRenderType {
     /// TEMPORARY: I don't know the different types of links yet.
     Link,
+}
+
+/// Provides parameters for rendering a cross-reference.
+#[derive(Clone, Debug)]
+pub struct XrefRenderParams<'a> {
+    /// The raw, uninterpreted cross-reference target as written in the source.
+    pub target: &'a str,
+
+    /// Explicit link text supplied in the cross-reference, if any.
+    pub provided_text: Option<&'a str>,
+
+    /// The resolved destination, or `None` if the reference is unresolved.
+    pub resolved: Option<&'a ResolvedReference>,
 }
 
 /// Implementation of [`InlineSubstitutionRenderer`] that renders substitutions
@@ -689,6 +710,37 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
     fn render_anchor(&self, id: &str, _reftext: Option<String>, dest: &mut String) {
         dest.push_str(&format!("<a id=\"{id}\"></a>"));
+    }
+
+    fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
+        match params.resolved {
+            Some(resolved) => {
+                let text = params
+                    .provided_text
+                    .map(str::to_string)
+                    .or_else(|| resolved.text.clone())
+                    .unwrap_or_else(|| format!("[{target}]", target = params.target));
+
+                dest.push_str(&format!(
+                    r#"<a href="{href}">{text}</a>"#,
+                    href = resolved.href
+                ));
+            }
+
+            None => {
+                // Unresolved: link to the raw target and show bracketed text,
+                // mirroring Asciidoctor's behavior for a missing reference.
+                let text = params
+                    .provided_text
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("[{target}]", target = params.target));
+
+                dest.push_str(&format!(
+                    r##"<a href="#{target}">{text}</a>"##,
+                    target = params.target
+                ));
+            }
+        }
     }
 }
 

@@ -449,6 +449,19 @@ impl<'src> ListItem<'src> {
     }
 }
 
+impl<'src> ListItem<'src> {
+    /// Return a mutable slice of this list item's child blocks.
+    pub(crate) fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.blocks
+    }
+
+    /// Return a mutable reference to this list item's marker (used to reach a
+    /// description-list term's content).
+    pub(crate) fn marker_mut(&mut self) -> &mut ListItemMarker<'src> {
+        &mut self.marker
+    }
+}
+
 impl<'src> IsBlock<'src> for ListItem<'src> {
     fn content_model(&self) -> ContentModel {
         ContentModel::Compound

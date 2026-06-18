@@ -221,6 +221,15 @@ impl<'src> ListItemMarker<'src> {
     }
 
     /// Test for equality, disregarding span offsets.
+    /// Return a mutable reference to the term content of a description-list
+    /// marker, or `None` for other marker kinds.
+    pub(crate) fn term_mut(&mut self) -> Option<&mut Content<'src>> {
+        match self {
+            Self::DefinedTerm { term, .. } => Some(term),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_match_for(&self, other: &Self) -> bool {
         match self {
             Self::Hyphen(self_span) => match other {

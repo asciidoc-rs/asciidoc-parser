@@ -168,6 +168,11 @@ impl<'src> RawDelimitedBlock<'src> {
     pub fn content(&self) -> &Content<'src> {
         &self.content
     }
+
+    /// Return a mutable reference to the interpreted content of this block.
+    pub(crate) fn content_mut(&mut self) -> &mut Content<'src> {
+        &mut self.content
+    }
 }
 
 impl<'src> IsBlock<'src> for RawDelimitedBlock<'src> {

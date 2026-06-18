@@ -6,7 +6,7 @@ use regex::{Captures, Regex, Replacer};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::Content,
+    content::{Content, content::XrefSegment},
     parser::{IconRenderParams, ImageRenderParams, LinkRenderParams, LinkRenderType},
 };
 
@@ -87,14 +87,34 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
         }
     }
 
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/476):
-    // Handle double-angle-bracket cross-reference syntax.
-    /*
-    if (text.contains('&') && text.contains(";&l") || (found_macroish && text.contains("xref:"))) {
-        todo!("Port cross-reference macro");
-        // Port Ruby Asciidoctor's implementation from lines 742..840.
+    // Cross-references (`<<id>>`, `<<id,text>>`, `xref:id[]`, `xref:id[text]`).
+    //
+    // By the time the macros step runs, the special-characters step has already
+    // turned `<<` / `>>` into `&lt;&lt;` / `&gt;&gt;`. We do NOT resolve the
+    // reference here, because its target may be defined later in the document
+    // (or, for multi-document workflows, in another document). Instead each
+    // cross-reference is recorded as a deferred `XrefSegment` and a placeholder
+    // is left in the rendered text; resolution happens later via
+    // `Document::resolve_references`.
+    if text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:")) {
+        let mut xrefs: Vec<XrefSegment> = vec![];
+
+        let replaced = match INLINE_XREF.replace_all(
+            content.rendered(),
+            InlineXrefReplacer { xrefs: &mut xrefs },
+        ) {
+            Cow::Owned(new_result) => Some(new_result),
+            Cow::Borrowed(_) => None,
+        };
+
+        if let Some(new_result) = replaced {
+            content.rendered = new_result.into();
+        }
+
+        content.set_deferred_xrefs(xrefs);
     }
 
+    /*
     if found_macroish && text.contains("tnote") {
         todo!("Port footnote macro");
         // Port Ruby Asciidoctor's implementation from lines 842..884.
@@ -787,6 +807,80 @@ impl Replacer for InlineAnchorReplacer<'_> {
             .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor);
 
         self.0.renderer.render_anchor(id, reftext, dest);
+    }
+}
+
+/// Matches a cross-reference, in either the double-angle-bracket shorthand or
+/// the `xref:` macro form.
+///
+/// Note that the special-characters substitution runs before macros, so by this
+/// point `<<` and `>>` have already become `&lt;&lt;` and `&gt;&gt;`.
+///
+/// ## Examples
+///
+/// * `<<idname>>` (seen here as `&lt;&lt;idname&gt;&gt;`)
+/// * `<<idname,Reference Text>>`
+/// * `xref:idname[]`
+/// * `xref:idname[Reference Text]`
+static INLINE_XREF: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)
+        (\\)?                           # (1) optional escape backslash
+        (?:
+            &lt;&lt;                     #   shorthand: << (post special-chars)
+              ( .*? )                    # (2) refid plus optional ", reftext"
+            &gt;&gt;                     #   >>
+          |
+            xref:                        #   'xref:' macro form
+              ( [^:\s\[] [^\s\[]* )      # (3) target
+            \[                           #   opening '['
+              ( | .*?[^\\] )             # (4) reftext: empty or ends non-escaped
+            \]                           #   closing ']'
+        )
+        "#,
+    )
+    .unwrap()
+});
+
+#[derive(Debug)]
+struct InlineXrefReplacer<'x> {
+    /// Accumulates the cross-references discovered during replacement, in the
+    /// same order as the placeholders emitted into the output.
+    xrefs: &'x mut Vec<XrefSegment>,
+}
+
+impl Replacer for InlineXrefReplacer<'_> {
+    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
+        if caps.get(1).is_some() {
+            // Honor the escape: emit the reference literally (sans backslash).
+            dest.push_str(&caps[0][1..]);
+            return;
+        }
+
+        let (target, provided_text) = if let Some(inner) = caps.get(2) {
+            // Shorthand form: split an optional ", reftext" off the id.
+            match inner.as_str().split_once(',') {
+                Some((id, text)) => (id.trim().to_string(), Some(text.trim().to_string())),
+                None => (inner.as_str().trim().to_string(), None),
+            }
+        } else {
+            let target = caps[3].to_string();
+            let text = caps
+                .get(4)
+                .map(|m| m.as_str().to_string())
+                .filter(|s| !s.is_empty());
+            (target, text)
+        };
+
+        let index = self.xrefs.len();
+        self.xrefs.push(XrefSegment {
+            target,
+            provided_text,
+            resolved: None,
+        });
+
+        dest.push_str(&Content::xref_placeholder(index));
     }
 }
 

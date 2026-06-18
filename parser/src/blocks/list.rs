@@ -212,6 +212,13 @@ impl<'src> ListBlock<'src> {
     }
 }
 
+impl<'src> ListBlock<'src> {
+    /// Return a mutable slice of this list's items.
+    pub(crate) fn items_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.items
+    }
+}
+
 impl<'src> IsBlock<'src> for ListBlock<'src> {
     fn content_model(&self) -> ContentModel {
         ContentModel::Compound
