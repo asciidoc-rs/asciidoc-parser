@@ -109,28 +109,24 @@ impl<'src> SectionBlock<'src> {
             .and_then(|a| a.named_attribute("reftext").map(|a| a.value()))
             .unwrap_or_else(|| section_title.rendered());
 
-        let section_id = if let Some(catalog) = parser.catalog_mut() {
-            if sectids && manual_id.is_none() {
-                Some(catalog.generate_and_register_unique_id(
-                    &proposed_base_id,
-                    Some(reftext),
-                    RefType::Section,
-                ))
-            } else {
-                if let Some(manual_id) = manual_id
-                    && catalog
-                        .register_ref(manual_id, Some(reftext), RefType::Section)
-                        .is_err()
-                {
-                    warnings.push(Warning {
-                        source: metadata.source.trim_remainder(level_and_title.after),
-                        warning: WarningType::DuplicateId(manual_id.to_string()),
-                    });
-                }
-
-                None
-            }
+        let section_id = if sectids && manual_id.is_none() {
+            Some(parser.generate_and_register_unique_id(
+                &proposed_base_id,
+                Some(reftext),
+                RefType::Section,
+            ))
         } else {
+            if let Some(manual_id) = manual_id
+                && parser
+                    .register_ref(manual_id, Some(reftext), RefType::Section)
+                    .is_err()
+            {
+                warnings.push(Warning {
+                    source: metadata.source.trim_remainder(level_and_title.after),
+                    warning: WarningType::DuplicateId(manual_id.to_string()),
+                });
+            }
+
             None
         };
 

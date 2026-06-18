@@ -415,8 +415,7 @@ impl<'src> Block<'src> {
         warnings: &mut Vec<Warning<'src>>,
     ) {
         if let Some(id) = id
-            && let Some(catalog) = parser.catalog_mut()
-            && let Err(_duplicate_error) = catalog.register_ref(
+            && let Err(_duplicate_error) = parser.register_ref(
                 id,
                 title, // Use block title as reftext if available
                 RefType::Anchor,

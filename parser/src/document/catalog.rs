@@ -17,6 +17,12 @@ pub struct Catalog {
     pub(crate) reftext_to_id: HashMap<String, String>,
 }
 
+impl Default for Catalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Catalog {
     pub(crate) fn new() -> Self {
         Self {

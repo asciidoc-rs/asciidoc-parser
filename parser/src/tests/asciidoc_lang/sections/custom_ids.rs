@@ -497,16 +497,34 @@ Here's how to register auxiliary IDs using inline anchors when using an autogene
             warnings: &[],
             source_map: SourceMap(&[]),
             catalog: Catalog {
-                refs: HashMap::from([(
-                    "_section_title",
-                    RefEntry {
-                        id: "_section_title",
-                        reftext: Some(
-                            "<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>Section Title",
-                        ),
-                        ref_type: RefType::Section,
-                    },
-                ),]),
+                refs: HashMap::from([
+                    (
+                        "_section_title",
+                        RefEntry {
+                            id: "_section_title",
+                            reftext: Some(
+                                "<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>Section Title",
+                            ),
+                            ref_type: RefType::Section,
+                        },
+                    ),
+                    (
+                        "secondary-id",
+                        RefEntry {
+                            id: "secondary-id",
+                            reftext: None,
+                            ref_type: RefType::Anchor,
+                        },
+                    ),
+                    (
+                        "tertiary-id",
+                        RefEntry {
+                            id: "tertiary-id",
+                            reftext: None,
+                            ref_type: RefType::Anchor,
+                        },
+                    ),
+                ]),
                 reftext_to_id: HashMap::from([(
                     "<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>Section Title",
                     "_section_title"
@@ -584,16 +602,34 @@ fn assign_auxiliary_ids_2() {
             warnings: &[],
             source_map: SourceMap(&[]),
             catalog: Catalog {
-                refs: HashMap::from([(
-                    "_section_title",
-                    RefEntry {
-                        id: "_section_title",
-                        reftext: Some(
-                            "Section Title<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>",
-                        ),
-                        ref_type: RefType::Section,
-                    }
-                ),]),
+                refs: HashMap::from([
+                    (
+                        "_section_title",
+                        RefEntry {
+                            id: "_section_title",
+                            reftext: Some(
+                                "Section Title<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>",
+                            ),
+                            ref_type: RefType::Section,
+                        },
+                    ),
+                    (
+                        "secondary-id",
+                        RefEntry {
+                            id: "secondary-id",
+                            reftext: None,
+                            ref_type: RefType::Anchor,
+                        },
+                    ),
+                    (
+                        "tertiary-id",
+                        RefEntry {
+                            id: "tertiary-id",
+                            reftext: None,
+                            ref_type: RefType::Anchor,
+                        },
+                    ),
+                ]),
                 reftext_to_id: HashMap::from([(
                     "Section Title<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>",
                     "_section_title"
@@ -696,16 +732,34 @@ These additional anchor points don't interfere with the declaration of the prima
             warnings: &[],
             source_map: SourceMap(&[]),
             catalog: Catalog {
-                refs: HashMap::from([(
-                    "primary-id",
-                    RefEntry {
-                        id: "primary-id",
-                        reftext: Some(
-                            "<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>Section Title",
-                        ),
-                        ref_type: RefType::Section,
-                    }
-                ),]),
+                refs: HashMap::from([
+                    (
+                        "primary-id",
+                        RefEntry {
+                            id: "primary-id",
+                            reftext: Some(
+                                "<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>Section Title",
+                            ),
+                            ref_type: RefType::Section,
+                        },
+                    ),
+                    (
+                        "secondary-id",
+                        RefEntry {
+                            id: "secondary-id",
+                            reftext: None,
+                            ref_type: RefType::Anchor,
+                        },
+                    ),
+                    (
+                        "tertiary-id",
+                        RefEntry {
+                            id: "tertiary-id",
+                            reftext: None,
+                            ref_type: RefType::Anchor,
+                        },
+                    ),
+                ]),
                 reftext_to_id: HashMap::from([(
                     "<a id=\"secondary-id\"></a><a id=\"tertiary-id\"></a>Section Title",
                     "primary-id"

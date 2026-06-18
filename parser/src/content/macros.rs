@@ -778,6 +778,14 @@ impl Replacer for InlineAnchorReplacer<'_> {
             )
         };
 
+        // Register the inline anchor so that later cross-references can resolve
+        // against it. A duplicate ID here is non-fatal (first registration
+        // wins); block- and section-level registration paths surface duplicate
+        // warnings, so we don't double-report them for inline anchors.
+        let _ = self
+            .0
+            .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor);
+
         self.0.renderer.render_anchor(id, reftext, dest);
     }
 }
@@ -1574,7 +1582,17 @@ mod tests {
                     },
                     warnings: &[],
                     source_map: SourceMap(&[]),
-                    catalog: Catalog::default(),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            "tigers",
+                            RefEntry {
+                                id: "tigers",
+                                reftext: None,
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::new(),
+                    },
                 }
             );
         }
@@ -1631,7 +1649,17 @@ mod tests {
                     },
                     warnings: &[],
                     source_map: SourceMap(&[]),
-                    catalog: Catalog::default(),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            "tigers",
+                            RefEntry {
+                                id: "tigers",
+                                reftext: None,
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::new(),
+                    },
                 }
             );
         }
@@ -1688,7 +1716,17 @@ mod tests {
                     },
                     warnings: &[],
                     source_map: SourceMap(&[]),
-                    catalog: Catalog::default(),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            "tigers",
+                            RefEntry {
+                                id: "tigers",
+                                reftext: Some("Tigers"),
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::from([("Tigers", "tigers")]),
+                    },
                 }
             );
         }
@@ -1746,7 +1784,17 @@ mod tests {
                     },
                     warnings: &[],
                     source_map: SourceMap(&[]),
-                    catalog: Catalog::default(),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            "tigers",
+                            RefEntry {
+                                id: "tigers",
+                                reftext: Some("Tigers"),
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::from([("Tigers", "tigers")]),
+                    },
                 }
             );
         }
@@ -1804,7 +1852,51 @@ mod tests {
                     },
                     warnings: &[],
                     source_map: SourceMap(&[]),
-                    catalog: Catalog::default(),
+                    catalog: Catalog {
+                        refs: HashMap::from([
+                            (
+                                "one",
+                                RefEntry {
+                                    id: "one",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                            (
+                                "two",
+                                RefEntry {
+                                    id: "two",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                            (
+                                "three",
+                                RefEntry {
+                                    id: "three",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                            (
+                                "four",
+                                RefEntry {
+                                    id: "four",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                            (
+                                "five",
+                                RefEntry {
+                                    id: "five",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                        ]),
+                        reftext_to_id: HashMap::new(),
+                    },
                 }
             );
         }
@@ -1861,7 +1953,17 @@ mod tests {
                     },
                     warnings: &[],
                     source_map: SourceMap(&[]),
-                    catalog: Catalog::default(),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            ":idname",
+                            RefEntry {
+                                id: ":idname",
+                                reftext: None,
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::new(),
+                    },
                 }
             );
         }
