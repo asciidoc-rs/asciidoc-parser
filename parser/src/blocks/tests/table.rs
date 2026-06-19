@@ -5,6 +5,7 @@ use crate::{
     HasSpan, Parser, Span,
     blocks::{Block, ContentModel, IsBlock, TableBlock},
     content::SubstitutionGroup,
+    parser::ModificationContext,
 };
 
 /// Parse `source` as a single block and return the [`TableBlock`] it produced.
@@ -310,4 +311,32 @@ fn unsetting_table_caption_suppresses_the_label() {
 
     assert_eq!(table.title(), Some("Numbers"));
     assert!(table.caption().is_none());
+}
+
+#[test]
+fn empty_table_caption_suppresses_the_label() {
+    // An explicitly empty `table-caption` value (a distinct AsciiDoc operation
+    // from a hard unset, e.g. `:!table-caption:`) is also treated as "no label":
+    // each titled table keeps its title but receives no caption and does not
+    // consume a table number. This exercises the empty-label guard separately
+    // from the `Unset` path.
+    let mut parser = Parser::default().with_intrinsic_attribute(
+        "table-caption",
+        "",
+        ModificationContext::Anywhere,
+    );
+    let doc = parser.parse(".First\n|===\n|a\n|===\n\n.Second\n|===\n|b\n|===");
+
+    let observed: Vec<(Option<&str>, Option<&str>)> = doc
+        .nested_blocks()
+        .filter_map(|block| match block {
+            Block::Table(table) => Some((table.title(), table.caption())),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        observed,
+        vec![(Some("First"), None), (Some("Second"), None)]
+    );
 }
