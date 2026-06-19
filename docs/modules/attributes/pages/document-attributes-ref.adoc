@@ -1272,7 +1272,7 @@ _file path_
 |{y}
 |{y}
 |Copy CSS files to output.
-Only relevant when the `linkcss` attribute is set.
+Only relevant when the `linkcss` attribute is set and the output is a standalone HTML file.
 //<<applying-a-theme>>
 
 |css-signature
