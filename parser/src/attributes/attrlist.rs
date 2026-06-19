@@ -147,6 +147,80 @@ impl<'src> Attrlist<'src> {
         }
     }
 
+    /// Merge a subsequent block attribute line into this one.
+    ///
+    /// A block can be preceded by more than one attribute list line (optionally
+    /// straddling the block title). Asciidoctor merges every such line into a
+    /// single set of attributes, where a later line wins on a name (or
+    /// position) conflict and otherwise accumulates. This method folds `later`
+    /// into `self` using those semantics:
+    ///
+    /// * **Named attributes** accumulate; a later attribute with the same name
+    ///   replaces the earlier one (in place, preserving order).
+    /// * **Positional attributes** are matched by position. A later positional
+    ///   replaces the earlier one at the same position. The first positional
+    ///   additionally carries the block style and shorthand items (`#id`,
+    ///   `.role`, `%option`), which are merged via
+    ///   [`ElementAttribute::merge_block_style_shorthand`].
+    /// * The **anchor** is taken from the later line if it specifies one.
+    ///
+    /// The `source` span is left pointing at the first line, since the merged
+    /// attributes no longer correspond to a single contiguous span.
+    pub(crate) fn merge_block_attribute_line(&mut self, later: Attrlist<'src>) {
+        let Attrlist {
+            attributes: later_attributes,
+            anchor: later_anchor,
+            source: _,
+        } = later;
+
+        if later_anchor.is_some() {
+            self.anchor = later_anchor;
+        }
+
+        let mut positional_index = 0usize;
+
+        for attr in later_attributes {
+            if attr.name_str().is_some() {
+                if let Some(existing) = self
+                    .attributes
+                    .iter_mut()
+                    .find(|a| a.name_str() == attr.name_str())
+                {
+                    *existing = attr;
+                } else {
+                    self.attributes.push(attr);
+                }
+                continue;
+            }
+
+            positional_index += 1;
+
+            if positional_index == 1 {
+                if let Some(existing) = self.nth_positional_mut(1) {
+                    *existing = ElementAttribute::merge_block_style_shorthand(existing, &attr);
+                } else {
+                    self.attributes.push(attr);
+                }
+            } else if let Some(existing) = self.nth_positional_mut(positional_index) {
+                *existing = attr;
+            } else {
+                self.attributes.push(attr);
+            }
+        }
+    }
+
+    /// Return a mutable reference to the (1-based) `n`th positional attribute.
+    fn nth_positional_mut(&mut self, n: usize) -> Option<&mut ElementAttribute<'src>> {
+        if n == 0 {
+            return None;
+        }
+
+        self.attributes
+            .iter_mut()
+            .filter(|attr| attr.name_str().is_none())
+            .nth(n - 1)
+    }
+
     /// Returns an iterator over the attributes contained within
     /// this attrlist.
     pub fn attributes(&'src self) -> Iter<'src, ElementAttribute<'src>> {
@@ -1279,6 +1353,56 @@ mod tests {
                 warning: WarningType::EmptyShorthandItem,
             }]
         );
+    }
+
+    #[test]
+    fn merge_block_attribute_line_anchor_later_wins() {
+        let p = Parser::default();
+
+        let mut first = crate::attributes::Attrlist::parse(
+            crate::Span::new("[id1]"),
+            &p,
+            AttrlistContext::Block,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        let later = crate::attributes::Attrlist::parse(
+            crate::Span::new("[id2]"),
+            &p,
+            AttrlistContext::Block,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        assert_eq!(first.anchor(), Some("id1"));
+        first.merge_block_attribute_line(later);
+        assert_eq!(first.anchor(), Some("id2"));
+    }
+
+    #[test]
+    fn merge_block_attribute_line_anchor_retained_when_later_has_none() {
+        let p = Parser::default();
+
+        let mut first = crate::attributes::Attrlist::parse(
+            crate::Span::new("[id1]"),
+            &p,
+            AttrlistContext::Block,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        let later = crate::attributes::Attrlist::parse(
+            crate::Span::new("foo=bar"),
+            &p,
+            AttrlistContext::Block,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        first.merge_block_attribute_line(later);
+        assert_eq!(first.anchor(), Some("id1"));
+        assert_eq!(first.named_attribute("foo").unwrap().value(), "bar");
     }
 
     #[test]

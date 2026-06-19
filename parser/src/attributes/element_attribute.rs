@@ -119,11 +119,16 @@ impl<'src> ElementAttribute<'src> {
 
     /// Return the attribute name, if one was found`.
     pub fn name(&'src self) -> Option<&'src str> {
-        if let Some(ref name) = self.name {
-            Some(name.as_ref())
-        } else {
-            None
-        }
+        self.name_str()
+    }
+
+    /// Return the attribute name, if one was found.
+    ///
+    /// Unlike [`name`](Self::name), this borrows for the duration of the call
+    /// only, so it can be used on temporary `ElementAttribute` values (for
+    /// example while merging multiple attribute lists).
+    pub(crate) fn name_str(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
     /// Return the shorthand items, if applicable.
@@ -132,6 +137,12 @@ impl<'src> ElementAttribute<'src> {
     /// attribute is not of the appropriate kind, this will return an empty
     /// list.
     pub fn shorthand_items(&'src self) -> Vec<&'src str> {
+        self.shorthand_items_internal()
+    }
+
+    /// Same as [`shorthand_items`](Self::shorthand_items), but borrows for the
+    /// duration of the call only so it can be used on temporary values.
+    fn shorthand_items_internal(&self) -> Vec<&str> {
         let mut result = vec![];
         let value = self.value.as_ref();
 
@@ -160,7 +171,13 @@ impl<'src> ElementAttribute<'src> {
 
     /// Return the block style name from shorthand syntax.
     pub fn block_style(&'src self) -> Option<&'src str> {
-        self.shorthand_items()
+        self.block_style_internal()
+    }
+
+    /// Same as [`block_style`](Self::block_style), but borrows for the duration
+    /// of the call only.
+    fn block_style_internal(&self) -> Option<&str> {
+        self.shorthand_items_internal()
             .first()
             .filter(|v| !v.chars().any(is_shorthand_delimiter))
             .cloned()
@@ -200,8 +217,13 @@ impl<'src> ElementAttribute<'src> {
     /// * Goal 2
     /// ```
     pub fn id(&'src self) -> Option<&'src str> {
-        self.shorthand_items()
-            .iter()
+        self.id_internal()
+    }
+
+    /// Same as [`id`](Self::id), but borrows for the duration of the call only.
+    fn id_internal(&self) -> Option<&str> {
+        self.shorthand_items_internal()
+            .into_iter()
             .find(|v| v.starts_with('#'))
             .map(|v| &v[1..])
     }
@@ -228,8 +250,14 @@ impl<'src> ElementAttribute<'src> {
     ///
     /// [named attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/positional-and-named-attributes/#named
     pub fn roles(&'src self) -> Vec<&'src str> {
-        self.shorthand_items()
-            .iter()
+        self.roles_internal()
+    }
+
+    /// Same as [`roles`](Self::roles), but borrows for the duration of the call
+    /// only.
+    fn roles_internal(&self) -> Vec<&str> {
+        self.shorthand_items_internal()
+            .into_iter()
             .filter(|span| span.starts_with('.'))
             .map(|span| &span[1..])
             .collect()
@@ -300,11 +328,68 @@ impl<'src> ElementAttribute<'src> {
     ///
     /// [named attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/positional-and-named-attributes/#named
     pub fn options(&'src self) -> Vec<&'src str> {
-        self.shorthand_items()
-            .iter()
+        self.options_internal()
+    }
+
+    /// Same as [`options`](Self::options), but borrows for the duration of the
+    /// call only.
+    fn options_internal(&self) -> Vec<&str> {
+        self.shorthand_items_internal()
+            .into_iter()
             .filter(|v| v.starts_with('%'))
             .map(|v| &v[1..])
             .collect()
+    }
+
+    /// Merge the shorthand of two first-position (block style) attributes drawn
+    /// from separate block attribute lines, following Asciidoctor's semantics:
+    ///
+    /// * the block style and ID are taken from the later line if it specifies
+    ///   them, otherwise retained from the earlier line;
+    /// * roles and options accumulate, with the earlier line's values first.
+    ///
+    /// The result is a freshly synthesized positional attribute whose value
+    /// re-encodes the merged shorthand so that the usual accessors continue to
+    /// work.
+    pub(crate) fn merge_block_style_shorthand(earlier: &Self, later: &Self) -> Self {
+        let block_style = later.block_style_internal().or(earlier.block_style_internal());
+        let id = later.id_internal().or(earlier.id_internal());
+
+        let mut roles = earlier.roles_internal();
+        roles.extend(later.roles_internal());
+
+        let mut options = earlier.options_internal();
+        options.extend(later.options_internal());
+
+        let mut value = String::new();
+        if let Some(block_style) = block_style {
+            value.push_str(block_style);
+        }
+        if let Some(id) = id {
+            value.push('#');
+            value.push_str(id);
+        }
+        for role in &roles {
+            value.push('.');
+            value.push_str(role);
+        }
+        for option in &options {
+            value.push('%');
+            value.push_str(option);
+        }
+
+        let mut warnings: Vec<WarningType> = vec![];
+        let shorthand_item_indices = if value.is_empty() {
+            vec![]
+        } else {
+            parse_shorthand_items(&value, &mut warnings)
+        };
+
+        Self {
+            name: None,
+            value: CowStr::from(value),
+            shorthand_item_indices,
+        }
     }
 
     /// Return the attribute's value.
