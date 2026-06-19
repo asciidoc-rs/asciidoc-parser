@@ -242,3 +242,72 @@ fn header_option_without_cells() {
     assert!(table.header_row().is_none());
     assert!(table.body_rows().is_empty());
 }
+
+#[test]
+fn titled_table_is_captioned() {
+    // A block title on a table produces both a title and an automatic caption
+    // ("Table 1. ") drawn from the default `table-caption` value.
+    let table = parse_table(".A table with a title\n|===\n|a |b\n|===");
+
+    assert_eq!(table.title(), Some("A table with a title"));
+    assert_eq!(table.caption(), Some("Table 1. "));
+}
+
+#[test]
+fn untitled_table_has_no_caption() {
+    // Without a title, a table is not captioned and does not consume a number.
+    let table = parse_table("|===\n|a |b\n|===");
+
+    assert!(table.title().is_none());
+    assert!(table.caption().is_none());
+}
+
+#[test]
+fn captioned_tables_are_numbered_in_document_order() {
+    // Only titled tables consume a number, and they are numbered in document
+    // order across the whole document.
+    let doc = Parser::default()
+        .parse(".First\n|===\n|a\n|===\n\n|===\n|b\n|===\n\n.Second\n|===\n|c\n|===");
+
+    let captions: Vec<Option<&str>> = doc
+        .nested_blocks()
+        .filter_map(|block| match block {
+            Block::Table(table) => Some(table.caption()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(captions, vec![Some("Table 1. "), None, Some("Table 2. ")]);
+}
+
+#[test]
+fn table_caption_can_be_relabeled() {
+    // The label portion of the caption is taken from the `table-caption`
+    // document attribute.
+    let doc = Parser::default().parse(":table-caption: Spreadsheet\n\n.Numbers\n|===\n|a\n|===");
+
+    let caption = doc.nested_blocks().find_map(|block| match block {
+        Block::Table(table) => table.caption().map(|c| c.to_string()),
+        _ => None,
+    });
+
+    assert_eq!(caption.as_deref(), Some("Spreadsheet 1. "));
+}
+
+#[test]
+fn unsetting_table_caption_suppresses_the_label() {
+    // When `table-caption` is unset, a titled table keeps its title but receives
+    // no caption (and no number).
+    let doc = Parser::default().parse(":!table-caption:\n\n.Numbers\n|===\n|a\n|===");
+
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    assert_eq!(table.title(), Some("Numbers"));
+    assert!(table.caption().is_none());
+}
