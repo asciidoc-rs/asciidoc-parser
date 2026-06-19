@@ -204,3 +204,38 @@ fn resolution_is_repeatable() {
         "See <a href=\"second.html#topic\">Second</a>."
     );
 }
+
+#[test]
+fn re_resolution_is_a_full_independent_sweep() {
+    // Each call re-resolves every reference against the given resolver. A
+    // resolver that no longer knows a target re-reports it as unresolved and
+    // reverts the rendering to the fallback, even though an earlier pass had
+    // resolved it.
+    let mut doc = Parser::default().parse_deferred("See <<topic>>.\n");
+
+    let knows_topic = CrossDocResolver {
+        index: HashMap::from([(
+            "topic".to_string(),
+            ResolvedReference {
+                href: "first.html#topic".to_string(),
+                text: Some("Topic".to_string()),
+            },
+        )]),
+    };
+    let warnings = doc.resolve_references(&knows_topic, &HtmlSubstitutionRenderer {});
+    assert!(warnings.is_empty());
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"first.html#topic\">Topic</a>."
+    );
+
+    // A second pass with an empty resolver re-reports the target and reverts to
+    // the unresolved fallback.
+    let knows_nothing = CrossDocResolver {
+        index: HashMap::new(),
+    };
+    let warnings = doc.resolve_references(&knows_nothing, &HtmlSubstitutionRenderer {});
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].target, "topic");
+    assert_eq!(first_paragraph(&doc), "See <a href=\"#topic\">[topic]</a>.");
+}

@@ -165,8 +165,19 @@ impl<'src> Document<'src> {
     /// document, so a single shared resolver can be parametrized per call site.
     ///
     /// Resolution is non-destructive and may be repeated (e.g. for incremental
-    /// builds or multiple output targets). Targets that cannot be resolved are
-    /// returned as [`ReferenceWarning`]s.
+    /// builds or multiple output targets): the original target text is retained,
+    /// so re-resolving is always possible.
+    ///
+    /// Each call is a **full, independent resolution sweep**. Every
+    /// cross-reference is re-resolved against `resolver`, overwriting any result
+    /// from a previous pass, and the returned [`ReferenceWarning`]s reflect only
+    /// what *this* `resolver` could not resolve — a prior pass having resolved a
+    /// target does not suppress a warning here. Consequently, resolving with a
+    /// resolver that knows fewer targets than an earlier pass (for example,
+    /// calling this after [`Parser::parse`] has already auto-resolved against the
+    /// document's own catalog) will re-report those now-unknown targets as
+    /// unresolved. Multi-document pipelines should therefore start from
+    /// [`Parser::parse_deferred`], which does not auto-resolve.
     pub fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,

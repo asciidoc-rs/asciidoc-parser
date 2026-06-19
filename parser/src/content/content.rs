@@ -127,10 +127,21 @@ impl<'src> Content<'src> {
     /// macros substitution step. The placeholder tokens for these references
     /// must already have been written into [`Content::rendered`], in the same
     /// order as `xrefs`.
+    ///
+    /// This must be called at most once per `Content`: the placeholder indices
+    /// already embedded in [`Content::rendered`] are positions into this single
+    /// `xrefs` vector. The macros substitution runs once per content, so this
+    /// holds in practice; the assertion guards against a future caller breaking
+    /// it.
     pub(crate) fn set_deferred_xrefs(&mut self, xrefs: Vec<XrefSegment>) {
         if xrefs.is_empty() {
             return;
         }
+
+        debug_assert!(
+            self.deferred.is_none(),
+            "set_deferred_xrefs must be called at most once per Content"
+        );
 
         self.deferred = Some(Box::new(DeferredContent {
             template: String::new(),
@@ -228,20 +239,36 @@ fn render_template(
             continue;
         };
 
-        if let Ok(index) = after[..end].parse::<usize>()
-            && let Some(xref) = xrefs.get(index)
-        {
-            renderer.render_xref(
-                &XrefRenderParams {
-                    target: &xref.target,
-                    provided_text: xref.provided_text.as_deref(),
-                    resolved: xref.resolved.as_ref(),
-                },
-                &mut out,
-            );
-        }
-
+        let body = &after[..end];
         rest = &after[end + XREF_PLACEHOLDER_END.len_utf8()..];
+
+        match body
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| xrefs.get(index))
+        {
+            Some(xref) => {
+                renderer.render_xref(
+                    &XrefRenderParams {
+                        target: &xref.target,
+                        provided_text: xref.provided_text.as_deref(),
+                        resolved: xref.resolved.as_ref(),
+                    },
+                    &mut out,
+                );
+            }
+
+            None => {
+                // Unreachable while `template` and `xrefs` come from the same
+                // `Content` (indices are assigned sequentially). If that
+                // invariant is ever broken, emit the raw placeholder rather than
+                // silently dropping the span, so the breakage is visible.
+                debug_assert!(false, "xref placeholder index {body:?} out of range");
+                out.push(XREF_PLACEHOLDER_START);
+                out.push_str(body);
+                out.push(XREF_PLACEHOLDER_END);
+            }
+        }
     }
 
     out.push_str(rest);
