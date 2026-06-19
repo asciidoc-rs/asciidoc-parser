@@ -340,3 +340,62 @@ fn empty_table_caption_suppresses_the_label() {
         vec![(Some("First"), None), (Some("Second"), None)]
     );
 }
+
+#[test]
+fn caption_attribute_sets_the_label_verbatim() {
+    // An explicit `caption` attribute provides the label exactly as written,
+    // including its trailing space, with no automatically inserted number.
+    let table =
+        parse_table("[caption=\"Table A. \"]\n.A table with a custom label\n|===\n|a\n|===");
+
+    assert_eq!(table.title(), Some("A table with a custom label"));
+    assert_eq!(table.caption(), Some("Table A. "));
+}
+
+#[test]
+fn caption_attribute_does_not_consume_a_table_number() {
+    // A table labeled with an explicit `caption` is skipped by the document-wide
+    // counter, so a following `table-caption` table is numbered as if the
+    // explicitly captioned table were not there.
+    let doc = Parser::default().parse(
+        ".First\n|===\n|a\n|===\n\n[caption=\"Table A. \"]\n.Custom\n|===\n|b\n|===\n\n.Third\n|===\n|c\n|===",
+    );
+
+    let captions: Vec<Option<&str>> = doc
+        .nested_blocks()
+        .filter_map(|block| match block {
+            Block::Table(table) => Some(table.caption()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        captions,
+        vec![Some("Table 1. "), Some("Table A. "), Some("Table 2. ")]
+    );
+}
+
+#[test]
+fn caption_attribute_applies_even_when_table_caption_is_unset() {
+    // The `caption` attribute is honored independently of `table-caption`, so it
+    // still labels a titled table even when `table-caption` has been unset.
+    let doc = Parser::default()
+        .parse(":!table-caption:\n\n[caption=\"Forced. \"]\n.Numbers\n|===\n|a\n|===");
+
+    let caption = doc.nested_blocks().find_map(|block| match block {
+        Block::Table(table) => table.caption().map(|c| c.to_string()),
+        _ => None,
+    });
+
+    assert_eq!(caption.as_deref(), Some("Forced. "));
+}
+
+#[test]
+fn caption_attribute_is_ignored_without_a_title() {
+    // The caption labels a title; with no title there is nothing to caption, so
+    // an untitled table carries no caption even when `caption` is set.
+    let table = parse_table("[caption=\"Table A. \"]\n|===\n|a\n|===");
+
+    assert!(table.title().is_none());
+    assert!(table.caption().is_none());
+}

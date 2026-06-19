@@ -138,21 +138,34 @@ impl<'src> TableBlock<'src> {
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
         let has_header = opts_header || (!line1_blank && line2_blank);
 
-        // A titled table is given an automatic caption (e.g. "Table 1. ") that
-        // a processor prepends to the title. The label comes from the
-        // `table-caption` attribute (which defaults to "Table"); each captioned
-        // table consumes the next value of a document-wide table counter. When
-        // `table-caption` is unset, no caption (and no number) is assigned.
+        // A titled table is given a caption (e.g. "Table 1. ") that a processor
+        // prepends to the title.
+        //
+        // An explicit `caption` attribute on the table sets the label verbatim
+        // (including any trailing whitespace) and is used as-is, with no
+        // automatically incremented number; it applies even when
+        // `table-caption` has been unset. Otherwise the label comes from the
+        // `table-caption` attribute (which defaults to "Table"), and each such
+        // captioned table consumes the next value of a document-wide table
+        // counter. When `table-caption` is unset and no explicit `caption` is
+        // given, no caption (and no number) is assigned.
         //
         // Computed before the cell iterator below borrows `parser` immutably, so
         // that the mutable counter update does not conflict with that borrow.
         let caption = if metadata.title.is_some() {
-            match parser.attribute_value("table-caption") {
-                InterpretedValue::Value(label) if !label.is_empty() => {
-                    let number = parser.assign_table_number();
-                    Some(format!("{label} {number}. "))
-                }
-                _ => None,
+            match metadata
+                .attrlist
+                .as_ref()
+                .and_then(|a| a.named_attribute("caption"))
+            {
+                Some(attr) => Some(attr.value().to_string()),
+                None => match parser.attribute_value("table-caption") {
+                    InterpretedValue::Value(label) if !label.is_empty() => {
+                        let number = parser.assign_table_number();
+                        Some(format!("{label} {number}. "))
+                    }
+                    _ => None,
+                },
             }
         } else {
             None
@@ -221,12 +234,15 @@ impl<'src> TableBlock<'src> {
         })
     }
 
-    /// Returns the automatic caption assigned to this table, if any.
+    /// Returns the caption assigned to this table, if any.
     ///
-    /// A titled table is captioned with a label and number (e.g. `"Table 1. "`)
-    /// that a processor prepends to the [`title`](IsBlock::title). The caption
-    /// is absent when the table has no title or when the `table-caption`
-    /// attribute has been unset.
+    /// A titled table is captioned with a label that a processor prepends to
+    /// the [`title`](IsBlock::title). By default the label combines the
+    /// `table-caption` attribute and an automatically incremented number (e.g.
+    /// `"Table 1. "`). An explicit `caption` attribute on the table overrides
+    /// this with a verbatim label and no number. The caption is absent when the
+    /// table has no title, or when `table-caption` has been unset and no
+    /// explicit `caption` is given.
     pub fn caption(&self) -> Option<&str> {
         self.caption.as_deref()
     }
