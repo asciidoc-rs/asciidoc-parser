@@ -2,8 +2,9 @@
 //! `docs/modules/tables/pages/build-a-basic-table.adoc`.
 
 use crate::{
-    Parser, Span,
+    HasSpan, Parser, Span,
     blocks::{Block, ContentModel, IsBlock, TableBlock},
+    content::SubstitutionGroup,
 };
 
 /// Parse `source` as a single block and return the [`TableBlock`] it produced.
@@ -171,4 +172,73 @@ fn unterminated_table_warns() {
         w.warning,
         crate::warnings::WarningType::UnterminatedDelimitedBlock
     )));
+}
+
+#[test]
+fn block_level_accessors() {
+    // Exercise every `IsBlock`/`HasSpan` accessor through the `Block` enum
+    // (rather than the unwrapped `TableBlock`) so the delegating match arms in
+    // `block.rs` are covered.
+    let mut parser = Parser::default();
+    let block = Block::parse(Span::new("|===\n|a |b\n|==="), &mut parser)
+        .unwrap_if_no_warnings()
+        .unwrap()
+        .item;
+
+    assert_eq!(block.content_model(), ContentModel::Table);
+    assert_eq!(block.raw_context().as_ref(), "table");
+    assert_eq!(block.resolved_context().as_ref(), "table");
+    assert!(block.rendered_content().is_none());
+    assert_eq!(block.nested_blocks().count(), 0);
+    assert!(block.declared_style().is_none());
+    assert!(block.id().is_none());
+    assert!(block.roles().is_empty());
+    assert!(block.options().is_empty());
+    assert!(block.title_source().is_none());
+    assert!(block.title().is_none());
+    assert!(block.anchor().is_none());
+    assert!(block.anchor_reftext().is_none());
+    assert!(block.attrlist().is_none());
+    assert_eq!(block.substitution_group(), SubstitutionGroup::Normal);
+    assert_eq!(block.span().data(), "|===\n|a |b\n|===");
+}
+
+#[test]
+fn escaped_cell_separator() {
+    // A backslash-escaped separator (`\|`) is not a cell boundary; the backslash
+    // is stripped from the rendered cell content.
+    let table = parse_table("|===\n|a \\| b\n|===");
+
+    assert_eq!(table.body_rows().len(), 1);
+    assert_eq!(row_text(&table.body_rows()[0]), vec!["a | b".to_string()]);
+}
+
+#[test]
+fn cols_with_empty_specifier() {
+    // Empty entries in the `cols` list (e.g. from a doubled comma) are skipped.
+    let table = parse_table("[cols=\"1,,1\"]\n|===\n|a |b\n|===");
+
+    assert_eq!(table.columns().len(), 2);
+}
+
+#[test]
+fn no_cols_and_first_line_without_a_cell() {
+    // With no `cols` attribute and a first line that contains no cell separator,
+    // the column count is zero and the body loop is skipped entirely.
+    let table = parse_table("|===\nnot a cell\n|===");
+
+    assert!(table.columns().is_empty());
+    assert!(table.header_row().is_none());
+    assert!(table.body_rows().is_empty());
+}
+
+#[test]
+fn header_option_without_cells() {
+    // The `header` option forces header handling even when the table has no
+    // cells, exercising the empty-header-row branch.
+    let table = parse_table("[%header,cols=\"1,1\"]\n|===\nnot a cell\n|===");
+
+    assert_eq!(table.columns().len(), 2);
+    assert!(table.header_row().is_none());
+    assert!(table.body_rows().is_empty());
 }
