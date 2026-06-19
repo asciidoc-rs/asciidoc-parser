@@ -246,8 +246,6 @@ For instance, consider a table with the three built-in option values, `header`, 
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // This source now parses as a table block; the options under test live on
-        // the table's attribute list.
         assert!(matches!(mi.item, crate::blocks::Block::Table(_)));
 
         assert_eq!(
@@ -509,8 +507,6 @@ Instead of using the shorthand notation, <<ex-table-formal>> shows how the value
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // This source now parses as a table block; the options under test live on
-        // the table's attribute list.
         assert!(matches!(mi.item, crate::blocks::Block::Table(_)));
 
         assert_eq!(

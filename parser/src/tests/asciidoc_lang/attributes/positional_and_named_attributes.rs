@@ -489,8 +489,6 @@ Specifically, this syntax sets the `header`, `footer`, and `autowidth` options.
         .unwrap()
         .item;
 
-        // This source now parses as a table block; the shorthand options under
-        // test live on the table's attribute list.
         assert!(matches!(block, crate::blocks::Block::Table(_)));
 
         assert_eq!(
@@ -844,10 +842,10 @@ If enclosing quotes are used, they are dropped from the parsed value and the pre
             r#"
  [#unset]
  === Unset a named attribute
- 
+
  To undefine a named attribute, set the value to `None` (case sensitive).
  // end::name[]
- 
+
 "#
         );
 
