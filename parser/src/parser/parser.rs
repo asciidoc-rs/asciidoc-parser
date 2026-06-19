@@ -62,6 +62,10 @@ pub struct Parser {
     /// Section type of outermost section. (Used to determine whether to number
     /// child sections as a normal section or appendix.)
     pub(crate) topmost_section_type: SectionType,
+
+    /// Number most recently assigned to a captioned table. Incremented each
+    /// time a titled table receives an automatic caption (e.g. "Table 1.").
+    pub(crate) last_table_number: usize,
 }
 
 impl Default for Parser {
@@ -81,6 +85,7 @@ impl Default for Parser {
             },
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,
+            last_table_number: 0,
         }
     }
 }
@@ -153,6 +158,9 @@ impl Parser {
 
         // Reset section numbering for each new document.
         self.last_section_number = SectionNumber::default();
+
+        // Reset table numbering for each new document.
+        self.last_table_number = 0;
 
         Document::parse(&preprocessed_source, source_map, self)
     }
@@ -515,6 +523,16 @@ impl Parser {
                 self.last_section_number.clone()
             }
         }
+    }
+
+    /// Assigns the next sequential number to a captioned table and returns it.
+    ///
+    /// Tables are numbered in document order, but only those that actually
+    /// receive a caption (i.e. titled tables for which the `table-caption`
+    /// attribute is set) consume a number.
+    pub(crate) fn assign_table_number(&mut self) -> usize {
+        self.last_table_number += 1;
+        self.last_table_number
     }
 }
 

@@ -216,6 +216,7 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                 },
                 title_source: None,
                 title: None,
+                caption: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -438,6 +439,7 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                 },
                 title_source: None,
                 title: None,
+                caption: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {

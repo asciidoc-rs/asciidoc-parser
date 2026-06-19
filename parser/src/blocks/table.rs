@@ -3,6 +3,7 @@ use crate::{
     attributes::Attrlist,
     blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
     content::{Content, SubstitutionGroup},
+    document::InterpretedValue,
     parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning},
     span::MatchedItem,
     strings::CowStr,
@@ -44,6 +45,7 @@ pub struct TableBlock<'src> {
     source: Span<'src>,
     title_source: Option<Span<'src>>,
     title: Option<String>,
+    caption: Option<String>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -136,6 +138,26 @@ impl<'src> TableBlock<'src> {
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
         let has_header = opts_header || (!line1_blank && line2_blank);
 
+        // A titled table is given an automatic caption (e.g. "Table 1. ") that
+        // a processor prepends to the title. The label comes from the
+        // `table-caption` attribute (which defaults to "Table"); each captioned
+        // table consumes the next value of a document-wide table counter. When
+        // `table-caption` is unset, no caption (and no number) is assigned.
+        //
+        // Computed before the cell iterator below borrows `parser` immutably, so
+        // that the mutable counter update does not conflict with that borrow.
+        let caption = if metadata.title.is_some() {
+            match parser.attribute_value("table-caption") {
+                InterpretedValue::Value(label) if !label.is_empty() => {
+                    let number = parser.assign_table_number();
+                    Some(format!("{label} {number}. "))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         // Scan every cell in the table, in document order, then partition into
         // rows of `ncols` cells each.
         let mut cells = scan_cells(inside)
@@ -188,6 +210,7 @@ impl<'src> TableBlock<'src> {
                     source,
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
+                    caption,
                     anchor: metadata.anchor,
                     anchor_reftext: metadata.anchor_reftext,
                     attrlist: metadata.attrlist.clone(),
@@ -196,6 +219,16 @@ impl<'src> TableBlock<'src> {
             }),
             warnings,
         })
+    }
+
+    /// Returns the automatic caption assigned to this table, if any.
+    ///
+    /// A titled table is captioned with a label and number (e.g. `"Table 1. "`)
+    /// that a processor prepends to the [`title`](IsBlock::title). The caption
+    /// is absent when the table has no title or when the `table-caption`
+    /// attribute has been unset.
+    pub fn caption(&self) -> Option<&str> {
+        self.caption.as_deref()
     }
 
     /// Returns the columns of this table.

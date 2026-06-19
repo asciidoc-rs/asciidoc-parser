@@ -313,8 +313,9 @@ impl ToVirtualDom for Document<'_> {
 /// NOTE: Some block types (like lists) handle their titles internally, so we
 /// skip adding a separate title element for those.
 fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
-    // Check if this block type handles its own title internally.
-    let handles_title_internally = matches!(block, Block::List(_));
+    // Check if this block type handles its own title internally. Lists render
+    // their title inside the list wrapper; tables render it as a <caption>.
+    let handles_title_internally = matches!(block, Block::List(_) | Block::Table(_));
 
     // Add title as a separate sibling element if the block doesn't handle it
     // internally.
@@ -834,8 +835,19 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
     }
 
     if let Some(title) = table.title() {
-        node.children
-            .push(VirtualNode::new("caption").with_text(title.to_string()));
+        // A titled table renders a <caption class="title">. When the processor
+        // assigned an automatic caption (e.g. "Table 1. "), it is prepended to
+        // the title text.
+        let caption_text = match table.caption() {
+            Some(caption) => format!("{caption}{title}"),
+            None => title.to_string(),
+        };
+
+        node.children.push(
+            VirtualNode::new("caption")
+                .with_class("title")
+                .with_text(caption_text),
+        );
     }
 
     let mut colgroup = VirtualNode::new("colgroup");
@@ -1046,6 +1058,23 @@ mod tests {
         let code = para.children.iter().find(|c| c.tag == "code");
         assert!(code.is_some(), "Should have a <code> element");
         assert_eq!(code.unwrap().text.as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn titled_table_renders_captioned_title() {
+        let doc = Parser::default().parse(".A table with a title\n|===\n|a |b\n|===");
+        let vdom = doc.to_virtual_dom();
+
+        let table = &vdom.children[0];
+        assert_eq!(table.tag, "table");
+
+        let caption = &table.children[0];
+        assert_eq!(caption.tag, "caption");
+        assert!(caption.classes.contains(&"title".to_string()));
+        assert_eq!(
+            caption.text.as_deref(),
+            Some("Table 1. A table with a title")
+        );
     }
 
     #[test]

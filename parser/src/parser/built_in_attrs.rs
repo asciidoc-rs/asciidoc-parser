@@ -125,6 +125,15 @@ pub(super) fn built_in_attrs() -> HashMap<String, AttributeValue> {
         },
     );
 
+    attrs.insert(
+        "table-caption".to_owned(),
+        AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::Anywhere,
+            value: InterpretedValue::Set,
+        },
+    );
+
     // TO DO: Replace ./images with value of imagesdir if that is non-default.
     attrs.insert(
         "iconsdir".to_owned(),
@@ -142,6 +151,7 @@ pub(super) fn built_in_default_values() -> HashMap<String, String> {
     let mut defaults: HashMap<String, String> = HashMap::new();
 
     defaults.insert("example-caption".to_owned(), "Example".to_owned());
+    defaults.insert("table-caption".to_owned(), "Table".to_owned());
     defaults.insert("iconsdir".to_owned(), "./images/icons".to_owned());
     defaults.insert("sectnums".to_owned(), "all".to_owned());
     defaults.insert("toc".to_owned(), "auto".to_owned());
