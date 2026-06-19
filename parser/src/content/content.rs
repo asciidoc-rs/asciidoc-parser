@@ -26,9 +26,9 @@ use crate::{
 /// macros substitution therefore records each cross-reference as a deferred
 /// [`XrefSegment`] and leaves an opaque placeholder in the rendered text. The
 /// references are resolved in a later pass — see
-/// [`Document::resolve_references`] — at which point [`rendered()`] reflects the
-/// resolved links. Until then, [`rendered()`] shows an unresolved fallback, so
-/// it always returns clean text.
+/// [`Document::resolve_references`] — at which point [`rendered()`] reflects
+/// the resolved links. Until then, [`rendered()`] shows an unresolved fallback,
+/// so it always returns clean text.
 ///
 /// [substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/
 /// [`SimpleBlock`]: crate::blocks::SimpleBlock
@@ -115,8 +115,8 @@ impl<'src> Content<'src> {
         self.rendered.as_ref().is_empty()
     }
 
-    /// Returns `true` if this content contains one or more cross-references that
-    /// have not yet been resolved to a destination.
+    /// Returns `true` if this content contains one or more cross-references
+    /// that have not yet been resolved to a destination.
     pub fn has_unresolved_refs(&self) -> bool {
         self.deferred
             .as_ref()
@@ -207,8 +207,8 @@ impl<'src> Content<'src> {
         self.rebuild_rendered(renderer);
     }
 
-    /// Rebuilds [`Content::rendered`] from the deferred template and the current
-    /// (resolved or unresolved) state of its cross-references.
+    /// Rebuilds [`Content::rendered`] from the deferred template and the
+    /// current (resolved or unresolved) state of its cross-references.
     fn rebuild_rendered(&mut self, renderer: &dyn InlineSubstitutionRenderer) {
         let Some(deferred) = self.deferred.as_ref() else {
             return;

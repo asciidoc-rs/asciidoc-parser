@@ -113,7 +113,8 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
         NO_BLOCKS.iter()
     }
 
-    /// Returns a mutable slice of the nested blocks contained within this block.
+    /// Returns a mutable slice of the nested blocks contained within this
+    /// block.
     ///
     /// This is the mutable counterpart of [`nested_blocks()`]. The default
     /// returns an empty slice; container blocks override it to expose their

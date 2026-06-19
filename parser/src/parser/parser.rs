@@ -137,9 +137,10 @@ impl Parser {
     /// [`Document::resolve_references`].
     ///
     /// This is the entry point for multi-document workflows (e.g. Antora-style
-    /// site generation): parse every document with this method, build a combined
-    /// index from each document's [`catalog()`], then resolve each document
-    /// against that index. This crate does not merge catalogs itself.
+    /// site generation): parse every document with this method, build a
+    /// combined index from each document's [`catalog()`], then resolve each
+    /// document against that index. This crate does not merge catalogs
+    /// itself.
     ///
     /// [`parse()`]: Self::parse
     /// [`catalog()`]: Document::catalog
@@ -252,8 +253,8 @@ impl Parser {
         self
     }
 
-    /// Register a referenceable element (anchor, section, bibliography entry) in
-    /// the document catalog.
+    /// Register a referenceable element (anchor, section, bibliography entry)
+    /// in the document catalog.
     ///
     /// This takes `&self` (rather than `&mut self`) so that it can be called
     /// from inline-substitution code paths that only hold a shared reference to

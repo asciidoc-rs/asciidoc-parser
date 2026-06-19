@@ -29,8 +29,8 @@ pub struct ResolvedReference {
 /// A warning produced while resolving cross-references.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReferenceWarning {
-    /// The cross-reference target that could not be resolved, exactly as written
-    /// in the source.
+    /// The cross-reference target that could not be resolved, exactly as
+    /// written in the source.
     pub target: String,
 
     /// The kind of problem encountered.
@@ -72,7 +72,8 @@ pub trait ReferenceResolver {
     fn resolve(&self, context: &ResolutionContext<'_>) -> Option<ResolvedReference>;
 }
 
-/// The default single-document [`ReferenceResolver`], backed by one [`Catalog`].
+/// The default single-document [`ReferenceResolver`], backed by one
+/// [`Catalog`].
 ///
 /// It resolves bare IDs and natural cross-references (by reference text) to
 /// `#id` fragments. Targets that carry a path component (detected by the
