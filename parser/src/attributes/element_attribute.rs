@@ -352,7 +352,9 @@ impl<'src> ElementAttribute<'src> {
     /// re-encodes the merged shorthand so that the usual accessors continue to
     /// work.
     pub(crate) fn merge_block_style_shorthand(earlier: &Self, later: &Self) -> Self {
-        let block_style = later.block_style_internal().or(earlier.block_style_internal());
+        let block_style = later
+            .block_style_internal()
+            .or(earlier.block_style_internal());
         let id = later.id_internal().or(earlier.id_internal());
 
         let mut roles = earlier.roles_internal();

@@ -519,9 +519,8 @@ mod tests {
 
         #[test]
         fn two_non_conflicting_named() {
-            let metadata = crate::blocks::metadata::BlockMetadata::new(
-                "[foo=bar]\n[baz=qux]\ncontent\n",
-            );
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[foo=bar]\n[baz=qux]\ncontent\n");
 
             let attrlist = metadata.attrlist.as_ref().unwrap();
             assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "bar");
@@ -610,8 +609,7 @@ mod tests {
 
         #[test]
         fn shorthand_id_later_wins() {
-            let metadata =
-                crate::blocks::metadata::BlockMetadata::new("[#id1]\n[#id2]\ncontent\n");
+            let metadata = crate::blocks::metadata::BlockMetadata::new("[#id1]\n[#id2]\ncontent\n");
 
             let attrlist = metadata.attrlist.as_ref().unwrap();
             assert_eq!(attrlist.id().unwrap(), "id2");
@@ -649,9 +647,8 @@ mod tests {
 
         #[test]
         fn extra_positional_only_on_later_line() {
-            let metadata = crate::blocks::metadata::BlockMetadata::new(
-                "[quote]\n[quote,Author]\ncontent\n",
-            );
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[quote]\n[quote,Author]\ncontent\n");
 
             let attrlist = metadata.attrlist.as_ref().unwrap();
             assert_eq!(attrlist.block_style().unwrap(), "quote");
