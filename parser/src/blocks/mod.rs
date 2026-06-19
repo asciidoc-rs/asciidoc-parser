@@ -64,5 +64,8 @@ pub use section::{SectionBlock, SectionNumber, SectionType};
 mod simple;
 pub use simple::{SimpleBlock, SimpleBlockStyle};
 
+mod table;
+pub use table::{TableBlock, TableCell, TableColumn, TableRow};
+
 #[cfg(test)]
 mod tests;

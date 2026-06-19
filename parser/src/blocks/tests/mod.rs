@@ -12,6 +12,7 @@ mod media;
 mod raw_delimited;
 mod section;
 mod simple;
+mod table;
 
 mod content_model {
     use crate::blocks::ContentModel;
