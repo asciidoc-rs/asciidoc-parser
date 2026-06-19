@@ -380,12 +380,24 @@ impl<'src> ElementAttribute<'src> {
             value.push_str(option);
         }
 
+        // The shorthand string is synthesized entirely from components that
+        // were already parsed and validated when their source lines were read
+        // (a block style, a non-empty ID, and non-empty roles/options, each
+        // separated by a single delimiter). Re-parsing it therefore can never
+        // produce a warning, so rather than plumb an always-empty warning list
+        // back to the caller we assert that invariant — turning a silent
+        // discard into an explicit, regression-guarded one.
         let mut warnings: Vec<WarningType> = vec![];
         let shorthand_item_indices = if value.is_empty() {
             vec![]
         } else {
             parse_shorthand_items(&value, &mut warnings)
         };
+
+        debug_assert!(
+            warnings.is_empty(),
+            "merging block-style shorthand should not produce warnings, got: {warnings:?}"
+        );
 
         Self {
             name: None,
