@@ -4,7 +4,7 @@ use crate::{
     Span,
     attributes::Attrlist,
     blocks::{Block, is_built_in_context},
-    content::SubstitutionGroup,
+    content::{Content, SubstitutionGroup},
     strings::CowStr,
 };
 
@@ -111,6 +111,26 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
         const NO_BLOCKS: &[Block<'static>] = &[];
         NO_BLOCKS.iter()
+    }
+
+    /// Returns a mutable slice of the nested blocks contained within this block.
+    ///
+    /// This is the mutable counterpart of [`nested_blocks()`]. The default
+    /// returns an empty slice; container blocks override it to expose their
+    /// children for in-place passes such as cross-reference resolution.
+    ///
+    /// [`nested_blocks()`]: Self::nested_blocks
+    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut []
+    }
+
+    /// Returns a mutable reference to this block's own resolvable content — its
+    /// body, section title, or description-list term — if any.
+    ///
+    /// The default returns `None`; content-bearing blocks override it. This is
+    /// used by in-place passes such as cross-reference resolution.
+    fn content_mut(&mut self) -> Option<&mut Content<'src>> {
+        None
     }
 
     /// Returns the ID for this block, if present.

@@ -8,7 +8,7 @@ use crate::{
         MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock,
         metadata::BlockMetadata,
     },
-    content::SubstitutionGroup,
+    content::{Content, SubstitutionGroup},
     document::{Attribute, RefType},
     parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning},
     span::MatchedItem,
@@ -442,60 +442,22 @@ impl<'src> Block<'src> {
     /// Resolve any deferred cross-references in this block and its descendants,
     /// using `resolver` to map targets to destinations and `renderer` to render
     /// the resulting links. Unresolved targets are reported in `warnings`.
+    ///
+    /// This drives the recursion uniformly via the [`IsBlock::content_mut`] and
+    /// [`IsBlock::nested_blocks_mut`] accessors, so it needs no per-block-type
+    /// special casing.
     pub(crate) fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut Vec<ReferenceWarning>,
     ) {
-        match self {
-            Self::Simple(b) => b
-                .content_mut()
-                .resolve_references(resolver, renderer, warnings),
+        if let Some(content) = self.content_mut() {
+            content.resolve_references(resolver, renderer, warnings);
+        }
 
-            Self::RawDelimited(b) => b
-                .content_mut()
-                .resolve_references(resolver, renderer, warnings),
-
-            Self::Section(b) => {
-                b.section_title_mut()
-                    .resolve_references(resolver, renderer, warnings);
-
-                for child in b.nested_blocks_mut() {
-                    child.resolve_references(resolver, renderer, warnings);
-                }
-            }
-
-            Self::List(b) => {
-                for item in b.items_mut() {
-                    item.resolve_references(resolver, renderer, warnings);
-                }
-            }
-
-            Self::ListItem(b) => {
-                if let Some(term) = b.marker_mut().term_mut() {
-                    term.resolve_references(resolver, renderer, warnings);
-                }
-
-                for child in b.nested_blocks_mut() {
-                    child.resolve_references(resolver, renderer, warnings);
-                }
-            }
-
-            Self::CompoundDelimited(b) => {
-                for child in b.nested_blocks_mut() {
-                    child.resolve_references(resolver, renderer, warnings);
-                }
-            }
-
-            Self::Preamble(b) => {
-                for child in b.nested_blocks_mut() {
-                    child.resolve_references(resolver, renderer, warnings);
-                }
-            }
-
-            // These block types carry no cross-reference-bearing content.
-            Self::Media(_) | Self::Break(_) | Self::DocumentAttribute(_) => {}
+        for child in self.nested_blocks_mut() {
+            child.resolve_references(resolver, renderer, warnings);
         }
     }
 }
@@ -558,6 +520,36 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Preamble(b) => b.nested_blocks(),
             Self::Break(b) => b.nested_blocks(),
             Self::DocumentAttribute(b) => b.nested_blocks(),
+        }
+    }
+
+    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        match self {
+            Self::Simple(b) => b.nested_blocks_mut(),
+            Self::Media(b) => b.nested_blocks_mut(),
+            Self::Section(b) => b.nested_blocks_mut(),
+            Self::List(b) => b.nested_blocks_mut(),
+            Self::ListItem(b) => b.nested_blocks_mut(),
+            Self::RawDelimited(b) => b.nested_blocks_mut(),
+            Self::CompoundDelimited(b) => b.nested_blocks_mut(),
+            Self::Preamble(b) => b.nested_blocks_mut(),
+            Self::Break(b) => b.nested_blocks_mut(),
+            Self::DocumentAttribute(b) => b.nested_blocks_mut(),
+        }
+    }
+
+    fn content_mut(&mut self) -> Option<&mut Content<'src>> {
+        match self {
+            Self::Simple(b) => b.content_mut(),
+            Self::Media(b) => b.content_mut(),
+            Self::Section(b) => b.content_mut(),
+            Self::List(b) => b.content_mut(),
+            Self::ListItem(b) => b.content_mut(),
+            Self::RawDelimited(b) => b.content_mut(),
+            Self::CompoundDelimited(b) => b.content_mut(),
+            Self::Preamble(b) => b.content_mut(),
+            Self::Break(b) => b.content_mut(),
+            Self::DocumentAttribute(b) => b.content_mut(),
         }
     }
 

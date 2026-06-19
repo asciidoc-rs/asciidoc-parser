@@ -139,13 +139,6 @@ impl<'src> CompoundDelimitedBlock<'src> {
     }
 }
 
-impl<'src> CompoundDelimitedBlock<'src> {
-    /// Return a mutable slice of this block's child blocks.
-    pub(crate) fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
-        &mut self.blocks
-    }
-}
-
 impl<'src> IsBlock<'src> for CompoundDelimitedBlock<'src> {
     fn content_model(&self) -> ContentModel {
         ContentModel::Compound
@@ -157,6 +150,10 @@ impl<'src> IsBlock<'src> for CompoundDelimitedBlock<'src> {
 
     fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
         self.blocks.iter()
+    }
+
+    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.blocks
     }
 
     fn title_source(&'src self) -> Option<Span<'src>> {

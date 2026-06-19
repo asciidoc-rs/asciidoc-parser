@@ -202,14 +202,6 @@ impl<'src> SimpleBlock<'src> {
         &self.content
     }
 
-    /// Return a mutable reference to the interpreted content of this block.
-    ///
-    /// Used by the cross-reference resolution pass to splice resolved
-    /// references into the rendered content.
-    pub(crate) fn content_mut(&mut self) -> &mut Content<'src> {
-        &mut self.content
-    }
-
     /// Return the style of this block.
     pub fn style(&self) -> SimpleBlockStyle {
         self.style
@@ -442,6 +434,10 @@ fn parse_lines<'src>(
 impl<'src> IsBlock<'src> for SimpleBlock<'src> {
     fn content_model(&self) -> ContentModel {
         ContentModel::Simple
+    }
+
+    fn content_mut(&mut self) -> Option<&mut Content<'src>> {
+        Some(&mut self.content)
     }
 
     fn rendered_content(&self) -> Option<&str> {

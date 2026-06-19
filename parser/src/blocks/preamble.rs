@@ -33,11 +33,6 @@ impl<'src> Preamble<'src> {
             source: preamble_source,
         }
     }
-
-    /// Return a mutable slice of this preamble's child blocks.
-    pub(crate) fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
-        &mut self.blocks
-    }
 }
 
 impl<'src> IsBlock<'src> for Preamble<'src> {
@@ -51,6 +46,10 @@ impl<'src> IsBlock<'src> for Preamble<'src> {
 
     fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
         self.blocks.iter()
+    }
+
+    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.blocks
     }
 
     fn title_source(&'src self) -> Option<Span<'src>> {
