@@ -4,6 +4,20 @@ This document summarizes the changes introduced to the AsciiDoc Language Documen
 For a detailed view of what's changed, refer to the repository's
 https://github.com/asciidoctor/asciidoc-docs/commits/main[commit history].
 
+== Published Q2 2026
+
+Added::
+* Add examples for how to avoid first line of paragraph from being matched as a block attribute line
+
+== Published Q1 2026
+
+Added::
+* Document the `window` attribute of the xref macro
+
+Changed::
+* Clarify that `indent` attribute on verbatim block ignored if at least one line is not indented
+* Clarify that the preface for a multipart book may be defined as either a level 0 or level 1 section
+
 == Published Q4 2025
 
 Added::

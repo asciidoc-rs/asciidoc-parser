@@ -13,9 +13,13 @@ The attribute `indent` allows the leading block indent to be stripped and, optio
 * When `indent` is 0, the leading block indent is stripped
 * When `indent` is > 0, the leading block indent is first stripped, then the content is indented by the number of columns equal to this value.
 
+WARNING: If any line in the verbatim content is not indented, the `indent` attribute is effectively ignored.
+
 If the `tabsize` attribute is set on the block or the document, tabs are also replaced with the number of spaces specified by that attribute, regardless of whether the `indent` attribute is set.
 
-For example, this AsciiDoc source:
+Let's consider a source block that has included content which is indented.
+Only the result of the include directive is shown here to help illustrate the behavior.
+When the `indent` attribute is used on the source block in the following AsciiDoc source:
 
 [source]
 ....
@@ -27,7 +31,7 @@ For example, this AsciiDoc source:
 ----
 ....
 
-Produces:
+The processor produces:
 
 ....
 def names
@@ -35,7 +39,7 @@ def names
 end
 ....
 
-This AsciiDoc source:
+On the other hand, this AsciiDoc source:
 
 [source]
 ....
@@ -54,3 +58,5 @@ Produces:
     @name.split ' '
   end
 ----
+
+Notice that when the `indent` attribute is positive, the block indentation is first removed, then readded using the specified amount.

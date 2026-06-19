@@ -1380,7 +1380,7 @@ See https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/s
 === Autolinks (URLs and email addresses)
 
 * *FI* Is it possible to turn off implicit autolinks?
-* *FI* Should we continue support for angle bracket enclosure for explicit autolink?
+* *FI* Should we continue support for angle bracket enclosure for explicit autolink? Yes, I think we should. They are a common web convention. They also help delinate the boundaries of a URL, though the example cited in the docs (of a replacement getting caught up in the URL) should no longer necessitate their use.
 
 === Link and URL macros
 
@@ -1392,6 +1392,8 @@ See https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/s
 * target model:
 * attrlist model:
 
+shorthand for targeting a blank window/new tab
+
 === Cross reference macros
 
 * type: inline element
@@ -1401,6 +1403,8 @@ See https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/s
 * variant: xref
 * target model:
 * attrlist model:
+
+should support shorthand for targeting a blank window/new tab like the link macro
 
 === STEM macro
 
@@ -1724,7 +1728,8 @@ That list is as follows:
 
 * Setext-style headings (section titles and discrete headings)
 * Trailing markers on Atx-style headings
-* Roman numeral list markers (can still be enabled in output using list style)
+* Roman numeral ordered list markers (can still be enabled in output using list style)
+* Unicode bullet (U+2022) as unordered list marker
 * Markdown compatibility syntax with the exception of email-style quote blocks and thematic break variants
 * ;; as dlist marker (infinite depth of colons is permitted instead)
 * Half open callout list marker (e.g., `1>`)

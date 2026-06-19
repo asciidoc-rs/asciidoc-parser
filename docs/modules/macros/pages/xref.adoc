@@ -110,3 +110,22 @@ include::example$xref.adoc[tag=xref-title]
 As a rule of thumb, the natural cross reference should only be used for rapid development or short-lived content.
 As the content matures, you should switch to using IDs for referencing, ideally IDs which are declared explicitly.
 By doing so, it ensures your references have maximum stability and are shielded against title revisions.
+
+== Target a blank window
+
+You can use the `window` attribute on the xref macro to control the link target (equivalent to the xref:link-macro-attribute-parsing.adoc#target-a-blank-window[window] attribute of the link macro).
+Configuring a link that points to a location outside the current site is common practice to avoid disrupting the reader's flow.
+This is a behavior that is specific to HTML output.
+
+Most of the time, you’ll use the window attribute to target a blank window.
+To enable this behavior, you set the window attribute to the special value _blank.
+
+[source]
+----
+xref:page.adoc[window=_blank]
+----
+
+In the HTML output, the value of the window attribute is assigned to the target attribute on the <a> tag (e.g., target=_blank).
+When the target is _blank, the processor will automatically add the `rel=noopener` attribute as well.
+
+NOTE: The blank window shorthand, `^`, only works with the link macro.

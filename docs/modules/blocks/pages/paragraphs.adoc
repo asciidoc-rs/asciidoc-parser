@@ -22,3 +22,26 @@ The result of <<ex-paragraph>> is displayed below.
 ====
 include::example$paragraph.adoc[tag=para]
 ====
+
+[#block-attribute-line-conflict]
+== Conflict with a block attribute line
+
+The first line of a paragraph cannot start with `[` and end with `]`.
+That's because it will be treated as block metadata, specifically a block attribute line.
+
+There are two ways to work around this issue.
+First, you can add any text in front of the `[` that will otherwise not be rendered to disrupt the syntax match.
+For example, you can start the paragraph with the attribute reference `+{empty}+`.
+
+----
+{empty}[.rolename]*main text*footnote:[The footnote.]
+----
+
+Another way to solve the problem is to write the paragraph as a literal paragraph, then override the implicit style using the explicit style normal.
+
+----
+[normal]
+ [.rolename]*main text*footnote:[The footnote.]
+----
+
+The normal style often comes in handy when you want to prevent the parser from matching beginning-of-line syntax.

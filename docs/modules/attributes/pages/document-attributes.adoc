@@ -95,3 +95,7 @@ A document attribute can be referenced anywhere in the document where the attrib
 Generally speaking, the xref:subs:attributes.adoc[attributes substitution] is applied to the value of an attribute entry, titles, paragraph text, list text, the value of an element attribute, and the target of a macro.
 
 A document attribute can only be referenced after it has been defined.
+
+== Glossary
+
+include::partial$attribute-terms.adoc[]

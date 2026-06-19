@@ -795,11 +795,7 @@ Not only does that require manual adjustment as items are added to the list, it 
 Instead, use a list continuation between each block element you want to attach to the list item to ensure the list item is continuous.
 The list continuation glues the blocks together within a given item and keeps them at the same level of indentation.
 
-* For details on how to use a list continuation, refer to the xref:continuation.adoc[] page.
-* For an example of the list continuation used in an ordered list, see the launch steps in https://github.com/aws-quickstart/quickstart-microsoft-sql-fci-fsx/blob/main/docs/partner_editable/deploy_steps.adoc[this .adoc file in GitHub^].
-* To see how those launch steps look in the final output, see the https://aws-quickstart.github.io/quickstart-microsoft-sql-fci-fsx/#_launch_the_quick_start[Launch the Quick Start^] section of the generated deployment guide.
-The list continuations prevent step 2 from resetting to 1.
-They also prevent step 5, which is pulled in from a separate AsciiDoc file, from resetting to 1.
+For details on how to use a list continuation, refer to the xref:continuation.adoc[] page.
 ****
 
 "#
