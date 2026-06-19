@@ -225,6 +225,10 @@ impl<'src> IsBlock<'src> for ListBlock<'src> {
         self.items.iter()
     }
 
+    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.items
+    }
+
     fn title_source(&'src self) -> Option<Span<'src>> {
         self.title_source
     }

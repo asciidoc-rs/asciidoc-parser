@@ -184,6 +184,12 @@ impl SubstitutionGroup {
         if let Some(passthroughs) = passthroughs {
             passthroughs.restore_to(content, parser);
         }
+
+        // Capture any deferred cross-references as a placeholder template and
+        // render the unresolved fallback, so `rendered()` is clean even before
+        // references are resolved. This is a no-op when no cross-references were
+        // found.
+        content.finalize_deferred(&*parser.renderer);
     }
 
     pub(crate) fn override_via_attrlist(&self, attrlist: Option<&Attrlist>) -> Self {

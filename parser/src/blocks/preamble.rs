@@ -48,6 +48,10 @@ impl<'src> IsBlock<'src> for Preamble<'src> {
         self.blocks.iter()
     }
 
+    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.blocks
+    }
+
     fn title_source(&'src self) -> Option<Span<'src>> {
         None
     }

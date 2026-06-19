@@ -14,7 +14,7 @@ mod inline_substitution_renderer;
 pub use inline_substitution_renderer::{
     CharacterReplacementType, HtmlSubstitutionRenderer, IconRenderParams, ImageRenderParams,
     InlineSubstitutionRenderer, LinkRenderParams, LinkRenderType, QuoteScope, QuoteType,
-    SpecialCharacter,
+    SpecialCharacter, XrefRenderParams,
 };
 
 mod parser;
@@ -24,6 +24,12 @@ mod path_resolver;
 pub use path_resolver::PathResolver;
 
 pub(crate) mod preprocessor;
+
+mod reference_resolver;
+pub use reference_resolver::{
+    CatalogResolver, ReferenceResolver, ReferenceWarning, ReferenceWarningKind, ResolutionContext,
+    ResolvedReference,
+};
 
 mod source_map;
 pub use source_map::{SourceLine, SourceMap};

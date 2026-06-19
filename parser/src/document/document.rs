@@ -10,7 +10,9 @@ use crate::{
     blocks::{Block, ContentModel, IsBlock, Preamble, parse_utils::parse_blocks_until},
     document::{Catalog, Header},
     internal::debug::DebugSliceReference,
-    parser::SourceMap,
+    parser::{
+        CatalogResolver, InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning, SourceMap,
+    },
     strings::CowStr,
     warnings::Warning,
 };
@@ -151,6 +153,67 @@ impl<'src> Document<'src> {
     /// Return the document catalog for accessing referenceable elements.
     pub fn catalog(&self) -> &Catalog {
         &self.internal.borrow_dependent().catalog
+    }
+
+    /// Resolve the document's deferred cross-references using a caller-supplied
+    /// [`ReferenceResolver`] and [`InlineSubstitutionRenderer`].
+    ///
+    /// This is the entry point for multi-document workflows: parse each
+    /// document with [`Parser::parse_deferred`], then call this with a
+    /// resolver that resolves targets against whatever combined index the
+    /// caller has built (this crate does not merge catalogs). The resolver
+    /// binds the "from" document, so a single shared resolver can be
+    /// parametrized per call site.
+    ///
+    /// Resolution is non-destructive and may be repeated (e.g. for incremental
+    /// builds or multiple output targets): the original target text is
+    /// retained, so re-resolving is always possible.
+    ///
+    /// Each call is a **full, independent resolution sweep**. Every
+    /// cross-reference is re-resolved against `resolver`, overwriting any
+    /// result from a previous pass, and the returned [`ReferenceWarning`]s
+    /// reflect only what *this* `resolver` could not resolve — a prior pass
+    /// having resolved a target does not suppress a warning here.
+    /// Consequently, resolving with a resolver that knows fewer targets
+    /// than an earlier pass (for example, calling this after
+    /// [`Parser::parse`] has already auto-resolved against the document's
+    /// own catalog) will re-report those now-unknown targets as unresolved.
+    /// Multi-document pipelines should therefore start from
+    /// [`Parser::parse_deferred`], which does not auto-resolve.
+    pub fn resolve_references(
+        &mut self,
+        resolver: &dyn ReferenceResolver,
+        renderer: &dyn InlineSubstitutionRenderer,
+    ) -> Vec<ReferenceWarning> {
+        let mut warnings = Vec::new();
+
+        self.internal.with_dependent_mut(|_owner, dependent| {
+            for block in dependent.blocks.iter_mut() {
+                block.resolve_references(resolver, renderer, &mut warnings);
+            }
+        });
+
+        warnings
+    }
+
+    /// Resolve the document's deferred cross-references against its own
+    /// catalog.
+    ///
+    /// This is the single-document convenience path used by [`Parser::parse`].
+    pub(crate) fn resolve_against_own_catalog(
+        &mut self,
+        renderer: &dyn InlineSubstitutionRenderer,
+    ) -> Vec<ReferenceWarning> {
+        let mut warnings = Vec::new();
+
+        self.internal.with_dependent_mut(|_owner, dependent| {
+            let resolver = CatalogResolver::new(&dependent.catalog);
+            for block in dependent.blocks.iter_mut() {
+                block.resolve_references(&resolver, renderer, &mut warnings);
+            }
+        });
+
+        warnings
     }
 }
 

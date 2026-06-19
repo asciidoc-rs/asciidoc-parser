@@ -175,6 +175,10 @@ impl<'src> IsBlock<'src> for RawDelimitedBlock<'src> {
         self.content_model
     }
 
+    fn content_mut(&mut self) -> Option<&mut Content<'src>> {
+        Some(&mut self.content)
+    }
+
     fn rendered_content(&self) -> Option<&str> {
         Some(self.content.rendered())
     }

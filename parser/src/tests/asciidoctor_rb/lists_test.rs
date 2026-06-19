@@ -828,37 +828,44 @@ mod bulleted_lists {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/461):
-        // Enable this test when xref replacement refactoring is complete.
         fn should_discover_anchor_at_start_of_unordered_list_item_text_and_register_it_as_a_reference()
          {
-            let _doc = Parser::default().parse("The highest peak in the Front Range is <<grays-peak>>, which tops <<mount-evans>> by just a few feet.\n\n* [[mount-evans,Mount Evans]]At 14,271 feet, Mount Evans is the highest summit of the Chicago Peaks in the Front Range of the Rocky Mountains.\n* [[grays-peak,Grays Peak]]\nGrays Peak rises to 14,278 feet, making it the highest summit in the Front Range of the Rocky Mountains.\n* Longs Peak is a 14,259-foot high, prominent mountain summit in the northern Front Range of the Rocky Mountains.\n* Pikes Peak is the highest summit of the southern Front Range of the Rocky Mountains at 14,115 feet.\n");
-            todo!("doc.catalog[:refs] check");
-            todo!(
-                "assert_xpath: '(//p)[1]/a[@href=\"#grays-peak\"][text()=\"Grays Peak\"]', output, 1"
+            let doc = Parser::default().parse("The highest peak in the Front Range is <<grays-peak>>, which tops <<mount-evans>> by just a few feet.\n\n* [[mount-evans,Mount Evans]]At 14,271 feet, Mount Evans is the highest summit of the Chicago Peaks in the Front Range of the Rocky Mountains.\n* [[grays-peak,Grays Peak]]\nGrays Peak rises to 14,278 feet, making it the highest summit in the Front Range of the Rocky Mountains.\n* Longs Peak is a 14,259-foot high, prominent mountain summit in the northern Front Range of the Rocky Mountains.\n* Pikes Peak is the highest summit of the southern Front Range of the Rocky Mountains at 14,115 feet.\n");
+
+            // The inline anchors at the start of the list items were registered.
+            assert!(doc.catalog().contains_id("mount-evans"));
+            assert!(doc.catalog().contains_id("grays-peak"));
+
+            // The forward cross-references in the first paragraph resolved
+            // against those later-defined anchors.
+            assert_xpath(
+                &doc,
+                "(//p)[1]/a[@href=\"#grays-peak\"][text()=\"Grays Peak\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '(//p)[1]/a[@href=\"#mount-evans\"][text()=\"Mount Evans\"]', output, 1"
+            assert_xpath(
+                &doc,
+                "(//p)[1]/a[@href=\"#mount-evans\"][text()=\"Mount Evans\"]",
+                1,
             );
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/461):
-        // Enable this test when xref replacement refactoring is complete.
         fn should_discover_anchor_at_start_of_ordered_list_item_text_and_register_it_as_a_reference()
          {
-            let _doc = Parser::default().parse("This is a cross-reference to <<step-2>>.\nThis is a cross-reference to <<step-4>>.\n\n. Ordered list, item 1, without anchor\n. [[step-2,Step 2]]Ordered list, item 2, with anchor\n. Ordered list, item 3, without anchor\n. [[step-4,Step 4]]Ordered list, item 4, with anchor\n");
-            todo!("doc.catalog[:refs] check");
-            todo!("assert_xpath: '(//p)[1]/a[@href=\"#step-2\"][text()=\"Step 2\"]', output, 1");
-            todo!("assert_xpath: '(//p)[1]/a[@href=\"#step-4\"][text()=\"Step 4\"]', output, 1");
+            let doc = Parser::default().parse("This is a cross-reference to <<step-2>>.\nThis is a cross-reference to <<step-4>>.\n\n. Ordered list, item 1, without anchor\n. [[step-2,Step 2]]Ordered list, item 2, with anchor\n. Ordered list, item 3, without anchor\n. [[step-4,Step 4]]Ordered list, item 4, with anchor\n");
+
+            assert!(doc.catalog().contains_id("step-2"));
+            assert!(doc.catalog().contains_id("step-4"));
+
+            assert_xpath(&doc, "(//p)[1]/a[@href=\"#step-2\"][text()=\"Step 2\"]", 1);
+            assert_xpath(&doc, "(//p)[1]/a[@href=\"#step-4\"][text()=\"Step 4\"]", 1);
         }
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/461):
-        // Enable this test when xref replacement refactoring is complete.
+        // Cross-reference resolution (#461) is implemented, but this scenario
+        // also depends on callout lists.
         // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
         // Enable this test when callouts are implemented.
         fn should_discover_anchor_at_start_of_callout_list_item_text_and_register_it_as_a_reference()

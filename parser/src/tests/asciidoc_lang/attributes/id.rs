@@ -891,14 +891,24 @@ The id (`#`) shorthand can be used on inline quoted text.
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "free_the_world",
+                        RefEntry {
+                            id: "free_the_world",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }
 }
 
 mod anchor {
-    use crate::{document::RefType, tests::prelude::*};
+    use crate::tests::prelude::*;
 
     non_normative!(
         r#"
@@ -973,7 +983,17 @@ According to the https://www.w3.org/TR/REC-xml/#NT-Name[XML Name] rules, a porta
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "start_with_letter",
+                        RefEntry {
+                            id: "start_with_letter",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
 
@@ -1029,7 +1049,17 @@ According to the https://www.w3.org/TR/REC-xml/#NT-Name[XML Name] rules, a porta
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "_start_with_underscore",
+                        RefEntry {
+                            id: "_start_with_underscore",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
 
@@ -1085,7 +1115,17 @@ According to the https://www.w3.org/TR/REC-xml/#NT-Name[XML Name] rules, a porta
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        ":start_with_colon",
+                        RefEntry {
+                            id: ":start_with_colon",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
 
@@ -1300,7 +1340,7 @@ include::example$id.adoc[tag=block-id-shorthand]
                         RefEntry {
                             id: "notice",
                             reftext: None,
-                            ref_type: RefType::Anchor,
+                            ref_type: crate::document::RefType::Anchor,
                         }
                     ),]),
                     reftext_to_id: HashMap::default(),
@@ -1387,7 +1427,7 @@ include::example$id.adoc[tag=block-id-brackets]
                         RefEntry {
                             id: "notice",
                             reftext: None,
-                            ref_type: RefType::Anchor,
+                            ref_type: crate::document::RefType::Anchor,
                         }
                     ),]),
                     reftext_to_id: HashMap::default(),
@@ -1467,7 +1507,17 @@ include::example$id.adoc[tag=anchor-brackets]
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "bookmark-a",
+                        RefEntry {
+                            id: "bookmark-a",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }

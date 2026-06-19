@@ -206,9 +206,8 @@ impl<'src> ListItemMarker<'src> {
             });
 
             // Register the anchor in the catalog.
-            if let Some(catalog) = parser.catalog_mut()
-                && let Err(_duplicate_error) =
-                    catalog.register_ref(id, reftext.as_deref(), RefType::Anchor)
+            if let Err(_duplicate_error) =
+                parser.register_ref(id, reftext.as_deref(), RefType::Anchor)
             {
                 warnings.push(Warning {
                     source: term.original(),
@@ -219,6 +218,15 @@ impl<'src> ListItemMarker<'src> {
 
         // Apply macros substitution to render the inline anchor as HTML.
         SubstitutionStep::Macros.apply(term, parser, None);
+    }
+
+    /// Return a mutable reference to the term content of a description-list
+    /// marker, or `None` for other marker kinds.
+    pub(crate) fn term_mut(&mut self) -> Option<&mut Content<'src>> {
+        match self {
+            Self::DefinedTerm { term, .. } => Some(term),
+            _ => None,
+        }
     }
 
     /// Test for equality, disregarding span offsets.

@@ -9,3 +9,4 @@ pub(crate) mod assert_dom;
 pub(crate) mod fixtures;
 pub(crate) mod prelude;
 pub(crate) mod sdd;
+mod xref;

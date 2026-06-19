@@ -7,6 +7,7 @@ use crate::{
         Block, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItemMarker,
         RawDelimitedBlock, SimpleBlock, metadata::BlockMetadata,
     },
+    content::Content,
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     strings::CowStr,
@@ -452,6 +453,15 @@ impl<'src> ListItem<'src> {
 impl<'src> IsBlock<'src> for ListItem<'src> {
     fn content_model(&self) -> ContentModel {
         ContentModel::Compound
+    }
+
+    fn content_mut(&mut self) -> Option<&mut Content<'src>> {
+        // A description-list item's resolvable content is its term.
+        self.marker.term_mut()
+    }
+
+    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+        &mut self.blocks
     }
 
     fn raw_context(&self) -> CowStr<'src> {

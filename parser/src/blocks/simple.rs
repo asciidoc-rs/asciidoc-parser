@@ -436,6 +436,10 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
         ContentModel::Simple
     }
 
+    fn content_mut(&mut self) -> Option<&mut Content<'src>> {
+        Some(&mut self.content)
+    }
+
     fn rendered_content(&self) -> Option<&str> {
         Some(self.content.rendered())
     }

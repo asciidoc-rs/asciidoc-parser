@@ -1,9 +1,9 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     Document, HasSpan,
     blocks::{SectionNumber, SectionType},
-    document::{Attribute, Catalog, InterpretedValue},
+    document::{Attribute, Catalog, InterpretedValue, RefType},
     parser::{
         AllowableValue, AttributeValue, HtmlSubstitutionRenderer, IncludeFileHandler,
         InlineSubstitutionRenderer, ModificationContext, PathResolver,
@@ -43,7 +43,12 @@ pub struct Parser {
     /// Document catalog for tracking referenceable elements during parsing.
     /// This is created during parsing and transferred to the Document when
     /// complete.
-    catalog: Option<Catalog>,
+    ///
+    /// Wrapped in a [`RefCell`] so that anchors and references discovered deep
+    /// inside inline substitution (where only a shared `&Parser` is available,
+    /// e.g. within a regex [`Replacer`](regex::Replacer)) can still be
+    /// registered.
+    catalog: RefCell<Catalog>,
 
     /// Most recently-assigned section number.
     pub(crate) last_section_number: SectionNumber,
@@ -68,7 +73,7 @@ impl Default for Parser {
             primary_file_name: None,
             path_resolver: PathResolver::default(),
             include_file_handler: None,
-            catalog: Some(Catalog::new()),
+            catalog: RefCell::new(Catalog::new()),
             last_section_number: SectionNumber::default(),
             last_appendix_section_number: SectionNumber {
                 section_type: SectionType::Appendix,
@@ -113,13 +118,38 @@ impl Parser {
     /// [`warnings()`]: Document::warnings
     /// [`attribute_value()`]: Self::attribute_value
     pub fn parse(&mut self, source: &str) -> Document<'static> {
+        let mut document = self.parse_deferred(source);
+
+        // Resolve cross-references against this document's own catalog. For
+        // multi-document workflows, use `parse_deferred` and resolve later with
+        // a caller-supplied resolver via `Document::resolve_references`.
+        document.resolve_against_own_catalog(&*self.renderer);
+
+        document
+    }
+
+    /// Parse a UTF-8 string as an AsciiDoc document, leaving cross-references
+    /// unresolved.
+    ///
+    /// This behaves like [`parse()`], except it does not resolve
+    /// cross-references (`<<id>>`, `xref:id[…]`). The returned [`Document`]
+    /// carries its references in a deferred state; resolve them later with
+    /// [`Document::resolve_references`].
+    ///
+    /// This is the entry point for multi-document workflows (e.g. Antora-style
+    /// site generation): parse every document with this method, build a
+    /// combined index from each document's [`catalog()`], then resolve each
+    /// document against that index. This crate does not merge catalogs
+    /// itself.
+    ///
+    /// [`parse()`]: Self::parse
+    /// [`catalog()`]: Document::catalog
+    pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
         let (preprocessed_source, source_map) = preprocess(source, self);
 
         // NOTE: `Document::parse` will transfer the catalog to itself at the end of the
-        // parsing operation.
-        if self.catalog.is_none() {
-            self.catalog = Some(Catalog::new());
-        }
+        // parsing operation. Start each parse with a fresh catalog.
+        *self.catalog.borrow_mut() = Catalog::new();
 
         // Reset section numbering for each new document.
         self.last_section_number = SectionNumber::default();
@@ -223,29 +253,43 @@ impl Parser {
         self
     }
 
-    /// Returns a mutable reference to the document catalog.
+    /// Register a referenceable element (anchor, section, bibliography entry)
+    /// in the document catalog.
     ///
-    /// This is used during parsing to allow code within `Document::parse` to
-    /// register and access referenceable elements. The catalog should only be
-    /// available during active parsing.
-    ///
-    /// # Example usage during parsing
-    /// ```ignore
-    /// // Within block parsing code:
-    /// if let Some(catalog) = parser.catalog_mut() {
-    ///     catalog.register_ref("my-anchor", Some(span), Some("My Anchor"), RefType::Anchor)?;
-    /// }
-    /// ```
-    pub(crate) fn catalog_mut(&mut self) -> Option<&mut Catalog> {
-        self.catalog.as_mut()
+    /// This takes `&self` (rather than `&mut self`) so that it can be called
+    /// from inline-substitution code paths that only hold a shared reference to
+    /// the parser, such as a regex [`Replacer`](regex::Replacer).
+    pub(crate) fn register_ref(
+        &self,
+        id: &str,
+        reftext: Option<&str>,
+        ref_type: RefType,
+    ) -> Result<(), crate::document::DuplicateIdError> {
+        self.catalog
+            .borrow_mut()
+            .register_ref(id, reftext, ref_type)
     }
 
-    /// Takes the catalog from the parser, transferring ownership.
+    /// Generate a unique ID derived from `base_id` and register it in the
+    /// document catalog, returning the ID that was assigned.
+    pub(crate) fn generate_and_register_unique_id(
+        &self,
+        base_id: &str,
+        reftext: Option<&str>,
+        ref_type: RefType,
+    ) -> String {
+        self.catalog
+            .borrow_mut()
+            .generate_and_register_unique_id(base_id, reftext, ref_type)
+    }
+
+    /// Takes the catalog from the parser, transferring ownership and leaving an
+    /// empty catalog in its place.
     ///
     /// This is used by `Document::parse` to transfer the catalog from the
     /// parser to the document at the end of parsing.
     pub(crate) fn take_catalog(&mut self) -> Catalog {
-        self.catalog.take().unwrap_or_else(Catalog::new)
+        std::mem::take(&mut *self.catalog.borrow_mut())
     }
 
     /* Comment out until we're prepared to use and test this.
@@ -585,7 +629,9 @@ mod tests {
         let catalog = doc.catalog();
         assert!(catalog.is_empty());
 
-        assert!(parser.catalog.is_none());
+        // The catalog was transferred to the document, leaving the parser with
+        // an empty catalog.
+        assert!(parser.catalog.borrow().is_empty());
     }
 
     #[test]
@@ -664,6 +710,10 @@ mod tests {
 
         fn render_anchor(&self, id: &str, _reftext: Option<String>, dest: &mut String) {
             dest.push_str(&format!("[ANCHOR:{}]", id));
+        }
+
+        fn render_xref(&self, params: &crate::parser::XrefRenderParams, dest: &mut String) {
+            dest.push_str(&format!("[XREF:{}]", params.target));
         }
     }
 

@@ -144,7 +144,7 @@ The single quotes around the variable name in the assignment are required to for
                                         col: 1,
                                         offset: 81,
                                     },
-                                    rendered: "See xref:chain-operation[].",
+                                    rendered: "See <a href=\"#chain-operation\">Chain</a>.",
                                 },
                                 source: Span {
                                     data: "See xref:chain-{chapter}[].",
@@ -254,7 +254,7 @@ The single quotes around the variable name in the assignment are required to for
                                     col: 1,
                                     offset: 180,
                                 },
-                                rendered: "See xref:chain-maintenance[].",
+                                rendered: "See <a href=\"#chain-maintenance\">Chain</a>.",
                             },
                             source: Span {
                                 data: "See xref:chain-{chapter}[].",
