@@ -23,8 +23,8 @@ use crate::{
 /// Cross-references (`<<id>>`, `xref:id[…]`) cannot be resolved while a block
 /// is being parsed, because their target may be defined later in the document
 /// (or, for multi-document workflows, in another document entirely). The
-/// macros substitution therefore records each cross-reference as a deferred
-/// [`XrefSegment`] and leaves an opaque placeholder in the rendered text. The
+/// macros substitution therefore records each cross-reference in a deferred
+/// form and leaves an opaque placeholder in the rendered text. The
 /// references are resolved in a later pass — see
 /// [`Document::resolve_references`] — at which point [`rendered()`] reflects
 /// the resolved links. Until then, [`rendered()`] shows an unresolved fallback,
