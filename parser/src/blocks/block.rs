@@ -460,6 +460,7 @@ impl<'src> Block<'src> {
             Self::Section(b) => {
                 b.section_title_mut()
                     .resolve_references(resolver, renderer, warnings);
+
                 for child in b.nested_blocks_mut() {
                     child.resolve_references(resolver, renderer, warnings);
                 }
@@ -475,6 +476,7 @@ impl<'src> Block<'src> {
                 if let Some(term) = b.marker_mut().term_mut() {
                     term.resolve_references(resolver, renderer, warnings);
                 }
+
                 for child in b.nested_blocks_mut() {
                     child.resolve_references(resolver, renderer, warnings);
                 }
