@@ -246,53 +246,33 @@ For instance, consider a table with the three built-in option values, `header`, 
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // IMPORTANT: This test will have to be revised once we parse tables.
+        // This source now parses as a table block; the options under test live on
+        // the table's attribute list.
+        assert!(matches!(mi.item, crate::blocks::Block::Table(_)));
 
         assert_eq!(
-            mi.item,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
-                        data: "|===\n|Cell A1 |Cell B1",
-                        line: 2,
-                        col: 1,
-                        offset: 36,
+            mi.item.attrlist().unwrap(),
+            Attrlist {
+                attributes: &[
+                    ElementAttribute {
+                        name: None,
+                        shorthand_items: &["%header", "%footer", "%autowidth",],
+                        value: "%header%footer%autowidth"
                     },
-                    rendered: "|===\n|Cell A1 |Cell B1",
-                },
-                source: Span {
-                    data: "[%header%footer%autowidth,cols=2*~]\n|===\n|Cell A1 |Cell B1",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                style: SimpleBlockStyle::Paragraph,
-                title_source: None,
-                title: None,
+                    ElementAttribute {
+                        name: Some("cols"),
+                        shorthand_items: &[],
+                        value: "2*~"
+                    },
+                ],
                 anchor: None,
-                anchor_reftext: None,
-                attrlist: Some(Attrlist {
-                    attributes: &[
-                        ElementAttribute {
-                            name: None,
-                            shorthand_items: &["%header", "%footer", "%autowidth",],
-                            value: "%header%footer%autowidth"
-                        },
-                        ElementAttribute {
-                            name: Some("cols"),
-                            shorthand_items: &[],
-                            value: "2*~"
-                        },
-                    ],
-                    anchor: None,
-                    source: Span {
-                        data: "%header%footer%autowidth,cols=2*~",
-                        line: 1,
-                        col: 2,
-                        offset: 1,
-                    },
-                },),
-            },)
+                source: Span {
+                    data: "%header%footer%autowidth,cols=2*~",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+            },
         );
 
         let options = mi.item.options();
@@ -529,53 +509,33 @@ Instead of using the shorthand notation, <<ex-table-formal>> shows how the value
         .unwrap_if_no_warnings()
         .unwrap();
 
-        // IMPORTANT: This test will have to be revised once we support tables.
+        // This source now parses as a table block; the options under test live on
+        // the table's attribute list.
+        assert!(matches!(mi.item, crate::blocks::Block::Table(_)));
 
         assert_eq!(
-            mi.item,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
-                        data: "|===\n|Cell A1 |Cell B1",
-                        line: 2,
-                        col: 1,
-                        offset: 42,
+            mi.item.attrlist().unwrap(),
+            Attrlist {
+                attributes: &[
+                    ElementAttribute {
+                        name: Some("cols"),
+                        shorthand_items: &[],
+                        value: "2*~"
                     },
-                    rendered: "|===\n|Cell A1 |Cell B1",
-                },
-                source: Span {
-                    data: "[cols=2*~,opts=\"header,footer,autowidth\"]\n|===\n|Cell A1 |Cell B1",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                style: SimpleBlockStyle::Paragraph,
-                title_source: None,
-                title: None,
+                    ElementAttribute {
+                        name: Some("opts"),
+                        shorthand_items: &[],
+                        value: "header,footer,autowidth"
+                    },
+                ],
                 anchor: None,
-                anchor_reftext: None,
-                attrlist: Some(Attrlist {
-                    attributes: &[
-                        ElementAttribute {
-                            name: Some("cols"),
-                            shorthand_items: &[],
-                            value: "2*~"
-                        },
-                        ElementAttribute {
-                            name: Some("opts"),
-                            shorthand_items: &[],
-                            value: "header,footer,autowidth"
-                        },
-                    ],
-                    anchor: None,
-                    source: Span {
-                        data: "cols=2*~,opts=\"header,footer,autowidth\"",
-                        line: 1,
-                        col: 2,
-                        offset: 1,
-                    },
-                },),
-            },)
+                source: Span {
+                    data: "cols=2*~,opts=\"header,footer,autowidth\"",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+            },
         );
 
         let options = mi.item.options();

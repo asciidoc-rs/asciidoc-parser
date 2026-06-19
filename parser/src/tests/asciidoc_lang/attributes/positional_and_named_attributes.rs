@@ -489,45 +489,29 @@ Specifically, this syntax sets the `header`, `footer`, and `autowidth` options.
         .unwrap()
         .item;
 
+        // This source now parses as a table block; the shorthand options under
+        // test live on the table's attribute list.
+        assert!(matches!(block, crate::blocks::Block::Table(_)));
+
         assert_eq!(
-            block,
-            Block::Simple(SimpleBlock {
-                content: Content {
-                    original: Span {
-                        data: "|===\n|Header A |Header B\n|Footer A |Footer B\n|===",
-                        line: 2,
-                        col: 1,
-                        offset: 27,
-                    },
-                    rendered: "|===\n|Header A |Header B\n|Footer A |Footer B\n|===",
-                },
-                source: Span {
-                    data: "[%header%footer%autowidth]\n|===\n|Header A |Header B\n|Footer A |Footer B\n|===",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                style: SimpleBlockStyle::Paragraph,
-                title_source: None,
-                title: None,
+            block.attrlist().unwrap(),
+            Attrlist {
+                attributes: &[ElementAttribute {
+                    name: None,
+                    shorthand_items: &["%header", "%footer", "%autowidth",],
+                    value: "%header%footer%autowidth"
+                },],
                 anchor: None,
-                anchor_reftext: None,
-                attrlist: Some(Attrlist {
-                    attributes: &[ElementAttribute {
-                        name: None,
-                        shorthand_items: &["%header", "%footer", "%autowidth",],
-                        value: "%header%footer%autowidth"
-                    },],
-                    anchor: None,
-                    source: Span {
-                        data: "%header%footer%autowidth",
-                        line: 1,
-                        col: 2,
-                        offset: 1,
-                    },
-                },),
-            },)
+                source: Span {
+                    data: "%header%footer%autowidth",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+            },
         );
+
+        assert_eq!(block.options(), vec!["header", "footer", "autowidth"]);
 
         verifies!(
             r#"

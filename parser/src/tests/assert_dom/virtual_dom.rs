@@ -13,7 +13,7 @@ use crate::{
     blocks::{
         Block, Break, CompoundDelimitedBlock, IsBlock, ListBlock, ListItem, ListItemMarker,
         ListType, MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock,
-        SimpleBlockStyle,
+        SimpleBlockStyle, TableBlock, TableRow,
     },
 };
 
@@ -396,6 +396,7 @@ impl ToVirtualDom for Block<'_> {
             Block::Media(media) => media_to_node(media),
             Block::RawDelimited(raw) => raw_delimited_to_node(raw),
             Block::CompoundDelimited(compound) => compound_delimited_to_node(compound),
+            Block::Table(table) => table_to_node(table),
             Block::Preamble(preamble) => preamble_to_node(preamble),
             Block::Break(break_) => break_to_node(break_),
             Block::DocumentAttribute(_) => {
@@ -818,6 +819,71 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
     }
 
     node
+}
+
+fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
+    let mut node =
+        VirtualNode::new("table").with_classes(["tableblock", "frame-all", "grid-all", "stretch"]);
+
+    if let Some(id) = table.id() {
+        node = node.with_id(id);
+    }
+
+    for role in table.roles() {
+        node = node.with_class(role);
+    }
+
+    if let Some(title) = table.title() {
+        node.children
+            .push(VirtualNode::new("caption").with_text(title.to_string()));
+    }
+
+    let mut colgroup = VirtualNode::new("colgroup");
+    for _ in table.columns() {
+        colgroup.children.push(VirtualNode::new("col"));
+    }
+    node.children.push(colgroup);
+
+    if let Some(header) = table.header_row() {
+        let mut thead = VirtualNode::new("thead");
+        thead.children.push(table_row_to_node(header, "th", false));
+        node.children.push(thead);
+    }
+
+    if !table.body_rows().is_empty() {
+        let mut tbody = VirtualNode::new("tbody");
+        for row in table.body_rows() {
+            tbody.children.push(table_row_to_node(row, "td", true));
+        }
+        node.children.push(tbody);
+    }
+
+    node
+}
+
+fn table_row_to_node(row: &TableRow<'_>, cell_tag: &str, wrap_in_paragraph: bool) -> VirtualNode {
+    let mut tr = VirtualNode::new("tr");
+
+    for cell in row.cells() {
+        let mut cell_node =
+            VirtualNode::new(cell_tag).with_classes(["tableblock", "halign-left", "valign-top"]);
+
+        let rendered = cell.content().rendered().to_string();
+
+        if wrap_in_paragraph {
+            cell_node.children.push(
+                VirtualNode::new("p")
+                    .with_class("tableblock")
+                    .with_text(rendered),
+            );
+        } else {
+            cell_node = cell_node.with_text(rendered);
+        }
+
+        tr.children.push(cell_node);
+    }
+
+    tr
 }
 
 fn preamble_to_node<'a>(preamble: &'a Preamble<'a>) -> VirtualNode {

@@ -1,0 +1,174 @@
+//! Tests for the basic PSV table block, covering the examples in
+//! `docs/modules/tables/pages/build-a-basic-table.adoc`.
+
+use crate::{
+    Parser, Span,
+    blocks::{Block, ContentModel, IsBlock, TableBlock},
+};
+
+/// Parse `source` as a single block and return the [`TableBlock`] it produced.
+fn parse_table(source: &str) -> TableBlock<'_> {
+    let mut parser = Parser::default();
+    let mi = Block::parse(Span::new(source), &mut parser)
+        .unwrap_if_no_warnings()
+        .unwrap();
+
+    match mi.item {
+        Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    }
+}
+
+/// Collect the rendered content of every cell in a row.
+fn row_text(row: &crate::blocks::TableRow<'_>) -> Vec<String> {
+    row.cells()
+        .iter()
+        .map(|cell| cell.content().rendered().to_string())
+        .collect()
+}
+
+#[test]
+fn two_columns_three_rows() {
+    // From <<ex-rows>>: two columns via `cols`, three body rows, no header.
+    let table = parse_table(
+        "[cols=\"1,1\"]\n|===\n|Cell in column 1, row 1\n|Cell in column 2, row 1\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
+    );
+
+    assert_eq!(table.content_model(), ContentModel::Table);
+    assert_eq!(table.raw_context().as_ref(), "table");
+    assert_eq!(table.columns().len(), 2);
+    assert!(table.header_row().is_none());
+
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                "Cell in column 1, row 1".to_string(),
+                "Cell in column 2, row 1".to_string()
+            ],
+            vec![
+                "Cell in column 1, row 2".to_string(),
+                "Cell in column 2, row 2".to_string()
+            ],
+            vec![
+                "Cell in column 1, row 3".to_string(),
+                "Cell in column 2, row 3".to_string()
+            ],
+        ]
+    );
+}
+
+#[test]
+fn multiple_cells_on_one_line() {
+    // From <<ex-rows>>: a row may place several cells on a single line, each
+    // separated by a space followed by a vertical bar.
+    let table = parse_table(
+        "[cols=\"1,1\"]\n|===\n|Cell in column 1, row 1\n|Cell in column 2, row 1\n\n|Cell in column 1, row 2 |Cell in column 2, row 2\n|Cell in column 1, row 3 |Cell in column 2, row 3\n|===",
+    );
+
+    assert_eq!(table.body_rows().len(), 3);
+    assert_eq!(
+        row_text(&table.body_rows()[2]),
+        vec![
+            "Cell in column 1, row 3".to_string(),
+            "Cell in column 2, row 3".to_string()
+        ]
+    );
+}
+
+#[test]
+fn implicit_header_row() {
+    // From <<ex-header>>: the first line after the delimiter is non-empty and is
+    // followed by a blank line, so it becomes the header row.
+    let table = parse_table(
+        "[cols=\"1,1\"]\n|===\n|Cell in column 1, header row |Cell in column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
+    );
+
+    let header = table.header_row().unwrap();
+    assert_eq!(
+        row_text(header),
+        vec![
+            "Cell in column 1, header row".to_string(),
+            "Cell in column 2, header row".to_string()
+        ]
+    );
+
+    assert_eq!(table.body_rows().len(), 2);
+}
+
+#[test]
+fn implicit_columns_from_first_row() {
+    // From add-columns.adoc <<ex-implicit>>: with no `cols` attribute and a blank
+    // line before the first row, the column count comes from the first row's cell
+    // count and there is no header.
+    let table = parse_table(
+        "|===\n\n|Cell in column 1, row 1 |Cell in column 2, row 1 |Cell in column 3, row 1\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n|===",
+    );
+
+    assert_eq!(table.columns().len(), 3);
+    assert!(table.header_row().is_none());
+    assert_eq!(table.body_rows().len(), 2);
+    assert_eq!(
+        row_text(&table.body_rows()[0]),
+        vec![
+            "Cell in column 1, row 1".to_string(),
+            "Cell in column 2, row 1".to_string(),
+            "Cell in column 3, row 1".to_string()
+        ]
+    );
+}
+
+#[test]
+fn column_multiplier() {
+    // From add-columns.adoc: `cols="5,3*"` yields one column then three more.
+    let table = parse_table("[cols=\"5,3*\"]\n|===\n|a |b |c |d\n|===");
+
+    let widths: Vec<usize> = table.columns().iter().map(|c| c.width()).collect();
+    assert_eq!(widths, vec![5, 1, 1, 1]);
+}
+
+#[test]
+fn cell_content_is_substituted() {
+    // Cell content flows through the normal substitution pipeline.
+    let table = parse_table("|===\n|*bold* and _italic_\n|===");
+
+    assert_eq!(
+        row_text(&table.body_rows()[0]),
+        vec!["<strong>bold</strong> and <em>italic</em>".to_string()]
+    );
+}
+
+#[test]
+fn leading_and_trailing_whitespace_stripped() {
+    // From <<ex-more-cells>>: leading and trailing spaces around cell content are
+    // stripped.
+    let table = parse_table("[cols=\"1,1\"]\n|===\n|a |    b spaced\n|===");
+
+    assert_eq!(
+        row_text(&table.body_rows()[0]),
+        vec!["a".to_string(), "b spaced".to_string()]
+    );
+}
+
+#[test]
+fn block_is_recognized_via_debug() {
+    let mut parser = Parser::default();
+    let mi = Block::parse(Span::new("|===\n|a |b\n|==="), &mut parser)
+        .unwrap_if_no_warnings()
+        .unwrap();
+
+    let debug_output = format!("{:?}", mi.item);
+    assert!(debug_output.starts_with("Block::Table"));
+}
+
+#[test]
+fn unterminated_table_warns() {
+    let mut parser = Parser::default();
+    let maw = Block::parse(Span::new("|===\n|a |b"), &mut parser);
+
+    assert!(maw.warnings.iter().any(|w| matches!(
+        w.warning,
+        crate::warnings::WarningType::UnterminatedDelimitedBlock
+    )));
+}
