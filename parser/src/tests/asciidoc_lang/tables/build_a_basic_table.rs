@@ -25,6 +25,11 @@ fn create_a_table_with_two_columns_and_three_rows() {
     non_normative!(
         r#"
 == Create a table with two columns and three rows
+"#
+    );
+
+    verifies!(
+        r#"
 
 In <<ex-cols>>, we'll assign the `cols` attribute a list of column specifiers.
 A column specifier represents a column.
@@ -83,11 +88,6 @@ You can enter xref:add-cells-and-rows.adoc[more than one cell or all of the cell
 The table from <<ex-rows>> is displayed below.
 It contains two columns and three rows of text positioned and styled using the default alignment, style, border, and width attribute values.
 
-"#
-    );
-
-    verifies!(
-        r#"
 [cols="1,1"]
 |===
 |Cell in column 1, row 1
@@ -96,6 +96,10 @@ It contains two columns and three rows of text positioned and styled using the d
 |Cell in column 1, row 2 |Cell in column 2, row 2
 |Cell in column 1, row 3 |Cell in column 2, row 3
 |===
+
+In addition to the xref:add-columns.adoc[cols attribute], you can identify the number of columns using a xref:add-columns.adoc#column-multiplier[column multiplier] or xref:add-columns.adoc#implicit-cols[the table's first row].
+However, the `cols` attribute is required to customize the xref:adjust-column-widths.adoc[width], xref:align-by-column.adoc[alignment], or xref:format-column-content.adoc[style] of a column.
+
 "#
     );
 
@@ -240,15 +244,6 @@ It contains two columns and three rows of text positioned and styled using the d
             catalog: Catalog::default(),
         }
     );
-
-    non_normative!(
-        r#"
-
-In addition to the xref:add-columns.adoc[cols attribute], you can identify the number of columns using a xref:add-columns.adoc#column-multiplier[column multiplier] or xref:add-columns.adoc#implicit-cols[the table's first row].
-However, the `cols` attribute is required to customize the xref:adjust-column-widths.adoc[width], xref:align-by-column.adoc[alignment], or xref:format-column-content.adoc[style] of a column.
-
-"#
-    );
 }
 
 #[test]
@@ -256,6 +251,11 @@ fn add_a_header_row_to_the_table() {
     non_normative!(
         r#"
 === Add a header row to the table
+"#
+    );
+
+    verifies!(
+        r#"
 
 Let's add a header row to the table in <<ex-header>>.
 You can implicitly identify the first row of a table as a header row by entering all of the first row's cells on the line directly after the opening table delimiter.
@@ -282,11 +282,6 @@ You can implicitly identify the first row of a table as a header row by entering
 
 The table from <<ex-header>> is displayed below.
 
-"#
-    );
-
-    verifies!(
-        r#"
 [cols="1,1"]
 |===
 |Cell in column 1, header row |Cell in column 2, header row
@@ -300,6 +295,8 @@ The table from <<ex-header>> is displayed below.
 |Cell in column 1, row 4
 |Cell in column 2, row 4
 |===
+
+A header row can also be identified by assigning xref:add-header-row.adoc[header to the options attribute].
 "#
     );
 
@@ -468,12 +465,5 @@ The table from <<ex-header>> is displayed below.
             source_map: SourceMap(&[]),
             catalog: Catalog::default(),
         }
-    );
-
-    non_normative!(
-        r#"
-
-A header row can also be identified by assigning xref:add-header-row.adoc[header to the options attribute].
-"#
     );
 }
