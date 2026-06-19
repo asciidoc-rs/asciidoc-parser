@@ -155,7 +155,7 @@ fn add_a_title_to_a_table() {
         }
     );
 
-    non_normative!(
+    verifies!(
         r#"
 The table from <<ex-title>> is displayed below.
 
@@ -168,17 +168,13 @@ The table from <<ex-title>> is displayed below.
 |Cell in column 2, row 2
 |===
 
-"#
-    );
-
-    verifies!(
-        r#"
 You'll notice in the above result, that the processor automatically added _Table 1._ in front of the table's title.
 "#
     );
 
-    // The processor prepends the automatic caption ("Table 1. ") to the block
-    // title, rendering both inside the table's `<caption class="title">`.
+    // The displayed table renders with the processor's automatic caption
+    // ("Table 1. ") prepended to the block title, both inside the table's
+    // `<caption class="title">`.
     assert_xpath(
         &doc,
         "//caption[text()=\"Table 1. A table with a title\"]",
