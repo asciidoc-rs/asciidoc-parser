@@ -1568,4 +1568,63 @@ mod tests {
             assert_eq!(offset, 28);
         }
     }
+
+    mod merge_block_style_shorthand {
+        use crate::{
+            attributes::{AttrlistContext, element_attribute::ParseShorthand},
+            strings::CowStr,
+            tests::prelude::*,
+        };
+
+        fn parse(value: &str) -> crate::attributes::ElementAttribute<'_> {
+            let p = Parser::default();
+            crate::attributes::ElementAttribute::parse(
+                &CowStr::from(value),
+                0,
+                &p,
+                ParseShorthand(true),
+                AttrlistContext::Block,
+            )
+            .0
+        }
+
+        #[test]
+        fn merges_disjoint_shorthand() {
+            let earlier = parse("#myid");
+            let later = parse(".myrole");
+
+            let merged =
+                crate::attributes::ElementAttribute::merge_block_style_shorthand(&earlier, &later);
+
+            assert!(merged.name().is_none());
+            assert_eq!(merged.id().unwrap(), "myid");
+            assert_eq!(merged.roles(), vec!["myrole"]);
+        }
+
+        #[test]
+        fn two_empty_positionals_stay_empty() {
+            // Merging two empty first positionals exercises the empty-value
+            // branch, which produces an attribute with no shorthand items.
+            let earlier = parse("");
+            let later = parse("");
+
+            let merged =
+                crate::attributes::ElementAttribute::merge_block_style_shorthand(&earlier, &later);
+
+            assert_eq!(
+                merged,
+                ElementAttribute {
+                    name: None,
+                    shorthand_items: &[],
+                    value: "",
+                }
+            );
+
+            assert!(merged.name().is_none());
+            assert!(merged.block_style().is_none());
+            assert!(merged.id().is_none());
+            assert!(merged.roles().is_empty());
+            assert!(merged.options().is_empty());
+        }
+    }
 }

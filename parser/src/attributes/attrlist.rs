@@ -210,10 +210,12 @@ impl<'src> Attrlist<'src> {
     }
 
     /// Return a mutable reference to the (1-based) `n`th positional attribute.
+    ///
+    /// `n` must be 1 or greater; the only caller is
+    /// [`merge_block_attribute_line`](Self::merge_block_attribute_line), which
+    /// always passes a positive position.
     fn nth_positional_mut(&mut self, n: usize) -> Option<&mut ElementAttribute<'src>> {
-        if n == 0 {
-            return None;
-        }
+        debug_assert!(n >= 1, "nth_positional_mut requires a 1-based position");
 
         self.attributes
             .iter_mut()
