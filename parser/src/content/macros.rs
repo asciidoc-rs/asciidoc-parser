@@ -99,10 +99,9 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
     if text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:")) {
         let mut xrefs: Vec<XrefSegment> = vec![];
 
-        let replaced = match INLINE_XREF.replace_all(
-            content.rendered(),
-            InlineXrefReplacer { xrefs: &mut xrefs },
-        ) {
+        let replaced = match INLINE_XREF
+            .replace_all(content.rendered(), InlineXrefReplacer { xrefs: &mut xrefs })
+        {
             Cow::Owned(new_result) => Some(new_result),
             Cow::Borrowed(_) => None,
         };

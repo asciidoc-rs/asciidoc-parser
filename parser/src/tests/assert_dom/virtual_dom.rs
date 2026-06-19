@@ -4,6 +4,10 @@
 //! documents for testing purposes. It maps AsciiDoc block structures to their
 //! HTML equivalents, enabling XPath-like queries for test assertions.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use crate::{
     Document, HasSpan,
     blocks::{
@@ -111,7 +115,49 @@ fn try_parse_element(text: &str, pos: usize) -> Option<(VirtualNode, usize)> {
         VirtualNode::new(tag_name).with_text(content)
     };
 
+    // Capture the opening tag's attributes (id, class, href, etc.) so that
+    // attribute predicates like `[@href="#x"]` can match inline elements.
+    let element = apply_tag_attributes(element, tag_content);
+
     Some((element, after_closing))
+}
+
+/// Matches `name="value"` attribute pairs in an opening tag. Renderer output
+/// always uses double quotes, so single-quoted values are not handled.
+static HTML_ATTR: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r#"([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*"([^"]*)""#).unwrap()
+});
+
+/// Parses the attributes from an opening tag's content and applies them to
+/// `node`, routing `id` and `class` to their dedicated fields and everything
+/// else into the generic attribute map.
+fn apply_tag_attributes(mut node: VirtualNode, tag_content: &str) -> VirtualNode {
+    // Skip the tag name; only the remainder can contain attributes.
+    let attrs = tag_content
+        .trim()
+        .split_once(char::is_whitespace)
+        .map(|(_, rest)| rest)
+        .unwrap_or("");
+
+    for caps in HTML_ATTR.captures_iter(attrs) {
+        let name = &caps[1];
+        let value = caps[2].to_string();
+
+        match name {
+            "id" => node.id = Some(value),
+            "class" => {
+                for class in value.split_whitespace() {
+                    node.classes.push(class.to_string());
+                }
+            }
+            _ => {
+                node.attributes.insert(name.to_string(), value);
+            }
+        }
+    }
+
+    node
 }
 
 /// Extracts the tag name from an opening tag string (without the < and >).

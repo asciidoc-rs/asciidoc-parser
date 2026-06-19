@@ -264,7 +264,9 @@ impl Parser {
         reftext: Option<&str>,
         ref_type: RefType,
     ) -> Result<(), crate::document::DuplicateIdError> {
-        self.catalog.borrow_mut().register_ref(id, reftext, ref_type)
+        self.catalog
+            .borrow_mut()
+            .register_ref(id, reftext, ref_type)
     }
 
     /// Generate a unique ID derived from `base_id` and register it in the
@@ -709,11 +711,7 @@ mod tests {
             dest.push_str(&format!("[ANCHOR:{}]", id));
         }
 
-        fn render_xref(
-            &self,
-            params: &crate::parser::XrefRenderParams,
-            dest: &mut String,
-        ) {
+        fn render_xref(&self, params: &crate::parser::XrefRenderParams, dest: &mut String) {
             dest.push_str(&format!("[XREF:{}]", params.target));
         }
     }
