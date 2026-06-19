@@ -59,11 +59,13 @@ impl<'src> TableBlock<'src> {
     /// delimiters are not yet recognized.
     pub(crate) fn is_table_delimiter(line: &Span<'src>) -> bool {
         let data = line.data();
+        // `len() >= 4` plus the leading `|` guarantees `rest` holds at least three
+        // bytes, so the closure only needs to confirm they are all `=`.
         data.len() >= 4
             && data.starts_with('|')
             && data
                 .get(1..)
-                .is_some_and(|rest| rest.len() >= 3 && rest.bytes().all(|b| b == b'='))
+                .is_some_and(|rest| rest.bytes().all(|b| b == b'='))
     }
 
     pub(crate) fn parse(
@@ -372,10 +374,19 @@ fn parse_cols(value: &str) -> Vec<TableColumn> {
 
 /// Parse a single column specifier, extracting its proportional width.
 ///
-/// Alignment and style operators are not yet interpreted; any non-digit
-/// characters are ignored and the column falls back to the default width.
+/// In a full column specifier the width is the single numeric token, optionally
+/// preceded by alignment operators and followed by a style operator (neither of
+/// which is interpreted yet). The width is therefore the first contiguous run
+/// of digits; a spec with no digits falls back to the default width. Taking the
+/// first run — rather than concatenating every digit in the spec — keeps
+/// unrelated digit groups from fusing once those operators are supported.
 fn parse_col_spec(spec: &str) -> TableColumn {
-    let digits: String = spec.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits: String = spec
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+
     match digits.parse::<usize>() {
         Ok(width) if width > 0 => TableColumn { width },
         _ => TableColumn::default(),
@@ -386,8 +397,12 @@ fn parse_col_spec(spec: &str) -> TableColumn {
 /// each cell's content.
 ///
 /// A cell boundary is a vertical bar (`|`) that appears at the start of a line
-/// or is preceded by whitespace, and that is not escaped with a leading
-/// backslash. Content before the first boundary is ignored.
+/// or is preceded by whitespace. Content before the first boundary is ignored.
+///
+/// An escaped separator (`\|`) is preceded by a backslash — neither a line
+/// start nor whitespace — so it already fails the boundary test and needs no
+/// special handling here; the backslash is stripped later in
+/// [`TableCell::parse`].
 fn scan_cells(region: Span<'_>) -> Vec<Span<'_>> {
     let bytes = region.data().as_bytes();
     let len = bytes.len();
@@ -401,9 +416,8 @@ fn scan_cells(region: Span<'_>) -> Vec<Span<'_>> {
             let prev = i.checked_sub(1).and_then(|p| bytes.get(p)).copied();
             let at_line_start = prev.is_none() || prev == Some(b'\n');
             let after_space = prev == Some(b' ') || prev == Some(b'\t');
-            let escaped = prev == Some(b'\\');
 
-            if (at_line_start || after_space) && !escaped {
+            if at_line_start || after_space {
                 if let Some(start) = content_start {
                     cells.push(region.slice(start..i));
                 }
