@@ -249,8 +249,9 @@ If the text cannot be parsed, an error message will be emitted to the log.
     fn avoid_attrlist_with_empty() {
         verifies!(
             r#"
-WARNING: The opening line of a paragraph may inadvertently match the syntax of a block attribute line.
-If this happens, append `+{empty}+` to the end of the line to disrupt the syntax match.
+WARNING: The first line of a paragraph cannot start with `[` and end with `]`.
+That's because it will match the syntax of a block attribute line.
+See xref:blocks:paragraphs.adoc#block-attribute-line-conflict[avoiding a conflict with a block attribute line].
 
 "#
         );

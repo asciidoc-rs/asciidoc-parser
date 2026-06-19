@@ -502,7 +502,7 @@ fn per_line_dialogue_syntax() {
     // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/440): Await spec clarity on correct behavior for this example.
     verifies!(
         r#"
-If you're writing a story with dialogue, and you want to prefix the dialogue lines with `--`, the per-line syntax is the most appropriate choice.
+If you're writing a story with dialogue, and you want to prefix the dialogue lines with `--`, be aware that you are going to get a conflict between the hard line break and the automatic endash replacement.
 For example:
 
 [source]
@@ -511,8 +511,19 @@ For example:
 -- What is it? -- replied Lance.
 ----
 
-If you were to use the `hardbreaks` option instead, the second `--` would not only be substituted with an endash, it would also consume the preceding newline.
-As a result, both lines in the source would end up appearing on the same line in the output.
+The second `--` will not only be substituted with an endash, it will also consume the preceding newline.
+As a result, both lines in the source will end up appearing on the same line in the output.
+To circumvent this problem, you can need to add an extra newline for the endash replacement to consume.
+
+[source]
+----
+[%hardbreaks]
+-- Come here! -- I said.
+{empty}
+-- What is it? -- replied Lance.
+----
+
+Then each dialog will appear on its own line.
 
 "#
     );

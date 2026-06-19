@@ -15,7 +15,9 @@ A preface is a special section that precedes the first chapter of a book or a bo
 
 The `preface` section style can only be used when the doctype is `book`.
 A preface can contain subsections.
-When a book doesn't contain parts, the preface must be defined as a level 1 section (`==`) and any preface subsections must start at level 2 (`===`).
+When a book contains parts (i.e., multipart book), the preface can be defined as either a level 0 section (`=`) or level 1 section (`==`).
+When a book doesn't contain parts, the preface must be defined as a level 1 section (`==`).
+In either case, any preface subsections must start at one level below the level of the preface title.
 
 [source]
 ----
