@@ -3,7 +3,10 @@
 
 use crate::{
     HasSpan, Parser, Span,
-    blocks::{Block, ContentModel, HorizontalAlignment, IsBlock, TableBlock, VerticalAlignment},
+    blocks::{
+        Block, ContentModel, HorizontalAlignment, IsBlock, TableBlock, TableCellContent,
+        VerticalAlignment,
+    },
     content::SubstitutionGroup,
     parser::ModificationContext,
 };
@@ -22,10 +25,16 @@ fn parse_table(source: &str) -> TableBlock<'_> {
 }
 
 /// Collect the rendered content of every cell in a row.
+///
+/// Every cell in these basic-table tests uses the default (inline) style, so a
+/// cell is expected to hold [`TableCellContent::Simple`].
 fn row_text(row: &crate::blocks::TableRow<'_>) -> Vec<String> {
     row.cells()
         .iter()
-        .map(|cell| cell.content().rendered().to_string())
+        .map(|cell| match cell.content() {
+            TableCellContent::Simple(content) => content.rendered().to_string(),
+            TableCellContent::AsciiDoc(_) => panic!("expected simple cell content"),
+        })
         .collect()
 }
 

@@ -63,17 +63,19 @@ fn add_a_title_to_a_table() {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     }
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1, header row",
                                     line: 4,
@@ -81,10 +83,10 @@ fn add_a_title_to_a_table() {
                                     offset: 41,
                                 },
                                 rendered: "Column 1, header row",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2, header row",
                                     line: 4,
@@ -92,14 +94,14 @@ fn add_a_title_to_a_table() {
                                     offset: 63,
                                 },
                                 rendered: "Column 2, header row",
-                            },
+                            }),
                         },
                     ],
                 }),
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 1, row 2",
                                     line: 6,
@@ -107,10 +109,10 @@ fn add_a_title_to_a_table() {
                                     offset: 86,
                                 },
                                 rendered: "Cell in column 1, row 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 2, row 2",
                                     line: 7,
@@ -118,7 +120,7 @@ fn add_a_title_to_a_table() {
                                     offset: 111,
                                 },
                                 rendered: "Cell in column 2, row 2",
-                            },
+                            }),
                         },
                     ],
                 }],

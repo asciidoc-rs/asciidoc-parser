@@ -13,7 +13,7 @@ use crate::{
     blocks::{
         Block, Break, CompoundDelimitedBlock, IsBlock, ListBlock, ListItem, ListItemMarker,
         ListType, MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock,
-        SimpleBlockStyle, TableBlock, TableRow,
+        SimpleBlockStyle, TableBlock, TableCellContent, TableRow,
     },
 };
 
@@ -880,16 +880,29 @@ fn table_row_to_node(row: &TableRow<'_>, cell_tag: &str, wrap_in_paragraph: bool
         let mut cell_node =
             VirtualNode::new(cell_tag).with_classes(["tableblock", "halign-left", "valign-top"]);
 
-        let rendered = cell.content().rendered().to_string();
+        match cell.content() {
+            TableCellContent::Simple(content) => {
+                let rendered = content.rendered().to_string();
 
-        if wrap_in_paragraph {
-            cell_node.children.push(
-                VirtualNode::new("p")
-                    .with_class("tableblock")
-                    .with_text(rendered),
-            );
-        } else {
-            cell_node = cell_node.with_text(rendered);
+                if wrap_in_paragraph {
+                    cell_node.children.push(
+                        VirtualNode::new("p")
+                            .with_class("tableblock")
+                            .with_text(rendered),
+                    );
+                } else {
+                    cell_node = cell_node.with_text(rendered);
+                }
+            }
+
+            // An AsciiDoc-styled cell holds a nested sequence of blocks, which
+            // render directly into the cell rather than into a single
+            // paragraph.
+            TableCellContent::AsciiDoc(blocks) => {
+                for block in blocks {
+                    cell_node.children.push(block.to_virtual_dom());
+                }
+            }
         }
 
         tr.children.push(cell_node);

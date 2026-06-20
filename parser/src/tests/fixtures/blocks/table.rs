@@ -2,8 +2,8 @@ use std::fmt;
 
 use crate::{
     HasSpan,
-    blocks::{HorizontalAlignment, IsBlock, VerticalAlignment},
-    tests::fixtures::{Span, attributes::Attrlist, content::Content},
+    blocks::{ColumnStyle, HorizontalAlignment, IsBlock, VerticalAlignment},
+    tests::fixtures::{Span, attributes::Attrlist, blocks::Block, content::Content},
 };
 
 #[derive(Eq, PartialEq)]
@@ -44,6 +44,7 @@ pub(crate) struct TableColumn {
     pub width: usize,
     pub h_align: HorizontalAlignment,
     pub v_align: VerticalAlignment,
+    pub style: ColumnStyle,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -53,7 +54,13 @@ pub(crate) struct TableRow {
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct TableCell {
-    pub content: Content,
+    pub content: TableCellContent,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum TableCellContent {
+    Simple(Content),
+    AsciiDoc(&'static [Block]),
 }
 
 impl<'src> PartialEq<crate::blocks::TableBlock<'src>> for TableBlock {
@@ -71,8 +78,21 @@ impl PartialEq<TableBlock> for crate::blocks::TableBlock<'_> {
 fn columns_eq(fixture: &[TableColumn], observed: &[crate::blocks::TableColumn]) -> bool {
     fixture.len() == observed.len()
         && fixture.iter().zip(observed.iter()).all(|(f, o)| {
-            f.width == o.width() && f.h_align == o.h_align() && f.v_align == o.v_align()
+            f.width == o.width()
+                && f.h_align == o.h_align()
+                && f.v_align == o.v_align()
+                && f.style == o.style()
         })
+}
+
+fn cell_content_eq(fixture: &TableCellContent, observed: &crate::blocks::TableCellContent) -> bool {
+    match (fixture, observed) {
+        (TableCellContent::Simple(f), crate::blocks::TableCellContent::Simple(o)) => f == o,
+        (TableCellContent::AsciiDoc(f), crate::blocks::TableCellContent::AsciiDoc(o)) => {
+            f.len() == o.len() && f.iter().zip(o.iter()).all(|(fb, ob)| fb == ob)
+        }
+        _ => false,
+    }
 }
 
 fn cells_eq(fixture: &[TableCell], observed: &[crate::blocks::TableCell]) -> bool {
@@ -80,7 +100,7 @@ fn cells_eq(fixture: &[TableCell], observed: &[crate::blocks::TableCell]) -> boo
         && fixture
             .iter()
             .zip(observed.iter())
-            .all(|(f, o)| f.content == *o.content())
+            .all(|(f, o)| cell_content_eq(&f.content, o.content()))
 }
 
 fn row_eq(fixture: &TableRow, observed: &crate::blocks::TableRow) -> bool {

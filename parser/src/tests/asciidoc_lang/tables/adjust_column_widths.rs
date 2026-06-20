@@ -56,23 +56,26 @@ When using the HTML5 backend with the default Asciidoctor stylesheet, tables str
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: None,
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 2,
@@ -80,10 +83,10 @@ When using the HTML5 backend with the default Asciidoctor stylesheet, tables str
                                     offset: 6,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 2,
@@ -91,10 +94,10 @@ When using the HTML5 backend with the default Asciidoctor stylesheet, tables str
                                     offset: 16,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 2,
@@ -102,7 +105,7 @@ When using the HTML5 backend with the default Asciidoctor stylesheet, tables str
                                     offset: 26,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                     ],
                 },],
@@ -199,22 +202,25 @@ As seen below, the columns stretch across the width of the page according to the
                         width: 2,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 3,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 3,
@@ -222,10 +228,10 @@ As seen below, the columns stretch across the width of the page according to the
                                     offset: 21,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 3,
@@ -233,10 +239,10 @@ As seen below, the columns stretch across the width of the page according to the
                                     offset: 31,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 3,
@@ -244,14 +250,14 @@ As seen below, the columns stretch across the width of the page according to the
                                     offset: 41,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                     ],
                 },),
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 2",
                                     line: 5,
@@ -259,10 +265,10 @@ As seen below, the columns stretch across the width of the page according to the
                                     offset: 52,
                                 },
                                 rendered: "This column has a proportional width of 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 1",
                                     line: 6,
@@ -270,10 +276,10 @@ As seen below, the columns stretch across the width of the page according to the
                                     offset: 95,
                                 },
                                 rendered: "This column has a proportional width of 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 3",
                                     line: 7,
@@ -281,7 +287,7 @@ As seen below, the columns stretch across the width of the page according to the
                                     offset: 138,
                                 },
                                 rendered: "This column has a proportional width of 3",
-                            },
+                            }),
                         },
                     ],
                 },],
@@ -420,22 +426,25 @@ The columns, displayed in the table below, have adjusted across the width of the
                         width: 6,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 3,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 3,
@@ -443,10 +452,10 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 21,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 3,
@@ -454,10 +463,10 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 31,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 3,
@@ -465,14 +474,14 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 41,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                     ],
                 },),
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 6",
                                     line: 5,
@@ -480,10 +489,10 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 52,
                                 },
                                 rendered: "This column has a proportional width of 6",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 1",
                                     line: 6,
@@ -491,10 +500,10 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 95,
                                 },
                                 rendered: "This column has a proportional width of 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 3",
                                     line: 7,
@@ -502,7 +511,7 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 138,
                                 },
                                 rendered: "This column has a proportional width of 3",
-                            },
+                            }),
                         },
                     ],
                 },],
@@ -570,22 +579,25 @@ The columns, displayed in the table below, have adjusted across the width of the
                         width: 6,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 2,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 3,
@@ -593,10 +605,10 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 21,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 3,
@@ -604,10 +616,10 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 31,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 3,
@@ -615,14 +627,14 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 41,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                     ],
                 },),
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 6",
                                     line: 5,
@@ -630,10 +642,10 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 52,
                                 },
                                 rendered: "This column has a proportional width of 6",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 1",
                                     line: 6,
@@ -641,10 +653,10 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 95,
                                 },
                                 rendered: "This column has a proportional width of 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a proportional width of 2",
                                     line: 7,
@@ -652,7 +664,7 @@ The columns, displayed in the table below, have adjusted across the width of the
                                     offset: 138,
                                 },
                                 rendered: "This column has a proportional width of 2",
-                            },
+                            }),
                         },
                     ],
                 },],
@@ -765,22 +777,25 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                         width: 15,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 30,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 55,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 3,
@@ -788,10 +803,10 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 27,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 3,
@@ -799,10 +814,10 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 37,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 3,
@@ -810,14 +825,14 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 47,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                     ],
                 },),
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a width of 15%",
                                     line: 5,
@@ -825,10 +840,10 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 58,
                                 },
                                 rendered: "This column has a width of 15%",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a width of 30%",
                                     line: 6,
@@ -836,10 +851,10 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 90,
                                 },
                                 rendered: "This column has a width of 30%",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a width of 55%",
                                     line: 7,
@@ -847,7 +862,7 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 122,
                                 },
                                 rendered: "This column has a width of 55%",
-                            },
+                            }),
                         },
                     ],
                 },],
@@ -915,22 +930,25 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                         width: 15,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 30,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 55,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 3,
@@ -938,10 +956,10 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 24,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 3,
@@ -949,10 +967,10 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 34,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 3,
@@ -960,14 +978,14 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 44,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                     ],
                 },),
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a width of 15%",
                                     line: 5,
@@ -975,10 +993,10 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 55,
                                 },
                                 rendered: "This column has a width of 15%",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a width of 30%",
                                     line: 6,
@@ -986,10 +1004,10 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 87,
                                 },
                                 rendered: "This column has a width of 30%",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "This column has a width of 55%",
                                     line: 7,
@@ -997,7 +1015,7 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                                     offset: 119,
                                 },
                                 rendered: "This column has a width of 55%",
-                            },
+                            }),
                         },
                     ],
                 },],
