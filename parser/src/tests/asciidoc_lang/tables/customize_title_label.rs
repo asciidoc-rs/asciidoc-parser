@@ -229,6 +229,9 @@ If you want the caption of the table to only consist of the caption label, use t
     // support: setting a block's title through a `title` attribute, and the
     // `{counter:table-number}` counter reference. The example is tracked here
     // but not yet exercised.
+    //
+    // TODO: Promote to `verifies!` once counter support lands.
+    // https://github.com/asciidoc-rs/asciidoc-parser/issues/514
     to_do_verifies!(
         r#"
 [source]
@@ -256,6 +259,9 @@ Alternately, you can write is as follows:
 
     // Reproducing this example requires `{counter:table-number}` counter
     // support, which is not yet implemented.
+    //
+    // TODO: Promote to `verifies!` once counter support lands.
+    // https://github.com/asciidoc-rs/asciidoc-parser/issues/514
     to_do_verifies!(
         r#"
 [source]
