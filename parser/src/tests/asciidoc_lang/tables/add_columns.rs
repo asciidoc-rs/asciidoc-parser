@@ -116,10 +116,26 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 3 },
-                    TableColumn { width: 3 },
-                    TableColumn { width: 3 },
-                    TableColumn { width: 3 },
+                    TableColumn {
+                        width: 3,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 3,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 3,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 3,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
@@ -311,9 +327,21 @@ The integer `3`, combined with the `+*+` operator, indicates that the table will
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 1 },
-                    TableColumn { width: 1 },
-                    TableColumn { width: 1 },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: None,
                 body_rows: &[TableRow {
@@ -453,10 +481,26 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 5 },
-                    TableColumn { width: 1 },
-                    TableColumn { width: 1 },
-                    TableColumn { width: 1 },
+                    TableColumn {
+                        width: 5,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
@@ -680,9 +724,21 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 1 },
-                    TableColumn { width: 1 },
-                    TableColumn { width: 1 },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: None,
                 body_rows: &[

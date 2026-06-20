@@ -52,9 +52,21 @@ When using the HTML5 backend with the default Asciidoctor stylesheet, tables str
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 1 },
-                    TableColumn { width: 1 },
-                    TableColumn { width: 1 },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: None,
                 body_rows: &[TableRow {
@@ -183,9 +195,21 @@ As seen below, the columns stretch across the width of the page according to the
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 2 },
-                    TableColumn { width: 1 },
-                    TableColumn { width: 3 },
+                    TableColumn {
+                        width: 2,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 3,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
@@ -392,9 +416,21 @@ The columns, displayed in the table below, have adjusted across the width of the
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 6 },
-                    TableColumn { width: 1 },
-                    TableColumn { width: 3 },
+                    TableColumn {
+                        width: 6,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 3,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
@@ -530,9 +566,21 @@ The columns, displayed in the table below, have adjusted across the width of the
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 6 },
-                    TableColumn { width: 1 },
-                    TableColumn { width: 2 },
+                    TableColumn {
+                        width: 6,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 2,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
@@ -713,9 +761,21 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 15 },
-                    TableColumn { width: 30 },
-                    TableColumn { width: 55 },
+                    TableColumn {
+                        width: 15,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 30,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 55,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
@@ -851,9 +911,21 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
             },
             blocks: &[Block::Table(TableBlock {
                 columns: &[
-                    TableColumn { width: 15 },
-                    TableColumn { width: 30 },
-                    TableColumn { width: 55 },
+                    TableColumn {
+                        width: 15,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 30,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 55,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
                 ],
                 header_row: Some(TableRow {
                     cells: &[

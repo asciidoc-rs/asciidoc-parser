@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::{
     HasSpan,
-    blocks::IsBlock,
+    blocks::{HorizontalAlignment, IsBlock, VerticalAlignment},
     tests::fixtures::{Span, attributes::Attrlist, content::Content},
 };
 
@@ -42,6 +42,8 @@ impl fmt::Debug for TableBlock {
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct TableColumn {
     pub width: usize,
+    pub h_align: HorizontalAlignment,
+    pub v_align: VerticalAlignment,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -68,10 +70,9 @@ impl PartialEq<TableBlock> for crate::blocks::TableBlock<'_> {
 
 fn columns_eq(fixture: &[TableColumn], observed: &[crate::blocks::TableColumn]) -> bool {
     fixture.len() == observed.len()
-        && fixture
-            .iter()
-            .zip(observed.iter())
-            .all(|(f, o)| f.width == o.width())
+        && fixture.iter().zip(observed.iter()).all(|(f, o)| {
+            f.width == o.width() && f.h_align == o.h_align() && f.v_align == o.v_align()
+        })
 }
 
 fn cells_eq(fixture: &[TableCell], observed: &[crate::blocks::TableCell]) -> bool {

@@ -125,7 +125,18 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                 },
             },
             blocks: &[Block::Table(TableBlock {
-                columns: &[TableColumn { width: 1 }, TableColumn { width: 1 }],
+                columns: &[
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    }
+                ],
                 header_row: None,
                 body_rows: &[
                     TableRow {
@@ -323,7 +334,18 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                 },
             },
             blocks: &[Block::Table(TableBlock {
-                columns: &[TableColumn { width: 1 }, TableColumn { width: 1 }],
+                columns: &[
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    }
+                ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
