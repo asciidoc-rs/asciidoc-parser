@@ -155,15 +155,7 @@ CAUTION: If you want a space between the label and the title, you must add a tra
 "#
     );
 
-    // The per-table `caption` attribute is implemented (see the
-    // `caption_attribute_*` unit tests in `blocks/tests/table.rs`), but the
-    // page's concrete example places `[caption="…"]` and `[cols="…"]` on
-    // separate attribute-list lines straddling the title. The block-metadata
-    // parser currently keeps only a single attribute-list line, so this exact
-    // example can't yet be reproduced. Merging multiple block attribute lines is
-    // a general metadata fix tracked separately; once it lands, this becomes a
-    // `verifies!` with the displayed table asserted via `assert_xpath`.
-    to_do_verifies!(
+    verifies!(
         r#"
 .Modify the label using caption
 [source#ex-caption]
@@ -195,9 +187,20 @@ The table from <<ex-caption>> is displayed below.
 "#
     );
 
-    if false {
-        todo!("Merge multiple block attribute lines (see blocks/metadata.rs)");
-    }
+    // The explicit `caption` attribute (on its own attribute-list line above the
+    // title, with the `cols` specifier on a second line below it) sets the label
+    // verbatim — including its trailing space — with no automatically inserted
+    // number. The label and title render together inside the table's
+    // `<caption class="title">`.
+    let doc = Parser::default().parse(
+        "[caption=\"Table A. \"]\n.A table with a custom label\n[cols=\"3*\"]\n|===\n|Null\n|A mystery\n|See Appendix R\n|===",
+    );
+
+    assert_xpath(
+        &doc,
+        "//caption[text()=\"Table A. A table with a custom label\"]",
+        1,
+    );
 
     non_normative!(
         r#"
