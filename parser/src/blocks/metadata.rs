@@ -127,22 +127,27 @@ impl<'src> BlockMetadata<'src> {
                 }
             }
 
-            // Try to parse an attribute list.
-            if attrlist.is_none()
-                && let Some(MatchAndWarnings {
-                    item:
-                        MatchedItem {
-                            item: attrlist_item,
-                            after: new_block_start,
-                        },
-                    warnings: mut attrlist_warnings,
-                }) = parse_maybe_attrlist_line(block_start, parser)
+            // Try to parse an attribute list. A block may be preceded by more
+            // than one attribute list line (optionally straddling the title);
+            // Asciidoctor merges them into a single set of attributes, with a
+            // later line winning on conflict and otherwise accumulating.
+            if let Some(MatchAndWarnings {
+                item:
+                    MatchedItem {
+                        item: attrlist_item,
+                        after: new_block_start,
+                    },
+                warnings: mut attrlist_warnings,
+            }) = parse_maybe_attrlist_line(block_start, parser)
             {
                 if !attrlist_warnings.is_empty() {
                     warnings.append(&mut attrlist_warnings);
                 }
 
-                attrlist = Some(attrlist_item);
+                match attrlist {
+                    Some(ref mut existing) => existing.merge_block_attribute_line(attrlist_item),
+                    None => attrlist = Some(attrlist_item),
+                }
                 block_start = new_block_start;
                 continue;
             }
@@ -507,5 +512,161 @@ mod tests {
                 },
             }
         );
+    }
+
+    mod merge_attribute_lines {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn two_non_conflicting_named() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[foo=bar]\n[baz=qux]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "bar");
+            assert_eq!(attrlist.named_attribute("baz").unwrap().value(), "qux");
+        }
+
+        #[test]
+        fn conflicting_named_later_wins() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[foo=bar]\n[foo=qux]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "qux");
+
+            // Only one `foo` attribute should remain.
+            assert_eq!(
+                attrlist
+                    .attributes()
+                    .filter(|a| a.name() == Some("foo"))
+                    .count(),
+                1
+            );
+        }
+
+        #[test]
+        fn lines_straddling_a_title() {
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[foo=bar]\n.My Title\n[baz=qux]\ncontent\n",
+            );
+
+            assert_eq!(metadata.title.as_deref(), Some("My Title"));
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "bar");
+            assert_eq!(attrlist.named_attribute("baz").unwrap().value(), "qux");
+        }
+
+        #[test]
+        fn combined_with_anchor() {
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[foo=bar]\n[[my-anchor]]\n[baz=qux]\ncontent\n",
+            );
+
+            assert_eq!(
+                metadata.anchor.unwrap(),
+                Span {
+                    data: "my-anchor",
+                    line: 2,
+                    col: 3,
+                    offset: 12,
+                }
+            );
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "bar");
+            assert_eq!(attrlist.named_attribute("baz").unwrap().value(), "qux");
+        }
+
+        #[test]
+        fn block_style_later_wins() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[sidebar]\n[example]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.block_style().unwrap(), "example");
+        }
+
+        #[test]
+        fn shorthand_id_and_role_across_lines() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[#myid]\n[.myrole]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.id().unwrap(), "myid");
+            assert_eq!(attrlist.roles(), vec!["myrole"]);
+        }
+
+        #[test]
+        fn shorthand_roles_accumulate() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[.role1]\n[.role2]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.roles(), vec!["role1", "role2"]);
+        }
+
+        #[test]
+        fn shorthand_id_later_wins() {
+            let metadata = crate::blocks::metadata::BlockMetadata::new("[#id1]\n[#id2]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.id().unwrap(), "id2");
+        }
+
+        #[test]
+        fn shorthand_options_accumulate() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[%opt1]\n[%opt2]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.options(), vec!["opt1", "opt2"]);
+        }
+
+        #[test]
+        fn second_positional_later_wins() {
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[quote,Author1]\n[quote,Author2]\ncontent\n",
+            );
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.block_style().unwrap(), "quote");
+            assert_eq!(attrlist.nth_attribute(2).unwrap().value(), "Author2");
+        }
+
+        #[test]
+        fn first_positional_only_on_later_line() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[foo=bar]\n[sidebar]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.block_style().unwrap(), "sidebar");
+            assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "bar");
+        }
+
+        #[test]
+        fn extra_positional_only_on_later_line() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[quote]\n[quote,Author]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.block_style().unwrap(), "quote");
+            assert_eq!(attrlist.nth_attribute(2).unwrap().value(), "Author");
+        }
+
+        #[test]
+        fn three_lines_mixed_with_title() {
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[#id1]\n.Title\n[.r1.r2]\n[foo=bar]\ncontent\n",
+            );
+
+            assert_eq!(metadata.title.as_deref(), Some("Title"));
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.id().unwrap(), "id1");
+            assert_eq!(attrlist.roles(), vec!["r1", "r2"]);
+            assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "bar");
+        }
     }
 }
