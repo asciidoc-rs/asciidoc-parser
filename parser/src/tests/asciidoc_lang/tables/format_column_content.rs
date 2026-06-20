@@ -43,6 +43,7 @@ fn intro() {
     verifies!(
         r#"
 A column style operator is applied to a column specifier and xref:add-columns.adoc#cols-attribute[assigned to the cols attribute].
+
 "#
     );
 
@@ -56,7 +57,6 @@ A column style operator is applied to a column specifier and xref:add-columns.ad
 fn column_styles_and_their_operators() {
     non_normative!(
         r#"
-
 [#cols-style]
 == Column styles and their operators
 
@@ -91,6 +91,7 @@ include::partial$style-operators.adoc[]
     verifies!(
         r#"
 When a style operator isn't explicitly applied to a column specifier, the `d` style is assigned automatically and the column is processed as paragraph text.
+
 "#
     );
 
@@ -113,7 +114,6 @@ When a style operator isn't explicitly applied to a column specifier, the `d` st
 fn apply_a_style_operator_to_a_column() {
     non_normative!(
         r#"
-
 == Apply a style operator to a column
 
 "#
@@ -126,6 +126,7 @@ A style operator is always placed in the last position on a column's specifier o
 * `[cols=">pass:q[#e#],.^3pass:q[#s#]"]` A style operator is placed directly after any other operators and the column width in the column's specifier.
 * `[cols="pass:q[#h#],pass:q[#e#]"]` When a column width isn't specified, the style operator can represent both the column and the column's content style.
 * `[cols="3*.>pass:q[#m#]"]` When a multiplier is present, the style operator is placed after any horizontal and vertical alignment operators.
+
 "#
     );
 
@@ -169,7 +170,6 @@ A style operator is always placed in the last position on a column's specifier o
 
     non_normative!(
         r#"
-
 Let's apply a different style to each column in <<ex-style>>.
 
 .Add a style operator to each column
@@ -198,6 +198,7 @@ The table from <<ex-style>> is displayed below.
     verifies!(
         r#"
 Note that the style applied to each column doesn't affect the xref:add-header-row.adoc[header row] or override any inline formatting.
+
 "#
     );
 
@@ -235,7 +236,6 @@ Note that the style applied to each column doesn't affect the xref:add-header-ro
 fn use_asciidoc_block_elements_in_a_column() {
     non_normative!(
         r#"
-
 .Result of <<ex-style>>
 [cols="h,m,s,e"]
 |===
@@ -262,6 +262,7 @@ Additionally, if a xref:format-cell-content.adoc#override-column-style[cell spec
     verifies!(
         r#"
 To use AsciiDoc block elements, such as delimited source blocks and lists, in a column, place the lowercase letter `a` on the column specifier.
+
 "#
     );
 
@@ -275,7 +276,6 @@ To use AsciiDoc block elements, such as delimited source blocks and lists, in a 
 
     non_normative!(
         r#"
-
 .Apply the AsciiDoc block style operator to the first column
 [source#ex-asciidoc]
 ....
