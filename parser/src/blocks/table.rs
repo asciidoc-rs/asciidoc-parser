@@ -31,8 +31,9 @@ use crate::{
 ///
 /// * The CSV, TSV, and DSV data formats (and the `,===` / `:===` shorthand
 ///   delimiters).
-/// * Column specifiers and multipliers beyond a proportional width (alignment
-///   and style operators).
+/// * Column specifier style operators (the `a`, `d`, `e`, `h`, `l`, `m`, `s`,
+///   and `v` operators); proportional width and the horizontal and vertical
+///   alignment operators are supported.
 /// * Cell specifiers (spans, duplication, per-cell alignment and style, and the
 ///   `a` AsciiDoc style that nests block content inside a cell).
 /// * Footer rows.
@@ -331,11 +332,14 @@ impl<'src> HasSpan<'src> for TableBlock<'src> {
 
 /// A column in a [`TableBlock`].
 ///
-/// For now a column carries only its proportional width. Alignment and style
-/// operators on the `cols` specifier are not yet modeled.
+/// A column carries its proportional width and the horizontal and vertical
+/// alignment applied to its cells' content. Style operators on the `cols`
+/// specifier are not yet modeled.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableColumn {
     width: usize,
+    h_align: HorizontalAlignment,
+    v_align: VerticalAlignment,
 }
 
 impl TableColumn {
@@ -344,12 +348,75 @@ impl TableColumn {
     pub fn width(&self) -> usize {
         self.width
     }
+
+    /// Returns the horizontal alignment applied to this column's content.
+    ///
+    /// The alignment comes from a horizontal alignment operator (`<`, `>`, or
+    /// `^`) on the column's specifier and defaults to
+    /// [`HorizontalAlignment::Left`].
+    pub fn h_align(&self) -> HorizontalAlignment {
+        self.h_align
+    }
+
+    /// Returns the vertical alignment applied to this column's content.
+    ///
+    /// The alignment comes from a vertical alignment operator (`.<`, `.>`, or
+    /// `.^`) on the column's specifier and defaults to
+    /// [`VerticalAlignment::Top`].
+    pub fn v_align(&self) -> VerticalAlignment {
+        self.v_align
+    }
 }
 
 impl Default for TableColumn {
     fn default() -> Self {
-        Self { width: 1 }
+        Self {
+            width: 1,
+            h_align: HorizontalAlignment::Left,
+            v_align: VerticalAlignment::Top,
+        }
     }
+}
+
+/// The horizontal alignment of a column's content.
+///
+/// Specified by a horizontal alignment operator at the start of a
+/// [column specifier](TableColumn): the less-than sign (`<`) for
+/// [`Left`](Self::Left), the greater-than sign (`>`) for
+/// [`Right`](Self::Right), and the caret (`^`) for [`Center`](Self::Center).
+/// The default is [`Left`](Self::Left).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HorizontalAlignment {
+    /// Content is aligned to the left side of the column (the `<` operator).
+    /// This is the default horizontal alignment.
+    Left,
+
+    /// Content is centered horizontally in the column (the `^` operator).
+    Center,
+
+    /// Content is aligned to the right side of the column (the `>` operator).
+    Right,
+}
+
+/// The vertical alignment of a column's content.
+///
+/// Specified by a vertical alignment operator on a
+/// [column specifier](TableColumn), always introduced by a dot (`.`): `.<` for
+/// [`Top`](Self::Top), `.>` for [`Bottom`](Self::Bottom), and `.^` for
+/// [`Middle`](Self::Middle). The default is [`Top`](Self::Top).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VerticalAlignment {
+    /// Content is aligned to the top of the column's cells (the `.<` operator).
+    /// This is the default vertical alignment.
+    Top,
+
+    /// Content is centered vertically in the column's cells (the `.^`
+    /// operator).
+    Middle,
+
+    /// Content is aligned to the bottom of the column's cells (the `.>`
+    /// operator).
+    Bottom,
 }
 
 /// A row of cells in a [`TableBlock`].
@@ -400,8 +467,9 @@ impl<'src> TableCell<'src> {
 /// Parse the value of the `cols` attribute into a list of columns.
 ///
 /// The value is a comma-separated list of column specifiers. A specifier may be
-/// preceded by a multiplier (`<n>*`) that repeats the column `n` times. Only
-/// the proportional width portion of a specifier is currently interpreted.
+/// preceded by a multiplier (`<n>*`) that repeats the column `n` times. The
+/// alignment operators and proportional width of a specifier are interpreted;
+/// the style operator is not yet.
 fn parse_cols(value: &str) -> Vec<TableColumn> {
     let mut columns: Vec<TableColumn> = vec![];
 
@@ -425,24 +493,73 @@ fn parse_cols(value: &str) -> Vec<TableColumn> {
     columns
 }
 
-/// Parse a single column specifier, extracting its proportional width.
+/// Parse a single column specifier, extracting its alignment and proportional
+/// width.
 ///
-/// In a full column specifier the width is the single numeric token, optionally
-/// preceded by alignment operators and followed by a style operator (neither of
-/// which is interpreted yet). The width is therefore the first contiguous run
-/// of digits; a spec with no digits falls back to the default width. Taking the
-/// first run — rather than concatenating every digit in the spec — keeps
-/// unrelated digit groups from fusing once those operators are supported.
+/// A column specifier is positional: an optional horizontal alignment operator
+/// (`<`, `>`, or `^`) comes first, followed by an optional vertical alignment
+/// operator (`.<`, `.>`, or `.^`), followed by the width, and finally an
+/// optional style operator. When a multiplier (`<n>*`) is present, the
+/// operators follow the multiplier, so the `spec` passed here is the portion
+/// after the `*`.
+///
+/// The width is the first contiguous run of digits after any alignment
+/// operators; a spec with no digits falls back to the default width. Taking the
+/// first run — rather than concatenating every digit — keeps the width from
+/// fusing with digits in an as-yet-unmodeled style operator. The style operator
+/// is otherwise ignored.
 fn parse_col_spec(spec: &str) -> TableColumn {
-    let digits: String = spec
-        .chars()
-        .skip_while(|c| !c.is_ascii_digit())
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
+    let mut rest = spec.trim();
 
-    match digits.parse::<usize>() {
-        Ok(width) if width > 0 => TableColumn { width },
-        _ => TableColumn::default(),
+    // Horizontal alignment operator (if present) always comes first.
+    let mut h_align = HorizontalAlignment::Left;
+    match rest.as_bytes().first() {
+        Some(b'<') => {
+            h_align = HorizontalAlignment::Left;
+            rest = &rest[1..];
+        }
+        Some(b'>') => {
+            h_align = HorizontalAlignment::Right;
+            rest = &rest[1..];
+        }
+        Some(b'^') => {
+            h_align = HorizontalAlignment::Center;
+            rest = &rest[1..];
+        }
+        _ => {}
+    }
+
+    // Vertical alignment operator (if present) follows, introduced by a dot.
+    let mut v_align = VerticalAlignment::Top;
+    if let Some(after_dot) = rest.strip_prefix('.') {
+        match after_dot.as_bytes().first() {
+            Some(b'<') => {
+                v_align = VerticalAlignment::Top;
+                rest = &after_dot[1..];
+            }
+            Some(b'>') => {
+                v_align = VerticalAlignment::Bottom;
+                rest = &after_dot[1..];
+            }
+            Some(b'^') => {
+                v_align = VerticalAlignment::Middle;
+                rest = &after_dot[1..];
+            }
+            _ => {}
+        }
+    }
+
+    // Width is the first run of digits after the alignment operators.
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let width = match digits.parse::<usize>() {
+        Ok(width) if width > 0 => width,
+        _ => TableColumn::default().width,
+    };
+
+    TableColumn {
+        width,
+        h_align,
+        v_align,
     }
 }
 

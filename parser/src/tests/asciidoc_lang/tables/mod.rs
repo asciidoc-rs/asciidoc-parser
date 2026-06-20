@@ -1,6 +1,7 @@
 mod add_columns;
 mod add_title;
 mod adjust_column_widths;
+mod align_by_column;
 mod build_a_basic_table;
 mod customize_title_label;
 mod turn_off_title_label;

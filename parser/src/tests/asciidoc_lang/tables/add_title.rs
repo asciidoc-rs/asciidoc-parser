@@ -58,7 +58,18 @@ fn add_a_title_to_a_table() {
                 },
             },
             blocks: &[Block::Table(TableBlock {
-                columns: &[TableColumn { width: 1 }, TableColumn { width: 1 }],
+                columns: &[
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    },
+                    TableColumn {
+                        width: 1,
+                        h_align: HorizontalAlignment::Left,
+                        v_align: VerticalAlignment::Top,
+                    }
+                ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
