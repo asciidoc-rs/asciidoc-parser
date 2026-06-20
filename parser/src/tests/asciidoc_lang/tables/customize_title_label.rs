@@ -20,17 +20,17 @@ fn modify_the_label_using_table_caption() {
         r#"
 == Modify the label using table-caption
 
+"#
+    );
+
+    verifies!(
+        r#"
 You can change the label for all titled tables using the document attribute `table-caption`.
 (Don't let the attribute's name mislead you.
 It's the attribute that controls the table title labels at the document level.)
 
 In the document header, set the `table-caption` attribute and assign it your custom label text.
 
-"#
-    );
-
-    verifies!(
-        r#"
 [source]
 ----
 = Document Title
