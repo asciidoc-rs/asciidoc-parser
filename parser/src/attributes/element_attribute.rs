@@ -41,12 +41,12 @@ impl<'src> ElementAttribute<'src> {
                     match space.after.take_prefix("=") {
                         Some(equals) => {
                             let space = equals.after.take_whitespace_with_newline();
-                            if space.after.is_empty() || space.after.starts_with(',') {
-                                // TO DO: Is this a warning? Possible spec ambiguity.
-                                (None, source)
-                            } else {
-                                (Some(name.item), space.after)
-                            }
+                            // `name=` with nothing (or only a comma) after the `=`
+                            // is a named attribute with an empty value, not a
+                            // positional one. The empty value falls out of the
+                            // value scan below (`take_while(c != ',')` yields the
+                            // empty string), so the name is all we need to keep.
+                            (Some(name.item), space.after)
                         }
                         None => (None, source),
                     }
@@ -1141,9 +1141,12 @@ mod tests {
         }
 
         #[test]
-        fn fallback_if_no_value() {
+        fn named_with_empty_value() {
             let p = Parser::default();
 
+            // `name=` with nothing after the `=` is a named attribute whose value
+            // is the empty string (e.g. `[caption=]` clears a label), not a
+            // positional attribute with the literal value "abc=".
             let (element_attr, offset, warning_types) = crate::attributes::ElementAttribute::parse(
                 &CowStr::from("abc="),
                 0,
@@ -1157,13 +1160,13 @@ mod tests {
             assert_eq!(
                 element_attr,
                 ElementAttribute {
-                    name: None,
+                    name: Some("abc"),
                     shorthand_items: &[],
-                    value: "abc="
+                    value: ""
                 }
             );
 
-            assert!(element_attr.name().is_none());
+            assert_eq!(element_attr.name(), Some("abc"));
             assert!(element_attr.block_style().is_none());
             assert!(element_attr.id().is_none());
             assert!(element_attr.roles().is_empty());
@@ -1173,9 +1176,12 @@ mod tests {
         }
 
         #[test]
-        fn fallback_if_immediate_comma() {
+        fn named_with_empty_value_before_comma() {
             let p = Parser::default();
 
+            // `name=` immediately followed by a comma is likewise a named
+            // attribute with an empty value; parsing stops at the comma so the
+            // next attribute can be read separately.
             let (element_attr, offset, warning_types) = crate::attributes::ElementAttribute::parse(
                 &CowStr::from("abc=,def"),
                 0,
@@ -1189,13 +1195,13 @@ mod tests {
             assert_eq!(
                 element_attr,
                 ElementAttribute {
-                    name: None,
+                    name: Some("abc"),
                     shorthand_items: &[],
-                    value: "abc="
+                    value: ""
                 }
             );
 
-            assert!(element_attr.name().is_none());
+            assert_eq!(element_attr.name(), Some("abc"));
             assert!(element_attr.block_style().is_none());
             assert!(element_attr.id().is_none());
             assert!(element_attr.roles().is_empty());

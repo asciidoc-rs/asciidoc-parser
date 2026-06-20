@@ -144,11 +144,13 @@ impl<'src> TableBlock<'src> {
         // An explicit `caption` attribute on the table sets the label verbatim
         // (including any trailing whitespace) and is used as-is, with no
         // automatically incremented number; it applies even when
-        // `table-caption` has been unset. Otherwise the label comes from the
-        // `table-caption` attribute (which defaults to "Table"), and each such
-        // captioned table consumes the next value of a document-wide table
-        // counter. When `table-caption` is unset and no explicit `caption` is
-        // given, no caption (and no number) is assigned.
+        // `table-caption` has been unset. An explicitly empty `caption` (e.g.
+        // `[caption=]`) removes the label entirely, so the title renders with no
+        // prefix. Otherwise the label comes from the `table-caption` attribute
+        // (which defaults to "Table"), and each such captioned table consumes
+        // the next value of a document-wide table counter. When `table-caption`
+        // is unset and no explicit `caption` is given, no caption (and no
+        // number) is assigned.
         //
         // Computed before the cell iterator below borrows `parser` immutably, so
         // that the mutable counter update does not conflict with that borrow.
@@ -158,6 +160,7 @@ impl<'src> TableBlock<'src> {
                 .as_ref()
                 .and_then(|a| a.named_attribute("caption"))
             {
+                Some(attr) if attr.value().is_empty() => None,
                 Some(attr) => Some(attr.value().to_string()),
                 None => match parser.attribute_value("table-caption") {
                     InterpretedValue::Value(label) if !label.is_empty() => {
@@ -240,9 +243,10 @@ impl<'src> TableBlock<'src> {
     /// the [`title`](IsBlock::title). By default the label combines the
     /// `table-caption` attribute and an automatically incremented number (e.g.
     /// `"Table 1. "`). An explicit `caption` attribute on the table overrides
-    /// this with a verbatim label and no number. The caption is absent when the
-    /// table has no title, or when `table-caption` has been unset and no
-    /// explicit `caption` is given.
+    /// this with a verbatim label and no number; an explicitly empty `caption`
+    /// (e.g. `[caption=]`) removes the label entirely. The caption is absent
+    /// when the table has no title, when `table-caption` has been unset and no
+    /// explicit `caption` is given, or when an empty `caption` was supplied.
     pub fn caption(&self) -> Option<&str> {
         self.caption.as_deref()
     }
