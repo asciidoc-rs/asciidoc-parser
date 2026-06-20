@@ -3,7 +3,7 @@
 
 use crate::{
     HasSpan, Parser, Span,
-    blocks::{Block, ContentModel, IsBlock, TableBlock},
+    blocks::{Block, ContentModel, HorizontalAlignment, IsBlock, TableBlock, VerticalAlignment},
     content::SubstitutionGroup,
     parser::ModificationContext,
 };
@@ -429,4 +429,21 @@ fn empty_caption_attribute_does_not_consume_a_table_number() {
         .collect();
 
     assert_eq!(captions, vec![Some("Table 1. "), None, Some("Table 2. ")]);
+}
+
+#[test]
+fn malformed_vertical_operator_falls_back_to_defaults() {
+    // A dot in a column specifier introduces a vertical alignment operator, which
+    // must be followed by `<`, `>`, or `^`. When the dot is followed by anything
+    // else (here the letter `x`), the operator is malformed; rather than panic,
+    // the parser leaves the dot unconsumed so the column falls back to the
+    // default vertical alignment (top) and default width, and the stray text is
+    // ignored along with the as-yet-unmodeled style operator.
+    let table = parse_table("[cols=\".x,1\"]\n|===\n|a |b\n|===");
+
+    let columns = table.columns();
+    assert_eq!(columns.len(), 2);
+    assert_eq!(columns[0].width(), 1);
+    assert_eq!(columns[0].h_align(), HorizontalAlignment::Left);
+    assert_eq!(columns[0].v_align(), VerticalAlignment::Top);
 }
