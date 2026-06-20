@@ -635,7 +635,10 @@ centered vertically.
         ]
     );
 
-    non_normative!(
+    // Cell specifiers (and thus their per-cell alignment operators) are not yet
+    // parsed, so the override of a column's alignment by a cell's alignment can't
+    // be verified yet.
+    to_do_verifies!(
         r#"
 IMPORTANT: If there is an xref:align-by-cell.adoc[alignment operator on a cell's specifier], it will override the column's alignment operator.
 "#
