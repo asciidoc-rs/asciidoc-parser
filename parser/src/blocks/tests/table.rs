@@ -399,3 +399,34 @@ fn caption_attribute_is_ignored_without_a_title() {
     assert!(table.title().is_none());
     assert!(table.caption().is_none());
 }
+
+#[test]
+fn empty_caption_attribute_suppresses_the_label() {
+    // An explicitly empty `caption` (e.g. `[caption=]`) removes the label on the
+    // table: the title is kept but no caption (and no number) is assigned, so the
+    // title renders with no prefix.
+    let table = parse_table("[caption=]\n.A table with a title but no label\n|===\n|a\n|===");
+
+    assert_eq!(table.title(), Some("A table with a title but no label"));
+    assert!(table.caption().is_none());
+}
+
+#[test]
+fn empty_caption_attribute_does_not_consume_a_table_number() {
+    // A table whose label is removed with an empty `caption` is skipped by the
+    // document-wide counter, so a following `table-caption` table is numbered as
+    // if the unlabeled table were not there.
+    let doc = Parser::default().parse(
+        ".First\n|===\n|a\n|===\n\n[caption=]\n.Unlabeled\n|===\n|b\n|===\n\n.Third\n|===\n|c\n|===",
+    );
+
+    let captions: Vec<Option<&str>> = doc
+        .nested_blocks()
+        .filter_map(|block| match block {
+            Block::Table(table) => Some(table.caption()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(captions, vec![Some("Table 1. "), None, Some("Table 2. ")]);
+}
