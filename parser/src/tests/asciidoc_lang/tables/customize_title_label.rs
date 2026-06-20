@@ -144,6 +144,11 @@ fn modify_the_label_of_an_individual_table_using_caption() {
         r#"
 == Modify the label of an individual table using caption
 
+"#
+    );
+
+    verifies!(
+        r#"
 You can customize the label on an individual table by setting the `caption` attribute.
 (Don't let the name of the attribute mislead you.
 The caption attribute only sets the caption's label, not the whole caption line).
@@ -152,11 +157,6 @@ Labels assigned using `caption` don't get an automatically incremented number an
 
 CAUTION: If you want a space between the label and the title, you must add a trailing space to the value of the caption attribute.
 
-"#
-    );
-
-    verifies!(
-        r#"
 .Modify the label using caption
 [source#ex-caption]
 ----
@@ -202,20 +202,62 @@ The table from <<ex-caption>> is displayed below.
         1,
     );
 
-    non_normative!(
+    verifies!(
         r#"
 If you create any subsequent tables in your document and don't set `caption` on them, the title labels will revert to the value assigned to `table-caption`.
 
+"#
+    );
+
+    // A table that sets `caption` is skipped by the table counter, so a later
+    // titled table without `caption` reverts to the `table-caption` label and
+    // resumes the automatic numbering from "Table 1.".
+    let doc = Parser::default()
+        .parse("[caption=\"Custom. \"]\n.Custom\n|===\n|a\n|===\n\n.Next\n|===\n|b\n|===");
+
+    assert_xpath(&doc, "//caption[text()=\"Custom. Custom\"]", 1);
+    assert_xpath(&doc, "//caption[text()=\"Table 1. Next\"]", 1);
+
+    non_normative!(
+        r#"
 If you want the caption of the table to only consist of the caption label, use the following syntax:
 
+"#
+    );
+
+    // Reproducing this example requires two features the parser does not yet
+    // support: setting a block's title through a `title` attribute, and the
+    // `{counter:table-number}` counter reference. The example is tracked here
+    // but not yet exercised.
+    to_do_verifies!(
+        r#"
 [source]
 ----
 [caption=,title="{table-caption} {counter:table-number}"]
 include::example$table.adoc[tag=b-col-h]
 ----
 
+"#
+    );
+
+    if false {
+        todo!("block title attribute and counter:table-number support");
+    }
+}
+
+#[test]
+fn modify_the_label_of_an_individual_table_to_only_the_caption_label() {
+    non_normative!(
+        r#"
 Alternately, you can write is as follows:
 
+"#
+    );
+
+    // Reproducing this example requires `{counter:table-number}` counter
+    // support, which is not yet implemented.
+    to_do_verifies!(
+        r#"
 [source]
 ----
 .{empty}
@@ -224,4 +266,8 @@ include::example$table.adoc[tag=b-col-h]
 ----
 "#
     );
+
+    if false {
+        todo!("counter:table-number support");
+    }
 }
