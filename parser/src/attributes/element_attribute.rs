@@ -117,7 +117,7 @@ impl<'src> ElementAttribute<'src> {
         )
     }
 
-    /// Return the attribute name, if one was found`.
+    /// Return the attribute name, if one was found.
     pub fn name(&'src self) -> Option<&'src str> {
         self.name_str()
     }
@@ -229,7 +229,7 @@ impl<'src> ElementAttribute<'src> {
     }
 
     /// Return any role attributes that were found in shorthand syntax.
-    ///     
+    ///
     /// You can assign one or more roles to blocks and most inline elements
     /// using the `role` attribute. The `role` attribute is a [named attribute].
     /// Even though the attribute name is singular, it may contain multiple
@@ -264,7 +264,7 @@ impl<'src> ElementAttribute<'src> {
     }
 
     /// Return any option attributes that were found in shorthand syntax.
-    ///     
+    ///
     /// The `options` attribute (often abbreviated as `opts`) is a versatile
     /// [named attribute] that can be assigned one or more values. It can be
     /// defined globally as document attribute as well as a block attribute on
