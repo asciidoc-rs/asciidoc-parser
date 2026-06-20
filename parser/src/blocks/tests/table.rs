@@ -4,8 +4,8 @@
 use crate::{
     HasSpan, Parser, Span,
     blocks::{
-        Block, ContentModel, HorizontalAlignment, IsBlock, TableBlock, TableCellContent,
-        VerticalAlignment,
+        Block, ColumnStyle, ContentModel, HorizontalAlignment, IsBlock, TableBlock,
+        TableCellContent, VerticalAlignment,
     },
     content::SubstitutionGroup,
     parser::ModificationContext,
@@ -446,8 +446,8 @@ fn malformed_vertical_operator_falls_back_to_defaults() {
     // must be followed by `<`, `>`, or `^`. When the dot is followed by anything
     // else (here the letter `x`), the operator is malformed; rather than panic,
     // the parser leaves the dot unconsumed so the column falls back to the
-    // default vertical alignment (top) and default width, and the stray text is
-    // ignored along with the as-yet-unmodeled style operator.
+    // default vertical alignment (top) and default width. The leftover `.x` is
+    // not a recognized single-letter style operator, so the style also defaults.
     let table = parse_table("[cols=\".x,1\"]\n|===\n|a |b\n|===");
 
     let columns = table.columns();
@@ -455,4 +455,106 @@ fn malformed_vertical_operator_falls_back_to_defaults() {
     assert_eq!(columns[0].width(), 1);
     assert_eq!(columns[0].h_align(), HorizontalAlignment::Left);
     assert_eq!(columns[0].v_align(), VerticalAlignment::Top);
+    assert_eq!(columns[0].style(), ColumnStyle::Default);
+}
+
+#[test]
+fn literal_column_processes_content_verbatim() {
+    // The `l` (literal) style processes a cell's content with the verbatim
+    // substitution group: inline markup like `*z*` is left intact and only the
+    // special characters are escaped, in contrast to the default style's normal
+    // substitutions.
+    let table = parse_table("[cols=\"l\"]\n|===\n|lit *z* and <x>\n|===");
+
+    assert_eq!(table.columns()[0].style(), ColumnStyle::Literal);
+
+    match table.body_rows()[0].cells()[0].content() {
+        TableCellContent::Simple(content) => {
+            assert_eq!(content.rendered(), "lit *z* and &lt;x&gt;");
+        }
+        TableCellContent::AsciiDoc(_) => panic!("expected simple cell content"),
+    }
+}
+
+#[test]
+fn malformed_style_operator_falls_back_to_default() {
+    // The style operator is the entire remainder after the width, so trailing
+    // junk (here `em`, perhaps a typo for the `e` style) is not a recognized
+    // single-letter operator and the column falls back to the default style
+    // rather than silently honoring the first letter.
+    let table = parse_table("[cols=\"1em\"]\n|===\n|a\n|===");
+
+    assert_eq!(table.columns()[0].style(), ColumnStyle::Default);
+}
+
+#[test]
+fn asciidoc_cell_resolves_references_in_nested_blocks() {
+    // Cross-references inside an AsciiDoc cell are resolved during the document's
+    // reference-resolution pass, which descends into the cell's nested blocks.
+    let doc = Parser::default()
+        .parse("[#target]\nTarget paragraph.\n\n[cols=\"a\"]\n|===\n|See xref:target[].\n|===");
+
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let blocks = match table.body_rows()[0].cells()[0].content() {
+        TableCellContent::AsciiDoc(blocks) => blocks,
+        TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
+    };
+
+    let rendered = blocks[0].rendered_content().unwrap();
+    assert!(
+        rendered.contains("href=\"#target\""),
+        "xref was not resolved: {rendered}"
+    );
+}
+
+#[test]
+fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
+    // An AsciiDoc cell inherits the parent document's attributes, but an
+    // attribute it defines is scoped to the cell and does not leak back into the
+    // parent document (matching Asciidoctor).
+    let mut parser = Parser::default();
+    let doc = parser.parse(
+        ":parent-attr: inherited\n\n[cols=\"a\"]\n|===\n|\n:cell-attr: leaked\ncell sees: {parent-attr} {cell-attr}\n|===",
+    );
+
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let blocks = match table.body_rows()[0].cells()[0].content() {
+        TableCellContent::AsciiDoc(blocks) => blocks,
+        TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
+    };
+
+    // Inside the cell, both the inherited parent attribute and the cell's own
+    // attribute resolve.
+    let rendered: String = blocks
+        .iter()
+        .filter_map(|block| block.rendered_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("inherited"),
+        "cell did not inherit the parent attribute: {rendered}"
+    );
+    assert!(
+        rendered.contains("leaked"),
+        "cell did not see its own attribute: {rendered}"
+    );
+
+    // The attribute defined inside the cell did not leak into the parent, while
+    // the parent's own attribute is unaffected.
+    assert!(!parser.has_attribute("cell-attr"));
+    assert!(parser.has_attribute("parent-attr"));
 }

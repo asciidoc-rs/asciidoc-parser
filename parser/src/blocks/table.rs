@@ -538,8 +538,15 @@ impl<'src> TableCell<'src> {
 
         if style == ColumnStyle::AsciiDoc {
             // The AsciiDoc style effectively creates a nested, standalone
-            // AsciiDoc document in the cell.
+            // AsciiDoc document in the cell. It inherits the parent document's
+            // attributes, but any attribute it defines is scoped to the cell and
+            // must not leak back into the parent. Snapshot the attribute set
+            // before parsing and restore it afterward to enforce that boundary
+            // (matching Asciidoctor, where a `:foo:` set inside a cell is not
+            // visible after the table).
+            let saved_attributes = parser.attribute_values.clone();
             let mut maw = parse_blocks_until(trimmed, |_| false, parser);
+            parser.attribute_values = saved_attributes;
             warnings.append(&mut maw.warnings);
             return Self {
                 content: TableCellContent::AsciiDoc(maw.item.item),
@@ -702,15 +709,18 @@ fn parse_col_spec(spec: &str) -> TableColumn {
     rest = &rest[digits.len()..];
 
     // The style operator, if present, occupies the last position on the
-    // specifier.
-    let style = match rest.trim().as_bytes().first() {
-        Some(b'a') => ColumnStyle::AsciiDoc,
-        Some(b'd') => ColumnStyle::Default,
-        Some(b'e') => ColumnStyle::Emphasis,
-        Some(b'h') => ColumnStyle::Header,
-        Some(b'l') => ColumnStyle::Literal,
-        Some(b'm') => ColumnStyle::Monospace,
-        Some(b's') => ColumnStyle::Strong,
+    // specifier, so it is the entire remainder after the width. Matching the
+    // whole remainder (rather than just its first byte) means a malformed spec
+    // with trailing junk — e.g. `1em` — falls back to the default style instead
+    // of silently honoring the first letter and discarding the rest.
+    let style = match rest.trim() {
+        "a" => ColumnStyle::AsciiDoc,
+        "d" => ColumnStyle::Default,
+        "e" => ColumnStyle::Emphasis,
+        "h" => ColumnStyle::Header,
+        "l" => ColumnStyle::Literal,
+        "m" => ColumnStyle::Monospace,
+        "s" => ColumnStyle::Strong,
         _ => ColumnStyle::Default,
     };
 
