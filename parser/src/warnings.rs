@@ -79,6 +79,9 @@ pub enum WarningType {
 
     #[error("List item index: expected {0}, got {1}")]
     ListItemOutOfSequence(String, String),
+
+    #[error("Dropping table cell because it exceeds the specified number of columns")]
+    TableCellExceedsColumnCount,
 }
 
 impl std::fmt::Debug for WarningType {
@@ -152,6 +155,10 @@ impl std::fmt::Debug for WarningType {
                 .field(expected)
                 .field(actual)
                 .finish(),
+
+            WarningType::TableCellExceedsColumnCount => {
+                write!(f, "WarningType::TableCellExceedsColumnCount")
+            }
         }
     }
 }
@@ -402,6 +409,13 @@ mod tests {
                     debug_output,
                     "WarningType::ListItemOutOfSequence(\"y\", \"z\")"
                 );
+            }
+
+            #[test]
+            fn table_cell_exceeds_column_count() {
+                let warning = WarningType::TableCellExceedsColumnCount;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::TableCellExceedsColumnCount");
             }
         }
     }

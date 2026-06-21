@@ -704,3 +704,67 @@ fn dot_not_followed_by_vertical_operator_is_not_a_cell_separator() {
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
     assert_eq!(rows, vec![vec!["a .x|b".to_string()]]);
 }
+
+#[test]
+fn cell_span_exceeding_columns_drops_overrunning_row() {
+    // A span wider than the table overruns the grid. Matching Asciidoctor, the
+    // whole overrunning row is dropped and a warning is emitted: here the leading
+    // `x` cell is discarded along with the `3+|y` cell that overshoots the two
+    // columns, and the following row (`z`, `w`) stays aligned to the grid.
+    let mut parser = Parser::default();
+    let maw = Block::parse(
+        Span::new("[cols=\"2*\"]\n|===\n|x 3+|y\n|z |w\n|==="),
+        &mut parser,
+    );
+
+    assert!(maw.warnings.iter().any(|w| matches!(
+        w.warning,
+        crate::warnings::WarningType::TableCellExceedsColumnCount
+    )));
+
+    let table = match maw.item.unwrap().item {
+        Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    };
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(rows, vec![vec!["z".to_string(), "w".to_string()]]);
+}
+
+#[test]
+fn row_fully_covered_by_rowspans_drops_following_cell() {
+    // Two row-spanning cells (`.2+`) together cover every column of the next row,
+    // so that row has no cells of its own to close it. The following cell (`c1`)
+    // therefore overruns the pre-filled row and is dropped with it (matching
+    // Asciidoctor), leaving the remaining cells aligned: `c2` and `d1` form the
+    // second body row and the short final row holds `d2`.
+    let mut parser = Parser::default();
+    let maw = Block::parse(
+        Span::new("[cols=\"2*\"]\n|===\n.2+|a .2+|b\n|c1 |c2\n|d1 |d2\n|==="),
+        &mut parser,
+    );
+
+    assert_eq!(
+        maw.warnings
+            .iter()
+            .filter(|w| matches!(
+                w.warning,
+                crate::warnings::WarningType::TableCellExceedsColumnCount
+            ))
+            .count(),
+        1
+    );
+
+    let table = match maw.item.unwrap().item {
+        Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    };
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(
+        rows,
+        vec![
+            vec!["a".to_string(), "b".to_string()],
+            vec!["c2".to_string(), "d1".to_string()],
+            vec!["d2".to_string()],
+        ]
+    );
+}

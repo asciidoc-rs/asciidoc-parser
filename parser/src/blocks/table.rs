@@ -223,7 +223,11 @@ impl<'src> TableBlock<'src> {
         // number of column slots that cells from earlier rows occupy in the row
         // `k` steps ahead of the one being filled; a row closes once its own
         // cells' colspans plus the slots carried into it (`active_rowspans[0]`)
-        // reach `ncols`.
+        // reach `ncols`. A cell whose span pushes the row *past* `ncols` overruns
+        // the grid: the whole overrunning row is dropped (with a warning), again
+        // matching Asciidoctor. A row whose columns are entirely pre-filled by
+        // carried slots has no cells of its own to close it, so the next cell
+        // overruns and is dropped together with that pre-filled row.
         let mut warnings: Vec<Warning<'src>> = vec![];
         let raw_cells = scan_cells(inside);
 
@@ -249,13 +253,26 @@ impl<'src> TableBlock<'src> {
                 }
 
                 column_visits += colspan;
+                let cell_source = raw.content;
                 current_row.push(raw);
 
                 // The slots carried into the current row are `active_rowspans[0]`;
                 // the vector is never empty here, so the fallback is unreachable.
                 let carried = active_rowspans.first().copied().unwrap_or(0);
-                if column_visits + carried >= ncols {
-                    raw_rows.push(std::mem::take(&mut current_row));
+                let effective = column_visits + carried;
+                if effective >= ncols {
+                    if effective == ncols {
+                        raw_rows.push(std::mem::take(&mut current_row));
+                    } else {
+                        // Overrun: this cell's span pushes the row past `ncols`.
+                        // Discard the whole row so the remaining cells stay
+                        // aligned to the grid.
+                        current_row.clear();
+                        warnings.push(Warning {
+                            source: cell_source,
+                            warning: WarningType::TableCellExceedsColumnCount,
+                        });
+                    }
                     column_visits = 0;
                     active_rowspans.remove(0);
                     if active_rowspans.is_empty() {
