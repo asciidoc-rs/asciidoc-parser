@@ -36,7 +36,6 @@ use crate::{
 /// * Cell specifiers (spans, duplication, per-cell alignment and style); the
 ///   per-cell style operator that overrides a column's style operator is not
 ///   yet recognized.
-/// * Footer rows.
 ///
 /// Column specifier style operators (the `a`, `d`, `e`, `h`, `l`, `m`, and `s`
 /// operators) are supported, along with proportional width and the horizontal
@@ -140,6 +139,14 @@ impl<'src> TableBlock<'src> {
             .as_ref()
             .is_some_and(|a| a.has_option("noheader"));
 
+        // The last row is promoted to a footer row when the `footer` option is
+        // set. Unlike the header row, a footer cell is processed with its
+        // column's style (it is simply the last body row, relabeled).
+        let opts_footer = metadata
+            .attrlist
+            .as_ref()
+            .is_some_and(|a| a.has_option("footer"));
+
         // The blank line must genuinely exist after the first row; the end of the
         // table (an empty remainder) does not count, so a single-row table is not
         // mistaken for an all-header table.
@@ -234,6 +241,11 @@ impl<'src> TableBlock<'src> {
             }
         }
 
+        // The footer row, when requested, is the last row of the table. It is
+        // moved out of the body so the caller sees it as a distinct footer. When
+        // the table has no rows to spare, no footer is produced.
+        let footer_row = if opts_footer { body_rows.pop() } else { None };
+
         let source = metadata
             .source
             .trim_remainder(closing_delimiter.discard_all())
@@ -252,7 +264,7 @@ impl<'src> TableBlock<'src> {
                     columns,
                     header_row,
                     body_rows,
-                    footer_row: None,
+                    footer_row,
                     source,
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
