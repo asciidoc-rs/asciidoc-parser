@@ -597,3 +597,16 @@ fn non_specifier_token_is_not_a_cell_separator() {
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
     assert_eq!(rows, vec![vec!["a foo|b".to_string()]]);
 }
+
+#[test]
+fn dot_not_followed_by_vertical_operator_is_not_a_cell_separator() {
+    // A vertical alignment operator is a dot followed by `<`, `>`, or `^`. A dot
+    // followed by anything else (here `.x`) is not a valid cell specifier, so the
+    // `|` is not a cell separator: `a .x|b` is a single cell whose content
+    // includes the literal `.x|`.
+    let table = parse_table("|===\n|a .x|b\n|===");
+
+    assert_eq!(table.columns().len(), 1);
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(rows, vec![vec!["a .x|b".to_string()]]);
+}
