@@ -167,9 +167,10 @@ Taking into account any xref:span-cells.adoc[spans], which are applied via a <<s
     // Cell specifiers (per-cell spans, duplication, alignment, and style
     // operators) are introduced here but specified in detail on dedicated
     // pages (span-cells, duplicate-cells, align-by-cell, format-cell-content).
-    // They are not yet implemented, so this conceptual section is marked
-    // non-normative; the operators are verified on those pages.
-    non_normative!(
+    // They are not yet implemented, so this normative section is flagged as a
+    // TODO: come back and verify it (especially the `ex-specifier` example)
+    // once per-cell specifiers are supported and those pages are covered.
+    to_do_verifies!(
         r#"
 [#specifiers]
 === Cell specifiers and operators
