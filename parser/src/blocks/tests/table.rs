@@ -768,3 +768,63 @@ fn row_fully_covered_by_rowspans_drops_following_cell() {
         ]
     );
 }
+
+#[test]
+fn dropped_overrunning_cell_keeps_its_rowspan_carryover() {
+    // When a cell that carries a row span is itself part of an overrunning row,
+    // its already-reserved slots in the next rows are *not* rolled back when the
+    // row is dropped. Matching Asciidoctor, the `2.2+|b` cell (colspan 2, rowspan
+    // 2) overruns the two-column row and is dropped with `a`, but its rowspan
+    // still pre-fills the next row, so `c` overruns that pre-filled row and is
+    // dropped too. Only `d` and `e` survive.
+    let mut parser = Parser::default();
+    let maw = Block::parse(
+        Span::new("[cols=\"2*\"]\n|===\n|a 2.2+|b\n|c\n|d\n|e\n|==="),
+        &mut parser,
+    );
+
+    assert_eq!(
+        maw.warnings
+            .iter()
+            .filter(|w| matches!(
+                w.warning,
+                crate::warnings::WarningType::TableCellExceedsColumnCount
+            ))
+            .count(),
+        2
+    );
+
+    let table = match maw.item.unwrap().item {
+        Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    };
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(rows, vec![vec!["d".to_string(), "e".to_string()]]);
+}
+
+#[test]
+fn huge_row_span_factor_does_not_overallocate() {
+    // A row span factor far larger than the table can never carry into rows that
+    // don't exist, so it is clamped for the grid bookkeeping; without the clamp,
+    // `.1000000000+` would resize the `active_rowspans` vector to a billion
+    // entries (a multi-gigabyte allocation). The cell still reports its literal
+    // parsed `rowspan` (matching Asciidoctor), and the following cell, covered by
+    // the span, overruns and is dropped.
+    let mut parser = Parser::default();
+    let maw = Block::parse(Span::new("|===\n.1000000000+|a\n|b\n|==="), &mut parser);
+
+    assert!(maw.warnings.iter().any(|w| matches!(
+        w.warning,
+        crate::warnings::WarningType::TableCellExceedsColumnCount
+    )));
+
+    let table = match maw.item.unwrap().item {
+        Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    };
+    assert_eq!(table.body_rows().len(), 1);
+    let cell = &table.body_rows()[0].cells()[0];
+    assert_eq!(cell.colspan(), 1);
+    assert_eq!(cell.rowspan(), 1_000_000_000);
+    assert_eq!(row_text(&table.body_rows()[0]), vec!["a".to_string()]);
+}

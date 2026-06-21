@@ -231,6 +231,17 @@ impl<'src> TableBlock<'src> {
         let mut warnings: Vec<Warning<'src>> = vec![];
         let raw_cells = scan_cells(inside);
 
+        // A table can never have more rows than it has cells, so a row span is
+        // clamped to the cell count for the `active_rowspans` bookkeeping below: a
+        // larger span carries into rows that can't exist and so has no additional
+        // layout effect. The clamp also bounds the `active_rowspans` allocation,
+        // so a hostile specifier such as `.1000000000+` can't trigger a
+        // multi-gigabyte allocation. (The cell's reported [`rowspan`] keeps the
+        // literal parsed value, matching Asciidoctor.)
+        //
+        // [`rowspan`]: TableCell::rowspan
+        let max_rowspan = raw_cells.len().saturating_add(1);
+
         let mut raw_rows: Vec<Vec<RawCell<'src>>> = vec![];
         if ncols > 0 {
             let mut active_rowspans: Vec<usize> = vec![0];
@@ -239,7 +250,7 @@ impl<'src> TableBlock<'src> {
 
             for raw in raw_cells {
                 let colspan = raw.spec.colspan.max(1);
-                let rowspan = raw.spec.rowspan.max(1);
+                let rowspan = raw.spec.rowspan.max(1).min(max_rowspan);
 
                 // A cell that spans more than one row reserves `colspan` slots in
                 // each of the rows it extends into (but not its own row).
