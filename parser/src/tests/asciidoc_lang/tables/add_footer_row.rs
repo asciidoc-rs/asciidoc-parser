@@ -113,10 +113,22 @@ The `options` attribute is represented by the percent sign (`%`) when it's set u
     let table = parse_table("[%footer]\n|===\n|Cell 1 |Cell 2\n|Foot 1 |Foot 2\n|===");
     assert!(table.footer_row().is_some());
 
-    non_normative!(
+    verifies!(
         r#"
 In <<ex-short>>, `footer` is assigned using the shorthand syntax for `options`.
 
+"#
+    );
+
+    // The `ex-short` example assigns `footer` (alongside `header`) using the
+    // `%` shorthand syntax, so the last row is promoted to the footer.
+    let ex_short = parse_table(
+        "[%header%footer,cols=\"2,2,1\"]\n|===\n|Column 1, header row\n|Column 2, header row\n|Column 3, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n\n|Column 1, footer row\n|Column 2, footer row\n|Column 3, footer row\n|===",
+    );
+    assert!(ex_short.footer_row().is_some());
+
+    non_normative!(
+        r#"
 .Table with footer assigned using the shorthand syntax
 [source#ex-short]
 ----
