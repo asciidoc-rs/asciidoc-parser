@@ -563,13 +563,29 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
 fn cell_specifier_style_operator_locates_separator() {
     // A single lowercase letter directly in front of a `|` is a (style) cell
     // specifier, so the `|` is a cell separator: `a s|b` is two cells, not one.
-    // The style operator is recognized only so the separator is located; its
-    // styling effect is not yet applied, so the cell renders as plain content.
+    // A recognized style operator (here `s`) is applied to the cell.
     let table = parse_table("|===\n|a s|b\n|===");
 
     assert_eq!(table.columns().len(), 2);
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
     assert_eq!(rows, vec![vec!["a".to_string(), "b".to_string()]]);
+
+    let cells = table.body_rows()[0].cells();
+    assert_eq!(cells[0].style(), ColumnStyle::Default);
+    assert_eq!(cells[1].style(), ColumnStyle::Strong);
+}
+
+#[test]
+fn unrecognized_cell_style_operator_inherits_column_style() {
+    // A single lowercase letter that isn't a recognized style operator (here `z`)
+    // still locates the cell separator, but it leaves the cell's style unset, so
+    // the cell inherits its column's style rather than reverting to the default.
+    // This matches Asciidoctor, which ignores an unrecognized cell style operator.
+    let table = parse_table("[cols=\"m,m\"]\n|===\n|head1 |head2\n\nz|zee s|ess\n|===");
+
+    let cells = table.body_rows()[0].cells();
+    assert_eq!(cells[0].style(), ColumnStyle::Monospace);
+    assert_eq!(cells[1].style(), ColumnStyle::Strong);
 }
 
 #[test]
