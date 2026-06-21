@@ -12,6 +12,16 @@ use crate::{
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
 
+/// Attributes that an AsciiDoc table cell may modify even when they are set in
+/// the parent document.
+///
+/// An AsciiDoc cell inherits the parent's attributes and cannot modify them,
+/// but the AsciiDoc specification carves out a handful of exceptions:
+/// `doctype`, `toc`, `notitle` (and its complement, `showtitle`), and
+/// `compat-mode`.
+const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
+    &["doctype", "toc", "notitle", "showtitle", "compat-mode"];
+
 /// A table is a delimited block that arranges content into a grid of rows and
 /// columns.
 ///
@@ -595,7 +605,28 @@ impl<'src> TableCell<'src> {
             // (matching Asciidoctor, where a `:foo:` set inside a cell is not
             // visible after the table).
             let saved_attributes = parser.attribute_values.clone();
+
+            // An attribute that is set in the parent document cannot be modified
+            // inside the cell. Lock every inherited attribute that currently
+            // holds a value for the duration of the cell (other than the handful
+            // of exceptions the spec carves out), so a body assignment to one of
+            // them is ignored. An attribute that is unset in the parent is not
+            // locked: the cell may assign it (matching Asciidoctor, which here
+            // diverges from the spec's "set or explicitly unset" wording). The
+            // lock set is saved and restored so it applies only within the cell
+            // and nests correctly.
+            let saved_locks = parser.locked_attribute_names.clone();
+            for (name, value) in saved_attributes.iter() {
+                if !matches!(value.value, InterpretedValue::Unset)
+                    && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name.as_str())
+                {
+                    parser.locked_attribute_names.insert(name.clone());
+                }
+            }
+
             let mut maw = parse_blocks_until(trimmed, |_| false, parser);
+
+            parser.locked_attribute_names = saved_locks;
             parser.attribute_values = saved_attributes;
             warnings.append(&mut maw.warnings);
             TableCellContent::AsciiDoc(maw.item.item)

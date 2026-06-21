@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use crate::{
     Document, HasSpan,
@@ -66,6 +70,19 @@ pub struct Parser {
     /// Number most recently assigned to a captioned table. Incremented each
     /// time a titled table receives an automatic caption (e.g. "Table 1.").
     pub(crate) last_table_number: usize,
+
+    /// Canonical names of attributes that are locked against modification from
+    /// the document body for the current scope.
+    ///
+    /// An AsciiDoc table cell creates a nested document that inherits the
+    /// parent document's attributes. An attribute set or unset in the
+    /// parent _cannot_ be modified inside the cell (matching Asciidoctor),
+    /// so while a cell is being parsed every inherited attribute name
+    /// (other than a handful of exceptions) is recorded here and a body
+    /// attribute assignment to such a name is silently ignored. The set is
+    /// saved and restored around each cell, so the lock applies only within
+    /// the cell (and nests correctly).
+    pub(crate) locked_attribute_names: HashSet<String>,
 }
 
 impl Default for Parser {
@@ -86,6 +103,7 @@ impl Default for Parser {
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,
             last_table_number: 0,
+            locked_attribute_names: HashSet::new(),
         }
     }
 }
@@ -485,6 +503,13 @@ impl Parser {
         warnings: &mut Vec<Warning<'src>>,
     ) {
         let attr_name = remap_attr_name(attr.name().data());
+
+        // An attribute inherited from the parent document of an AsciiDoc table
+        // cell is locked for the duration of that cell: a body assignment to it
+        // is silently ignored (no warning), matching Asciidoctor.
+        if self.locked_attribute_names.contains(&attr_name) {
+            return;
+        }
 
         // Verify that we have permission to overwrite any existing attribute value.
         if let Some(existing_attr) = self.attribute_values.get(&attr_name)

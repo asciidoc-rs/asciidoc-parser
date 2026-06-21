@@ -164,13 +164,13 @@ Taking into account any xref:span-cells.adoc[spans], which are applied via a <<s
         }
     );
 
-    // Cell specifiers (per-cell spans, duplication, alignment, and style
-    // operators) are introduced here but specified in detail on dedicated
-    // pages (span-cells, duplicate-cells, align-by-cell, format-cell-content).
-    // They are not yet implemented, so this normative section is flagged as a
-    // TODO: come back and verify it (especially the `ex-specifier` example)
-    // once per-cell specifiers are supported and those pages are covered.
-    to_do_verifies!(
+    // Cell specifiers introduce per-cell spans, duplication, alignment, and
+    // style operators, each specified in detail on a dedicated page (span-cells,
+    // duplicate-cells, align-by-cell, format-cell-content). The alignment and
+    // style operators (and the override behavior) are implemented and verified
+    // here; the span and duplication operators are recognized so the separator
+    // is located, but their layout effect is not yet applied.
+    verifies!(
         r#"
 [#specifiers]
 === Cell specifiers and operators
@@ -201,6 +201,45 @@ Also, the operator in a cell specifier will override the operator in a xref:add-
 
 "#
     );
+
+    // Expansion of `ex-specifier`. The first cell's specifier (`>s`) makes its
+    // content right-aligned and bold; the second cell has no specifier, so the
+    // default properties (left-aligned, default style) apply. This also shows
+    // that a cell specifier applies only to the cell it's placed on, not to the
+    // whole row.
+    let table = specifier_table(
+        "[cols=\"2*\"]\n|===\n>s|This cell's specifier indicates that this cell's content is right-aligned and bold.\n|The cell specifier on this cell hasn't been set explicitly, so the  default properties are applied.\n|===",
+    );
+    let row = &table.body_rows()[0];
+    assert_eq!(row.cells()[0].h_align(), HorizontalAlignment::Right);
+    assert_eq!(row.cells()[0].style(), ColumnStyle::Strong);
+    assert_eq!(row.cells()[1].h_align(), HorizontalAlignment::Left);
+    assert_eq!(row.cells()[1].style(), ColumnStyle::Default);
+
+    // A cell specifier operator overrides the column specifier operator for the
+    // same property: the column is centered and monospace (`^m`), but the cell's
+    // own `>` and `s` operators win, while a property the cell leaves unset (here
+    // vertical alignment) still falls back to the column.
+    let table = specifier_table("[cols=\"^.^m\"]\n|===\n>s|overridden\n|===");
+    let cell = &table.body_rows()[0].cells()[0];
+    assert_eq!(cell.h_align(), HorizontalAlignment::Right);
+    assert_eq!(cell.style(), ColumnStyle::Strong);
+    assert_eq!(cell.v_align(), VerticalAlignment::Middle);
+}
+
+/// Parse `source` as a single block and return the [`TableBlock`] it produced.
+///
+/// [`TableBlock`]: crate::blocks::TableBlock
+fn specifier_table(source: &str) -> crate::blocks::TableBlock<'_> {
+    let mut parser = Parser::default();
+    let mi = crate::blocks::Block::parse(crate::Span::new(source), &mut parser)
+        .unwrap_if_no_warnings()
+        .unwrap();
+
+    match mi.item {
+        crate::blocks::Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    }
 }
 
 #[test]

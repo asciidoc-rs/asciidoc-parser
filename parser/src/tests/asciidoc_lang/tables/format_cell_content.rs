@@ -35,6 +35,27 @@ fn simple_text(cell: &crate::blocks::TableCell<'_>) -> String {
     }
 }
 
+/// Find the first table in `doc` and return the joined rendered text of the
+/// AsciiDoc blocks in its first body cell.
+fn asciidoc_cell_text(doc: &crate::Document<'_>) -> String {
+    let table = doc
+        .nested_blocks()
+        .find_map(|b| match b {
+            crate::blocks::Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .expect("expected a table block");
+
+    match table.body_rows()[0].cells()[0].content() {
+        crate::blocks::TableCellContent::AsciiDoc(blocks) => blocks
+            .iter()
+            .filter_map(|block| block.rendered_content())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => panic!("expected nested AsciiDoc blocks, got {other:?}"),
+    }
+}
+
 non_normative!(
     r#"
 = Format Content by Cell
@@ -370,17 +391,30 @@ As such, it inherits attributes from the parent document.
         other => panic!("expected nested AsciiDoc blocks, got {other:?}"),
     }
 
-    to_do_verifies!(
+    verifies!(
         r#"
 If an attribute is set or explicitly unset in the parent document, it _cannot_ be modified in the AsciiDoc table cell.
 There are a handful of exceptions to this rule, which includes doctype, toc, notitle (and its complement, showtitle), and compat-mode.
 "#
     );
 
-    // TODO: The lock that prevents a parent-set attribute from being modified
-    // inside an AsciiDoc cell (and its handful of exceptions) is not yet
-    // enforced; the cell's attribute scope is snapshotted and restored, but a
-    // parent-set attribute can still be reassigned during the cell's own parse.
+    // An attribute set in the parent is locked inside the cell: a reassignment
+    // (placed before the reference, so it would take effect if it were honored)
+    // is ignored, so the cell still sees the inherited value. Asciidoctor only
+    // locks attributes that are *set*, not ones explicitly unset, so the crate
+    // follows suit; see the unit tests in `blocks::tests::table` for the full
+    // set/unset/exception matrix.
+    let mut parser = Parser::default();
+    let doc = parser
+        .parse(":locked: parent\n\n|===\n|h\n\na|\n:locked: child\n\nvalue is {locked}\n|===");
+    assert_eq!(asciidoc_cell_text(&doc), "value is parent");
+
+    // One of the carved-out exceptions (here `compat-mode`) may still be modified
+    // inside the cell even though the parent set it.
+    let mut parser = Parser::default();
+    let doc = parser
+        .parse(":compat-mode: parent\n\n|===\n|h\n\na|\n:compat-mode: child\n\nmode is {compat-mode}\n|===");
+    assert_eq!(asciidoc_cell_text(&doc), "mode is child");
 
     verifies!(
         r#"

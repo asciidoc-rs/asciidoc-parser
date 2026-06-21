@@ -559,6 +559,84 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
     assert!(parser.has_attribute("parent-attr"));
 }
 
+/// Collect the rendered text of every block in an AsciiDoc cell.
+fn asciidoc_cell_text(table: &TableBlock<'_>, row: usize, col: usize) -> String {
+    match table.body_rows()[row].cells()[col].content() {
+        TableCellContent::AsciiDoc(blocks) => blocks
+            .iter()
+            .filter_map(|block| block.rendered_content())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
+    }
+}
+
+#[test]
+fn asciidoc_cell_cannot_modify_a_parent_attribute() {
+    // An attribute set in the parent document is locked inside an AsciiDoc cell:
+    // a reassignment is silently ignored, so the inherited value is what the cell
+    // sees. The lock is scoped to the cell, so the parent value is unchanged
+    // afterward.
+    let mut parser = Parser::default();
+    let doc = parser.parse(
+        ":locked: parent\n\n[cols=\"a\"]\n|===\n|\n:locked: child\n\nvalue is {locked}\n|===",
+    );
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    assert_eq!(asciidoc_cell_text(table, 0, 0), "value is parent");
+    assert_eq!(
+        parser.attribute_value("locked"),
+        crate::document::InterpretedValue::Value("parent".to_string())
+    );
+}
+
+#[test]
+fn asciidoc_cell_may_set_an_attribute_unset_in_the_parent() {
+    // Only attributes that are *set* in the parent are locked. An attribute that
+    // is explicitly unset in the parent is not locked, so the cell may assign it
+    // and the cell sees its own value (matching Asciidoctor, which here diverges
+    // from the spec's "set or explicitly unset" wording).
+    let mut parser = Parser::default();
+    let doc = parser.parse(
+        ":locked: value\n:locked!:\n\n[cols=\"a\"]\n|===\n|\n:locked: child\n\nvalue is {locked}\n|===",
+    );
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    assert_eq!(asciidoc_cell_text(table, 0, 0), "value is child");
+}
+
+#[test]
+fn asciidoc_cell_may_modify_an_exempt_attribute() {
+    // A handful of attributes are exempt from the cell lock; `compat-mode` is one
+    // of them, so a cell may modify it even though the parent set it, while a
+    // non-exempt attribute (`locked`) stays at the inherited value.
+    let mut parser = Parser::default();
+    let doc = parser.parse(
+        ":compat-mode: parent\n:locked: parent\n\n[cols=\"a\"]\n|===\n|\n:compat-mode: child\n:locked: child\n\nc={compat-mode} l={locked}\n|===",
+    );
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    assert_eq!(asciidoc_cell_text(table, 0, 0), "c=child l=parent");
+}
+
 #[test]
 fn cell_specifier_style_operator_locates_separator() {
     // A single lowercase letter directly in front of a `|` is a (style) cell
