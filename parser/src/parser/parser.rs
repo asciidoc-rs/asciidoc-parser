@@ -75,8 +75,9 @@ pub struct Parser {
     /// the document body for the current scope.
     ///
     /// An AsciiDoc table cell creates a nested document that inherits the
-    /// parent document's attributes. An attribute set or unset in the
-    /// parent _cannot_ be modified inside the cell (matching Asciidoctor),
+    /// parent document's attributes. An attribute that is *set* in the
+    /// parent _cannot_ be modified inside the cell (matching Asciidoctor,
+    /// which here diverges from the spec's "set or explicitly unset" wording),
     /// so while a cell is being parsed every inherited attribute name
     /// (other than a handful of exceptions) is recorded here and a body
     /// attribute assignment to such a name is silently ignored. The set is
