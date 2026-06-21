@@ -117,18 +117,6 @@ The `options` attribute is represented by the percent sign (`%`) when it's set u
         r#"
 In <<ex-short>>, `footer` is assigned using the shorthand syntax for `options`.
 
-"#
-    );
-
-    // The `ex-short` example assigns `footer` (alongside `header`) using the
-    // `%` shorthand syntax, so the last row is promoted to the footer.
-    let ex_short = parse_table(
-        "[%header%footer,cols=\"2,2,1\"]\n|===\n|Column 1, header row\n|Column 2, header row\n|Column 3, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n\n|Column 1, footer row\n|Column 2, footer row\n|Column 3, footer row\n|===",
-    );
-    assert!(ex_short.footer_row().is_some());
-
-    non_normative!(
-        r#"
 .Table with footer assigned using the shorthand syntax
 [source#ex-short]
 ----
@@ -149,6 +137,13 @@ In <<ex-short>>, `footer` is assigned using the shorthand syntax for `options`.
 ----
 "#
     );
+
+    // The `ex-short` example assigns `footer` (alongside `header`) using the
+    // `%` shorthand syntax, so the last row is promoted to the footer.
+    let ex_short = parse_table(
+        "[%header%footer,cols=\"2,2,1\"]\n|===\n|Column 1, header row\n|Column 2, header row\n|Column 3, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n\n|Column 1, footer row\n|Column 2, footer row\n|Column 3, footer row\n|===",
+    );
+    assert!(ex_short.footer_row().is_some());
 
     verifies!(
         r#"
@@ -181,7 +176,7 @@ In <<ex-short>>, `footer` is assigned using the shorthand syntax for `options`.
     );
     assert!(after.footer_row().is_none());
 
-    non_normative!(
+    verifies!(
         r#"
 The table from <<ex-short>> is displayed below.
 
@@ -204,10 +199,29 @@ The table from <<ex-short>> is displayed below.
 "#
     );
 
+    // The rendered result of <<ex-short>>: the last row renders as the footer.
+    let ex_short_result = parse_table(
+        "[%header%footer,cols=\"2,2,1\"]\n|===\n|Column 1, header row\n|Column 2, header row\n|Column 3, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n\n|Column 1, footer row\n|Column 2, footer row\n|Column 3, footer row\n|===",
+    );
+    assert_eq!(
+        footer_texts(&ex_short_result),
+        vec![
+            "Column 1, footer row",
+            "Column 2, footer row",
+            "Column 3, footer row"
+        ]
+    );
+
     verifies!(
         r#"
 In <<ex-formal>>, the `options` attribute is set and assigned the `footer` value using the formal syntax.
 The `options` attribute accepts a comma-separated list of values.
+
+.Table with footer assigned to the options attribute
+[source#ex-formal]
+----
+include::example$row.adoc[tag=opt-f]
+----
 
 "#
     );
@@ -225,21 +239,12 @@ The `options` attribute accepts a comma-separated list of values.
     );
     assert!(table.footer_row().is_some());
 
-    non_normative!(
-        r#"
-.Table with footer assigned to the options attribute
-[source#ex-formal]
-----
-include::example$row.adoc[tag=opt-f]
-----
-
-"#
-    );
-
     verifies!(
         r#"
 The last row of the table in <<ex-formal>> is rendered using the corresponding footer styles.
 
+.Result of <<ex-formal>>
+include::example$row.adoc[tag=opt-f]
 "#
     );
 
@@ -255,12 +260,5 @@ The last row of the table in <<ex-formal>> is rendered using the corresponding f
     assert_eq!(
         footer_texts(&formal),
         vec!["Column 1, footer row", "Column 2, footer row"]
-    );
-
-    non_normative!(
-        r#"
-.Result of <<ex-formal>>
-include::example$row.adoc[tag=opt-f]
-"#
     );
 }
