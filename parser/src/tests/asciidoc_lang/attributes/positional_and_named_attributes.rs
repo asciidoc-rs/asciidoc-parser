@@ -1519,7 +1519,7 @@ Any space or tab characters at the boundaries of the value are ignored.
                             ElementAttribute {
                                 name: None,
                                 value: "zip",
-                                shorthand_items: &["zip"],
+                                shorthand_items: &[],
                             },
                             ElementAttribute {
                                 name: Some("target",),
@@ -1609,7 +1609,7 @@ Any space or tab characters at the boundaries of the value are ignored.
                             ElementAttribute {
                                 name: None,
                                 value: "zip",
-                                shorthand_items: &["zip"],
+                                shorthand_items: &[],
                             },
                             ElementAttribute {
                                 name: Some("target",),
@@ -1707,7 +1707,7 @@ If there is a closing double quote, the enclosing double quote characters are re
                             ElementAttribute {
                                 name: None,
                                 value: "zip",
-                                shorthand_items: &["zip"],
+                                shorthand_items: &[],
                             },
                             ElementAttribute {
                                 name: Some("target",),
@@ -1797,7 +1797,7 @@ If there is a closing double quote, the enclosing double quote characters are re
                             ElementAttribute {
                                 name: None,
                                 value: "zip",
-                                shorthand_items: &["zip"],
+                                shorthand_items: &[],
                             },
                             ElementAttribute {
                                 name: Some("target",),
@@ -1895,7 +1895,7 @@ If there is a closing single quote, the enclosing single quote characters are re
                             ElementAttribute {
                                 name: None,
                                 value: "zip",
-                                shorthand_items: &["zip"],
+                                shorthand_items: &[],
                             },
                             ElementAttribute {
                                 name: Some("target",),
