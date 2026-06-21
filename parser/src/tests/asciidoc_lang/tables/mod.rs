@@ -1,5 +1,6 @@
 mod add_cells_and_rows;
 mod add_columns;
+mod add_header_row;
 mod add_title;
 mod adjust_column_widths;
 mod align_by_column;
