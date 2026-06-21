@@ -85,9 +85,13 @@ impl<'src> Attrlist<'src> {
                 });
             }
 
-            if attr.name().is_none() {
-                parse_shorthand_items = false;
-            }
+            // Shorthand items (the `#id`, `.role`, and `%option` entries) are
+            // only recognized in the first attribute position. Once the first
+            // attribute has been parsed — whether it was positional or named —
+            // disable shorthand parsing so that, for example, a `%header`
+            // entered after a named `cols` attribute is not mistaken for an
+            // option (the processor ignores it).
+            parse_shorthand_items = false;
 
             let mut after = Span::new(source_cow.as_ref()).discard(new_index);
 
