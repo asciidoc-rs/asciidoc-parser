@@ -130,11 +130,13 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     }
                 ],
                 header_row: None,
@@ -142,7 +144,7 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                     TableRow {
                         cells: &[
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 1, row 1",
                                         line: 3,
@@ -150,10 +152,10 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                                         offset: 19,
                                     },
                                     rendered: "Cell in column 1, row 1",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 2, row 1",
                                         line: 4,
@@ -161,14 +163,14 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                                         offset: 44,
                                     },
                                     rendered: "Cell in column 2, row 1",
-                                },
+                                }),
                             },
                         ],
                     },
                     TableRow {
                         cells: &[
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 1, row 2",
                                         line: 6,
@@ -176,10 +178,10 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                                         offset: 70,
                                     },
                                     rendered: "Cell in column 1, row 2",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 2, row 2",
                                         line: 6,
@@ -187,14 +189,14 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                                         offset: 95,
                                     },
                                     rendered: "Cell in column 2, row 2",
-                                },
+                                }),
                             },
                         ],
                     },
                     TableRow {
                         cells: &[
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 1, row 3",
                                         line: 7,
@@ -202,10 +204,10 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                                         offset: 120,
                                     },
                                     rendered: "Cell in column 1, row 3",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 2, row 3",
                                         line: 7,
@@ -213,7 +215,7 @@ However, the `cols` attribute is required to customize the xref:adjust-column-wi
                                         offset: 145,
                                     },
                                     rendered: "Cell in column 2, row 3",
-                                },
+                                }),
                             },
                         ],
                     },
@@ -339,17 +341,19 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     }
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 1, header row",
                                     line: 3,
@@ -357,10 +361,10 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                                     offset: 19,
                                 },
                                 rendered: "Cell in column 1, header row",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 2, header row",
                                     line: 3,
@@ -368,7 +372,7 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                                     offset: 49,
                                 },
                                 rendered: "Cell in column 2, header row",
-                            },
+                            }),
                         },
                     ],
                 }),
@@ -376,7 +380,7 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                     TableRow {
                         cells: &[
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 1, row 2",
                                         line: 5,
@@ -384,10 +388,10 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                                         offset: 80,
                                     },
                                     rendered: "Cell in column 1, row 2",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 2, row 2",
                                         line: 6,
@@ -395,14 +399,14 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                                         offset: 105,
                                     },
                                     rendered: "Cell in column 2, row 2",
-                                },
+                                }),
                             },
                         ],
                     },
                     TableRow {
                         cells: &[
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 1, row 3",
                                         line: 8,
@@ -410,10 +414,10 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                                         offset: 131,
                                     },
                                     rendered: "Cell in column 1, row 3",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 2, row 3",
                                         line: 9,
@@ -421,14 +425,14 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                                         offset: 156,
                                     },
                                     rendered: "Cell in column 2, row 3",
-                                },
+                                }),
                             },
                         ],
                     },
                     TableRow {
                         cells: &[
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 1, row 4",
                                         line: 11,
@@ -436,10 +440,10 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                                         offset: 182,
                                     },
                                     rendered: "Cell in column 1, row 4",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 2, row 4",
                                         line: 12,
@@ -447,7 +451,7 @@ A header row can also be identified by assigning xref:add-header-row.adoc[header
                                         offset: 207,
                                     },
                                     rendered: "Cell in column 2, row 4",
-                                },
+                                }),
                             },
                         ],
                     },

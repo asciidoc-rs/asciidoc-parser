@@ -120,27 +120,31 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                         width: 3,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 3,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 3,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 3,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 3,
@@ -148,10 +152,10 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                                     offset: 23,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 3,
@@ -159,10 +163,10 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                                     offset: 33,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 3,
@@ -170,10 +174,10 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                                     offset: 43,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 4",
                                     line: 3,
@@ -181,14 +185,14 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                                     offset: 53,
                                 },
                                 rendered: "Column 4",
-                            },
+                            }),
                         },
                     ],
                 }),
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 1",
                                     line: 5,
@@ -196,10 +200,10 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                                     offset: 64,
                                 },
                                 rendered: "Cell in column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 2",
                                     line: 6,
@@ -207,10 +211,10 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                                     offset: 82,
                                 },
                                 rendered: "Cell in column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 3",
                                     line: 7,
@@ -218,10 +222,10 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                                     offset: 100,
                                 },
                                 rendered: "Cell in column 3",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 4",
                                     line: 8,
@@ -229,7 +233,7 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                                     offset: 118,
                                 },
                                 rendered: "Cell in column 4",
-                            },
+                            }),
                         },
                     ],
                 }],
@@ -331,23 +335,26 @@ The integer `3`, combined with the `+*+` operator, indicates that the table will
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: None,
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 3,
@@ -355,10 +362,10 @@ The integer `3`, combined with the `+*+` operator, indicates that the table will
                                     offset: 18,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 3,
@@ -366,10 +373,10 @@ The integer `3`, combined with the `+*+` operator, indicates that the table will
                                     offset: 28,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 3,
@@ -377,7 +384,7 @@ The integer `3`, combined with the `+*+` operator, indicates that the table will
                                     offset: 38,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                     ],
                 }],
@@ -485,27 +492,31 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                         width: 5,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: Some(TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 1",
                                     line: 3,
@@ -513,10 +524,10 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                                     offset: 20,
                                 },
                                 rendered: "Column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 2",
                                     line: 3,
@@ -524,10 +535,10 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                                     offset: 30,
                                 },
                                 rendered: "Column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 3",
                                     line: 3,
@@ -535,10 +546,10 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                                     offset: 40,
                                 },
                                 rendered: "Column 3",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Column 4",
                                     line: 3,
@@ -546,14 +557,14 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                                     offset: 50,
                                 },
                                 rendered: "Column 4",
-                            },
+                            }),
                         },
                     ],
                 }),
                 body_rows: &[TableRow {
                     cells: &[
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 1",
                                     line: 5,
@@ -561,10 +572,10 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                                     offset: 61,
                                 },
                                 rendered: "Cell in column 1",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 2",
                                     line: 6,
@@ -572,10 +583,10 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                                     offset: 79,
                                 },
                                 rendered: "Cell in column 2",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 3",
                                     line: 7,
@@ -583,10 +594,10 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                                     offset: 97,
                                 },
                                 rendered: "Cell in column 3",
-                            },
+                            }),
                         },
                         TableCell {
-                            content: Content {
+                            content: TableCellContent::Simple(Content {
                                 original: Span {
                                     data: "Cell in column 4",
                                     line: 8,
@@ -594,7 +605,7 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                                     offset: 115,
                                 },
                                 rendered: "Cell in column 4",
-                            },
+                            }),
                         },
                     ],
                 }],
@@ -728,16 +739,19 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                     TableColumn {
                         width: 1,
                         h_align: HorizontalAlignment::Left,
                         v_align: VerticalAlignment::Top,
+                        style: ColumnStyle::Default,
                     },
                 ],
                 header_row: None,
@@ -745,7 +759,7 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                     TableRow {
                         cells: &[
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 1, row 1",
                                         line: 3,
@@ -753,10 +767,10 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                                         offset: 7,
                                     },
                                     rendered: "Cell in column 1, row 1",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 2, row 1",
                                         line: 3,
@@ -764,10 +778,10 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                                         offset: 32,
                                     },
                                     rendered: "Cell in column 2, row 1",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 3, row 1",
                                         line: 3,
@@ -775,14 +789,14 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                                         offset: 57,
                                     },
                                     rendered: "Cell in column 3, row 1",
-                                },
+                                }),
                             },
                         ],
                     },
                     TableRow {
                         cells: &[
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 1, row 2",
                                         line: 5,
@@ -790,10 +804,10 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                                         offset: 83,
                                     },
                                     rendered: "Cell in column 1, row 2",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 2, row 2",
                                         line: 5,
@@ -801,10 +815,10 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                                         offset: 108,
                                     },
                                     rendered: "Cell in column 2, row 2",
-                                },
+                                }),
                             },
                             TableCell {
-                                content: Content {
+                                content: TableCellContent::Simple(Content {
                                     original: Span {
                                         data: "Cell in column 3, row 2",
                                         line: 5,
@@ -812,7 +826,7 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                                         offset: 133,
                                     },
                                     rendered: "Cell in column 3, row 2",
-                                },
+                                }),
                             },
                         ],
                     },
