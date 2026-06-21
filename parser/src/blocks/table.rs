@@ -33,13 +33,15 @@ use crate::{
 ///
 /// * The CSV, TSV, and DSV data formats (and the `,===` / `:===` shorthand
 ///   delimiters).
-/// * Cell specifiers (spans, duplication, per-cell alignment and style); the
-///   per-cell style operator that overrides a column's style operator is not
-///   yet recognized.
+/// * Cell specifier span (`+`) and duplication (`*`) operators and the per-cell
+///   style operator: these are recognized in a cell specifier (so the cell
+///   separator is still located correctly) but their layout and styling effects
+///   are not yet applied.
 ///
 /// Column specifier style operators (the `a`, `d`, `e`, `h`, `l`, `m`, and `s`
 /// operators) are supported, along with proportional width and the horizontal
-/// and vertical alignment operators.
+/// and vertical alignment operators. Per-cell horizontal and vertical alignment
+/// operators are supported and override the column's alignment.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
@@ -205,17 +207,18 @@ impl<'src> TableBlock<'src> {
 
         let mut cells = Vec::with_capacity(raw_cells.len());
         for (idx, raw) in raw_cells.into_iter().enumerate() {
-            let style = if idx < header_len {
-                ColumnStyle::Default
-            } else {
-                // `idx % ncols` is in bounds whenever `ncols > 0`; an empty table
-                // (`ncols == 0`) has no columns, so the cell falls back to the
-                // default style.
-                columns
-                    .get(idx % ncols.max(1))
-                    .map_or(ColumnStyle::Default, |column| column.style)
-            };
-            cells.push(TableCell::parse(raw, style, parser, &mut warnings));
+            // `idx % ncols` is in bounds whenever `ncols > 0`; an empty table
+            // (`ncols == 0`) has no columns, so the cell falls back to the
+            // default column (default style and alignment).
+            let column = columns.get(idx % ncols.max(1)).cloned().unwrap_or_default();
+            let is_header = idx < header_len;
+            cells.push(TableCell::parse(
+                raw,
+                &column,
+                is_header,
+                parser,
+                &mut warnings,
+            ));
         }
         let mut cells = cells.into_iter();
 
@@ -532,12 +535,21 @@ impl<'src> TableRow<'src> {
 /// A single cell in a [`TableBlock`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableCell<'src> {
+    h_align: HorizontalAlignment,
+    v_align: VerticalAlignment,
     content: TableCellContent<'src>,
 }
 
 impl<'src> TableCell<'src> {
     /// Build a cell from the raw (untrimmed) span of its content, processing it
-    /// according to the [style](ColumnStyle) of the column the cell belongs to.
+    /// according to the [style](ColumnStyle) of the `column` the cell belongs
+    /// to.
+    ///
+    /// The cell's horizontal and vertical alignment come from the alignment
+    /// operators on its [specifier](RawCell::spec) when present; otherwise they
+    /// are inherited from the column. A header cell (`is_header`) is always
+    /// processed as plain header content, regardless of the column's style
+    /// operator.
     ///
     /// Leading and trailing whitespace is always stripped. For every style but
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) the cell holds inline
@@ -547,14 +559,28 @@ impl<'src> TableCell<'src> {
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) cell instead parses its content as a
     /// nested sequence of [blocks](TableCellContent::AsciiDoc).
     fn parse(
-        raw: Span<'src>,
-        style: ColumnStyle,
+        raw: RawCell<'src>,
+        column: &TableColumn,
+        is_header: bool,
         parser: &mut Parser,
         warnings: &mut Vec<Warning<'src>>,
     ) -> Self {
-        let trimmed = trim_surrounding_whitespace(raw);
+        // A cell's own alignment operator overrides the column's alignment; with
+        // no operator, the cell inherits the column's alignment.
+        let h_align = raw.spec.h_align.unwrap_or(column.h_align);
+        let v_align = raw.spec.v_align.unwrap_or(column.v_align);
 
-        if style == ColumnStyle::AsciiDoc {
+        // The header row is always processed as plain header content, so a
+        // column's style operator never affects a header cell.
+        let style = if is_header {
+            ColumnStyle::Default
+        } else {
+            column.style
+        };
+
+        let trimmed = trim_surrounding_whitespace(raw.content);
+
+        let content = if style == ColumnStyle::AsciiDoc {
             // The AsciiDoc style effectively creates a nested, standalone
             // AsciiDoc document in the cell. It inherits the parent document's
             // attributes, but any attribute it defines is scoped to the cell and
@@ -566,29 +592,51 @@ impl<'src> TableCell<'src> {
             let mut maw = parse_blocks_until(trimmed, |_| false, parser);
             parser.attribute_values = saved_attributes;
             warnings.append(&mut maw.warnings);
-            return Self {
-                content: TableCellContent::AsciiDoc(maw.item.item),
+            TableCellContent::AsciiDoc(maw.item.item)
+        } else {
+            let data = trimmed.data();
+
+            let mut content = if data.contains("\\|") {
+                Content::from_filtered(trimmed, data.replace("\\|", "|"))
+            } else {
+                Content::from(trimmed)
             };
-        }
 
-        let data = trimmed.data();
+            let substitutions = if style == ColumnStyle::Literal {
+                SubstitutionGroup::Verbatim
+            } else {
+                SubstitutionGroup::Normal
+            };
+            substitutions.apply(&mut content, parser, None);
 
-        let mut content = if data.contains("\\|") {
-            Content::from_filtered(trimmed, data.replace("\\|", "|"))
-        } else {
-            Content::from(trimmed)
+            TableCellContent::Simple(content)
         };
-
-        let substitutions = if style == ColumnStyle::Literal {
-            SubstitutionGroup::Verbatim
-        } else {
-            SubstitutionGroup::Normal
-        };
-        substitutions.apply(&mut content, parser, None);
 
         Self {
-            content: TableCellContent::Simple(content),
+            h_align,
+            v_align,
+            content,
         }
+    }
+
+    /// Returns the horizontal alignment of this cell's content.
+    ///
+    /// The alignment comes from a horizontal alignment operator (`<`, `>`, or
+    /// `^`) on the cell's specifier, which overrides the column's alignment. A
+    /// cell with no horizontal alignment operator inherits its column's
+    /// [`h_align`](TableColumn::h_align).
+    pub fn h_align(&self) -> HorizontalAlignment {
+        self.h_align
+    }
+
+    /// Returns the vertical alignment of this cell's content.
+    ///
+    /// The alignment comes from a vertical alignment operator (`.<`, `.>`, or
+    /// `.^`) on the cell's specifier, which overrides the column's alignment. A
+    /// cell with no vertical alignment operator inherits its column's
+    /// [`v_align`](TableColumn::v_align).
+    pub fn v_align(&self) -> VerticalAlignment {
+        self.v_align
     }
 
     /// Returns the interpreted content of this cell.
@@ -750,34 +798,84 @@ fn parse_col_spec(spec: &str) -> TableColumn {
     }
 }
 
-/// Scan a region for PSV cell boundaries, returning the raw (untrimmed) span of
-/// each cell's content.
+/// The alignment overrides parsed from a [cell specifier](RawCell::spec).
+///
+/// Each field is `None` when the corresponding alignment operator is absent
+/// from the specifier, in which case the cell inherits that alignment from its
+/// column.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct CellSpec {
+    h_align: Option<HorizontalAlignment>,
+    v_align: Option<VerticalAlignment>,
+}
+
+/// A single PSV cell as located by [`scan_cells`]: the alignment operators from
+/// its specifier together with the raw (untrimmed) span of its content.
+struct RawCell<'src> {
+    spec: CellSpec,
+    content: Span<'src>,
+}
+
+/// Scan a region for PSV cell boundaries, returning the [specifier](CellSpec)
+/// and raw (untrimmed) content span of each cell.
 ///
 /// A cell boundary is a vertical bar (`|`) that appears at the start of a line
-/// or is preceded by whitespace. Content before the first boundary is ignored.
+/// or is preceded by whitespace, optionally with a [cell specifier](CellSpec)
+/// (e.g. `^`, `2+`, `.>`) directly in front of the `|`. The token immediately
+/// preceding a `|` is taken to be a specifier when it parses as one (see
+/// [`parse_cell_spec`]); a token that doesn't parse as a specifier means the
+/// `|` is not a cell boundary. Content before the first boundary is ignored.
 ///
-/// An escaped separator (`\|`) is preceded by a backslash — neither a line
-/// start nor whitespace — so it already fails the boundary test and needs no
-/// special handling here; the backslash is stripped later in
-/// [`TableCell::parse`].
-fn scan_cells(region: Span<'_>) -> Vec<Span<'_>> {
-    let bytes = region.data().as_bytes();
+/// An escaped separator (`\|`) is preceded by a backslash, which is not a valid
+/// specifier, so the `|` already fails the boundary test and needs no special
+/// handling here; the backslash is stripped later in [`TableCell::parse`].
+fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
+    let data = region.data();
+    let bytes = data.as_bytes();
     let len = bytes.len();
 
-    let mut cells: Vec<Span<'_>> = vec![];
+    let mut cells: Vec<RawCell<'_>> = vec![];
+    // The content start and specifier of the cell currently being accumulated.
     let mut content_start: Option<usize> = None;
+    let mut cur_spec = CellSpec::default();
     let mut i = 0;
 
     while i < len {
-        if bytes.get(i) == Some(&b'|') {
-            let prev = i.checked_sub(1).and_then(|p| bytes.get(p)).copied();
-            let at_line_start = prev.is_none() || prev == Some(b'\n');
-            let after_space = prev == Some(b' ') || prev == Some(b'\t');
+        if bytes.get(i).copied() == Some(b'|') {
+            // Walk back to the start of the token directly preceding this `|`.
+            // The token (a possible cell specifier) runs back to the previous
+            // whitespace, tab, or newline, or to the start of the region; either
+            // way the token is anchored at a line start or after whitespace, as a
+            // cell boundary requires. (When `tok_start == i` the token is empty
+            // and the separator is plain.)
+            let mut tok_start = i;
+            while tok_start > 0
+                && !matches!(
+                    bytes.get(tok_start - 1).copied(),
+                    Some(b' ' | b'\t' | b'\n')
+                )
+            {
+                tok_start -= 1;
+            }
 
-            if at_line_start || after_space {
+            let token = data.get(tok_start..i).unwrap_or_default();
+            let spec = if token.is_empty() {
+                Some(CellSpec::default())
+            } else {
+                parse_cell_spec(token)
+            };
+
+            if let Some(spec) = spec {
                 if let Some(start) = content_start {
-                    cells.push(region.slice(start..i));
+                    // The previous cell's content ends at the start of this
+                    // cell's specifier; the separating whitespace, included in
+                    // the slice, is trimmed later in `TableCell::parse`.
+                    cells.push(RawCell {
+                        spec: cur_spec,
+                        content: region.slice(start..tok_start),
+                    });
                 }
+                cur_spec = spec;
                 content_start = Some(i + 1);
             }
         }
@@ -786,10 +884,103 @@ fn scan_cells(region: Span<'_>) -> Vec<Span<'_>> {
     }
 
     if let Some(start) = content_start {
-        cells.push(region.slice(start..len));
+        cells.push(RawCell {
+            spec: cur_spec,
+            content: region.slice(start..len),
+        });
     }
 
     cells
+}
+
+/// Parse a cell specifier, returning its [alignment overrides](CellSpec), or
+/// `None` if `token` is not a valid cell specifier.
+///
+/// A cell specifier is positional and every part is optional, but the whole
+/// token must be consumed for it to be valid:
+///
+/// ```text
+/// <factor><span or duplication operator><horizontal><vertical><style>
+/// ```
+///
+/// * The factor and span/duplication operator are an optional count (e.g. `2`,
+///   `2.3`, `.3`) that, when present, must be followed by `+` (span) or `*`
+///   (duplication). These operators are recognized so the cell separator is
+///   located correctly, but their layout effect is not yet applied.
+/// * The horizontal alignment operator is `<`, `>`, or `^`.
+/// * The vertical alignment operator is a dot followed by `<`, `>`, or `^`.
+/// * The style operator is a single lowercase letter. It is recognized (so the
+///   separator is located) but its styling effect is not yet applied.
+fn parse_cell_spec(token: &str) -> Option<CellSpec> {
+    let b = token.as_bytes();
+    let mut i = 0;
+
+    // Optional span/duplication: an optional count followed by `+` or `*`. The
+    // count is committed only when the operator that must follow it is present;
+    // otherwise leading digits remain and the token fails below.
+    let mut j = i;
+    while matches!(b.get(j).copied(), Some(c) if c.is_ascii_digit()) {
+        j += 1;
+    }
+    if b.get(j).copied() == Some(b'.') {
+        j += 1;
+        while matches!(b.get(j).copied(), Some(c) if c.is_ascii_digit()) {
+            j += 1;
+        }
+    }
+    if matches!(b.get(j).copied(), Some(b'+' | b'*')) {
+        i = j + 1;
+    }
+
+    // Optional horizontal alignment operator.
+    let mut h_align = None;
+    match b.get(i).copied() {
+        Some(b'<') => {
+            h_align = Some(HorizontalAlignment::Left);
+            i += 1;
+        }
+        Some(b'>') => {
+            h_align = Some(HorizontalAlignment::Right);
+            i += 1;
+        }
+        Some(b'^') => {
+            h_align = Some(HorizontalAlignment::Center);
+            i += 1;
+        }
+        _ => {}
+    }
+
+    // Optional vertical alignment operator, introduced by a dot.
+    let mut v_align = None;
+    if b.get(i).copied() == Some(b'.') {
+        match b.get(i + 1).copied() {
+            Some(b'<') => {
+                v_align = Some(VerticalAlignment::Top);
+                i += 2;
+            }
+            Some(b'>') => {
+                v_align = Some(VerticalAlignment::Bottom);
+                i += 2;
+            }
+            Some(b'^') => {
+                v_align = Some(VerticalAlignment::Middle);
+                i += 2;
+            }
+            _ => {}
+        }
+    }
+
+    // Optional style operator: a single lowercase letter in the last position.
+    if matches!(b.get(i).copied(), Some(c) if c.is_ascii_lowercase()) {
+        i += 1;
+    }
+
+    // The token is a cell specifier only if it was consumed in its entirety.
+    if i == b.len() {
+        Some(CellSpec { h_align, v_align })
+    } else {
+        None
+    }
 }
 
 /// Return the subspan of `s` with surrounding whitespace (including newlines)

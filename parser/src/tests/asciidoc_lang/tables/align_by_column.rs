@@ -635,12 +635,21 @@ centered vertically.
         ]
     );
 
-    // Cell specifiers (and thus their per-cell alignment operators) are not yet
-    // parsed, so the override of a column's alignment by a cell's alignment can't
-    // be verified yet.
-    to_do_verifies!(
+    verifies!(
         r#"
 IMPORTANT: If there is an xref:align-by-cell.adoc[alignment operator on a cell's specifier], it will override the column's alignment operator.
 "#
     );
+
+    // The column is centered horizontally and aligned to the bottom (`^.>`), but
+    // the cell's own specifier (`>.^`) overrides both: the cell is right-aligned
+    // and centered vertically.
+    let table = parse_table("[cols=\"^.>\"]\n|===\n>.^|overridden\n|===");
+    assert_eq!(
+        column_alignments(&table),
+        vec![(1, HorizontalAlignment::Center, VerticalAlignment::Bottom)]
+    );
+    let cell = &table.body_rows()[0].cells()[0];
+    assert_eq!(cell.h_align(), HorizontalAlignment::Right);
+    assert_eq!(cell.v_align(), VerticalAlignment::Middle);
 }
