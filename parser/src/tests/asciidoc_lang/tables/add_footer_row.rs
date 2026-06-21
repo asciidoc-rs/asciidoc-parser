@@ -201,16 +201,22 @@ The table from <<ex-short>> is displayed below.
 |Column 3, footer row
 |===
 
-In <<ex-formal>>, the `options` attribute is set and assigned the `footer` value using the formal syntax.
 "#
     );
 
     verifies!(
         r#"
+In <<ex-formal>>, the `options` attribute is set and assigned the `footer` value using the formal syntax.
 The `options` attribute accepts a comma-separated list of values.
 
 "#
     );
+
+    // The `ex-formal` example sets the `options` attribute to `footer` using the
+    // formal syntax, promoting the last row to the footer.
+    let ex_formal =
+        parse_table("[options=\"footer\"]\n|===\n|Cell 1 |Cell 2\n|Foot 1 |Foot 2\n|===");
+    assert!(ex_formal.footer_row().is_some());
 
     // The formal `options` value is a comma-separated list; `footer` is honored
     // when it appears among other values.
