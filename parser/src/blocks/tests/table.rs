@@ -670,8 +670,8 @@ fn unrecognized_cell_style_operator_inherits_column_style() {
 fn cell_specifier_span_operator_without_factor_locates_separator() {
     // The span (`+`) and duplication (`*`) operators may appear without a count.
     // A bare `+` directly in front of a `|` is still a valid cell specifier, so
-    // `a +|b` is two cells. (The span operator's layout effect is not yet
-    // applied.)
+    // `a +|b` is two cells. With no count the span factor defaults to 1, so the
+    // bare `+` cell spans a single column (no layout effect).
     let table = parse_table("|===\n|a +|b\n|===");
 
     assert_eq!(table.columns().len(), 2);

@@ -166,10 +166,10 @@ Taking into account any xref:span-cells.adoc[spans], which are applied via a <<s
 
     // Cell specifiers introduce per-cell spans, duplication, alignment, and
     // style operators, each specified in detail on a dedicated page (span-cells,
-    // duplicate-cells, align-by-cell, format-cell-content). The alignment and
-    // style operators (and the override behavior) are implemented and verified
-    // here; the span and duplication operators are recognized so the separator
-    // is located, but their layout effect is not yet applied.
+    // duplicate-cells, align-by-cell, format-cell-content). The span, alignment,
+    // and style operators (and the override behavior) are implemented and
+    // verified here; the duplication operator is recognized so the separator is
+    // located, but its layout effect is not yet applied.
     verifies!(
         r#"
 [#specifiers]

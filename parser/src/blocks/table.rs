@@ -43,16 +43,18 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 ///
 /// * The CSV, TSV, and DSV data formats (and the `,===` / `:===` shorthand
 ///   delimiters).
-/// * Cell specifier span (`+`) and duplication (`*`) operators: these are
-///   recognized in a cell specifier (so the cell separator is still located
-///   correctly) but their layout effect is not yet applied.
+/// * The cell specifier duplication (`*`) operator: it is recognized in a cell
+///   specifier (so the cell separator is still located correctly) but its
+///   layout effect is not yet applied.
 ///
 /// Column specifier style operators (the `a`, `d`, `e`, `h`, `l`, `m`, and `s`
 /// operators) are supported, along with proportional width and the horizontal
 /// and vertical alignment operators. Per-cell horizontal and vertical alignment
 /// operators are supported and override the column's alignment, and a per-cell
 /// style operator (in the last position of the cell specifier) is supported and
-/// overrides the column's style.
+/// overrides the column's style. The per-cell span (`+`) operator is supported:
+/// a cell can span multiple columns (`<n>+`), multiple rows (`.<n>+`), or a
+/// block of both (`<n>.<n>+`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
@@ -124,7 +126,13 @@ impl<'src> TableBlock<'src> {
             .map(|attr| parse_cols(attr.value()))
             .unwrap_or_default();
 
-        let first_line_cells = scan_cells(inside.discard_empty_lines().take_line().item).len();
+        // When the column count is implicit, it is the number of column slots in
+        // the first non-empty line: a cell that spans columns (`<n>+`) counts as
+        // `<n>` slots, not one.
+        let first_line_cells: usize = scan_cells(inside.discard_empty_lines().take_line().item)
+            .iter()
+            .map(|c| c.spec.colspan.max(1))
+            .sum();
 
         let ncols = if columns.is_empty() {
             first_line_cells
@@ -206,54 +214,89 @@ impl<'src> TableBlock<'src> {
         };
 
         // Scan every cell in the table, in document order, then partition into
-        // rows of `ncols` cells each.
+        // rows by walking the grid: a cell's span (colspan/rowspan) governs how
+        // many column slots it occupies, so a column-spanning cell fills its row
+        // with fewer cells and a row-spanning cell carries its columns down into
+        // the rows below.
         //
-        // Each cell is processed according to the style of the column it falls
-        // in. The header row (when present) is the first `ncols` cells and is
-        // always processed as plain header content, regardless of the column
-        // styles, so that a style operator doesn't affect the header row.
+        // This mirrors Asciidoctor's grid walk. `active_rowspans[k]` records the
+        // number of column slots that cells from earlier rows occupy in the row
+        // `k` steps ahead of the one being filled; a row closes once its own
+        // cells' colspans plus the slots carried into it (`active_rowspans[0]`)
+        // reach `ncols`.
         let mut warnings: Vec<Warning<'src>> = vec![];
         let raw_cells = scan_cells(inside);
-        let header_len = if has_header { ncols } else { 0 };
 
-        let mut cells = Vec::with_capacity(raw_cells.len());
-        for (idx, raw) in raw_cells.into_iter().enumerate() {
-            // `idx % ncols` is in bounds whenever `ncols > 0`; an empty table
-            // (`ncols == 0`) has no columns, so the cell falls back to the
-            // default column (default style and alignment).
-            let column = columns.get(idx % ncols.max(1)).cloned().unwrap_or_default();
-            let is_header = idx < header_len;
-            cells.push(TableCell::parse(
-                raw,
-                &column,
-                is_header,
-                parser,
-                &mut warnings,
-            ));
-        }
-        let mut cells = cells.into_iter();
-
-        let header_row = if has_header && ncols > 0 {
-            let row: Vec<TableCell<'src>> = cells.by_ref().take(ncols).collect();
-            if row.is_empty() {
-                None
-            } else {
-                Some(TableRow { cells: row })
-            }
-        } else {
-            None
-        };
-
-        let mut body_rows: Vec<TableRow<'src>> = vec![];
+        let mut raw_rows: Vec<Vec<RawCell<'src>>> = vec![];
         if ncols > 0 {
-            loop {
-                let row: Vec<TableCell<'src>> = cells.by_ref().take(ncols).collect();
-                if row.is_empty() {
-                    break;
+            let mut active_rowspans: Vec<usize> = vec![0];
+            let mut column_visits = 0usize;
+            let mut current_row: Vec<RawCell<'src>> = vec![];
+
+            for raw in raw_cells {
+                let colspan = raw.spec.colspan.max(1);
+                let rowspan = raw.spec.rowspan.max(1);
+
+                // A cell that spans more than one row reserves `colspan` slots in
+                // each of the rows it extends into (but not its own row).
+                if rowspan > 1 {
+                    if active_rowspans.len() < rowspan {
+                        active_rowspans.resize(rowspan, 0);
+                    }
+                    for slot in active_rowspans.iter_mut().take(rowspan).skip(1) {
+                        *slot += colspan;
+                    }
                 }
-                body_rows.push(TableRow { cells: row });
+
+                column_visits += colspan;
+                current_row.push(raw);
+
+                // The slots carried into the current row are `active_rowspans[0]`;
+                // the vector is never empty here, so the fallback is unreachable.
+                let carried = active_rowspans.first().copied().unwrap_or(0);
+                if column_visits + carried >= ncols {
+                    raw_rows.push(std::mem::take(&mut current_row));
+                    column_visits = 0;
+                    active_rowspans.remove(0);
+                    if active_rowspans.is_empty() {
+                        active_rowspans.push(0);
+                    }
+                }
+            }
+
+            // A trailing incomplete row (one that never reached `ncols`) is still
+            // emitted, matching the existing handling of short final rows.
+            if !current_row.is_empty() {
+                raw_rows.push(current_row);
             }
         }
+
+        // Each cell is processed according to the style of the column it falls
+        // in. A cell's column is its ordinal position within its row (matching
+        // Asciidoctor, which assigns the column by cell count, not grid slot). The
+        // header row (when present) is the first row and is always processed as
+        // plain header content, regardless of the column styles, so that a style
+        // operator doesn't affect the header row.
+        let mut rows: Vec<TableRow<'src>> = Vec::with_capacity(raw_rows.len());
+        for (row_idx, raw_row) in raw_rows.into_iter().enumerate() {
+            let is_header = has_header && row_idx == 0;
+            let mut cells = Vec::with_capacity(raw_row.len());
+            for (col_idx, raw) in raw_row.into_iter().enumerate() {
+                let column = columns.get(col_idx).cloned().unwrap_or_default();
+                cells.push(TableCell::parse(
+                    raw,
+                    &column,
+                    is_header,
+                    parser,
+                    &mut warnings,
+                ));
+            }
+            rows.push(TableRow { cells });
+        }
+
+        let mut rows = rows.into_iter();
+        let header_row = if has_header { rows.next() } else { None };
+        let mut body_rows: Vec<TableRow<'src>> = rows.collect();
 
         // The footer row, when requested, is the last row of the table. It is
         // moved out of the body so the caller sees it as a distinct footer. When
@@ -549,6 +592,8 @@ pub struct TableCell<'src> {
     h_align: HorizontalAlignment,
     v_align: VerticalAlignment,
     style: ColumnStyle,
+    colspan: usize,
+    rowspan: usize,
     content: TableCellContent<'src>,
 }
 
@@ -653,6 +698,8 @@ impl<'src> TableCell<'src> {
             h_align,
             v_align,
             style,
+            colspan: raw.spec.colspan.max(1),
+            rowspan: raw.spec.rowspan.max(1),
             content,
         }
     }
@@ -687,6 +734,26 @@ impl<'src> TableCell<'src> {
     /// operators on both column and cell specifiers.
     pub fn style(&self) -> ColumnStyle {
         self.style
+    }
+
+    /// Returns the number of columns this cell spans.
+    ///
+    /// The span comes from a column span factor (`<n>`) or block span factor
+    /// (`<n>.<n>`) in front of the span operator (`+`) on the cell's specifier.
+    /// A cell with no column span factor spans a single column, so the default
+    /// is `1`.
+    pub fn colspan(&self) -> usize {
+        self.colspan
+    }
+
+    /// Returns the number of rows this cell spans.
+    ///
+    /// The span comes from a row span factor (`.<n>`) or block span factor
+    /// (`<n>.<n>`) in front of the span operator (`+`) on the cell's specifier.
+    /// A cell with no row span factor spans a single row, so the default is
+    /// `1`.
+    pub fn rowspan(&self) -> usize {
+        self.rowspan
     }
 
     /// Returns the interpreted content of this cell.
@@ -848,17 +915,32 @@ fn parse_col_spec(spec: &str) -> TableColumn {
     }
 }
 
-/// The alignment and style overrides parsed from a
+/// The span, alignment, and style overrides parsed from a
 /// [cell specifier](RawCell::spec).
 ///
-/// Each field is `None` when the corresponding operator is absent from the
-/// specifier, in which case the cell inherits that alignment (or style) from
-/// its column.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// Each alignment and style field is `None` when the corresponding operator is
+/// absent from the specifier, in which case the cell inherits that alignment
+/// (or style) from its column. `colspan` and `rowspan` are the number of
+/// columns and rows the cell spans; they default to `1` (no span).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct CellSpec {
     h_align: Option<HorizontalAlignment>,
     v_align: Option<VerticalAlignment>,
     style: Option<ColumnStyle>,
+    colspan: usize,
+    rowspan: usize,
+}
+
+impl Default for CellSpec {
+    fn default() -> Self {
+        Self {
+            h_align: None,
+            v_align: None,
+            style: None,
+            colspan: 1,
+            rowspan: 1,
+        }
+    }
 }
 
 /// A single PSV cell as located by [`scan_cells`]: the alignment operators from
@@ -945,7 +1027,7 @@ fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
     cells
 }
 
-/// Parse a cell specifier, returning its [alignment overrides](CellSpec), or
+/// Parse a cell specifier, returning its [span and overrides](CellSpec), or
 /// `None` if `token` is not a valid cell specifier.
 ///
 /// A cell specifier is positional and every part is optional, but the whole
@@ -957,8 +1039,10 @@ fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
 ///
 /// * The factor and span/duplication operator are an optional count (e.g. `2`,
 ///   `2.3`, `.3`) that, when present, must be followed by `+` (span) or `*`
-///   (duplication). These operators are recognized so the cell separator is
-///   located correctly, but their layout effect is not yet applied.
+///   (duplication). For a span the factor is interpreted as the cell's colspan
+///   and rowspan (a missing column or row count defaults to 1). The duplication
+///   operator is recognized so the cell separator is located correctly, but its
+///   layout effect is not yet applied.
 /// * The horizontal alignment operator is `<`, `>`, or `^`.
 /// * The vertical alignment operator is a dot followed by `<`, `>`, or `^`.
 /// * The style operator is a single lowercase letter in the last position. A
@@ -971,21 +1055,55 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
     let b = token.as_bytes();
     let mut i = 0;
 
-    // Optional span/duplication: an optional count followed by `+` or `*`. The
-    // count is committed only when the operator that must follow it is present;
-    // otherwise leading digits remain and the token fails below.
+    // Optional span/duplication: an optional span factor followed by `+` (span)
+    // or `*` (duplication). The factor is a column count, an optional dot, and an
+    // optional row count (`<n>`, `.<n>`, or `<n>.<n>`). The factor is committed
+    // only when the operator that must follow it is present; otherwise the
+    // leading digits remain and the token fails the full-consumption check below.
+    let mut colspan = 1;
+    let mut rowspan = 1;
+    let col_start = i;
     let mut j = i;
     while matches!(b.get(j).copied(), Some(c) if c.is_ascii_digit()) {
         j += 1;
     }
+    let col_end = j;
+    let mut has_dot = false;
+    let mut row_start = j;
     if b.get(j).copied() == Some(b'.') {
+        has_dot = true;
         j += 1;
+        row_start = j;
         while matches!(b.get(j).copied(), Some(c) if c.is_ascii_digit()) {
             j += 1;
         }
     }
-    if matches!(b.get(j).copied(), Some(b'+' | b'*')) {
-        i = j + 1;
+    let row_end = j;
+    match b.get(j).copied() {
+        // Span: the factor is interpreted as a colspan and rowspan. A missing
+        // column or row count defaults to 1, so `2+` spans two columns, `.3+`
+        // spans three rows, and `2.3+` spans a 2x3 block.
+        Some(b'+') => {
+            // The factor consists only of ASCII digits and dots, so these ranges
+            // are always valid `str` slices.
+            let col_digits = token.get(col_start..col_end).unwrap_or_default();
+            if !col_digits.is_empty() {
+                colspan = col_digits.parse().unwrap_or(1);
+            }
+            if has_dot {
+                let row_digits = token.get(row_start..row_end).unwrap_or_default();
+                if !row_digits.is_empty() {
+                    rowspan = row_digits.parse().unwrap_or(1);
+                }
+            }
+            i = j + 1;
+        }
+        // Duplication: recognized so the cell separator is still located, but its
+        // layout effect (and so its factor) is not yet applied.
+        Some(b'*') => {
+            i = j + 1;
+        }
+        _ => {}
     }
 
     // Optional horizontal alignment operator.
@@ -1053,6 +1171,8 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
             h_align,
             v_align,
             style,
+            colspan,
+            rowspan,
         })
     } else {
         None

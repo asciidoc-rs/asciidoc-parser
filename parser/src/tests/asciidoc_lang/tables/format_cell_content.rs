@@ -173,9 +173,10 @@ include::example$cell.adoc[tag=styles]
     );
 
     // Expansion of `example$cell.adoc[tag=styles]`. Each body cell carries its
-    // own style operator (the span/duplication operators are recognized but
-    // their layout effect is not yet applied, so the cells flow into rows of
-    // two).
+    // own style operator. The `.3+` row span on the second cell carries its
+    // column down through the next two rows, so each of those rows needs only one
+    // explicit cell to be complete. (The duplication operator's layout effect is
+    // not yet applied, so the `2*>m` cell is a single cell.)
     let table = parse_table(
         "|===\n|Column 1 |Column 2\n\n2*>m|This content is duplicated across two columns (2*) and aligned to the right side of the cell (>).\n\nIt's rendered using a monospace font (m).\n\n.3+^.>s|This cell spans 3 rows (`3+`).\nThe content is centered horizontally (`+^+`), vertically aligned to the bottom of the cell (`.>`), and styled as strong (`s`).\ne|This content is italicized (`e`).\n\nm|This content is rendered using a monospace font (m).\n\ns|This content is bold (`s`).\n|===",
     );
@@ -183,7 +184,8 @@ include::example$cell.adoc[tag=styles]
         body_styles(&table),
         vec![
             vec![ColumnStyle::Monospace, ColumnStyle::Strong],
-            vec![ColumnStyle::Emphasis, ColumnStyle::Monospace],
+            vec![ColumnStyle::Emphasis],
+            vec![ColumnStyle::Monospace],
             vec![ColumnStyle::Strong],
         ]
     );
