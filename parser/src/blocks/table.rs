@@ -128,11 +128,17 @@ impl<'src> TableBlock<'src> {
 
         // The first row is an (implicit) header row when the line directly after
         // the opening delimiter is non-empty and is itself followed by an empty
-        // line. The `header` option forces the same interpretation.
+        // line. The `header` option forces the same interpretation; the
+        // `noheader` option suppresses only the implicit detection, so an
+        // explicit `header` still wins when both are present.
         let opts_header = metadata
             .attrlist
             .as_ref()
             .is_some_and(|a| a.has_option("header"));
+        let opts_noheader = metadata
+            .attrlist
+            .as_ref()
+            .is_some_and(|a| a.has_option("noheader"));
 
         // The blank line must genuinely exist after the first row; the end of the
         // table (an empty remainder) does not count, so a single-row table is not
@@ -141,7 +147,7 @@ impl<'src> TableBlock<'src> {
         let line1_blank = line1.item.data().trim().is_empty();
         let line2_blank =
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
-        let has_header = opts_header || (!line1_blank && line2_blank);
+        let has_header = opts_header || (!opts_noheader && !line1_blank && line2_blank);
 
         // A titled table is given a caption (e.g. "Table 1. ") that a processor
         // prepends to the title.
