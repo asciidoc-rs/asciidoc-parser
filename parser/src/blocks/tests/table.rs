@@ -558,3 +558,42 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
     assert!(!parser.has_attribute("cell-attr"));
     assert!(parser.has_attribute("parent-attr"));
 }
+
+#[test]
+fn cell_specifier_style_operator_locates_separator() {
+    // A single lowercase letter directly in front of a `|` is a (style) cell
+    // specifier, so the `|` is a cell separator: `a s|b` is two cells, not one.
+    // The style operator is recognized only so the separator is located; its
+    // styling effect is not yet applied, so the cell renders as plain content.
+    let table = parse_table("|===\n|a s|b\n|===");
+
+    assert_eq!(table.columns().len(), 2);
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(rows, vec![vec!["a".to_string(), "b".to_string()]]);
+}
+
+#[test]
+fn cell_specifier_span_operator_without_factor_locates_separator() {
+    // The span (`+`) and duplication (`*`) operators may appear without a count.
+    // A bare `+` directly in front of a `|` is still a valid cell specifier, so
+    // `a +|b` is two cells. (The span operator's layout effect is not yet
+    // applied.)
+    let table = parse_table("|===\n|a +|b\n|===");
+
+    assert_eq!(table.columns().len(), 2);
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(rows, vec![vec!["a".to_string(), "b".to_string()]]);
+}
+
+#[test]
+fn non_specifier_token_is_not_a_cell_separator() {
+    // A token in front of a `|` that does not parse as a cell specifier (here the
+    // word `foo`, which is more than a single style letter) means the `|` is not
+    // a cell separator: `a foo|b` is a single cell whose content includes the
+    // literal `|`.
+    let table = parse_table("|===\n|a foo|b\n|===");
+
+    assert_eq!(table.columns().len(), 1);
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(rows, vec![vec!["a foo|b".to_string()]]);
+}
