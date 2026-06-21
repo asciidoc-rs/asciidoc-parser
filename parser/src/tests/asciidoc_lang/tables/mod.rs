@@ -8,5 +8,6 @@ mod align_by_cell;
 mod align_by_column;
 mod build_a_basic_table;
 mod customize_title_label;
+mod format_cell_content;
 mod format_column_content;
 mod turn_off_title_label;

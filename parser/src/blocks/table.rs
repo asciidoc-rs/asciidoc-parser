@@ -12,6 +12,16 @@ use crate::{
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
 
+/// Attributes that an AsciiDoc table cell may modify even when they are set in
+/// the parent document.
+///
+/// An AsciiDoc cell inherits the parent's attributes and cannot modify them,
+/// but the AsciiDoc specification carves out a handful of exceptions:
+/// `doctype`, `toc`, `notitle` (and its complement, `showtitle`), and
+/// `compat-mode`.
+const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
+    &["doctype", "toc", "notitle", "showtitle", "compat-mode"];
+
 /// A table is a delimited block that arranges content into a grid of rows and
 /// columns.
 ///
@@ -33,15 +43,16 @@ use crate::{
 ///
 /// * The CSV, TSV, and DSV data formats (and the `,===` / `:===` shorthand
 ///   delimiters).
-/// * Cell specifier span (`+`) and duplication (`*`) operators and the per-cell
-///   style operator: these are recognized in a cell specifier (so the cell
-///   separator is still located correctly) but their layout and styling effects
-///   are not yet applied.
+/// * Cell specifier span (`+`) and duplication (`*`) operators: these are
+///   recognized in a cell specifier (so the cell separator is still located
+///   correctly) but their layout effect is not yet applied.
 ///
 /// Column specifier style operators (the `a`, `d`, `e`, `h`, `l`, `m`, and `s`
 /// operators) are supported, along with proportional width and the horizontal
 /// and vertical alignment operators. Per-cell horizontal and vertical alignment
-/// operators are supported and override the column's alignment.
+/// operators are supported and override the column's alignment, and a per-cell
+/// style operator (in the last position of the cell specifier) is supported and
+/// overrides the column's style.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
@@ -537,6 +548,7 @@ impl<'src> TableRow<'src> {
 pub struct TableCell<'src> {
     h_align: HorizontalAlignment,
     v_align: VerticalAlignment,
+    style: ColumnStyle,
     content: TableCellContent<'src>,
 }
 
@@ -547,9 +559,11 @@ impl<'src> TableCell<'src> {
     ///
     /// The cell's horizontal and vertical alignment come from the alignment
     /// operators on its [specifier](RawCell::spec) when present; otherwise they
-    /// are inherited from the column. A header cell (`is_header`) is always
-    /// processed as plain header content, regardless of the column's style
-    /// operator.
+    /// are inherited from the column. Likewise, a style operator on the cell's
+    /// specifier overrides the column's [style](ColumnStyle); with no cell
+    /// style operator, the cell is processed with the column's style. A
+    /// header cell (`is_header`) is always processed as plain header
+    /// content, regardless of any style operator on the column or the cell.
     ///
     /// Leading and trailing whitespace is always stripped. For every style but
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) the cell holds inline
@@ -570,12 +584,14 @@ impl<'src> TableCell<'src> {
         let h_align = raw.spec.h_align.unwrap_or(column.h_align);
         let v_align = raw.spec.v_align.unwrap_or(column.v_align);
 
-        // The header row is always processed as plain header content, so a
-        // column's style operator never affects a header cell.
+        // A cell's own style operator overrides the column's style; with no
+        // operator, the cell is processed with the column's style. The header
+        // row is always processed as plain header content, so neither a column
+        // nor a cell style operator ever affects a header cell.
         let style = if is_header {
             ColumnStyle::Default
         } else {
-            column.style
+            raw.spec.style.unwrap_or(column.style)
         };
 
         let trimmed = trim_surrounding_whitespace(raw.content);
@@ -589,7 +605,28 @@ impl<'src> TableCell<'src> {
             // (matching Asciidoctor, where a `:foo:` set inside a cell is not
             // visible after the table).
             let saved_attributes = parser.attribute_values.clone();
+
+            // An attribute that is set in the parent document cannot be modified
+            // inside the cell. Lock every inherited attribute that currently
+            // holds a value for the duration of the cell (other than the handful
+            // of exceptions the spec carves out), so a body assignment to one of
+            // them is ignored. An attribute that is unset in the parent is not
+            // locked: the cell may assign it (matching Asciidoctor, which here
+            // diverges from the spec's "set or explicitly unset" wording). The
+            // lock set is saved and restored so it applies only within the cell
+            // and nests correctly.
+            let saved_locks = parser.locked_attribute_names.clone();
+            for (name, value) in saved_attributes.iter() {
+                if !matches!(value.value, InterpretedValue::Unset)
+                    && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name.as_str())
+                {
+                    parser.locked_attribute_names.insert(name.clone());
+                }
+            }
+
             let mut maw = parse_blocks_until(trimmed, |_| false, parser);
+
+            parser.locked_attribute_names = saved_locks;
             parser.attribute_values = saved_attributes;
             warnings.append(&mut maw.warnings);
             TableCellContent::AsciiDoc(maw.item.item)
@@ -615,6 +652,7 @@ impl<'src> TableCell<'src> {
         Self {
             h_align,
             v_align,
+            style,
             content,
         }
     }
@@ -637,6 +675,18 @@ impl<'src> TableCell<'src> {
     /// [`v_align`](TableColumn::v_align).
     pub fn v_align(&self) -> VerticalAlignment {
         self.v_align
+    }
+
+    /// Returns the [style](ColumnStyle) applied to this cell's content.
+    ///
+    /// The style comes from a style operator in the last position of the cell's
+    /// specifier (`a`, `d`, `e`, `h`, `l`, `m`, or `s`), which overrides the
+    /// column's style. A cell with no style operator inherits its column's
+    /// [`style`](TableColumn::style). A header cell is always
+    /// [`Default`](ColumnStyle::Default), because the header row ignores style
+    /// operators on both column and cell specifiers.
+    pub fn style(&self) -> ColumnStyle {
+        self.style
     }
 
     /// Returns the interpreted content of this cell.
@@ -798,15 +848,17 @@ fn parse_col_spec(spec: &str) -> TableColumn {
     }
 }
 
-/// The alignment overrides parsed from a [cell specifier](RawCell::spec).
+/// The alignment and style overrides parsed from a
+/// [cell specifier](RawCell::spec).
 ///
-/// Each field is `None` when the corresponding alignment operator is absent
-/// from the specifier, in which case the cell inherits that alignment from its
-/// column.
+/// Each field is `None` when the corresponding operator is absent from the
+/// specifier, in which case the cell inherits that alignment (or style) from
+/// its column.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct CellSpec {
     h_align: Option<HorizontalAlignment>,
     v_align: Option<VerticalAlignment>,
+    style: Option<ColumnStyle>,
 }
 
 /// A single PSV cell as located by [`scan_cells`]: the alignment operators from
@@ -909,8 +961,12 @@ fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
 ///   located correctly, but their layout effect is not yet applied.
 /// * The horizontal alignment operator is `<`, `>`, or `^`.
 /// * The vertical alignment operator is a dot followed by `<`, `>`, or `^`.
-/// * The style operator is a single lowercase letter. It is recognized (so the
-///   separator is located) but its styling effect is not yet applied.
+/// * The style operator is a single lowercase letter in the last position. A
+///   recognized operator (`a`, `d`, `e`, `h`, `l`, `m`, or `s`) overrides the
+///   column's style on this cell. Any other single lowercase letter still
+///   locates the separator but leaves the style at `None`, so the cell inherits
+///   its column's style (matching Asciidoctor, which ignores an unrecognized
+///   style operator).
 fn parse_cell_spec(token: &str) -> Option<CellSpec> {
     let b = token.as_bytes();
     let mut i = 0;
@@ -971,13 +1027,33 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
     }
 
     // Optional style operator: a single lowercase letter in the last position.
-    if matches!(b.get(i).copied(), Some(c) if c.is_ascii_lowercase()) {
+    // A recognized letter overrides the column's style; any other lowercase
+    // letter is consumed (so the separator is still located) but leaves the
+    // style at `None`, so the cell inherits its column's style.
+    let mut style = None;
+    if let Some(c) = b.get(i).copied()
+        && c.is_ascii_lowercase()
+    {
+        style = match c {
+            b'a' => Some(ColumnStyle::AsciiDoc),
+            b'd' => Some(ColumnStyle::Default),
+            b'e' => Some(ColumnStyle::Emphasis),
+            b'h' => Some(ColumnStyle::Header),
+            b'l' => Some(ColumnStyle::Literal),
+            b'm' => Some(ColumnStyle::Monospace),
+            b's' => Some(ColumnStyle::Strong),
+            _ => None,
+        };
         i += 1;
     }
 
     // The token is a cell specifier only if it was consumed in its entirety.
     if i == b.len() {
-        Some(CellSpec { h_align, v_align })
+        Some(CellSpec {
+            h_align,
+            v_align,
+            style,
+        })
     } else {
         None
     }
