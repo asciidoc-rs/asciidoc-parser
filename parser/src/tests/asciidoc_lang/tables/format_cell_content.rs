@@ -94,15 +94,10 @@ You can style all of the content in an individual cell by adding a style operato
         ]
     );
 
-    non_normative!(
+    verifies!(
         r#"
 include::partial$style-operators.adoc[]
 
-"#
-    );
-
-    verifies!(
-        r#"
 When a style operator isn't explicitly assigned to a cell specifier (or xref:format-column-content.adoc[column specifier]), the cell falls back to the default (`d`) style and is processed as regular paragraph text.
 (The explicit `d` style is only needed if you want to revert the cell style based to a normal (default) cell when a style is applied to the column.)
 
@@ -159,7 +154,7 @@ Don't insert any spaces between the `|` and the operator.
     assert_eq!(cells[1].h_align(), HorizontalAlignment::Center);
     assert_eq!(cells[1].v_align(), VerticalAlignment::Bottom);
 
-    non_normative!(
+    verifies!(
         r#"
 Let's apply a style operator to each cell in <<ex-cell-styles>>.
 
@@ -214,7 +209,7 @@ However, inline formatting markup is applied in addition to the style specified 
 "#
     );
 
-    non_normative!(
+    verifies!(
         r#"
 .Override the column style using a cell style operator
 [source#ex-override]
@@ -344,7 +339,7 @@ The `a` can also be specified on the column in the `cols` attribute on the table
         crate::blocks::TableCellContent::Simple(_)
     ));
 
-    non_normative!(
+    verifies!(
         r#"
 .Apply the AsciiDoc block style operator to two cells
 [source#ex-asciidoc]
@@ -359,6 +354,48 @@ include::example$cell.adoc[tag=adoc]
 
 "#
     );
+
+    // Expansion of `example$cell.adoc[tag=adoc]`. In each row the first cell has
+    // no operator (its list / listing markup stays inline text), while the second
+    // cell's `a` operator parses the same markup as nested AsciiDoc blocks.
+    let table = parse_table(
+        "|===\n|Normal Style |AsciiDoc Style\n\n|This cell isn't prefixed with an `a`, so the processor doesn't interpret the following lines as an AsciiDoc list.\n\n* List item 1\n* List item 2\n* List item 3\n\na|This cell is prefixed with an `a`, so the processor interprets the following lines as an AsciiDoc list.\n\n* List item 1\n* List item 2\n* List item 3\n\n|This cell isn't prefixed with an `a`, so the processor doesn't interpret the listing block delimiters or the `source` style.\n\n[source,python]\n----\nimport os\nprint (\"%s\" %(os.uname()))\n----\n\na|This cell is prefixed with an `a`, so the listing block is processed and rendered according to the `source` style rules.\n\n[source,python]\n----\nimport os\nprint \"%s\" %(os.uname())\n----\n\n|===",
+    );
+    assert_eq!(table.body_rows().len(), 2);
+
+    // First row: the list markup. The plain cell keeps it inline; the `a` cell
+    // parses its leading sentence as a paragraph and the following lines as a
+    // list block.
+    let row = &table.body_rows()[0];
+    assert!(matches!(
+        row.cells()[0].content(),
+        crate::blocks::TableCellContent::Simple(_)
+    ));
+    match row.cells()[1].content() {
+        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+            assert_eq!(blocks.len(), 2);
+            assert_eq!(blocks[0].raw_context().as_ref(), "paragraph");
+            assert_eq!(blocks[1].raw_context().as_ref(), "list");
+        }
+        other => panic!("expected nested AsciiDoc blocks, got {other:?}"),
+    }
+
+    // Second row: the source listing. The plain cell keeps it inline; the `a`
+    // cell parses its leading sentence as a paragraph and the delimited block as
+    // a listing block.
+    let row = &table.body_rows()[1];
+    assert!(matches!(
+        row.cells()[0].content(),
+        crate::blocks::TableCellContent::Simple(_)
+    ));
+    match row.cells()[1].content() {
+        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+            assert_eq!(blocks.len(), 2);
+            assert_eq!(blocks[0].raw_context().as_ref(), "paragraph");
+            assert_eq!(blocks[1].raw_context().as_ref(), "listing");
+        }
+        other => panic!("expected nested AsciiDoc blocks, got {other:?}"),
+    }
 
     verifies!(
         r#"
