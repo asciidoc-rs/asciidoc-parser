@@ -844,7 +844,10 @@ fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
         if bytes.get(i).copied() == Some(b'|') {
             // Walk back to the start of the token directly preceding this `|`.
             // The token (a possible cell specifier) runs back to the previous
-            // whitespace, tab, or newline, or to the start of the region.
+            // whitespace, tab, or newline, or to the start of the region; either
+            // way the token is anchored at a line start or after whitespace, as a
+            // cell boundary requires. (When `tok_start == i` the token is empty
+            // and the separator is plain.)
             let mut tok_start = i;
             while tok_start > 0
                 && !matches!(
@@ -853,20 +856,6 @@ fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
                 )
             {
                 tok_start -= 1;
-            }
-
-            // The token must be anchored at a line start or whitespace for the
-            // `|` to be a cell boundary. (When `tok_start == i` the token is
-            // empty and `tok_start - 1`, if any, is whitespace; either way the
-            // separator is plain.)
-            let anchored = tok_start == 0
-                || matches!(
-                    bytes.get(tok_start - 1).copied(),
-                    Some(b' ' | b'\t' | b'\n')
-                );
-            if !anchored {
-                i += 1;
-                continue;
             }
 
             let token = data.get(tok_start..i).unwrap_or_default();
