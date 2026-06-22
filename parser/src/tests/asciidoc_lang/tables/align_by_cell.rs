@@ -146,17 +146,18 @@ include::example$align-cell.adoc[tag=factor]
 
     // Expansion of `example$align-cell.adoc[tag=factor]`. The `+^+` operator is
     // placed directly after the span (`2+`) and duplication (`2*`) operators;
-    // both cells are centered. (The span/duplication operators are recognized
-    // but their layout effect is not yet applied.)
+    // both cells are centered. The `2+` span fills the two-column row on its own,
+    // so it lands in its own row; the duplication operator's layout effect is not
+    // yet applied, so the `2*^` cell becomes a single cell in the next row.
     let table = parse_table(
         "|===\n|Column Name |Column Name\n\n2+^|This cell spans two columns, and its content is horizontally centered because the cell specifier includes the `+^+` operator.\n2*^|This content is duplicated in two adjacent columns.\nIts content is horizontally centered because the cell specifier\nincludes the `+^+` operator.\n|===",
     );
     assert_eq!(
         body_alignments(&table),
-        vec![vec![
-            (HorizontalAlignment::Center, VerticalAlignment::Top),
-            (HorizontalAlignment::Center, VerticalAlignment::Top),
-        ]]
+        vec![
+            vec![(HorizontalAlignment::Center, VerticalAlignment::Top)],
+            vec![(HorizontalAlignment::Center, VerticalAlignment::Top)],
+        ]
     );
 }
 
@@ -311,8 +312,9 @@ include::example$align-cell.adoc[tag=vspan]
 
     // Expansion of `example$align-cell.adoc[tag=vspan]`. The `.>` is placed
     // after the row-span operator (`.2+`); that cell is bottom-aligned, while
-    // the cells with no vertical alignment operator stay top-aligned. (The
-    // row-span operator is recognized but its layout effect is not yet applied.)
+    // the cells with no vertical alignment operator stay top-aligned. The `.2+`
+    // cell spans two rows, so it carries its column down into the next row, which
+    // then needs only the one remaining cell.
     let table = parse_table(
         "|===\n|Column Name |Column Name\n\n|There isn't a vertical alignment operator on this cell specifier, so the content is aligned to the top of the cell by default.\n\n.2+.>|This cell spans two rows, and its content is aligned to the bottom because the cell specifier includes the `.>` operator.\n\n|This content is aligned to the top of the cell by default.\n|===",
     );

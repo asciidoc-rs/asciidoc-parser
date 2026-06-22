@@ -10,4 +10,5 @@ mod build_a_basic_table;
 mod customize_title_label;
 mod format_cell_content;
 mod format_column_content;
+mod span_cells;
 mod turn_off_title_label;
