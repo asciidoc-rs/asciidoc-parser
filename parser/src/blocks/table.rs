@@ -43,9 +43,6 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 ///
 /// * The CSV, TSV, and DSV data formats (and the `,===` / `:===` shorthand
 ///   delimiters).
-/// * The cell specifier duplication (`*`) operator: it is recognized in a cell
-///   specifier (so the cell separator is still located correctly) but its
-///   layout effect is not yet applied.
 ///
 /// Column specifier style operators (the `a`, `d`, `e`, `h`, `l`, `m`, and `s`
 /// operators) are supported, along with proportional width and the horizontal
@@ -54,7 +51,9 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// style operator (in the last position of the cell specifier) is supported and
 /// overrides the column's style. The per-cell span (`+`) operator is supported:
 /// a cell can span multiple columns (`<n>+`), multiple rows (`.<n>+`), or a
-/// block of both (`<n>.<n>+`).
+/// block of both (`<n>.<n>+`). The per-cell duplication (`*`) operator is
+/// supported: a cell with a duplication factor (`<n>*`) clones its content and
+/// properties into `<n>` consecutive cells.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
@@ -128,10 +127,11 @@ impl<'src> TableBlock<'src> {
 
         // When the column count is implicit, it is the number of column slots in
         // the first non-empty line: a cell that spans columns (`<n>+`) counts as
-        // `<n>` slots, not one.
+        // `<n>` slots, not one, and a cell duplicated `<n>` times (`<n>*`) counts
+        // as `<n>` single-column slots (one per clone).
         let first_line_cells: usize = scan_cells(inside.discard_empty_lines().take_line().item)
             .iter()
-            .map(|c| c.spec.colspan.max(1))
+            .map(|c| c.spec.colspan.max(1) * c.spec.repeat.min(MAX_DUPLICATION_FACTOR))
             .sum();
 
         let ncols = if columns.is_empty() {
@@ -228,8 +228,12 @@ impl<'src> TableBlock<'src> {
         // matching Asciidoctor. A row whose columns are entirely pre-filled by
         // carried slots has no cells of its own to close it, so the next cell
         // overruns and is dropped together with that pre-filled row.
+        // A duplicated cell (`<n>*`) is expanded into `<n>` independent cells —
+        // each carrying the original's content, alignment, and style — before the
+        // grid walk, so each clone occupies its own column slot exactly like an
+        // ordinary cell. A duplication factor of zero drops the cell entirely.
         let mut warnings: Vec<Warning<'src>> = vec![];
-        let raw_cells = scan_cells(inside);
+        let raw_cells = expand_duplicates(scan_cells(inside));
 
         // A table can never have more rows than it has cells, so a row span is
         // clamped to the cell count for the `active_rowspans` bookkeeping below: a
@@ -949,7 +953,9 @@ fn parse_col_spec(spec: &str) -> TableColumn {
 /// Each alignment and style field is `None` when the corresponding operator is
 /// absent from the specifier, in which case the cell inherits that alignment
 /// (or style) from its column. `colspan` and `rowspan` are the number of
-/// columns and rows the cell spans; they default to `1` (no span).
+/// columns and rows the cell spans; they default to `1` (no span). `repeat` is
+/// the duplication factor — the number of consecutive cells the content is
+/// cloned into — and defaults to `1` (no duplication).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct CellSpec {
     h_align: Option<HorizontalAlignment>,
@@ -957,6 +963,7 @@ struct CellSpec {
     style: Option<ColumnStyle>,
     colspan: usize,
     rowspan: usize,
+    repeat: usize,
 }
 
 impl Default for CellSpec {
@@ -967,15 +974,56 @@ impl Default for CellSpec {
             style: None,
             colspan: 1,
             rowspan: 1,
+            repeat: 1,
         }
     }
 }
 
 /// A single PSV cell as located by [`scan_cells`]: the alignment operators from
 /// its specifier together with the raw (untrimmed) span of its content.
+#[derive(Clone, Copy)]
 struct RawCell<'src> {
     spec: CellSpec,
     content: Span<'src>,
+}
+
+/// The largest number of cells a single duplication factor (`<n>*`) is allowed
+/// to expand into.
+///
+/// A duplicated cell is materialized as `<n>` independent cells, so the factor
+/// is an amplification: a dozen source bytes such as `1000000000*` would
+/// otherwise request a billion `RawCell`s (a multi-gigabyte allocation).
+/// Capping the per-specifier factor bounds that amplification while leaving any
+/// realistic table — which never duplicates a cell more than a handful of times
+/// — untouched. (This is the one point where the implementation diverges from
+/// Asciidoctor, which expands the literal factor however large.)
+const MAX_DUPLICATION_FACTOR: usize = 1_000;
+
+/// Expand each duplicated cell into the `<n>` independent cells it represents.
+///
+/// A cell specifier with a duplication factor (`<n>*`) clones the cell's
+/// content and properties into `<n>` consecutive cells. Each clone is an
+/// ordinary single-slot cell (colspan and rowspan of 1), so expanding here —
+/// before the grid is walked — lets the clones flow into rows exactly like
+/// cells the author typed out by hand. A duplication factor of zero produces no
+/// cells, dropping the original (matching Asciidoctor). A cell with no
+/// duplication factor has a `repeat` of 1 and so passes through unchanged. The
+/// factor is clamped to [`MAX_DUPLICATION_FACTOR`] so a hostile specifier can't
+/// trigger a runaway allocation.
+fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
+    // The common case is no duplication at all, so only the clones beyond the
+    // first add to the count.
+    let extra: usize = cells
+        .iter()
+        .map(|c| c.spec.repeat.min(MAX_DUPLICATION_FACTOR).saturating_sub(1))
+        .sum();
+    let mut expanded = Vec::with_capacity(cells.len() + extra);
+    for cell in cells {
+        for _ in 0..cell.spec.repeat.min(MAX_DUPLICATION_FACTOR) {
+            expanded.push(cell);
+        }
+    }
+    expanded
 }
 
 /// Scan a region for PSV cell boundaries, returning the [specifier](CellSpec)
@@ -1068,9 +1116,10 @@ fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
 /// * The factor and span/duplication operator are an optional count (e.g. `2`,
 ///   `2.3`, `.3`) that, when present, must be followed by `+` (span) or `*`
 ///   (duplication). For a span the factor is interpreted as the cell's colspan
-///   and rowspan (a missing column or row count defaults to 1). The duplication
-///   operator is recognized so the cell separator is located correctly, but its
-///   layout effect is not yet applied.
+///   and rowspan (a missing column or row count defaults to 1). For a
+///   duplication the column part of the factor is the duplication count — the
+///   number of consecutive cells the content is cloned into — and any row part
+///   is ignored; a duplicated cell keeps a colspan and rowspan of 1.
 /// * The horizontal alignment operator is `<`, `>`, or `^`.
 /// * The vertical alignment operator is a dot followed by `<`, `>`, or `^`.
 /// * The style operator is a single lowercase letter in the last position. A
@@ -1090,6 +1139,7 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
     // leading digits remain and the token fails the full-consumption check below.
     let mut colspan = 1;
     let mut rowspan = 1;
+    let mut repeat = 1;
     let col_start = i;
     let mut j = i;
     while matches!(b.get(j).copied(), Some(c) if c.is_ascii_digit()) {
@@ -1126,9 +1176,17 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
             }
             i = j + 1;
         }
-        // Duplication: recognized so the cell separator is still located, but its
-        // layout effect (and so its factor) is not yet applied.
+        // Duplication: the factor is interpreted as a duplication count, so the
+        // cell's content and properties are cloned into `<n>` consecutive cells.
+        // Only the column part of the factor is the count; any row part (`<n>.`)
+        // is ignored, matching Asciidoctor. A missing column count defaults to 1.
+        // Unlike a span, a duplication leaves `colspan` and `rowspan` at 1: each
+        // clone is an ordinary single-slot cell.
         Some(b'*') => {
+            let col_digits = token.get(col_start..col_end).unwrap_or_default();
+            if !col_digits.is_empty() {
+                repeat = col_digits.parse().unwrap_or(1);
+            }
             i = j + 1;
         }
         _ => {}
@@ -1201,6 +1259,7 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
             style,
             colspan,
             rowspan,
+            repeat,
         })
     } else {
         None

@@ -828,3 +828,80 @@ fn huge_row_span_factor_does_not_overallocate() {
     assert_eq!(cell.rowspan(), 1_000_000_000);
     assert_eq!(row_text(&table.body_rows()[0]), vec!["a".to_string()]);
 }
+
+#[test]
+fn duplication_clones_content_and_properties() {
+    // A duplication factor (`<n>*`) clones the cell into `<n>` independent cells,
+    // each an ordinary single-slot cell (colspan and rowspan of 1) that carries
+    // the original's content and style. Here `3*e|x` becomes three emphasized
+    // cells, each holding `x`.
+    let table = parse_table("[cols=\"3*\"]\n|===\n3*e|x\n|===");
+    let cells = table.body_rows()[0].cells();
+    assert_eq!(cells.len(), 3);
+    for cell in cells {
+        assert_eq!(cell.colspan(), 1);
+        assert_eq!(cell.rowspan(), 1);
+        assert_eq!(cell.style(), ColumnStyle::Emphasis);
+    }
+    assert_eq!(
+        row_text(&table.body_rows()[0]),
+        vec!["x".to_string(), "x".to_string(), "x".to_string()]
+    );
+}
+
+#[test]
+fn duplication_factor_ignores_row_part() {
+    // Only the column part of the factor is the duplication count; a row part
+    // (`<n>.<n>*`) is ignored, matching Asciidoctor. So `2.3*` duplicates the cell
+    // twice (not six times), and each clone keeps a rowspan of 1.
+    let table = parse_table("[cols=\"4*\"]\n|===\n2.3*|a |b |c\n|===");
+    let cells = table.body_rows()[0].cells();
+    assert_eq!(cells.len(), 4);
+    assert_eq!(cells[0].rowspan(), 1);
+    assert_eq!(
+        row_text(&table.body_rows()[0]),
+        vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string()
+        ]
+    );
+}
+
+#[test]
+fn duplication_factor_of_zero_drops_the_cell() {
+    // A duplication factor of zero (`0*`) clones the cell zero times, dropping it
+    // entirely; the following cells flow normally into the grid. Matching
+    // Asciidoctor, `0*|x |a |b |c` yields a single row of `a`, `b`, `c`.
+    let table = parse_table("[cols=\"3*\"]\n|===\n0*|x |a |b |c\n|===");
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(
+        rows,
+        vec![vec!["a".to_string(), "b".to_string(), "c".to_string()]]
+    );
+}
+
+#[test]
+fn bare_duplication_operator_clones_once() {
+    // A bare duplication operator (`*`) with no factor defaults to a count of 1,
+    // so `*|a` is a single cell and locates the separator just like a plain `|`.
+    let table = parse_table("|===\n|a *|b\n|===");
+    assert_eq!(table.columns().len(), 2);
+    let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
+    assert_eq!(rows, vec![vec!["a".to_string(), "b".to_string()]]);
+}
+
+#[test]
+fn huge_duplication_factor_does_not_overallocate() {
+    // A duplication factor is an amplifier — `1000000000*` would otherwise
+    // materialize a billion cells (a multi-gigabyte allocation). The factor is
+    // clamped to `MAX_DUPLICATION_FACTOR` (1,000), so the expansion stays
+    // bounded. This is the one place the implementation diverges from Asciidoctor,
+    // which would expand the literal factor. The table is built from the clamped
+    // cells without hanging or exhausting memory.
+    let table = parse_table("|===\n1000000000*|x\n|===");
+    let total: usize = table.body_rows().iter().map(|r| r.cells().len()).sum();
+    assert_eq!(total, 1_000);
+    assert_eq!(row_text(&table.body_rows()[0])[0], "x".to_string());
+}

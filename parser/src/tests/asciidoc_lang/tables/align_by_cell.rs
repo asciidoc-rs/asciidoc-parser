@@ -147,8 +147,8 @@ include::example$align-cell.adoc[tag=factor]
     // Expansion of `example$align-cell.adoc[tag=factor]`. The `+^+` operator is
     // placed directly after the span (`2+`) and duplication (`2*`) operators;
     // both cells are centered. The `2+` span fills the two-column row on its own,
-    // so it lands in its own row; the duplication operator's layout effect is not
-    // yet applied, so the `2*^` cell becomes a single cell in the next row.
+    // so it lands in its own row; the `2*^` duplication clones its centered
+    // content into the two cells of the next row.
     let table = parse_table(
         "|===\n|Column Name |Column Name\n\n2+^|This cell spans two columns, and its content is horizontally centered because the cell specifier includes the `+^+` operator.\n2*^|This content is duplicated in two adjacent columns.\nIts content is horizontally centered because the cell specifier\nincludes the `+^+` operator.\n|===",
     );
@@ -156,7 +156,10 @@ include::example$align-cell.adoc[tag=factor]
         body_alignments(&table),
         vec![
             vec![(HorizontalAlignment::Center, VerticalAlignment::Top)],
-            vec![(HorizontalAlignment::Center, VerticalAlignment::Top)],
+            vec![
+                (HorizontalAlignment::Center, VerticalAlignment::Top),
+                (HorizontalAlignment::Center, VerticalAlignment::Top),
+            ],
         ]
     );
 }
@@ -404,7 +407,10 @@ include::example$align-cell.adoc[tag=combine]
     // first): `^.>` (center, bottom), `>.^` (right, middle), `2.3+^.^` (center,
     // middle, after a span), and `3*.>` (bottom, after a duplication; the
     // horizontal alignment falls back to the column default). The cell with no
-    // operators falls back to the default alignments (left, top).
+    // operators falls back to the default alignments (left, top). The `3*.>`
+    // duplication clones its bottom-aligned content into three cells: the first
+    // fills the row alongside the `2.3+` block span, and the next two each land
+    // in a row of their own (alongside the columns the block span carries down).
     let table = parse_table(
         "|===\n|Column 1 |Column 2 |Column 3\n\n^.>|The specifier for this cell is `^.>`.\nThe content is centered horizontally and aligned to the bottom of the cell.\n|There aren't any alignment operators on this cell's specifier, so the cell falls back to the default alignments.\nThe default horizontal alignment is the left side of the cell.\nThe default vertical alignment is the top of the cell.\n>.^|The specifier for this cell is `>.^`.\nThe content is aligned to the right side of the cell and centered vertically.\n\n2.3+^.^|The specifier for this cell is `pass:[2.3+^.^]`.\nIt spans two columns and three rows.\n\nIts content is centered horizontally and vertically.\n3*.>|The specifier for this cell is `3*.>`.\nThe cell is duplicated in three consecutive rows in the same column.\nIt's content is aligned to the bottom of the cell.\n|===",
     );
@@ -420,6 +426,8 @@ include::example$align-cell.adoc[tag=combine]
                 (HorizontalAlignment::Center, VerticalAlignment::Middle),
                 (HorizontalAlignment::Left, VerticalAlignment::Bottom),
             ],
+            vec![(HorizontalAlignment::Left, VerticalAlignment::Bottom)],
+            vec![(HorizontalAlignment::Left, VerticalAlignment::Bottom)],
         ]
     );
 }

@@ -143,16 +143,20 @@ Don't insert any spaces between the `|` and the operator.
     // The style operator occupies the last position of the specifier, after any
     // span/duplication operator and the horizontal and vertical alignment
     // operators: `2*>m` (duplication, right, monospace) and `.3+^.>s` (row span,
-    // center, bottom, strong).
+    // center, bottom, strong). The `2*` duplication clones its cell, so the first
+    // two cells both carry the right-aligned monospace specifier; the `.3+^.>s`
+    // cell follows.
     let table =
         parse_table("|===\n|h\n\n2*>m|dup right mono\n.3+^.>s|span center bottom strong\n|===");
     let cells: Vec<&crate::blocks::TableCell<'_>> =
         table.body_rows().iter().flat_map(|r| r.cells()).collect();
     assert_eq!(cells[0].style(), ColumnStyle::Monospace);
     assert_eq!(cells[0].h_align(), HorizontalAlignment::Right);
-    assert_eq!(cells[1].style(), ColumnStyle::Strong);
-    assert_eq!(cells[1].h_align(), HorizontalAlignment::Center);
-    assert_eq!(cells[1].v_align(), VerticalAlignment::Bottom);
+    assert_eq!(cells[1].style(), ColumnStyle::Monospace);
+    assert_eq!(cells[1].h_align(), HorizontalAlignment::Right);
+    assert_eq!(cells[2].style(), ColumnStyle::Strong);
+    assert_eq!(cells[2].h_align(), HorizontalAlignment::Center);
+    assert_eq!(cells[2].v_align(), VerticalAlignment::Bottom);
 
     verifies!(
         r#"
@@ -173,18 +177,18 @@ include::example$cell.adoc[tag=styles]
     );
 
     // Expansion of `example$cell.adoc[tag=styles]`. Each body cell carries its
-    // own style operator. The `.3+` row span on the second cell carries its
-    // column down through the next two rows, so each of those rows needs only one
-    // explicit cell to be complete. (The duplication operator's layout effect is
-    // not yet applied, so the `2*>m` cell is a single cell.)
+    // own style operator. The `2*>m` duplication clones its monospace content
+    // into the two cells of the first row. The `.3+` row span on the next cell
+    // carries its column down through the two rows below it, so each of those
+    // rows needs only one explicit cell to be complete.
     let table = parse_table(
         "|===\n|Column 1 |Column 2\n\n2*>m|This content is duplicated across two columns (2*) and aligned to the right side of the cell (>).\n\nIt's rendered using a monospace font (m).\n\n.3+^.>s|This cell spans 3 rows (`3+`).\nThe content is centered horizontally (`+^+`), vertically aligned to the bottom of the cell (`.>`), and styled as strong (`s`).\ne|This content is italicized (`e`).\n\nm|This content is rendered using a monospace font (m).\n\ns|This content is bold (`s`).\n|===",
     );
     assert_eq!(
         body_styles(&table),
         vec![
-            vec![ColumnStyle::Monospace, ColumnStyle::Strong],
-            vec![ColumnStyle::Emphasis],
+            vec![ColumnStyle::Monospace, ColumnStyle::Monospace],
+            vec![ColumnStyle::Strong, ColumnStyle::Emphasis],
             vec![ColumnStyle::Monospace],
             vec![ColumnStyle::Strong],
         ]
