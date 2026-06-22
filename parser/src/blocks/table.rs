@@ -997,7 +997,7 @@ struct RawCell<'src> {
 /// realistic table — which never duplicates a cell more than a handful of times
 /// — untouched. (This is the one point where the implementation diverges from
 /// Asciidoctor, which expands the literal factor however large.)
-const MAX_DUPLICATION_FACTOR: usize = 100_000;
+const MAX_DUPLICATION_FACTOR: usize = 1_000;
 
 /// Expand each duplicated cell into the `<n>` independent cells it represents.
 ///

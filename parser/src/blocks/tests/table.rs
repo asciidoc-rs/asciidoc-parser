@@ -896,12 +896,12 @@ fn bare_duplication_operator_clones_once() {
 fn huge_duplication_factor_does_not_overallocate() {
     // A duplication factor is an amplifier — `1000000000*` would otherwise
     // materialize a billion cells (a multi-gigabyte allocation). The factor is
-    // clamped to `MAX_DUPLICATION_FACTOR` (100,000), so the expansion stays
+    // clamped to `MAX_DUPLICATION_FACTOR` (1,000), so the expansion stays
     // bounded. This is the one place the implementation diverges from Asciidoctor,
     // which would expand the literal factor. The table is built from the clamped
     // cells without hanging or exhausting memory.
     let table = parse_table("|===\n1000000000*|x\n|===");
     let total: usize = table.body_rows().iter().map(|r| r.cells().len()).sum();
-    assert_eq!(total, 100_000);
+    assert_eq!(total, 1_000);
     assert_eq!(row_text(&table.body_rows()[0])[0], "x".to_string());
 }
