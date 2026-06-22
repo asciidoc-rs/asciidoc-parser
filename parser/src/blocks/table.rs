@@ -54,6 +54,11 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// block of both (`<n>.<n>+`). The per-cell duplication (`*`) operator is
 /// supported: a cell with a duplication factor (`<n>*`) clones its content and
 /// properties into `<n>` consecutive cells.
+///
+/// Table sizing is supported: the [`width`](Self::width) attribute sets a fixed
+/// table width, the `autowidth` option ([`is_autowidth`](Self::is_autowidth))
+/// sizes the table and its columns to their content, and an individual column
+/// can be made [autowidth](TableColumn::is_autowidth) with the `~` width value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
@@ -140,11 +145,24 @@ impl<'src> TableBlock<'src> {
             columns.len()
         };
 
-        let columns = if columns.is_empty() {
+        let mut columns: Vec<TableColumn> = if columns.is_empty() {
             (0..ncols).map(|_| TableColumn::default()).collect()
         } else {
             columns
         };
+
+        // The `autowidth` option sizes the table to its content; the columns
+        // inherit the setting, so every column becomes autowidth regardless of
+        // any proportional width set on its specifier.
+        if metadata
+            .attrlist
+            .as_ref()
+            .is_some_and(|a| a.has_option("autowidth"))
+        {
+            for column in columns.iter_mut() {
+                column.autowidth = true;
+            }
+        }
 
         // The first row is an (implicit) header row when the line directly after
         // the opening delimiter is non-empty and is itself followed by an empty
@@ -387,6 +405,39 @@ impl<'src> TableBlock<'src> {
         &self.columns
     }
 
+    /// Returns the fixed width of this table, as a percentage of the content
+    /// area, when the `width` attribute is set.
+    ///
+    /// The `width` attribute is an integer percentage from 1 to 100; the
+    /// trailing `%` sign is optional (`[width=75%]` and `[width=75]` are
+    /// equivalent). A value outside that range, or one that is not an integer,
+    /// is ignored and reported as `None`. When the attribute is absent the
+    /// table spans the width of the content area and this returns `None`.
+    pub fn width(&self) -> Option<usize> {
+        let raw = self
+            .attrlist
+            .as_ref()
+            .and_then(|a| a.named_attribute("width"))?
+            .value();
+
+        let raw = raw.strip_suffix('%').unwrap_or(raw);
+        match raw.parse::<usize>() {
+            Ok(width) if (1..=100).contains(&width) => Some(width),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if this table carries the `autowidth` option.
+    ///
+    /// An autowidth table is sized to fit its content rather than spanning the
+    /// width of the content area, and each of its [columns](TableColumn) is
+    /// likewise [autowidth](TableColumn::is_autowidth).
+    pub fn is_autowidth(&self) -> bool {
+        self.attrlist
+            .as_ref()
+            .is_some_and(|a| a.has_option("autowidth"))
+    }
+
     /// Returns the header row of this table, if one was declared.
     pub fn header_row(&self) -> Option<&TableRow<'src>> {
         self.header_row.as_ref()
@@ -467,6 +518,7 @@ impl<'src> HasSpan<'src> for TableBlock<'src> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableColumn {
     width: usize,
+    autowidth: bool,
     h_align: HorizontalAlignment,
     v_align: VerticalAlignment,
     style: ColumnStyle,
@@ -475,8 +527,22 @@ pub struct TableColumn {
 impl TableColumn {
     /// Returns the proportional width of this column relative to the other
     /// columns in the table.
+    ///
+    /// When the column is [autowidth](Self::is_autowidth), this proportional
+    /// width is not used to size the column (the column is sized to its
+    /// content instead) and reports the default value of `1`.
     pub fn width(&self) -> usize {
         self.width
+    }
+
+    /// Returns `true` if this column is sized to fit its content rather than to
+    /// a proportional width.
+    ///
+    /// A column is autowidth when its column specifier uses the special width
+    /// value `~`, or when the table as a whole carries the `autowidth` option
+    /// (in which case every column inherits the setting).
+    pub fn is_autowidth(&self) -> bool {
+        self.autowidth
     }
 
     /// Returns the horizontal alignment applied to this column's content.
@@ -511,6 +577,7 @@ impl Default for TableColumn {
     fn default() -> Self {
         Self {
             width: 1,
+            autowidth: false,
             h_align: HorizontalAlignment::Left,
             v_align: VerticalAlignment::Top,
             style: ColumnStyle::Default,
@@ -870,8 +937,9 @@ fn parse_cols(value: &str) -> Vec<TableColumn> {
 /// present, the operators follow the multiplier, so the `spec` passed here is
 /// the portion after the `*`.
 ///
-/// The width is the first contiguous run of digits after any alignment
-/// operators; a spec with no digits falls back to the default width. The style
+/// The width is either the special autowidth value `~` (sizing the column to
+/// its content) or the first contiguous run of digits after any alignment
+/// operators; a spec with neither falls back to the default width. The style
 /// operator is the trailing letter (`a`, `d`, `e`, `h`, `l`, `m`, or `s`); an
 /// unrecognized trailing letter leaves the style at its default.
 fn parse_col_spec(spec: &str) -> TableColumn {
@@ -915,13 +983,24 @@ fn parse_col_spec(spec: &str) -> TableColumn {
         }
     }
 
-    // Width is the first run of digits after the alignment operators.
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    let width = match digits.parse::<usize>() {
-        Ok(width) if width > 0 => width,
-        _ => TableColumn::default().width,
-    };
-    rest = &rest[digits.len()..];
+    // Width comes after the alignment operators. The special value `~` marks
+    // the column as autowidth (sized to its content); otherwise the width is
+    // the first run of digits. A spec with neither falls back to the default
+    // proportional width.
+    let mut autowidth = false;
+    let mut width = TableColumn::default().width;
+    if let Some(after_tilde) = rest.strip_prefix('~') {
+        autowidth = true;
+        rest = after_tilde;
+    } else {
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(parsed) = digits.parse::<usize>()
+            && parsed > 0
+        {
+            width = parsed;
+        }
+        rest = &rest[digits.len()..];
+    }
 
     // The style operator, if present, occupies the last position on the
     // specifier, so it is the entire remainder after the width. Matching the
@@ -941,6 +1020,7 @@ fn parse_col_spec(spec: &str) -> TableColumn {
 
     TableColumn {
         width,
+        autowidth,
         h_align,
         v_align,
         style,
