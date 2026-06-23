@@ -6,6 +6,7 @@ mod add_title;
 mod adjust_column_widths;
 mod align_by_cell;
 mod align_by_column;
+mod assign_a_role;
 mod borders;
 mod build_a_basic_table;
 mod customize_title_label;
