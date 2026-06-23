@@ -86,7 +86,7 @@ The `%` sign is optional.
     let src = format!("[width=wide]\n{BASE_H}");
     assert_eq!(parse_table(&src).width(), None);
 
-    non_normative!(
+    verifies!(
         r#"
 .Table with width set to 75%
 [source#ex-fixed]
@@ -140,7 +140,7 @@ The columns inherit this setting, so individual columns will also be sized accor
     assert_eq!(table.width(), None);
     assert_eq!(column_widths(&table), vec![(1, true), (1, true), (1, true)]);
 
-    non_normative!(
+    verifies!(
         r#"
 .Table using autowidth
 [source#ex-auto]
@@ -155,6 +155,16 @@ include::example$row.adoc[tag=base-h]
 
 "#
     );
+
+    // The autowidth table from <<ex-auto>> applied to the standard three-column
+    // table: the table is autowidth, every column is autowidth, and the header
+    // and body rows are otherwise unchanged.
+    let src = format!("[%autowidth]\n{BASE_H}");
+    let table = parse_table(&src);
+    assert!(table.is_autowidth());
+    assert_eq!(column_widths(&table), vec![(1, true), (1, true), (1, true)]);
+    assert!(table.header_row().is_some());
+    assert_eq!(table.body_rows().len(), 2);
 
     verifies!(
         r#"
@@ -178,7 +188,7 @@ If you want each column to have an automatic width, but want the table to span t
     let table = parse_table(&src);
     assert_eq!(table.width(), Some(100));
 
-    non_normative!(
+    verifies!(
         r#"
 .Full-width table with autowidth columns
 [source#ex-stretch]
@@ -194,6 +204,22 @@ The columns are sized to the content, but the table spans the width of the page.
 [%autowidth.stretch]
 include::example$row.adoc[tag=base-h]
 
+"#
+    );
+
+    // <<ex-stretch>>: the columns are sized to their content (each autowidth)
+    // while the `stretch` role records that the table spans the full page
+    // width.
+    let src = format!("[%autowidth.stretch]\n{BASE_H}");
+    let table = parse_table(&src);
+    assert!(table.is_autowidth());
+    assert_eq!(column_widths(&table), vec![(1, true), (1, true), (1, true)]);
+    assert!(table.attrlist().unwrap().roles().contains(&"stretch"));
+
+    // The DocBook converter is out of scope for this parser, so the warning
+    // below describes downstream behavior we don't model.
+    non_normative!(
+        r#"
 WARNING: The `autowidth` option is not recognized by the DocBook converter.
 
 "#
@@ -217,23 +243,7 @@ In this case, width values are assumed to be a percentage value (i.e., 100-based
 "#
     );
 
-    // The `~` width value marks an individual column as autowidth; the other
-    // columns keep their explicit (percentage-based) width. Here the first
-    // column is a 25% header column and the remaining two are autowidth.
-    let table = parse_table(
-        "[cols=\"25h,~,~\"]\n|===\n|small |as big as the column needs to be |the rest\n|===",
-    );
-    assert_eq!(
-        column_widths(&table),
-        vec![(25, false), (1, true), (1, true)]
-    );
-    assert_eq!(table.columns()[0].style(), ColumnStyle::Header);
-
-    // Only the `~` columns are autowidth; the table itself carries no
-    // `autowidth` option.
-    assert!(!table.is_autowidth());
-
-    non_normative!(
+    verifies!(
         r#"
 .Table with fixed and autowidth columns
 [source#ex-mix]
@@ -251,4 +261,20 @@ In this case, width values are assumed to be a percentage value (i.e., 100-based
 |===
 "#
     );
+
+    // <<ex-mix>>: the `~` width value marks an individual column as autowidth;
+    // the other columns keep their explicit (percentage-based) width. Here the
+    // first column is a 25% header column and the remaining two are autowidth.
+    let table = parse_table(
+        "[cols=\"25h,~,~\"]\n|===\n|small |as big as the column needs to be |the rest\n|===",
+    );
+    assert_eq!(
+        column_widths(&table),
+        vec![(25, false), (1, true), (1, true)]
+    );
+    assert_eq!(table.columns()[0].style(), ColumnStyle::Header);
+
+    // Only the `~` columns are autowidth; the table itself carries no
+    // `autowidth` option.
+    assert!(!table.is_autowidth());
 }
