@@ -1170,14 +1170,13 @@ fn build_data_table<'src>(
     } = body;
     let separator = separator.as_str();
 
-    let (fields, first_row_len) = match data_format {
-        // CSV and TSV share their parsing rules and differ only in the default
-        // separator (resolved by the caller).
-        DataFormat::Csv | DataFormat::Tsv => parse_csv_fields(inside, separator),
-        // DSV is parsed by its own, simpler rules.
-        DataFormat::Dsv => parse_dsv_fields(inside, separator),
-        // PSV never reaches this builder.
-        DataFormat::Psv => (vec![], 0),
+    // DSV is parsed by its own, simpler rules; CSV and TSV share their rules and
+    // differ only in the default separator (resolved by the caller). PSV never
+    // reaches this builder.
+    let (fields, first_row_len) = if data_format == DataFormat::Dsv {
+        parse_dsv_fields(inside, separator)
+    } else {
+        parse_csv_fields(inside, separator)
     };
 
     let ncols = if cols_attr.is_empty() {
@@ -1232,6 +1231,13 @@ struct DataField<'src> {
 /// quote is written by doubling it (`""`). A newline that is not inside a
 /// quoted value ends the row. The fields are returned flat; the caller flows
 /// them into rows.
+///
+/// This mirrors Asciidoctor's `Table::ParserContext`: a separator or newline is
+/// a cell boundary only when the text accumulated since the previous boundary
+/// has no [unclosed quote](has_unclosed_quotes); otherwise it is part of the
+/// value. As a result a value whose opening quote is never properly closed (or
+/// that has trailing characters after its closing quote) keeps its quotes and
+/// absorbs the following separators, rather than being treated as enclosed.
 fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField<'src>>, usize) {
     let data = region.data();
     let n = data.len();
@@ -1241,143 +1247,150 @@ fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField
 
     let mut fields: Vec<DataField<'src>> = vec![];
     let mut first_row_len = 0usize;
-    let mut row_count = 0usize;
+    let mut first_row_done = false;
+    let mut fields_in_row = 0usize;
+
+    // The raw text of the cell currently being accumulated runs from `cell_start`
+    // to the next boundary.
+    let mut cell_start = 0usize;
     let mut i = 0usize;
 
-    while i < n {
-        // Skip a blank (whitespace-only) physical line at a row boundary.
-        let mut line_end = i;
-        while line_end < n && at(line_end) != Some(b'\n') {
-            line_end += 1;
-        }
-        if data.get(i..line_end).unwrap_or("").trim().is_empty() {
-            i = if line_end < n { line_end + 1 } else { line_end };
+    while i <= n {
+        let at_eof = i == n;
+        let at_sep = !at_eof && starts_with_sep(i);
+        let at_nl = !at_eof && at(i) == Some(b'\n');
+
+        if !(at_eof || at_sep || at_nl) {
+            i += 1;
             continue;
         }
 
-        // Parse one row, field by field, until an unquoted newline (or EOF).
-        let mut fields_in_row = 0usize;
-        loop {
-            // Skip leading whitespace to detect a quoted value, but never skip a
-            // separator (so a leading tab in a TSV table starts an empty field).
-            let mut start = i;
-            while matches!(at(start), Some(b' ' | b'\t')) && !starts_with_sep(start) {
-                start += 1;
-            }
+        let raw = data.get(cell_start..i).unwrap_or_default();
 
-            let (field, after, ended_row) = if at(start) == Some(b'"') {
-                parse_csv_quoted_field(region, start + 1, &starts_with_sep)
-            } else {
-                // An unquoted value runs to the next separator or newline.
-                let mut q = i;
-                while q < n && at(q) != Some(b'\n') && !starts_with_sep(q) {
-                    q += 1;
-                }
-                let trimmed = trim_surrounding_whitespace(region.slice(i..q));
-                let ended_row = q >= n || at(q) == Some(b'\n');
-                (
-                    DataField {
-                        content: trimmed,
-                        replacement: None,
-                    },
-                    q,
-                    ended_row,
-                )
-            };
+        // A separator or newline that falls inside an unclosed quoted value is
+        // part of the value, not a boundary; absorb it and keep scanning.
+        if !at_eof && has_unclosed_quotes(raw) {
+            i += if at_sep { sep_len } else { 1 };
+            continue;
+        }
 
-            fields.push(field);
+        // A wholly blank physical line (or trailing blank text at the end of the
+        // region) between rows is skipped rather than emitted as an empty cell. A
+        // blank cell that follows a separator on a populated line is kept.
+        let blank_skip = (at_nl || at_eof) && fields_in_row == 0 && raw.trim().is_empty();
+        if !blank_skip {
+            fields.push(make_csv_field(region, cell_start, i));
             fields_in_row += 1;
-
-            if ended_row {
-                i = if after < n { after + 1 } else { after };
-                break;
+            if !first_row_done {
+                first_row_len = fields_in_row;
             }
-            i = after + sep_len;
         }
 
-        if row_count == 0 {
-            first_row_len = fields_in_row;
+        if at_eof {
+            break;
         }
-        row_count += 1;
+
+        if at_nl {
+            // The newline ends the row. The first populated row fixes the implicit
+            // column count.
+            if fields_in_row > 0 {
+                first_row_done = true;
+            }
+            fields_in_row = 0;
+            cell_start = i + 1;
+            i += 1;
+        } else {
+            cell_start = i + sep_len;
+            i += sep_len;
+        }
     }
 
     (fields, first_row_len)
 }
 
-/// Parse a CSV/TSV quoted value beginning just after its opening quote
-/// (`value_start`), returning the field, the byte offset just past the closing
-/// quote and any trailing characters, and whether the value ends the row.
+/// Build a CSV/TSV [field](DataField) from the byte range `start..end`,
+/// applying Asciidoctor's `close_cell` value processing.
 ///
-/// A doubled quote (`""`) inside the value is an escaped literal quote. After
-/// the closing quote, any characters up to the next separator or newline are
-/// ignored. A value with no closing quote runs to the end of the region.
-fn parse_csv_quoted_field<'src>(
-    region: Span<'src>,
-    value_start: usize,
-    starts_with_sep: &impl Fn(usize) -> bool,
-) -> (DataField<'src>, usize, bool) {
-    let data = region.data();
-    let n = data.len();
-    let at = |k: usize| data.as_bytes().get(k).copied();
+/// The value is stripped of surrounding whitespace; then, if it is enclosed in
+/// double quotes, the quotes are removed and the inner value is stripped again;
+/// finally any run of consecutive double quotes is collapsed to one (so an
+/// escaped `""` becomes a single `"`). A value that is not enclosed (no leading
+/// quote, an unclosed quote, or trailing characters after the closing quote)
+/// keeps its quotes and is only collapsed.
+fn make_csv_field<'src>(region: Span<'src>, start: usize, end: usize) -> DataField<'src> {
+    let trimmed = trim_surrounding_whitespace(region.slice(start..end));
+    let value = csv_cell_value(trimmed.data());
+    let replacement = (value != trimmed.data()).then_some(value);
+    DataField {
+        content: trimmed,
+        replacement,
+    }
+}
 
-    let mut buf = String::new();
-    let mut has_escape = false;
-    let mut seg_start = value_start;
-    let mut q = value_start;
-    let inner_end;
-    loop {
-        if q >= n {
-            inner_end = n;
-            break;
+/// Apply Asciidoctor's CSV value processing to an already-stripped cell value:
+/// unquote an enclosed value and collapse escaped double quotes (`""` -> `"`).
+fn csv_cell_value(text: &str) -> String {
+    if text.is_empty() || !text.contains('"') {
+        return text.to_string();
+    }
+
+    // An enclosed value (leading and trailing quote) has its quotes removed and
+    // is stripped again; a lone `"` becomes empty. Anything else keeps its text.
+    if text.starts_with('"') && text.ends_with('"') {
+        match text.get(1..text.len() - 1) {
+            Some(inner) => squeeze_quotes(inner.trim()),
+            None => String::new(),
         }
-        if at(q) == Some(b'"') {
-            if at(q + 1) == Some(b'"') {
-                // A doubled quote collapses to a single literal quote: keep the
-                // first quote (part of the preceding segment) and skip the second.
-                has_escape = true;
-                buf.push_str(data.get(seg_start..=q).unwrap_or_default());
-                q += 2;
-                seg_start = q;
+    } else {
+        squeeze_quotes(text)
+    }
+}
+
+/// Collapse every run of consecutive double quotes to a single double quote,
+/// matching Ruby's `String#squeeze('"')`.
+fn squeeze_quotes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut prev_quote = false;
+    for c in text.chars() {
+        if c == '"' {
+            if prev_quote {
                 continue;
             }
-            // A lone quote closes the value.
-            inner_end = q;
-            break;
+            prev_quote = true;
+        } else {
+            prev_quote = false;
         }
-        q += 1;
+        out.push(c);
     }
-    if has_escape {
-        buf.push_str(data.get(seg_start..inner_end).unwrap_or_default());
+    out
+}
+
+/// Determine whether `buffer` (the cell text accumulated so far) holds an
+/// unclosed double quote, a direct port of Asciidoctor's
+/// `Table::ParserContext#buffer_has_unclosed_quotes?`.
+///
+/// Only a value that begins with a double quote can be "quoted"; for any other
+/// value embedded quotes are literal and this returns `false`. A leading quote
+/// is unclosed until a matching trailing quote appears (accounting for escaped
+/// `""` pairs).
+fn has_unclosed_quotes(buffer: &str) -> bool {
+    let record = buffer.trim();
+
+    if record == "\"" {
+        return true;
     }
 
-    // Advance past the closing quote (if any), then ignore trailing characters
-    // up to the next separator or newline.
-    let mut after = if at(inner_end) == Some(b'"') {
-        inner_end + 1
+    if !record.starts_with('"') {
+        return false;
+    }
+
+    let trailing_quote = record.ends_with('"');
+    if (trailing_quote && record.ends_with("\"\"")) || record.starts_with("\"\"") {
+        let collapsed = record.replace("\"\"", "");
+        collapsed.starts_with('"') && !collapsed.ends_with('"')
     } else {
-        inner_end
-    };
-    while after < n && at(after) != Some(b'\n') && !starts_with_sep(after) {
-        after += 1;
+        !trailing_quote
     }
-    let ended_row = after >= n || at(after) == Some(b'\n');
-
-    let trimmed = trim_surrounding_whitespace(region.slice(value_start..inner_end));
-    let replacement = if has_escape {
-        let value = buf.trim().to_string();
-        (value != trimmed.data()).then_some(value)
-    } else {
-        None
-    };
-
-    (
-        DataField {
-            content: trimmed,
-            replacement,
-        },
-        after,
-        ended_row,
-    )
 }
 
 /// Parse a DSV region into its [fields](DataField), returning them in document
