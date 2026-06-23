@@ -1447,12 +1447,12 @@ fn scan_cells(region: Span<'_>, separator: u8) -> Vec<RawCell<'_>> {
 
     while i < len {
         if bytes.get(i).copied() == Some(separator) {
-            // Walk back to the start of the token directly preceding this `|`.
-            // The token (a possible cell specifier) runs back to the previous
-            // whitespace, tab, or newline, or to the start of the region; either
-            // way the token is anchored at a line start or after whitespace, as a
-            // cell boundary requires. (When `tok_start == i` the token is empty
-            // and the separator is plain.)
+            // Walk back to the start of the token directly preceding this
+            // separator. The token (a possible cell specifier) runs back to the
+            // previous whitespace, tab, or newline, or to the start of the
+            // region; either way the token is anchored at a line start or after
+            // whitespace, as a cell boundary requires. (When `tok_start == i`
+            // the token is empty and the separator is plain.)
             let mut tok_start = i;
             while tok_start > 0
                 && !matches!(

@@ -110,11 +110,21 @@ To distinguish the inner table from the enclosing one, you need to use `!===` as
     assert_eq!(simple_text(&inner.body_rows()[0].cells()[1]), "C12");
 
     // A `!===` table at the top level (not inside an AsciiDoc cell) is still a
-    // table, but it separates on the default `|`, so a bare `!` there is literal
-    // text and does not begin a cell.
-    let top_level = parse_table("|===\n| a ! b\n|===");
+    // table — `parse_table` would panic if the `!===` delimiter were not
+    // recognized — but it separates on the default `|`, so the `|` begins the
+    // cell and a bare `!` is literal text that does not begin a cell.
+    let top_level = parse_table("!===\n| a ! b\n!===");
     assert_eq!(top_level.body_rows()[0].cells().len(), 1);
     assert_eq!(simple_text(&top_level.body_rows()[0].cells()[0]), "a ! b");
+
+    // The same top-level `!===` table behaves identically to its `|===`
+    // counterpart, confirming the leading delimiter character does not change
+    // the (top-level) default separator.
+    let pipe_level = parse_table("|===\n| a ! b\n|===");
+    assert_eq!(
+        simple_text(&top_level.body_rows()[0].cells()[0]),
+        simple_text(&pipe_level.body_rows()[0].cells()[0]),
+    );
 }
 
 #[test]
