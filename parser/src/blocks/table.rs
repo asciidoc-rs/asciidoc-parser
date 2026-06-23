@@ -546,8 +546,11 @@ impl TableColumn {
     /// `table.columns().iter().any(TableColumn::is_autowidth)`.
     ///
     /// When this column itself is autowidth, this width is not used to size the
-    /// column (the column is sized to its content instead) and reports the
-    /// default value of `1`.
+    /// column (the column is sized to its content instead). A column made
+    /// autowidth by the `~` specifier reports the default width of `1`, but one
+    /// that inherits autowidth from the table's `autowidth` option retains
+    /// whatever width its specifier set (e.g. `2` for the first column of
+    /// `[%autowidth,cols="2,1"]`).
     pub fn width(&self) -> usize {
         self.width
     }

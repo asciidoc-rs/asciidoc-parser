@@ -168,10 +168,13 @@ fn autowidth_option_makes_columns_autowidth() {
         assert!(table.columns().iter().all(|c| c.is_autowidth()));
     }
 
-    // Even an explicit proportional width is overridden by the table's
-    // `autowidth` option.
+    // A column that inherits autowidth from the table's `autowidth` option
+    // still becomes autowidth, but retains the explicit width from its
+    // specifier (the width is simply not used to size an autowidth column).
     let table = parse_table("[%autowidth,cols=\"2,1\"]\n|===\n|a |b\n|===");
     assert!(table.columns().iter().all(|c| c.is_autowidth()));
+    let widths: Vec<usize> = table.columns().iter().map(|c| c.width()).collect();
+    assert_eq!(widths, vec![2, 1]);
 
     // Without the option, the table and its columns keep proportional widths.
     let table = parse_table("|===\n|a |b\n|===");
