@@ -13,5 +13,6 @@ mod duplicate_cells;
 mod format_cell_content;
 mod format_column_content;
 mod span_cells;
+mod striping;
 mod turn_off_title_label;
 mod width;

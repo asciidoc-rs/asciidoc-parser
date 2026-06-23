@@ -64,6 +64,10 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// the border around the table and the [`grid`](Self::grid) attribute controls
 /// the borders between cells. Each falls back to a document-level default
 /// (`table-frame` / `table-grid`) and then to `all`.
+///
+/// Zebra striping is supported via the [`stripes`](Self::stripes) attribute,
+/// which falls back to the `table-stripes` document attribute and then to
+/// `none`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
@@ -76,6 +80,7 @@ pub struct TableBlock<'src> {
     caption: Option<String>,
     frame: Frame,
     grid: Grid,
+    stripes: Stripes,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -238,14 +243,18 @@ impl<'src> TableBlock<'src> {
             None
         };
 
-        // The `frame` and `grid` attributes control the table's borders. Each
-        // defaults to `all`; the default can be changed for the whole document
-        // with the `table-frame` / `table-grid` attribute, and an explicit
-        // attribute on the table overrides both. The value is resolved here
-        // (while `parser` is borrowed only immutably) and stored on the block so
-        // the accessors need no further document lookup.
-        let frame = resolve_border::<Frame>(metadata, parser, "frame", "table-frame");
-        let grid = resolve_border::<Grid>(metadata, parser, "grid", "table-grid");
+        // The `frame` and `grid` attributes control the table's borders, and the
+        // `stripes` attribute controls zebra striping. The borders each default
+        // to `all` and stripes defaults to `none`; the default can be changed for
+        // the whole document with the `table-frame` / `table-grid` /
+        // `table-stripes` attribute, and an explicit attribute on the table
+        // overrides both. Each value is resolved here (while `parser` is borrowed
+        // only immutably) and stored on the block so the accessors need no further
+        // document lookup.
+        let frame = resolve_table_attribute::<Frame>(metadata, parser, "frame", "table-frame");
+        let grid = resolve_table_attribute::<Grid>(metadata, parser, "grid", "table-grid");
+        let stripes =
+            resolve_table_attribute::<Stripes>(metadata, parser, "stripes", "table-stripes");
 
         // Scan every cell in the table, in document order, then partition into
         // rows by walking the grid: a cell's span (colspan/rowspan) governs how
@@ -394,6 +403,7 @@ impl<'src> TableBlock<'src> {
                     caption,
                     frame,
                     grid,
+                    stripes,
                     anchor: metadata.anchor,
                     anchor_reftext: metadata.anchor_reftext,
                     attrlist: metadata.attrlist.clone(),
@@ -475,6 +485,24 @@ impl<'src> TableBlock<'src> {
     /// absent it defaults to [`Grid::All`].
     pub fn grid(&self) -> Grid {
         self.grid
+    }
+
+    /// Returns the [`Stripes`] that control which rows of this table are shaded
+    /// to create a zebra-striping effect.
+    ///
+    /// The stripes come from the `stripes` attribute on the table, which
+    /// accepts `none`, `even`, `odd`, `all`, or `hover`. When the attribute
+    /// is absent the value is taken from the `table-stripes` document
+    /// attribute, and when that too is absent it defaults to
+    /// [`Stripes::None`].
+    ///
+    /// As a shorthand, a `stripes-<value>` role on the table (e.g.
+    /// `[.stripes-even]`) applies the same CSS class directly without setting
+    /// the `stripes` attribute. That shorthand does not affect this value
+    /// (which remains [`Stripes::None`]); the role is instead reported
+    /// among the table's [roles](crate::attributes::Attrlist::roles).
+    pub fn stripes(&self) -> Stripes {
+        self.stripes
     }
 
     /// Returns the header row of this table, if one was declared.
@@ -785,16 +813,51 @@ pub enum Grid {
     None,
 }
 
-/// A table border value ([`Frame`] or [`Grid`]) that can be parsed from an
-/// attribute value and has a default of `all`.
-trait BorderValue: Copy + Default {
-    /// Parse the value of a `frame` / `grid` attribute (or its document-level
-    /// `table-frame` / `table-grid` counterpart). An unrecognized value yields
-    /// the default.
+/// The zebra striping applied to the rows of a [`TableBlock`].
+///
+/// Striping shades the specified rows with a background color to create a zebra
+/// effect. It is set with the `stripes` attribute on the table (or,
+/// document-wide, the `table-stripes` attribute). The default is
+/// [`None`](Self::None).
+///
+/// Under the covers, a converter applies the CSS class `stripes-<value>` to the
+/// table; the actual shading depends on the stylesheet. As a shorthand, the
+/// same class can be applied directly with a role (e.g. `[.stripes-even]`)
+/// rather than the `stripes` attribute. A role does not set this value (see
+/// [`TableBlock::stripes`]).
+///
+/// An unrecognized value falls back to [`None`](Self::None). (Asciidoctor
+/// instead passes an unrecognized value straight through to a CSS class, which
+/// the stylesheet ignores; this parser models only the five documented values.)
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Stripes {
+    /// No rows are shaded (the `none` value). This is the default.
+    #[default]
+    None,
+
+    /// Even rows are shaded (the `even` value).
+    Even,
+
+    /// Odd rows are shaded (the `odd` value).
+    Odd,
+
+    /// All rows are shaded (the `all` value).
+    All,
+
+    /// The row under the mouse cursor is shaded (the `hover` value). This has
+    /// an effect only in HTML output.
+    Hover,
+}
+
+/// A table-level attribute value ([`Frame`], [`Grid`], or [`Stripes`]) that can
+/// be parsed from an attribute value and has a default.
+trait TableAttributeValue: Copy + Default {
+    /// Parse the value of the table attribute (or its document-level
+    /// `table-<name>` counterpart). An unrecognized value yields the default.
     fn from_attr_value(value: &str) -> Self;
 }
 
-impl BorderValue for Frame {
+impl TableAttributeValue for Frame {
     fn from_attr_value(value: &str) -> Self {
         match value.trim() {
             // `topbot` is the older synonym for `ends`.
@@ -807,7 +870,7 @@ impl BorderValue for Frame {
     }
 }
 
-impl BorderValue for Grid {
+impl TableAttributeValue for Grid {
     fn from_attr_value(value: &str) -> Self {
         match value.trim() {
             "rows" => Grid::Rows,
@@ -819,12 +882,25 @@ impl BorderValue for Grid {
     }
 }
 
-/// Resolve a table border attribute ([`Frame`] or [`Grid`]).
+impl TableAttributeValue for Stripes {
+    fn from_attr_value(value: &str) -> Self {
+        match value.trim() {
+            "even" => Stripes::Even,
+            "odd" => Stripes::Odd,
+            "all" => Stripes::All,
+            "hover" => Stripes::Hover,
+            // `none` and any unrecognized value.
+            _ => Stripes::None,
+        }
+    }
+}
+
+/// Resolve a table-level attribute ([`Frame`], [`Grid`], or [`Stripes`]).
 ///
 /// An explicit attribute on the table (`attr_name`) wins; otherwise the
 /// document-level default (`doc_attr_name`) is consulted; otherwise the value
-/// defaults to `all`.
-fn resolve_border<B: BorderValue>(
+/// falls back to the type's default.
+fn resolve_table_attribute<B: TableAttributeValue>(
     metadata: &BlockMetadata<'_>,
     parser: &Parser,
     attr_name: &str,
