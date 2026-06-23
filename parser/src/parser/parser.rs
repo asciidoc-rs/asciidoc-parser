@@ -84,6 +84,17 @@ pub struct Parser {
     /// saved and restored around each cell, so the lock applies only within
     /// the cell (and nests correctly).
     pub(crate) locked_attribute_names: HashSet<String>,
+
+    /// Number of AsciiDoc table cells currently being parsed in the call stack.
+    ///
+    /// An AsciiDoc table cell creates a nested, standalone AsciiDoc document.
+    /// While that document is being parsed this counter is greater than zero,
+    /// which (matching Asciidoctor's `Document#nested?`) changes the default
+    /// cell separator of any table found inside from the vertical bar (`|`) to
+    /// the exclamation mark (`!`), so a nested table needs no explicit
+    /// `separator` attribute. The counter is incremented and decremented around
+    /// each AsciiDoc cell, so it nests correctly.
+    pub(crate) nested_document_depth: usize,
 }
 
 impl Default for Parser {
@@ -105,6 +116,7 @@ impl Default for Parser {
             topmost_section_type: SectionType::Normal,
             last_table_number: 0,
             locked_attribute_names: HashSet::new(),
+            nested_document_depth: 0,
         }
     }
 }

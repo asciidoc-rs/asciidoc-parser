@@ -25,11 +25,14 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// A table is a delimited block that arranges content into a grid of rows and
 /// columns.
 ///
-/// A table is introduced by a table delimiter (`|===`) and closed by a matching
-/// delimiter. Cells are separated using prefix-separated value (PSV) syntax: a
-/// vertical bar (`|`) at the start of a line or preceded by whitespace begins a
-/// new cell. Cells flow, in document order, into rows whose length is fixed by
-/// the number of columns.
+/// A table is introduced by a table delimiter (`|===`, or `!===` for a nested
+/// table) and closed by a matching delimiter. Cells are separated using
+/// prefix-separated value (PSV) syntax: the table's cell separator — a vertical
+/// bar (`|`) by default — at the start of a line or preceded by whitespace
+/// begins a new cell. Cells flow, in document order, into rows whose length is
+/// fixed by the number of columns. (The separator defaults to `!` inside a
+/// nested table and can be overridden with the `separator` attribute; see
+/// below.)
 ///
 /// The number of columns is determined either by the `cols` attribute or,
 /// implicitly, by the number of cells found in the first non-empty line after
@@ -68,6 +71,13 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// Zebra striping is supported via the [`stripes`](Self::stripes) attribute,
 /// which falls back to the `table-stripes` document attribute and then to
 /// `none`.
+///
+/// Nested tables are supported: an [`AsciiDoc`](ColumnStyle::AsciiDoc) cell may
+/// contain its own table. The cell separator defaults to the vertical bar (`|`)
+/// but switches to the exclamation mark (`!`) inside an AsciiDoc cell, so a
+/// nested table is opened with `!===` and separates its cells with `!`. The
+/// `separator` attribute overrides the default separator with an explicit
+/// character at any level.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
@@ -89,17 +99,20 @@ pub struct TableBlock<'src> {
 impl<'src> TableBlock<'src> {
     /// Returns `true` if `line` is a table delimiter.
     ///
-    /// A table delimiter is a vertical bar (`|`) followed by three or more
-    /// equals signs (`===`).
+    /// A table delimiter is a vertical bar (`|`) or an exclamation mark (`!`)
+    /// followed by three or more equals signs (`===`). The `!===` form opens a
+    /// table whose default cell separator is the exclamation mark, which lets a
+    /// nested table be distinguished from the `|`-separated table that encloses
+    /// it.
     ///
-    /// **NOTE:** The `,===` (CSV), `:===` (DSV), and `!===` (nested) shorthand
-    /// delimiters are not yet recognized.
+    /// **NOTE:** The `,===` (CSV) and `:===` (DSV) shorthand delimiters are not
+    /// yet recognized.
     pub(crate) fn is_table_delimiter(line: &Span<'src>) -> bool {
         let data = line.data();
-        // `len() >= 4` plus the leading `|` guarantees `rest` holds at least three
-        // bytes, so the closure only needs to confirm they are all `=`.
+        // `len() >= 4` plus the leading `|`/`!` guarantees `rest` holds at least
+        // three bytes, so the closure only needs to confirm they are all `=`.
         data.len() >= 4
-            && data.starts_with('|')
+            && (data.starts_with('|') || data.starts_with('!'))
             && data
                 .get(1..)
                 .is_some_and(|rest| rest.bytes().all(|b| b == b'='))
@@ -133,6 +146,14 @@ impl<'src> TableBlock<'src> {
 
         let inside = delimiter.after.trim_remainder(closing_delimiter);
 
+        // The cell separator partitions each row into cells. It defaults to the
+        // vertical bar (`|`), except inside an AsciiDoc table cell — a nested,
+        // standalone document — where it defaults to the exclamation mark (`!`)
+        // so a nested table is distinguished from the `|`-separated table that
+        // encloses it. The `separator` attribute overrides the default with an
+        // explicit character; an empty `separator` falls back to the default.
+        let separator = resolve_separator(metadata, parser);
+
         // Determine the number of columns, either from the `cols` attribute or
         // implicitly from the number of cells in the first non-empty line.
         let columns: Vec<TableColumn> = metadata
@@ -146,10 +167,11 @@ impl<'src> TableBlock<'src> {
         // the first non-empty line: a cell that spans columns (`<n>+`) counts as
         // `<n>` slots, not one, and a cell duplicated `<n>` times (`<n>*`) counts
         // as `<n>` single-column slots (one per clone).
-        let first_line_cells: usize = scan_cells(inside.discard_empty_lines().take_line().item)
-            .iter()
-            .map(|c| c.spec.colspan.max(1) * c.spec.repeat.min(MAX_DUPLICATION_FACTOR))
-            .sum();
+        let first_line_cells: usize =
+            scan_cells(inside.discard_empty_lines().take_line().item, separator)
+                .iter()
+                .map(|c| c.spec.colspan.max(1) * c.spec.repeat.min(MAX_DUPLICATION_FACTOR))
+                .sum();
 
         let ncols = if columns.is_empty() {
             first_line_cells
@@ -276,7 +298,7 @@ impl<'src> TableBlock<'src> {
         // grid walk, so each clone occupies its own column slot exactly like an
         // ordinary cell. A duplication factor of zero drops the cell entirely.
         let mut warnings: Vec<Warning<'src>> = vec![];
-        let raw_cells = expand_duplicates(scan_cells(inside));
+        let raw_cells = expand_duplicates(scan_cells(inside, separator));
 
         // A table can never have more rows than it has cells, so a row span is
         // clamped to the cell count for the `active_rowspans` bookkeeping below: a
@@ -362,6 +384,7 @@ impl<'src> TableBlock<'src> {
                     raw,
                     &column,
                     is_header,
+                    separator,
                     parser,
                     &mut warnings,
                 ));
@@ -919,6 +942,34 @@ fn resolve_table_attribute<B: TableAttributeValue>(
     }
 }
 
+/// Resolve the cell separator byte for a table.
+///
+/// The separator defaults to the vertical bar (`|`), except inside an AsciiDoc
+/// table cell — a nested, standalone document — where it defaults to the
+/// exclamation mark (`!`), so a nested table is distinguished from the
+/// `|`-separated table that encloses it. An explicit `separator` attribute on
+/// the table overrides the default with its first byte; an empty `separator`
+/// value (e.g. `[separator=]`) falls back to the default. A non-ASCII first
+/// character is ignored (the byte-oriented cell scanner only recognizes a
+/// single-byte separator), so it too falls back to the default.
+fn resolve_separator(metadata: &BlockMetadata<'_>, parser: &Parser) -> u8 {
+    let default = if parser.nested_document_depth > 0 {
+        b'!'
+    } else {
+        b'|'
+    };
+
+    metadata
+        .attrlist
+        .as_ref()
+        .and_then(|a| a.named_attribute("separator"))
+        .map(|attr| attr.value())
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.chars().next())
+        .filter(char::is_ascii)
+        .map_or(default, |c| c as u8)
+}
+
 /// A row of cells in a [`TableBlock`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableRow<'src> {
@@ -958,8 +1009,9 @@ impl<'src> TableCell<'src> {
     ///
     /// Leading and trailing whitespace is always stripped. For every style but
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) the cell holds inline
-    /// [`Content`](TableCellContent::Simple): escaped cell separators (`\|`)
-    /// are unescaped and substitutions are applied — the verbatim group for
+    /// [`Content`](TableCellContent::Simple): escaped cell separators (the
+    /// table's `separator` character preceded by a backslash, e.g. `\|`) are
+    /// unescaped and substitutions are applied — the verbatim group for
     /// [`Literal`](ColumnStyle::Literal), the normal group otherwise. An
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) cell instead parses its content as a
     /// nested sequence of [blocks](TableCellContent::AsciiDoc).
@@ -967,6 +1019,7 @@ impl<'src> TableCell<'src> {
         raw: RawCell<'src>,
         column: &TableColumn,
         is_header: bool,
+        separator: u8,
         parser: &mut Parser,
         warnings: &mut Vec<Warning<'src>>,
     ) -> Self {
@@ -1015,7 +1068,14 @@ impl<'src> TableCell<'src> {
                 }
             }
 
+            // Mark that we are inside an AsciiDoc cell (a nested document) for the
+            // duration of the cell, so a table found within defaults its cell
+            // separator to `!` rather than `|` (matching Asciidoctor's
+            // `Document#nested?`). The depth is restored afterward so the marker
+            // is scoped to the cell and nests correctly.
+            parser.nested_document_depth += 1;
             let mut maw = parse_blocks_until(trimmed, |_| false, parser);
+            parser.nested_document_depth -= 1;
 
             parser.locked_attribute_names = saved_locks;
             parser.attribute_values = saved_attributes;
@@ -1024,8 +1084,16 @@ impl<'src> TableCell<'src> {
         } else {
             let data = trimmed.data();
 
-            let mut content = if data.contains("\\|") {
-                Content::from_filtered(trimmed, data.replace("\\|", "|"))
+            // An escaped cell separator (a backslash in front of the table's
+            // separator character, e.g. `\|` or `\!`) is unescaped to the bare
+            // separator. Only the active separator is unescaped, so a `\|` in a
+            // `!`-separated table is left untouched.
+            let escaped = format!("\\{}", separator as char);
+            let mut content = if data.contains(&escaped) {
+                Content::from_filtered(
+                    trimmed,
+                    data.replace(&escaped, &(separator as char).to_string()),
+                )
             } else {
                 Content::from(trimmed)
             };
@@ -1356,17 +1424,20 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// Scan a region for PSV cell boundaries, returning the [specifier](CellSpec)
 /// and raw (untrimmed) content span of each cell.
 ///
-/// A cell boundary is a vertical bar (`|`) that appears at the start of a line
-/// or is preceded by whitespace, optionally with a [cell specifier](CellSpec)
-/// (e.g. `^`, `2+`, `.>`) directly in front of the `|`. The token immediately
-/// preceding a `|` is taken to be a specifier when it parses as one (see
-/// [`parse_cell_spec`]); a token that doesn't parse as a specifier means the
-/// `|` is not a cell boundary. Content before the first boundary is ignored.
+/// A cell boundary is the table's `separator` byte (the vertical bar (`|`) by
+/// default, or the exclamation mark (`!`) for a nested table) that appears at
+/// the start of a line or is preceded by whitespace, optionally with a
+/// [cell specifier](CellSpec) (e.g. `^`, `2+`, `.>`) directly in front of the
+/// separator. The token immediately preceding a separator is taken to be a
+/// specifier when it parses as one (see [`parse_cell_spec`]); a token that
+/// doesn't parse as a specifier means the separator is not a cell boundary.
+/// Content before the first boundary is ignored.
 ///
-/// An escaped separator (`\|`) is preceded by a backslash, which is not a valid
-/// specifier, so the `|` already fails the boundary test and needs no special
-/// handling here; the backslash is stripped later in [`TableCell::parse`].
-fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
+/// An escaped separator (e.g. `\|`) is preceded by a backslash, which is not a
+/// valid specifier, so the separator already fails the boundary test and needs
+/// no special handling here; the backslash is stripped later in
+/// [`TableCell::parse`].
+fn scan_cells(region: Span<'_>, separator: u8) -> Vec<RawCell<'_>> {
     let data = region.data();
     let bytes = data.as_bytes();
     let len = bytes.len();
@@ -1378,13 +1449,13 @@ fn scan_cells(region: Span<'_>) -> Vec<RawCell<'_>> {
     let mut i = 0;
 
     while i < len {
-        if bytes.get(i).copied() == Some(b'|') {
-            // Walk back to the start of the token directly preceding this `|`.
-            // The token (a possible cell specifier) runs back to the previous
-            // whitespace, tab, or newline, or to the start of the region; either
-            // way the token is anchored at a line start or after whitespace, as a
-            // cell boundary requires. (When `tok_start == i` the token is empty
-            // and the separator is plain.)
+        if bytes.get(i).copied() == Some(separator) {
+            // Walk back to the start of the token directly preceding this
+            // separator. The token (a possible cell specifier) runs back to the
+            // previous whitespace, tab, or newline, or to the start of the
+            // region; either way the token is anchored at a line start or after
+            // whitespace, as a cell boundary requires. (When `tok_start == i`
+            // the token is empty and the separator is plain.)
             let mut tok_start = i;
             while tok_start > 0
                 && !matches!(

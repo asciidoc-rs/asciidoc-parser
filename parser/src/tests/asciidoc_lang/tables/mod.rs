@@ -13,6 +13,7 @@ mod customize_title_label;
 mod duplicate_cells;
 mod format_cell_content;
 mod format_column_content;
+mod nested;
 mod orientation;
 mod span_cells;
 mod striping;
