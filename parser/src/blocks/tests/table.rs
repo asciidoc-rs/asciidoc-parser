@@ -140,6 +140,64 @@ fn column_multiplier() {
 }
 
 #[test]
+fn table_width_attribute() {
+    // The `width` attribute reports an integer percentage; the trailing `%` is
+    // optional.
+    assert_eq!(parse_table("[width=75%]\n|===\n|a\n|===").width(), Some(75));
+    assert_eq!(parse_table("[width=75]\n|===\n|a\n|===").width(), Some(75));
+
+    // No `width` attribute means no fixed width.
+    assert_eq!(parse_table("|===\n|a\n|===").width(), None);
+
+    // Values outside the 1-to-100 range, or non-integer values, are ignored.
+    assert_eq!(parse_table("[width=0]\n|===\n|a\n|===").width(), None);
+    assert_eq!(parse_table("[width=101]\n|===\n|a\n|===").width(), None);
+    assert_eq!(parse_table("[width=half]\n|===\n|a\n|===").width(), None);
+}
+
+#[test]
+fn autowidth_option_makes_columns_autowidth() {
+    // The shorthand `%autowidth` and the formal `options="autowidth"` both set
+    // the table to autowidth, and every column inherits the setting.
+    for source in [
+        "[%autowidth]\n|===\n|a |b\n|===",
+        "[options=\"autowidth\"]\n|===\n|a |b\n|===",
+    ] {
+        let table = parse_table(source);
+        assert!(table.is_autowidth());
+        assert!(table.columns().iter().all(|c| c.is_autowidth()));
+    }
+
+    // A column that inherits autowidth from the table's `autowidth` option
+    // still becomes autowidth, but retains the explicit width from its
+    // specifier (the width is simply not used to size an autowidth column).
+    let table = parse_table("[%autowidth,cols=\"2,1\"]\n|===\n|a |b\n|===");
+    assert!(table.columns().iter().all(|c| c.is_autowidth()));
+    let widths: Vec<usize> = table.columns().iter().map(|c| c.width()).collect();
+    assert_eq!(widths, vec![2, 1]);
+
+    // Without the option, the table and its columns keep proportional widths.
+    let table = parse_table("|===\n|a |b\n|===");
+    assert!(!table.is_autowidth());
+    assert!(table.columns().iter().all(|c| !c.is_autowidth()));
+}
+
+#[test]
+fn autowidth_column_via_tilde() {
+    // The `~` width value marks only that column as autowidth, leaving the
+    // others at their explicit width; the table itself is not autowidth.
+    let table = parse_table("[cols=\"25h,~,~\"]\n|===\n|a |b |c\n|===");
+
+    let columns: Vec<(usize, bool)> = table
+        .columns()
+        .iter()
+        .map(|c| (c.width(), c.is_autowidth()))
+        .collect();
+    assert_eq!(columns, vec![(25, false), (1, true), (1, true)]);
+    assert!(!table.is_autowidth());
+}
+
+#[test]
 fn cell_content_is_substituted() {
     // Cell content flows through the normal substitution pipeline.
     let table = parse_table("|===\n|*bold* and _italic_\n|===");
