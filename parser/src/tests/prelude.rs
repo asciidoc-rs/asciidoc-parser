@@ -7,7 +7,8 @@ pub(crate) use std::collections::HashMap;
 pub(crate) use crate::{
     HasSpan, Parser,
     blocks::{
-        ColumnStyle, HorizontalAlignment, IsBlock, SectionType, SimpleBlockStyle, VerticalAlignment,
+        ColumnStyle, Frame, Grid, HorizontalAlignment, IsBlock, SectionType, SimpleBlockStyle,
+        VerticalAlignment,
     },
     content::SubstitutionGroup,
     parser::ModificationContext,
