@@ -111,8 +111,10 @@ AsciiDoc also supports comma-separated values (CSV), tab-separated values (TSV),
     );
 }
 
-non_normative!(
-    r#"
+#[test]
+fn escape_the_cell_separator() {
+    verifies!(
+        r#"
 == Escape the cell separator
 
 The parser scans for the cell separator to partition cells _before_ it processes the cell text.
@@ -147,7 +149,25 @@ This table will render as follows:
 |===
 
 "#
-);
+    );
+
+    // The backslash-escaped separator (`\|`) is unescaped to a bare `|`, and the
+    // leading backslash is removed from the rendered cell.
+    let table = parse_table(
+        "[cols=2*]\n|===\n|The default separator in PSV tables is the \\| character.\n|The \\| character is often referred to as a \"`pipe`\".\n|===",
+    );
+    assert_eq!(table.body_rows().len(), 1);
+    let cells: Vec<String> = table.body_rows()[0]
+        .cells()
+        .iter()
+        .map(simple_text)
+        .collect();
+    assert_eq!(
+        cells[0],
+        "The default separator in PSV tables is the | character."
+    );
+    assert!(cells[1].contains("The | character"), "got: {:?}", cells[1]);
+}
 
 #[test]
 fn escape_with_backslash() {
@@ -190,8 +210,10 @@ This approach produces the same result as the previous example.
     assert!(cell.contains("the | character"), "got: {cell:?}");
 }
 
-non_normative!(
-    r#"
+#[test]
+fn substitute_the_vbar_reference() {
+    verifies!(
+        r#"
 [source]
 ----
 [cols=2*]
@@ -206,7 +228,24 @@ There are also times when you can't or don't want to modify the cell content (pe
 To address these cases, AsciiDoc allows you to override the cell separator.
 
 "#
-);
+    );
+
+    // The `{vbar}` attribute reference renders as a bare `|`, producing the same
+    // result as the backslash escape.
+    let table = parse_table(
+        "[cols=2*]\n|===\n|The default separator in PSV tables is the {vbar} character.\n|The {vbar} character is often referred to as a \"`pipe`\".\n|===",
+    );
+    let cells: Vec<String> = table.body_rows()[0]
+        .cells()
+        .iter()
+        .map(simple_text)
+        .collect();
+    assert_eq!(
+        cells[0],
+        "The default separator in PSV tables is the | character."
+    );
+    assert!(cells[1].contains("The | character"), "got: {:?}", cells[1]);
+}
 
 #[test]
 fn override_the_cell_separator() {
@@ -233,8 +272,10 @@ A good candidate is the broken bar, or `¦`.
     );
 }
 
-non_normative!(
-    r#"
+#[test]
+fn custom_separator_example() {
+    verifies!(
+        r#"
 Here's the previous example rewritten using a custom separator.
 
 [source]
@@ -253,7 +294,25 @@ You can safely use the original cell separator in the cell content and not worry
 == Delimiter-separated values
 
 "#
-);
+    );
+
+    // With the separator overridden to the broken bar (`¦`), the vertical bars in
+    // the cell content are ordinary text and need no escaping.
+    let table = parse_table(
+        "[cols=2*,separator=¦]\n|===\n¦The default separator in PSV tables is the | character.\n¦The | character is often referred to as a \"`pipe`\".\n|===",
+    );
+    assert_eq!(table.body_rows().len(), 1);
+    let cells: Vec<String> = table.body_rows()[0]
+        .cells()
+        .iter()
+        .map(simple_text)
+        .collect();
+    assert_eq!(
+        cells[0],
+        "The default separator in PSV tables is the | character."
+    );
+    assert!(cells[1].contains("The | character"), "got: {:?}", cells[1]);
+}
 
 #[test]
 fn delimiter_between_values() {
@@ -332,8 +391,10 @@ When the `format` attribute is set to `csv`, the default data separator is a com
     assert_eq!(table.body_rows().len(), 2);
 }
 
-non_normative!(
-    r#"
+#[test]
+fn csv_example() {
+    verifies!(
+        r#"
 [source]
 ----
 include::example$data.adoc[tag=csv]
@@ -355,7 +416,36 @@ You can do so using the xref:directives:include.adoc[include directive] between 
 ----
 
 "#
-);
+    );
+
+    // `include::example$data.adoc[tag=csv]` expands to this CSV table.
+    let table = parse_table(
+        "[%header,format=csv]\n|===\nArtist,Track,Genre\nBaauer,Harlem Shake,Hip Hop\nThe Lumineers,Ho Hey,Folk Rock\n|===",
+    );
+    assert_eq!(table.data_format(), DataFormat::Csv);
+    let header: Vec<String> = table
+        .header_row()
+        .unwrap()
+        .cells()
+        .iter()
+        .map(simple_text)
+        .collect();
+    assert_eq!(header, ["Artist", "Track", "Genre"]);
+    assert_eq!(
+        all_texts(&table),
+        [
+            "Artist",
+            "Track",
+            "Genre",
+            "Baauer",
+            "Harlem Shake",
+            "Hip Hop",
+            "The Lumineers",
+            "Ho Hey",
+            "Folk Rock"
+        ]
+    );
+}
 
 #[test]
 fn tsv_format() {
@@ -393,8 +483,10 @@ When the `format` attribute is set to `dsv`, the default data separator is a col
     assert_eq!(table.body_rows().len(), 2);
 }
 
-non_normative!(
-    r#"
+#[test]
+fn dsv_example() {
+    verifies!(
+        r#"
 [source]
 ----
 include::example$data.adoc[tag=dsv]
@@ -405,7 +497,28 @@ include::example$data.adoc[tag=dsv]
 include::example$data.adoc[tag=dsv]
 
 "#
-);
+    );
+
+    // `include::example$data.adoc[tag=dsv]` expands to this DSV table.
+    let table = parse_table(
+        "[%header,format=dsv]\n|===\nArtist:Track:Genre\nRobyn:Indestructible:Dance\nThe Piano Guys:Code Name Vivaldi:Classical\n|===",
+    );
+    assert_eq!(table.data_format(), DataFormat::Dsv);
+    assert_eq!(
+        all_texts(&table),
+        [
+            "Artist",
+            "Track",
+            "Genre",
+            "Robyn",
+            "Indestructible",
+            "Dance",
+            "The Piano Guys",
+            "Code Name Vivaldi",
+            "Classical"
+        ]
+    );
+}
 
 non_normative!(
     r#"
@@ -656,8 +769,10 @@ To make a CSV table, you can use `,===` as the table block delimiter:
     assert_eq!(table.columns().len(), 3);
 }
 
-non_normative!(
-    r#"
+#[test]
+fn shorthand_csv_example() {
+    verifies!(
+        r#"
 [source]
 ----
 include::example$data.adoc[tag=s-csv]
@@ -668,7 +783,24 @@ include::example$data.adoc[tag=s-csv]
 include::example$data.adoc[tag=s-csv]
 
 "#
-);
+    );
+
+    // `include::example$data.adoc[tag=s-csv]` expands to this shorthand CSV table.
+    let table = parse_table(",===\nArtist,Track,Genre\n\nBaauer,Harlem Shake,Hip Hop\n,===");
+    assert_eq!(table.data_format(), DataFormat::Csv);
+    assert!(table.header_row().is_some());
+    assert_eq!(
+        all_texts(&table),
+        [
+            "Artist",
+            "Track",
+            "Genre",
+            "Baauer",
+            "Harlem Shake",
+            "Hip Hop"
+        ]
+    );
+}
 
 #[test]
 fn shorthand_dsv_delimiter() {
@@ -686,8 +818,10 @@ To make a DSV table, you can use `:===` as the table block delimiter:
     assert_eq!(table.columns().len(), 3);
 }
 
-non_normative!(
-    r#"
+#[test]
+fn shorthand_dsv_example() {
+    verifies!(
+        r#"
 [source]
 ----
 include::example$data.adoc[tag=s-dsv]
@@ -698,7 +832,24 @@ include::example$data.adoc[tag=s-dsv]
 include::example$data.adoc[tag=s-dsv]
 
 "#
-);
+    );
+
+    // `include::example$data.adoc[tag=s-dsv]` expands to this shorthand DSV table.
+    let table = parse_table(":===\nArtist:Track:Genre\n\nRobyn:Indestructible:Dance\n:===");
+    assert_eq!(table.data_format(), DataFormat::Dsv);
+    assert!(table.header_row().is_some());
+    assert_eq!(
+        all_texts(&table),
+        [
+            "Artist",
+            "Track",
+            "Genre",
+            "Robyn",
+            "Indestructible",
+            "Dance"
+        ]
+    );
+}
 
 #[test]
 fn shorthand_implies_format() {
@@ -774,8 +925,10 @@ Instead, you can apply cell formatting to all cells in a given column using the 
     ));
 }
 
-non_normative!(
-    r#"
+#[test]
+fn data_formatting_example() {
+    verifies!(
+        r#"
 [source]
 ----
 [format=csv,cols="1h,1a"]
@@ -786,7 +939,20 @@ Forest,image::forest.jpg[]
 ----
 
 "#
-);
+    );
+
+    // The `cols="1h,1a"` example applies a header style to the first column and
+    // the AsciiDoc style to the second.
+    let table = parse_table(
+        "[format=csv,cols=\"1h,1a\"]\n|===\nSky,image::sky.jpg[]\nForest,image::forest.jpg[]\n|===",
+    );
+    assert_eq!(table.columns()[0].style(), ColumnStyle::Header);
+    assert_eq!(table.columns()[1].style(), ColumnStyle::AsciiDoc);
+    assert!(matches!(
+        table.body_rows()[0].cells()[1].content(),
+        TableCellContent::AsciiDoc(_)
+    ));
+}
 
 #[test]
 fn data_tables_do_not_support_spans() {
