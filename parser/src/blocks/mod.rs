@@ -66,7 +66,7 @@ pub use simple::{SimpleBlock, SimpleBlockStyle};
 
 mod table;
 pub use table::{
-    ColumnStyle, Frame, Grid, HorizontalAlignment, Stripes, TableBlock, TableCell,
+    ColumnStyle, DataFormat, Frame, Grid, HorizontalAlignment, Stripes, TableBlock, TableCell,
     TableCellContent, TableColumn, TableRow, VerticalAlignment,
 };
 
