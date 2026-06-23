@@ -59,6 +59,11 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// table width, the `autowidth` option ([`is_autowidth`](Self::is_autowidth))
 /// sizes the table and its columns to their content, and an individual column
 /// can be made [autowidth](TableColumn::is_autowidth) with the `~` width value.
+///
+/// Table borders are supported: the [`frame`](Self::frame) attribute controls
+/// the border around the table and the [`grid`](Self::grid) attribute controls
+/// the borders between cells. Each falls back to a document-level default
+/// (`table-frame` / `table-grid`) and then to `all`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
@@ -69,6 +74,8 @@ pub struct TableBlock<'src> {
     title_source: Option<Span<'src>>,
     title: Option<String>,
     caption: Option<String>,
+    frame: Frame,
+    grid: Grid,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -231,6 +238,15 @@ impl<'src> TableBlock<'src> {
             None
         };
 
+        // The `frame` and `grid` attributes control the table's borders. Each
+        // defaults to `all`; the default can be changed for the whole document
+        // with the `table-frame` / `table-grid` attribute, and an explicit
+        // attribute on the table overrides both. The value is resolved here
+        // (while `parser` is borrowed only immutably) and stored on the block so
+        // the accessors need no further document lookup.
+        let frame = resolve_border::<Frame>(metadata, parser, "frame", "table-frame");
+        let grid = resolve_border::<Grid>(metadata, parser, "grid", "table-grid");
+
         // Scan every cell in the table, in document order, then partition into
         // rows by walking the grid: a cell's span (colspan/rowspan) governs how
         // many column slots it occupies, so a column-spanning cell fills its row
@@ -376,6 +392,8 @@ impl<'src> TableBlock<'src> {
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
                     caption,
+                    frame,
+                    grid,
                     anchor: metadata.anchor,
                     anchor_reftext: metadata.anchor_reftext,
                     attrlist: metadata.attrlist.clone(),
@@ -436,6 +454,27 @@ impl<'src> TableBlock<'src> {
         self.attrlist
             .as_ref()
             .is_some_and(|a| a.has_option("autowidth"))
+    }
+
+    /// Returns the [`Frame`] that controls the border drawn around this table.
+    ///
+    /// The frame comes from the `frame` attribute on the table, which accepts
+    /// `all`, `ends`, `sides`, or `none`. When the attribute is absent the
+    /// value is taken from the `table-frame` document attribute, and when
+    /// that too is absent it defaults to [`Frame::All`].
+    pub fn frame(&self) -> Frame {
+        self.frame
+    }
+
+    /// Returns the [`Grid`] that controls the borders drawn between this
+    /// table's cells.
+    ///
+    /// The grid comes from the `grid` attribute on the table, which accepts
+    /// `all`, `rows`, `cols`, or `none`. When the attribute is absent the value
+    /// is taken from the `table-grid` document attribute, and when that too is
+    /// absent it defaults to [`Grid::All`].
+    pub fn grid(&self) -> Grid {
+        self.grid
     }
 
     /// Returns the header row of this table, if one was declared.
@@ -690,6 +729,118 @@ pub enum VerticalAlignment {
     /// Content is aligned to the bottom of the column's cells (the `.>`
     /// operator).
     Bottom,
+}
+
+/// The border drawn around a [`TableBlock`].
+///
+/// The frame is set with the `frame` attribute on the table (or, document-wide,
+/// the `table-frame` attribute). The default is [`All`](Self::All).
+///
+/// An unrecognized value falls back to [`All`](Self::All). (Asciidoctor instead
+/// passes an unrecognized value straight through to a CSS class, which the
+/// stylesheet ignores; this parser models only the four documented values.)
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Frame {
+    /// A border is drawn on every side of the table (the `all` value). This is
+    /// the default frame.
+    #[default]
+    All,
+
+    /// A border is drawn on the top and bottom of the table (the `ends` value).
+    ///
+    /// The `topbot` value recognized by older versions of AsciiDoc is accepted
+    /// as a synonym.
+    Ends,
+
+    /// A border is drawn on the left and right sides of the table (the `sides`
+    /// value).
+    Sides,
+
+    /// No border is drawn around the table (the `none` value).
+    None,
+}
+
+/// The borders drawn between the cells of a [`TableBlock`].
+///
+/// The grid is set with the `grid` attribute on the table (or, document-wide,
+/// the `table-grid` attribute). The default is [`All`](Self::All).
+///
+/// An unrecognized value falls back to [`All`](Self::All). (Asciidoctor instead
+/// passes an unrecognized value straight through to a CSS class, which the
+/// stylesheet ignores; this parser models only the four documented values.)
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Grid {
+    /// A border is drawn between all cells (the `all` value). This is the
+    /// default grid.
+    #[default]
+    All,
+
+    /// A border is drawn between the rows of the table (the `rows` value).
+    Rows,
+
+    /// A border is drawn between the columns of the table (the `cols` value).
+    Cols,
+
+    /// No border is drawn between the cells (the `none` value).
+    None,
+}
+
+/// A table border value ([`Frame`] or [`Grid`]) that can be parsed from an
+/// attribute value and has a default of `all`.
+trait BorderValue: Copy + Default {
+    /// Parse the value of a `frame` / `grid` attribute (or its document-level
+    /// `table-frame` / `table-grid` counterpart). An unrecognized value yields
+    /// the default.
+    fn from_attr_value(value: &str) -> Self;
+}
+
+impl BorderValue for Frame {
+    fn from_attr_value(value: &str) -> Self {
+        match value.trim() {
+            // `topbot` is the older synonym for `ends`.
+            "ends" | "topbot" => Frame::Ends,
+            "sides" => Frame::Sides,
+            "none" => Frame::None,
+            // `all` and any unrecognized value.
+            _ => Frame::All,
+        }
+    }
+}
+
+impl BorderValue for Grid {
+    fn from_attr_value(value: &str) -> Self {
+        match value.trim() {
+            "rows" => Grid::Rows,
+            "cols" => Grid::Cols,
+            "none" => Grid::None,
+            // `all` and any unrecognized value.
+            _ => Grid::All,
+        }
+    }
+}
+
+/// Resolve a table border attribute ([`Frame`] or [`Grid`]).
+///
+/// An explicit attribute on the table (`attr_name`) wins; otherwise the
+/// document-level default (`doc_attr_name`) is consulted; otherwise the value
+/// defaults to `all`.
+fn resolve_border<B: BorderValue>(
+    metadata: &BlockMetadata<'_>,
+    parser: &Parser,
+    attr_name: &str,
+    doc_attr_name: &str,
+) -> B {
+    if let Some(attr) = metadata
+        .attrlist
+        .as_ref()
+        .and_then(|a| a.named_attribute(attr_name))
+    {
+        B::from_attr_value(attr.value())
+    } else if let InterpretedValue::Value(value) = parser.attribute_value(doc_attr_name) {
+        B::from_attr_value(&value)
+    } else {
+        B::default()
+    }
 }
 
 /// A row of cells in a [`TableBlock`].

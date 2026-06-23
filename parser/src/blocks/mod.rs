@@ -66,8 +66,8 @@ pub use simple::{SimpleBlock, SimpleBlockStyle};
 
 mod table;
 pub use table::{
-    ColumnStyle, HorizontalAlignment, TableBlock, TableCell, TableCellContent, TableColumn,
-    TableRow, VerticalAlignment,
+    ColumnStyle, Frame, Grid, HorizontalAlignment, TableBlock, TableCell, TableCellContent,
+    TableColumn, TableRow, VerticalAlignment,
 };
 
 #[cfg(test)]
