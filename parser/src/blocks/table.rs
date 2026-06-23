@@ -525,12 +525,29 @@ pub struct TableColumn {
 }
 
 impl TableColumn {
-    /// Returns the proportional width of this column relative to the other
-    /// columns in the table.
+    /// Returns the width of this column relative to the other columns in the
+    /// table. The default width is `1`.
     ///
-    /// When the column is [autowidth](Self::is_autowidth), this proportional
-    /// width is not used to size the column (the column is sized to its
-    /// content instead) and reports the default value of `1`.
+    /// This value carries two different meanings depending on the table, and a
+    /// caller that resolves columns to final sizes must check which applies:
+    ///
+    /// * In an ordinary table (no column is [autowidth](Self::is_autowidth)),
+    ///   the width is a *proportional* ratio. Each column's share of the table
+    ///   is its width divided by the sum of all the column widths, so
+    ///   `[cols="1,2,3"]` yields shares of 1/6, 2/6, and 3/6.
+    /// * When at least one column in the table is autowidth (its specifier uses
+    ///   the special width value `~`), the AsciiDoc specification instead reads
+    ///   these widths as literal *percentages* (100-based): in
+    ///   `[cols="25,~,~"]` the first column is 25% wide and the `~` columns are
+    ///   sized to their content.
+    ///
+    /// The two cases are distinguished by whether any column in the table is
+    /// autowidth, which the caller can test with
+    /// `table.columns().iter().any(TableColumn::is_autowidth)`.
+    ///
+    /// When this column itself is autowidth, this width is not used to size the
+    /// column (the column is sized to its content instead) and reports the
+    /// default value of `1`.
     pub fn width(&self) -> usize {
         self.width
     }
