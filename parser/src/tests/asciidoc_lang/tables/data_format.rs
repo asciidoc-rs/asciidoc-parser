@@ -680,8 +680,10 @@ Each data format has a default separator associated with it (csv = comma, tsv = 
     assert_eq!(all_texts(&table), ["a", "b", "c"]);
 }
 
-non_normative!(
-    r#"
+#[test]
+fn custom_separator_dsv_example() {
+    verifies!(
+        r#"
 Here's an example of a DSV table that uses a custom separator character (i.e., delimiter):
 
 .A DSV table with a custom separator
@@ -695,7 +697,14 @@ d;e;f
 ----
 
 "#
-);
+    );
+
+    // The DSV example with a custom `;` separator parses into two three-cell rows.
+    let table = parse_table("[format=dsv,separator=;]\n|===\na;b;c\nd;e;f\n|===");
+    assert_eq!(table.data_format(), DataFormat::Dsv);
+    assert_eq!(table.columns().len(), 3);
+    assert_eq!(all_texts(&table), ["a", "b", "c", "d", "e", "f"]);
+}
 
 #[test]
 fn tsv_via_csv_and_tab_separator() {
