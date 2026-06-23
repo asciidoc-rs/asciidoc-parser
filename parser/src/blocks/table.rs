@@ -25,11 +25,14 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// A table is a delimited block that arranges content into a grid of rows and
 /// columns.
 ///
-/// A table is introduced by a table delimiter (`|===`) and closed by a matching
-/// delimiter. Cells are separated using prefix-separated value (PSV) syntax: a
-/// vertical bar (`|`) at the start of a line or preceded by whitespace begins a
-/// new cell. Cells flow, in document order, into rows whose length is fixed by
-/// the number of columns.
+/// A table is introduced by a table delimiter (`|===`, or `!===` for a nested
+/// table) and closed by a matching delimiter. Cells are separated using
+/// prefix-separated value (PSV) syntax: the table's cell separator — a vertical
+/// bar (`|`) by default — at the start of a line or preceded by whitespace
+/// begins a new cell. Cells flow, in document order, into rows whose length is
+/// fixed by the number of columns. (The separator defaults to `!` inside a
+/// nested table and can be overridden with the `separator` attribute; see
+/// below.)
 ///
 /// The number of columns is determined either by the `cols` attribute or,
 /// implicitly, by the number of cells found in the first non-empty line after
