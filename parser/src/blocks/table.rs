@@ -1383,7 +1383,7 @@ fn squeeze_quotes(text: &str) -> String {
 /// Note: the escaped-pair collapse (`replace("\"\"", "")`) runs before the
 /// start/end check, so `"""` collapses to a single `"` and is reported
 /// *closed*. Strict RFC 4180 would read `"""` as an unclosed field (open quote
-/// + escaped `""` + missing close); this matches Asciidoctor's
+/// plus escaped `""` + missing close); this matches Asciidoctor's
 /// `buffer_has_unclosed_quotes?` instead, so the divergence is intentional.
 fn has_unclosed_quotes(buffer: &str) -> bool {
     let record = buffer.trim();
