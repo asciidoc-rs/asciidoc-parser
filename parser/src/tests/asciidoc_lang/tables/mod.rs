@@ -18,5 +18,6 @@ mod nested;
 mod orientation;
 mod span_cells;
 mod striping;
+mod table_ref;
 mod turn_off_title_label;
 mod width;
