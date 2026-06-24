@@ -113,7 +113,9 @@ d|specifiers
     assert_eq!(table.columns()[2].width(), 1);
     assert_eq!(table.columns()[2].style(), ColumnStyle::Monospace);
     assert_eq!(table.columns()[3].width(), 2);
+    assert_eq!(table.columns()[3].style(), ColumnStyle::Default);
     assert_eq!(table.columns()[4].width(), 2);
+    assert_eq!(table.columns()[4].style(), ColumnStyle::Default);
 }
 
 #[test]
@@ -200,11 +202,23 @@ _Ideally a character not found in the cell content._
     assert_eq!(simple_text(&inner.body_rows()[0].cells()[1]), "y");
 
     // A user-defined separator can be any single character (here `%`), after
-    // which the original cell separator is ordinary text.
+    // which the original cell separator (`|`) is ordinary text within a cell. As
+    // in Asciidoctor's PSV, the separator only begins a new cell when it follows
+    // whitespace, so that boundary whitespace is necessarily trimmed from the
+    // preceding cell; the explicit assertion messages make a trimming regression
+    // fail loudly rather than silently.
     let table = parse_table("[separator=%]\n|===\n%a | b %c\n|===");
     assert_eq!(table.body_rows()[0].cells().len(), 2);
-    assert_eq!(simple_text(&table.body_rows()[0].cells()[0]), "a | b");
-    assert_eq!(simple_text(&table.body_rows()[0].cells()[1]), "c");
+    assert_eq!(
+        simple_text(&table.body_rows()[0].cells()[0]),
+        "a | b",
+        "the literal `|` is kept and the boundary whitespace before `%` is trimmed"
+    );
+    assert_eq!(
+        simple_text(&table.body_rows()[0].cells()[1]),
+        "c",
+        "content after the separator forms the next cell"
+    );
 }
 
 #[test]
