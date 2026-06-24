@@ -10,6 +10,7 @@ mod assign_a_role;
 mod borders;
 mod build_a_basic_table;
 mod customize_title_label;
+mod data_format;
 mod duplicate_cells;
 mod format_cell_content;
 mod format_column_content;

@@ -4,7 +4,7 @@
 use crate::{
     HasSpan, Parser, Span,
     blocks::{
-        Block, ColumnStyle, ContentModel, HorizontalAlignment, IsBlock, TableBlock,
+        Block, ColumnStyle, ContentModel, DataFormat, HorizontalAlignment, IsBlock, TableBlock,
         TableCellContent, VerticalAlignment,
     },
     content::SubstitutionGroup,
@@ -962,4 +962,94 @@ fn huge_duplication_factor_does_not_overallocate() {
     let total: usize = table.body_rows().iter().map(|r| r.cells().len()).sum();
     assert_eq!(total, 1_000);
     assert_eq!(row_text(&table.body_rows()[0])[0], "x".to_string());
+}
+
+// The `format` attribute selects the data format, and an unrecognized value
+// falls back to PSV. (Exercises `resolve_data_format`, including its
+// unrecognized-value arm.)
+#[test]
+fn data_format_attribute_recognizes_each_value() {
+    assert_eq!(
+        parse_table("|===\n|a |b\n|===").data_format(),
+        DataFormat::Psv
+    );
+    assert_eq!(
+        parse_table("[format=psv]\n|===\n|a |b\n|===").data_format(),
+        DataFormat::Psv
+    );
+    assert_eq!(
+        parse_table("[format=csv]\n|===\na,b\n|===").data_format(),
+        DataFormat::Csv
+    );
+    assert_eq!(
+        parse_table("[format=tsv]\n|===\na\tb\n|===").data_format(),
+        DataFormat::Tsv
+    );
+    assert_eq!(
+        parse_table("[format=dsv]\n|===\na:b\n|===").data_format(),
+        DataFormat::Dsv
+    );
+
+    // An unrecognized format value falls back to PSV.
+    assert_eq!(
+        parse_table("[format=bogus]\n|===\n|a |b\n|===").data_format(),
+        DataFormat::Psv
+    );
+}
+
+// A CSV value whose opening double quote is never closed keeps the quote and is
+// treated as literal text, matching Asciidoctor
+// (`buffer_has_unclosed_quotes?`).
+#[test]
+fn csv_unclosed_quote_is_literal() {
+    let table = parse_table("[format=csv]\n|===\nx,\"unterminated\n|===");
+    assert_eq!(table.columns().len(), 2);
+    assert_eq!(row_text(&table.body_rows()[0]), ["x", "\"unterminated"]);
+
+    // A bare leading quote leaves the value unclosed, so the following separator
+    // is absorbed into the (single) cell rather than ending it.
+    let table = parse_table("[format=csv]\n|===\n\",a\n|===");
+    assert_eq!(table.columns().len(), 1);
+    assert_eq!(row_text(&table.body_rows()[0]), ["\",a"]);
+
+    // A cell that is a single bare quote is an unclosed, empty quoted value.
+    let table = parse_table("[format=csv]\n|===\n\"\n|===");
+    assert_eq!(table.columns().len(), 1);
+    assert_eq!(row_text(&table.body_rows()[0]), [""]);
+}
+
+// A CSV value with characters after its closing quote is not a properly
+// enclosed value, so it (and any separators it spans) are taken literally as
+// one cell.
+#[test]
+fn csv_text_after_closing_quote_is_literal() {
+    let table = parse_table("[format=csv]\n|===\n\"abc\"x,d\n|===");
+    assert_eq!(table.columns().len(), 1);
+    assert_eq!(row_text(&table.body_rows()[0]), ["\"abc\"x,d"]);
+}
+
+// An escaped double quote (`""`) collapses to a single `"`, whether the value
+// is enclosed in quotes or not.
+#[test]
+fn csv_escaped_quotes_collapse() {
+    let table = parse_table("[format=csv]\n|===\n\"a\"\"b\",a\"\"b\n|===");
+    assert_eq!(table.columns().len(), 2);
+    assert_eq!(row_text(&table.body_rows()[0]), ["a\"b", "a\"b"]);
+
+    // An odd run of trailing quotes still leaves the value unclosed, so the
+    // separator is absorbed and the quotes are only collapsed.
+    let table = parse_table("[format=csv]\n|===\n\"a\"\",b\n|===");
+    assert_eq!(table.columns().len(), 1);
+    assert_eq!(row_text(&table.body_rows()[0]), ["\"a\",b"]);
+}
+
+// A trailing separator produces an empty cell at the end of the row
+// (Asciidoctor preserves it), so the row's column count includes that empty
+// cell.
+#[test]
+fn csv_trailing_separator_keeps_empty_cell() {
+    let table = parse_table("[format=csv]\n|===\na,b,\nc,d,e\n|===");
+    assert_eq!(table.columns().len(), 3);
+    assert_eq!(row_text(&table.body_rows()[0]), ["a", "b", ""]);
+    assert_eq!(row_text(&table.body_rows()[1]), ["c", "d", "e"]);
 }

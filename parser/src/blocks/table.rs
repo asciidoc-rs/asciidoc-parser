@@ -26,26 +26,29 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// columns.
 ///
 /// A table is introduced by a table delimiter (`|===`, or `!===` for a nested
-/// table) and closed by a matching delimiter. Cells are separated using
-/// prefix-separated value (PSV) syntax: the table's cell separator — a vertical
-/// bar (`|`) by default — at the start of a line or preceded by whitespace
-/// begins a new cell. Cells flow, in document order, into rows whose length is
-/// fixed by the number of columns. (The separator defaults to `!` inside a
-/// nested table and can be overridden with the `separator` attribute; see
-/// below.)
+/// table) and closed by a matching delimiter. By default cells are separated
+/// using prefix-separated value (PSV) syntax: the table's cell separator — a
+/// vertical bar (`|`) by default — at the start of a line or preceded by
+/// whitespace begins a new cell. Cells flow, in document order, into rows whose
+/// length is fixed by the number of columns. (The separator defaults to `!`
+/// inside a nested table and can be overridden with the `separator` attribute;
+/// see below.)
 ///
 /// The number of columns is determined either by the `cols` attribute or,
 /// implicitly, by the number of cells found in the first non-empty line after
 /// the opening delimiter.
 ///
-/// # Not yet supported
+/// # Data formats
 ///
-/// This is an initial implementation covering the basic PSV table. The
-/// following table features are recognized by the wider AsciiDoc specification
-/// but are not yet implemented:
-///
-/// * The CSV, TSV, and DSV data formats (and the `,===` / `:===` shorthand
-///   delimiters).
+/// In addition to the default PSV format, a table can be populated from
+/// delimiter-separated data with the [`format`](Self::data_format) attribute:
+/// `csv` (comma-separated values), `tsv` (tab-separated values), or `dsv`
+/// (delimited values, colon-separated by default). The `,===` and `:===`
+/// shorthand delimiters select the CSV and DSV formats respectively without an
+/// explicit `format` attribute. In a data format the separator is placed
+/// *between* values (not in front of each cell) and a cell carries no
+/// formatting spec; cell formatting is instead applied per column with the
+/// `cols` attribute. See [`DataFormat`] for the parsing rules.
 ///
 /// Column specifier style operators (the `a`, `d`, `e`, `h`, `l`, `m`, and `s`
 /// operators) are supported, along with proportional width and the horizontal
@@ -81,6 +84,7 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
+    data_format: DataFormat,
     header_row: Option<TableRow<'src>>,
     body_rows: Vec<TableRow<'src>>,
     footer_row: Option<TableRow<'src>>,
@@ -99,20 +103,23 @@ pub struct TableBlock<'src> {
 impl<'src> TableBlock<'src> {
     /// Returns `true` if `line` is a table delimiter.
     ///
-    /// A table delimiter is a vertical bar (`|`) or an exclamation mark (`!`)
-    /// followed by three or more equals signs (`===`). The `!===` form opens a
-    /// table whose default cell separator is the exclamation mark, which lets a
-    /// nested table be distinguished from the `|`-separated table that encloses
-    /// it.
+    /// A table delimiter is one of the lead characters `|`, `!`, `,`, or `:`
+    /// followed by three or more equals signs (`===`). The lead character also
+    /// selects the table's data format and default cell separator:
     ///
-    /// **NOTE:** The `,===` (CSV) and `:===` (DSV) shorthand delimiters are not
-    /// yet recognized.
+    /// * `|===` is the ordinary (PSV) table delimiter.
+    /// * `!===` opens a table whose default cell separator is the exclamation
+    ///   mark, which lets a nested table be distinguished from the
+    ///   `|`-separated table that encloses it.
+    /// * `,===` is the shorthand for a CSV table.
+    /// * `:===` is the shorthand for a DSV table.
     pub(crate) fn is_table_delimiter(line: &Span<'src>) -> bool {
         let data = line.data();
-        // `len() >= 4` plus the leading `|`/`!` guarantees `rest` holds at least
-        // three bytes, so the closure only needs to confirm they are all `=`.
+        // `len() >= 4` plus the leading delimiter character guarantees `rest`
+        // holds at least three bytes, so the closure only needs to confirm they
+        // are all `=`.
         data.len() >= 4
-            && (data.starts_with('|') || data.starts_with('!'))
+            && matches!(data.as_bytes().first(), Some(b'|' | b'!' | b',' | b':'))
             && data
                 .get(1..)
                 .is_some_and(|rest| rest.bytes().all(|b| b == b'='))
@@ -146,57 +153,40 @@ impl<'src> TableBlock<'src> {
 
         let inside = delimiter.after.trim_remainder(closing_delimiter);
 
-        // The cell separator partitions each row into cells. It defaults to the
-        // vertical bar (`|`), except inside an AsciiDoc table cell — a nested,
-        // standalone document — where it defaults to the exclamation mark (`!`)
-        // so a nested table is distinguished from the `|`-separated table that
-        // encloses it. The `separator` attribute overrides the default with an
-        // explicit character; an empty `separator` falls back to the default.
-        let separator = resolve_separator(metadata, parser);
+        // The data format governs how the table body is split into cells. It
+        // defaults to PSV, but the `format` attribute selects CSV, TSV, or DSV,
+        // and the `,===` / `:===` shorthand delimiters select CSV / DSV. The
+        // lead character of the delimiter (`delimiter_text`) is passed so the
+        // shorthand can be honored.
+        let data_format = resolve_data_format(metadata, delimiter_text);
 
-        // Determine the number of columns, either from the `cols` attribute or
-        // implicitly from the number of cells in the first non-empty line.
-        let columns: Vec<TableColumn> = metadata
+        // The cell separator partitions each row into cells. In PSV it defaults
+        // to the vertical bar (`|`), except inside an AsciiDoc table cell — a
+        // nested, standalone document — where it defaults to the exclamation
+        // mark (`!`) so a nested table is distinguished from the `|`-separated
+        // table that encloses it. Each data format has its own default (CSV =
+        // comma, TSV = tab, DSV = colon). The `separator` attribute overrides
+        // the default; an empty `separator` falls back to the default, and the
+        // two-character sequence `\t` is interpreted as a tab.
+        let separator = resolve_separator(metadata, parser, data_format);
+
+        // The `cols` attribute, when present, fixes the number of columns and
+        // carries the per-column formatting. When it is absent the column count
+        // is implicit (resolved per format below).
+        let cols_attr: Vec<TableColumn> = metadata
             .attrlist
             .as_ref()
             .and_then(|a| a.named_attribute("cols"))
             .map(|attr| parse_cols(attr.value()))
             .unwrap_or_default();
 
-        // When the column count is implicit, it is the number of column slots in
-        // the first non-empty line: a cell that spans columns (`<n>+`) counts as
-        // `<n>` slots, not one, and a cell duplicated `<n>` times (`<n>*`) counts
-        // as `<n>` single-column slots (one per clone).
-        let first_line_cells: usize =
-            scan_cells(inside.discard_empty_lines().take_line().item, separator)
-                .iter()
-                .map(|c| c.spec.colspan.max(1) * c.spec.repeat.min(MAX_DUPLICATION_FACTOR))
-                .sum();
-
-        let ncols = if columns.is_empty() {
-            first_line_cells
-        } else {
-            columns.len()
-        };
-
-        let mut columns: Vec<TableColumn> = if columns.is_empty() {
-            (0..ncols).map(|_| TableColumn::default()).collect()
-        } else {
-            columns
-        };
-
         // The `autowidth` option sizes the table to its content; the columns
         // inherit the setting, so every column becomes autowidth regardless of
         // any proportional width set on its specifier.
-        if metadata
+        let autowidth = metadata
             .attrlist
             .as_ref()
-            .is_some_and(|a| a.has_option("autowidth"))
-        {
-            for column in columns.iter_mut() {
-                column.autowidth = true;
-            }
-        }
+            .is_some_and(|a| a.has_option("autowidth"));
 
         // The first row is an (implicit) header row when the line directly after
         // the opening delimiter is non-empty and is itself followed by an empty
@@ -278,119 +268,24 @@ impl<'src> TableBlock<'src> {
         let stripes =
             resolve_table_attribute::<Stripes>(metadata, parser, "stripes", "table-stripes");
 
-        // Scan every cell in the table, in document order, then partition into
-        // rows by walking the grid: a cell's span (colspan/rowspan) governs how
-        // many column slots it occupies, so a column-spanning cell fills its row
-        // with fewer cells and a row-spanning cell carries its columns down into
-        // the rows below.
-        //
-        // This mirrors Asciidoctor's grid walk. `active_rowspans[k]` records the
-        // number of column slots that cells from earlier rows occupy in the row
-        // `k` steps ahead of the one being filled; a row closes once its own
-        // cells' colspans plus the slots carried into it (`active_rowspans[0]`)
-        // reach `ncols`. A cell whose span pushes the row *past* `ncols` overruns
-        // the grid: the whole overrunning row is dropped (with a warning), again
-        // matching Asciidoctor. A row whose columns are entirely pre-filled by
-        // carried slots has no cells of its own to close it, so the next cell
-        // overruns and is dropped together with that pre-filled row.
-        // A duplicated cell (`<n>*`) is expanded into `<n>` independent cells —
-        // each carrying the original's content, alignment, and style — before the
-        // grid walk, so each clone occupies its own column slot exactly like an
-        // ordinary cell. A duplication factor of zero drops the cell entirely.
+        // Split the body into columns and rows according to the data format.
+        // PSV walks a grid that honors cell spans and duplication; the data
+        // formats (CSV/TSV/DSV) split on a separator with no per-cell spec and
+        // flow the values into fixed-width rows.
         let mut warnings: Vec<Warning<'src>> = vec![];
-        let raw_cells = expand_duplicates(scan_cells(inside, separator));
-
-        // A table can never have more rows than it has cells, so a row span is
-        // clamped to the cell count for the `active_rowspans` bookkeeping below: a
-        // larger span carries into rows that can't exist and so has no additional
-        // layout effect. The clamp also bounds the `active_rowspans` allocation,
-        // so a hostile specifier such as `.1000000000+` can't trigger a
-        // multi-gigabyte allocation. (The cell's reported [`rowspan`] keeps the
-        // literal parsed value, matching Asciidoctor.)
-        //
-        // [`rowspan`]: TableCell::rowspan
-        let max_rowspan = raw_cells.len().saturating_add(1);
-
-        let mut raw_rows: Vec<Vec<RawCell<'src>>> = vec![];
-        if ncols > 0 {
-            let mut active_rowspans: Vec<usize> = vec![0];
-            let mut column_visits = 0usize;
-            let mut current_row: Vec<RawCell<'src>> = vec![];
-
-            for raw in raw_cells {
-                let colspan = raw.spec.colspan.max(1);
-                let rowspan = raw.spec.rowspan.max(1).min(max_rowspan);
-
-                // A cell that spans more than one row reserves `colspan` slots in
-                // each of the rows it extends into (but not its own row).
-                if rowspan > 1 {
-                    if active_rowspans.len() < rowspan {
-                        active_rowspans.resize(rowspan, 0);
-                    }
-                    for slot in active_rowspans.iter_mut().take(rowspan).skip(1) {
-                        *slot += colspan;
-                    }
-                }
-
-                column_visits += colspan;
-                let cell_source = raw.content;
-                current_row.push(raw);
-
-                // The slots carried into the current row are `active_rowspans[0]`;
-                // the vector is never empty here, so the fallback is unreachable.
-                let carried = active_rowspans.first().copied().unwrap_or(0);
-                let effective = column_visits + carried;
-                if effective >= ncols {
-                    if effective == ncols {
-                        raw_rows.push(std::mem::take(&mut current_row));
-                    } else {
-                        // Overrun: this cell's span pushes the row past `ncols`.
-                        // Discard the whole row so the remaining cells stay
-                        // aligned to the grid.
-                        current_row.clear();
-                        warnings.push(Warning {
-                            source: cell_source,
-                            warning: WarningType::TableCellExceedsColumnCount,
-                        });
-                    }
-                    column_visits = 0;
-                    active_rowspans.remove(0);
-                    if active_rowspans.is_empty() {
-                        active_rowspans.push(0);
-                    }
-                }
+        let body = TableBody {
+            inside,
+            separator,
+            cols_attr,
+            autowidth,
+            has_header,
+        };
+        let (columns, rows) = match data_format {
+            DataFormat::Psv => build_psv_table(body, parser, &mut warnings),
+            DataFormat::Csv | DataFormat::Tsv | DataFormat::Dsv => {
+                build_data_table(body, data_format, parser, &mut warnings)
             }
-
-            // A trailing incomplete row (one that never reached `ncols`) is still
-            // emitted, matching the existing handling of short final rows.
-            if !current_row.is_empty() {
-                raw_rows.push(current_row);
-            }
-        }
-
-        // Each cell is processed according to the style of the column it falls
-        // in. A cell's column is its ordinal position within its row (matching
-        // Asciidoctor, which assigns the column by cell count, not grid slot). The
-        // header row (when present) is the first row and is always processed as
-        // plain header content, regardless of the column styles, so that a style
-        // operator doesn't affect the header row.
-        let mut rows: Vec<TableRow<'src>> = Vec::with_capacity(raw_rows.len());
-        for (row_idx, raw_row) in raw_rows.into_iter().enumerate() {
-            let is_header = has_header && row_idx == 0;
-            let mut cells = Vec::with_capacity(raw_row.len());
-            for (col_idx, raw) in raw_row.into_iter().enumerate() {
-                let column = columns.get(col_idx).cloned().unwrap_or_default();
-                cells.push(TableCell::parse(
-                    raw,
-                    &column,
-                    is_header,
-                    separator,
-                    parser,
-                    &mut warnings,
-                ));
-            }
-            rows.push(TableRow { cells });
-        }
+        };
 
         let mut rows = rows.into_iter();
         let header_row = if has_header { rows.next() } else { None };
@@ -417,6 +312,7 @@ impl<'src> TableBlock<'src> {
             item: Some(MatchedItem {
                 item: Self {
                     columns,
+                    data_format,
                     header_row,
                     body_rows,
                     footer_row,
@@ -454,6 +350,16 @@ impl<'src> TableBlock<'src> {
     /// Returns the columns of this table.
     pub fn columns(&self) -> &[TableColumn] {
         &self.columns
+    }
+
+    /// Returns the [`DataFormat`] used to populate this table.
+    ///
+    /// The format comes from the `format` attribute on the table (`psv`, `csv`,
+    /// `tsv`, or `dsv`) or from a shorthand delimiter (`,===` selects CSV,
+    /// `:===` selects DSV). When neither is present the format defaults to
+    /// [`DataFormat::Psv`].
+    pub fn data_format(&self) -> DataFormat {
+        self.data_format
     }
 
     /// Returns the fixed width of this table, as a percentage of the content
@@ -693,6 +599,46 @@ impl Default for TableColumn {
             style: ColumnStyle::Default,
         }
     }
+}
+
+/// The data format that governs how a [`TableBlock`]'s body is split into
+/// cells.
+///
+/// The format is selected by the `format` attribute (`psv`, `csv`, `tsv`, or
+/// `dsv`) or by a shorthand delimiter (`,===` for CSV, `:===` for DSV). The
+/// default is [`Psv`](Self::Psv).
+///
+/// In the PSV format the separator is placed in front of each cell and a cell
+/// may carry a formatting spec. In the delimiter-separated formats (CSV, TSV,
+/// and DSV) the separator is placed *between* values and a cell carries no
+/// spec; cell formatting is applied per column with the `cols` attribute
+/// instead. In every delimiter-separated format empty lines are skipped,
+/// whitespace surrounding each value is stripped, and a "ragged" table (whose
+/// rows do not all have the same number of cells) has its cells flowed into
+/// fixed-width rows, dropping any cells left over at the end.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DataFormat {
+    /// Prefix-separated values: the default format. The separator (a vertical
+    /// bar, `|`, by default) is placed in front of each cell.
+    #[default]
+    Psv,
+
+    /// Comma-separated values (the `csv` format). The default separator is a
+    /// comma (`,`). Values may be enclosed in double quotes (`"`), within which
+    /// the separator and newlines are literal and a double quote is written by
+    /// doubling it (`""`); a newline that is not inside a quoted value begins a
+    /// new row. Loosely based on RFC 4180.
+    Csv,
+
+    /// Tab-separated values (the `tsv` format). Parsed by the same rules as
+    /// [`Csv`](Self::Csv), but the default separator is a tab.
+    Tsv,
+
+    /// Delimited values (the `dsv` format). The default separator is a colon
+    /// (`:`). Unlike CSV and TSV, an enclosing character is not recognized;
+    /// instead the separator can be included in a value by escaping it with a
+    /// single backslash (`\:`).
+    Dsv,
 }
 
 /// The style applied to the content of a [column](TableColumn) (and, by
@@ -942,21 +888,63 @@ fn resolve_table_attribute<B: TableAttributeValue>(
     }
 }
 
-/// Resolve the cell separator byte for a table.
+/// Resolve the [`DataFormat`] of a table.
 ///
-/// The separator defaults to the vertical bar (`|`), except inside an AsciiDoc
-/// table cell — a nested, standalone document — where it defaults to the
-/// exclamation mark (`!`), so a nested table is distinguished from the
-/// `|`-separated table that encloses it. An explicit `separator` attribute on
-/// the table overrides the default with its first byte; an empty `separator`
-/// value (e.g. `[separator=]`) falls back to the default. A non-ASCII first
-/// character is ignored (the byte-oriented cell scanner only recognizes a
-/// single-byte separator), so it too falls back to the default.
-fn resolve_separator(metadata: &BlockMetadata<'_>, parser: &Parser) -> u8 {
-    let default = if parser.nested_document_depth > 0 {
-        b'!'
-    } else {
-        b'|'
+/// An explicit, recognized `format` attribute (`psv`, `csv`, `tsv`, or `dsv`)
+/// always wins. Otherwise the lead character of the delimiter selects the
+/// format via its shorthand — `,===` is CSV and `:===` is DSV — and any other
+/// delimiter (`|===`, `!===`) is PSV.
+fn resolve_data_format(metadata: &BlockMetadata<'_>, delimiter_text: &str) -> DataFormat {
+    if let Some(attr) = metadata
+        .attrlist
+        .as_ref()
+        .and_then(|a| a.named_attribute("format"))
+    {
+        match attr.value().trim() {
+            "psv" => return DataFormat::Psv,
+            "csv" => return DataFormat::Csv,
+            "tsv" => return DataFormat::Tsv,
+            "dsv" => return DataFormat::Dsv,
+            // An unrecognized format value falls through to the shorthand (or
+            // the PSV default).
+            _ => {}
+        }
+    }
+
+    match delimiter_text.as_bytes().first() {
+        Some(b',') => DataFormat::Csv,
+        Some(b':') => DataFormat::Dsv,
+        _ => DataFormat::Psv,
+    }
+}
+
+/// Resolve the cell separator for a table.
+///
+/// Each [`DataFormat`] supplies a default separator: PSV uses the vertical bar
+/// (`|`), except inside an AsciiDoc table cell — a nested, standalone document
+/// — where it defaults to the exclamation mark (`!`) so a nested table is
+/// distinguished from the `|`-separated table that encloses it; CSV defaults to
+/// a comma (`,`), TSV to a tab, and DSV to a colon (`:`). An explicit
+/// `separator` attribute on the table overrides the default; an empty
+/// `separator` value (e.g. `[separator=]`) falls back to the default. The
+/// two-character sequence `\t` in the attribute value is interpreted as a tab,
+/// so a tab-separated table can be written `[format=csv,separator=\t]`.
+fn resolve_separator(
+    metadata: &BlockMetadata<'_>,
+    parser: &Parser,
+    data_format: DataFormat,
+) -> String {
+    let default = match data_format {
+        DataFormat::Psv => {
+            if parser.nested_document_depth > 0 {
+                "!"
+            } else {
+                "|"
+            }
+        }
+        DataFormat::Csv => ",",
+        DataFormat::Tsv => "\t",
+        DataFormat::Dsv => ":",
     };
 
     metadata
@@ -965,9 +953,634 @@ fn resolve_separator(metadata: &BlockMetadata<'_>, parser: &Parser) -> u8 {
         .and_then(|a| a.named_attribute("separator"))
         .map(|attr| attr.value())
         .filter(|value| !value.is_empty())
-        .and_then(|value| value.chars().next())
-        .filter(char::is_ascii)
-        .map_or(default, |c| c as u8)
+        // The author writes a literal tab as the escape sequence `\t`.
+        .map(|value| value.replace("\\t", "\t"))
+        .unwrap_or_else(|| default.to_string())
+}
+
+/// Finalize a table's columns once the column count is known.
+///
+/// When the `cols` attribute supplied columns (`cols_attr` is non-empty) they
+/// are used as-is; otherwise `ncols` default columns are created. When the
+/// table carries the `autowidth` option, every column is made autowidth
+/// regardless of the proportional width set on its specifier.
+fn finalize_columns(
+    cols_attr: Vec<TableColumn>,
+    ncols: usize,
+    autowidth: bool,
+) -> Vec<TableColumn> {
+    let mut columns = if cols_attr.is_empty() {
+        (0..ncols).map(|_| TableColumn::default()).collect()
+    } else {
+        cols_attr
+    };
+
+    if autowidth {
+        for column in columns.iter_mut() {
+            column.autowidth = true;
+        }
+    }
+
+    columns
+}
+
+/// The inputs shared by the PSV and data-format table-body builders.
+struct TableBody<'src> {
+    /// The region between the opening and closing delimiters.
+    inside: Span<'src>,
+    /// The resolved cell separator.
+    separator: String,
+    /// Columns parsed from the `cols` attribute (empty when the attribute is
+    /// absent, in which case the column count is implicit).
+    cols_attr: Vec<TableColumn>,
+    /// Whether the table carries the `autowidth` option.
+    autowidth: bool,
+    /// Whether the first row is a header row.
+    has_header: bool,
+}
+
+/// Build the columns and rows of a PSV (prefix-separated values) table.
+///
+/// The column count comes from the `cols` attribute (`cols_attr`) or, when that
+/// is absent, from the number of column slots in the first non-empty line.
+/// Cells are then scanned in document order and partitioned into rows by
+/// walking the grid: a cell's span (colspan/rowspan) governs how many column
+/// slots it occupies, so a column-spanning cell fills its row with fewer cells
+/// and a row-spanning cell carries its columns down into the rows below.
+///
+/// This mirrors Asciidoctor's grid walk. `active_rowspans[k]` records the
+/// number of column slots that cells from earlier rows occupy in the row `k`
+/// steps ahead of the one being filled; a row closes once its own cells'
+/// colspans plus the slots carried into it (`active_rowspans[0]`) reach
+/// `ncols`. A cell whose span pushes the row *past* `ncols` overruns the grid:
+/// the whole overrunning row is dropped (with a warning), again matching
+/// Asciidoctor. A row whose columns are entirely pre-filled by carried slots
+/// has no cells of its own to close it, so the next cell overruns and is
+/// dropped together with that pre-filled row. A duplicated cell (`<n>*`) is
+/// expanded into `<n>` independent cells — each carrying the original's
+/// content, alignment, and style — before the grid walk, so each clone occupies
+/// its own column slot exactly like an ordinary cell. A duplication factor of
+/// zero drops the cell entirely.
+fn build_psv_table<'src>(
+    body: TableBody<'src>,
+    parser: &mut Parser,
+    warnings: &mut Vec<Warning<'src>>,
+) -> (Vec<TableColumn>, Vec<TableRow<'src>>) {
+    let TableBody {
+        inside,
+        separator,
+        cols_attr,
+        autowidth,
+        has_header,
+    } = body;
+    let separator = separator.as_str();
+
+    // When the column count is implicit, it is the number of column slots in the
+    // first non-empty line: a cell that spans columns (`<n>+`) counts as `<n>`
+    // slots, not one, and a cell duplicated `<n>` times (`<n>*`) counts as `<n>`
+    // single-column slots (one per clone).
+    let first_line_cells: usize =
+        scan_cells(inside.discard_empty_lines().take_line().item, separator)
+            .iter()
+            .map(|c| c.spec.colspan.max(1) * c.spec.repeat.min(MAX_DUPLICATION_FACTOR))
+            .sum();
+
+    let ncols = if cols_attr.is_empty() {
+        first_line_cells
+    } else {
+        cols_attr.len()
+    };
+
+    let columns = finalize_columns(cols_attr, ncols, autowidth);
+
+    let raw_cells = expand_duplicates(scan_cells(inside, separator));
+
+    // A table can never have more rows than it has cells, so a row span is
+    // clamped to the cell count for the `active_rowspans` bookkeeping below: a
+    // larger span carries into rows that can't exist and so has no additional
+    // layout effect. The clamp also bounds the `active_rowspans` allocation, so a
+    // hostile specifier such as `.1000000000+` can't trigger a multi-gigabyte
+    // allocation. (The cell's reported [`rowspan`] keeps the literal parsed
+    // value, matching Asciidoctor.)
+    //
+    // [`rowspan`]: TableCell::rowspan
+    let max_rowspan = raw_cells.len().saturating_add(1);
+
+    let mut raw_rows: Vec<Vec<RawCell<'src>>> = vec![];
+    if ncols > 0 {
+        let mut active_rowspans: Vec<usize> = vec![0];
+        let mut column_visits = 0usize;
+        let mut current_row: Vec<RawCell<'src>> = vec![];
+
+        for raw in raw_cells {
+            let colspan = raw.spec.colspan.max(1);
+            let rowspan = raw.spec.rowspan.max(1).min(max_rowspan);
+
+            // A cell that spans more than one row reserves `colspan` slots in
+            // each of the rows it extends into (but not its own row).
+            if rowspan > 1 {
+                if active_rowspans.len() < rowspan {
+                    active_rowspans.resize(rowspan, 0);
+                }
+                for slot in active_rowspans.iter_mut().take(rowspan).skip(1) {
+                    *slot += colspan;
+                }
+            }
+
+            column_visits += colspan;
+            let cell_source = raw.content;
+            current_row.push(raw);
+
+            // The slots carried into the current row are `active_rowspans[0]`; the
+            // vector is never empty here, so the fallback is unreachable.
+            let carried = active_rowspans.first().copied().unwrap_or(0);
+            let effective = column_visits + carried;
+            if effective >= ncols {
+                if effective == ncols {
+                    raw_rows.push(std::mem::take(&mut current_row));
+                } else {
+                    // Overrun: this cell's span pushes the row past `ncols`.
+                    // Discard the whole row so the remaining cells stay aligned to
+                    // the grid.
+                    current_row.clear();
+                    warnings.push(Warning {
+                        source: cell_source,
+                        warning: WarningType::TableCellExceedsColumnCount,
+                    });
+                }
+                column_visits = 0;
+                active_rowspans.remove(0);
+                if active_rowspans.is_empty() {
+                    active_rowspans.push(0);
+                }
+            }
+        }
+
+        // A trailing incomplete row (one that never reached `ncols`) is still
+        // emitted, matching the existing handling of short final rows.
+        if !current_row.is_empty() {
+            raw_rows.push(current_row);
+        }
+    }
+
+    // Each cell is processed according to the style of the column it falls in. A
+    // cell's column is its ordinal position within its row (matching Asciidoctor,
+    // which assigns the column by cell count, not grid slot). The header row
+    // (when present) is the first row and is always processed as plain header
+    // content, regardless of the column styles, so that a style operator doesn't
+    // affect the header row.
+    let mut rows: Vec<TableRow<'src>> = Vec::with_capacity(raw_rows.len());
+    for (row_idx, raw_row) in raw_rows.into_iter().enumerate() {
+        let is_header = has_header && row_idx == 0;
+        let mut cells = Vec::with_capacity(raw_row.len());
+        for (col_idx, raw) in raw_row.into_iter().enumerate() {
+            let column = columns.get(col_idx).cloned().unwrap_or_default();
+            cells.push(TableCell::parse(
+                raw, &column, is_header, separator, parser, warnings,
+            ));
+        }
+        rows.push(TableRow { cells });
+    }
+
+    (columns, rows)
+}
+
+/// Build the columns and rows of a delimiter-separated table (CSV, TSV, or
+/// DSV).
+///
+/// The body is split into a flat list of [fields](DataField) by the format's
+/// parser, then flowed into fixed-width rows. The column count comes from the
+/// `cols` attribute (`cols_attr`) or, when that is absent, from the number of
+/// fields in the first row. Because a data cell carries no span, the fields are
+/// simply chunked `ncols` at a time; any fields left over after the last
+/// complete row are dropped ("extra cells at the end of the last row get
+/// dropped"). The first row is the header when `has_header` is set.
+fn build_data_table<'src>(
+    body: TableBody<'src>,
+    data_format: DataFormat,
+    parser: &mut Parser,
+    warnings: &mut Vec<Warning<'src>>,
+) -> (Vec<TableColumn>, Vec<TableRow<'src>>) {
+    let TableBody {
+        inside,
+        separator,
+        cols_attr,
+        autowidth,
+        has_header,
+    } = body;
+    let separator = separator.as_str();
+
+    // DSV is parsed by its own, simpler rules; CSV and TSV share their rules and
+    // differ only in the default separator (resolved by the caller). PSV never
+    // reaches this builder.
+    let (fields, first_row_len) = if data_format == DataFormat::Dsv {
+        parse_dsv_fields(inside, separator)
+    } else {
+        parse_csv_fields(inside, separator)
+    };
+
+    let ncols = if cols_attr.is_empty() {
+        first_row_len
+    } else {
+        cols_attr.len()
+    };
+
+    let columns = finalize_columns(cols_attr, ncols, autowidth);
+
+    // Integer division drops any partial trailing row; `checked_div` yields zero
+    // rows when there are no columns.
+    let nrows = fields.len().checked_div(ncols).unwrap_or(0);
+    let mut rows: Vec<TableRow<'src>> = Vec::with_capacity(nrows);
+    let mut fields = fields.into_iter();
+    for row_idx in 0..nrows {
+        let is_header = has_header && row_idx == 0;
+        let mut cells = Vec::with_capacity(ncols);
+        for col_idx in 0..ncols {
+            // `nrows * ncols <= fields.len()`, so the iterator always yields.
+            let Some(field) = fields.next() else { break };
+            let column = columns.get(col_idx).cloned().unwrap_or_default();
+            cells.push(TableCell::parse_data(
+                field, &column, is_header, parser, warnings,
+            ));
+        }
+        rows.push(TableRow { cells });
+    }
+
+    (columns, rows)
+}
+
+/// A single field of a delimiter-separated (CSV, TSV, or DSV) table, as located
+/// by [`parse_csv_fields`] or [`parse_dsv_fields`].
+///
+/// `content` is the field's value span with surrounding whitespace already
+/// stripped. `replacement` holds the value after quote or escape processing
+/// when it differs from `content` (a CSV value with a doubled-quote escape, or
+/// a DSV value with a backslash-escaped separator); it is `None` when the span
+/// is the verbatim value.
+struct DataField<'src> {
+    content: Span<'src>,
+    replacement: Option<String>,
+}
+
+/// Parse a CSV/TSV region into its [fields](DataField), returning them in
+/// document order together with the number of fields in the first row.
+///
+/// The rules, loosely based on RFC 4180: empty lines are skipped; whitespace
+/// surrounding each value is stripped; a value may be enclosed in double
+/// quotes, within which the separator and newlines are literal and a double
+/// quote is written by doubling it (`""`). A newline that is not inside a
+/// quoted value ends the row. The fields are returned flat; the caller flows
+/// them into rows.
+///
+/// This mirrors Asciidoctor's `Table::ParserContext`: a separator or newline is
+/// a cell boundary only when the text accumulated since the previous boundary
+/// has no [unclosed quote](has_unclosed_quotes); otherwise it is part of the
+/// value. As a result a value whose opening quote is never properly closed (or
+/// that has trailing characters after its closing quote) keeps its quotes and
+/// absorbs the following separators, rather than being treated as enclosed.
+fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField<'src>>, usize) {
+    let data = region.data();
+    let n = data.len();
+    let sep_len = separator.len().max(1);
+    let at = |k: usize| data.as_bytes().get(k).copied();
+    let starts_with_sep = |pos: usize| data.get(pos..).is_some_and(|s| s.starts_with(separator));
+
+    let mut fields: Vec<DataField<'src>> = vec![];
+    let mut first_row_len = 0usize;
+    let mut first_row_done = false;
+    let mut fields_in_row = 0usize;
+
+    // The raw text of the cell currently being accumulated runs from `cell_start`
+    // to the next boundary.
+    let mut cell_start = 0usize;
+    let mut i = 0usize;
+
+    while i <= n {
+        let at_eof = i == n;
+        let at_sep = !at_eof && starts_with_sep(i);
+        let at_nl = !at_eof && at(i) == Some(b'\n');
+
+        if !(at_eof || at_sep || at_nl) {
+            i += 1;
+            continue;
+        }
+
+        let raw = data.get(cell_start..i).unwrap_or_default();
+
+        // A separator or newline that falls inside an unclosed quoted value is
+        // part of the value, not a boundary; absorb it and keep scanning.
+        if !at_eof && has_unclosed_quotes(raw) {
+            i += if at_sep { sep_len } else { 1 };
+            continue;
+        }
+
+        // A wholly blank physical line (or trailing blank text at the end of the
+        // region) between rows is skipped rather than emitted as an empty cell. A
+        // blank cell that follows a separator on a populated line is kept.
+        let blank_skip = (at_nl || at_eof) && fields_in_row == 0 && raw.trim().is_empty();
+        if !blank_skip {
+            fields.push(make_csv_field(region, cell_start, i));
+            fields_in_row += 1;
+            if !first_row_done {
+                first_row_len = fields_in_row;
+            }
+        }
+
+        if at_eof {
+            break;
+        }
+
+        if at_nl {
+            // The newline ends the row. The first populated row fixes the implicit
+            // column count.
+            if fields_in_row > 0 {
+                first_row_done = true;
+            }
+            fields_in_row = 0;
+            cell_start = i + 1;
+            i += 1;
+        } else {
+            cell_start = i + sep_len;
+            i += sep_len;
+        }
+    }
+
+    (fields, first_row_len)
+}
+
+/// Build a CSV/TSV [field](DataField) from the byte range `start..end`,
+/// applying Asciidoctor's `close_cell` value processing.
+///
+/// The value is stripped of surrounding whitespace; then, if it is enclosed in
+/// double quotes, the quotes are removed and the inner value is stripped again;
+/// finally any run of consecutive double quotes is collapsed to one (so an
+/// escaped `""` becomes a single `"`). A value that is not enclosed (no leading
+/// quote, an unclosed quote, or trailing characters after the closing quote)
+/// keeps its quotes and is only collapsed.
+fn make_csv_field<'src>(region: Span<'src>, start: usize, end: usize) -> DataField<'src> {
+    let trimmed = trim_surrounding_whitespace(region.slice(start..end));
+    let value = csv_cell_value(trimmed.data());
+    let replacement = (value != trimmed.data()).then_some(value);
+    DataField {
+        content: trimmed,
+        replacement,
+    }
+}
+
+/// Apply Asciidoctor's CSV value processing to an already-stripped cell value:
+/// unquote an enclosed value and collapse escaped double quotes (`""` -> `"`).
+fn csv_cell_value(text: &str) -> String {
+    if text.is_empty() || !text.contains('"') {
+        return text.to_string();
+    }
+
+    // An enclosed value (leading and trailing quote) has its quotes removed and
+    // is stripped again; a lone `"` becomes empty. Anything else keeps its text.
+    if text.starts_with('"') && text.ends_with('"') {
+        match text.get(1..text.len() - 1) {
+            Some(inner) => squeeze_quotes(inner.trim()),
+            None => String::new(),
+        }
+    } else {
+        squeeze_quotes(text)
+    }
+}
+
+/// Collapse every run of consecutive double quotes to a single double quote,
+/// matching Ruby's `String#squeeze('"')`.
+///
+/// Note: the `continue` intentionally leaves `prev_quote` set, so a run of
+/// *N ≥ 2* consecutive `"` collapses to a single `"` (e.g. `""""` -> `"`), not
+/// to pairs. This deliberately matches Asciidoctor rather than strict RFC 4180,
+/// under which only `""` is a double-quote escape — don't "fix" it to a
+/// two-character collapse without also changing Asciidoctor.
+fn squeeze_quotes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut prev_quote = false;
+    for c in text.chars() {
+        if c == '"' {
+            if prev_quote {
+                continue;
+            }
+            prev_quote = true;
+        } else {
+            prev_quote = false;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Determine whether `buffer` (the cell text accumulated so far) holds an
+/// unclosed double quote, a direct port of Asciidoctor's
+/// `Table::ParserContext#buffer_has_unclosed_quotes?`.
+///
+/// Only a value that begins with a double quote can be "quoted"; for any other
+/// value embedded quotes are literal and this returns `false`. A leading quote
+/// is unclosed until a matching trailing quote appears (accounting for escaped
+/// `""` pairs).
+///
+/// Note: the escaped-pair collapse (`replace("\"\"", "")`) runs before the
+/// start/end check, so `"""` collapses to a single `"` and is reported
+/// *closed*. Strict RFC 4180 would read `"""` as an unclosed field (open quote
+/// plus escaped `""` + missing close); this matches Asciidoctor's
+/// `buffer_has_unclosed_quotes?` instead, so the divergence is intentional.
+fn has_unclosed_quotes(buffer: &str) -> bool {
+    let record = buffer.trim();
+
+    if record == "\"" {
+        return true;
+    }
+
+    if !record.starts_with('"') {
+        return false;
+    }
+
+    let trailing_quote = record.ends_with('"');
+    if (trailing_quote && record.ends_with("\"\"")) || record.starts_with("\"\"") {
+        let collapsed = record.replace("\"\"", "");
+        collapsed.starts_with('"') && !collapsed.ends_with('"')
+    } else {
+        !trailing_quote
+    }
+}
+
+/// Parse a DSV region into its [fields](DataField), returning them in document
+/// order together with the number of fields in the first row.
+///
+/// Each non-empty line is a row. Whitespace surrounding each value is stripped,
+/// and the separator can be included in a value by escaping it with a single
+/// backslash (`\:`). An enclosing character is not recognized.
+fn parse_dsv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField<'src>>, usize) {
+    let data = region.data();
+    let n = data.len();
+    let sep_len = separator.len().max(1);
+    let escaped = format!("\\{separator}");
+    let at = |k: usize| data.as_bytes().get(k).copied();
+
+    let mut fields: Vec<DataField<'src>> = vec![];
+    let mut first_row_len = 0usize;
+    let mut row_count = 0usize;
+    let mut i = 0usize;
+
+    while i < n {
+        let mut line_end = i;
+        while line_end < n && at(line_end) != Some(b'\n') {
+            line_end += 1;
+        }
+
+        if data.get(i..line_end).unwrap_or("").trim().is_empty() {
+            i = if line_end < n { line_end + 1 } else { line_end };
+            continue;
+        }
+
+        let in_line = |pos: usize| {
+            data.get(pos..line_end)
+                .is_some_and(|s| s.starts_with(separator))
+        };
+
+        let mut fields_in_row = 0usize;
+        let mut field_start = i;
+        let mut p = i;
+        while p < line_end {
+            // A backslash that escapes the separator (`\:`) is not a boundary;
+            // skip past both so the separator stays in the value.
+            if at(p) == Some(b'\\')
+                && data
+                    .get(p + 1..line_end)
+                    .is_some_and(|s| s.starts_with(separator))
+            {
+                p += 1 + sep_len;
+                continue;
+            }
+
+            if in_line(p) {
+                fields.push(make_dsv_field(region, field_start, p, &escaped, separator));
+                fields_in_row += 1;
+                p += sep_len;
+                field_start = p;
+                continue;
+            }
+
+            p += 1;
+        }
+
+        // The final field of the line runs to the line end.
+        fields.push(make_dsv_field(
+            region,
+            field_start,
+            line_end,
+            &escaped,
+            separator,
+        ));
+        fields_in_row += 1;
+
+        if row_count == 0 {
+            first_row_len = fields_in_row;
+        }
+        row_count += 1;
+
+        i = if line_end < n { line_end + 1 } else { line_end };
+    }
+
+    (fields, first_row_len)
+}
+
+/// Build a DSV [field](DataField) from the byte range `start..end`, unescaping
+/// any backslash-escaped separators (`escaped`, e.g. `\:`) into the bare
+/// separator.
+fn make_dsv_field<'src>(
+    region: Span<'src>,
+    start: usize,
+    end: usize,
+    escaped: &str,
+    separator: &str,
+) -> DataField<'src> {
+    let trimmed = trim_surrounding_whitespace(region.slice(start..end));
+    let replacement = if trimmed.data().contains(escaped) {
+        Some(trimmed.data().replace(escaped, separator))
+    } else {
+        None
+    };
+
+    DataField {
+        content: trimmed,
+        replacement,
+    }
+}
+
+/// Process a cell's content according to its [style](ColumnStyle), shared by
+/// the PSV and data-format cell builders.
+///
+/// `trimmed` is the cell's content span with surrounding whitespace already
+/// removed. `replacement` is the pre-filtered value (an escaped separator
+/// unescaped, or a CSV/DSV value after quote/escape processing) when it differs
+/// from `trimmed`; it is ignored for the [`AsciiDoc`](ColumnStyle::AsciiDoc)
+/// style, which parses `trimmed` verbatim as a nested document. Every other
+/// style produces inline [`Simple`](TableCellContent::Simple) content with the
+/// verbatim substitution group for [`Literal`](ColumnStyle::Literal) and the
+/// normal group otherwise.
+fn process_content<'src>(
+    trimmed: Span<'src>,
+    replacement: Option<String>,
+    style: ColumnStyle,
+    parser: &mut Parser,
+    warnings: &mut Vec<Warning<'src>>,
+) -> TableCellContent<'src> {
+    if style == ColumnStyle::AsciiDoc {
+        // The AsciiDoc style effectively creates a nested, standalone AsciiDoc
+        // document in the cell. It inherits the parent document's attributes, but
+        // any attribute it defines is scoped to the cell and must not leak back
+        // into the parent. Snapshot the attribute set before parsing and restore
+        // it afterward to enforce that boundary (matching Asciidoctor, where a
+        // `:foo:` set inside a cell is not visible after the table).
+        let saved_attributes = parser.attribute_values.clone();
+
+        // An attribute that is set in the parent document cannot be modified
+        // inside the cell. Lock every inherited attribute that currently holds a
+        // value for the duration of the cell (other than the handful of
+        // exceptions the spec carves out), so a body assignment to one of them is
+        // ignored. An attribute that is unset in the parent is not locked: the
+        // cell may assign it (matching Asciidoctor, which here diverges from the
+        // spec's "set or explicitly unset" wording). The lock set is saved and
+        // restored so it applies only within the cell and nests correctly.
+        let saved_locks = parser.locked_attribute_names.clone();
+        for (name, value) in saved_attributes.iter() {
+            if !matches!(value.value, InterpretedValue::Unset)
+                && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name.as_str())
+            {
+                parser.locked_attribute_names.insert(name.clone());
+            }
+        }
+
+        // Mark that we are inside an AsciiDoc cell (a nested document) for the
+        // duration of the cell, so a table found within defaults its cell
+        // separator to `!` rather than `|` (matching Asciidoctor's
+        // `Document#nested?`). The depth is restored afterward so the marker is
+        // scoped to the cell and nests correctly.
+        parser.nested_document_depth += 1;
+        let mut maw = parse_blocks_until(trimmed, |_| false, parser);
+        parser.nested_document_depth -= 1;
+
+        parser.locked_attribute_names = saved_locks;
+        parser.attribute_values = saved_attributes;
+        warnings.append(&mut maw.warnings);
+        TableCellContent::AsciiDoc(maw.item.item)
+    } else {
+        let mut content = match replacement {
+            Some(replacement) => Content::from_filtered(trimmed, replacement),
+            None => Content::from(trimmed),
+        };
+
+        let substitutions = if style == ColumnStyle::Literal {
+            SubstitutionGroup::Verbatim
+        } else {
+            SubstitutionGroup::Normal
+        };
+        substitutions.apply(&mut content, parser, None);
+
+        TableCellContent::Simple(content)
+    }
 }
 
 /// A row of cells in a [`TableBlock`].
@@ -1019,7 +1632,7 @@ impl<'src> TableCell<'src> {
         raw: RawCell<'src>,
         column: &TableColumn,
         is_header: bool,
-        separator: u8,
+        separator: &str,
         parser: &mut Parser,
         warnings: &mut Vec<Warning<'src>>,
     ) -> Self {
@@ -1040,73 +1653,20 @@ impl<'src> TableCell<'src> {
 
         let trimmed = trim_surrounding_whitespace(raw.content);
 
-        let content = if style == ColumnStyle::AsciiDoc {
-            // The AsciiDoc style effectively creates a nested, standalone
-            // AsciiDoc document in the cell. It inherits the parent document's
-            // attributes, but any attribute it defines is scoped to the cell and
-            // must not leak back into the parent. Snapshot the attribute set
-            // before parsing and restore it afterward to enforce that boundary
-            // (matching Asciidoctor, where a `:foo:` set inside a cell is not
-            // visible after the table).
-            let saved_attributes = parser.attribute_values.clone();
-
-            // An attribute that is set in the parent document cannot be modified
-            // inside the cell. Lock every inherited attribute that currently
-            // holds a value for the duration of the cell (other than the handful
-            // of exceptions the spec carves out), so a body assignment to one of
-            // them is ignored. An attribute that is unset in the parent is not
-            // locked: the cell may assign it (matching Asciidoctor, which here
-            // diverges from the spec's "set or explicitly unset" wording). The
-            // lock set is saved and restored so it applies only within the cell
-            // and nests correctly.
-            let saved_locks = parser.locked_attribute_names.clone();
-            for (name, value) in saved_attributes.iter() {
-                if !matches!(value.value, InterpretedValue::Unset)
-                    && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name.as_str())
-                {
-                    parser.locked_attribute_names.insert(name.clone());
-                }
-            }
-
-            // Mark that we are inside an AsciiDoc cell (a nested document) for the
-            // duration of the cell, so a table found within defaults its cell
-            // separator to `!` rather than `|` (matching Asciidoctor's
-            // `Document#nested?`). The depth is restored afterward so the marker
-            // is scoped to the cell and nests correctly.
-            parser.nested_document_depth += 1;
-            let mut maw = parse_blocks_until(trimmed, |_| false, parser);
-            parser.nested_document_depth -= 1;
-
-            parser.locked_attribute_names = saved_locks;
-            parser.attribute_values = saved_attributes;
-            warnings.append(&mut maw.warnings);
-            TableCellContent::AsciiDoc(maw.item.item)
+        // An escaped cell separator (a backslash in front of the table's
+        // separator, e.g. `\|` or `\!`) is unescaped to the bare separator. Only
+        // the active separator is unescaped, so a `\|` in a `!`-separated table
+        // is left untouched. The replacement is computed only for the inline
+        // styles; an AsciiDoc cell parses its content verbatim (see
+        // [`process_content`]).
+        let escaped = format!("\\{separator}");
+        let replacement = if style != ColumnStyle::AsciiDoc && trimmed.data().contains(&escaped) {
+            Some(trimmed.data().replace(&escaped, separator))
         } else {
-            let data = trimmed.data();
-
-            // An escaped cell separator (a backslash in front of the table's
-            // separator character, e.g. `\|` or `\!`) is unescaped to the bare
-            // separator. Only the active separator is unescaped, so a `\|` in a
-            // `!`-separated table is left untouched.
-            let escaped = format!("\\{}", separator as char);
-            let mut content = if data.contains(&escaped) {
-                Content::from_filtered(
-                    trimmed,
-                    data.replace(&escaped, &(separator as char).to_string()),
-                )
-            } else {
-                Content::from(trimmed)
-            };
-
-            let substitutions = if style == ColumnStyle::Literal {
-                SubstitutionGroup::Verbatim
-            } else {
-                SubstitutionGroup::Normal
-            };
-            substitutions.apply(&mut content, parser, None);
-
-            TableCellContent::Simple(content)
+            None
         };
+
+        let content = process_content(trimmed, replacement, style, parser, warnings);
 
         Self {
             h_align,
@@ -1114,6 +1674,41 @@ impl<'src> TableCell<'src> {
             style,
             colspan: raw.spec.colspan.max(1),
             rowspan: raw.spec.rowspan.max(1),
+            content,
+        }
+    }
+
+    /// Build a cell from a [data field](DataField) of a delimiter-separated
+    /// table (CSV, TSV, or DSV).
+    ///
+    /// Unlike a PSV cell, a data cell carries no per-cell specifier: its
+    /// alignment and [style](ColumnStyle) come entirely from the `column`, and
+    /// it always spans a single row and column. The separator escaping is
+    /// handled by the format parser before this point, so the field already
+    /// holds the extracted value (its [`replacement`](DataField::replacement),
+    /// when present, is the value after quote/escape processing). A header cell
+    /// (`is_header`) is processed as plain header content.
+    fn parse_data(
+        field: DataField<'src>,
+        column: &TableColumn,
+        is_header: bool,
+        parser: &mut Parser,
+        warnings: &mut Vec<Warning<'src>>,
+    ) -> Self {
+        let style = if is_header {
+            ColumnStyle::Default
+        } else {
+            column.style
+        };
+
+        let content = process_content(field.content, field.replacement, style, parser, warnings);
+
+        Self {
+            h_align: column.h_align,
+            v_align: column.v_align,
+            style,
+            colspan: 1,
+            rowspan: 1,
             content,
         }
     }
@@ -1424,9 +2019,10 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// Scan a region for PSV cell boundaries, returning the [specifier](CellSpec)
 /// and raw (untrimmed) content span of each cell.
 ///
-/// A cell boundary is the table's `separator` byte (the vertical bar (`|`) by
-/// default, or the exclamation mark (`!`) for a nested table) that appears at
-/// the start of a line or is preceded by whitespace, optionally with a
+/// A cell boundary is the table's `separator` (the vertical bar (`|`) by
+/// default, the exclamation mark (`!`) for a nested table, or any string set
+/// with the `separator` attribute, e.g. the broken bar `¦`) that appears at the
+/// start of a line or is preceded by whitespace, optionally with a
 /// [cell specifier](CellSpec) (e.g. `^`, `2+`, `.>`) directly in front of the
 /// separator. The token immediately preceding a separator is taken to be a
 /// specifier when it parses as one (see [`parse_cell_spec`]); a token that
@@ -1437,19 +2033,25 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// valid specifier, so the separator already fails the boundary test and needs
 /// no special handling here; the backslash is stripped later in
 /// [`TableCell::parse`].
-fn scan_cells(region: Span<'_>, separator: u8) -> Vec<RawCell<'_>> {
+fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
     let data = region.data();
     let bytes = data.as_bytes();
     let len = bytes.len();
+    // A zero-length separator would never advance; treat it as a single byte to
+    // stay safe. (The resolver never produces an empty separator.)
+    let sep_len = separator.len().max(1);
 
-    let mut cells: Vec<RawCell<'_>> = vec![];
+    let mut cells: Vec<RawCell<'src>> = vec![];
     // The content start and specifier of the cell currently being accumulated.
     let mut content_start: Option<usize> = None;
     let mut cur_spec = CellSpec::default();
     let mut i = 0;
 
     while i < len {
-        if bytes.get(i).copied() == Some(separator) {
+        if data
+            .get(i..)
+            .is_some_and(|rest| rest.starts_with(separator))
+        {
             // Walk back to the start of the token directly preceding this
             // separator. The token (a possible cell specifier) runs back to the
             // previous whitespace, tab, or newline, or to the start of the
@@ -1484,7 +2086,9 @@ fn scan_cells(region: Span<'_>, separator: u8) -> Vec<RawCell<'_>> {
                     });
                 }
                 cur_spec = spec;
-                content_start = Some(i + 1);
+                content_start = Some(i + sep_len);
+                i += sep_len;
+                continue;
             }
         }
 
