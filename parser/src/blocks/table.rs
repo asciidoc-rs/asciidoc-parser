@@ -1348,6 +1348,12 @@ fn csv_cell_value(text: &str) -> String {
 
 /// Collapse every run of consecutive double quotes to a single double quote,
 /// matching Ruby's `String#squeeze('"')`.
+///
+/// Note: the `continue` intentionally leaves `prev_quote` set, so a run of
+/// *N ≥ 2* consecutive `"` collapses to a single `"` (e.g. `""""` -> `"`), not
+/// to pairs. This deliberately matches Asciidoctor rather than strict RFC 4180,
+/// under which only `""` is a double-quote escape — don't "fix" it to a
+/// two-character collapse without also changing Asciidoctor.
 fn squeeze_quotes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut prev_quote = false;
@@ -1373,6 +1379,12 @@ fn squeeze_quotes(text: &str) -> String {
 /// value embedded quotes are literal and this returns `false`. A leading quote
 /// is unclosed until a matching trailing quote appears (accounting for escaped
 /// `""` pairs).
+///
+/// Note: the escaped-pair collapse (`replace("\"\"", "")`) runs before the
+/// start/end check, so `"""` collapses to a single `"` and is reported
+/// *closed*. Strict RFC 4180 would read `"""` as an unclosed field (open quote
+/// + escaped `""` + missing close); this matches Asciidoctor's
+/// `buffer_has_unclosed_quotes?` instead, so the divergence is intentional.
 fn has_unclosed_quotes(buffer: &str) -> bool {
     let record = buffer.trim();
 
