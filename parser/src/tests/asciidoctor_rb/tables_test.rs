@@ -985,18 +985,21 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not drop an incomplete final row nor warn
-    // about it; Asciidoctor drops the `|e` row and logs an error. Enable once
-    // incomplete trailing rows are detected.
     fn should_drop_incomplete_row_at_end_of_table_and_log_an_error() {
         let doc = Parser::default().parse("[cols=2*]\n|===\n|a |b\n|c |d\n|e\n|===");
 
+        // The incomplete `|e` row is dropped, leaving two rows, and an error is
+        // logged against its line (line 5).
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table tr", 2);
 
         let warnings: Vec<_> = doc.warnings().collect();
         assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::TableDroppingIncompleteRowAtEndOfTable
+        );
+        assert_eq!(warnings[0].source.line(), 5);
     }
 
     #[test]

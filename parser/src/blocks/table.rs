@@ -1139,10 +1139,15 @@ fn build_psv_table<'src>(
             }
         }
 
-        // A trailing incomplete row (one that never reached `ncols`) is still
-        // emitted, matching the existing handling of short final rows.
-        if !current_row.is_empty() {
-            raw_rows.push(current_row);
+        // If the table ends mid-row, the cells accumulated since the last
+        // complete row never filled `ncols`. Matching Asciidoctor's
+        // `close_table`, that incomplete row is dropped and an error is logged
+        // against its last cell.
+        if let Some(last) = current_row.last() {
+            warnings.push(Warning {
+                source: last.content,
+                warning: WarningType::TableDroppingIncompleteRowAtEndOfTable,
+            });
         }
     }
 

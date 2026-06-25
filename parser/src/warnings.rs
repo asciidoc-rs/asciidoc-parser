@@ -88,6 +88,9 @@ pub enum WarningType {
 
     #[error("Table is missing a leading separator; recovering automatically")]
     TableMissingLeadingSeparator,
+
+    #[error("Dropping cells from incomplete row; detected end of table")]
+    TableDroppingIncompleteRowAtEndOfTable,
 }
 
 impl std::fmt::Debug for WarningType {
@@ -172,6 +175,10 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::TableMissingLeadingSeparator => {
                 write!(f, "WarningType::TableMissingLeadingSeparator")
+            }
+
+            WarningType::TableDroppingIncompleteRowAtEndOfTable => {
+                write!(f, "WarningType::TableDroppingIncompleteRowAtEndOfTable")
             }
         }
     }
@@ -444,6 +451,16 @@ mod tests {
                 let warning = WarningType::TableMissingLeadingSeparator;
                 let debug_output = format!("{:?}", warning);
                 assert_eq!(debug_output, "WarningType::TableMissingLeadingSeparator");
+            }
+
+            #[test]
+            fn table_dropping_incomplete_row_at_end_of_table() {
+                let warning = WarningType::TableDroppingIncompleteRowAtEndOfTable;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::TableDroppingIncompleteRowAtEndOfTable"
+                );
             }
         }
     }

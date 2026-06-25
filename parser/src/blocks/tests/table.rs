@@ -805,9 +805,11 @@ fn cell_span_exceeding_columns_drops_overrunning_row() {
 fn row_fully_covered_by_rowspans_drops_following_cell() {
     // Two row-spanning cells (`.2+`) together cover every column of the next row,
     // so that row has no cells of its own to close it. The following cell (`c1`)
-    // therefore overruns the pre-filled row and is dropped with it (matching
-    // Asciidoctor), leaving the remaining cells aligned: `c2` and `d1` form the
-    // second body row and the short final row holds `d2`.
+    // therefore overruns the pre-filled row and is dropped with it (a column-count
+    // overrun warning), leaving `c2` and `d1` aligned as the second body row. The
+    // trailing `d2` cell can't fill a row of its own, so the table ends on an
+    // incomplete row that is dropped with an end-of-table warning (matching
+    // Asciidoctor, which renders only two rows here).
     let mut parser = Parser::default();
     let maw = Block::parse(
         Span::new("[cols=\"2*\"]\n|===\n.2+|a .2+|b\n|c1 |c2\n|d1 |d2\n|==="),
@@ -824,6 +826,16 @@ fn row_fully_covered_by_rowspans_drops_following_cell() {
             .count(),
         1
     );
+    assert_eq!(
+        maw.warnings
+            .iter()
+            .filter(|w| matches!(
+                w.warning,
+                crate::warnings::WarningType::TableDroppingIncompleteRowAtEndOfTable
+            ))
+            .count(),
+        1
+    );
 
     let table = match maw.item.unwrap().item {
         Block::Table(table) => table,
@@ -835,7 +847,6 @@ fn row_fully_covered_by_rowspans_drops_following_cell() {
         vec![
             vec!["a".to_string(), "b".to_string()],
             vec!["c2".to_string(), "d1".to_string()],
-            vec!["d2".to_string()],
         ]
     );
 }
