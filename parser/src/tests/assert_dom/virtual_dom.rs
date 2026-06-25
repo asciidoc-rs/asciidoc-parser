@@ -1038,29 +1038,48 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                     // paragraph.
                     _ if rendered.is_empty() => {}
 
-                    style => {
-                        // Body and footer cells wrap their content in a
-                        // `<p class="tableblock">`, with an inner style element
-                        // (`<strong>`, `<em>`, `<code>`) when the cell carries a
-                        // text style.
-                        let p = VirtualNode::new("p").with_class("tableblock");
-                        let p = match style_wrapper(style) {
-                            Some(tag) => p.with_child(
-                                VirtualNode::new(tag).with_html_content(rendered),
-                            ),
-                            None => p.with_html_content(rendered),
-                        };
-                        cell_node.children.push(p);
-                    }
+                    style => match style_wrapper(style) {
+                        // A text-styled cell wraps its content in a
+                        // `<p class="tableblock">` with an inner style element
+                        // (`<strong>`, `<em>`, `<code>`).
+                        Some(tag) => {
+                            cell_node.children.push(
+                                VirtualNode::new("p").with_class("tableblock").with_child(
+                                    VirtualNode::new(tag).with_html_content(rendered),
+                                ),
+                            );
+                        }
+
+                        // A plain cell renders each blank-line-separated
+                        // paragraph as its own `<p class="tableblock">`, matching
+                        // Asciidoctor (the parser stores them as one cell with
+                        // embedded blank lines).
+                        None => {
+                            for para in rendered
+                                .split("\n\n")
+                                .map(str::trim)
+                                .filter(|p| !p.is_empty())
+                            {
+                                cell_node.children.push(
+                                    VirtualNode::new("p")
+                                        .with_class("tableblock")
+                                        .with_html_content(para),
+                                );
+                            }
+                        }
+                    },
                 }
             }
 
             // An AsciiDoc-styled cell holds a nested sequence of blocks, which
             // render into a `<div class="content">` wrapper inside the cell.
+            // The blocks render as they would at the top level of a document
+            // (e.g. paragraphs wrapped in `<div class="paragraph">`), so the
+            // cell reuses `add_block_with_title`.
             TableCellContent::AsciiDoc(blocks) => {
                 let mut content = VirtualNode::new("div").with_class("content");
                 for block in blocks {
-                    content.children.push(block.to_virtual_dom());
+                    add_block_with_title(&mut content, block);
                 }
                 cell_node.children.push(content);
             }

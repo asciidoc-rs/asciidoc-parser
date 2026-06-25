@@ -436,6 +436,302 @@ mod psv {
         assert_xpath(&doc, "/table/thead/following-sibling::tbody", 1);
         assert_xpath(&doc, "/table/tbody/following-sibling::tfoot", 1);
     }
+
+    // Backend-specific test omitted: DocBook ("table with header and footer
+    // docbook").
+
+    // Backend-specific test omitted: DocBook ("should set horizontal and
+    // vertical alignment when converting to DocBook").
+
+    #[test]
+    fn should_preserve_frame_value_ends_when_converting_to_html() {
+        let doc = Parser::default().parse("[frame=ends]\n|===\n|A |B |C\n|===");
+
+        assert_css(&doc, "table.frame-ends", 1);
+    }
+
+    #[test]
+    fn should_normalize_frame_value_topbot_as_ends_when_converting_to_html() {
+        let doc = Parser::default().parse("[frame=topbot]\n|===\n|A |B |C\n|===");
+
+        assert_css(&doc, "table.frame-ends", 1);
+    }
+
+    // Backend-specific test omitted: DocBook ("should preserve frame value
+    // topbot when converting to DocBook").
+
+    // Backend-specific test omitted: DocBook ("should convert frame value ends
+    // to topbot when converting to DocBook").
+
+    // Backend-specific test omitted: DocBook ("table with landscape orientation
+    // in DocBook").
+
+    #[test]
+    fn table_with_implicit_header_row() {
+        let doc = Parser::default().parse(
+            "|===\n|Column 1 |Column 2\n\n|Data A1\n|Data B1\n\n|Data A2\n|Data B2\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 1);
+        assert_css(&doc, "table > thead > tr", 1);
+        assert_css(&doc, "table > thead > tr > th", 2);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 2);
+    }
+
+    #[test]
+    fn table_with_implicit_header_row_only() {
+        let doc = Parser::default().parse("|===\n|Column 1 |Column 2\n\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 1);
+        assert_css(&doc, "table > thead > tr", 1);
+        assert_css(&doc, "table > thead > tr > th", 2);
+        assert_css(&doc, "table > tbody", 0);
+    }
+
+    #[test]
+    fn table_with_implicit_header_row_when_other_options_set() {
+        let doc = Parser::default()
+            .parse("[%autowidth]\n|===\n|Column 1 |Column 2\n\n|Data A1\n|Data B1\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table[style*=\"width\"]", 0);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 1);
+        assert_css(&doc, "table > thead > tr", 1);
+        assert_css(&doc, "table > thead > tr > th", 2);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 1);
+    }
+
+    #[test]
+    fn no_implicit_header_row_if_second_line_not_blank() {
+        let doc = Parser::default().parse(
+            "|===\n|Column 1 |Column 2\n|Data A1\n|Data B1\n\n|Data A2\n|Data B2\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 0);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 3);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): The crate mis-parses this table — it creates an implicit
+    // header row even though the first cell spans multiple lines, and (blocked
+    // by the PSV cell-splitting divergence, see `ignores_escaped_separators`)
+    // drops cells from the multi-line `A1 continued|B1` row. Enable once both
+    // are fixed.
+    fn no_implicit_header_row_if_cell_in_first_line_spans_multiple_lines() {
+        let doc = Parser::default().parse(
+            "[cols=2*]\n|===\n|A1\n\n\nA1 continued|B1\n\n|A2\n|B2\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 0);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_xpath(&doc, "(//td)[1]/p", 2);
+    }
+
+    #[test]
+    fn should_format_first_cell_as_literal_if_there_is_no_implicit_header_row_and_column_has_l_style()
+     {
+        let doc = Parser::default().parse("[cols=\"1l,1\"]\n|===\n|literal\n|normal\n|===");
+
+        assert_css(&doc, "tbody pre", 1);
+        assert_css(&doc, "tbody p.tableblock", 1);
+    }
+
+    #[test]
+    fn should_format_first_cell_as_asciidoc_if_there_is_no_implicit_header_row_and_column_has_a_style()
+     {
+        let doc = Parser::default().parse("[cols=\"1a,1\"]\n|===\n| * list\n| normal\n|===");
+
+        assert_css(&doc, "tbody .ulist", 1);
+        assert_css(&doc, "tbody p.tableblock", 1);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): The crate does not treat a leading-indented line in an
+    // AsciiDoc (`a`) cell as a literal block, so no `<pre>` is produced. Enable
+    // once leading indent is interpreted inside AsciiDoc cells.
+    fn should_interpret_leading_indent_if_first_cell_is_asciidoc_and_there_is_no_implicit_header_row()
+     {
+        let doc = Parser::default().parse("[cols=\"1a,1\"]\n|===\n|\n  literal\n| normal\n|===");
+
+        assert_css(&doc, "tbody pre", 1);
+        assert_css(&doc, "tbody p.tableblock", 1);
+    }
+
+    #[test]
+    fn should_format_first_cell_as_asciidoc_if_there_is_no_implicit_header_row_and_cell_has_a_style() {
+        let doc = Parser::default().parse("|===\na| * list\n| normal\n|===");
+
+        assert_css(&doc, "tbody .ulist", 1);
+        assert_css(&doc, "tbody p.tableblock", 1);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): The crate creates an implicit header row even though the
+    // first cell (an AsciiDoc cell) spans multiple lines; Asciidoctor suppresses
+    // the implicit header in that case. Enable once implicit-header detection
+    // accounts for multi-line first cells.
+    fn no_implicit_header_row_if_asciidoc_cell_in_first_line_spans_multiple_lines() {
+        let doc = Parser::default().parse(
+            "[cols=2*]\n|===\na|contains AsciiDoc content\n\n* a\n* b\n* c\na|contains no AsciiDoc content\n\njust text\n|A2\n|B2\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 0);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_xpath(&doc, "(//td)[1]//ul", 1);
+    }
+
+    #[test]
+    fn no_implicit_header_row_if_first_line_blank() {
+        let doc = Parser::default().parse(
+            "|===\n\n|Column 1 |Column 2\n\n|Data A1\n|Data B1\n\n|Data A2\n|Data B2\n\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 0);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 3);
+    }
+
+    #[test]
+    fn no_implicit_header_row_if_noheader_option_is_specified() {
+        let doc = Parser::default().parse(
+            "[%noheader]\n|===\n|Column 1 |Column 2\n\n|Data A1\n|Data B1\n\n|Data A2\n|Data B2\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 0);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 3);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Blocked by the PSV cell-splitting divergence (see
+    // `ignores_escaped_separators`): `|Occupation| Website` is not split into
+    // two cells, so the header/footer rows are mis-parsed. Enable once the
+    // parser splits on any unescaped `|`.
+    fn styles_not_applied_to_header_cells() {
+        let doc = Parser::default().parse(
+            "[cols=\"1h,1s,1e\",options=\"header,footer\"]\n|===\n|Name |Occupation| Website\n|Octocat |Social coding| https://github.com\n|Name |Occupation| Website\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > thead > tr > th", 3);
+        assert_css(&doc, "table > thead > tr > th > *", 0);
+
+        assert_css(&doc, "table > tfoot > tr > th", 1);
+        assert_css(&doc, "table > tfoot > tr > td", 2);
+        assert_css(&doc, "table > tfoot > tr > td > p > strong", 1);
+        assert_css(&doc, "table > tfoot > tr > td > p > em", 1);
+
+        assert_css(&doc, "table > tbody > tr > th", 1);
+        assert_css(&doc, "table > tbody > tr > td", 2);
+        assert_css(&doc, "table > tbody > tr > td > p.header", 0);
+        assert_css(&doc, "table > tbody > tr > td > p > strong", 1);
+        assert_css(&doc, "table > tbody > tr > td > p > em > a", 1);
+    }
+
+    #[test]
+    fn should_apply_text_formatting_to_cells_in_implicit_header_row_when_column_has_a_style() {
+        let doc = Parser::default()
+            .parse("[cols=\"2*a\"]\n|===\n| _foo_ | *bar*\n\n| * list item\n| paragraph\n|===");
+
+        assert_xpath(&doc, "(//thead/tr/th)[1]/em[text()=\"foo\"]", 1);
+        assert_xpath(&doc, "(//thead/tr/th)[2]/strong[text()=\"bar\"]", 1);
+        assert_css(&doc, "tbody .ulist", 1);
+        assert_css(&doc, "tbody .paragraph", 1);
+    }
+
+    #[test]
+    fn should_apply_style_and_text_formatting_to_cells_in_first_row_if_no_implicit_header() {
+        let doc = Parser::default()
+            .parse("[cols=\"s,e\"]\n|===\n| _strong_ | *emphasis*\n| strong\n| emphasis\n|===");
+
+        assert_xpath(&doc, "((//tbody/tr)[1]/td)[1]//strong/em[text()=\"strong\"]", 1);
+        assert_xpath(&doc, "((//tbody/tr)[1]/td)[2]//em/strong[text()=\"emphasis\"]", 1);
+        assert_xpath(&doc, "((//tbody/tr)[2]/td)[1]//strong[text()=\"strong\"]", 1);
+        assert_xpath(&doc, "((//tbody/tr)[2]/td)[2]//em[text()=\"emphasis\"]", 1);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Blocked by the PSV cell-splitting divergence (see
+    // `ignores_escaped_separators`): `|Occupation| Website` is not split into
+    // two cells, so the rows are mis-parsed. Enable once the parser splits on
+    // any unescaped `|`.
+    fn vertical_table_headers_use_th_element_instead_of_header_class() {
+        let doc = Parser::default().parse(
+            "[cols=\"1h,1s,1e\"]\n|===\n\n|Name |Occupation| Website\n\n|Octocat |Social coding| https://github.com\n\n|Name |Occupation| Website\n\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > tbody > tr > th", 3);
+        assert_css(&doc, "table > tbody > tr > td", 6);
+        assert_css(&doc, "table > tbody > tr .header", 0);
+        assert_css(&doc, "table > tbody > tr > td > p > strong", 3);
+        assert_css(&doc, "table > tbody > tr > td > p > em", 3);
+        assert_css(&doc, "table > tbody > tr > td > p > em > a", 1);
+    }
+
+    #[test]
+    fn supports_horizontal_and_vertical_source_data_with_blank_lines_and_table_header() {
+        let doc = Parser::default().parse(
+            ".Horizontal and vertical source data\n[width=\"80%\",cols=\"3,^2,^2,10\",options=\"header\"]\n|===\n|Date |Duration |Avg HR |Notes\n\n|22-Aug-08 |10:24 | 157 |\nWorked out MSHR (max sustainable heart rate) by going hard\nfor this interval.\n\n|22-Aug-08 |23:03 | 152 |\nBack-to-back with previous interval.\n\n|24-Aug-08 |40:00 | 145 |\nModerately hard interspersed with 3x 3min intervals (2 min\nhard + 1 min really hard taking the HR up to 160).\n\nI am getting in shape!\n\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table[width=\"80%\"]", 1);
+        assert_xpath(
+            &doc,
+            "/table/caption[@class=\"title\"][text()=\"Table 1. Horizontal and vertical source data\"]",
+            1,
+        );
+        assert_css(&doc, "table > colgroup > col", 4);
+        // Ruby uses `col:nth-child(N)`; the indexed XPath form is equivalent.
+        assert_xpath(&doc, "(/table/colgroup/col)[1][@width=\"17.647%\"]", 1);
+        assert_xpath(&doc, "(/table/colgroup/col)[2][@width=\"11.7647%\"]", 1);
+        assert_xpath(&doc, "(/table/colgroup/col)[3][@width=\"11.7647%\"]", 1);
+        assert_xpath(&doc, "(/table/colgroup/col)[4][@width=\"58.8236%\"]", 1);
+        assert_css(&doc, "table > thead", 1);
+        assert_css(&doc, "table > thead > tr", 1);
+        assert_css(&doc, "table > thead > tr > th", 4);
+        assert_css(&doc, "table > tbody > tr", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 4);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 4);
+        assert_xpath(&doc, "(/table/tbody/tr)[3]/td", 4);
+        assert_xpath(
+            &doc,
+            "/table/tbody/tr[1]/td[4]/p[text()='Worked out MSHR (max sustainable heart rate) by going hard\nfor this interval.']",
+            1,
+        );
+        assert_xpath(&doc, "(/table/tbody/tr)[3]/td[4]/p", 2);
+        assert_xpath(
+            &doc,
+            "/table/tbody/tr[3]/td[4]/p[2][text()=\"I am getting in shape!\"]",
+            1,
+        );
+    }
 }
 
 mod dsv {
@@ -447,6 +743,8 @@ mod csv {
     #[allow(unused_imports)]
     use crate::tests::prelude::*;
 }
+
+
 
 
 
