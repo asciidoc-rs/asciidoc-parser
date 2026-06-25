@@ -564,14 +564,24 @@ fn matches_single_predicate(node: &VirtualNode, predicate: &str) -> bool {
         }
     }
 
-    // CSS-style attribute substring selector: [attr*="value"].
+    // CSS-style attribute substring selector: [attr*="value"]. As with the
+    // exact-match form below, `class` and `id` live on their own node fields
+    // rather than in `attributes`; `class` is matched against the rendered
+    // (space-joined) class list so the substring may span class boundaries.
     if let Some((attr_name, value_part)) = predicate.split_once("*=") {
         let attr_name = attr_name.trim();
         let value = unquote_attr_value(value_part);
-        return node
-            .attributes
-            .get(attr_name)
-            .is_some_and(|v| v.contains(&value));
+        return match attr_name {
+            "class" => node.classes.join(" ").contains(value.as_str()),
+            "id" => node
+                .id
+                .as_deref()
+                .is_some_and(|id| id.contains(value.as_str())),
+            _ => node
+                .attributes
+                .get(attr_name)
+                .is_some_and(|v| v.contains(&value)),
+        };
     }
 
     // CSS-style attribute value selector without the `@` prefix:
@@ -749,6 +759,29 @@ mod tests {
 
         // Verify the attribute value.
         assert_eq!(result[0].attributes.get("start"), Some(&"2".to_string()));
+    }
+
+    #[test]
+    fn query_attribute_substring_selector() {
+        // The `[attr*="value"]` substring selector must consult the dedicated
+        // `class` and `id` node fields, not just `attributes`.
+        let node = VirtualNode::new("table")
+            .with_classes(["tableblock", "fit-content"])
+            .with_id("results")
+            .with_attribute("style", "width: 50%;");
+
+        // `class` matches against the space-joined class list.
+        assert_eq!(query_css(&node, "table[class*=\"fit\"]").len(), 1);
+        assert_eq!(query_css(&node, "table[class*=\"block\"]").len(), 1);
+        assert_eq!(query_css(&node, "table[class*=\"nope\"]").len(), 0);
+
+        // `id` matches against the id field.
+        assert_eq!(query_css(&node, "table[id*=\"sult\"]").len(), 1);
+        assert_eq!(query_css(&node, "table[id*=\"nope\"]").len(), 0);
+
+        // An ordinary attribute matches against its value.
+        assert_eq!(query_css(&node, "table[style*=\"width\"]").len(), 1);
+        assert_eq!(query_css(&node, "table[style*=\"height\"]").len(), 0);
     }
 
     #[test]
