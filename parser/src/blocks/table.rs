@@ -2073,12 +2073,18 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
             .get(i..)
             .is_some_and(|rest| rest.starts_with(separator))
         {
+            // A separator immediately preceded by a backslash is escaped: it is
+            // literal content, not a cell boundary. The backslash is stripped
+            // from the rendered cell later (see `TableCell::parse`).
+            if i > 0 && bytes.get(i - 1).copied() == Some(b'\\') {
+                i += sep_len;
+                continue;
+            }
+
             // Walk back to the start of the token directly preceding this
             // separator. The token (a possible cell specifier) runs back to the
             // previous whitespace, tab, or newline, or to the start of the
-            // region; either way the token is anchored at a line start or after
-            // whitespace, as a cell boundary requires. (When `tok_start == i`
-            // the token is empty and the separator is plain.)
+            // region.
             let mut tok_start = i;
             while tok_start > 0
                 && !matches!(
@@ -2096,21 +2102,30 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
                 parse_cell_spec(token)
             };
 
-            if let Some(spec) = spec {
-                if let Some(start) = content_start {
-                    // The previous cell's content ends at the start of this
-                    // cell's specifier; the separating whitespace, included in
-                    // the slice, is trimmed later in `TableCell::parse`.
-                    cells.push(RawCell {
-                        spec: cur_spec,
-                        content: region.slice(start..tok_start),
-                    });
-                }
-                cur_spec = spec;
-                content_start = Some(i + sep_len);
-                i += sep_len;
-                continue;
+            // Every unescaped separator is a cell boundary (matching
+            // Asciidoctor). When the token is empty or a valid specifier it
+            // belongs to the *next* cell, so the previous cell's content ends
+            // before the token. Otherwise the token is ordinary content of the
+            // previous cell (e.g. the `a` in `|a|b`, where `a` is not preceded
+            // by whitespace and so is not a specifier), the separator is plain,
+            // and the next cell takes the default specifier.
+            let (content_end, next_spec) = match spec {
+                Some(spec) => (tok_start, spec),
+                None => (i, CellSpec::default()),
+            };
+
+            if let Some(start) = content_start {
+                // The separating whitespace, included in the slice, is trimmed
+                // later in `TableCell::parse`.
+                cells.push(RawCell {
+                    spec: cur_spec,
+                    content: region.slice(start..content_end),
+                });
             }
+            cur_spec = next_spec;
+            content_start = Some(i + sep_len);
+            i += sep_len;
+            continue;
         }
 
         i += 1;

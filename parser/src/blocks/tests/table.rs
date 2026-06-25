@@ -739,29 +739,27 @@ fn cell_specifier_span_operator_without_factor_locates_separator() {
 }
 
 #[test]
-fn non_specifier_token_is_not_a_cell_separator() {
+fn non_specifier_token_is_a_plain_cell_separator() {
     // A token in front of a `|` that does not parse as a cell specifier (here the
-    // word `foo`, which is more than a single style letter) means the `|` is not
-    // a cell separator: `a foo|b` is a single cell whose content includes the
-    // literal `|`.
+    // word `foo`, which is more than a single style letter) is ordinary content:
+    // the `|` is still a plain cell separator, so `a foo|b` is two cells (matching
+    // Asciidoctor).
     let table = parse_table("|===\n|a foo|b\n|===");
 
-    assert_eq!(table.columns().len(), 1);
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
-    assert_eq!(rows, vec![vec!["a foo|b".to_string()]]);
+    assert_eq!(rows, vec![vec!["a foo".to_string(), "b".to_string()]]);
 }
 
 #[test]
-fn dot_not_followed_by_vertical_operator_is_not_a_cell_separator() {
+fn dot_not_followed_by_vertical_operator_is_a_plain_cell_separator() {
     // A vertical alignment operator is a dot followed by `<`, `>`, or `^`. A dot
     // followed by anything else (here `.x`) is not a valid cell specifier, so the
-    // `|` is not a cell separator: `a .x|b` is a single cell whose content
-    // includes the literal `.x|`.
+    // `.x` is content and the `|` is a plain cell separator: `a .x|b` is two cells
+    // (matching Asciidoctor).
     let table = parse_table("|===\n|a .x|b\n|===");
 
-    assert_eq!(table.columns().len(), 1);
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
-    assert_eq!(rows, vec![vec!["a .x|b".to_string()]]);
+    assert_eq!(rows, vec![vec!["a .x".to_string(), "b".to_string()]]);
 }
 
 #[test]

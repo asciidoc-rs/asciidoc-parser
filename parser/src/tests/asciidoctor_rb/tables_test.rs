@@ -155,12 +155,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate diverges from Asciidoctor on PSV cell
-    // splitting: it treats a `|` as a cell separator only when preceded by a
-    // delimiter boundary (e.g. a space), so `|a|b` parses as a single cell
-    // whereas Asciidoctor (and this test) splits it into two. Enable once the
-    // parser splits on any unescaped `|`.
     fn ignores_escaped_separators() {
         let doc = Parser::default().parse("|===\n|A \\| here| a \\| there\n|===");
 
@@ -599,11 +593,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Blocked by the PSV cell-splitting divergence (see
-    // `ignores_escaped_separators`): `|Occupation| Website` is not split into
-    // two cells, so the header/footer rows are mis-parsed. Enable once the
-    // parser splits on any unescaped `|`.
     fn styles_not_applied_to_header_cells() {
         let doc = Parser::default().parse(
             "[cols=\"1h,1s,1e\",options=\"header,footer\"]\n|===\n|Name |Occupation| Website\n|Octocat |Social coding| https://github.com\n|Name |Occupation| Website\n|===",
@@ -660,11 +649,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Blocked by the PSV cell-splitting divergence (see
-    // `ignores_escaped_separators`): `|Occupation| Website` is not split into
-    // two cells, so the rows are mis-parsed. Enable once the parser splits on
-    // any unescaped `|`.
     fn vertical_table_headers_use_th_element_instead_of_header_class() {
         let doc = Parser::default().parse(
             "[cols=\"1h,1s,1e\"]\n|===\n\n|Name |Occupation| Website\n\n|Octocat |Social coding| https://github.com\n\n|Name |Occupation| Website\n\n|===",
@@ -1314,11 +1298,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Blocked by the deprecated bare-integer colspec
-    // divergence — `cols=2` should yield two columns but the crate parses one
-    // (see `table_with_explicit_deprecated_colspec_syntax_can_have_multiple_rows_on_a_single_line`).
-    // Enable once `cols=2` is supported.
     fn custom_separator_for_an_asciidoc_table_cell() {
         let doc = Parser::default().parse(
             "[cols=2,separator=!]\n|===\n!Pipe output to vim\na!\n----\nasciidoctor -o - -s test.adoc | view -\n----\n|===",
