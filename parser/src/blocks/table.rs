@@ -217,7 +217,22 @@ impl<'src> TableBlock<'src> {
         let line1_blank = line1.item.data().trim().is_empty();
         let line2_blank =
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
-        let has_header = opts_header || (!opts_noheader && !line1_blank && line2_blank);
+
+        // An implicit header additionally requires that the first row be complete
+        // on the first line. If the first cell spans multiple lines — for PSV,
+        // the first non-blank line after the blank gap continues the cell instead
+        // of starting a new one; for CSV/TSV, the first line opens a quoted value
+        // that is not closed on that line — there is no implicit header (matching
+        // Asciidoctor, which cancels the implicit header in these cases).
+        let first_row_complete = match data_format {
+            DataFormat::Psv => first_nonblank_line(line1.after)
+                .is_none_or(|line| psv_line_starts_cell(line.data(), separator.as_str())),
+            DataFormat::Csv | DataFormat::Tsv => !line_has_unclosed_quote(line1.item.data()),
+            DataFormat::Dsv => true,
+        };
+
+        let has_header =
+            opts_header || (!opts_noheader && !line1_blank && line2_blank && first_row_complete);
 
         // A titled table is given a caption (e.g. "Table 1. ") that a processor
         // prepends to the title.
@@ -1176,7 +1191,7 @@ fn build_data_table<'src>(
     let (fields, first_row_len) = if data_format == DataFormat::Dsv {
         parse_dsv_fields(inside, separator)
     } else {
-        parse_csv_fields(inside, separator)
+        parse_csv_fields(inside, separator, warnings)
     };
 
     let ncols = if cols_attr.is_empty() {
@@ -1238,7 +1253,11 @@ struct DataField<'src> {
 /// value. As a result a value whose opening quote is never properly closed (or
 /// that has trailing characters after its closing quote) keeps its quotes and
 /// absorbs the following separators, rather than being treated as enclosed.
-fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField<'src>>, usize) {
+fn parse_csv_fields<'src>(
+    region: Span<'src>,
+    separator: &str,
+    warnings: &mut Vec<Warning<'src>>,
+) -> (Vec<DataField<'src>>, usize) {
     let data = region.data();
     let n = data.len();
     let sep_len = separator.len().max(1);
@@ -1279,7 +1298,7 @@ fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField
         // blank cell that follows a separator on a populated line is kept.
         let blank_skip = (at_nl || at_eof) && fields_in_row == 0 && raw.trim().is_empty();
         if !blank_skip {
-            fields.push(make_csv_field(region, cell_start, i));
+            fields.push(make_csv_field(region, cell_start, i, warnings));
             fields_in_row += 1;
             if !first_row_done {
                 first_row_len = fields_in_row;
@@ -1312,37 +1331,42 @@ fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField
 /// applying Asciidoctor's `close_cell` value processing.
 ///
 /// The value is stripped of surrounding whitespace; then, if it is enclosed in
-/// double quotes, the quotes are removed and the inner value is stripped again;
-/// finally any run of consecutive double quotes is collapsed to one (so an
-/// escaped `""` becomes a single `"`). A value that is not enclosed (no leading
-/// quote, an unclosed quote, or trailing characters after the closing quote)
-/// keeps its quotes and is only collapsed.
-fn make_csv_field<'src>(region: Span<'src>, start: usize, end: usize) -> DataField<'src> {
+/// double quotes, the quotes are removed and the inner value is stripped again,
+/// so the field's [content](DataField::content) span points at the actual value
+/// (this matters for an AsciiDoc cell, which parses that span). Finally any run
+/// of consecutive double quotes is collapsed to one (so an escaped `""` becomes
+/// a single `"`). A value that is not enclosed (no leading quote, or trailing
+/// characters after the closing quote) keeps its quotes and is only collapsed.
+///
+/// A lone double quote is an unclosed quoted value: it logs an error and the
+/// cell is set to empty (matching Asciidoctor).
+fn make_csv_field<'src>(
+    region: Span<'src>,
+    start: usize,
+    end: usize,
+    warnings: &mut Vec<Warning<'src>>,
+) -> DataField<'src> {
     let trimmed = trim_surrounding_whitespace(region.slice(start..end));
-    let value = csv_cell_value(trimmed.data());
-    let replacement = (value != trimmed.data()).then_some(value);
-    DataField {
-        content: trimmed,
-        replacement,
-    }
-}
+    let data = trimmed.data();
 
-/// Apply Asciidoctor's CSV value processing to an already-stripped cell value:
-/// unquote an enclosed value and collapse escaped double quotes (`""` -> `"`).
-fn csv_cell_value(text: &str) -> String {
-    if text.is_empty() || !text.contains('"') {
-        return text.to_string();
-    }
-
-    // An enclosed value (leading and trailing quote) has its quotes removed and
-    // is stripped again; a lone `"` becomes empty. Anything else keeps its text.
-    if text.starts_with('"') && text.ends_with('"') {
-        match text.get(1..text.len() - 1) {
-            Some(inner) => squeeze_quotes(inner.trim()),
-            None => String::new(),
-        }
+    let content = if data == "\"" {
+        warnings.push(Warning {
+            source: trimmed,
+            warning: WarningType::TableCsvDataHasUnclosedQuote,
+        });
+        trimmed.slice(0..0)
+    } else if data.len() >= 2 && data.starts_with('"') && data.ends_with('"') {
+        trim_surrounding_whitespace(trimmed.slice(1..data.len() - 1))
     } else {
-        squeeze_quotes(text)
+        trimmed
+    };
+
+    let value = squeeze_quotes(content.data());
+    let replacement = (value != content.data()).then_some(value);
+
+    DataField {
+        content,
+        replacement,
     }
 }
 
@@ -1651,7 +1675,7 @@ impl<'src> TableCell<'src> {
             raw.spec.style.unwrap_or(column.style)
         };
 
-        let trimmed = trim_surrounding_whitespace(raw.content);
+        let trimmed = trim_cell_content(raw.content, style);
 
         // An escaped cell separator (a backslash in front of the table's
         // separator, e.g. `\|` or `\!`) is unescaped to the bare separator. Only
@@ -1808,23 +1832,50 @@ pub enum TableCellContent<'src> {
     AsciiDoc(Vec<Block<'src>>),
 }
 
-/// Parse the value of the `cols` attribute into a list of columns.
+/// Parse the value of the `cols` attribute into a list of columns, mirroring
+/// Asciidoctor's `parse_colspecs`.
 ///
-/// The value is a comma-separated list of column specifiers. A specifier may be
-/// preceded by a multiplier (`<n>*`) that repeats the column `n` times. The
-/// alignment operators and proportional width of a specifier are interpreted;
-/// the style operator is not yet.
+/// All spaces are first removed from the value. A wholly blank value yields no
+/// columns (the caller then takes the column count from the first row), and a
+/// lone integer (the deprecated `cols="3"` form) yields that many default
+/// columns. Otherwise the value is a list of column specifiers separated by
+/// commas, or by semicolons when no comma is present. An empty record (e.g. the
+/// trailing field of `cols="1,,1"`) contributes a default column, and a
+/// specifier may be preceded by a multiplier (`<n>*`) that repeats the column
+/// `n` times. Each specifier's alignment operators, proportional width, and
+/// [style operator](parse_col_spec) are interpreted.
 fn parse_cols(value: &str) -> Vec<TableColumn> {
+    // Asciidoctor strips every space from the cols value before parsing, so
+    // `cols=" 1, 1 "` is equivalent to `cols="1,1"`.
+    let records: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // A wholly blank cols value is ignored: the caller falls back to the column
+    // count of the first row.
+    if records.is_empty() {
+        return vec![];
+    }
+
+    // Deprecated single-integer form: `cols=3` is equivalent to `cols="3*"` and
+    // produces that many equally sized columns.
+    if let Ok(count) = records.parse::<usize>() {
+        return vec![TableColumn::default(); count];
+    }
+
+    // Split on commas when present, otherwise on semicolons (Asciidoctor accepts
+    // either as the column-spec separator, but not a mix). Empty records are
+    // kept: each one contributes a default column.
+    let parts: Vec<&str> = if records.contains(',') {
+        records.split(',').collect()
+    } else {
+        records.split(';').collect()
+    };
+
     let mut columns: Vec<TableColumn> = vec![];
-
-    for part in value.split(',') {
-        let part = part.trim();
+    for part in parts {
         if part.is_empty() {
-            continue;
-        }
-
-        if let Some((count, spec)) = part.split_once('*') {
-            let repeat = count.trim().parse::<usize>().unwrap_or(1).max(1);
+            columns.push(TableColumn::default());
+        } else if let Some((count, spec)) = part.split_once('*') {
+            let repeat = count.parse::<usize>().unwrap_or(1).max(1);
             let column = parse_col_spec(spec);
             for _ in 0..repeat {
                 columns.push(column.clone());
@@ -2019,20 +2070,23 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// Scan a region for PSV cell boundaries, returning the [specifier](CellSpec)
 /// and raw (untrimmed) content span of each cell.
 ///
-/// A cell boundary is the table's `separator` (the vertical bar (`|`) by
-/// default, the exclamation mark (`!`) for a nested table, or any string set
-/// with the `separator` attribute, e.g. the broken bar `¦`) that appears at the
-/// start of a line or is preceded by whitespace, optionally with a
-/// [cell specifier](CellSpec) (e.g. `^`, `2+`, `.>`) directly in front of the
-/// separator. The token immediately preceding a separator is taken to be a
-/// specifier when it parses as one (see [`parse_cell_spec`]); a token that
-/// doesn't parse as a specifier means the separator is not a cell boundary.
-/// Content before the first boundary is ignored.
+/// Every unescaped occurrence of the table's `separator` (the vertical bar
+/// (`|`) by default, the exclamation mark (`!`) for a nested table, or any
+/// string set with the `separator` attribute, e.g. the broken bar `¦`) is a
+/// cell boundary, matching Asciidoctor. The token immediately preceding a
+/// separator is treated as that cell's [specifier](CellSpec) (e.g. `^`, `2+`,
+/// `.>`) only when it parses as one (see [`parse_cell_spec`]) *and* is anchored
+/// at the line start or preceded by whitespace; otherwise the token is ordinary
+/// content of the preceding cell and the separator is a plain boundary (so the
+/// `a` in `|a|b` is content, not a style operator). Content before the first
+/// boundary is ignored.
 ///
-/// An escaped separator (e.g. `\|`) is preceded by a backslash, which is not a
-/// valid specifier, so the separator already fails the boundary test and needs
-/// no special handling here; the backslash is stripped later in
-/// [`TableCell::parse`].
+/// A separator immediately preceded by a backslash (e.g. `\|`) is escaped: it
+/// is literal content rather than a boundary, and the backslash is stripped
+/// later in [`TableCell::parse`]. Only the single byte before the separator is
+/// inspected, so `\\|` is also read as an escaped separator — matching
+/// Asciidoctor, whose check is likewise the single-character
+/// `pre_match.end_with? '\'`.
 fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
     let data = region.data();
     let bytes = data.as_bytes();
@@ -2052,12 +2106,18 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
             .get(i..)
             .is_some_and(|rest| rest.starts_with(separator))
         {
+            // A separator immediately preceded by a backslash is escaped: it is
+            // literal content, not a cell boundary. The backslash is stripped
+            // from the rendered cell later (see `TableCell::parse`).
+            if i > 0 && bytes.get(i - 1).copied() == Some(b'\\') {
+                i += sep_len;
+                continue;
+            }
+
             // Walk back to the start of the token directly preceding this
             // separator. The token (a possible cell specifier) runs back to the
             // previous whitespace, tab, or newline, or to the start of the
-            // region; either way the token is anchored at a line start or after
-            // whitespace, as a cell boundary requires. (When `tok_start == i`
-            // the token is empty and the separator is plain.)
+            // region.
             let mut tok_start = i;
             while tok_start > 0
                 && !matches!(
@@ -2075,21 +2135,30 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
                 parse_cell_spec(token)
             };
 
-            if let Some(spec) = spec {
-                if let Some(start) = content_start {
-                    // The previous cell's content ends at the start of this
-                    // cell's specifier; the separating whitespace, included in
-                    // the slice, is trimmed later in `TableCell::parse`.
-                    cells.push(RawCell {
-                        spec: cur_spec,
-                        content: region.slice(start..tok_start),
-                    });
-                }
-                cur_spec = spec;
-                content_start = Some(i + sep_len);
-                i += sep_len;
-                continue;
+            // Every unescaped separator is a cell boundary (matching
+            // Asciidoctor). When the token is empty or a valid specifier it
+            // belongs to the *next* cell, so the previous cell's content ends
+            // before the token. Otherwise the token is ordinary content of the
+            // previous cell (e.g. the `a` in `|a|b`, where `a` is not preceded
+            // by whitespace and so is not a specifier), the separator is plain,
+            // and the next cell takes the default specifier.
+            let (content_end, next_spec) = match spec {
+                Some(spec) => (tok_start, spec),
+                None => (i, CellSpec::default()),
+            };
+
+            if let Some(start) = content_start {
+                // The separating whitespace, included in the slice, is trimmed
+                // later in `TableCell::parse`.
+                cells.push(RawCell {
+                    spec: cur_spec,
+                    content: region.slice(start..content_end),
+                });
             }
+            cur_spec = next_spec;
+            content_start = Some(i + sep_len);
+            i += sep_len;
+            continue;
         }
 
         i += 1;
@@ -2275,4 +2344,78 @@ fn trim_surrounding_whitespace(s: Span<'_>) -> Span<'_> {
     let start = data.len() - data.trim_start().len();
     let len = data.trim().len();
     s.slice(start..start + len)
+}
+
+/// Trim a PSV cell's content according to its [style](ColumnStyle), matching
+/// Asciidoctor's `Table::Cell` initializer:
+///
+/// * A [`Literal`](ColumnStyle::Literal) cell has its trailing whitespace
+///   removed and any leading blank lines stripped, but the leading indentation
+///   of its first content line is preserved (so an indented literal cell keeps
+///   its indentation).
+/// * An [`AsciiDoc`](ColumnStyle::AsciiDoc) cell likewise removes trailing
+///   whitespace; if the remaining content begins with a newline it strips the
+///   leading blank lines (preserving the first content line's indentation, so a
+///   leading-indented line is interpreted as a literal block), otherwise it
+///   strips the leading whitespace.
+/// * Every other style has all surrounding whitespace removed.
+fn trim_cell_content(s: Span<'_>, style: ColumnStyle) -> Span<'_> {
+    let data = s.data();
+    match style {
+        ColumnStyle::Literal => {
+            let end = data.trim_end().len();
+            let mut start = 0;
+            while data[start..end].starts_with('\n') {
+                start += 1;
+            }
+            s.slice(start..end)
+        }
+        ColumnStyle::AsciiDoc => {
+            let end = data.trim_end().len();
+            if data[..end].starts_with('\n') {
+                let mut start = 0;
+                while data[start..end].starts_with('\n') {
+                    start += 1;
+                }
+                s.slice(start..end)
+            } else {
+                let start = end - data[..end].trim_start().len();
+                s.slice(start..end)
+            }
+        }
+        _ => trim_surrounding_whitespace(s),
+    }
+}
+
+/// Returns the first non-blank line in `rest`, or `None` when every remaining
+/// line is blank (or `rest` is empty).
+fn first_nonblank_line(mut rest: Span<'_>) -> Option<Span<'_>> {
+    while !rest.is_empty() {
+        let line = rest.take_line();
+        if !line.item.data().trim().is_empty() {
+            return Some(line.item);
+        }
+        rest = line.after;
+    }
+    None
+}
+
+/// Returns `true` when `line` begins a new PSV cell, i.e. it contains the
+/// separator and the text before the first separator (after any leading
+/// whitespace) is either empty or a valid cell specifier. A line that continues
+/// the previous cell returns `false`.
+fn psv_line_starts_cell(line: &str, separator: &str) -> bool {
+    match line.find(separator) {
+        Some(pos) => {
+            let prefix = line[..pos].trim_start();
+            prefix.is_empty() || parse_cell_spec(prefix).is_some()
+        }
+        None => false,
+    }
+}
+
+/// Returns `true` when `line` contains an odd number of double quotes, i.e. it
+/// opens a quoted CSV/TSV value that is not closed on the same line.
+fn line_has_unclosed_quote(line: &str) -> bool {
+    line.bytes().filter(|&b| b == b'"').count() % 2 == 1
 }

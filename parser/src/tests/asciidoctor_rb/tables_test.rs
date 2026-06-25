@@ -155,12 +155,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate diverges from Asciidoctor on PSV cell
-    // splitting: it treats a `|` as a cell separator only when preceded by a
-    // delimiter boundary (e.g. a space), so `|a|b` parses as a single cell
-    // whereas Asciidoctor (and this test) splits it into two. Enable once the
-    // parser splits on any unescaped `|`.
     fn ignores_escaped_separators() {
         let doc = Parser::default().parse("|===\n|A \\| here| a \\| there\n|===");
 
@@ -228,11 +222,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate strips the leading indentation from the first
-    // content line of a literal (`l`) cell, producing "one\n  two\nthree"
-    // instead of Asciidoctor's "  one\n  two\nthree". A literal cell should
-    // preserve leading spaces on every line. Enable once fixed.
     fn should_preserve_leading_spaces_but_not_leading_newlines_or_trailing_spaces_in_literal_table_cells()
      {
         let doc =
@@ -339,10 +328,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not support the deprecated bare-integer
-    // colspec (`cols="3"` meaning three columns); it parses a single column of
-    // width 3. Enable once the deprecated syntax is supported.
     fn table_with_explicit_deprecated_colspec_syntax_can_have_multiple_rows_on_a_single_line() {
         let doc = Parser::default().parse("[cols=\"3\"]\n|===\n|one |two\n|1 |2 |a |b\n|===");
 
@@ -352,10 +337,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not add a column for an empty trailing
-    // record in the colspec (`cols="<,"` should yield two columns); it parses a
-    // single column. Enable once empty colspec records are honored.
     fn columns_are_added_for_empty_records_in_colspec_attribute() {
         let doc = Parser::default().parse("[cols=\"<,\"]\n|===\n|one |two\n|1 |2 |a |b\n|===");
 
@@ -365,10 +346,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not accept a semicolon as the colspec
-    // separator (`cols="1s;3m"` should yield two columns); it parses a single
-    // column. Enable once `;`-separated colspecs are supported.
     fn cols_may_be_separated_by_semi_colon_instead_of_comma() {
         let doc = Parser::default().parse("[cols=\"1s;3m\"]\n|===\n| strong\n| mono\n|===");
 
@@ -516,12 +493,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate mis-parses this table — it creates an implicit
-    // header row even though the first cell spans multiple lines, and (blocked
-    // by the PSV cell-splitting divergence, see `ignores_escaped_separators`)
-    // drops cells from the multi-line `A1 continued|B1` row. Enable once both
-    // are fixed.
     fn no_implicit_header_row_if_cell_in_first_line_spans_multiple_lines() {
         let doc =
             Parser::default().parse("[cols=2*]\n|===\n|A1\n\n\nA1 continued|B1\n\n|A2\n|B2\n|===");
@@ -553,10 +524,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not treat a leading-indented line in an
-    // AsciiDoc (`a`) cell as a literal block, so no `<pre>` is produced. Enable
-    // once leading indent is interpreted inside AsciiDoc cells.
     fn should_interpret_leading_indent_if_first_cell_is_asciidoc_and_there_is_no_implicit_header_row()
      {
         let doc = Parser::default().parse("[cols=\"1a,1\"]\n|===\n|\n  literal\n| normal\n|===");
@@ -575,11 +542,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate creates an implicit header row even though the
-    // first cell (an AsciiDoc cell) spans multiple lines; Asciidoctor suppresses
-    // the implicit header in that case. Enable once implicit-header detection
-    // accounts for multi-line first cells.
     fn no_implicit_header_row_if_asciidoc_cell_in_first_line_spans_multiple_lines() {
         let doc = Parser::default().parse(
             "[cols=2*]\n|===\na|contains AsciiDoc content\n\n* a\n* b\n* c\na|contains no AsciiDoc content\n\njust text\n|A2\n|B2\n|===",
@@ -620,11 +582,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Blocked by the PSV cell-splitting divergence (see
-    // `ignores_escaped_separators`): `|Occupation| Website` is not split into
-    // two cells, so the header/footer rows are mis-parsed. Enable once the
-    // parser splits on any unescaped `|`.
     fn styles_not_applied_to_header_cells() {
         let doc = Parser::default().parse(
             "[cols=\"1h,1s,1e\",options=\"header,footer\"]\n|===\n|Name |Occupation| Website\n|Octocat |Social coding| https://github.com\n|Name |Occupation| Website\n|===",
@@ -681,11 +638,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Blocked by the PSV cell-splitting divergence (see
-    // `ignores_escaped_separators`): `|Occupation| Website` is not split into
-    // two cells, so the rows are mis-parsed. Enable once the parser splits on
-    // any unescaped `|`.
     fn vertical_table_headers_use_th_element_instead_of_header_class() {
         let doc = Parser::default().parse(
             "[cols=\"1h,1s,1e\"]\n|===\n\n|Name |Occupation| Website\n\n|Octocat |Social coding| https://github.com\n\n|Name |Occupation| Website\n\n|===",
@@ -1169,10 +1121,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): A leading-indented line inside an AsciiDoc cell is not
-    // rendered as a literal block (`<pre>`). Related to the `1a`-column leading
-    // indent gap. Enable once interpreted.
     fn should_preserve_leading_indentation_in_contents_of_asciidoc_table_cell_if_contents_starts_with_newline()
      {
         let doc = Parser::default().parse("|===\na|\n $ command\na| paragraph\n|===");
@@ -1339,11 +1287,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Blocked by the deprecated bare-integer colspec
-    // divergence — `cols=2` should yield two columns but the crate parses one
-    // (see `table_with_explicit_deprecated_colspec_syntax_can_have_multiple_rows_on_a_single_line`).
-    // Enable once `cols=2` is supported.
     fn custom_separator_for_an_asciidoc_table_cell() {
         let doc = Parser::default().parse(
             "[cols=2,separator=!]\n|===\n!Pipe output to vim\na!\n----\nasciidoctor -o - -s test.adoc | view -\n----\n|===",
@@ -1365,11 +1308,6 @@ mod psv {
     // docbook 5", "table with unbreakable option docbook 5").
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Blocked by the multi-line-first-cell implicit-header
-    // divergence — the quoted first cell spans multiple lines, so Asciidoctor
-    // suppresses the implicit header, but the crate creates one (see
-    // `no_implicit_header_row_if_cell_in_first_line_spans_multiple_lines`).
     fn no_implicit_header_row_if_cell_in_first_line_is_quoted_and_spans_multiple_lines() {
         let doc =
             Parser::default().parse("[cols=2*l]\n,===\n\"A1\n\nA1 continued\",B1\nA2,B2\n,===");
@@ -1453,12 +1391,19 @@ mod csv {
     fn should_log_error_but_not_crash_if_cell_data_has_unclosed_quote() {
         let doc = Parser::default().parse(",===\na,b\nc,\"\n,===");
 
-        // The unclosed quote recovers to an empty cell without crashing.
-        // NOTE: Asciidoctor also logs an ERROR ("unclosed quote in CSV data");
-        // the crate recovers silently, so that warning assertion is not ported.
+        // The unclosed quote recovers to an empty cell without crashing, and an
+        // error is logged for line 3 (the `c,"` line).
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table td", 4);
         assert_xpath(&doc, "(//td)[4]/p", 0);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::TableCsvDataHasUnclosedQuote
+        );
+        assert_eq!(warnings[0].source.line(), 3);
     }
 
     #[test]
@@ -1597,12 +1542,6 @@ mod csv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): For a multi-line, whitespace-padded quoted CSV value
-    // feeding an AsciiDoc (`a`) column, the crate does not strip the surrounding
-    // quotes or whitespace — the cell renders `"\n  one sentence, one line\n  "`
-    // verbatim instead of the trimmed `one sentence, one line`. Enable once the
-    // CSV quote/whitespace stripping handles this case.
     fn should_strip_whitespace_around_contents_of_asciidoc_cell() {
         let doc = Parser::default().parse(
             "[cols=\"1,1,1a\",separator=;]\n,===\nelement;description;example\n\nparagraph;contiguous lines of words and phrases;\"\n  one sentence, one line\n  \"\n,===",

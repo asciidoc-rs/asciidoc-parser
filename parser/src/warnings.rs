@@ -82,6 +82,9 @@ pub enum WarningType {
 
     #[error("Dropping table cell because it exceeds the specified number of columns")]
     TableCellExceedsColumnCount,
+
+    #[error("Unclosed quote in CSV data; setting cell to empty")]
+    TableCsvDataHasUnclosedQuote,
 }
 
 impl std::fmt::Debug for WarningType {
@@ -158,6 +161,10 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::TableCellExceedsColumnCount => {
                 write!(f, "WarningType::TableCellExceedsColumnCount")
+            }
+
+            WarningType::TableCsvDataHasUnclosedQuote => {
+                write!(f, "WarningType::TableCsvDataHasUnclosedQuote")
             }
         }
     }
@@ -416,6 +423,13 @@ mod tests {
                 let warning = WarningType::TableCellExceedsColumnCount;
                 let debug_output = format!("{:?}", warning);
                 assert_eq!(debug_output, "WarningType::TableCellExceedsColumnCount");
+            }
+
+            #[test]
+            fn table_csv_data_has_unclosed_quote() {
+                let warning = WarningType::TableCsvDataHasUnclosedQuote;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::TableCsvDataHasUnclosedQuote");
             }
         }
     }

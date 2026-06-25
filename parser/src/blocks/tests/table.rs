@@ -282,11 +282,26 @@ fn escaped_cell_separator() {
 }
 
 #[test]
-fn cols_with_empty_specifier() {
-    // Empty entries in the `cols` list (e.g. from a doubled comma) are skipped.
-    let table = parse_table("[cols=\"1,,1\"]\n|===\n|a |b\n|===");
+fn separator_after_backslash_is_escaped() {
+    // The escape check inspects only the single byte before the separator, so a
+    // separator preceded by a backslash is escaped even when that backslash is
+    // itself preceded by another one. `|a\\|b` is therefore one cell whose
+    // content is `a\|b` (the escaping backslash is stripped), matching
+    // Asciidoctor, whose check is likewise the single-character
+    // `pre_match.end_with? '\'`.
+    let table = parse_table("|===\n|a\\\\|b\n|===");
 
-    assert_eq!(table.columns().len(), 2);
+    assert_eq!(table.body_rows().len(), 1);
+    assert_eq!(row_text(&table.body_rows()[0]), vec!["a\\|b".to_string()]);
+}
+
+#[test]
+fn cols_with_empty_specifier() {
+    // An empty entry in the `cols` list (e.g. from a doubled comma) contributes a
+    // default column, matching Asciidoctor: `cols="1,,1"` yields three columns.
+    let table = parse_table("[cols=\"1,,1\"]\n|===\n|a |b |c\n|===");
+
+    assert_eq!(table.columns().len(), 3);
 }
 
 #[test]
@@ -738,29 +753,27 @@ fn cell_specifier_span_operator_without_factor_locates_separator() {
 }
 
 #[test]
-fn non_specifier_token_is_not_a_cell_separator() {
+fn non_specifier_token_is_a_plain_cell_separator() {
     // A token in front of a `|` that does not parse as a cell specifier (here the
-    // word `foo`, which is more than a single style letter) means the `|` is not
-    // a cell separator: `a foo|b` is a single cell whose content includes the
-    // literal `|`.
+    // word `foo`, which is more than a single style letter) is ordinary content:
+    // the `|` is still a plain cell separator, so `a foo|b` is two cells (matching
+    // Asciidoctor).
     let table = parse_table("|===\n|a foo|b\n|===");
 
-    assert_eq!(table.columns().len(), 1);
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
-    assert_eq!(rows, vec![vec!["a foo|b".to_string()]]);
+    assert_eq!(rows, vec![vec!["a foo".to_string(), "b".to_string()]]);
 }
 
 #[test]
-fn dot_not_followed_by_vertical_operator_is_not_a_cell_separator() {
+fn dot_not_followed_by_vertical_operator_is_a_plain_cell_separator() {
     // A vertical alignment operator is a dot followed by `<`, `>`, or `^`. A dot
     // followed by anything else (here `.x`) is not a valid cell specifier, so the
-    // `|` is not a cell separator: `a .x|b` is a single cell whose content
-    // includes the literal `.x|`.
+    // `.x` is content and the `|` is a plain cell separator: `a .x|b` is two cells
+    // (matching Asciidoctor).
     let table = parse_table("|===\n|a .x|b\n|===");
 
-    assert_eq!(table.columns().len(), 1);
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
-    assert_eq!(rows, vec![vec!["a .x|b".to_string()]]);
+    assert_eq!(rows, vec![vec!["a .x".to_string(), "b".to_string()]]);
 }
 
 #[test]
@@ -1011,9 +1024,24 @@ fn csv_unclosed_quote_is_literal() {
     let table = parse_table("[format=csv]\n|===\n\",a\n|===");
     assert_eq!(table.columns().len(), 1);
     assert_eq!(row_text(&table.body_rows()[0]), ["\",a"]);
+}
 
-    // A cell that is a single bare quote is an unclosed, empty quoted value.
-    let table = parse_table("[format=csv]\n|===\n\"\n|===");
+#[test]
+fn csv_lone_quote_is_unclosed_and_empty_with_warning() {
+    // A cell that is a single bare quote is an unclosed, empty quoted value: it is
+    // set to empty and an error is logged (matching Asciidoctor).
+    let mut parser = Parser::default();
+    let maw = Block::parse(Span::new("[format=csv]\n|===\n\"\n|==="), &mut parser);
+
+    assert!(maw.warnings.iter().any(|w| matches!(
+        w.warning,
+        crate::warnings::WarningType::TableCsvDataHasUnclosedQuote
+    )));
+
+    let table = match maw.item.unwrap().item {
+        Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    };
     assert_eq!(table.columns().len(), 1);
     assert_eq!(row_text(&table.body_rows()[0]), [""]);
 }
