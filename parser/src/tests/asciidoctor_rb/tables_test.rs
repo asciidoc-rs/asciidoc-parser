@@ -1045,17 +1045,14 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): A line containing only `{blank}` adjacent to non-blank
-    // lines should not split the cell into multiple paragraphs; the crate renders
-    // it as a blank line, producing multiple paragraphs. Enable once `{blank}`
-    // is handled inside table cells.
     fn should_not_split_paragraph_at_line_containing_only_blank_that_is_directly_adjacent_to_non_blank_lines()
      {
         let doc = Parser::default().parse(
             "|===\n|paragraph\n{blank}\nstill one paragraph\n{blank}\nstill one paragraph\n|===",
         );
 
+        // Each `{blank}` line renders as an empty line but is not blank in the
+        // source, so the cell stays a single paragraph.
         assert_css(&doc, "p.tableblock", 1);
     }
 

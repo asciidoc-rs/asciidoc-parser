@@ -1068,10 +1068,8 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                         // Asciidoctor (the parser stores them as one cell with
                         // embedded blank lines).
                         None => {
-                            for para in rendered
-                                .split("\n\n")
-                                .map(str::trim)
-                                .filter(|p| !p.is_empty())
+                            for para in
+                                split_cell_paragraphs(content.original().data(), content.rendered())
                             {
                                 cell_node.children.push(
                                     VirtualNode::new("p")
@@ -1174,6 +1172,49 @@ fn column_pcwidths(columns: &[TableColumn]) -> Vec<String> {
     }
 
     pct.iter().map(|w| format_pcwidth(*w)).collect()
+}
+
+/// Splits a plain (non-styled) table cell's content into paragraphs, returning
+/// the rendered text of each.
+///
+/// A paragraph break is a blank line in the **source**, not the rendered text.
+/// This matters for an attribute reference such as `{blank}`: a line containing
+/// only `{blank}` renders as an empty line but is not blank in the source, so
+/// it must not split the paragraph (matching Asciidoctor). Inline substitution
+/// is line-preserving, so the source and rendered line counts line up; each
+/// non-blank source line contributes its rendered counterpart to the current
+/// paragraph. If the two ever diverge in length, fall back to splitting the
+/// rendered text on blank lines.
+fn split_cell_paragraphs(source: &str, rendered: &str) -> Vec<String> {
+    let source_lines: Vec<&str> = source.split('\n').collect();
+    let rendered_lines: Vec<&str> = rendered.split('\n').collect();
+
+    if source_lines.len() != rendered_lines.len() {
+        return rendered
+            .split("\n\n")
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect();
+    }
+
+    let mut paragraphs: Vec<String> = vec![];
+    let mut current: Vec<&str> = vec![];
+    for (src, rendered) in source_lines.iter().zip(rendered_lines.iter()) {
+        if src.trim().is_empty() {
+            if !current.is_empty() {
+                paragraphs.push(current.join("\n").trim().to_string());
+                current.clear();
+            }
+        } else {
+            current.push(rendered);
+        }
+    }
+    if !current.is_empty() {
+        paragraphs.push(current.join("\n").trim().to_string());
+    }
+
+    paragraphs.retain(|p| !p.is_empty());
+    paragraphs
 }
 
 fn truncate4(x: f64) -> f64 {
