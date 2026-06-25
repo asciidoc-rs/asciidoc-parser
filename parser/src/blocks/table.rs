@@ -1815,16 +1815,37 @@ pub enum TableCellContent<'src> {
 /// alignment operators and proportional width of a specifier are interpreted;
 /// the style operator is not yet.
 fn parse_cols(value: &str) -> Vec<TableColumn> {
+    // Asciidoctor strips every space from the cols value before parsing, so
+    // `cols=" 1, 1 "` is equivalent to `cols="1,1"`.
+    let records: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // A wholly blank cols value is ignored: the caller falls back to the column
+    // count of the first row.
+    if records.is_empty() {
+        return vec![];
+    }
+
+    // Deprecated single-integer form: `cols=3` is equivalent to `cols="3*"` and
+    // produces that many equally sized columns.
+    if let Ok(count) = records.parse::<usize>() {
+        return vec![TableColumn::default(); count];
+    }
+
+    // Split on commas when present, otherwise on semicolons (Asciidoctor accepts
+    // either as the column-spec separator, but not a mix). Empty records are
+    // kept: each one contributes a default column.
+    let parts: Vec<&str> = if records.contains(',') {
+        records.split(',').collect()
+    } else {
+        records.split(';').collect()
+    };
+
     let mut columns: Vec<TableColumn> = vec![];
-
-    for part in value.split(',') {
-        let part = part.trim();
+    for part in parts {
         if part.is_empty() {
-            continue;
-        }
-
-        if let Some((count, spec)) = part.split_once('*') {
-            let repeat = count.trim().parse::<usize>().unwrap_or(1).max(1);
+            columns.push(TableColumn::default());
+        } else if let Some((count, spec)) = part.split_once('*') {
+            let repeat = count.parse::<usize>().unwrap_or(1).max(1);
             let column = parse_col_spec(spec);
             for _ in 0..repeat {
                 columns.push(column.clone());

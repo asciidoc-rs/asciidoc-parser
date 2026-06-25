@@ -339,10 +339,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not support the deprecated bare-integer
-    // colspec (`cols="3"` meaning three columns); it parses a single column of
-    // width 3. Enable once the deprecated syntax is supported.
     fn table_with_explicit_deprecated_colspec_syntax_can_have_multiple_rows_on_a_single_line() {
         let doc = Parser::default().parse("[cols=\"3\"]\n|===\n|one |two\n|1 |2 |a |b\n|===");
 
@@ -352,10 +348,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not add a column for an empty trailing
-    // record in the colspec (`cols="<,"` should yield two columns); it parses a
-    // single column. Enable once empty colspec records are honored.
     fn columns_are_added_for_empty_records_in_colspec_attribute() {
         let doc = Parser::default().parse("[cols=\"<,\"]\n|===\n|one |two\n|1 |2 |a |b\n|===");
 
@@ -365,10 +357,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not accept a semicolon as the colspec
-    // separator (`cols="1s;3m"` should yield two columns); it parses a single
-    // column. Enable once `;`-separated colspecs are supported.
     fn cols_may_be_separated_by_semi_colon_instead_of_comma() {
         let doc = Parser::default().parse("[cols=\"1s;3m\"]\n|===\n| strong\n| mono\n|===");
 

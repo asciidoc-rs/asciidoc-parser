@@ -283,10 +283,11 @@ fn escaped_cell_separator() {
 
 #[test]
 fn cols_with_empty_specifier() {
-    // Empty entries in the `cols` list (e.g. from a doubled comma) are skipped.
-    let table = parse_table("[cols=\"1,,1\"]\n|===\n|a |b\n|===");
+    // An empty entry in the `cols` list (e.g. from a doubled comma) contributes a
+    // default column, matching Asciidoctor: `cols="1,,1"` yields three columns.
+    let table = parse_table("[cols=\"1,,1\"]\n|===\n|a |b |c\n|===");
 
-    assert_eq!(table.columns().len(), 2);
+    assert_eq!(table.columns().len(), 3);
 }
 
 #[test]
