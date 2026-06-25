@@ -939,6 +939,15 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
         );
     }
 
+    // A table with no rows at all (e.g. every row was dropped for exceeding the
+    // column count) renders as a bare `<table>` with no colgroup or sections.
+    if table.header_row().is_none()
+        && table.body_rows().is_empty()
+        && table.footer_row().is_none()
+    {
+        return node;
+    }
+
     let mut colgroup = VirtualNode::new("colgroup");
     for width in column_pcwidths(table.columns()) {
         let mut col = VirtualNode::new("col");

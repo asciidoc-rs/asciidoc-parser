@@ -732,6 +732,287 @@ mod psv {
             1,
         );
     }
+
+    #[test]
+    fn percentages_as_column_widths() {
+        let doc = Parser::default().parse("[cols=\"<.^10%,<90%\"]\n|===\n|column A |column B\n|===");
+
+        assert_xpath(&doc, "/table/colgroup/col", 2);
+        assert_xpath(&doc, "(/table/colgroup/col)[1][@width=\"10%\"]", 1);
+        assert_xpath(&doc, "(/table/colgroup/col)[2][@width=\"90%\"]", 1);
+    }
+
+    #[test]
+    fn spans_alignments_and_styles() {
+        let doc = Parser::default().parse(
+            "[cols=\"e,m,^,>s\",width=\"25%\"]\n|===\n|1 >s|2 |3 |4\n^|5 2.2+^.^|6 .3+<.>m|7\n^|8\nd|9 2+>|10\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col[width=\"25%\"]", 4);
+        assert_css(&doc, "table > tbody > tr", 4);
+        assert_css(&doc, "table > tbody > tr > td", 10);
+
+        // Ruby uses `tr:nth-child(N)` / `td:nth-child(N)`; the indexed XPath form
+        // is equivalent and supported by the test DOM.
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 4);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[3]/td", 1);
+        assert_xpath(&doc, "(/table/tbody/tr)[4]/td", 2);
+
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[1]/td)[1][@class=\"halign-left valign-top\"]/p/em",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[1]/td)[2][@class=\"halign-right valign-top\"]/p/strong",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[1]/td)[3][@class=\"halign-center valign-top\"]/p",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[1]/td)[3][@class=\"halign-center valign-top\"]/p/*",
+            0,
+        );
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[1]/td)[4][@class=\"halign-right valign-top\"]/p/strong",
+            1,
+        );
+
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[2]/td)[1][@class=\"halign-center valign-top\"]/p/em",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[2]/td)[2][@class=\"halign-center valign-middle\"][@colspan=\"2\"][@rowspan=\"2\"]/p/code",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[2]/td)[3][@class=\"halign-left valign-bottom\"][@rowspan=\"3\"]/p/code",
+            1,
+        );
+
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[3]/td)[1][@class=\"halign-center valign-top\"]/p/em",
+            1,
+        );
+
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[4]/td)[1][@class=\"halign-left valign-top\"]/p",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[4]/td)[1][@class=\"halign-left valign-top\"]/p/em",
+            0,
+        );
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[4]/td)[2][@class=\"halign-right valign-top\"][@colspan=\"2\"]/p/code",
+            1,
+        );
+    }
+
+    #[test]
+    fn sets_up_columns_correctly_if_first_row_has_cell_that_spans_columns() {
+        let doc = Parser::default()
+            .parse("|===\n2+^|AAA |CCC\n|AAA |BBB |CCC\n|AAA |BBB |CCC\n|===");
+
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 2);
+        assert_xpath(&doc, "((/table/tbody/tr)[1]/td)[1][@colspan=\"2\"]", 1);
+        // Ruby uses `td:nth-child(1)[colspan]` / `td:nth-child(2):not([colspan])`;
+        // since row 1 has exactly one cell carrying a colspan, asserting the row
+        // has a single colspanned cell is equivalent.
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td[@colspan]", 1);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td[@colspan]", 0);
+        assert_xpath(&doc, "(/table/tbody/tr)[3]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[3]/td[@colspan]", 0);
+    }
+
+    #[test]
+    fn supports_repeating_cells() {
+        let doc = Parser::default().parse("|===\n3*|A\n|1 3*|2\n|b |c\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 3);
+        assert_css(&doc, "table > tbody > tr", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[3]/td", 3);
+
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[1]/p[text()=\"A\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p[text()=\"A\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[3]/p[text()=\"A\"]", 1);
+
+        assert_xpath(&doc, "/table/tbody/tr[2]/td[1]/p[text()=\"1\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[2]/td[2]/p[text()=\"2\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[2]/td[3]/p[text()=\"2\"]", 1);
+
+        assert_xpath(&doc, "/table/tbody/tr[3]/td[1]/p[text()=\"2\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[3]/td[2]/p[text()=\"b\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[3]/td[3]/p[text()=\"c\"]", 1);
+    }
+
+    // Backend-specific test omitted: DocBook ("calculates colnames correctly
+    // when using implicit column count and single cell with colspan").
+
+    // Backend-specific test omitted: DocBook ("calculates colnames correctly
+    // when using implicit column count and cells with mixed colspans").
+
+    // Backend-specific test omitted: DocBook ("assigns unique column names for
+    // table with implicit column count and colspans in first row").
+
+    #[test]
+    fn should_drop_row_but_preserve_remaining_rows_after_cell_with_colspan_exceeds_number_of_columns()
+     {
+        let doc = Parser::default().parse("[cols=2*]\n|===\n3+|A\n|B\na|C\n\nmore C\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table tr", 1);
+        assert_xpath(&doc, "/table/tbody/tr/td[1]/p[text()=\"B\"]", 1);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::TableCellExceedsColumnCount
+        );
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    fn should_drop_last_row_if_last_cell_in_table_has_colspan_that_exceeds_specified_number_of_columns()
+     {
+        let doc = Parser::default().parse("[cols=2*]\n|===\n|a 2+|b\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table *", 0);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::TableCellExceedsColumnCount
+        );
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    fn should_drop_last_row_if_last_cell_in_table_has_colspan_that_exceeds_implicit_number_of_columns()
+     {
+        let doc = Parser::default().parse("|===\n|a |b\n|c 2+|d\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table tr", 1);
+        assert_xpath(&doc, "/table/tbody/tr/td[1]/p[text()=\"a\"]", 1);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::TableCellExceedsColumnCount
+        );
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): The crate mis-groups cells into rows when a leading row's
+    // colspans overflow the column count: for this input it produces seven
+    // single-cell rows instead of dropping the overflowing first row and forming
+    // one row of seven cells. Enable once row grouping accounts for the dropped
+    // colspan row.
+    fn should_take_colspan_into_account_when_taking_cells_for_row() {
+        let doc = Parser::default()
+            .parse("[cols=7]\n|===\n2+|a 2+|b 2+|c 2+|d\n|e |f |g |h |i |j |k\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table tr", 1);
+        assert_css(&doc, "table tr td", 7);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::TableCellExceedsColumnCount
+        );
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): The crate does not drop an incomplete final row nor warn
+    // about it; Asciidoctor drops the `|e` row and logs an error. Enable once
+    // incomplete trailing rows are detected.
+    fn should_drop_incomplete_row_at_end_of_table_and_log_an_error() {
+        let doc = Parser::default().parse("[cols=2*]\n|===\n|a |b\n|c |d\n|e\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table tr", 2);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Duplicating a cell across columns with different styles
+    // (`2*|` into a default column and an `^l` literal column) is mishandled —
+    // the crate produces single-cell rows that all take the literal style
+    // instead of one row whose first cell is paragraphs and second is a literal
+    // block. Enable once cross-column cell duplication applies each column's
+    // style.
+    fn should_apply_cell_style_for_column_to_repeated_content() {
+        let doc = Parser::default().parse(
+            "[cols=\",^l\"]\n|===\n|Paragraphs |Literal\n\n2*|The discussion about what is good,\nwhat is beautiful, what is noble,\nwhat is pure, and what is true\ncould always go on.\n\nWhy is that important?\nWhy would I like to do that?\n\nBecause that's the only conversation worth having.\n\nAnd whether it goes on or not after I die, I don't know.\nBut, I do know that it is the conversation I want to have while I am still alive.\n\nWhich means that to me the offer of certainty,\nthe offer of complete security,\nthe offer of an impermeable faith that can't give way\nis an offer of something not worth having.\n\nI want to live my life taking the risk all the time\nthat I don't know anything like enough yet...\nthat I haven't understood enough...\nthat I can't know enough...\nthat I am always hungrily operating on the margins\nof a potentially great harvest of future knowledge and wisdom.\n\nI wouldn't have it any other way.\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > tbody > tr > td:nth-child(1).halign-left.valign-top > p.tableblock", 7);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): A line containing only `{blank}` adjacent to non-blank
+    // lines should not split the cell into multiple paragraphs; the crate renders
+    // it as a blank line, producing multiple paragraphs. Enable once `{blank}`
+    // is handled inside table cells.
+    fn should_not_split_paragraph_at_line_containing_only_blank_that_is_directly_adjacent_to_non_blank_lines()
+     {
+        let doc = Parser::default().parse(
+            "|===\n|paragraph\n{blank}\nstill one paragraph\n{blank}\nstill one paragraph\n|===",
+        );
+
+        assert_css(&doc, "p.tableblock", 1);
+    }
+
+    #[test]
+    fn should_strip_trailing_newlines_when_splitting_paragraphs() {
+        let doc = Parser::default().parse(
+            "|===\n|first wrapped\nparagraph\n\nsecond paragraph\n\nthird paragraph\n|===",
+        );
+
+        assert_xpath(
+            &doc,
+            "(//p[@class=\"tableblock\"])[1][text()=\"first wrapped\nparagraph\"]",
+            1,
+        );
+        assert_xpath(&doc, "(//p[@class=\"tableblock\"])[2][text()=\"second paragraph\"]", 1);
+        assert_xpath(&doc, "(//p[@class=\"tableblock\"])[3][text()=\"third paragraph\"]", 1);
+    }
 }
 
 mod dsv {
@@ -743,10 +1024,3 @@ mod csv {
     #[allow(unused_imports)]
     use crate::tests::prelude::*;
 }
-
-
-
-
-
-
-
