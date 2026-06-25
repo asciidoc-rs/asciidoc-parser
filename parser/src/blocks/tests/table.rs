@@ -282,6 +282,20 @@ fn escaped_cell_separator() {
 }
 
 #[test]
+fn separator_after_backslash_is_escaped() {
+    // The escape check inspects only the single byte before the separator, so a
+    // separator preceded by a backslash is escaped even when that backslash is
+    // itself preceded by another one. `|a\\|b` is therefore one cell whose
+    // content is `a\|b` (the escaping backslash is stripped), matching
+    // Asciidoctor, whose check is likewise the single-character
+    // `pre_match.end_with? '\'`.
+    let table = parse_table("|===\n|a\\\\|b\n|===");
+
+    assert_eq!(table.body_rows().len(), 1);
+    assert_eq!(row_text(&table.body_rows()[0]), vec!["a\\|b".to_string()]);
+}
+
+#[test]
 fn cols_with_empty_specifier() {
     // An empty entry in the `cols` list (e.g. from a doubled comma) contributes a
     // default column, matching Asciidoctor: `cols="1,,1"` yields three columns.

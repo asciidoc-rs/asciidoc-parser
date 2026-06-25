@@ -1832,12 +1832,18 @@ pub enum TableCellContent<'src> {
     AsciiDoc(Vec<Block<'src>>),
 }
 
-/// Parse the value of the `cols` attribute into a list of columns.
+/// Parse the value of the `cols` attribute into a list of columns, mirroring
+/// Asciidoctor's `parse_colspecs`.
 ///
-/// The value is a comma-separated list of column specifiers. A specifier may be
-/// preceded by a multiplier (`<n>*`) that repeats the column `n` times. The
-/// alignment operators and proportional width of a specifier are interpreted;
-/// the style operator is not yet.
+/// All spaces are first removed from the value. A wholly blank value yields no
+/// columns (the caller then takes the column count from the first row), and a
+/// lone integer (the deprecated `cols="3"` form) yields that many default
+/// columns. Otherwise the value is a list of column specifiers separated by
+/// commas, or by semicolons when no comma is present. An empty record (e.g. the
+/// trailing field of `cols="1,,1"`) contributes a default column, and a
+/// specifier may be preceded by a multiplier (`<n>*`) that repeats the column
+/// `n` times. Each specifier's alignment operators, proportional width, and
+/// [style operator](parse_col_spec) are interpreted.
 fn parse_cols(value: &str) -> Vec<TableColumn> {
     // Asciidoctor strips every space from the cols value before parsing, so
     // `cols=" 1, 1 "` is equivalent to `cols="1,1"`.
@@ -2064,20 +2070,23 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// Scan a region for PSV cell boundaries, returning the [specifier](CellSpec)
 /// and raw (untrimmed) content span of each cell.
 ///
-/// A cell boundary is the table's `separator` (the vertical bar (`|`) by
-/// default, the exclamation mark (`!`) for a nested table, or any string set
-/// with the `separator` attribute, e.g. the broken bar `¦`) that appears at the
-/// start of a line or is preceded by whitespace, optionally with a
-/// [cell specifier](CellSpec) (e.g. `^`, `2+`, `.>`) directly in front of the
-/// separator. The token immediately preceding a separator is taken to be a
-/// specifier when it parses as one (see [`parse_cell_spec`]); a token that
-/// doesn't parse as a specifier means the separator is not a cell boundary.
-/// Content before the first boundary is ignored.
+/// Every unescaped occurrence of the table's `separator` (the vertical bar
+/// (`|`) by default, the exclamation mark (`!`) for a nested table, or any
+/// string set with the `separator` attribute, e.g. the broken bar `¦`) is a
+/// cell boundary, matching Asciidoctor. The token immediately preceding a
+/// separator is treated as that cell's [specifier](CellSpec) (e.g. `^`, `2+`,
+/// `.>`) only when it parses as one (see [`parse_cell_spec`]) *and* is anchored
+/// at the line start or preceded by whitespace; otherwise the token is ordinary
+/// content of the preceding cell and the separator is a plain boundary (so the
+/// `a` in `|a|b` is content, not a style operator). Content before the first
+/// boundary is ignored.
 ///
-/// An escaped separator (e.g. `\|`) is preceded by a backslash, which is not a
-/// valid specifier, so the separator already fails the boundary test and needs
-/// no special handling here; the backslash is stripped later in
-/// [`TableCell::parse`].
+/// A separator immediately preceded by a backslash (e.g. `\|`) is escaped: it
+/// is literal content rather than a boundary, and the backslash is stripped
+/// later in [`TableCell::parse`]. Only the single byte before the separator is
+/// inspected, so `\\|` is also read as an escaped separator — matching
+/// Asciidoctor, whose check is likewise the single-character
+/// `pre_match.end_with? '\'`.
 fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
     let data = region.data();
     let bytes = data.as_bytes();
