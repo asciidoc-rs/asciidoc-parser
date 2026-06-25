@@ -1013,6 +1013,341 @@ mod psv {
         assert_xpath(&doc, "(//p[@class=\"tableblock\"])[2][text()=\"second paragraph\"]", 1);
         assert_xpath(&doc, "(//p[@class=\"tableblock\"])[3][text()=\"third paragraph\"]", 1);
     }
+
+    #[test]
+    #[ignore]
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/456): The
+    // admonition inside the open block does not render as `.admonitionblock`.
+    // Enable when admonitions are implemented.
+    fn basic_asciidoc_cell() {
+        let doc = Parser::default().parse("|===\na|--\nNOTE: content\n\ncontent\n--\n|===");
+
+        assert_css(&doc, "table.tableblock", 1);
+        assert_css(&doc, "table.tableblock td.tableblock", 1);
+        assert_css(&doc, "table.tableblock td.tableblock .openblock", 1);
+        assert_css(&doc, "table.tableblock td.tableblock .openblock .admonitionblock", 1);
+        assert_css(&doc, "table.tableblock td.tableblock .openblock .paragraph", 1);
+    }
+
+    #[test]
+    fn asciidoc_table_cell_should_be_wrapped_in_div_with_class_content() {
+        let doc = Parser::default().parse("|===\na|AsciiDoc table cell\n|===");
+
+        assert_css(&doc, "table.tableblock td.tableblock > div.content", 1);
+        assert_css(&doc, "table.tableblock td.tableblock > div.content > div.paragraph", 1);
+    }
+
+    // The following AsciiDoc-table-cell tests depend on nested-document
+    // attribute inheritance/locking (doctype, icons, sectids, showtitle/notitle
+    // set or unset in the cell relative to the parent document or the API),
+    // which the crate does not yet model. They are kept as ignored stubs so the
+    // scenarios are not lost.
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): doctype set inside an AsciiDoc table cell.
+    fn doctype_can_be_set_in_asciidoc_table_cell() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): doctype reset to default inside an AsciiDoc table cell.
+    fn should_reset_doctype_to_default_in_asciidoc_table_cell() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): doctype-related attributes updated when doctype is set
+    // in an AsciiDoc table cell.
+    fn should_update_doctype_related_attributes_in_asciidoc_table_cell_when_doctype_is_set() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): an AsciiDoc table cell must not override an attribute
+    // hard set by the API.
+    fn should_not_allow_asciidoc_table_cell_to_set_a_document_attribute_that_was_hard_set_by_the_api()
+     {
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): an AsciiDoc table cell must not override an attribute
+    // hard unset by the API.
+    fn should_not_allow_asciidoc_table_cell_to_set_a_document_attribute_that_was_hard_unset_by_the_api()
+     {
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): an attribute unset in the parent document stays unset in
+    // an AsciiDoc table cell.
+    fn should_keep_attribute_unset_in_asciidoc_table_cell_if_unset_in_parent_document() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): an attribute unset in the parent document can be set in
+    // an AsciiDoc table cell.
+    fn should_allow_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): a locked-unset attribute cannot be set in an AsciiDoc
+    // table cell.
+    fn should_not_allow_locked_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell() {
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): showtitle enabled in an AsciiDoc table cell if unset in
+    // the parent document.
+    fn showtitle_can_be_enabled_in_asciidoc_table_cell_if_unset_in_parent_document() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): showtitle enabled in an AsciiDoc table cell if unset by
+    // the API.
+    fn showtitle_can_be_enabled_in_asciidoc_table_cell_if_unset_by_api() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): showtitle disabled in an AsciiDoc table cell if set in
+    // the parent document.
+    fn showtitle_can_be_disabled_in_asciidoc_table_cell_if_set_in_parent_document() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): showtitle disabled in an AsciiDoc table cell if set by
+    // the API.
+    fn showtitle_can_be_disabled_in_asciidoc_table_cell_if_set_by_api() {}
+
+    #[test]
+    #[ignore]
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/456): The
+    // NOTE admonition and nested blocks do not render as `.admonitionblock` /
+    // `.dlist` inside the cell. Enable when admonitions are implemented.
+    fn asciidoc_content() {
+        let doc = Parser::default().parse(
+            "[cols=\"1e,1,5a\"]\n|===\n|Name |Backends |Description\n\n|badges |xhtml11, html5 |\nLink badges.\n\n[NOTE]\n====\nThe path names are relative.\n====\n|docinfo |All backends |\nThese attributes control docinfo:\n\ndocinfo:: Include x\ndocinfo1:: Include y\n|===",
+        );
+
+        assert_css(&doc, "table.tableblock > tbody > tr", 2);
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[1]/td)[3]//*[@class=\"admonitionblock\"]",
+            1,
+        );
+        assert_xpath(&doc, "((/table/tbody/tr)[2]/td)[3]//*[@class=\"dlist\"]", 1);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): A leading-indented line inside an AsciiDoc cell is not
+    // rendered as a literal block (`<pre>`). Related to the `1a`-column leading
+    // indent gap. Enable once interpreted.
+    fn should_preserve_leading_indentation_in_contents_of_asciidoc_table_cell_if_contents_starts_with_newline()
+     {
+        let doc = Parser::default().parse("|===\na|\n $ command\na| paragraph\n|===");
+
+        assert_css(&doc, "td", 2);
+        assert_xpath(&doc, "(//td)[1]//*[@class=\"literalblock\"]", 1);
+        assert_xpath(&doc, "(//td)[2]//*[@class=\"paragraph\"]", 1);
+        assert_xpath(&doc, "(//pre)[1][text()=\"$ command\"]", 1);
+        assert_xpath(&doc, "(//p)[1][text()=\"paragraph\"]", 1);
+    }
+
+    // Out of scope (omitted): include files / preprocessor directives are not
+    // supported, so "preprocessor directive on first line of an AsciiDoc table
+    // cell should be processed" and "error about unresolved preprocessor
+    // directive ... should have correct cursor" are not ported.
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Cross-reference resolution from inside an AsciiDoc table
+    // cell to a reference in the main document.
+    fn cross_reference_link_in_an_asciidoc_table_cell_should_resolve_to_reference_in_main_document() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Cataloging an anchor at the start of an AsciiDoc table
+    // cell as a document reference.
+    fn should_discover_anchor_at_start_of_cell_and_register_it_as_a_reference() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Cataloging an anchor at the start of a cell in an
+    // implicit header row when the column has a style.
+    fn should_catalog_anchor_at_start_of_cell_in_implicit_header_row_when_column_has_a_style() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Cataloging an anchor at the start of a cell in an
+    // explicit header row when the column has a style.
+    fn should_catalog_anchor_at_start_of_cell_in_explicit_header_row_when_column_has_a_style() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Cataloging an anchor at the start of a cell in the first
+    // row.
+    fn should_catalog_anchor_at_start_of_cell_in_first_row() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Footnotes must not be shared between an AsciiDoc table
+    // cell and the main document.
+    fn footnotes_should_not_be_shared_between_an_asciidoc_table_cell_and_the_main_document() {}
+
+    // Backend-specific test omitted: DocBook ("callout numbers should be
+    // globally unique, including AsciiDoc table cells").
+
+    // Out of scope (omitted): compatibility mode is a stated limitation of the
+    // crate, so the three "compat mode ... in AsciiDoc table cell" tests are not
+    // ported.
+
+    #[test]
+    fn nested_table() {
+        let doc = Parser::default().parse(
+            "[cols=\"1,2a\"]\n|===\n|Normal cell\n|Cell with nested table\n[cols=\"2,1\"]\n!===\n!Nested table cell 1 !Nested table cell 2\n!===\n|===",
+        );
+
+        assert_css(&doc, "table", 2);
+        assert_css(&doc, "table table", 1);
+        // Ruby uses `td:nth-child(2) table`; the nested table sits in the second
+        // cell of the (single) outer row.
+        assert_xpath(&doc, "/table/tbody/tr/td[2]//table", 1);
+        assert_xpath(&doc, "/table/tbody/tr/td[2]//table/tbody/tr/td", 2);
+    }
+
+    #[test]
+    fn can_set_format_of_nested_table_to_psv() {
+        let doc = Parser::default().parse(
+            "[cols=\"2*\"]\n|===\n|normal cell\na|\n[format=psv]\n!===\n!nested cell\n!===\n|===",
+        );
+
+        assert_css(&doc, "table", 2);
+        assert_css(&doc, "table table", 1);
+        assert_xpath(&doc, "/table/tbody/tr/td[2]//table", 1);
+        assert_xpath(&doc, "/table/tbody/tr/td[2]//table/tbody/tr/td", 1);
+    }
+
+    // The following depend on document option/attribute inheritance into the
+    // nested AsciiDoc-cell document (to_dir, toc, doctitle), which the crate
+    // does not yet model.
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): AsciiDoc table cell should inherit the to_dir option.
+    fn asciidoc_table_cell_should_inherit_to_dir_option_from_parent_document() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): AsciiDoc table cell should not inherit the toc setting.
+    fn asciidoc_table_cell_should_not_inherit_toc_setting_from_parent_document() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): enabling toc in an AsciiDoc table cell.
+    fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): enabling toc in an AsciiDoc table cell even if hard unset
+    // by the API.
+    fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell_even_if_hard_unset_by_api() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): enabling toc in both the outer document and an AsciiDoc
+    // table cell.
+    fn should_be_able_to_enable_toc_in_both_outer_document_and_in_an_asciidoc_table_cell() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): a document in an AsciiDoc table cell must not see the
+    // parent's doctitle.
+    fn document_in_an_asciidoc_table_cell_should_not_see_doctitle_of_parent() {}
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): the `{set:cellbgcolor:...}` counter attribute is not
+    // supported, so per-cell background colors are not applied.
+    fn cell_background_color() {}
+
+    #[test]
+    fn should_warn_if_table_block_is_not_terminated() {
+        let doc =
+            Parser::default().parse("outside\n\n|===\n|\ninside\n\nstill inside\n\neof");
+
+        assert_xpath(&doc, "/table", 1);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].warning, WarningType::UnterminatedDelimitedBlock);
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): an unterminated example block inside an AsciiDoc table
+    // cell that is itself attached to a list item — Asciidoctor reports the
+    // warning at the inner block's line (9). Enable once the cursor/line of
+    // nested-cell warnings is tracked.
+    fn should_show_correct_line_number_in_warning_about_unterminated_block_inside_asciidoc_table_cell()
+     {
+        let doc = Parser::default().parse(
+            "outside\n\n* list item\n+\n|===\n|cell\na|inside\n\n====\nunterminated example block\n|===\n\neof",
+        );
+
+        assert_xpath(&doc, "//ul//table", 1);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.warning == WarningType::UnterminatedDelimitedBlock && w.source.line() == 9)
+        );
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Blocked by the deprecated bare-integer colspec
+    // divergence — `cols=2` should yield two columns but the crate parses one
+    // (see `table_with_explicit_deprecated_colspec_syntax_can_have_multiple_rows_on_a_single_line`).
+    // Enable once `cols=2` is supported.
+    fn custom_separator_for_an_asciidoc_table_cell() {
+        let doc = Parser::default().parse(
+            "[cols=2,separator=!]\n|===\n!Pipe output to vim\na!\n----\nasciidoctor -o - -s test.adoc | view -\n----\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > tbody > tr", 1);
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 2);
+        assert_xpath(&doc, "((/table/tbody/tr)[1]/td)[1]//p", 1);
+        assert_xpath(
+            &doc,
+            "((/table/tbody/tr)[1]/td)[2]//*[@class=\"listingblock\"]",
+            1,
+        );
+    }
+
+    // Backend-specific tests omitted: DocBook ("table with breakable option
+    // docbook 5", "table with unbreakable option docbook 5").
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): Blocked by the multi-line-first-cell implicit-header
+    // divergence — the quoted first cell spans multiple lines, so Asciidoctor
+    // suppresses the implicit header, but the crate creates one (see
+    // `no_implicit_header_row_if_cell_in_first_line_spans_multiple_lines`).
+    fn no_implicit_header_row_if_cell_in_first_line_is_quoted_and_spans_multiple_lines() {
+        let doc = Parser::default()
+            .parse("[cols=2*l]\n,===\n\"A1\n\nA1 continued\",B1\nA2,B2\n,===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > thead", 0);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_xpath(&doc, "(//td)[1]//pre[text()=\"A1\n\nA1 continued\"]", 1);
+    }
 }
 
 mod dsv {
