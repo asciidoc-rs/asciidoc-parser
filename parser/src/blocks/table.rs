@@ -1651,7 +1651,7 @@ impl<'src> TableCell<'src> {
             raw.spec.style.unwrap_or(column.style)
         };
 
-        let trimmed = trim_surrounding_whitespace(raw.content);
+        let trimmed = trim_cell_content(raw.content, style);
 
         // An escaped cell separator (a backslash in front of the table's
         // separator, e.g. `\|` or `\!`) is unescaped to the bare separator. Only
@@ -2296,4 +2296,45 @@ fn trim_surrounding_whitespace(s: Span<'_>) -> Span<'_> {
     let start = data.len() - data.trim_start().len();
     let len = data.trim().len();
     s.slice(start..start + len)
+}
+
+/// Trim a PSV cell's content according to its [style](ColumnStyle), matching
+/// Asciidoctor's `Table::Cell` initializer:
+///
+/// * A [`Literal`](ColumnStyle::Literal) cell has its trailing whitespace
+///   removed and any leading blank lines stripped, but the leading indentation
+///   of its first content line is preserved (so an indented literal cell keeps
+///   its indentation).
+/// * An [`AsciiDoc`](ColumnStyle::AsciiDoc) cell likewise removes trailing
+///   whitespace; if the remaining content begins with a newline it strips the
+///   leading blank lines (preserving the first content line's indentation, so a
+///   leading-indented line is interpreted as a literal block), otherwise it
+///   strips the leading whitespace.
+/// * Every other style has all surrounding whitespace removed.
+fn trim_cell_content(s: Span<'_>, style: ColumnStyle) -> Span<'_> {
+    let data = s.data();
+    match style {
+        ColumnStyle::Literal => {
+            let end = data.trim_end().len();
+            let mut start = 0;
+            while data[start..end].starts_with('\n') {
+                start += 1;
+            }
+            s.slice(start..end)
+        }
+        ColumnStyle::AsciiDoc => {
+            let end = data.trim_end().len();
+            if data[..end].starts_with('\n') {
+                let mut start = 0;
+                while data[start..end].starts_with('\n') {
+                    start += 1;
+                }
+                s.slice(start..end)
+            } else {
+                let start = end - data[..end].trim_start().len();
+                s.slice(start..end)
+            }
+        }
+        _ => trim_surrounding_whitespace(s),
+    }
 }

@@ -228,11 +228,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate strips the leading indentation from the first
-    // content line of a literal (`l`) cell, producing "one\n  two\nthree"
-    // instead of Asciidoctor's "  one\n  two\nthree". A literal cell should
-    // preserve leading spaces on every line. Enable once fixed.
     fn should_preserve_leading_spaces_but_not_leading_newlines_or_trailing_spaces_in_literal_table_cells()
      {
         let doc =
@@ -541,10 +536,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate does not treat a leading-indented line in an
-    // AsciiDoc (`a`) cell as a literal block, so no `<pre>` is produced. Enable
-    // once leading indent is interpreted inside AsciiDoc cells.
     fn should_interpret_leading_indent_if_first_cell_is_asciidoc_and_there_is_no_implicit_header_row()
      {
         let doc = Parser::default().parse("[cols=\"1a,1\"]\n|===\n|\n  literal\n| normal\n|===");
@@ -1157,10 +1148,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): A leading-indented line inside an AsciiDoc cell is not
-    // rendered as a literal block (`<pre>`). Related to the `1a`-column leading
-    // indent gap. Enable once interpreted.
     fn should_preserve_leading_indentation_in_contents_of_asciidoc_table_cell_if_contents_starts_with_newline()
      {
         let doc = Parser::default().parse("|===\na|\n $ command\na| paragraph\n|===");
