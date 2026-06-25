@@ -947,13 +947,19 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
     }
 
     let mut colgroup = VirtualNode::new("colgroup");
-    for width in column_pcwidths(table.columns()) {
-        let mut col = VirtualNode::new("col");
+    for (column, pcwidth) in table.columns().iter().zip(column_pcwidths(table.columns())) {
+        // Every column exposes its computed percentage width in `colpcwidth`,
+        // mirroring the model attribute Asciidoctor assigns to each column.
+        let mut col = VirtualNode::new("col").with_attribute("colpcwidth", pcwidth.clone());
 
-        // Autowidth columns are sized to their content and carry no width
-        // attribute; proportional columns expose their computed percentage.
-        if let Some(width) = width {
-            col = col.with_attribute("width", format!("{width}%"));
+        if column.is_autowidth() {
+            // An autowidth column is sized to its content: it carries the
+            // `autowidth-option` marker (present with an empty value) and no HTML
+            // `width` attribute.
+            col = col.with_attribute("autowidth-option", "");
+        } else {
+            // A proportional column emits its percentage as the HTML `width`.
+            col = col.with_attribute("width", format!("{pcwidth}%"));
         }
 
         colgroup.children.push(col);
@@ -1098,51 +1104,76 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
     tr
 }
 
-/// Computes the per-column percentage width that Asciidoctor's HTML backend
-/// renders on each `<col>`. Returns `None` for an autowidth column (which
-/// carries no width attribute).
+/// Computes the `colpcwidth` (percentage width) that Asciidoctor assigns to
+/// every column, mirroring `Table#assign_column_widths`.
 ///
-/// This mirrors `Table#assign_column_widths` in Asciidoctor: percentages are
-/// truncated to four decimal places and the rounding balance is donated to the
-/// final column so the widths sum to exactly 100.
-fn column_pcwidths(columns: &[TableColumn]) -> Vec<Option<String>> {
-    // When any column is autowidth, the proportional columns are treated as
-    // literal percentages and the autowidth columns get no width.
-    if columns.iter().any(TableColumn::is_autowidth) {
-        return columns
+/// Each autowidth column takes an equal share of the space the fixed columns
+/// leave free (`(100 - fixed_total) / autowidth_count`); every column's
+/// percentage is then truncated to four decimal places and the rounding balance
+/// is donated to the final column so the widths sum to exactly 100. The value
+/// is returned for every column (including autowidth columns, which carry the
+/// percentage in the model even though the HTML backend omits their `width`
+/// attribute).
+fn column_pcwidths(columns: &[TableColumn]) -> Vec<String> {
+    let n = columns.len();
+    if n == 0 {
+        return vec![];
+    }
+
+    let fixed_total: usize = columns
+        .iter()
+        .filter(|c| !c.is_autowidth())
+        .map(TableColumn::width)
+        .sum();
+
+    // Resolve the effective per-column width and the base they are a percentage
+    // of. With autowidth columns present the base is the full 100% and each
+    // autowidth column takes an equal share of the remaining space (collapsing
+    // to zero when the fixed columns already exceed 100%); otherwise each
+    // column's own proportional width is taken over the sum of all widths.
+    let (effective, base): (Vec<f64>, f64) = if columns.iter().any(TableColumn::is_autowidth) {
+        let autowidth_count = columns.iter().filter(|c| c.is_autowidth()).count();
+        let (share, base) = if fixed_total > 100 {
+            (0.0, fixed_total as f64)
+        } else {
+            (
+                truncate4((100.0 - fixed_total as f64) / autowidth_count as f64),
+                100.0,
+            )
+        };
+        let effective = columns
             .iter()
             .map(|c| {
                 if c.is_autowidth() {
-                    None
+                    share
                 } else {
-                    Some(format_pcwidth(c.width() as f64))
+                    c.width() as f64
                 }
             })
             .collect();
-    }
+        (effective, base)
+    } else {
+        let base = if fixed_total == 0 {
+            n as f64
+        } else {
+            fixed_total as f64
+        };
+        (columns.iter().map(|c| c.width() as f64).collect(), base)
+    };
 
-    let base: usize = columns.iter().map(TableColumn::width).sum();
-    if base == 0 {
-        return columns.iter().map(|_| None).collect();
-    }
-
-    let truncated: Vec<f64> = columns
+    let mut pct: Vec<f64> = effective
         .iter()
-        .map(|c| truncate4(c.width() as f64 * 100.0 / base as f64))
+        .map(|w| truncate4(w * 100.0 / base))
         .collect();
 
-    let total: f64 = truncated.iter().sum();
-    let mut widths: Vec<Option<String>> =
-        truncated.iter().map(|w| Some(format_pcwidth(*w))).collect();
-
     // Donate the rounding balance to the final column.
+    let total: f64 = pct.iter().sum();
     if (total - 100.0).abs() > 1e-9 {
-        let last = truncated.len() - 1;
-        let donated = round4(100.0 - (total - truncated[last]));
-        widths[last] = Some(format_pcwidth(donated));
+        let last = n - 1;
+        pct[last] = round4(100.0 - total + pct[last]);
     }
 
-    widths
+    pct.iter().map(|w| format_pcwidth(*w)).collect()
 }
 
 fn truncate4(x: f64) -> f64 {

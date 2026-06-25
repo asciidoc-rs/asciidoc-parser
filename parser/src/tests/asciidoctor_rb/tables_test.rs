@@ -287,10 +287,40 @@ mod psv {
         let doc = Parser::default()
             .parse("[cols=\"15%,3*~\"]\n|=======\n|A |B |C |D\n|a |b |c |d\n|1 |2 |3 |4\n|=======");
 
+        // The fixed first column keeps its computed percentage in `colpcwidth`
+        // and carries the HTML `width` attribute; it is not autowidth.
+        assert_xpath(&doc, "(/table/colgroup/col)[1][@colpcwidth=\"15\"]", 1);
+        assert_xpath(&doc, "(/table/colgroup/col)[1][@width=\"15%\"]", 1);
+        assert_xpath(&doc, "(/table/colgroup/col)[1][@autowidth-option]", 0);
+
+        // Each autowidth column still has a computed `colpcwidth` (the remaining
+        // space shared three ways, truncated to four places with the balance
+        // donated to the last column) and the `autowidth-option` marker, but no
+        // HTML `width` attribute.
+        for i in 2..=3 {
+            assert_xpath(
+                &doc,
+                &format!("(/table/colgroup/col)[{i}][@colpcwidth=\"28.3333\"]"),
+                1,
+            );
+        }
+        assert_xpath(&doc, "(/table/colgroup/col)[4][@colpcwidth=\"28.3334\"]", 1);
+        for i in 2..=4 {
+            assert_xpath(
+                &doc,
+                &format!("(/table/colgroup/col)[{i}][@autowidth-option]"),
+                1,
+            );
+            assert_xpath(&doc, &format!("(/table/colgroup/col)[{i}][@width]"), 0);
+        }
+
+        // The HTML-output expectations from the Ruby test: every column renders a
+        // `<col>`, but only the single fixed column carries a `width` attribute.
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table colgroup col", 4);
         assert_css(&doc, "table colgroup col[width]", 1);
         assert_css(&doc, "table colgroup col[width=\"15%\"]", 1);
+        assert_css(&doc, "table colgroup col[autowidth-option]", 3);
     }
 
     #[test]
