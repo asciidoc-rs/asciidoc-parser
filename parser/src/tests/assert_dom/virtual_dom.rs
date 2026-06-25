@@ -941,9 +941,7 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
 
     // A table with no rows at all (e.g. every row was dropped for exceeding the
     // column count) renders as a bare `<table>` with no colgroup or sections.
-    if table.header_row().is_none()
-        && table.body_rows().is_empty()
-        && table.footer_row().is_none()
+    if table.header_row().is_none() && table.body_rows().is_empty() && table.footer_row().is_none()
     {
         return node;
     }
@@ -1026,9 +1024,9 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                     // `<div class="literal"><pre>…</pre></div>`.
                     ColumnStyle::Literal => {
                         cell_node.children.push(
-                            VirtualNode::new("div").with_class("literal").with_child(
-                                VirtualNode::new("pre").with_html_content(rendered),
-                            ),
+                            VirtualNode::new("div")
+                                .with_class("literal")
+                                .with_child(VirtualNode::new("pre").with_html_content(rendered)),
                         );
                     }
 
@@ -1036,9 +1034,9 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                         // Header-row cells place their content directly in the
                         // cell, wrapped only by any style element.
                         match style_wrapper(cell.style()) {
-                            Some(tag) => cell_node.children.push(
-                                VirtualNode::new(tag).with_html_content(rendered),
-                            ),
+                            Some(tag) => cell_node
+                                .children
+                                .push(VirtualNode::new(tag).with_html_content(rendered)),
                             None => cell_node = cell_node.with_html_content(rendered),
                         }
                     }
@@ -1053,9 +1051,9 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                         // (`<strong>`, `<em>`, `<code>`).
                         Some(tag) => {
                             cell_node.children.push(
-                                VirtualNode::new("p").with_class("tableblock").with_child(
-                                    VirtualNode::new(tag).with_html_content(rendered),
-                                ),
+                                VirtualNode::new("p")
+                                    .with_class("tableblock")
+                                    .with_child(VirtualNode::new(tag).with_html_content(rendered)),
                             );
                         }
 

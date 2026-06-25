@@ -15,11 +15,7 @@ mod psv {
         assert_css(&doc, "table.tableblock.frame-all.grid-all.stretch", 1);
         assert_css(&doc, "table > colgroup > col[width=\"33.3333%\"]", 2);
         // Ruby uses `col:last-of-type`; the indexed XPath form is equivalent.
-        assert_xpath(
-            &doc,
-            "(/table/colgroup/col)[3][@width=\"33.3334%\"]",
-            1,
-        );
+        assert_xpath(&doc, "(/table/colgroup/col)[3][@width=\"33.3334%\"]", 1);
         assert_css(&doc, "table tr", 3);
         assert_css(&doc, "table > tbody > tr", 3);
         assert_css(&doc, "table td", 9);
@@ -31,8 +27,16 @@ mod psv {
 
         let cells = [["A", "B", "C"], ["a", "b", "c"], ["1", "2", "3"]];
         for (rowi, row) in cells.iter().enumerate() {
-            assert_xpath(&doc, &format!("(/table/tbody/tr)[{}]/td", rowi + 1), row.len());
-            assert_xpath(&doc, &format!("(/table/tbody/tr)[{}]/td/p", rowi + 1), row.len());
+            assert_xpath(
+                &doc,
+                &format!("(/table/tbody/tr)[{}]/td", rowi + 1),
+                row.len(),
+            );
+            assert_xpath(
+                &doc,
+                &format!("(/table/tbody/tr)[{}]/td/p", rowi + 1),
+                row.len(),
+            );
             for (celli, cell) in row.iter().enumerate() {
                 assert_xpath(
                     &doc,
@@ -158,8 +162,7 @@ mod psv {
     // whereas Asciidoctor (and this test) splits it into two. Enable once the
     // parser splits on any unescaped `|`.
     fn ignores_escaped_separators() {
-        let doc =
-            Parser::default().parse("|===\n|A \\| here| a \\| there\n|===");
+        let doc = Parser::default().parse("|===\n|A \\| here| a \\| there\n|===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
@@ -171,9 +174,8 @@ mod psv {
 
     #[test]
     fn preserves_escaped_delimiters_at_the_end_of_the_line() {
-        let doc = Parser::default().parse(
-            "[%header,cols=\"1,1\"]\n|===\n|A |B\\|\n|A1 |B1\\|\n|A2 |B2\\|\n|===",
-        );
+        let doc = Parser::default()
+            .parse("[%header,cols=\"1,1\"]\n|===\n|A |B\\|\n|A1 |B1\\|\n|A2 |B2\\|\n|===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
@@ -189,8 +191,7 @@ mod psv {
 
     #[test]
     fn should_treat_trailing_pipe_as_an_empty_cell() {
-        let doc =
-            Parser::default().parse("|===\n|A1 |\n|B1 |B2\n|C1 |C2\n|===");
+        let doc = Parser::default().parse("|===\n|A1 |\n|B1 |B2\n|C1 |C2\n|===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
@@ -203,9 +204,8 @@ mod psv {
 
     #[test]
     fn performs_normal_substitutions_on_cell_content() {
-        let doc = Parser::default().parse(
-            ":show_title: Cool new show\n|===\n|{show_title} |Coming soon...\n|===",
-        );
+        let doc = Parser::default()
+            .parse(":show_title: Cool new show\n|===\n|{show_title} |Coming soon...\n|===");
 
         assert_xpath(&doc, "//tbody/tr/td[1]/p[text()=\"Cool new show\"]", 1);
         assert_xpath(
@@ -235,8 +235,8 @@ mod psv {
     // preserve leading spaces on every line. Enable once fixed.
     fn should_preserve_leading_spaces_but_not_leading_newlines_or_trailing_spaces_in_literal_table_cells()
      {
-        let doc = Parser::default()
-            .parse("[cols=2*]\n|===\nl|\n  one\n  two\nthree\n\n  | normal\n|===");
+        let doc =
+            Parser::default().parse("[cols=2*]\n|===\nl|\n  one\n  two\nthree\n\n  | normal\n|===");
 
         assert_css(&doc, "table pre", 1);
         assert_xpath(&doc, "/table//pre[text()=\"  one\n  two\nthree\"]", 1);
@@ -244,8 +244,8 @@ mod psv {
 
     #[test]
     fn should_ignore_v_table_cell_style() {
-        let doc = Parser::default()
-            .parse("[cols=2*]\n|===\nv|\n  one\n  two\nthree\n\n  | normal\n|===");
+        let doc =
+            Parser::default().parse("[cols=2*]\n|===\nv|\n  one\n  two\nthree\n\n  | normal\n|===");
 
         // The unrecognized `v` style is ignored, so the cell renders as a normal
         // paragraph (`p.tableblock`) with leading newlines and trailing spaces
@@ -259,9 +259,8 @@ mod psv {
 
     #[test]
     fn table_and_column_width_not_assigned_when_autowidth_option_is_specified() {
-        let doc = Parser::default().parse(
-            "[options=\"autowidth\"]\n|=======\n|A |B |C\n|a |b |c\n|1 |2 |3\n|=======",
-        );
+        let doc = Parser::default()
+            .parse("[options=\"autowidth\"]\n|=======\n|A |B |C\n|a |b |c\n|1 |2 |3\n|=======");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table.fit-content", 1);
@@ -272,9 +271,8 @@ mod psv {
 
     #[test]
     fn does_not_assign_column_width_for_autowidth_columns_in_html_output() {
-        let doc = Parser::default().parse(
-            "[cols=\"15%,3*~\"]\n|=======\n|A |B |C |D\n|a |b |c |d\n|1 |2 |3 |4\n|=======",
-        );
+        let doc = Parser::default()
+            .parse("[cols=\"15%,3*~\"]\n|=======\n|A |B |C |D\n|a |b |c |d\n|1 |2 |3 |4\n|=======");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table colgroup col", 4);
@@ -302,9 +300,8 @@ mod psv {
 
     #[test]
     fn explicit_table_width_is_used_even_when_autowidth_option_is_specified() {
-        let doc = Parser::default().parse(
-            "[%autowidth,width=75%]\n|=======\n|A |B |C\n|a |b |c\n|1 |2 |3\n|=======",
-        );
+        let doc = Parser::default()
+            .parse("[%autowidth,width=75%]\n|=======\n|A |B |C\n|a |b |c\n|1 |2 |3\n|=======");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table[width]", 1);
@@ -314,8 +311,8 @@ mod psv {
 
     #[test]
     fn first_row_sets_number_of_columns_when_not_specified() {
-        let doc = Parser::default()
-            .parse("|===\n|first |second |third |fourth\n|1 |2 |3\n|4\n|===");
+        let doc =
+            Parser::default().parse("|===\n|first |second |third |fourth\n|1 |2 |3\n|4\n|===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 4);
@@ -326,8 +323,7 @@ mod psv {
 
     #[test]
     fn colspec_attribute_using_asterisk_syntax_sets_number_of_columns() {
-        let doc = Parser::default()
-            .parse("[cols=\"3*\"]\n|===\n|A |B |C |a |b |c |1 |2 |3\n|===");
+        let doc = Parser::default().parse("[cols=\"3*\"]\n|===\n|A |B |C |a |b |c |1 |2 |3\n|===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > tbody > tr", 3);
@@ -468,9 +464,8 @@ mod psv {
 
     #[test]
     fn table_with_implicit_header_row() {
-        let doc = Parser::default().parse(
-            "|===\n|Column 1 |Column 2\n\n|Data A1\n|Data B1\n\n|Data A2\n|Data B2\n|===",
-        );
+        let doc = Parser::default()
+            .parse("|===\n|Column 1 |Column 2\n\n|Data A1\n|Data B1\n\n|Data A2\n|Data B2\n|===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
@@ -510,9 +505,8 @@ mod psv {
 
     #[test]
     fn no_implicit_header_row_if_second_line_not_blank() {
-        let doc = Parser::default().parse(
-            "|===\n|Column 1 |Column 2\n|Data A1\n|Data B1\n\n|Data A2\n|Data B2\n|===",
-        );
+        let doc = Parser::default()
+            .parse("|===\n|Column 1 |Column 2\n|Data A1\n|Data B1\n\n|Data A2\n|Data B2\n|===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
@@ -529,9 +523,8 @@ mod psv {
     // drops cells from the multi-line `A1 continued|B1` row. Enable once both
     // are fixed.
     fn no_implicit_header_row_if_cell_in_first_line_spans_multiple_lines() {
-        let doc = Parser::default().parse(
-            "[cols=2*]\n|===\n|A1\n\n\nA1 continued|B1\n\n|A2\n|B2\n|===",
-        );
+        let doc =
+            Parser::default().parse("[cols=2*]\n|===\n|A1\n\n\nA1 continued|B1\n\n|A2\n|B2\n|===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
@@ -573,7 +566,8 @@ mod psv {
     }
 
     #[test]
-    fn should_format_first_cell_as_asciidoc_if_there_is_no_implicit_header_row_and_cell_has_a_style() {
+    fn should_format_first_cell_as_asciidoc_if_there_is_no_implicit_header_row_and_cell_has_a_style()
+     {
         let doc = Parser::default().parse("|===\na| * list\n| normal\n|===");
 
         assert_css(&doc, "tbody .ulist", 1);
@@ -668,9 +662,21 @@ mod psv {
         let doc = Parser::default()
             .parse("[cols=\"s,e\"]\n|===\n| _strong_ | *emphasis*\n| strong\n| emphasis\n|===");
 
-        assert_xpath(&doc, "((//tbody/tr)[1]/td)[1]//strong/em[text()=\"strong\"]", 1);
-        assert_xpath(&doc, "((//tbody/tr)[1]/td)[2]//em/strong[text()=\"emphasis\"]", 1);
-        assert_xpath(&doc, "((//tbody/tr)[2]/td)[1]//strong[text()=\"strong\"]", 1);
+        assert_xpath(
+            &doc,
+            "((//tbody/tr)[1]/td)[1]//strong/em[text()=\"strong\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((//tbody/tr)[1]/td)[2]//em/strong[text()=\"emphasis\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((//tbody/tr)[2]/td)[1]//strong[text()=\"strong\"]",
+            1,
+        );
         assert_xpath(&doc, "((//tbody/tr)[2]/td)[2]//em[text()=\"emphasis\"]", 1);
     }
 
@@ -735,7 +741,8 @@ mod psv {
 
     #[test]
     fn percentages_as_column_widths() {
-        let doc = Parser::default().parse("[cols=\"<.^10%,<90%\"]\n|===\n|column A |column B\n|===");
+        let doc =
+            Parser::default().parse("[cols=\"<.^10%,<90%\"]\n|===\n|column A |column B\n|===");
 
         assert_xpath(&doc, "/table/colgroup/col", 2);
         assert_xpath(&doc, "(/table/colgroup/col)[1][@width=\"10%\"]", 1);
@@ -827,8 +834,8 @@ mod psv {
 
     #[test]
     fn sets_up_columns_correctly_if_first_row_has_cell_that_spans_columns() {
-        let doc = Parser::default()
-            .parse("|===\n2+^|AAA |CCC\n|AAA |BBB |CCC\n|AAA |BBB |CCC\n|===");
+        let doc =
+            Parser::default().parse("|===\n2+^|AAA |CCC\n|AAA |BBB |CCC\n|AAA |BBB |CCC\n|===");
 
         assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 2);
         assert_xpath(&doc, "((/table/tbody/tr)[1]/td)[1][@colspan=\"2\"]", 1);
@@ -981,7 +988,11 @@ mod psv {
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
-        assert_css(&doc, "table > tbody > tr > td:nth-child(1).halign-left.valign-top > p.tableblock", 7);
+        assert_css(
+            &doc,
+            "table > tbody > tr > td:nth-child(1).halign-left.valign-top > p.tableblock",
+            7,
+        );
     }
 
     #[test]
@@ -1001,17 +1012,24 @@ mod psv {
 
     #[test]
     fn should_strip_trailing_newlines_when_splitting_paragraphs() {
-        let doc = Parser::default().parse(
-            "|===\n|first wrapped\nparagraph\n\nsecond paragraph\n\nthird paragraph\n|===",
-        );
+        let doc = Parser::default()
+            .parse("|===\n|first wrapped\nparagraph\n\nsecond paragraph\n\nthird paragraph\n|===");
 
         assert_xpath(
             &doc,
             "(//p[@class=\"tableblock\"])[1][text()=\"first wrapped\nparagraph\"]",
             1,
         );
-        assert_xpath(&doc, "(//p[@class=\"tableblock\"])[2][text()=\"second paragraph\"]", 1);
-        assert_xpath(&doc, "(//p[@class=\"tableblock\"])[3][text()=\"third paragraph\"]", 1);
+        assert_xpath(
+            &doc,
+            "(//p[@class=\"tableblock\"])[2][text()=\"second paragraph\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(//p[@class=\"tableblock\"])[3][text()=\"third paragraph\"]",
+            1,
+        );
     }
 
     #[test]
@@ -1025,8 +1043,16 @@ mod psv {
         assert_css(&doc, "table.tableblock", 1);
         assert_css(&doc, "table.tableblock td.tableblock", 1);
         assert_css(&doc, "table.tableblock td.tableblock .openblock", 1);
-        assert_css(&doc, "table.tableblock td.tableblock .openblock .admonitionblock", 1);
-        assert_css(&doc, "table.tableblock td.tableblock .openblock .paragraph", 1);
+        assert_css(
+            &doc,
+            "table.tableblock td.tableblock .openblock .admonitionblock",
+            1,
+        );
+        assert_css(
+            &doc,
+            "table.tableblock td.tableblock .openblock .paragraph",
+            1,
+        );
     }
 
     #[test]
@@ -1034,7 +1060,11 @@ mod psv {
         let doc = Parser::default().parse("|===\na|AsciiDoc table cell\n|===");
 
         assert_css(&doc, "table.tableblock td.tableblock > div.content", 1);
-        assert_css(&doc, "table.tableblock td.tableblock > div.content > div.paragraph", 1);
+        assert_css(
+            &doc,
+            "table.tableblock td.tableblock > div.content > div.paragraph",
+            1,
+        );
     }
 
     // The following AsciiDoc-table-cell tests depend on nested-document
@@ -1091,7 +1121,8 @@ mod psv {
     #[ignore]
     // TODO (issue TBD): a locked-unset attribute cannot be set in an AsciiDoc
     // table cell.
-    fn should_not_allow_locked_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell() {
+    fn should_not_allow_locked_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell()
+    {
     }
 
     #[test]
@@ -1162,7 +1193,9 @@ mod psv {
     #[ignore]
     // TODO (issue TBD): Cross-reference resolution from inside an AsciiDoc table
     // cell to a reference in the main document.
-    fn cross_reference_link_in_an_asciidoc_table_cell_should_resolve_to_reference_in_main_document() {}
+    fn cross_reference_link_in_an_asciidoc_table_cell_should_resolve_to_reference_in_main_document()
+    {
+    }
 
     #[test]
     #[ignore]
@@ -1272,8 +1305,7 @@ mod psv {
 
     #[test]
     fn should_warn_if_table_block_is_not_terminated() {
-        let doc =
-            Parser::default().parse("outside\n\n|===\n|\ninside\n\nstill inside\n\neof");
+        let doc = Parser::default().parse("outside\n\n|===\n|\ninside\n\nstill inside\n\neof");
 
         assert_xpath(&doc, "/table", 1);
 
@@ -1301,7 +1333,8 @@ mod psv {
         assert!(
             warnings
                 .iter()
-                .any(|w| w.warning == WarningType::UnterminatedDelimitedBlock && w.source.line() == 9)
+                .any(|w| w.warning == WarningType::UnterminatedDelimitedBlock
+                    && w.source.line() == 9)
         );
     }
 
@@ -1338,8 +1371,8 @@ mod psv {
     // suppresses the implicit header, but the crate creates one (see
     // `no_implicit_header_row_if_cell_in_first_line_spans_multiple_lines`).
     fn no_implicit_header_row_if_cell_in_first_line_is_quoted_and_spans_multiple_lines() {
-        let doc = Parser::default()
-            .parse("[cols=2*l]\n,===\n\"A1\n\nA1 continued\",B1\nA2,B2\n,===");
+        let doc =
+            Parser::default().parse("[cols=2*l]\n,===\n\"A1\n\nA1 continued\",B1\nA2,B2\n,===");
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
@@ -1351,11 +1384,234 @@ mod psv {
 }
 
 mod dsv {
-    #[allow(unused_imports)]
     use crate::tests::prelude::*;
+
+    #[test]
+    fn converts_simple_dsv_table() {
+        let doc = Parser::default().parse(
+            "[width=\"75%\",format=\"dsv\"]\n|===\nroot:x:0:0:root:/root:/bin/bash\nbin:x:1:1:bin:/bin:/sbin/nologin\nmysql:x:27:27:MySQL\\:Server:/var/lib/mysql:/bin/bash\ngdm:x:42:42::/var/lib/gdm:/sbin/nologin\nsshd:x:74:74:Privilege-separated SSH:/var/empty/sshd:/sbin/nologin\nnobody:x:99:99:Nobody:/:/sbin/nologin\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col[width=\"14.2857%\"]", 6);
+        // Ruby uses `col:last-of-type`; the indexed XPath form is equivalent.
+        assert_xpath(&doc, "(/table/colgroup/col)[7][@width=\"14.2858%\"]", 1);
+        assert_css(&doc, "table > tbody > tr", 6);
+        assert_xpath(&doc, "//tr[4]/td[5]/p/text()", 0);
+        assert_xpath(&doc, "//tr[3]/td[5]/p[text()=\"MySQL:Server\"]", 1);
+    }
+
+    #[test]
+    fn dsv_format_shorthand() {
+        let doc = Parser::default().parse(":===\na:b:c\n1:2:3\n:===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 3);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
+    }
+
+    #[test]
+    fn single_cell_in_dsv_table_should_only_produce_single_row() {
+        let doc = Parser::default().parse(":===\nsingle cell\n:===");
+
+        assert_css(&doc, "table td", 1);
+    }
+
+    #[test]
+    fn should_treat_trailing_colon_as_an_empty_cell() {
+        let doc = Parser::default().parse(":===\nA1:\nB1:B2\nC1:C2\n:===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > tbody > tr", 3);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td", 2);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[1]/p[text()=\"A1\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p", 0);
+        assert_xpath(&doc, "/table/tbody/tr[2]/td[1]/p[text()=\"B1\"]", 1);
+    }
 }
 
 mod csv {
-    #[allow(unused_imports)]
     use crate::tests::prelude::*;
+
+    #[test]
+    fn should_treat_trailing_comma_as_an_empty_cell() {
+        let doc = Parser::default().parse(",===\nA1,\nB1,B2\nC1,C2\n,===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > tbody > tr", 3);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td", 2);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[1]/p[text()=\"A1\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p", 0);
+        assert_xpath(&doc, "/table/tbody/tr[2]/td[1]/p[text()=\"B1\"]", 1);
+    }
+
+    #[test]
+    fn should_log_error_but_not_crash_if_cell_data_has_unclosed_quote() {
+        let doc = Parser::default().parse(",===\na,b\nc,\"\n,===");
+
+        // The unclosed quote recovers to an empty cell without crashing.
+        // NOTE: Asciidoctor also logs an ERROR ("unclosed quote in CSV data");
+        // the crate recovers silently, so that warning assertion is not ported.
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table td", 4);
+        assert_xpath(&doc, "(//td)[4]/p", 0);
+    }
+
+    #[test]
+    fn should_preserve_newlines_in_quoted_csv_values() {
+        let doc = Parser::default().parse(
+            "[cols=\"1,1,1l\"]\n,===\n\"A\nB\nC\",\"one\n\ntwo\n\nthree\",\"do\n\nre\n\nme\"\n,===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 3);
+        assert_css(&doc, "table > tbody > tr", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td", 3);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[1]/p[text()=\"A\nB\nC\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p", 3);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p[1][text()=\"one\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p[2][text()=\"two\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p[3][text()=\"three\"]", 1);
+        assert_xpath(
+            &doc,
+            "/table/tbody/tr[1]/td[3]//pre[text()=\"do\n\nre\n\nme\"]",
+            1,
+        );
+    }
+
+    // Out of scope (omitted): include files are not supported, so "should not
+    // drop trailing empty cell in TSV data when loaded from an include file" is
+    // not ported.
+
+    #[test]
+    fn mixed_unquoted_records_and_quoted_records_with_escaped_quotes_commas_and_wrapped_lines() {
+        let doc = Parser::default().parse(
+            "[format=\"csv\",options=\"header\"]\n|===\nYear,Make,Model,Description,Price\n1997,Ford,E350,\"ac, abs, moon\",3000.00\n1999,Chevy,\"Venture \"\"Extended Edition\"\"\",\"\",4900.00\n1999,Chevy,\"Venture \"\"Extended Edition, Very Large\"\"\",,5000.00\n1996,Jeep,Grand Cherokee,\"MUST SELL!\nair, moon roof, loaded\",4799.00\n2000,Toyota,Tundra,\"\"\"This one's gonna to blow you're socks off,\"\" per the sticker\",10000.00\n2000,Toyota,Tundra,\"Check it, \"\"this one's gonna to blow you're socks off\"\", per the sticker\",10000.00\n|===",
+        );
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col[width=\"20%\"]", 5);
+        assert_css(&doc, "table > thead > tr", 1);
+        assert_css(&doc, "table > tbody > tr", 6);
+        assert_xpath(
+            &doc,
+            "((//tbody/tr)[1]/td)[4]/p[text()=\"ac, abs, moon\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((//tbody/tr)[2]/td)[3]/p[text()='Venture \"Extended Edition\"']",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((//tbody/tr)[4]/td)[4]/p[text()=\"MUST SELL!\nair, moon roof, loaded\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((//tbody/tr)[5]/td)[4]/p[text()='\"This one\u{2019}s gonna to blow you\u{2019}re socks off,\" per the sticker']",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "((//tbody/tr)[6]/td)[4]/p[text()='Check it, \"this one\u{2019}s gonna to blow you\u{2019}re socks off\", per the sticker']",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_allow_quotes_around_a_csv_value_to_be_on_their_own_lines() {
+        let doc = Parser::default().parse("[cols=2*]\n,===\n\"\nA\n\",\"\nB\n\"\n,===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 2);
+        assert_css(&doc, "table > tbody > tr", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td", 2);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[1]/p[text()=\"A\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p[text()=\"B\"]", 1);
+    }
+
+    #[test]
+    fn csv_format_shorthand() {
+        let doc = Parser::default().parse(",===\na,b,c\n1,2,3\n,===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 3);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
+    }
+
+    #[test]
+    fn tsv_as_format() {
+        let doc = Parser::default().parse("[format=tsv]\n,===\na\tb\tc\n1\t2\t3\n,===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 3);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
+    }
+
+    #[test]
+    fn custom_csv_separator() {
+        let doc = Parser::default().parse("[format=csv,separator=;]\n|===\na;b;c\n1;2;3\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 3);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
+    }
+
+    #[test]
+    fn tab_as_separator() {
+        let doc = Parser::default().parse("[separator=\\t]\n,===\na\tb\tc\n1\t2\t3\n,===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > colgroup > col", 3);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 3);
+        assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
+    }
+
+    #[test]
+    fn single_cell_in_csv_table_should_only_produce_single_row() {
+        let doc = Parser::default().parse(",===\nsingle cell\n,===");
+
+        assert_css(&doc, "table td", 1);
+    }
+
+    #[test]
+    fn cell_formatted_with_asciidoc_style() {
+        let doc = Parser::default().parse(
+            "[cols=\"1,1,1a\",separator=;]\n,===\nelement;description;example\n\nthematic break,a visible break; also known as a horizontal rule;---\n,===",
+        );
+
+        assert_css(&doc, "table tbody hr", 1);
+    }
+
+    #[test]
+    #[ignore]
+    // TODO (issue TBD): For a multi-line, whitespace-padded quoted CSV value
+    // feeding an AsciiDoc (`a`) column, the crate does not strip the surrounding
+    // quotes or whitespace — the cell renders `"\n  one sentence, one line\n  "`
+    // verbatim instead of the trimmed `one sentence, one line`. Enable once the
+    // CSV quote/whitespace stripping handles this case.
+    fn should_strip_whitespace_around_contents_of_asciidoc_cell() {
+        let doc = Parser::default().parse(
+            "[cols=\"1,1,1a\",separator=;]\n,===\nelement;description;example\n\nparagraph;contiguous lines of words and phrases;\"\n  one sentence, one line\n  \"\n,===",
+        );
+
+        assert_xpath(
+            &doc,
+            "/table/tbody//*[@class=\"paragraph\"]/p[text()=\"one sentence, one line\"]",
+            1,
+        );
+    }
 }
