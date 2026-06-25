@@ -329,10 +329,30 @@ mod psv {
             "[cols=\"4*~\",width=50%]\n|=======\n|A |B |C |D\n|a |b |c |d\n|1 |2 |3 |4\n|=======",
         );
 
+        // Every column is autowidth, so each takes an equal 25% share in
+        // `colpcwidth` and carries the `autowidth-option` marker; none carries an
+        // HTML `width` attribute even though the table itself has a width.
+        for i in 1..=4 {
+            assert_xpath(
+                &doc,
+                &format!("(/table/colgroup/col)[{i}][@colpcwidth=\"25\"]"),
+                1,
+            );
+            assert_xpath(
+                &doc,
+                &format!("(/table/colgroup/col)[{i}][@autowidth-option]"),
+                1,
+            );
+            assert_xpath(&doc, &format!("(/table/colgroup/col)[{i}][@width]"), 0);
+        }
+
+        // The explicit table width is still rendered, and no column carries a
+        // width-bearing `style` (the Ruby HTML-output expectations).
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table[width=\"50%\"]", 1);
         assert_css(&doc, "table colgroup col", 4);
         assert_css(&doc, "table colgroup col[style]", 0);
+        assert_css(&doc, "table colgroup col[autowidth-option]", 4);
     }
 
     // Backend-specific test omitted: DocBook ("equally distributes remaining
