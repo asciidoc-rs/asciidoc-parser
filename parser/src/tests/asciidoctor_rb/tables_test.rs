@@ -1003,13 +1003,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Duplicating a cell across columns with different styles
-    // (`2*|` into a default column and an `^l` literal column) is mishandled —
-    // the crate produces single-cell rows that all take the literal style
-    // instead of one row whose first cell is paragraphs and second is a literal
-    // block. Enable once cross-column cell duplication applies each column's
-    // style.
     fn should_apply_cell_style_for_column_to_repeated_content() {
         let doc = Parser::default().parse(
             "[cols=\",^l\"]\n|===\n|Paragraphs |Literal\n\n2*|The discussion about what is good,\nwhat is beautiful, what is noble,\nwhat is pure, and what is true\ncould always go on.\n\nWhy is that important?\nWhy would I like to do that?\n\nBecause that's the only conversation worth having.\n\nAnd whether it goes on or not after I die, I don't know.\nBut, I do know that it is the conversation I want to have while I am still alive.\n\nWhich means that to me the offer of certainty,\nthe offer of complete security,\nthe offer of an impermeable faith that can't give way\nis an offer of something not worth having.\n\nI want to live my life taking the risk all the time\nthat I don't know anything like enough yet...\nthat I haven't understood enough...\nthat I can't know enough...\nthat I am always hungrily operating on the margins\nof a potentially great harvest of future knowledge and wisdom.\n\nI wouldn't have it any other way.\n|===",
@@ -1017,10 +1010,37 @@ mod psv {
 
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > colgroup > col", 2);
-        assert_css(
+        assert_css(&doc, "table > thead", 1);
+        assert_css(&doc, "table > thead > tr", 1);
+        assert_css(&doc, "table > thead > tr > th", 2);
+        assert_css(&doc, "table > tbody", 1);
+        assert_css(&doc, "table > tbody > tr", 1);
+        assert_css(&doc, "table > tbody > tr > td", 2);
+
+        // The duplicated cell (`2*|`) is cloned into both columns, and each clone
+        // takes its own column's style: the first (default) column renders the
+        // content as seven paragraphs, the second (`^l`) column as a single
+        // centered literal block. (Ruby uses `td:nth-child(N)`; the equivalent
+        // positional `td[N]` is expressed in XPath here.)
+        assert_xpath(
             &doc,
-            "table > tbody > tr > td:nth-child(1).halign-left.valign-top > p.tableblock",
+            "/table/tbody/tr/td[1][@class=\"halign-left valign-top\"]/p[@class=\"tableblock\"]",
             7,
+        );
+        assert_xpath(
+            &doc,
+            "/table/tbody/tr/td[2][@class=\"halign-center valign-top\"]/div[@class=\"literal\"]/pre",
+            1,
+        );
+
+        // The literal block preserves every line of the cell, including the blank
+        // lines between paragraphs (26 lines total).
+        let vdom = doc.to_virtual_dom();
+        let pre = query_xpath(&vdom, "/table/tbody/tr/td[2]//pre");
+        assert_eq!(pre.len(), 1);
+        assert_eq!(
+            pre[0].text.as_deref().unwrap_or_default().lines().count(),
+            26
         );
     }
 
