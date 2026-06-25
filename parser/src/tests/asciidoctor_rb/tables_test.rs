@@ -493,12 +493,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate mis-parses this table — it creates an implicit
-    // header row even though the first cell spans multiple lines, and (blocked
-    // by the PSV cell-splitting divergence, see `ignores_escaped_separators`)
-    // drops cells from the multi-line `A1 continued|B1` row. Enable once both
-    // are fixed.
     fn no_implicit_header_row_if_cell_in_first_line_spans_multiple_lines() {
         let doc =
             Parser::default().parse("[cols=2*]\n|===\n|A1\n\n\nA1 continued|B1\n\n|A2\n|B2\n|===");
@@ -548,11 +542,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): The crate creates an implicit header row even though the
-    // first cell (an AsciiDoc cell) spans multiple lines; Asciidoctor suppresses
-    // the implicit header in that case. Enable once implicit-header detection
-    // accounts for multi-line first cells.
     fn no_implicit_header_row_if_asciidoc_cell_in_first_line_spans_multiple_lines() {
         let doc = Parser::default().parse(
             "[cols=2*]\n|===\na|contains AsciiDoc content\n\n* a\n* b\n* c\na|contains no AsciiDoc content\n\njust text\n|A2\n|B2\n|===",
@@ -1319,11 +1308,6 @@ mod psv {
     // docbook 5", "table with unbreakable option docbook 5").
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): Blocked by the multi-line-first-cell implicit-header
-    // divergence — the quoted first cell spans multiple lines, so Asciidoctor
-    // suppresses the implicit header, but the crate creates one (see
-    // `no_implicit_header_row_if_cell_in_first_line_spans_multiple_lines`).
     fn no_implicit_header_row_if_cell_in_first_line_is_quoted_and_spans_multiple_lines() {
         let doc =
             Parser::default().parse("[cols=2*l]\n,===\n\"A1\n\nA1 continued\",B1\nA2,B2\n,===");

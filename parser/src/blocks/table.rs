@@ -217,7 +217,22 @@ impl<'src> TableBlock<'src> {
         let line1_blank = line1.item.data().trim().is_empty();
         let line2_blank =
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
-        let has_header = opts_header || (!opts_noheader && !line1_blank && line2_blank);
+
+        // An implicit header additionally requires that the first row be complete
+        // on the first line. If the first cell spans multiple lines — for PSV,
+        // the first non-blank line after the blank gap continues the cell instead
+        // of starting a new one; for CSV/TSV, the first line opens a quoted value
+        // that is not closed on that line — there is no implicit header (matching
+        // Asciidoctor, which cancels the implicit header in these cases).
+        let first_row_complete = match data_format {
+            DataFormat::Psv => first_nonblank_line(line1.after)
+                .is_none_or(|line| psv_line_starts_cell(line.data(), separator.as_str())),
+            DataFormat::Csv | DataFormat::Tsv => !line_has_unclosed_quote(line1.item.data()),
+            DataFormat::Dsv => true,
+        };
+
+        let has_header =
+            opts_header || (!opts_noheader && !line1_blank && line2_blank && first_row_complete);
 
         // A titled table is given a caption (e.g. "Table 1. ") that a processor
         // prepends to the title.
@@ -2352,4 +2367,37 @@ fn trim_cell_content(s: Span<'_>, style: ColumnStyle) -> Span<'_> {
         }
         _ => trim_surrounding_whitespace(s),
     }
+}
+
+/// Returns the first non-blank line in `rest`, or `None` when every remaining
+/// line is blank (or `rest` is empty).
+fn first_nonblank_line(mut rest: Span<'_>) -> Option<Span<'_>> {
+    while !rest.is_empty() {
+        let line = rest.take_line();
+        if !line.item.data().trim().is_empty() {
+            return Some(line.item);
+        }
+        rest = line.after;
+    }
+    None
+}
+
+/// Returns `true` when `line` begins a new PSV cell, i.e. it contains the
+/// separator and the text before the first separator (after any leading
+/// whitespace) is either empty or a valid cell specifier. A line that continues
+/// the previous cell returns `false`.
+fn psv_line_starts_cell(line: &str, separator: &str) -> bool {
+    match line.find(separator) {
+        Some(pos) => {
+            let prefix = line[..pos].trim_start();
+            prefix.is_empty() || parse_cell_spec(prefix).is_some()
+        }
+        None => false,
+    }
+}
+
+/// Returns `true` when `line` contains an odd number of double quotes, i.e. it
+/// opens a quoted CSV/TSV value that is not closed on the same line.
+fn line_has_unclosed_quote(line: &str) -> bool {
+    line.bytes().filter(|&b| b == b'"').count() % 2 == 1
 }
