@@ -1010,9 +1010,24 @@ fn csv_unclosed_quote_is_literal() {
     let table = parse_table("[format=csv]\n|===\n\",a\n|===");
     assert_eq!(table.columns().len(), 1);
     assert_eq!(row_text(&table.body_rows()[0]), ["\",a"]);
+}
 
-    // A cell that is a single bare quote is an unclosed, empty quoted value.
-    let table = parse_table("[format=csv]\n|===\n\"\n|===");
+#[test]
+fn csv_lone_quote_is_unclosed_and_empty_with_warning() {
+    // A cell that is a single bare quote is an unclosed, empty quoted value: it is
+    // set to empty and an error is logged (matching Asciidoctor).
+    let mut parser = Parser::default();
+    let maw = Block::parse(Span::new("[format=csv]\n|===\n\"\n|==="), &mut parser);
+
+    assert!(maw.warnings.iter().any(|w| matches!(
+        w.warning,
+        crate::warnings::WarningType::TableCsvDataHasUnclosedQuote
+    )));
+
+    let table = match maw.item.unwrap().item {
+        Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    };
     assert_eq!(table.columns().len(), 1);
     assert_eq!(row_text(&table.body_rows()[0]), [""]);
 }

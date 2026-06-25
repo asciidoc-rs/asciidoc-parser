@@ -1391,12 +1391,19 @@ mod csv {
     fn should_log_error_but_not_crash_if_cell_data_has_unclosed_quote() {
         let doc = Parser::default().parse(",===\na,b\nc,\"\n,===");
 
-        // The unclosed quote recovers to an empty cell without crashing.
-        // NOTE: Asciidoctor also logs an ERROR ("unclosed quote in CSV data");
-        // the crate recovers silently, so that warning assertion is not ported.
+        // The unclosed quote recovers to an empty cell without crashing, and an
+        // error is logged for line 3 (the `c,"` line).
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table td", 4);
         assert_xpath(&doc, "(//td)[4]/p", 0);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::TableCsvDataHasUnclosedQuote
+        );
+        assert_eq!(warnings[0].source.line(), 3);
     }
 
     #[test]
@@ -1535,12 +1542,6 @@ mod csv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): For a multi-line, whitespace-padded quoted CSV value
-    // feeding an AsciiDoc (`a`) column, the crate does not strip the surrounding
-    // quotes or whitespace — the cell renders `"\n  one sentence, one line\n  "`
-    // verbatim instead of the trimmed `one sentence, one line`. Enable once the
-    // CSV quote/whitespace stripping handles this case.
     fn should_strip_whitespace_around_contents_of_asciidoc_cell() {
         let doc = Parser::default().parse(
             "[cols=\"1,1,1a\",separator=;]\n,===\nelement;description;example\n\nparagraph;contiguous lines of words and phrases;\"\n  one sentence, one line\n  \"\n,===",

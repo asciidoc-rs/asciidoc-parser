@@ -1191,7 +1191,7 @@ fn build_data_table<'src>(
     let (fields, first_row_len) = if data_format == DataFormat::Dsv {
         parse_dsv_fields(inside, separator)
     } else {
-        parse_csv_fields(inside, separator)
+        parse_csv_fields(inside, separator, warnings)
     };
 
     let ncols = if cols_attr.is_empty() {
@@ -1253,7 +1253,11 @@ struct DataField<'src> {
 /// value. As a result a value whose opening quote is never properly closed (or
 /// that has trailing characters after its closing quote) keeps its quotes and
 /// absorbs the following separators, rather than being treated as enclosed.
-fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField<'src>>, usize) {
+fn parse_csv_fields<'src>(
+    region: Span<'src>,
+    separator: &str,
+    warnings: &mut Vec<Warning<'src>>,
+) -> (Vec<DataField<'src>>, usize) {
     let data = region.data();
     let n = data.len();
     let sep_len = separator.len().max(1);
@@ -1294,7 +1298,7 @@ fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField
         // blank cell that follows a separator on a populated line is kept.
         let blank_skip = (at_nl || at_eof) && fields_in_row == 0 && raw.trim().is_empty();
         if !blank_skip {
-            fields.push(make_csv_field(region, cell_start, i));
+            fields.push(make_csv_field(region, cell_start, i, warnings));
             fields_in_row += 1;
             if !first_row_done {
                 first_row_len = fields_in_row;
@@ -1327,37 +1331,42 @@ fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField
 /// applying Asciidoctor's `close_cell` value processing.
 ///
 /// The value is stripped of surrounding whitespace; then, if it is enclosed in
-/// double quotes, the quotes are removed and the inner value is stripped again;
-/// finally any run of consecutive double quotes is collapsed to one (so an
-/// escaped `""` becomes a single `"`). A value that is not enclosed (no leading
-/// quote, an unclosed quote, or trailing characters after the closing quote)
-/// keeps its quotes and is only collapsed.
-fn make_csv_field<'src>(region: Span<'src>, start: usize, end: usize) -> DataField<'src> {
+/// double quotes, the quotes are removed and the inner value is stripped again,
+/// so the field's [content](DataField::content) span points at the actual value
+/// (this matters for an AsciiDoc cell, which parses that span). Finally any run
+/// of consecutive double quotes is collapsed to one (so an escaped `""` becomes
+/// a single `"`). A value that is not enclosed (no leading quote, or trailing
+/// characters after the closing quote) keeps its quotes and is only collapsed.
+///
+/// A lone double quote is an unclosed quoted value: it logs an error and the
+/// cell is set to empty (matching Asciidoctor).
+fn make_csv_field<'src>(
+    region: Span<'src>,
+    start: usize,
+    end: usize,
+    warnings: &mut Vec<Warning<'src>>,
+) -> DataField<'src> {
     let trimmed = trim_surrounding_whitespace(region.slice(start..end));
-    let value = csv_cell_value(trimmed.data());
-    let replacement = (value != trimmed.data()).then_some(value);
-    DataField {
-        content: trimmed,
-        replacement,
-    }
-}
+    let data = trimmed.data();
 
-/// Apply Asciidoctor's CSV value processing to an already-stripped cell value:
-/// unquote an enclosed value and collapse escaped double quotes (`""` -> `"`).
-fn csv_cell_value(text: &str) -> String {
-    if text.is_empty() || !text.contains('"') {
-        return text.to_string();
-    }
-
-    // An enclosed value (leading and trailing quote) has its quotes removed and
-    // is stripped again; a lone `"` becomes empty. Anything else keeps its text.
-    if text.starts_with('"') && text.ends_with('"') {
-        match text.get(1..text.len() - 1) {
-            Some(inner) => squeeze_quotes(inner.trim()),
-            None => String::new(),
-        }
+    let content = if data == "\"" {
+        warnings.push(Warning {
+            source: trimmed,
+            warning: WarningType::TableCsvDataHasUnclosedQuote,
+        });
+        trimmed.slice(0..0)
+    } else if data.len() >= 2 && data.starts_with('"') && data.ends_with('"') {
+        trim_surrounding_whitespace(trimmed.slice(1..data.len() - 1))
     } else {
-        squeeze_quotes(text)
+        trimmed
+    };
+
+    let value = squeeze_quotes(content.data());
+    let replacement = (value != content.data()).then_some(value);
+
+    DataField {
+        content,
+        replacement,
     }
 }
 
