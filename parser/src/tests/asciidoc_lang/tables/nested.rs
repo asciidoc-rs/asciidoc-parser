@@ -24,7 +24,8 @@ fn nested_table<'a, 'src>(
     cell: &'a crate::blocks::TableCell<'src>,
 ) -> &'a crate::blocks::TableBlock<'src> {
     match cell.content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             let tables: Vec<&crate::blocks::TableBlock<'src>> = blocks
                 .iter()
                 .filter_map(|block| match block {
@@ -81,7 +82,8 @@ To distinguish the inner table from the enclosing one, you need to use `!===` as
     // The AsciiDoc cell holds a nested table in addition to its normal block
     // content (the leading `Cell 2.2` paragraph).
     match last_cell.content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             assert!(
                 blocks
                     .iter()

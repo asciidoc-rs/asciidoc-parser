@@ -35,7 +35,8 @@ fn nested_table<'a, 'src>(
     cell: &'a crate::blocks::TableCell<'src>,
 ) -> &'a crate::blocks::TableBlock<'src> {
     match cell.content() {
-        TableCellContent::AsciiDoc(blocks) => {
+        TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             let tables: Vec<&crate::blocks::TableBlock<'src>> = blocks
                 .iter()
                 .filter_map(|block| match block {

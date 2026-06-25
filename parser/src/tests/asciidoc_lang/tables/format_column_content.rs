@@ -331,7 +331,8 @@ The AsciiDoc block style effectively creates a nested, standalone AsciiDoc docum
     // keeps the list markup as plain inline text.
     let row = &table.body_rows()[0];
     match row.cells()[0].content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             assert_eq!(blocks.len(), 1);
             assert_eq!(blocks[0].raw_context().as_ref(), "list");
         }
@@ -345,7 +346,8 @@ The AsciiDoc block style effectively creates a nested, standalone AsciiDoc docum
     // Second body row: the AsciiDoc cell parses the delimited source block.
     let row = &table.body_rows()[1];
     match row.cells()[0].content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             assert_eq!(blocks.len(), 1);
             assert_eq!(blocks[0].raw_context().as_ref(), "listing");
         }

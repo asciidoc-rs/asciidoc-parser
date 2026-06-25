@@ -89,6 +89,7 @@ fn cell_content_eq(fixture: &TableCellContent, observed: &crate::blocks::TableCe
     match (fixture, observed) {
         (TableCellContent::Simple(f), crate::blocks::TableCellContent::Simple(o)) => f == o,
         (TableCellContent::AsciiDoc(f), crate::blocks::TableCellContent::AsciiDoc(o)) => {
+            let o = o.blocks();
             f.len() == o.len() && f.iter().zip(o.iter()).all(|(fb, ob)| fb == ob)
         }
         _ => false,

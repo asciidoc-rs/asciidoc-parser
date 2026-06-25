@@ -255,6 +255,63 @@ impl Parser {
             .unwrap_or(false)
     }
 
+    /// Resolves whether a document title should be displayed, from the
+    /// `showtitle`/`notitle` attribute pair (which are complements).
+    ///
+    /// `showtitle` takes precedence: if present, the title shows precisely when
+    /// it is set. Otherwise `notitle`, if present, hides the title when set.
+    /// When neither attribute is present, `default_shown` decides — a
+    /// standalone document (such as a nested AsciiDoc table cell) shows its
+    /// title, while an embedded document does not.
+    pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
+        if self.has_attribute("showtitle") {
+            self.is_attribute_set("showtitle")
+        } else if self.has_attribute("notitle") {
+            !self.is_attribute_set("notitle")
+        } else {
+            default_shown
+        }
+    }
+
+    /// Forces the `doctype` attribute to `value`, refreshing the derived
+    /// `backend-html5-doctype-*` attribute.
+    ///
+    /// Used when a nested AsciiDoc table cell resets its doctype to the default
+    /// (a cell does not inherit the parent's doctype). The value stays
+    /// modifiable from the document body so the cell may still set its own
+    /// doctype.
+    pub(crate) fn force_doctype(&mut self, value: &str) {
+        self.attribute_values.insert(
+            "doctype".to_string(),
+            AttributeValue {
+                allowable_value: AllowableValue::Any,
+                modification_context: ModificationContext::ApiOrDocumentBody,
+                value: InterpretedValue::Value(value.to_string()),
+            },
+        );
+        self.refresh_doctype_derived_attr();
+    }
+
+    /// Recomputes the `backend-html5-doctype-{doctype}` intrinsic attribute so
+    /// exactly one exists — for the active doctype — resolving to an empty
+    /// (defined) value. References to any other doctype stay undefined and so
+    /// render literally.
+    pub(crate) fn refresh_doctype_derived_attr(&mut self) {
+        self.attribute_values
+            .retain(|name, _| !name.starts_with("backend-html5-doctype-"));
+
+        if let InterpretedValue::Value(doctype) = self.attribute_value("doctype") {
+            self.attribute_values.insert(
+                format!("backend-html5-doctype-{doctype}"),
+                AttributeValue {
+                    allowable_value: AllowableValue::Any,
+                    modification_context: ModificationContext::Anywhere,
+                    value: InterpretedValue::Value(String::new()),
+                },
+            );
+        }
+    }
+
     /// Sets the value of an [intrinsic attribute].
     ///
     /// Intrinsic attributes are set automatically by the processor. These
@@ -483,7 +540,11 @@ impl Parser {
             value,
         };
 
+        let is_doctype = attr_name == "doctype";
         self.attribute_values.insert(attr_name, attribute_value);
+        if is_doctype {
+            self.refresh_doctype_derived_attr();
+        }
     }
 
     /// Called from [`Header::parse()`] for a value that is derived from parsing
@@ -542,7 +603,11 @@ impl Parser {
             value: attr.value().clone(),
         };
 
+        let is_doctype = attr_name == "doctype";
         self.attribute_values.insert(attr_name, attribute_value);
+        if is_doctype {
+            self.refresh_doctype_derived_attr();
+        }
     }
 
     /// Assign the next section number for a given level.
@@ -796,5 +861,69 @@ mod tests {
             simple_block.content().rendered(),
             "Hello [AMP] goodbye [LT] world [GT] test"
         );
+    }
+
+    mod resolve_show_title {
+        use crate::parser::{ModificationContext, Parser};
+
+        fn with(name: &str, set: bool) -> Parser {
+            Parser::default().with_intrinsic_attribute_bool(
+                name,
+                set,
+                ModificationContext::Anywhere,
+            )
+        }
+
+        #[test]
+        fn neither_present_uses_default() {
+            assert!(Parser::default().resolve_show_title(true));
+            assert!(!Parser::default().resolve_show_title(false));
+        }
+
+        #[test]
+        fn showtitle_takes_precedence_and_decides() {
+            // Present and set -> shown; present and unset -> hidden, regardless
+            // of the default.
+            assert!(with("showtitle", true).resolve_show_title(false));
+            assert!(!with("showtitle", false).resolve_show_title(true));
+        }
+
+        #[test]
+        fn notitle_is_the_complement_when_showtitle_absent() {
+            // notitle set -> hidden; notitle unset -> shown.
+            assert!(!with("notitle", true).resolve_show_title(true));
+            assert!(with("notitle", false).resolve_show_title(false));
+        }
+    }
+
+    mod refresh_doctype_derived_attr {
+        use crate::{document::InterpretedValue, parser::Parser};
+
+        #[test]
+        fn tracks_the_active_doctype() {
+            let mut parser = Parser::default();
+
+            // The default doctype is `article`, so only its derived attribute is
+            // defined (to an empty value).
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Value(String::new())
+            );
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-book"),
+                InterpretedValue::Unset
+            );
+
+            // Forcing a new doctype moves the derived attribute with it.
+            parser.force_doctype("book");
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-book"),
+                InterpretedValue::Value(String::new())
+            );
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Unset
+            );
+        }
     }
 }

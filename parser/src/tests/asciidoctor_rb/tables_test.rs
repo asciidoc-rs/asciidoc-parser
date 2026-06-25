@@ -1113,87 +1113,151 @@ mod psv {
         );
     }
 
-    // The following AsciiDoc-table-cell tests depend on nested-document
-    // attribute inheritance/locking (doctype, icons, sectids, showtitle/notitle
-    // set or unset in the cell relative to the parent document or the API),
-    // which the crate does not yet model. They are kept as ignored stubs so the
-    // scenarios are not lost.
-
     #[test]
-    #[ignore]
-    // TODO (issue TBD): doctype set inside an AsciiDoc table cell.
-    fn doctype_can_be_set_in_asciidoc_table_cell() {}
+    fn doctype_can_be_set_in_asciidoc_table_cell() {
+        let doc = Parser::default().parse("|===\na|\n:doctype: inline\n\ncontent\n|===");
 
-    #[test]
-    #[ignore]
-    // TODO (issue TBD): doctype reset to default inside an AsciiDoc table cell.
-    fn should_reset_doctype_to_default_in_asciidoc_table_cell() {}
-
-    #[test]
-    #[ignore]
-    // TODO (issue TBD): doctype-related attributes updated when doctype is set
-    // in an AsciiDoc table cell.
-    fn should_update_doctype_related_attributes_in_asciidoc_table_cell_when_doctype_is_set() {}
-
-    #[test]
-    #[ignore]
-    // TODO (issue TBD): an AsciiDoc table cell must not override an attribute
-    // hard set by the API.
-    fn should_not_allow_asciidoc_table_cell_to_set_a_document_attribute_that_was_hard_set_by_the_api()
-     {
+        // An `inline` doctype renders the cell's lone paragraph as bare inline
+        // content, with no `.paragraph` wrapper.
+        assert_css(&doc, "table.tableblock", 1);
+        assert_css(&doc, "table.tableblock .paragraph", 0);
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): an AsciiDoc table cell must not override an attribute
-    // hard unset by the API.
-    fn should_not_allow_asciidoc_table_cell_to_set_a_document_attribute_that_was_hard_unset_by_the_api()
-     {
+    fn should_reset_doctype_to_default_in_asciidoc_table_cell() {
+        // The parent is a `book`, but a cell resets to the default `article`
+        // doctype, so `{doctype}` is `article` and only the
+        // `backend-html5-doctype-article` derived attribute is defined (an
+        // undefined reference is left literal).
+        let doc = Parser::default().parse(
+            "= Book Title\n:doctype: book\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n\ndoctype={doctype}\n{backend-html5-doctype-article}\n{backend-html5-doctype-book}\n|===",
+        );
+
+        assert_rendered_contains(&doc, "doctype=article");
+        refute_rendered_contains(&doc, "{backend-html5-doctype-article}");
+        assert_rendered_contains(&doc, "{backend-html5-doctype-book}");
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): an attribute unset in the parent document stays unset in
-    // an AsciiDoc table cell.
-    fn should_keep_attribute_unset_in_asciidoc_table_cell_if_unset_in_parent_document() {}
+    fn should_update_doctype_related_attributes_in_asciidoc_table_cell_when_doctype_is_set() {
+        // Setting `:doctype: book` in the cell updates `{doctype}` and the
+        // derived `backend-html5-doctype-*` attribute accordingly.
+        let doc = Parser::default().parse(
+            "= Document Title\n:doctype: article\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:doctype: book\n\ndoctype={doctype}\n{backend-html5-doctype-book}\n{backend-html5-doctype-article}\n|===",
+        );
+
+        assert_rendered_contains(&doc, "doctype=book");
+        refute_rendered_contains(&doc, "{backend-html5-doctype-book}");
+        assert_rendered_contains(&doc, "{backend-html5-doctype-article}");
+    }
+
+    // Deferred: "should not allow AsciiDoc table cell to set a document
+    // attribute that was hard set by the API" (Ruby 1457) observes the lock via
+    // a NOTE admonition's icon, and admonitions are not implemented. The same
+    // API-lock path is covered by
+    // `should_not_allow_locked_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell`.
+
+    // Deferred: "should not allow AsciiDoc table cell to set a document
+    // attribute that was hard unset by the API" (Ruby 1472) — same admonition
+    // dependency as above.
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): an attribute unset in the parent document can be set in
-    // an AsciiDoc table cell.
-    fn should_allow_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell() {}
+    fn should_keep_attribute_unset_in_asciidoc_table_cell_if_unset_in_parent_document() {
+        // `sectids` and `table-caption` are unset in the parent and stay unset
+        // in the cell: the headings get no id, and both the outer table and the
+        // nested table render their title as a bare `<caption>`.
+        let doc = Parser::default().parse(
+            ":!sectids:\n:!table-caption:\n\n== Outer Heading\n\n.Outer Table\n|===\na|\n\n== Inner Heading\n\n.Inner Table\n!===\n! table cell\n!===\n|===",
+        );
+
+        assert_xpath(&doc, "//h2[@id]", 0);
+        assert_xpath(&doc, "//caption[text()=\"Outer Table\"]", 1);
+        assert_xpath(&doc, "//caption[text()=\"Inner Table\"]", 1);
+    }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): a locked-unset attribute cannot be set in an AsciiDoc
-    // table cell.
+    fn should_allow_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell() {
+        // `sectids` is unset in the parent header (not locked), so the cell may
+        // set it: the heading after `:sectids:` in the cell gets an id.
+        let doc = Parser::default().parse(
+            ":!sectids:\n\n== No ID\n\n|===\na|\n\n== No ID\n\n:sectids:\n\n== Has ID\n|===",
+        );
+
+        assert_css(&doc, "h2", 3);
+        assert_xpath(&doc, "(//h2)[1][@id]", 0);
+        assert_xpath(&doc, "(//h2)[2][@id]", 0);
+        assert_xpath(&doc, "(//h2)[3][@id=\"_has_id\"]", 1);
+    }
+
+    #[test]
     fn should_not_allow_locked_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell()
     {
+        // `sectids` is hard unset by the API, so the cell's `:sectids:` is
+        // ignored and no heading gets an id.
+        let doc = Parser::default()
+            .with_intrinsic_attribute_bool("sectids", false, ModificationContext::ApiOnly)
+            .parse("== No ID\n\n|===\na|\n\n== No ID\n\n:sectids:\n\n== Has ID\n|===");
+
+        assert_css(&doc, "h2", 3);
+        assert_xpath(&doc, "//h2[@id]", 0);
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): showtitle enabled in an AsciiDoc table cell if unset in
-    // the parent document.
-    fn showtitle_can_be_enabled_in_asciidoc_table_cell_if_unset_in_parent_document() {}
+    fn showtitle_can_be_enabled_in_asciidoc_table_cell_if_unset_in_parent_document() {
+        // The parent hides its title; the cell shows its own. (`showtitle` and
+        // `notitle` are complements, so both spellings are exercised.)
+        for (parent, cell) in [(":!showtitle:", ":showtitle:"), (":notitle:", ":!notitle:")] {
+            let doc = Parser::default().parse(&format!(
+                "= Document Title\n{parent}\n\n|===\na|\n= Nested Document Title\n{cell}\n\ncontent\n|==="
+            ));
+            assert_css(&doc, "h1", 1);
+            assert_css(&doc, ".tableblock h1", 1);
+        }
+    }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): showtitle enabled in an AsciiDoc table cell if unset by
-    // the API.
-    fn showtitle_can_be_enabled_in_asciidoc_table_cell_if_unset_by_api() {}
+    fn showtitle_can_be_enabled_in_asciidoc_table_cell_if_unset_by_api() {
+        for (name, value, cell) in [
+            ("showtitle", false, ":showtitle:"),
+            ("notitle", true, ":!notitle:"),
+        ] {
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool(name, value, ModificationContext::ApiOnly)
+                .parse(&format!(
+                    "= Document Title\n\n|===\na|\n= Nested Document Title\n{cell}\n\ncontent\n|==="
+                ));
+            assert_css(&doc, "h1", 1);
+            assert_css(&doc, ".tableblock h1", 1);
+        }
+    }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): showtitle disabled in an AsciiDoc table cell if set in
-    // the parent document.
-    fn showtitle_can_be_disabled_in_asciidoc_table_cell_if_set_in_parent_document() {}
+    fn showtitle_can_be_disabled_in_asciidoc_table_cell_if_set_in_parent_document() {
+        // The parent shows its title; the cell hides its own.
+        for (parent, cell) in [(":showtitle:", ":!showtitle:"), (":!notitle:", ":notitle:")] {
+            let doc = Parser::default().parse(&format!(
+                "= Document Title\n{parent}\n\n|===\na|\n= Nested Document Title\n{cell}\n\ncontent\n|==="
+            ));
+            assert_css(&doc, "h1", 1);
+            assert_css(&doc, ".tableblock h1", 0);
+        }
+    }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): showtitle disabled in an AsciiDoc table cell if set by
-    // the API.
-    fn showtitle_can_be_disabled_in_asciidoc_table_cell_if_set_by_api() {}
+    fn showtitle_can_be_disabled_in_asciidoc_table_cell_if_set_by_api() {
+        for (name, value, cell) in [
+            ("showtitle", true, ":!showtitle:"),
+            ("notitle", false, ":notitle:"),
+        ] {
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool(name, value, ModificationContext::ApiOnly)
+                .parse(&format!(
+                    "= Document Title\n\n|===\na|\n= Nested Document Title\n{cell}\n\ncontent\n|==="
+                ));
+            assert_css(&doc, "h1", 1);
+            assert_css(&doc, ".tableblock h1", 0);
+        }
+    }
 
     #[test]
     #[ignore]

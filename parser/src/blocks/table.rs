@@ -6,7 +6,9 @@ use crate::{
     },
     content::{Content, SubstitutionGroup},
     document::InterpretedValue,
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning},
+    parser::{
+        InlineSubstitutionRenderer, ModificationContext, ReferenceResolver, ReferenceWarning,
+    },
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -1581,14 +1583,49 @@ fn process_content<'src>(
         // cell may assign it (matching Asciidoctor, which here diverges from the
         // spec's "set or explicitly unset" wording). The lock set is saved and
         // restored so it applies only within the cell and nests correctly.
+        // An attribute set in the parent is locked, as is one hard set or unset
+        // through the API (its modification context is `ApiOnly`) even though it
+        // is unset — matching Asciidoctor, where an API-controlled attribute can
+        // never be overridden in a cell. An attribute merely unset in the parent
+        // document is not locked, so the cell may assign it.
         let saved_locks = parser.locked_attribute_names.clone();
         for (name, value) in saved_attributes.iter() {
-            if !matches!(value.value, InterpretedValue::Unset)
+            let api_locked = value.modification_context == ModificationContext::ApiOnly;
+            if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
                 && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name.as_str())
             {
                 parser.locked_attribute_names.insert(name.clone());
             }
         }
+
+        // The modifiable attributes may always be changed inside a cell, even
+        // when the parent or the API set them with a restrictive modification
+        // context. Relax their context for the duration of the cell so a body
+        // assignment is honored; the snapshot restore reverts it afterward.
+        for name in ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES {
+            if let Some(attr) = parser.attribute_values.get_mut(*name) {
+                attr.modification_context = ModificationContext::Anywhere;
+            }
+        }
+
+        // A cell does not inherit the parent's doctype; it resets to the default
+        // (`article`). The cell body may still set its own doctype, and the
+        // derived `backend-html5-doctype-*` attribute is refreshed to match.
+        parser.force_doctype("article");
+
+        // A leading level-0 title line (`= Title`) is the nested document's
+        // title rather than a section, so capture it here (a level-0 heading is
+        // otherwise rejected in block parsing). The remaining lines form the
+        // cell's body.
+        let first_line = trimmed.take_line();
+        let (title_source, body) = if first_line.item.data().starts_with("= ") {
+            (
+                Some(first_line.item.discard(2).discard_whitespace()),
+                first_line.after,
+            )
+        } else {
+            (None, trimmed)
+        };
 
         // Mark that we are inside an AsciiDoc cell (a nested document) for the
         // duration of the cell, so a table found within defaults its cell
@@ -1596,13 +1633,35 @@ fn process_content<'src>(
         // `Document#nested?`). The depth is restored afterward so the marker is
         // scoped to the cell and nests correctly.
         parser.nested_document_depth += 1;
-        let mut maw = parse_blocks_until(trimmed, |_| false, parser);
+        let mut maw = parse_blocks_until(body, |_| false, parser);
         parser.nested_document_depth -= 1;
+
+        // The cell's render-time decisions depend on its now-mutated attribute
+        // state (its body may have changed `doctype`/`showtitle`/`notitle`), so
+        // resolve them before the snapshot is restored. A captured title is kept
+        // only when the cell's effective `showtitle` shows it.
+        let inline = matches!(
+            parser.attribute_value("doctype"),
+            InterpretedValue::Value(ref v) if v == "inline"
+        );
+        let title = if parser.resolve_show_title(true) {
+            title_source.map(|span| {
+                let mut content = Content::from(span);
+                SubstitutionGroup::Header.apply(&mut content, parser, None);
+                content.rendered().to_string()
+            })
+        } else {
+            None
+        };
 
         parser.locked_attribute_names = saved_locks;
         parser.attribute_values = saved_attributes;
         warnings.append(&mut maw.warnings);
-        TableCellContent::AsciiDoc(maw.item.item)
+        TableCellContent::AsciiDoc(AsciiDocCell {
+            title,
+            inline,
+            blocks: maw.item.item,
+        })
     } else {
         let mut content = match replacement {
             Some(replacement) => Content::from_filtered(trimmed, replacement),
@@ -1818,8 +1877,8 @@ impl<'src> TableCell<'src> {
             TableCellContent::Simple(content) => {
                 content.resolve_references(resolver, renderer, warnings);
             }
-            TableCellContent::AsciiDoc(blocks) => {
-                for block in blocks.iter_mut() {
+            TableCellContent::AsciiDoc(cell) => {
+                for block in cell.blocks_mut() {
                     block.resolve_references(resolver, renderer, warnings);
                 }
             }
@@ -1842,7 +1901,53 @@ pub enum TableCellContent<'src> {
 
     /// Block content: the cell's text parsed as a nested, standalone AsciiDoc
     /// document. Produced by the [`AsciiDoc`](ColumnStyle::AsciiDoc) style.
-    AsciiDoc(Vec<Block<'src>>),
+    AsciiDoc(AsciiDocCell<'src>),
+}
+
+/// The content of an [`AsciiDoc`](TableCellContent::AsciiDoc) table cell: a
+/// nested, standalone AsciiDoc document.
+///
+/// Because the cell behaves like its own document, a few render-time decisions
+/// depend on attribute state that is scoped to the cell and gone by the time
+/// the document is rendered. They are therefore resolved while the cell is
+/// parsed and captured here: whether the cell's nested document title is shown
+/// (and its rendered text), and whether the cell's `doctype` is `inline` (in
+/// which case a lone paragraph renders without the usual block wrapper).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AsciiDocCell<'src> {
+    title: Option<String>,
+    inline: bool,
+    blocks: Vec<Block<'src>>,
+}
+
+impl<'src> AsciiDocCell<'src> {
+    /// Returns the cell's nested-document title, rendered to its display text.
+    ///
+    /// This is `Some` only when the cell began with a level-0 title line
+    /// (`= Title`) *and* the cell's effective `showtitle`/`notitle` state means
+    /// that title is shown; otherwise it is `None`.
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Returns `true` when the cell's `doctype` resolves to `inline`.
+    ///
+    /// An `inline` document renders a lone paragraph as bare inline content,
+    /// without the enclosing block wrapper.
+    pub fn is_inline(&self) -> bool {
+        self.inline
+    }
+
+    /// Returns the blocks parsed from the cell's content.
+    pub fn blocks(&self) -> &[Block<'src>] {
+        &self.blocks
+    }
+
+    /// Returns a mutable iterator over the cell's blocks (used to resolve
+    /// deferred cross-references).
+    fn blocks_mut(&mut self) -> impl Iterator<Item = &mut Block<'src>> {
+        self.blocks.iter_mut()
+    }
 }
 
 /// Parse the value of the `cols` attribute into a list of columns, mirroring

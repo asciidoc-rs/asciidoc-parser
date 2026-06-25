@@ -576,7 +576,7 @@ fn asciidoc_cell_resolves_references_in_nested_blocks() {
         .unwrap();
 
     let blocks = match table.body_rows()[0].cells()[0].content() {
-        TableCellContent::AsciiDoc(blocks) => blocks,
+        TableCellContent::AsciiDoc(cell) => cell.blocks(),
         TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
     };
 
@@ -606,7 +606,7 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
         .unwrap();
 
     let blocks = match table.body_rows()[0].cells()[0].content() {
-        TableCellContent::AsciiDoc(blocks) => blocks,
+        TableCellContent::AsciiDoc(cell) => cell.blocks(),
         TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
     };
 
@@ -635,7 +635,8 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
 /// Collect the rendered text of every block in an AsciiDoc cell.
 fn asciidoc_cell_text(table: &TableBlock<'_>, row: usize, col: usize) -> String {
     match table.body_rows()[row].cells()[col].content() {
-        TableCellContent::AsciiDoc(blocks) => blocks
+        TableCellContent::AsciiDoc(cell) => cell
+            .blocks()
             .iter()
             .filter_map(|block| block.rendered_content())
             .collect::<Vec<_>>()

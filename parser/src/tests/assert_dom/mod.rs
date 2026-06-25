@@ -123,6 +123,54 @@ fn refute_block_contains<'src, B: IsBlock<'src>>(block: &'src B, text: &str) {
     }
 }
 
+/// Asserts that the document's rendered output (its virtual DOM text) contains
+/// the given text. Unlike [`assert_output_contains`], this descends into table
+/// cells, so it can see content nested in an AsciiDoc cell.
+///
+/// # Panics
+///
+/// Panics if the rendered text does not contain `text`.
+#[track_caller]
+pub(crate) fn assert_rendered_contains(doc: &Document, text: &str) {
+    let rendered = rendered_text(doc);
+    assert!(
+        rendered.contains(text),
+        "rendered output should contain {text:?}, but did not:\n\n{rendered}"
+    );
+}
+
+/// Refutes that the document's rendered output (its virtual DOM text) contains
+/// the given text.
+///
+/// # Panics
+///
+/// Panics if the rendered text contains `text`.
+#[track_caller]
+pub(crate) fn refute_rendered_contains(doc: &Document, text: &str) {
+    let rendered = rendered_text(doc);
+    assert!(
+        !rendered.contains(text),
+        "rendered output should not contain {text:?}, but did:\n\n{rendered}"
+    );
+}
+
+/// Collects all text in the document's virtual DOM, in document order.
+fn rendered_text(doc: &Document) -> String {
+    fn collect(node: &virtual_dom::VirtualNode, out: &mut String) {
+        if let Some(text) = &node.text {
+            out.push_str(text);
+            out.push('\n');
+        }
+        for child in &node.children {
+            collect(child, out);
+        }
+    }
+
+    let mut out = String::new();
+    collect(&doc.to_virtual_dom(), &mut out);
+    out
+}
+
 mod css;
 use css::*;
 

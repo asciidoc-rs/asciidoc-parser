@@ -25,7 +25,23 @@ use crate::tests::assert_dom::virtual_dom::VirtualNode;
 pub(crate) fn query_css<'a>(root: &'a VirtualNode, selector: &str) -> Vec<&'a VirtualNode> {
     let selector = selector.trim();
 
+    // A descendant selector can reach the same node through more than one
+    // matching ancestor (e.g. `.tableblock h1` where both the `<table>` and the
+    // `<td>` carry the `tableblock` class). De-duplicate so each node is counted
+    // once, matching a real CSS engine.
+    let mut seen: Vec<*const VirtualNode> = Vec::new();
     query_descendant_or_self(root, selector)
+        .into_iter()
+        .filter(|node| {
+            let ptr = *node as *const VirtualNode;
+            if seen.contains(&ptr) {
+                false
+            } else {
+                seen.push(ptr);
+                true
+            }
+        })
+        .collect()
 }
 
 /// Finds the position of a space that acts as a descendant combinator.

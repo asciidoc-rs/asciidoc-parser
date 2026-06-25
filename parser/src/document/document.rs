@@ -45,6 +45,7 @@ struct InternalDependent<'src> {
     warnings: Vec<Warning<'src>>,
     source_map: SourceMap,
     catalog: Catalog,
+    show_doctitle: bool,
 }
 
 self_cell! {
@@ -114,6 +115,11 @@ impl<'src> Document<'src> {
                 blocks = section_blocks;
             }
 
+            // Whether the document title renders as an `<h1>`. An embedded
+            // document shows its title only when `showtitle` is set (the
+            // default is hidden), so resolve it from the final attribute state.
+            let show_doctitle = parser.resolve_show_title(false);
+
             InternalDependent {
                 header,
                 blocks,
@@ -121,6 +127,7 @@ impl<'src> Document<'src> {
                 warnings,
                 source_map,
                 catalog: parser.take_catalog(),
+                show_doctitle,
             }
         });
 
@@ -133,6 +140,19 @@ impl<'src> Document<'src> {
     /// Return the document header.
     pub fn header(&self) -> &Header<'_> {
         &self.internal.borrow_dependent().header
+    }
+
+    /// Return the document title (the level-0 `= Title`), if there was one.
+    pub fn doctitle(&self) -> Option<&str> {
+        self.header().title()
+    }
+
+    /// Return whether the document title should be displayed (as an `<h1>`).
+    ///
+    /// This reflects the effective `showtitle`/`notitle` attribute state: an
+    /// embedded document shows its title only when `showtitle` is set.
+    pub fn show_doctitle(&self) -> bool {
+        self.internal.borrow_dependent().show_doctitle
     }
 
     /// Return an iterator over any warnings found during parsing.

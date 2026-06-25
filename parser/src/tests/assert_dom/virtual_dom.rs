@@ -341,6 +341,14 @@ impl ToVirtualDom for Document<'_> {
             node = node.with_id(id);
         }
 
+        // The document title renders as an `<h1>` when it is shown (the
+        // effective `showtitle`/`notitle` state).
+        if self.show_doctitle()
+            && let Some(title) = self.doctitle()
+        {
+            node.children.push(VirtualNode::new("h1").with_text(title));
+        }
+
         // Add child blocks, including block titles as separate siblings.
         for block in self.nested_blocks() {
             add_block_with_title(&mut node, block);
@@ -1082,16 +1090,38 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                 }
             }
 
-            // An AsciiDoc-styled cell holds a nested sequence of blocks, which
-            // render into a `<div class="content">` wrapper inside the cell.
-            // The blocks render as they would at the top level of a document
-            // (e.g. paragraphs wrapped in `<div class="paragraph">`), so the
-            // cell reuses `add_block_with_title`.
-            TableCellContent::AsciiDoc(blocks) => {
+            // An AsciiDoc-styled cell holds a nested document, which renders into
+            // a `<div class="content">` wrapper inside the cell. The blocks
+            // render as they would at the top level of a document (e.g.
+            // paragraphs wrapped in `<div class="paragraph">`), so the cell
+            // reuses `add_block_with_title`.
+            TableCellContent::AsciiDoc(cell) => {
                 let mut content = VirtualNode::new("div").with_class("content");
-                for block in blocks {
-                    add_block_with_title(&mut content, block);
+
+                // The nested document's title renders as an `<h1>` when shown.
+                if let Some(title) = cell.title() {
+                    content
+                        .children
+                        .push(VirtualNode::new("h1").with_text(title));
                 }
+
+                if cell.is_inline() {
+                    // An `inline` doctype renders block content as bare inline
+                    // content, without the `<div class="paragraph"><p>` wrapper.
+                    for block in cell.blocks() {
+                        match block.rendered_content() {
+                            Some(rendered) => {
+                                content.children.extend(parse_html_content(rendered));
+                            }
+                            None => add_block_with_title(&mut content, block),
+                        }
+                    }
+                } else {
+                    for block in cell.blocks() {
+                        add_block_with_title(&mut content, block);
+                    }
+                }
+
                 cell_node.children.push(content);
             }
         }
