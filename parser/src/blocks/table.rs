@@ -1056,6 +1056,7 @@ fn build_psv_table<'src>(
     // single-column slots (one per clone).
     let first_line_cells: usize =
         scan_cells(inside.discard_empty_lines().take_line().item, separator)
+            .0
             .iter()
             .map(|c| c.spec.colspan.max(1) * c.spec.repeat.min(MAX_DUPLICATION_FACTOR))
             .sum();
@@ -1068,7 +1069,14 @@ fn build_psv_table<'src>(
 
     let columns = finalize_columns(cols_attr, ncols, autowidth);
 
-    let raw_cells = expand_duplicates(scan_cells(inside, separator));
+    let (raw_cells, recovered_first_cell) = scan_cells(inside, separator);
+    if let Some(source) = recovered_first_cell {
+        warnings.push(Warning {
+            source,
+            warning: WarningType::TableMissingLeadingSeparator,
+        });
+    }
+    let raw_cells = expand_duplicates(raw_cells);
 
     // A table can never have more rows than it has cells, so a row span is
     // clamped to the cell count for the `active_rowspans` bookkeeping below: a
@@ -2087,7 +2095,10 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// inspected, so `\\|` is also read as an escaped separator — matching
 /// Asciidoctor, whose check is likewise the single-character
 /// `pre_match.end_with? '\'`.
-fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
+fn scan_cells<'src>(
+    region: Span<'src>,
+    separator: &str,
+) -> (Vec<RawCell<'src>>, Option<Span<'src>>) {
     let data = region.data();
     let bytes = data.as_bytes();
     let len = bytes.len();
@@ -2099,6 +2110,9 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
     // The content start and specifier of the cell currently being accumulated.
     let mut content_start: Option<usize> = None;
     let mut cur_spec = CellSpec::default();
+    // The span of a cell recovered from content that precedes the first
+    // separator (see below); `Some` drives a missing-leading-separator warning.
+    let mut recovered: Option<Span<'src>> = None;
     let mut i = 0;
 
     while i < len {
@@ -2147,13 +2161,30 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
                 None => (i, CellSpec::default()),
             };
 
-            if let Some(start) = content_start {
-                // The separating whitespace, included in the slice, is trimmed
-                // later in `TableCell::parse`.
-                cells.push(RawCell {
-                    spec: cur_spec,
-                    content: region.slice(start..content_end),
-                });
+            match content_start {
+                Some(start) => {
+                    // The separating whitespace, included in the slice, is
+                    // trimmed later in `TableCell::parse`.
+                    cells.push(RawCell {
+                        spec: cur_spec,
+                        content: region.slice(start..content_end),
+                    });
+                }
+                None => {
+                    // No cell has been opened yet, so this is the table's first
+                    // separator. Non-blank content in front of it means the first
+                    // cell is missing its leading separator; recover that content
+                    // as the first cell (with the default specifier) and record
+                    // its span so the caller can warn, matching Asciidoctor.
+                    let leading = region.slice(0..content_end);
+                    if !leading.data().trim().is_empty() {
+                        cells.push(RawCell {
+                            spec: CellSpec::default(),
+                            content: leading,
+                        });
+                        recovered = Some(leading);
+                    }
+                }
             }
             cur_spec = next_spec;
             content_start = Some(i + sep_len);
@@ -2171,7 +2202,7 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
         });
     }
 
-    cells
+    (cells, recovered)
 }
 
 /// Parse a cell specifier, returning its [span and overrides](CellSpec), or

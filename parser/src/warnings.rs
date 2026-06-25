@@ -85,6 +85,9 @@ pub enum WarningType {
 
     #[error("Unclosed quote in CSV data; setting cell to empty")]
     TableCsvDataHasUnclosedQuote,
+
+    #[error("Table is missing a leading separator; recovering automatically")]
+    TableMissingLeadingSeparator,
 }
 
 impl std::fmt::Debug for WarningType {
@@ -165,6 +168,10 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::TableCsvDataHasUnclosedQuote => {
                 write!(f, "WarningType::TableCsvDataHasUnclosedQuote")
+            }
+
+            WarningType::TableMissingLeadingSeparator => {
+                write!(f, "WarningType::TableMissingLeadingSeparator")
             }
         }
     }
@@ -430,6 +437,13 @@ mod tests {
                 let warning = WarningType::TableCsvDataHasUnclosedQuote;
                 let debug_output = format!("{:?}", warning);
                 assert_eq!(debug_output, "WarningType::TableCsvDataHasUnclosedQuote");
+            }
+
+            #[test]
+            fn table_missing_leading_separator() {
+                let warning = WarningType::TableMissingLeadingSeparator;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::TableMissingLeadingSeparator");
             }
         }
     }

@@ -197,6 +197,30 @@ mod psv {
     }
 
     #[test]
+    fn should_auto_recover_with_warning_if_missing_leading_separator_on_first_cell() {
+        let doc = Parser::default().parse("|===\nA | here| a | there\n| x\n| y\n| z\n| end\n|===");
+
+        // The content before the first separator (`A`) is recovered as the first
+        // cell, so the first row has four cells and the table four columns.
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > tbody > tr", 2);
+        assert_css(&doc, "table > tbody > tr > td", 8);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[1]/p[text()=\"A\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[2]/p[text()=\"here\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[3]/p[text()=\"a\"]", 1);
+        assert_xpath(&doc, "/table/tbody/tr[1]/td[4]/p[text()=\"there\"]", 1);
+
+        // The recovery logs an error pointing at the offending line (line 2).
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::TableMissingLeadingSeparator
+        );
+        assert_eq!(warnings[0].source.line(), 2);
+    }
+
+    #[test]
     fn performs_normal_substitutions_on_cell_content() {
         let doc = Parser::default()
             .parse(":show_title: Cool new show\n|===\n|{show_title} |Coming soon...\n|===");
