@@ -564,9 +564,47 @@ fn matches_single_predicate(node: &VirtualNode, predicate: &str) -> bool {
         }
     }
 
+    // CSS-style attribute substring selector: [attr*="value"].
+    if let Some((attr_name, value_part)) = predicate.split_once("*=") {
+        let attr_name = attr_name.trim();
+        let value = unquote_attr_value(value_part);
+        return node
+            .attributes
+            .get(attr_name)
+            .is_some_and(|v| v.contains(&value));
+    }
+
+    // CSS-style attribute value selector without the `@` prefix:
+    // [attr="value"]. (The `@`-prefixed form is handled above.)
+    if let Some((attr_name, value_part)) = predicate.split_once('=') {
+        let attr_name = attr_name.trim();
+        let value = unquote_attr_value(value_part);
+        match attr_name {
+            "class" => {
+                return value
+                    .split_whitespace()
+                    .all(|c| node.classes.iter().any(|nc| nc == c));
+            }
+            "id" => return node.id.as_deref() == Some(value.as_str()),
+            _ => return node.attributes.get(attr_name).map(|v| v.as_str()) == Some(value.as_str()),
+        }
+    }
+
     // Numeric predicate [N]: Would need to be handled by caller with context.
     // For now, just return `true` to pass through.
     true
+}
+
+/// Strips surrounding single or double quotes (and whitespace) from a CSS
+/// attribute selector value.
+fn unquote_attr_value(value_part: &str) -> String {
+    let trimmed = value_part.trim();
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .or_else(|| trimmed.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+        .unwrap_or(trimmed);
+    unescape_css_string(unquoted)
 }
 
 /// Unescapes CSS string literals.

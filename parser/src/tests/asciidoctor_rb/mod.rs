@@ -1,3 +1,25 @@
+//! Behavioral tests ported 1:1 from Ruby Asciidoctor's `test/*_test.rb` suites.
+//!
+//! Porting conventions (see the existing modules for worked examples):
+//!
+//! * One Rust module per Ruby file (`<suite>_test.rs`); nested Ruby `context`
+//!   blocks become nested `mod`s, and each Ruby `test 'name'` becomes a
+//!   `#[test] fn name()`.
+//! * Ruby `assert_xpath` / `assert_css` / `assert_output_contains` /
+//!   `refute_output_contains` map to the same-named helpers in
+//!   [`crate::tests::assert_dom`], run against `doc.to_virtual_dom()`. Use a
+//!   full-AST `assert_eq!(doc, Document { .. })` where the Ruby test inspects
+//!   parser state (warnings, source spans, catalog) rather than HTML.
+//! * DocBook and other non-HTML backends are out of scope: such tests are
+//!   omitted with a `// Backend-specific test omitted: DocBook.` note. Compat
+//!   mode is likewise disregarded.
+//! * Tests blocked on an unimplemented (but planned) feature are kept as
+//!   `#[ignore]`d stubs whose body preserves the Ruby assertions in
+//!   `todo!("..")` calls, tagged with a tracking-issue `TODO`. Features that
+//!   are explicitly out of scope are omitted with a one-line `// NOTE:`.
+//! * Expected values track the crate's *actual* output, not the Ruby HTML
+//!   string, when the two differ.
+
 // The tests in this tree are adapted from the Ruby implementation of
 // Asciidoctor, which comes with the following license:
 
@@ -27,3 +49,4 @@
 mod lists_test;
 mod paragraphs_test;
 mod substitutions_test;
+mod tables_test;

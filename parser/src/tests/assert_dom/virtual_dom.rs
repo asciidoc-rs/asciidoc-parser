@@ -11,9 +11,10 @@ use regex::Regex;
 use crate::{
     Document, HasSpan,
     blocks::{
-        Block, Break, CompoundDelimitedBlock, IsBlock, ListBlock, ListItem, ListItemMarker,
-        ListType, MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock,
-        SimpleBlockStyle, TableBlock, TableCellContent, TableRow,
+        Block, Break, ColumnStyle, CompoundDelimitedBlock, Frame, Grid, HorizontalAlignment,
+        IsBlock, ListBlock, ListItem, ListItemMarker, ListType, MediaBlock, Preamble,
+        RawDelimitedBlock, SectionBlock, SimpleBlock, SimpleBlockStyle, Stripes, TableBlock,
+        TableCellContent, TableColumn, TableRow, VerticalAlignment,
     },
 };
 
@@ -22,11 +23,53 @@ use crate::{
 /// This simulates what a browser would do when parsing HTML and accessing
 /// text content via JavaScript's `textContent` or XPath's `text()`.
 fn decode_html_entities(s: &str) -> String {
+    let s = decode_numeric_entities(s);
     s.replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&amp;", "&")
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
+}
+
+/// Decodes numeric character references (`&#8230;` and `&#x2026;`) to their
+/// character equivalents, mirroring what a browser does when reading `text()`.
+/// Asciidoctor emits typographic replacements (ellipsis, dashes, zero-width
+/// spaces) as numeric references, so the test DOM must decode them to compare
+/// against the expected characters.
+fn decode_numeric_entities(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut rest = s;
+
+    while let Some(amp) = rest.find("&#") {
+        result.push_str(&rest[..amp]);
+        let after = &rest[amp + 2..];
+
+        let (digits, radix) = match after.strip_prefix(['x', 'X']) {
+            Some(hex) => (hex, 16),
+            None => (after, 10),
+        };
+
+        let end = digits.find(';');
+        let parsed = end
+            .map(|e| &digits[..e])
+            .and_then(|d| u32::from_str_radix(d, radix).ok())
+            .and_then(char::from_u32);
+
+        match (end, parsed) {
+            (Some(e), Some(ch)) => {
+                result.push(ch);
+                rest = &digits[e + 1..];
+            }
+            _ => {
+                // Not a well-formed numeric reference; keep the literal `&#`.
+                result.push_str("&#");
+                rest = after;
+            }
+        }
+    }
+
+    result.push_str(rest);
+    result
 }
 
 /// Parses simple HTML inline markup from text and returns a mix of text and
@@ -479,6 +522,16 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
         list_element = list_element.with_class(style);
     }
 
+    // For ordered lists whose explicit numbering does not start at 1, emit the
+    // implicit `start` attribute (matching Asciidoctor).
+    if list.type_() == ListType::Ordered
+        && let Some(Block::ListItem(first)) = list.nested_blocks().next()
+        && let Some(ordinal) = first.list_item_marker().ordinal_value()
+        && ordinal != 1
+    {
+        list_element = list_element.with_attribute("start", ordinal.to_string());
+    }
+
     // Add all named attributes from the attrlist to the list element.
     if let Some(attrlist) = list.attrlist() {
         for attr in attrlist.attributes() {
@@ -823,8 +876,38 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
 }
 
 fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
-    let mut node =
-        VirtualNode::new("table").with_classes(["tableblock", "frame-all", "grid-all", "stretch"]);
+    // The table-level classes mirror Asciidoctor's HTML backend: always
+    // `tableblock`, then the frame and grid classes, then a width class.
+    let mut classes = vec![
+        "tableblock".to_string(),
+        frame_class(table.frame()).to_string(),
+        grid_class(table.grid()).to_string(),
+    ];
+
+    // A table whose columns are sized to their content renders `fit-content`; a
+    // full-width (default) table renders `stretch`; a table with an explicit
+    // width renders neither (the width travels in the `width` attribute).
+    let autowidth = table.columns().iter().any(TableColumn::is_autowidth);
+    if autowidth {
+        classes.push("fit-content".to_string());
+    } else if table.width().is_none() {
+        classes.push("stretch".to_string());
+    }
+
+    if let Some(stripes) = stripes_class(table.stripes()) {
+        classes.push(stripes.to_string());
+    }
+
+    // The `float` attribute renders as a bare direction class (e.g. `left`).
+    if let Some(float) = table
+        .attrlist()
+        .and_then(|a| a.named_attribute("float"))
+        .map(|a| a.value())
+    {
+        classes.push(float.to_string());
+    }
+
+    let mut node = VirtualNode::new("table").with_classes(classes);
 
     if let Some(id) = table.id() {
         node = node.with_id(id);
@@ -832,6 +915,12 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
 
     for role in table.roles() {
         node = node.with_class(role);
+    }
+
+    // An explicit table width is carried in the `width` attribute as a
+    // percentage, matching `table[width="50%"]`-style assertions.
+    if let Some(width) = table.width() {
+        node = node.with_attribute("width", format!("{width}%"));
     }
 
     if let Some(title) = table.title() {
@@ -851,57 +940,129 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
     }
 
     let mut colgroup = VirtualNode::new("colgroup");
-    for _ in table.columns() {
-        colgroup.children.push(VirtualNode::new("col"));
+    for width in column_pcwidths(table.columns()) {
+        let mut col = VirtualNode::new("col");
+
+        // Autowidth columns are sized to their content and carry no width
+        // attribute; proportional columns expose their computed percentage.
+        if let Some(width) = width {
+            col = col.with_attribute("width", format!("{width}%"));
+        }
+
+        colgroup.children.push(col);
     }
     node.children.push(colgroup);
 
     if let Some(header) = table.header_row() {
         let mut thead = VirtualNode::new("thead");
-        thead.children.push(table_row_to_node(header, "th", false));
+        thead.children.push(table_row_to_node(header, true, false));
         node.children.push(thead);
     }
 
     if !table.body_rows().is_empty() {
         let mut tbody = VirtualNode::new("tbody");
         for row in table.body_rows() {
-            tbody.children.push(table_row_to_node(row, "td", true));
+            tbody.children.push(table_row_to_node(row, false, true));
         }
         node.children.push(tbody);
+    }
+
+    // The footer renders after the body, so the section order is
+    // thead, tbody, tfoot.
+    if let Some(footer) = table.footer_row() {
+        let mut tfoot = VirtualNode::new("tfoot");
+        tfoot.children.push(table_row_to_node(footer, false, true));
+        node.children.push(tfoot);
     }
 
     node
 }
 
-fn table_row_to_node(row: &TableRow<'_>, cell_tag: &str, wrap_in_paragraph: bool) -> VirtualNode {
+/// Renders one table row. `header_row` marks the row as the table's header (its
+/// cells become `<th>` and their content is not wrapped in a paragraph);
+/// otherwise cells are `<td>` and body content is wrapped in a
+/// `<p class="tableblock">` (`wrap_in_paragraph`).
+fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bool) -> VirtualNode {
     let mut tr = VirtualNode::new("tr");
 
     for cell in row.cells() {
-        let mut cell_node =
-            VirtualNode::new(cell_tag).with_classes(["tableblock", "halign-left", "valign-top"]);
+        // A cell carrying the header style renders as a `<th>` even outside the
+        // header row; otherwise header rows use `<th>` and body/footer rows use
+        // `<td>`.
+        let cell_tag = if header_row || cell.style() == ColumnStyle::Header {
+            "th"
+        } else {
+            "td"
+        };
+
+        let mut cell_node = VirtualNode::new(cell_tag).with_classes([
+            "tableblock".to_string(),
+            halign_class(cell.h_align()).to_string(),
+            valign_class(cell.v_align()).to_string(),
+        ]);
+
+        if cell.colspan() > 1 {
+            cell_node = cell_node.with_attribute("colspan", cell.colspan().to_string());
+        }
+        if cell.rowspan() > 1 {
+            cell_node = cell_node.with_attribute("rowspan", cell.rowspan().to_string());
+        }
 
         match cell.content() {
             TableCellContent::Simple(content) => {
                 let rendered = content.rendered().to_string();
 
-                if wrap_in_paragraph {
-                    cell_node.children.push(
-                        VirtualNode::new("p")
-                            .with_class("tableblock")
-                            .with_text(rendered),
-                    );
-                } else {
-                    cell_node = cell_node.with_text(rendered);
+                match cell.style() {
+                    // A literal cell renders its content verbatim inside a
+                    // `<div class="literal"><pre>…</pre></div>`.
+                    ColumnStyle::Literal => {
+                        cell_node.children.push(
+                            VirtualNode::new("div").with_class("literal").with_child(
+                                VirtualNode::new("pre").with_html_content(rendered),
+                            ),
+                        );
+                    }
+
+                    _ if !wrap_in_paragraph => {
+                        // Header-row cells place their content directly in the
+                        // cell, wrapped only by any style element.
+                        match style_wrapper(cell.style()) {
+                            Some(tag) => cell_node.children.push(
+                                VirtualNode::new(tag).with_html_content(rendered),
+                            ),
+                            None => cell_node = cell_node.with_html_content(rendered),
+                        }
+                    }
+
+                    // An empty body cell renders as an empty `<td>` with no
+                    // paragraph.
+                    _ if rendered.is_empty() => {}
+
+                    style => {
+                        // Body and footer cells wrap their content in a
+                        // `<p class="tableblock">`, with an inner style element
+                        // (`<strong>`, `<em>`, `<code>`) when the cell carries a
+                        // text style.
+                        let p = VirtualNode::new("p").with_class("tableblock");
+                        let p = match style_wrapper(style) {
+                            Some(tag) => p.with_child(
+                                VirtualNode::new(tag).with_html_content(rendered),
+                            ),
+                            None => p.with_html_content(rendered),
+                        };
+                        cell_node.children.push(p);
+                    }
                 }
             }
 
             // An AsciiDoc-styled cell holds a nested sequence of blocks, which
-            // render directly into the cell rather than into a single
-            // paragraph.
+            // render into a `<div class="content">` wrapper inside the cell.
             TableCellContent::AsciiDoc(blocks) => {
+                let mut content = VirtualNode::new("div").with_class("content");
                 for block in blocks {
-                    cell_node.children.push(block.to_virtual_dom());
+                    content.children.push(block.to_virtual_dom());
                 }
+                cell_node.children.push(content);
             }
         }
 
@@ -909,6 +1070,124 @@ fn table_row_to_node(row: &TableRow<'_>, cell_tag: &str, wrap_in_paragraph: bool
     }
 
     tr
+}
+
+/// Computes the per-column percentage width that Asciidoctor's HTML backend
+/// renders on each `<col>`. Returns `None` for an autowidth column (which
+/// carries no width attribute).
+///
+/// This mirrors `Table#assign_column_widths` in Asciidoctor: percentages are
+/// truncated to four decimal places and the rounding balance is donated to the
+/// final column so the widths sum to exactly 100.
+fn column_pcwidths(columns: &[TableColumn]) -> Vec<Option<String>> {
+    // When any column is autowidth, the proportional columns are treated as
+    // literal percentages and the autowidth columns get no width.
+    if columns.iter().any(TableColumn::is_autowidth) {
+        return columns
+            .iter()
+            .map(|c| {
+                if c.is_autowidth() {
+                    None
+                } else {
+                    Some(format_pcwidth(c.width() as f64))
+                }
+            })
+            .collect();
+    }
+
+    let base: usize = columns.iter().map(TableColumn::width).sum();
+    if base == 0 {
+        return columns.iter().map(|_| None).collect();
+    }
+
+    let truncated: Vec<f64> = columns
+        .iter()
+        .map(|c| truncate4(c.width() as f64 * 100.0 / base as f64))
+        .collect();
+
+    let total: f64 = truncated.iter().sum();
+    let mut widths: Vec<Option<String>> =
+        truncated.iter().map(|w| Some(format_pcwidth(*w))).collect();
+
+    // Donate the rounding balance to the final column.
+    if (total - 100.0).abs() > 1e-9 {
+        let last = truncated.len() - 1;
+        let donated = round4(100.0 - (total - truncated[last]));
+        widths[last] = Some(format_pcwidth(donated));
+    }
+
+    widths
+}
+
+fn truncate4(x: f64) -> f64 {
+    (x * 10000.0).trunc() / 10000.0
+}
+
+fn round4(x: f64) -> f64 {
+    (x * 10000.0).round() / 10000.0
+}
+
+/// Formats a percentage width the way Asciidoctor serializes it: whole numbers
+/// have no decimal part, and fractional values keep up to four significant
+/// decimal places with trailing zeros trimmed (e.g. `50`, `17.647`, `33.3334`).
+fn format_pcwidth(x: f64) -> String {
+    let s = format!("{x:.4}");
+    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+    trimmed.to_string()
+}
+
+/// The inline element a text-styled cell wraps its content in, if any.
+fn style_wrapper(style: ColumnStyle) -> Option<&'static str> {
+    match style {
+        ColumnStyle::Strong => Some("strong"),
+        ColumnStyle::Emphasis => Some("em"),
+        ColumnStyle::Monospace => Some("code"),
+        _ => None,
+    }
+}
+
+fn frame_class(frame: Frame) -> &'static str {
+    match frame {
+        Frame::All => "frame-all",
+        Frame::Ends => "frame-ends",
+        Frame::Sides => "frame-sides",
+        Frame::None => "frame-none",
+    }
+}
+
+fn grid_class(grid: Grid) -> &'static str {
+    match grid {
+        Grid::All => "grid-all",
+        Grid::Rows => "grid-rows",
+        Grid::Cols => "grid-cols",
+        Grid::None => "grid-none",
+    }
+}
+
+fn stripes_class(stripes: Stripes) -> Option<&'static str> {
+    match stripes {
+        Stripes::None => None,
+        Stripes::Even => Some("stripes-even"),
+        Stripes::Odd => Some("stripes-odd"),
+        Stripes::All => Some("stripes-all"),
+        Stripes::Hover => Some("stripes-hover"),
+    }
+}
+
+fn halign_class(align: HorizontalAlignment) -> &'static str {
+    match align {
+        HorizontalAlignment::Left => "halign-left",
+        HorizontalAlignment::Center => "halign-center",
+        HorizontalAlignment::Right => "halign-right",
+    }
+}
+
+fn valign_class(align: VerticalAlignment) -> &'static str {
+    match align {
+        VerticalAlignment::Top => "valign-top",
+        VerticalAlignment::Middle => "valign-middle",
+        VerticalAlignment::Bottom => "valign-bottom",
+    }
 }
 
 fn preamble_to_node<'a>(preamble: &'a Preamble<'a>) -> VirtualNode {
