@@ -925,5 +925,27 @@ mod tests {
                 InterpretedValue::Unset
             );
         }
+
+        #[test]
+        fn defines_no_derived_attr_when_doctype_is_not_a_value() {
+            let mut parser = Parser::default();
+
+            // The default article derived attribute starts out defined.
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Value(String::new())
+            );
+
+            // With `doctype` unset (no `Value`), a refresh clears any existing
+            // derived attribute and defines none.
+            parser.attribute_values.remove("doctype");
+            parser.refresh_doctype_derived_attr();
+
+            assert_eq!(parser.attribute_value("doctype"), InterpretedValue::Unset);
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Unset
+            );
+        }
     }
 }

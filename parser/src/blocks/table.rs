@@ -2688,3 +2688,51 @@ fn psv_line_starts_cell(line: &str, separator: &str) -> bool {
 fn line_has_unclosed_quote(line: &str) -> bool {
     line.bytes().filter(|&b| b == b'"').count() % 2 == 1
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{AsciiDocCell, OwnedCell, OwnedCellInner};
+    use crate::parser::{
+        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+    };
+
+    /// A resolver that resolves nothing; the owned-cell resolution path under
+    /// test carries no references, so it is never actually consulted.
+    struct NoopResolver;
+
+    impl ReferenceResolver for NoopResolver {
+        fn resolve(&self, _context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
+            None
+        }
+    }
+
+    /// When an owned (include-expanded) AsciiDoc cell is shared behind more
+    /// than one `Arc` reference, `resolve_references` cannot obtain a
+    /// mutable borrow of the store and leaves it untouched rather than
+    /// panicking. Production code resolves while the cell is its sole
+    /// owner, so this defensive branch is exercised here by deliberately
+    /// holding a second reference.
+    #[test]
+    fn resolve_references_skips_shared_owned_cell() {
+        let mut cell = AsciiDocCell::Owned(Arc::new(OwnedCell::new(String::new(), |_source| {
+            OwnedCellInner {
+                title: None,
+                inline: false,
+                blocks: vec![],
+            }
+        })));
+
+        // Hold a second reference to the same store so `Arc::get_mut` fails.
+        let shared = cell.clone();
+
+        let mut warnings = vec![];
+        cell.resolve_references(&NoopResolver, &HtmlSubstitutionRenderer {}, &mut warnings);
+
+        // Resolution was skipped silently: no warnings, and the two references
+        // still describe the same (unmodified) cell.
+        assert!(warnings.is_empty());
+        assert_eq!(cell, shared);
+    }
+}
