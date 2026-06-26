@@ -44,37 +44,39 @@ pub(crate) fn query_css<'a>(root: &'a VirtualNode, selector: &str) -> Vec<&'a Vi
         .collect()
 }
 
-/// Finds the position of a space that acts as a descendant combinator.
-/// Returns `None` if there are no descendant combinator spaces.
+/// Finds the position of the first space that acts as a descendant combinator,
+/// scanning the whole pattern. Returns `None` if there are none.
 ///
-/// This distinguishes between:
+/// A space is a descendant combinator only when it is not merely whitespace
+/// padding a `>` or `+` combinator. This distinguishes between:
 /// - `div p` - space is a descendant combinator
-/// - `div > p` - space is just whitespace around `>`
-/// - `div + p` - space is just whitespace around `+`
+/// - `div > p` - spaces are just whitespace around `>`
+/// - `div + p` - spaces are just whitespace around `+`
+/// - `a > b c` - the space before `c` is a descendant combinator even though it
+///   follows a `>` combinator earlier in the pattern
 fn find_descendant_combinator_space(pattern: &str) -> Option<usize> {
-    let gt_pos = pattern.find('>');
-    let plus_pos = pattern.find('+');
-
-    // Find first space.
     for (i, ch) in pattern.char_indices() {
-        if ch == ' ' {
-            // Check if this space is before any `>` or `+` combinator.
-            let before_gt = gt_pos.is_none_or(|gt| i < gt);
-            let before_plus = plus_pos.is_none_or(|plus| i < plus);
-
-            if before_gt && before_plus {
-                // This space comes before any other combinators.
-                // Check if the next non-whitespace character is a combinator.
-                let rest = pattern[i..].trim_start();
-                if rest.starts_with('>') || rest.starts_with('+') {
-                    // This is whitespace before a combinator, not a descendant combinator.
-                    continue;
-                }
-
-                // This is a descendant combinator.
-                return Some(i);
-            }
+        if ch != ' ' {
+            continue;
         }
+
+        // Whitespace immediately before a `>`/`+` combinator is not a descendant
+        // combinator (e.g. the space in `div >`).
+        let rest = pattern[i..].trim_start();
+        if rest.starts_with('>') || rest.starts_with('+') {
+            continue;
+        }
+
+        // Whitespace immediately after a `>`/`+` combinator (or leading the
+        // pattern) is not a descendant combinator either (e.g. the space in
+        // `div > p`).
+        let prev = pattern[..i].trim_end();
+        if prev.is_empty() || prev.ends_with('>') || prev.ends_with('+') {
+            continue;
+        }
+
+        // A simple selector on both sides: this is a descendant combinator.
+        return Some(i);
     }
 
     None
@@ -223,6 +225,32 @@ fn query_with_direct_child_constraint<'a>(
     // Find which combinator appears first to process them in order.
     let plus_pos = pattern.find('+');
     let gt_pos = pattern.find('>');
+    let space_pos = find_descendant_combinator_space(pattern);
+
+    // Process a descendant combinator first if it is the leftmost combinator
+    // (e.g. the ` ` in `td .paragraph`, reached after stripping the preceding
+    // `>` steps of `table > tbody > tr > td .paragraph`). The constrained child
+    // matches a direct child; the rest is an unconstrained descendant search.
+    if let Some(space) = space_pos
+        && gt_pos.is_none_or(|gt| space < gt)
+        && plus_pos.is_none_or(|plus| space < plus)
+    {
+        let (first, rest) = pattern.split_at(space);
+        let first = first.trim();
+        let rest = rest.trim();
+
+        let mut results = Vec::new();
+        for child in &node.children {
+            if matches_selector_with_context(child, first, Some(node)) {
+                // The descendant combinator excludes the matched child itself, so
+                // search its subtrees rather than the child node.
+                for grandchild in &child.children {
+                    results.extend(query_descendant_or_self(grandchild, rest));
+                }
+            }
+        }
+        return results;
+    }
 
     // Process `>` first if it appears before `+`.
     if let Some(gt) = gt_pos
@@ -751,6 +779,28 @@ mod tests {
             1,
             "Should find 1 .olist that is adjacent sibling of p inside li"
         );
+    }
+
+    #[test]
+    fn query_child_chain_then_descendant() {
+        // A chain of `>` child combinators followed by a trailing descendant
+        // combinator (`a > b > c d`). The descendant step is reached only after
+        // the preceding `>` steps are stripped, so it must be handled inside the
+        // direct-child traversal, not just at the top level.
+        let doc = Parser::default().parse("[cols=\"1a\"]\n|===\n|AsciiDoc content\n|===");
+        let vdom = doc.to_virtual_dom();
+
+        // The paragraph sits at td > div.content > div.paragraph, i.e. it is a
+        // descendant (not a direct child) of the `td`.
+        assert_eq!(query_css(&vdom, "table > tbody > tr > td").len(), 1);
+        assert_eq!(
+            query_css(&vdom, "table > tbody > tr > td .paragraph").len(),
+            1
+        );
+
+        // A descendant step that itself precedes a further child combinator
+        // (`td .content > .paragraph`) is also handled.
+        assert_eq!(query_css(&vdom, "td .content > .paragraph").len(), 1);
     }
 
     #[test]

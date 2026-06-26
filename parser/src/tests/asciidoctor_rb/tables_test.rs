@@ -1408,9 +1408,8 @@ mod psv {
     // Attribute/option inheritance into the nested AsciiDoc-cell document is
     // implemented; the following remain unported for narrower reasons. The
     // `to_dir` test needs the nested cell exposed as an introspectable document
-    // object carrying inherited options. The `toc` tests need TOC rendering (a
-    // separate unimplemented feature); the doctitle test is rendered-output
-    // based.
+    // object carrying inherited options; the `toc` tests need TOC rendering (a
+    // separate unimplemented feature).
 
     #[test]
     #[ignore]
@@ -1444,10 +1443,19 @@ mod psv {
     fn should_be_able_to_enable_toc_in_both_outer_document_and_in_an_asciidoc_table_cell() {}
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): a document in an AsciiDoc table cell must not see the
-    // parent's doctitle.
-    fn document_in_an_asciidoc_table_cell_should_not_see_doctitle_of_parent() {}
+    fn document_in_an_asciidoc_table_cell_should_not_see_doctitle_of_parent() {
+        let doc = Parser::default()
+            .parse("= Document Title\n\n[cols=\"1a\"]\n|===\n|AsciiDoc content\n|===");
+
+        assert_css(&doc, "table", 1);
+        assert_css(&doc, "table > tbody > tr > td", 1);
+
+        // The cell is its own (nested) document and does not inherit the parent's
+        // doctitle, so its lone paragraph is not promoted into a preamble: the
+        // cell renders a bare `.paragraph`, never a `#preamble`.
+        assert_css(&doc, "table > tbody > tr > td #preamble", 0);
+        assert_css(&doc, "table > tbody > tr > td .paragraph", 1);
+    }
 
     #[test]
     #[ignore]
