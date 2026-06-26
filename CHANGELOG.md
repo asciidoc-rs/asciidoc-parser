@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.15.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.15.1...v0.15.2)
+_26 June 2026_
+
+### Added
+
+* Add support for tables ([#508](https://github.com/asciidoc-rs/asciidoc-parser/pull/508))
+
+### Fixed
+
+* Only honor attrlist shorthand in the first attribute position ([#524](https://github.com/asciidoc-rs/asciidoc-parser/pull/524))
+
+### Updated dependencies
+
+* Update codspeed-criterion-compat requirement in /parser ([#538](https://github.com/asciidoc-rs/asciidoc-parser/pull/538))
+
 ## [0.15.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.15.0...v0.15.1)
 _20 June 2026_
 
