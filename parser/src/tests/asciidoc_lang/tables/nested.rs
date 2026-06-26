@@ -164,6 +164,13 @@ non_normative!(
     r#"
 NOTE: Although nested tables are not technically valid in DocBook 5.0, the DocBook toolchain processes them anyway.
 
+"#
+);
+
+#[test]
+fn nested_table_example() {
+    verifies!(
+        r#"
 The following example contains a nested table in the last cell.
 Notice the nested table has its own format, independent of that of the outer table:
 
@@ -175,6 +182,47 @@ include::example$table.adoc[tag=nested]
 .Result: A nested table
 include::example$table.adoc[tag=nested]
 
+"#
+    );
+
+    // Expansion of `example$table.adoc[tag=nested]`, which is identical to
+    // `NESTED_EXAMPLE`: a two-column outer table whose AsciiDoc-styled (`a`) last
+    // cell carries a nested table.
+    let outer = parse_table(NESTED_EXAMPLE);
+    assert_eq!(outer.columns().len(), 2);
+    assert_eq!(outer.body_rows().len(), 2);
+
+    let last_cell = &outer.body_rows()[1].cells()[1];
+    assert_eq!(last_cell.style(), ColumnStyle::AsciiDoc);
+
+    // The nested table renders with its own format, independent of the outer
+    // table: its own column spec produces a two-cell implicit header row
+    // (`Col1`/`Col2`) followed by one body row (`C11`/`C12`).
+    let inner = nested_table(last_cell);
+    assert_eq!(inner.columns().len(), 2);
+    assert_eq!(
+        inner
+            .header_row()
+            .unwrap()
+            .cells()
+            .iter()
+            .map(simple_text)
+            .collect::<Vec<_>>(),
+        vec!["Col1", "Col2"]
+    );
+    assert_eq!(inner.body_rows().len(), 1);
+    assert_eq!(
+        inner.body_rows()[0]
+            .cells()
+            .iter()
+            .map(simple_text)
+            .collect::<Vec<_>>(),
+        vec!["C11", "C12"]
+    );
+}
+
+non_normative!(
+    r#"
 We recommend using nested tables sparingly.
 There's usually a better way to present the information.
 "#

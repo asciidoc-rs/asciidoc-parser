@@ -194,9 +194,22 @@ You'll notice in the above result, that the processor automatically added _Table
         1,
     );
 
-    non_normative!(
+    verifies!(
         r#"
 This title label can be xref:customize-title-label.adoc[customized] or xref:turn-off-title-label.adoc[deactivated].
 "#
+    );
+
+    // The two cross-references render as links to the sibling pages that cover
+    // customizing and deactivating the title label.
+    let see_also = Parser::default().parse(
+        "This title label can be xref:customize-title-label.adoc[customized] or xref:turn-off-title-label.adoc[deactivated].",
+    );
+    let crate::blocks::Block::Simple(para) = &see_also.nested_blocks().next().unwrap() else {
+        panic!("expected a paragraph");
+    };
+    assert_eq!(
+        para.content().rendered(),
+        "This title label can be <a href=\"#customize-title-label.adoc\">customized</a> or <a href=\"#turn-off-title-label.adoc\">deactivated</a>."
     );
 }

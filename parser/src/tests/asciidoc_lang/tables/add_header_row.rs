@@ -162,7 +162,7 @@ The `options` attribute is represented by the percent sign (`%`) when it's set u
     let table = parse_table("[%header]\n|===\n|Column 1 |Column 2\n|Cell 1 |Cell 2\n|===");
     assert!(table.header_row().is_some());
 
-    non_normative!(
+    verifies!(
         r#"
 In <<ex-short>>, `header` is assigned to using the shorthand syntax for `options`.
 
@@ -182,6 +182,14 @@ In <<ex-short>>, `header` is assigned to using the shorthand syntax for `options
 ----
 "#
     );
+
+    // The `ex-short` example assigns `header` using the `%` shorthand syntax, so
+    // the first row is promoted to the header. (The callout `<.>` on the
+    // attribute line is doc-authoring markup, not part of the table source.)
+    let ex_short = parse_table(
+        "[%header,cols=\"2,2,1\"]\n|===\n|Column 1, header row\n|Column 2, header row\n|Column 3, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n|===",
+    );
+    assert!(ex_short.header_row().is_some());
 
     verifies!(
         r#"
@@ -204,7 +212,7 @@ In <<ex-short>>, `header` is assigned to using the shorthand syntax for `options
     );
     assert!(after.header_row().is_none());
 
-    non_normative!(
+    verifies!(
         r#"
 The table from <<ex-short>> is displayed below.
 
@@ -220,16 +228,42 @@ The table from <<ex-short>> is displayed below.
 |Cell in column 3, row 2
 |===
 
-In <<ex-formal>>, the `options` attribute is set and assigned the `header` value using the formal syntax.
 "#
+    );
+
+    // The rendered result of <<ex-short>>: the first row renders as the header.
+    let ex_short_result = parse_table(
+        "[%header,cols=\"2,2,1\"]\n|===\n|Column 1, header row\n|Column 2, header row\n|Column 3, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n|===",
+    );
+    assert_eq!(
+        header_texts(&ex_short_result),
+        vec![
+            "Column 1, header row",
+            "Column 2, header row",
+            "Column 3, header row"
+        ]
     );
 
     verifies!(
         r#"
+In <<ex-formal>>, the `options` attribute is set and assigned the `header` value using the formal syntax.
 The `options` attribute accepts a comma-separated list of values.
+
+.Table with header assigned to the options attribute
+[source#ex-formal]
+----
+include::example$row.adoc[tag=opt-h]
+----
 
 "#
     );
+
+    // The `ex-formal` example (`opt-h` from row.adoc) sets the `options`
+    // attribute to `header` using the formal syntax, promoting the first row.
+    let ex_formal = parse_table(
+        "[cols=\"2*\",options=\"header\"]\n|===\n|Column 1, header row\n|Column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
+    );
+    assert!(ex_formal.header_row().is_some());
 
     // The formal `options` value is a comma-separated list; `header` is honored
     // when it appears among other values.
@@ -238,20 +272,23 @@ The `options` attribute accepts a comma-separated list of values.
     );
     assert!(table.header_row().is_some());
 
-    non_normative!(
+    verifies!(
         r#"
-.Table with header assigned to the options attribute
-[source#ex-formal]
-----
-include::example$row.adoc[tag=opt-h]
-----
-
 The first row of the table in <<ex-formal>> is rendered using the corresponding header styles and semantics.
 
 .Result of <<ex-formal>>
 include::example$row.adoc[tag=opt-h]
 
 "#
+    );
+
+    // The rendered result of <<ex-formal>>: the first row renders as the header.
+    let ex_formal_result = parse_table(
+        "[cols=\"2*\",options=\"header\"]\n|===\n|Column 1, header row\n|Column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
+    );
+    assert_eq!(
+        header_texts(&ex_formal_result),
+        vec!["Column 1, header row", "Column 2, header row"]
     );
 }
 
@@ -292,7 +329,7 @@ The following conventions determine when the first row automatically becomes the
     let no_header = parse_table("|===\n|Cell 1 |Cell 2\n|Cell 3 |Cell 4\n|===");
     assert!(no_header.header_row().is_none());
 
-    non_normative!(
+    verifies!(
         r#"
 .First row is implicitly assigned header
 [source#ex-implicit]
@@ -300,12 +337,33 @@ The following conventions determine when the first row automatically becomes the
 include::example$row.adoc[tag=impl-h]
 ----
 
+"#
+    );
+
+    // The `ex-implicit` example (`impl-h` from row.adoc) relies on layout alone:
+    // a non-empty first line followed by a blank line promotes the first row.
+    let ex_implicit = parse_table(
+        "|===\n|Column 1, header row |Column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
+    );
+    assert!(ex_implicit.header_row().is_some());
+
+    verifies!(
+        r#"
 As seen in the result below, if all of these rules hold true, then the first row of the table is treated as a header row.
 
 .Result of <<ex-implicit>>
 include::example$row.adoc[tag=impl-h]
 
 "#
+    );
+
+    // The rendered result of <<ex-implicit>>: the first row renders as the header.
+    let ex_implicit_result = parse_table(
+        "|===\n|Column 1, header row |Column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
+    );
+    assert_eq!(
+        header_texts(&ex_implicit_result),
+        vec!["Column 1, header row", "Column 2, header row"]
     );
 }
 
@@ -344,7 +402,7 @@ In <<ex-noheader>>, `noheader` is assigned using the shorthand syntax.
     let table = parse_table("[%header%noheader]\n|===\n|Cell 1 |Cell 2\n\n|Cell 3 |Cell 4\n|===");
     assert!(table.header_row().is_some());
 
-    non_normative!(
+    verifies!(
         r#"
 .Deactivate implicit header row with noheader
 [source#ex-noheader]
@@ -357,6 +415,19 @@ In <<ex-noheader>>, `noheader` is assigned using the shorthand syntax.
 |===
 ----
 
+"#
+    );
+
+    // The `ex-noheader` example suppresses the implicit header via the `%noheader`
+    // shorthand, so the first row stays in the body rather than being promoted.
+    let ex_noheader = parse_table(
+        "[%noheader]\n|===\n|Cell in column 1, row 1 |Cell in column 2, row 1\n\n|Cell in column 1, row 2 |Cell in column 2, row 2\n|===",
+    );
+    assert!(ex_noheader.header_row().is_none());
+    assert_eq!(ex_noheader.body_rows().len(), 2);
+
+    verifies!(
+        r#"
 The table from <<ex-noheader>> is displayed below.
 
 .Result of <<ex-noheader>>
@@ -367,6 +438,19 @@ The table from <<ex-noheader>> is displayed below.
 |Cell in column 1, row 2 |Cell in column 2, row 2
 |===
 
+"#
+    );
+
+    // The rendered result of <<ex-noheader>>: no header row is present and both
+    // rows remain in the body.
+    let ex_noheader_result = parse_table(
+        "[%noheader]\n|===\n|Cell in column 1, row 1 |Cell in column 2, row 1\n\n|Cell in column 1, row 2 |Cell in column 2, row 2\n|===",
+    );
+    assert!(ex_noheader_result.header_row().is_none());
+    assert_eq!(ex_noheader_result.body_rows().len(), 2);
+
+    non_normative!(
+        r#"
 //CAUTION: We're considering using a similar convention for enabling the footer in the future.
 //Thus, if you rely on this convention to enable the header row, it's advised that you not put all the cells in the last row on the same line unless you intend on making it the footer row.
 "#

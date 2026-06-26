@@ -31,6 +31,16 @@ fn simple_text(cell: &crate::blocks::TableCell<'_>) -> String {
     }
 }
 
+/// Parse `source` as a standalone document and return the rendered HTML of its
+/// first (paragraph) block.
+fn rendered_paragraph(source: &str) -> String {
+    let doc = Parser::default().parse(source);
+    let crate::blocks::Block::Simple(para) = &doc.nested_blocks().next().unwrap() else {
+        panic!("expected a paragraph");
+    };
+    para.content().rendered().to_string()
+}
+
 non_normative!(
     r#"
 = Format Content by Column
@@ -81,12 +91,33 @@ You can style all of the content in a column by adding a style operator to a col
     );
     assert_eq!(table.body_rows().len(), 2);
 
-    non_normative!(
+    verifies!(
         r#"
 include::partial$style-operators.adoc[]
 
 "#
     );
+
+    // Expansion of `partial$style-operators.adoc`: a three-column reference
+    // table listing each style and its operator. Its first row is an implicit
+    // header (non-empty first line followed by a blank line), and it has one
+    // body row per documented style (AsciiDoc, Default, Emphasis, Header,
+    // Literal, Monospace, Strong).
+    let style_operators = parse_table(
+        "|===\n|Style |Operator |Description\n\n|AsciiDoc\n|`a`\n|Supports block elements (lists, delimited blocks, and block macros).\nThis style effectively creates a nested, standalone AsciiDoc document.\nThe parent document's implicit attributes, such as `doctitle`, are shadowed and custom attributes are inherited.\n// what does \"shadowed\" actually mean???\n\n|Default\n|`d`\n|All of the markup that is permitted in a paragraph (i.e., inline formatting, inline macros) is supported.\n\n|Emphasis\n|`e`\n|Text is italicized.\n\n|Header\n|`h`\n|Applies the header semantics and styles to the text and cell borders.\n\n|Literal\n|`l`\n|Content is treated as if it were inside a literal block.\n\n|Monospace\n|`m`\n|Text is rendered using a monospace font.\n\n|Strong\n|`s`\n|Text is bold.\n|===",
+    );
+    assert_eq!(style_operators.columns().len(), 3);
+    assert_eq!(
+        style_operators
+            .header_row()
+            .unwrap()
+            .cells()
+            .iter()
+            .map(simple_text)
+            .collect::<Vec<_>>(),
+        vec!["Style", "Operator", "Description"]
+    );
+    assert_eq!(style_operators.body_rows().len(), 7);
 
     verifies!(
         r#"
@@ -168,7 +199,7 @@ A style operator is always placed in the last position on a column's specifier o
         assert_eq!(column.v_align(), VerticalAlignment::Bottom);
     }
 
-    non_normative!(
+    verifies!(
         r#"
 Let's apply a different style to each column in <<ex-style>>.
 
@@ -191,23 +222,16 @@ Let's apply a different style to each column in <<ex-style>>.
 |===
 ----
 
-The table from <<ex-style>> is displayed below.
 "#
     );
 
-    verifies!(
-        r#"
-Note that the style applied to each column doesn't affect the xref:add-header-row.adoc[header row] or override any inline formatting.
-
-"#
-    );
-
-    // Each column carries its own style operator.
-    let table = parse_table(
-        "[cols=\"h,m,s,e\"]\n|===\n|Column 1 |Column 2 |Column 3 |Column 4\n\n|This column's content and borders are rendered using the table header (`h`) styles.\n|This column's content is rendered using a monospace font (m).\n|This column's content is bold (`s`).\n|This column's content is italicized (`e`).\n|===",
+    // The `ex-style` example applies a different style operator to each of the
+    // four columns.
+    let ex_style = parse_table(
+        "[cols=\"h,m,s,e\"]\n|===\n|Column 1 |Column 2 |Column 3 |Column 4\n\n|This column's content and borders are rendered using the table header (`h`) styles.\n|This column's content is rendered using a monospace font (m).\n|This column's content is bold (`s`).\n|This column's content is italicized (`e`).\n|This column's content and borders are rendered using the table header (`h`) styles.\n|This column's content is rendered using a monospace font (m).\n|This column's content is bold (`s`).\n|This column's content is italicized (`e`).\n|===",
     );
     assert_eq!(
-        column_styles(&table),
+        column_styles(&ex_style),
         vec![
             ColumnStyle::Header,
             ColumnStyle::Monospace,
@@ -216,26 +240,11 @@ Note that the style applied to each column doesn't affect the xref:add-header-ro
         ]
     );
 
-    // The style doesn't affect the header row: each header cell holds plain
-    // inline content with no style applied, even though its column is styled.
-    let header = table.header_row().unwrap();
-    let header_text: Vec<String> = header.cells().iter().map(simple_text).collect();
-    assert_eq!(
-        header_text,
-        vec!["Column 1", "Column 2", "Column 3", "Column 4"]
-    );
-
-    // The style doesn't override inline formatting either: the body cell in the
-    // header-styled column still resolves its inline backtick markup to a
-    // monospace span.
-    let body = &table.body_rows()[0];
-    assert!(simple_text(&body.cells()[0]).contains("<code>h</code>"));
-}
-
-#[test]
-fn use_asciidoc_block_elements_in_a_column() {
-    non_normative!(
+    verifies!(
         r#"
+The table from <<ex-style>> is displayed below.
+Note that the style applied to each column doesn't affect the xref:add-header-row.adoc[header row] or override any inline formatting.
+
 .Result of <<ex-style>>
 [cols="h,m,s,e"]
 |===
@@ -252,8 +261,48 @@ fn use_asciidoc_block_elements_in_a_column() {
 |This column's content is italicized (`e`).
 |===
 
+"#
+    );
+
+    // The rendered result of <<ex-style>>: the style doesn't affect the header
+    // row (each header cell holds plain inline content with no style applied,
+    // even though its column is styled)...
+    let ex_style_result = parse_table(
+        "[cols=\"h,m,s,e\"]\n|===\n|Column 1 |Column 2 |Column 3 |Column 4\n\n|This column's content and borders are rendered using the table header (`h`) styles.\n|This column's content is rendered using a monospace font (m).\n|This column's content is bold (`s`).\n|This column's content is italicized (`e`).\n|This column's content and borders are rendered using the table header (`h`) styles.\n|This column's content is rendered using a monospace font (m).\n|This column's content is bold (`s`).\n|This column's content is italicized (`e`).\n|===",
+    );
+    let header = ex_style_result.header_row().unwrap();
+    let header_text: Vec<String> = header.cells().iter().map(simple_text).collect();
+    assert_eq!(
+        header_text,
+        vec!["Column 1", "Column 2", "Column 3", "Column 4"]
+    );
+
+    // ...nor does it override inline formatting: the body cell in the
+    // header-styled column still resolves its inline backtick markup to a
+    // monospace span.
+    let body = &ex_style_result.body_rows()[0];
+    assert!(simple_text(&body.cells()[0]).contains("<code>h</code>"));
+
+    verifies!(
+        r#"
 Additionally, if a xref:format-cell-content.adoc#override-column-style[cell specifier contains a style operator], that style will override a column's style operator.
 
+"#
+    );
+
+    // The cross-reference to the cell-specifier override behavior renders as a
+    // link to the format-cell-content page.
+    let rendered = rendered_paragraph(
+        "Additionally, if a xref:format-cell-content.adoc#override-column-style[cell specifier contains a style operator], that style will override a column's style operator.",
+    );
+    assert!(rendered.contains("<a href="));
+    assert!(rendered.contains("cell specifier contains a style operator</a>"));
+}
+
+#[test]
+fn use_asciidoc_block_elements_in_a_column() {
+    non_normative!(
+        r#"
 == Use AsciiDoc block elements in a column
 
 "#
@@ -274,7 +323,7 @@ To use AsciiDoc block elements, such as delimited source blocks and lists, in a 
         vec![ColumnStyle::AsciiDoc, ColumnStyle::Default]
     );
 
-    non_normative!(
+    verifies!(
         r#"
 .Apply the AsciiDoc block style operator to the first column
 [source#ex-asciidoc]
@@ -310,26 +359,21 @@ print ("%s" %(os.uname()))
 "#
     );
 
-    verifies!(
-        r#"
-The AsciiDoc block style effectively creates a nested, standalone AsciiDoc document in each cell in the column.
-"#
-    );
-
-    // The AsciiDoc-styled column parses each of its cells as a nested sequence
-    // of blocks, while the default-styled column leaves the same markup as
-    // inline content.
-    let table = parse_table(
+    // The `ex-asciidoc` example applies the AsciiDoc block style (`a`) to the
+    // first column, so its cells parse nested block content (a list, then a
+    // delimited source block) while the default-styled column keeps the same
+    // markup as inline content.
+    let ex_asciidoc = parse_table(
         "[cols=\"2a,2\"]\n|===\n|Column with the `a` style operator applied to its specifier |Column using the default style\n\n|\n* List item 1\n* List item 2\n* List item 3\n|\n* List item 1\n* List item 2\n* List item 3\n\n|\n[source,python]\n----\nimport os\nprint \"%s\" %(os.uname())\n----\n|\n[source,python]\n----\nimport os\nprint (\"%s\" %(os.uname()))\n----\n|===",
     );
     assert_eq!(
-        column_styles(&table),
+        column_styles(&ex_asciidoc),
         vec![ColumnStyle::AsciiDoc, ColumnStyle::Default]
     );
 
     // First body row: the AsciiDoc cell parses a list block; the default cell
     // keeps the list markup as plain inline text.
-    let row = &table.body_rows()[0];
+    let row = &ex_asciidoc.body_rows()[0];
     match row.cells()[0].content() {
         crate::blocks::TableCellContent::AsciiDoc(cell) => {
             let blocks = cell.blocks();
@@ -344,7 +388,7 @@ The AsciiDoc block style effectively creates a nested, standalone AsciiDoc docum
     ));
 
     // Second body row: the AsciiDoc cell parses the delimited source block.
-    let row = &table.body_rows()[1];
+    let row = &ex_asciidoc.body_rows()[1];
     match row.cells()[0].content() {
         crate::blocks::TableCellContent::AsciiDoc(cell) => {
             let blocks = cell.blocks();
@@ -353,6 +397,12 @@ The AsciiDoc block style effectively creates a nested, standalone AsciiDoc docum
         }
         other => panic!("expected nested AsciiDoc blocks, got {other:?}"),
     }
+
+    verifies!(
+        r#"
+The AsciiDoc block style effectively creates a nested, standalone AsciiDoc document in each cell in the column.
+"#
+    );
 
     // A full structural comparison of a minimal AsciiDoc cell: its content is a
     // nested list block parsed as a standalone document fragment.
@@ -459,6 +509,11 @@ The AsciiDoc block style effectively creates a nested, standalone AsciiDoc docum
 The parent document's implicit attributes, such as `doctitle`, are shadowed and custom attributes are inherited.
 // what does "shadowed" actually mean???
 
+"#
+    );
+
+    verifies!(
+        r#"
 .Result of <<ex-asciidoc>>
 [cols="2a,2"]
 |===
@@ -488,7 +543,37 @@ print ("%s" %(os.uname()))
 ----
 |===
 
+"#
+    );
+
+    // The rendered result of <<ex-asciidoc>>: the first column is AsciiDoc, the
+    // second is default, and every body cell in the AsciiDoc column renders as
+    // nested block content.
+    let ex_asciidoc_result = parse_table(
+        "[cols=\"2a,2\"]\n|===\n|Column with the `a` style operator applied to its specifier |Column using the default style\n\n|\n* List item 1\n* List item 2\n* List item 3\n|\n* List item 1\n* List item 2\n* List item 3\n\n|\n[source,python]\n----\nimport os\nprint \"%s\" %(os.uname())\n----\n\n|\n[source,python]\n----\nimport os\nprint (\"%s\" %(os.uname()))\n----\n|===",
+    );
+    assert_eq!(
+        column_styles(&ex_asciidoc_result),
+        vec![ColumnStyle::AsciiDoc, ColumnStyle::Default]
+    );
+    for row in ex_asciidoc_result.body_rows() {
+        assert!(matches!(
+            row.cells()[0].content(),
+            crate::blocks::TableCellContent::AsciiDoc(_)
+        ));
+    }
+
+    verifies!(
+        r#"
 You can also apply the xref:format-cell-content.adoc#a-operator[AsciiDoc block style operator to individual cells].
 "#
     );
+
+    // The closing cross-reference renders as a link to the format-cell-content
+    // page's section on the per-cell AsciiDoc operator.
+    let rendered = rendered_paragraph(
+        "You can also apply the xref:format-cell-content.adoc#a-operator[AsciiDoc block style operator to individual cells].",
+    );
+    assert!(rendered.contains("<a href="));
+    assert!(rendered.contains("AsciiDoc block style operator to individual cells</a>"));
 }
