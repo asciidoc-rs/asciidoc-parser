@@ -1329,34 +1329,38 @@ mod psv {
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): Cross-reference resolution from inside an AsciiDoc table
-    // cell to a reference in the main document.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
+    // Cross-reference resolution from inside an AsciiDoc table cell to a
+    // reference in the main document.
     fn cross_reference_link_in_an_asciidoc_table_cell_should_resolve_to_reference_in_main_document()
     {
     }
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): Cataloging an anchor at the start of an AsciiDoc table
-    // cell as a document reference.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
+    // Cataloging an anchor at the start of an AsciiDoc table cell as a document
+    // reference.
     fn should_discover_anchor_at_start_of_cell_and_register_it_as_a_reference() {}
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): Cataloging an anchor at the start of a cell in an
-    // implicit header row when the column has a style.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
+    // Cataloging an anchor at the start of a cell in an implicit header row when
+    // the column has a style.
     fn should_catalog_anchor_at_start_of_cell_in_implicit_header_row_when_column_has_a_style() {}
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): Cataloging an anchor at the start of a cell in an
-    // explicit header row when the column has a style.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
+    // Cataloging an anchor at the start of a cell in an explicit header row when
+    // the column has a style.
     fn should_catalog_anchor_at_start_of_cell_in_explicit_header_row_when_column_has_a_style() {}
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): Cataloging an anchor at the start of a cell in the first
-    // row.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
+    // Cataloging an anchor at the start of a cell in the first row.
     fn should_catalog_anchor_at_start_of_cell_in_first_row() {}
 
     #[test]
@@ -1455,10 +1459,11 @@ mod psv {
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): an unterminated example block inside an AsciiDoc table
-    // cell that is itself attached to a list item — Asciidoctor reports the
-    // warning at the inner block's line (9). Enable once the cursor/line of
-    // nested-cell warnings is tracked.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/542): an
+    // unterminated example block inside an AsciiDoc table cell that is itself
+    // attached to a list item — Asciidoctor reports the warning at the inner
+    // block's line (9). Enable once the cursor/line of nested-cell warnings is
+    // tracked (same nested-cell source-map work as #542).
     fn should_show_correct_line_number_in_warning_about_unterminated_block_inside_asciidoc_table_cell()
      {
         let doc = Parser::default().parse(
