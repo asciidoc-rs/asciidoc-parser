@@ -33,3 +33,6 @@ pub(crate) use section_number::SectionNumber;
 
 mod simple;
 pub(crate) use simple::SimpleBlock;
+
+mod table;
+pub(crate) use table::{TableBlock, TableCell, TableCellContent, TableColumn, TableRow};

@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use crate::{
     Document, HasSpan,
@@ -62,6 +66,35 @@ pub struct Parser {
     /// Section type of outermost section. (Used to determine whether to number
     /// child sections as a normal section or appendix.)
     pub(crate) topmost_section_type: SectionType,
+
+    /// Number most recently assigned to a captioned table. Incremented each
+    /// time a titled table receives an automatic caption (e.g. "Table 1.").
+    pub(crate) last_table_number: usize,
+
+    /// Canonical names of attributes that are locked against modification from
+    /// the document body for the current scope.
+    ///
+    /// An AsciiDoc table cell creates a nested document that inherits the
+    /// parent document's attributes. An attribute that is *set* in the
+    /// parent _cannot_ be modified inside the cell (matching Asciidoctor,
+    /// which here diverges from the spec's "set or explicitly unset" wording),
+    /// so while a cell is being parsed every inherited attribute name
+    /// (other than a handful of exceptions) is recorded here and a body
+    /// attribute assignment to such a name is silently ignored. The set is
+    /// saved and restored around each cell, so the lock applies only within
+    /// the cell (and nests correctly).
+    pub(crate) locked_attribute_names: HashSet<String>,
+
+    /// Number of AsciiDoc table cells currently being parsed in the call stack.
+    ///
+    /// An AsciiDoc table cell creates a nested, standalone AsciiDoc document.
+    /// While that document is being parsed this counter is greater than zero,
+    /// which (matching Asciidoctor's `Document#nested?`) changes the default
+    /// cell separator of any table found inside from the vertical bar (`|`) to
+    /// the exclamation mark (`!`), so a nested table needs no explicit
+    /// `separator` attribute. The counter is incremented and decremented around
+    /// each AsciiDoc cell, so it nests correctly.
+    pub(crate) nested_document_depth: usize,
 }
 
 impl Default for Parser {
@@ -81,6 +114,9 @@ impl Default for Parser {
             },
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,
+            last_table_number: 0,
+            locked_attribute_names: HashSet::new(),
+            nested_document_depth: 0,
         }
     }
 }
@@ -154,6 +190,9 @@ impl Parser {
         // Reset section numbering for each new document.
         self.last_section_number = SectionNumber::default();
 
+        // Reset table numbering for each new document.
+        self.last_table_number = 0;
+
         Document::parse(&preprocessed_source, source_map, self)
     }
 
@@ -214,6 +253,63 @@ impl Parser {
             .get(name.as_ref())
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or(false)
+    }
+
+    /// Resolves whether a document title should be displayed, from the
+    /// `showtitle`/`notitle` attribute pair (which are complements).
+    ///
+    /// `showtitle` takes precedence: if present, the title shows precisely when
+    /// it is set. Otherwise `notitle`, if present, hides the title when set.
+    /// When neither attribute is present, `default_shown` decides — a
+    /// standalone document (such as a nested AsciiDoc table cell) shows its
+    /// title, while an embedded document does not.
+    pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
+        if self.has_attribute("showtitle") {
+            self.is_attribute_set("showtitle")
+        } else if self.has_attribute("notitle") {
+            !self.is_attribute_set("notitle")
+        } else {
+            default_shown
+        }
+    }
+
+    /// Forces the `doctype` attribute to `value`, refreshing the derived
+    /// `backend-html5-doctype-*` attribute.
+    ///
+    /// Used when a nested AsciiDoc table cell resets its doctype to the default
+    /// (a cell does not inherit the parent's doctype). The value stays
+    /// modifiable from the document body so the cell may still set its own
+    /// doctype.
+    pub(crate) fn force_doctype(&mut self, value: &str) {
+        self.attribute_values.insert(
+            "doctype".to_string(),
+            AttributeValue {
+                allowable_value: AllowableValue::Any,
+                modification_context: ModificationContext::ApiOrDocumentBody,
+                value: InterpretedValue::Value(value.to_string()),
+            },
+        );
+        self.refresh_doctype_derived_attr();
+    }
+
+    /// Recomputes the `backend-html5-doctype-{doctype}` intrinsic attribute so
+    /// exactly one exists — for the active doctype — resolving to an empty
+    /// (defined) value. References to any other doctype stay undefined and so
+    /// render literally.
+    pub(crate) fn refresh_doctype_derived_attr(&mut self) {
+        self.attribute_values
+            .retain(|name, _| !name.starts_with("backend-html5-doctype-"));
+
+        if let InterpretedValue::Value(doctype) = self.attribute_value("doctype") {
+            self.attribute_values.insert(
+                format!("backend-html5-doctype-{doctype}"),
+                AttributeValue {
+                    allowable_value: AllowableValue::Any,
+                    modification_context: ModificationContext::Anywhere,
+                    value: InterpretedValue::Value(String::new()),
+                },
+            );
+        }
     }
 
     /// Sets the value of an [intrinsic attribute].
@@ -444,7 +540,11 @@ impl Parser {
             value,
         };
 
+        let is_doctype = attr_name == "doctype";
         self.attribute_values.insert(attr_name, attribute_value);
+        if is_doctype {
+            self.refresh_doctype_derived_attr();
+        }
     }
 
     /// Called from [`Header::parse()`] for a value that is derived from parsing
@@ -478,6 +578,13 @@ impl Parser {
     ) {
         let attr_name = remap_attr_name(attr.name().data());
 
+        // An attribute inherited from the parent document of an AsciiDoc table
+        // cell is locked for the duration of that cell: a body assignment to it
+        // is silently ignored (no warning), matching Asciidoctor.
+        if self.locked_attribute_names.contains(&attr_name) {
+            return;
+        }
+
         // Verify that we have permission to overwrite any existing attribute value.
         if let Some(existing_attr) = self.attribute_values.get(&attr_name)
             && (existing_attr.modification_context != ModificationContext::Anywhere
@@ -496,7 +603,11 @@ impl Parser {
             value: attr.value().clone(),
         };
 
+        let is_doctype = attr_name == "doctype";
         self.attribute_values.insert(attr_name, attribute_value);
+        if is_doctype {
+            self.refresh_doctype_derived_attr();
+        }
     }
 
     /// Assign the next section number for a given level.
@@ -515,6 +626,16 @@ impl Parser {
                 self.last_section_number.clone()
             }
         }
+    }
+
+    /// Assigns the next sequential number to a captioned table and returns it.
+    ///
+    /// Tables are numbered in document order, but only those that actually
+    /// receive a caption (i.e. titled tables for which the `table-caption`
+    /// attribute is set) consume a number.
+    pub(crate) fn assign_table_number(&mut self) -> usize {
+        self.last_table_number += 1;
+        self.last_table_number
     }
 }
 
@@ -740,5 +861,91 @@ mod tests {
             simple_block.content().rendered(),
             "Hello [AMP] goodbye [LT] world [GT] test"
         );
+    }
+
+    mod resolve_show_title {
+        use crate::parser::{ModificationContext, Parser};
+
+        fn with(name: &str, set: bool) -> Parser {
+            Parser::default().with_intrinsic_attribute_bool(
+                name,
+                set,
+                ModificationContext::Anywhere,
+            )
+        }
+
+        #[test]
+        fn neither_present_uses_default() {
+            assert!(Parser::default().resolve_show_title(true));
+            assert!(!Parser::default().resolve_show_title(false));
+        }
+
+        #[test]
+        fn showtitle_takes_precedence_and_decides() {
+            // Present and set -> shown; present and unset -> hidden, regardless
+            // of the default.
+            assert!(with("showtitle", true).resolve_show_title(false));
+            assert!(!with("showtitle", false).resolve_show_title(true));
+        }
+
+        #[test]
+        fn notitle_is_the_complement_when_showtitle_absent() {
+            // notitle set -> hidden; notitle unset -> shown.
+            assert!(!with("notitle", true).resolve_show_title(true));
+            assert!(with("notitle", false).resolve_show_title(false));
+        }
+    }
+
+    mod refresh_doctype_derived_attr {
+        use crate::{document::InterpretedValue, parser::Parser};
+
+        #[test]
+        fn tracks_the_active_doctype() {
+            let mut parser = Parser::default();
+
+            // The default doctype is `article`, so only its derived attribute is
+            // defined (to an empty value).
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Value(String::new())
+            );
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-book"),
+                InterpretedValue::Unset
+            );
+
+            // Forcing a new doctype moves the derived attribute with it.
+            parser.force_doctype("book");
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-book"),
+                InterpretedValue::Value(String::new())
+            );
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Unset
+            );
+        }
+
+        #[test]
+        fn defines_no_derived_attr_when_doctype_is_not_a_value() {
+            let mut parser = Parser::default();
+
+            // The default article derived attribute starts out defined.
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Value(String::new())
+            );
+
+            // With `doctype` unset (no `Value`), a refresh clears any existing
+            // derived attribute and defines none.
+            parser.attribute_values.remove("doctype");
+            parser.refresh_doctype_derived_attr();
+
+            assert_eq!(parser.attribute_value("doctype"), InterpretedValue::Unset);
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Unset
+            );
+        }
     }
 }

@@ -2471,9 +2471,13 @@ mod description_lists_dlist {
             assert_xpath(&doc, "//dl/dt/following-sibling::dd", 2);
             assert_xpath(&doc, "(//dl/dt)[1][normalize-space(text()) = \"term1\"]", 1);
 
+            // The `--` renders as a spaced em dash (thin space, em dash, thin
+            // space); the test DOM now decodes numeric character references the
+            // way a browser's `text()` does, so this asserts the decoded
+            // characters rather than the raw `&#8201;&#8212;&#8201;` entities.
             assert_xpath(
                 &doc,
-                "(//dl/dt)[1]/following-sibling::dd/p[text() = \"def1&#8201;&#8212;&#8201;and a note\"]",
+                "(//dl/dt)[1]/following-sibling::dd/p[text() = \"def1\u{2009}\u{2014}\u{2009}and a note\"]",
                 1,
             );
 

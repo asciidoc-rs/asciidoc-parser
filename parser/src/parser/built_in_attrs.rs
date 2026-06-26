@@ -125,6 +125,15 @@ pub(super) fn built_in_attrs() -> HashMap<String, AttributeValue> {
         },
     );
 
+    attrs.insert(
+        "table-caption".to_owned(),
+        AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::Anywhere,
+            value: InterpretedValue::Set,
+        },
+    );
+
     // TO DO: Replace ./images with value of imagesdir if that is non-default.
     attrs.insert(
         "iconsdir".to_owned(),
@@ -135,6 +144,27 @@ pub(super) fn built_in_attrs() -> HashMap<String, AttributeValue> {
         },
     );
 
+    // The document type defaults to `article` and may be set in the header or
+    // via the API. The derived `backend-html5-doctype-{doctype}` attribute is
+    // defined (empty) only for the active doctype; it is kept in sync by
+    // `Parser::refresh_doctype_derived_attr` whenever `doctype` changes.
+    attrs.insert(
+        "doctype".to_owned(),
+        AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::ApiOrHeader,
+            value: InterpretedValue::Value("article".to_owned()),
+        },
+    );
+    attrs.insert(
+        "backend-html5-doctype-article".to_owned(),
+        AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::Anywhere,
+            value: InterpretedValue::Value(String::new()),
+        },
+    );
+
     attrs
 }
 
@@ -142,6 +172,7 @@ pub(super) fn built_in_default_values() -> HashMap<String, String> {
     let mut defaults: HashMap<String, String> = HashMap::new();
 
     defaults.insert("example-caption".to_owned(), "Example".to_owned());
+    defaults.insert("table-caption".to_owned(), "Table".to_owned());
     defaults.insert("iconsdir".to_owned(), "./images/icons".to_owned());
     defaults.insert("sectnums".to_owned(), "all".to_owned());
     defaults.insert("toc".to_owned(), "auto".to_owned());

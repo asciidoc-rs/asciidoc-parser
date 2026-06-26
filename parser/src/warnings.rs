@@ -79,6 +79,18 @@ pub enum WarningType {
 
     #[error("List item index: expected {0}, got {1}")]
     ListItemOutOfSequence(String, String),
+
+    #[error("Dropping table cell because it exceeds the specified number of columns")]
+    TableCellExceedsColumnCount,
+
+    #[error("Unclosed quote in CSV data; setting cell to empty")]
+    TableCsvDataHasUnclosedQuote,
+
+    #[error("Table is missing a leading separator; recovering automatically")]
+    TableMissingLeadingSeparator,
+
+    #[error("Dropping cells from incomplete row; detected end of table")]
+    TableDroppingIncompleteRowAtEndOfTable,
 }
 
 impl std::fmt::Debug for WarningType {
@@ -152,6 +164,22 @@ impl std::fmt::Debug for WarningType {
                 .field(expected)
                 .field(actual)
                 .finish(),
+
+            WarningType::TableCellExceedsColumnCount => {
+                write!(f, "WarningType::TableCellExceedsColumnCount")
+            }
+
+            WarningType::TableCsvDataHasUnclosedQuote => {
+                write!(f, "WarningType::TableCsvDataHasUnclosedQuote")
+            }
+
+            WarningType::TableMissingLeadingSeparator => {
+                write!(f, "WarningType::TableMissingLeadingSeparator")
+            }
+
+            WarningType::TableDroppingIncompleteRowAtEndOfTable => {
+                write!(f, "WarningType::TableDroppingIncompleteRowAtEndOfTable")
+            }
         }
     }
 }
@@ -401,6 +429,37 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::ListItemOutOfSequence(\"y\", \"z\")"
+                );
+            }
+
+            #[test]
+            fn table_cell_exceeds_column_count() {
+                let warning = WarningType::TableCellExceedsColumnCount;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::TableCellExceedsColumnCount");
+            }
+
+            #[test]
+            fn table_csv_data_has_unclosed_quote() {
+                let warning = WarningType::TableCsvDataHasUnclosedQuote;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::TableCsvDataHasUnclosedQuote");
+            }
+
+            #[test]
+            fn table_missing_leading_separator() {
+                let warning = WarningType::TableMissingLeadingSeparator;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::TableMissingLeadingSeparator");
+            }
+
+            #[test]
+            fn table_dropping_incomplete_row_at_end_of_table() {
+                let warning = WarningType::TableDroppingIncompleteRowAtEndOfTable;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::TableDroppingIncompleteRowAtEndOfTable"
                 );
             }
         }

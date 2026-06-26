@@ -371,20 +371,35 @@ mod default_special_characters_substitution {
         assert_eq!(block1.content().rendered(), "Stuff &gt; nonsense");
     }
 
-    #[ignore]
     #[test]
     fn tables() {
-        to_do_verifies!(
+        verifies!(
             r#"
 |Tables |{y}
 
 "#
         );
 
-        todo!("Write test once table parsing is implemented");
+        // Special character substitution always applies to table cell content,
+        // including literal (`l`) cells, where most other substitution steps are
+        // skipped.
+        let doc = Parser::default().parse("|===\n|a > b\nl|c > d\n|===");
 
-        // Blocked on https://github.com/asciidoc-rs/asciidoc-parser/issues/296:
-        // Implement table parsing
+        let Some(Block::Table(table)) = doc.nested_blocks().next() else {
+            panic!("expected a table block");
+        };
+
+        let cells: Vec<_> = table.body_rows().iter().flat_map(|r| r.cells()).collect();
+
+        let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
+            panic!("expected simple cell content");
+        };
+        assert_eq!(default_cell.rendered(), "a &gt; b");
+
+        let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
+            panic!("expected simple cell content");
+        };
+        assert_eq!(literal_cell.rendered(), "c &gt; d");
     }
 
     #[test]
