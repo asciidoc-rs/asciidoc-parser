@@ -1372,6 +1372,9 @@ mod psv {
 
     // Backend-specific test omitted: DocBook ("callout numbers should be
     // globally unique, including AsciiDoc table cells").
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311): the
+    // underlying feature (callouts, including global numbering across AsciiDoc
+    // table cells) is unimplemented; revisit when callouts land.
 
     // Out of scope (omitted): compatibility mode is a stated limitation of the
     // crate, so the three "compat mode ... in AsciiDoc table cell" tests are not
