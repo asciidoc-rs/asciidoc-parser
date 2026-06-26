@@ -1126,7 +1126,7 @@ fn build_psv_table<'src>(
             current_row.push(raw);
 
             // The slots carried into the current row are `active_rowspans[0]`; the
-            // vector is never empty here, so the fallback is unreachable.
+            // deque is never empty here, so the fallback is unreachable.
             let carried = active_rowspans.front().copied().unwrap_or(0);
             let effective = column_visits + carried;
             if effective >= ncols {
