@@ -5,7 +5,7 @@
 // limitation of `asciidoc-parser` crate) and alternate (non-HTML) back ends.
 
 mod psv {
-    use crate::tests::prelude::*;
+    use crate::tests::prelude::{inline_file_handler::InlineFileHandler, *};
 
     #[test]
     fn converts_simple_psv_table() {
@@ -1311,8 +1311,6 @@ mod psv {
 
     #[test]
     fn preprocessor_directive_on_first_line_of_an_asciidoc_table_cell_should_be_processed() {
-        use crate::tests::prelude::inline_file_handler::InlineFileHandler;
-
         let handler =
             InlineFileHandler::from_pairs([("fixtures/include-file.adoc", "included content")]);
         let mut parser = Parser::default().with_include_file_handler(handler);
@@ -1323,10 +1321,11 @@ mod psv {
         assert_rendered_contains(&doc, "included content");
     }
 
-    // Deferred: "error about unresolved preprocessor directive on first line of
-    // an AsciiDoc table cell should have correct cursor" (Ruby 1728) asserts the
-    // file/line cursor of the unresolved-directive error, which needs the cell's
-    // nested source map threaded back to the parent — not yet implemented.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/542): Deferred:
+    // "error about unresolved preprocessor directive on first line of an AsciiDoc
+    // table cell should have correct cursor" (Ruby 1728) asserts the file/line
+    // cursor of the unresolved-directive error, which needs the cell's nested
+    // source map threaded back to the parent — not yet implemented.
 
     #[test]
     #[ignore]
