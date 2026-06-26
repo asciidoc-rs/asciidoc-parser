@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use self_cell::self_cell;
+
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
@@ -8,6 +12,7 @@ use crate::{
     document::InterpretedValue,
     parser::{
         InlineSubstitutionRenderer, ModificationContext, ReferenceResolver, ReferenceWarning,
+        preprocessor::preprocess,
     },
     span::MatchedItem,
     strings::CowStr,
@@ -1613,55 +1618,38 @@ fn process_content<'src>(
         // derived `backend-html5-doctype-*` attribute is refreshed to match.
         parser.force_doctype("article");
 
-        // A leading level-0 title line (`= Title`) is the nested document's
-        // title rather than a section, so capture it here (a level-0 heading is
-        // otherwise rejected in block parsing). The remaining lines form the
-        // cell's body.
-        let first_line = trimmed.take_line();
-        let (title_source, body) = if first_line.item.data().starts_with("= ") {
-            (
-                Some(first_line.item.discard(2).discard_whitespace()),
-                first_line.after,
-            )
+        // A cell whose content holds a preprocessor directive (an `include::`)
+        // is parsed from an owned, expanded source the cell carries; every other
+        // cell is parsed in place from the parent document's source, which keeps
+        // its spans (and line numbers) and avoids a copy.
+        let cell = if content_has_directive(trimmed.data()) {
+            let (expanded, _source_map) = preprocess(trimmed.data(), parser);
+            let owned = OwnedCell::new(expanded, |source| {
+                // Warnings from the owned parse borrow the owned source and so
+                // cannot escape it; the include path is rare and currently
+                // warning-free, so they are dropped here.
+                let mut owned_warnings: Vec<Warning<'_>> = vec![];
+                let (title, inline, blocks) =
+                    parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
+                OwnedCellInner {
+                    title,
+                    inline,
+                    blocks,
+                }
+            });
+            AsciiDocCell::Owned(Arc::new(owned))
         } else {
-            (None, trimmed)
-        };
-
-        // Mark that we are inside an AsciiDoc cell (a nested document) for the
-        // duration of the cell, so a table found within defaults its cell
-        // separator to `!` rather than `|` (matching Asciidoctor's
-        // `Document#nested?`). The depth is restored afterward so the marker is
-        // scoped to the cell and nests correctly.
-        parser.nested_document_depth += 1;
-        let mut maw = parse_blocks_until(body, |_| false, parser);
-        parser.nested_document_depth -= 1;
-
-        // The cell's render-time decisions depend on its now-mutated attribute
-        // state (its body may have changed `doctype`/`showtitle`/`notitle`), so
-        // resolve them before the snapshot is restored. A captured title is kept
-        // only when the cell's effective `showtitle` shows it.
-        let inline = matches!(
-            parser.attribute_value("doctype"),
-            InterpretedValue::Value(ref v) if v == "inline"
-        );
-        let title = if parser.resolve_show_title(true) {
-            title_source.map(|span| {
-                let mut content = Content::from(span);
-                SubstitutionGroup::Header.apply(&mut content, parser, None);
-                content.rendered().to_string()
+            let (title, inline, blocks) = parse_asciidoc_cell_body(trimmed, parser, warnings);
+            AsciiDocCell::Borrowed(BorrowedCell {
+                title,
+                inline,
+                blocks,
             })
-        } else {
-            None
         };
 
         parser.locked_attribute_names = saved_locks;
         parser.attribute_values = saved_attributes;
-        warnings.append(&mut maw.warnings);
-        TableCellContent::AsciiDoc(AsciiDocCell {
-            title,
-            inline,
-            blocks: maw.item.item,
-        })
+        TableCellContent::AsciiDoc(cell)
     } else {
         let mut content = match replacement {
             Some(replacement) => Content::from_filtered(trimmed, replacement),
@@ -1677,6 +1665,63 @@ fn process_content<'src>(
 
         TableCellContent::Simple(content)
     }
+}
+
+/// Parses the body of an AsciiDoc table cell — a nested, standalone AsciiDoc
+/// document — returning its (shown) title, whether its doctype is `inline`, and
+/// its blocks.
+///
+/// A leading level-0 title line (`= Title`) is the nested document's title
+/// rather than a section, so it is split off and rendered here (a level-0
+/// heading is otherwise rejected in block parsing). The render-time decisions
+/// (`inline`, and whether the title is shown) depend on the cell's now-mutated
+/// attribute state, so they are resolved before the caller restores the
+/// parent's attribute snapshot.
+fn parse_asciidoc_cell_body<'src>(
+    content: Span<'src>,
+    parser: &mut Parser,
+    warnings: &mut Vec<Warning<'src>>,
+) -> (Option<String>, bool, Vec<Block<'src>>) {
+    let first_line = content.take_line();
+    let (title_source, body) = if first_line.item.data().starts_with("= ") {
+        (
+            Some(first_line.item.discard(2).discard_whitespace()),
+            first_line.after,
+        )
+    } else {
+        (None, content)
+    };
+
+    // Mark that we are inside an AsciiDoc cell (a nested document) for the
+    // duration of the parse, so a table found within defaults its cell separator
+    // to `!` rather than `|` (matching Asciidoctor's `Document#nested?`).
+    parser.nested_document_depth += 1;
+    let mut maw = parse_blocks_until(body, |_| false, parser);
+    parser.nested_document_depth -= 1;
+    warnings.append(&mut maw.warnings);
+
+    let inline = matches!(
+        parser.attribute_value("doctype"),
+        InterpretedValue::Value(ref v) if v == "inline"
+    );
+    let title = if parser.resolve_show_title(true) {
+        title_source.map(|span| {
+            let mut content = Content::from(span);
+            SubstitutionGroup::Header.apply(&mut content, parser, None);
+            content.rendered().to_string()
+        })
+    } else {
+        None
+    };
+
+    (title, inline, maw.item.item)
+}
+
+/// Returns `true` when the cell content holds an `include::` preprocessor
+/// directive at the start of a line, which must be expanded before the cell is
+/// parsed.
+fn content_has_directive(content: &str) -> bool {
+    content.starts_with("include::") || content.contains("\ninclude::")
 }
 
 /// A row of cells in a [`TableBlock`].
@@ -1885,9 +1930,7 @@ impl<'src> TableCell<'src> {
                 content.resolve_references(resolver, renderer, warnings);
             }
             TableCellContent::AsciiDoc(cell) => {
-                for block in cell.blocks_mut() {
-                    block.resolve_references(resolver, renderer, warnings);
-                }
+                cell.resolve_references(resolver, renderer, warnings);
             }
         }
     }
@@ -1929,11 +1972,19 @@ pub enum TableCellContent<'src> {
 /// parsed and captured here: whether the cell's nested document title is shown
 /// (and its rendered text), and whether the cell's `doctype` is `inline` (in
 /// which case a lone paragraph renders without the usual block wrapper).
+///
+/// A cell whose content has no preprocessor directives is parsed in place from
+/// the parent document's source ([`Borrowed`](Self::Borrowed)). A cell that
+/// expands an `include::` directive owns its preprocessed source
+/// ([`Owned`](Self::Owned)); the owned store is shared behind an [`Arc`] so the
+/// cell stays cheaply cloneable.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AsciiDocCell<'src> {
-    title: Option<String>,
-    inline: bool,
-    blocks: Vec<Block<'src>>,
+pub enum AsciiDocCell<'src> {
+    /// Parsed in place from the parent document's source.
+    Borrowed(BorrowedCell<'src>),
+
+    /// Parsed from an owned, include-expanded source the cell carries.
+    Owned(Arc<OwnedCell>),
 }
 
 impl<'src> AsciiDocCell<'src> {
@@ -1943,7 +1994,10 @@ impl<'src> AsciiDocCell<'src> {
     /// (`= Title`) *and* the cell's effective `showtitle`/`notitle` state means
     /// that title is shown; otherwise it is `None`.
     pub fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+        match self {
+            Self::Borrowed(cell) => cell.title.as_deref(),
+            Self::Owned(cell) => cell.borrow_dependent().title.as_deref(),
+        }
     }
 
     /// Returns `true` when the cell's `doctype` resolves to `inline`.
@@ -1951,19 +2005,77 @@ impl<'src> AsciiDocCell<'src> {
     /// An `inline` document renders a lone paragraph as bare inline content,
     /// without the enclosing block wrapper.
     pub fn is_inline(&self) -> bool {
-        self.inline
+        match self {
+            Self::Borrowed(cell) => cell.inline,
+            Self::Owned(cell) => cell.borrow_dependent().inline,
+        }
     }
 
     /// Returns the blocks parsed from the cell's content.
-    pub fn blocks(&self) -> &[Block<'src>] {
-        &self.blocks
+    pub fn blocks(&self) -> &[Block<'_>] {
+        match self {
+            Self::Borrowed(cell) => &cell.blocks,
+            Self::Owned(cell) => &cell.borrow_dependent().blocks,
+        }
     }
 
-    /// Returns a mutable iterator over the cell's blocks (used to resolve
-    /// deferred cross-references).
-    fn blocks_mut(&mut self) -> impl Iterator<Item = &mut Block<'src>> {
-        self.blocks.iter_mut()
+    /// Resolves any deferred cross-references in the cell's blocks.
+    fn resolve_references(
+        &mut self,
+        resolver: &dyn ReferenceResolver,
+        renderer: &dyn InlineSubstitutionRenderer,
+        warnings: &mut Vec<ReferenceWarning>,
+    ) {
+        match self {
+            Self::Borrowed(cell) => {
+                for block in &mut cell.blocks {
+                    block.resolve_references(resolver, renderer, warnings);
+                }
+            }
+            // The owned store is shared behind an `Arc`, but references are
+            // resolved immediately after parsing while the cell is still its sole
+            // owner, so `get_mut` succeeds.
+            Self::Owned(cell) => {
+                if let Some(cell) = Arc::get_mut(cell) {
+                    cell.with_dependent_mut(|_, dependent| {
+                        for block in &mut dependent.blocks {
+                            block.resolve_references(resolver, renderer, warnings);
+                        }
+                    });
+                }
+            }
+        }
     }
+}
+
+/// An [`AsciiDoc`](TableCellContent::AsciiDoc) cell parsed in place from the
+/// parent document's source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowedCell<'src> {
+    title: Option<String>,
+    inline: bool,
+    blocks: Vec<Block<'src>>,
+}
+
+self_cell! {
+    /// An [`AsciiDoc`](TableCellContent::AsciiDoc) cell that owns its
+    /// (include-expanded) source, with the parsed blocks borrowing from it.
+    pub struct OwnedCell {
+        owner: String,
+
+        #[covariant]
+        dependent: OwnedCellInner,
+    }
+
+    impl {Debug, Eq, PartialEq}
+}
+
+/// The parsed contents of an [`OwnedCell`], borrowing its owned source.
+#[derive(Debug, Eq, PartialEq)]
+struct OwnedCellInner<'src> {
+    title: Option<String>,
+    inline: bool,
+    blocks: Vec<Block<'src>>,
 }
 
 /// Parse the value of the `cols` attribute into a list of columns, mirroring

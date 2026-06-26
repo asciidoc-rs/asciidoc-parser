@@ -1309,10 +1309,24 @@ mod psv {
         assert_xpath(&doc, "(//p)[1][text()=\"paragraph\"]", 1);
     }
 
-    // Out of scope (omitted): include files / preprocessor directives are not
-    // supported, so "preprocessor directive on first line of an AsciiDoc table
-    // cell should be processed" and "error about unresolved preprocessor
-    // directive ... should have correct cursor" are not ported.
+    #[test]
+    fn preprocessor_directive_on_first_line_of_an_asciidoc_table_cell_should_be_processed() {
+        use crate::tests::prelude::inline_file_handler::InlineFileHandler;
+
+        let handler =
+            InlineFileHandler::from_pairs([("fixtures/include-file.adoc", "included content")]);
+        let mut parser = Parser::default().with_include_file_handler(handler);
+        let doc = parser.parse("|===\na|include::fixtures/include-file.adoc[]\n|===");
+
+        // The `include::` on the cell's first line is expanded, so the cell holds
+        // the included content rather than the literal directive.
+        assert_rendered_contains(&doc, "included content");
+    }
+
+    // Deferred: "error about unresolved preprocessor directive on first line of
+    // an AsciiDoc table cell should have correct cursor" (Ruby 1728) asserts the
+    // file/line cursor of the unresolved-directive error, which needs the cell's
+    // nested source map threaded back to the parent — not yet implemented.
 
     #[test]
     #[ignore]
