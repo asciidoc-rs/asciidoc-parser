@@ -1421,24 +1421,26 @@ mod psv {
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): AsciiDoc table cell should not inherit the toc setting.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/546): AsciiDoc
+    // table cell should not inherit the toc setting.
     fn asciidoc_table_cell_should_not_inherit_toc_setting_from_parent_document() {}
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): enabling toc in an AsciiDoc table cell.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/546): enabling
+    // toc in an AsciiDoc table cell.
     fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell() {}
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): enabling toc in an AsciiDoc table cell even if hard unset
-    // by the API.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/546): enabling
+    // toc in an AsciiDoc table cell even if hard unset by the API.
     fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell_even_if_hard_unset_by_api() {}
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): enabling toc in both the outer document and an AsciiDoc
-    // table cell.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/546): enabling
+    // toc in both the outer document and an AsciiDoc table cell.
     fn should_be_able_to_enable_toc_in_both_outer_document_and_in_an_asciidoc_table_cell() {}
 
     #[test]
