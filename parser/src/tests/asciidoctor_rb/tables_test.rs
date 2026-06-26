@@ -1588,7 +1588,7 @@ mod dsv {
 }
 
 mod csv {
-    use crate::tests::prelude::*;
+    use crate::tests::prelude::{inline_file_handler::InlineFileHandler, *};
 
     #[test]
     fn should_treat_trailing_comma_as_an_empty_cell() {
@@ -1644,9 +1644,28 @@ mod csv {
         );
     }
 
-    // Out of scope (omitted): include files are not supported, so "should not
-    // drop trailing empty cell in TSV data when loaded from an include file" is
-    // not ported.
+    #[test]
+    fn should_not_drop_trailing_empty_cell_in_tsv_data_when_loaded_from_an_include_file() {
+        // The `1\t2\t` record ends with a tab, so its third field is empty. The
+        // include is the delivery mechanism; the behavior under test is that the
+        // trailing empty cell survives.
+        let handler = InlineFileHandler::from_pairs([(
+            "fixtures/data.tsv",
+            "First\tSecond\tThird\na\tb\tc\n1\t2\t\nx\ty\tz\n",
+        )]);
+        let mut parser = Parser::default().with_include_file_handler(handler);
+        let doc = parser.parse("[%header,format=tsv]\n|===\ninclude::fixtures/data.tsv[]\n|===");
+
+        assert_css(&doc, "table > tbody > tr", 3);
+        assert_css(&doc, "table > tbody > tr:nth-child(1) > td", 3);
+        assert_css(&doc, "table > tbody > tr:nth-child(2) > td", 3);
+        assert_css(&doc, "table > tbody > tr:nth-child(3) > td", 3);
+        assert_css(
+            &doc,
+            "table > tbody > tr:nth-child(2) > td:nth-child(3):empty",
+            1,
+        );
+    }
 
     #[test]
     fn mixed_unquoted_records_and_quoted_records_with_escaped_quotes_commas_and_wrapped_lines() {

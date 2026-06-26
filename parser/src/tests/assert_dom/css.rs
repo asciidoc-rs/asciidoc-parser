@@ -13,6 +13,9 @@ use crate::tests::assert_dom::virtual_dom::VirtualNode;
 /// - `tag > child` - Find direct children only
 /// - `tag:first-of-type` - Find first occurrence of tag among siblings
 /// - `tag:not(selector)` - Find elements that do NOT match the inner selector
+/// - `tag:nth-child(N)` - Find the element that is the Nth child of its parent
+/// - `tag:empty` - Find elements with no children and no text
+/// - Pseudo-classes may be chained, e.g. `td:nth-child(3):empty`
 ///
 /// # Example
 ///
@@ -346,7 +349,8 @@ fn query_with_direct_child_constraint<'a>(
 /// - ID selector: `[@id="foo"]` or `#foo`
 /// - Text content: `[text()="value"]`
 /// - Index: `[1]`, `[2]`, etc. (handled by `apply_numeric_predicate`)
-/// - Pseudo-selectors: `:first-of-type`
+/// - Pseudo-selectors: `:first-of-type`, `:not(...)`, `:nth-child(N)`, `:empty`
+///   (and chains thereof, e.g. `:nth-child(3):empty`)
 fn matches_selector_with_context(
     node: &VirtualNode,
     selector: &str,
@@ -436,8 +440,39 @@ fn matches_selector_with_context(
     true
 }
 
-/// Checks if a node matches a pseudo-selector.
+/// Checks if a node matches a pseudo-selector, which may be a chain of several
+/// pseudo-classes (e.g. `nth-child(3):empty`). Every pseudo-class in the chain
+/// must match.
 fn matches_pseudo_selector(node: &VirtualNode, pseudo: &str, parent: Option<&VirtualNode>) -> bool {
+    split_pseudo_chain(pseudo.trim())
+        .iter()
+        .all(|part| matches_single_pseudo(node, part, parent))
+}
+
+/// Splits a pseudo-selector chain on top-level `:` separators, leaving colons
+/// inside parentheses (e.g. a nested `:not(...)`) untouched.
+/// `nth-child(3):empty` becomes `["nth-child(3)", "empty"]`.
+fn split_pseudo_chain(pseudo: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0;
+    for (i, ch) in pseudo.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ':' if depth == 0 => {
+                parts.push(&pseudo[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&pseudo[start..]);
+    parts.into_iter().filter(|p| !p.is_empty()).collect()
+}
+
+/// Checks if a node matches a single pseudo-class.
+fn matches_single_pseudo(node: &VirtualNode, pseudo: &str, parent: Option<&VirtualNode>) -> bool {
     let pseudo = pseudo.trim();
 
     // Handle :not() pseudo-class.
@@ -447,6 +482,20 @@ fn matches_pseudo_selector(node: &VirtualNode, pseudo: &str, parent: Option<&Vir
             return !matches_inner_not_selector(node, inner.trim());
         }
         return false; // Malformed :not().
+    }
+
+    // Handle :nth-child(N) pseudo-class (1-indexed position among siblings).
+    if let Some(arg) = pseudo.strip_prefix("nth-child(") {
+        if let Some(arg) = arg.strip_suffix(')')
+            && let Ok(n) = arg.trim().parse::<usize>()
+            && let Some(parent) = parent
+        {
+            return parent
+                .children
+                .get(n.wrapping_sub(1))
+                .is_some_and(|child| std::ptr::eq(child as *const _, node as *const _));
+        }
+        return false; // Malformed or unsupported :nth-child() argument.
     }
 
     match pseudo {
@@ -779,6 +828,31 @@ mod tests {
             1,
             "Should find 1 .olist that is adjacent sibling of p inside li"
         );
+    }
+
+    #[test]
+    fn query_nth_child_and_pseudo_chain() {
+        // A two-row, three-column table whose middle row has an empty trailing
+        // cell. Exercises `:nth-child(N)` and a pseudo chain (`:nth-child(3):empty`).
+        let doc = Parser::default().parse("[format=csv]\n|===\na,b,c\n1,2,\n|===");
+        let vdom = doc.to_virtual_dom();
+
+        assert_eq!(query_css(&vdom, "tbody > tr").len(), 2);
+        assert_eq!(query_css(&vdom, "tbody > tr:nth-child(1) > td").len(), 3);
+        assert_eq!(query_css(&vdom, "tbody > tr:nth-child(2) > td").len(), 3);
+
+        // Only the second row's third cell is empty.
+        assert_eq!(
+            query_css(&vdom, "tbody > tr:nth-child(2) > td:nth-child(3):empty").len(),
+            1
+        );
+        assert_eq!(
+            query_css(&vdom, "tbody > tr:nth-child(1) > td:nth-child(3):empty").len(),
+            0
+        );
+
+        // A position that no sibling occupies matches nothing.
+        assert_eq!(query_css(&vdom, "tbody > tr:nth-child(3)").len(), 0);
     }
 
     #[test]
