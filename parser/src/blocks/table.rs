@@ -1010,13 +1010,17 @@ fn finalize_columns(
 struct TableBody<'src> {
     /// The region between the opening and closing delimiters.
     inside: Span<'src>,
+
     /// The resolved cell separator.
     separator: String,
+
     /// Columns parsed from the `cols` attribute (empty when the attribute is
     /// absent, in which case the column count is implicit).
     cols_attr: Vec<TableColumn>,
+
     /// Whether the table carries the `autowidth` option.
     autowidth: bool,
+
     /// Whether the first row is a header row.
     has_header: bool,
 }
@@ -1055,6 +1059,7 @@ fn build_psv_table<'src>(
         autowidth,
         has_header,
     } = body;
+
     let separator = separator.as_str();
 
     // When the column count is implicit, it is the number of column slots in the
@@ -1083,6 +1088,7 @@ fn build_psv_table<'src>(
             warning: WarningType::TableMissingLeadingSeparator,
         });
     }
+
     let raw_cells = expand_duplicates(raw_cells);
 
     // A table can never have more rows than it has cells, so a row span is
@@ -1097,6 +1103,7 @@ fn build_psv_table<'src>(
     let max_rowspan = raw_cells.len().saturating_add(1);
 
     let mut raw_rows: Vec<Vec<RawCell<'src>>> = vec![];
+
     if ncols > 0 {
         // A queue: each completed row consumes the slots carried into it from the
         // front (`pop_front`), while a multi-row cell reserves slots in the rows it
@@ -1207,6 +1214,7 @@ fn build_data_table<'src>(
         autowidth,
         has_header,
     } = body;
+
     let separator = separator.as_str();
 
     // DSV is parsed by its own, simpler rules; CSV and TSV share their rules and
@@ -1490,6 +1498,7 @@ fn parse_dsv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField
         let mut fields_in_row = 0usize;
         let mut field_start = i;
         let mut p = i;
+
         while p < line_end {
             // A backslash that escapes the separator (`\:`) is not a boundary;
             // skip past both so the separator stays in the value.
@@ -1637,11 +1646,13 @@ fn process_content<'src>(
                 let mut owned_warnings: Vec<Warning<'_>> = vec![];
                 let (title, inline, blocks) =
                     parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
+
                 debug_assert!(
                     owned_warnings.is_empty(),
                     "warnings from an include-expanded AsciiDoc cell are dropped; \
                      propagate them before adding any to this path"
                 );
+
                 OwnedCellInner {
                     title,
                     inline,
@@ -1715,6 +1726,7 @@ fn parse_asciidoc_cell_body<'src>(
         parser.attribute_value("doctype"),
         InterpretedValue::Value(ref v) if v == "inline"
     );
+
     let title = if parser.resolve_show_title(true) {
         title_source.map(|span| {
             let mut content = Content::from(span);
@@ -2043,6 +2055,7 @@ impl<'src> AsciiDocCell<'src> {
                     block.resolve_references(resolver, renderer, warnings);
                 }
             }
+
             // The owned store is shared behind an `Arc`, but references are
             // resolved immediately after parsing while the cell is still its sole
             // owner, so `get_mut` succeeds.
@@ -2170,14 +2183,17 @@ fn parse_col_spec(spec: &str) -> TableColumn {
             h_align = HorizontalAlignment::Left;
             rest = &rest[1..];
         }
+
         Some(b'>') => {
             h_align = HorizontalAlignment::Right;
             rest = &rest[1..];
         }
+
         Some(b'^') => {
             h_align = HorizontalAlignment::Center;
             rest = &rest[1..];
         }
+
         _ => {}
     }
 
@@ -2189,14 +2205,17 @@ fn parse_col_spec(spec: &str) -> TableColumn {
                 v_align = VerticalAlignment::Top;
                 rest = &after_dot[1..];
             }
+
             Some(b'>') => {
                 v_align = VerticalAlignment::Bottom;
                 rest = &after_dot[1..];
             }
+
             Some(b'^') => {
                 v_align = VerticalAlignment::Middle;
                 rest = &after_dot[1..];
             }
+
             _ => {}
         }
     }
@@ -2315,12 +2334,14 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
         .iter()
         .map(|c| c.spec.repeat.min(MAX_DUPLICATION_FACTOR).saturating_sub(1))
         .sum();
+
     let mut expanded = Vec::with_capacity(cells.len() + extra);
     for cell in cells {
         for _ in 0..cell.spec.repeat.min(MAX_DUPLICATION_FACTOR) {
             expanded.push(cell);
         }
     }
+
     expanded
 }
 
@@ -2351,19 +2372,23 @@ fn scan_cells<'src>(
     let data = region.data();
     let bytes = data.as_bytes();
     let len = bytes.len();
+
     // A zero-length separator would never advance; treat it as a single byte to
     // stay safe. (The resolver never produces an empty separator.)
     let sep_len = separator.len().max(1);
 
     let mut cells: Vec<RawCell<'src>> = vec![];
+
     // The content start and specifier of the cell currently being accumulated.
     let mut content_start: Option<usize> = None;
+
     let mut cur_spec = CellSpec::default();
+
     // The span of a cell recovered from content that precedes the first
     // separator (see below); `Some` drives a missing-leading-separator warning.
     let mut recovered: Option<Span<'src>> = None;
-    let mut i = 0;
 
+    let mut i = 0;
     while i < len {
         if data
             .get(i..)
@@ -2419,6 +2444,7 @@ fn scan_cells<'src>(
                         content: region.slice(start..content_end),
                     });
                 }
+
                 None => {
                     // No cell has been opened yet, so this is the table's first
                     // separator. Non-blank content in front of it means the first
@@ -2435,6 +2461,7 @@ fn scan_cells<'src>(
                     }
                 }
             }
+
             cur_spec = next_spec;
             content_start = Some(i + sep_len);
             i += sep_len;
@@ -2492,12 +2519,15 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
     let mut rowspan = 1;
     let mut repeat = 1;
     let col_start = i;
+
     let mut j = i;
     while matches!(b.get(j).copied(), Some(c) if c.is_ascii_digit()) {
         j += 1;
     }
+
     let col_end = j;
     let mut has_dot = false;
+
     let mut row_start = j;
     if b.get(j).copied() == Some(b'.') {
         has_dot = true;
@@ -2507,6 +2537,7 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
             j += 1;
         }
     }
+
     let row_end = j;
     match b.get(j).copied() {
         // Span: the factor is interpreted as a colspan and rowspan. A missing
@@ -2527,6 +2558,7 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
             }
             i = j + 1;
         }
+
         // Duplication: the factor is interpreted as a duplication count, so the
         // cell's content and properties are cloned into `<n>` consecutive cells.
         // Only the column part of the factor is the count; any row part (`<n>.`)
@@ -2540,6 +2572,7 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
             }
             i = j + 1;
         }
+
         _ => {}
     }
 
@@ -2550,14 +2583,17 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
             h_align = Some(HorizontalAlignment::Left);
             i += 1;
         }
+
         Some(b'>') => {
             h_align = Some(HorizontalAlignment::Right);
             i += 1;
         }
+
         Some(b'^') => {
             h_align = Some(HorizontalAlignment::Center);
             i += 1;
         }
+
         _ => {}
     }
 
@@ -2569,14 +2605,17 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
                 v_align = Some(VerticalAlignment::Top);
                 i += 2;
             }
+
             Some(b'>') => {
                 v_align = Some(VerticalAlignment::Bottom);
                 i += 2;
             }
+
             Some(b'^') => {
                 v_align = Some(VerticalAlignment::Middle);
                 i += 2;
             }
+
             _ => {}
         }
     }
@@ -2650,6 +2689,7 @@ fn trim_cell_content(s: Span<'_>, style: ColumnStyle) -> Span<'_> {
             }
             s.slice(start..end)
         }
+
         ColumnStyle::AsciiDoc => {
             let end = data.trim_end().len();
             if data[..end].starts_with('\n') {
@@ -2663,6 +2703,7 @@ fn trim_cell_content(s: Span<'_>, style: ColumnStyle) -> Span<'_> {
                 s.slice(start..end)
             }
         }
+
         _ => trim_surrounding_whitespace(s),
     }
 }
