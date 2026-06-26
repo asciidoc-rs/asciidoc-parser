@@ -1371,10 +1371,9 @@ mod psv {
     fn footnotes_should_not_be_shared_between_an_asciidoc_table_cell_and_the_main_document() {}
 
     // Backend-specific test omitted: DocBook ("callout numbers should be
-    // globally unique, including AsciiDoc table cells").
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311): the
-    // underlying feature (callouts, including global numbering across AsciiDoc
-    // table cells) is unimplemented; revisit when callouts land.
+    // globally unique, including AsciiDoc table cells"). Out of scope: it
+    // asserts only against DocBook output (`backend: 'docbook'`, `//co` /
+    // `//callout` elements), which the crate does not target.
 
     // Out of scope (omitted): compatibility mode is a stated limitation of the
     // crate, so the three "compat mode ... in AsciiDoc table cell" tests are not
