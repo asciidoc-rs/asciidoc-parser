@@ -555,20 +555,34 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
         assert_eq!(block1.content().rendered(), "Stuff &#169; nonsense");
     }
 
-    #[ignore]
     #[test]
     fn tables() {
-        to_do_verifies!(
+        verifies!(
             r#"
 |Tables |Varies
 
 "#
         );
 
-        todo!("Write test once table parsing is implemented");
+        // The replacements substitution applies to default table cells but not to
+        // literal (`l`) cells, hence "Varies".
+        let doc = Parser::default().parse("|===\n|(C)\nl|(C)\n|===");
 
-        // Blocked on https://github.com/asciidoc-rs/asciidoc-parser/issues/296:
-        // Implement table parsing
+        let Some(Block::Table(table)) = doc.nested_blocks().next() else {
+            panic!("expected a table block");
+        };
+
+        let cells: Vec<_> = table.body_rows().iter().flat_map(|r| r.cells()).collect();
+
+        let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
+            panic!("expected simple cell content");
+        };
+        assert_eq!(default_cell.rendered(), "&#169;");
+
+        let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
+            panic!("expected simple cell content");
+        };
+        assert_eq!(literal_cell.rendered(), "(C)");
     }
 
     #[test]

@@ -512,20 +512,34 @@ mod default_quotes_substitution {
         assert_eq!(block1.content().rendered(), "Stuff over <em>nonsense</em>");
     }
 
-    #[ignore]
     #[test]
     fn tables() {
-        to_do_verifies!(
+        verifies!(
             r#"
-|Tables |{y}
+|Tables |Varies
 
 "#
         );
 
-        todo!("Write test once table parsing is implemented");
+        // The quotes substitution applies to default table cells but not to
+        // literal (`l`) cells, hence "Varies".
+        let doc = Parser::default().parse("|===\n|*bold*\nl|*lit*\n|===");
 
-        // Blocked on https://github.com/asciidoc-rs/asciidoc-parser/issues/296:
-        // Implement table parsing
+        let Some(Block::Table(table)) = doc.nested_blocks().next() else {
+            panic!("expected a table block");
+        };
+
+        let cells: Vec<_> = table.body_rows().iter().flat_map(|r| r.cells()).collect();
+
+        let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
+            panic!("expected simple cell content");
+        };
+        assert_eq!(default_cell.rendered(), "<strong>bold</strong>");
+
+        let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
+            panic!("expected simple cell content");
+        };
+        assert_eq!(literal_cell.rendered(), "*lit*");
     }
 
     #[test]
