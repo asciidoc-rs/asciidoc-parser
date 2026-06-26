@@ -31,12 +31,11 @@ fn simple_text(cell: &crate::blocks::TableCell<'_>) -> String {
 /// Return the single nested [`TableBlock`] held by an AsciiDoc `cell`.
 ///
 /// [`TableBlock`]: crate::blocks::TableBlock
-fn nested_table<'a, 'src>(
-    cell: &'a crate::blocks::TableCell<'src>,
-) -> &'a crate::blocks::TableBlock<'src> {
+fn nested_table<'a>(cell: &'a crate::blocks::TableCell<'_>) -> &'a crate::blocks::TableBlock<'a> {
     match cell.content() {
-        TableCellContent::AsciiDoc(blocks) => {
-            let tables: Vec<&crate::blocks::TableBlock<'src>> = blocks
+        TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
+            let tables: Vec<&crate::blocks::TableBlock<'_>> = blocks
                 .iter()
                 .filter_map(|block| match block {
                     crate::blocks::Block::Table(table) => Some(table),

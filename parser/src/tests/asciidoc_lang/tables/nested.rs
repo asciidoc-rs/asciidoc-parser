@@ -20,12 +20,11 @@ fn parse_table(source: &str) -> crate::blocks::TableBlock<'_> {
 /// Return the single nested [`TableBlock`] held by `cell`, panicking if the
 /// cell is not an [`AsciiDoc`](crate::blocks::TableCellContent::AsciiDoc) cell
 /// or does not contain exactly one table.
-fn nested_table<'a, 'src>(
-    cell: &'a crate::blocks::TableCell<'src>,
-) -> &'a crate::blocks::TableBlock<'src> {
+fn nested_table<'a>(cell: &'a crate::blocks::TableCell<'_>) -> &'a crate::blocks::TableBlock<'a> {
     match cell.content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
-            let tables: Vec<&crate::blocks::TableBlock<'src>> = blocks
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
+            let tables: Vec<&crate::blocks::TableBlock<'_>> = blocks
                 .iter()
                 .filter_map(|block| match block {
                     crate::blocks::Block::Table(table) => Some(table),
@@ -81,7 +80,8 @@ To distinguish the inner table from the enclosing one, you need to use `!===` as
     // The AsciiDoc cell holds a nested table in addition to its normal block
     // content (the leading `Cell 2.2` paragraph).
     match last_cell.content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             assert!(
                 blocks
                     .iter()

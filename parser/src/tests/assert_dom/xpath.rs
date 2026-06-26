@@ -1133,6 +1133,18 @@ fn matches_single_predicate(node: &VirtualNode, predicate: &str) -> bool {
         }
     }
 
+    // Check for attribute-existence predicates `[@attr]` (no value).
+    if let Some(attr_name) = predicate.strip_prefix('@')
+        && !attr_name.contains('=')
+    {
+        let attr_name = attr_name.trim();
+        return match attr_name {
+            "class" => !node.classes.is_empty(),
+            "id" => node.id.is_some(),
+            _ => node.attributes.contains_key(attr_name),
+        };
+    }
+
     // Numeric predicate [N]: Would need to be handled by caller with context.
     // For now, just return `true` to pass through.
     true

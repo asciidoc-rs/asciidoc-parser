@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use self_cell::self_cell;
+
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
@@ -6,7 +10,10 @@ use crate::{
     },
     content::{Content, SubstitutionGroup},
     document::InterpretedValue,
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning},
+    parser::{
+        InlineSubstitutionRenderer, ModificationContext, ReferenceResolver, ReferenceWarning,
+        preprocessor::preprocess,
+    },
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -217,7 +224,22 @@ impl<'src> TableBlock<'src> {
         let line1_blank = line1.item.data().trim().is_empty();
         let line2_blank =
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
-        let has_header = opts_header || (!opts_noheader && !line1_blank && line2_blank);
+
+        // An implicit header additionally requires that the first row be complete
+        // on the first line. If the first cell spans multiple lines — for PSV,
+        // the first non-blank line after the blank gap continues the cell instead
+        // of starting a new one; for CSV/TSV, the first line opens a quoted value
+        // that is not closed on that line — there is no implicit header (matching
+        // Asciidoctor, which cancels the implicit header in these cases).
+        let first_row_complete = match data_format {
+            DataFormat::Psv => first_nonblank_line(line1.after)
+                .is_none_or(|line| psv_line_starts_cell(line.data(), separator.as_str())),
+            DataFormat::Csv | DataFormat::Tsv => !line_has_unclosed_quote(line1.item.data()),
+            DataFormat::Dsv => true,
+        };
+
+        let has_header =
+            opts_header || (!opts_noheader && !line1_blank && line2_blank && first_row_complete);
 
         // A titled table is given a caption (e.g. "Table 1. ") that a processor
         // prepends to the title.
@@ -1041,6 +1063,7 @@ fn build_psv_table<'src>(
     // single-column slots (one per clone).
     let first_line_cells: usize =
         scan_cells(inside.discard_empty_lines().take_line().item, separator)
+            .0
             .iter()
             .map(|c| c.spec.colspan.max(1) * c.spec.repeat.min(MAX_DUPLICATION_FACTOR))
             .sum();
@@ -1053,7 +1076,14 @@ fn build_psv_table<'src>(
 
     let columns = finalize_columns(cols_attr, ncols, autowidth);
 
-    let raw_cells = expand_duplicates(scan_cells(inside, separator));
+    let (raw_cells, recovered_first_cell) = scan_cells(inside, separator);
+    if let Some(source) = recovered_first_cell {
+        warnings.push(Warning {
+            source,
+            warning: WarningType::TableMissingLeadingSeparator,
+        });
+    }
+    let raw_cells = expand_duplicates(raw_cells);
 
     // A table can never have more rows than it has cells, so a row span is
     // clamped to the cell count for the `active_rowspans` bookkeeping below: a
@@ -1116,10 +1146,15 @@ fn build_psv_table<'src>(
             }
         }
 
-        // A trailing incomplete row (one that never reached `ncols`) is still
-        // emitted, matching the existing handling of short final rows.
-        if !current_row.is_empty() {
-            raw_rows.push(current_row);
+        // If the table ends mid-row, the cells accumulated since the last
+        // complete row never filled `ncols`. Matching Asciidoctor's
+        // `close_table`, that incomplete row is dropped and an error is logged
+        // against its last cell.
+        if let Some(last) = current_row.last() {
+            warnings.push(Warning {
+                source: last.content,
+                warning: WarningType::TableDroppingIncompleteRowAtEndOfTable,
+            });
         }
     }
 
@@ -1176,7 +1211,7 @@ fn build_data_table<'src>(
     let (fields, first_row_len) = if data_format == DataFormat::Dsv {
         parse_dsv_fields(inside, separator)
     } else {
-        parse_csv_fields(inside, separator)
+        parse_csv_fields(inside, separator, warnings)
     };
 
     let ncols = if cols_attr.is_empty() {
@@ -1238,7 +1273,11 @@ struct DataField<'src> {
 /// value. As a result a value whose opening quote is never properly closed (or
 /// that has trailing characters after its closing quote) keeps its quotes and
 /// absorbs the following separators, rather than being treated as enclosed.
-fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField<'src>>, usize) {
+fn parse_csv_fields<'src>(
+    region: Span<'src>,
+    separator: &str,
+    warnings: &mut Vec<Warning<'src>>,
+) -> (Vec<DataField<'src>>, usize) {
     let data = region.data();
     let n = data.len();
     let sep_len = separator.len().max(1);
@@ -1279,7 +1318,7 @@ fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField
         // blank cell that follows a separator on a populated line is kept.
         let blank_skip = (at_nl || at_eof) && fields_in_row == 0 && raw.trim().is_empty();
         if !blank_skip {
-            fields.push(make_csv_field(region, cell_start, i));
+            fields.push(make_csv_field(region, cell_start, i, warnings));
             fields_in_row += 1;
             if !first_row_done {
                 first_row_len = fields_in_row;
@@ -1312,37 +1351,42 @@ fn parse_csv_fields<'src>(region: Span<'src>, separator: &str) -> (Vec<DataField
 /// applying Asciidoctor's `close_cell` value processing.
 ///
 /// The value is stripped of surrounding whitespace; then, if it is enclosed in
-/// double quotes, the quotes are removed and the inner value is stripped again;
-/// finally any run of consecutive double quotes is collapsed to one (so an
-/// escaped `""` becomes a single `"`). A value that is not enclosed (no leading
-/// quote, an unclosed quote, or trailing characters after the closing quote)
-/// keeps its quotes and is only collapsed.
-fn make_csv_field<'src>(region: Span<'src>, start: usize, end: usize) -> DataField<'src> {
+/// double quotes, the quotes are removed and the inner value is stripped again,
+/// so the field's [content](DataField::content) span points at the actual value
+/// (this matters for an AsciiDoc cell, which parses that span). Finally any run
+/// of consecutive double quotes is collapsed to one (so an escaped `""` becomes
+/// a single `"`). A value that is not enclosed (no leading quote, or trailing
+/// characters after the closing quote) keeps its quotes and is only collapsed.
+///
+/// A lone double quote is an unclosed quoted value: it logs an error and the
+/// cell is set to empty (matching Asciidoctor).
+fn make_csv_field<'src>(
+    region: Span<'src>,
+    start: usize,
+    end: usize,
+    warnings: &mut Vec<Warning<'src>>,
+) -> DataField<'src> {
     let trimmed = trim_surrounding_whitespace(region.slice(start..end));
-    let value = csv_cell_value(trimmed.data());
-    let replacement = (value != trimmed.data()).then_some(value);
-    DataField {
-        content: trimmed,
-        replacement,
-    }
-}
+    let data = trimmed.data();
 
-/// Apply Asciidoctor's CSV value processing to an already-stripped cell value:
-/// unquote an enclosed value and collapse escaped double quotes (`""` -> `"`).
-fn csv_cell_value(text: &str) -> String {
-    if text.is_empty() || !text.contains('"') {
-        return text.to_string();
-    }
-
-    // An enclosed value (leading and trailing quote) has its quotes removed and
-    // is stripped again; a lone `"` becomes empty. Anything else keeps its text.
-    if text.starts_with('"') && text.ends_with('"') {
-        match text.get(1..text.len() - 1) {
-            Some(inner) => squeeze_quotes(inner.trim()),
-            None => String::new(),
-        }
+    let content = if data == "\"" {
+        warnings.push(Warning {
+            source: trimmed,
+            warning: WarningType::TableCsvDataHasUnclosedQuote,
+        });
+        trimmed.slice(0..0)
+    } else if data.len() >= 2 && data.starts_with('"') && data.ends_with('"') {
+        trim_surrounding_whitespace(trimmed.slice(1..data.len() - 1))
     } else {
-        squeeze_quotes(text)
+        trimmed
+    };
+
+    let value = squeeze_quotes(content.data());
+    let replacement = (value != content.data()).then_some(value);
+
+    DataField {
+        content,
+        replacement,
     }
 }
 
@@ -1544,28 +1588,68 @@ fn process_content<'src>(
         // cell may assign it (matching Asciidoctor, which here diverges from the
         // spec's "set or explicitly unset" wording). The lock set is saved and
         // restored so it applies only within the cell and nests correctly.
+        // An attribute set in the parent is locked, as is one hard set or unset
+        // through the API (its modification context is `ApiOnly`) even though it
+        // is unset — matching Asciidoctor, where an API-controlled attribute can
+        // never be overridden in a cell. An attribute merely unset in the parent
+        // document is not locked, so the cell may assign it.
         let saved_locks = parser.locked_attribute_names.clone();
         for (name, value) in saved_attributes.iter() {
-            if !matches!(value.value, InterpretedValue::Unset)
+            let api_locked = value.modification_context == ModificationContext::ApiOnly;
+            if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
                 && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name.as_str())
             {
                 parser.locked_attribute_names.insert(name.clone());
             }
         }
 
-        // Mark that we are inside an AsciiDoc cell (a nested document) for the
-        // duration of the cell, so a table found within defaults its cell
-        // separator to `!` rather than `|` (matching Asciidoctor's
-        // `Document#nested?`). The depth is restored afterward so the marker is
-        // scoped to the cell and nests correctly.
-        parser.nested_document_depth += 1;
-        let mut maw = parse_blocks_until(trimmed, |_| false, parser);
-        parser.nested_document_depth -= 1;
+        // The modifiable attributes may always be changed inside a cell, even
+        // when the parent or the API set them with a restrictive modification
+        // context. Relax their context for the duration of the cell so a body
+        // assignment is honored; the snapshot restore reverts it afterward.
+        for name in ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES {
+            if let Some(attr) = parser.attribute_values.get_mut(*name) {
+                attr.modification_context = ModificationContext::Anywhere;
+            }
+        }
+
+        // A cell does not inherit the parent's doctype; it resets to the default
+        // (`article`). The cell body may still set its own doctype, and the
+        // derived `backend-html5-doctype-*` attribute is refreshed to match.
+        parser.force_doctype("article");
+
+        // A cell whose content holds a preprocessor directive (an `include::`)
+        // is parsed from an owned, expanded source the cell carries; every other
+        // cell is parsed in place from the parent document's source, which keeps
+        // its spans (and line numbers) and avoids a copy.
+        let cell = if content_has_directive(trimmed.data()) {
+            let (expanded, _source_map) = preprocess(trimmed.data(), parser);
+            let owned = OwnedCell::new(expanded, |source| {
+                // Warnings from the owned parse borrow the owned source and so
+                // cannot escape it; the include path is rare and currently
+                // warning-free, so they are dropped here.
+                let mut owned_warnings: Vec<Warning<'_>> = vec![];
+                let (title, inline, blocks) =
+                    parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
+                OwnedCellInner {
+                    title,
+                    inline,
+                    blocks,
+                }
+            });
+            AsciiDocCell::Owned(Arc::new(owned))
+        } else {
+            let (title, inline, blocks) = parse_asciidoc_cell_body(trimmed, parser, warnings);
+            AsciiDocCell::Borrowed(BorrowedCell {
+                title,
+                inline,
+                blocks,
+            })
+        };
 
         parser.locked_attribute_names = saved_locks;
         parser.attribute_values = saved_attributes;
-        warnings.append(&mut maw.warnings);
-        TableCellContent::AsciiDoc(maw.item.item)
+        TableCellContent::AsciiDoc(cell)
     } else {
         let mut content = match replacement {
             Some(replacement) => Content::from_filtered(trimmed, replacement),
@@ -1581,6 +1665,63 @@ fn process_content<'src>(
 
         TableCellContent::Simple(content)
     }
+}
+
+/// Parses the body of an AsciiDoc table cell — a nested, standalone AsciiDoc
+/// document — returning its (shown) title, whether its doctype is `inline`, and
+/// its blocks.
+///
+/// A leading level-0 title line (`= Title`) is the nested document's title
+/// rather than a section, so it is split off and rendered here (a level-0
+/// heading is otherwise rejected in block parsing). The render-time decisions
+/// (`inline`, and whether the title is shown) depend on the cell's now-mutated
+/// attribute state, so they are resolved before the caller restores the
+/// parent's attribute snapshot.
+fn parse_asciidoc_cell_body<'src>(
+    content: Span<'src>,
+    parser: &mut Parser,
+    warnings: &mut Vec<Warning<'src>>,
+) -> (Option<String>, bool, Vec<Block<'src>>) {
+    let first_line = content.take_line();
+    let (title_source, body) = if first_line.item.data().starts_with("= ") {
+        (
+            Some(first_line.item.discard(2).discard_whitespace()),
+            first_line.after,
+        )
+    } else {
+        (None, content)
+    };
+
+    // Mark that we are inside an AsciiDoc cell (a nested document) for the
+    // duration of the parse, so a table found within defaults its cell separator
+    // to `!` rather than `|` (matching Asciidoctor's `Document#nested?`).
+    parser.nested_document_depth += 1;
+    let mut maw = parse_blocks_until(body, |_| false, parser);
+    parser.nested_document_depth -= 1;
+    warnings.append(&mut maw.warnings);
+
+    let inline = matches!(
+        parser.attribute_value("doctype"),
+        InterpretedValue::Value(ref v) if v == "inline"
+    );
+    let title = if parser.resolve_show_title(true) {
+        title_source.map(|span| {
+            let mut content = Content::from(span);
+            SubstitutionGroup::Header.apply(&mut content, parser, None);
+            content.rendered().to_string()
+        })
+    } else {
+        None
+    };
+
+    (title, inline, maw.item.item)
+}
+
+/// Returns `true` when the cell content holds an `include::` preprocessor
+/// directive at the start of a line, which must be expanded before the cell is
+/// parsed.
+fn content_has_directive(content: &str) -> bool {
+    content.starts_with("include::") || content.contains("\ninclude::")
 }
 
 /// A row of cells in a [`TableBlock`].
@@ -1605,6 +1746,7 @@ pub struct TableCell<'src> {
     colspan: usize,
     rowspan: usize,
     content: TableCellContent<'src>,
+    source: Span<'src>,
 }
 
 impl<'src> TableCell<'src> {
@@ -1651,7 +1793,7 @@ impl<'src> TableCell<'src> {
             raw.spec.style.unwrap_or(column.style)
         };
 
-        let trimmed = trim_surrounding_whitespace(raw.content);
+        let trimmed = trim_cell_content(raw.content, style);
 
         // An escaped cell separator (a backslash in front of the table's
         // separator, e.g. `\|` or `\!`) is unescaped to the bare separator. Only
@@ -1675,6 +1817,10 @@ impl<'src> TableCell<'src> {
             colspan: raw.spec.colspan.max(1),
             rowspan: raw.spec.rowspan.max(1),
             content,
+            // The cell's source begins at its content, immediately after the
+            // separator (before any trimming), so the cell's reported line is
+            // the separator's line.
+            source: raw.content,
         }
     }
 
@@ -1701,6 +1847,7 @@ impl<'src> TableCell<'src> {
             column.style
         };
 
+        let source = field.content;
         let content = process_content(field.content, field.replacement, style, parser, warnings);
 
         Self {
@@ -1710,6 +1857,7 @@ impl<'src> TableCell<'src> {
             colspan: 1,
             rowspan: 1,
             content,
+            source,
         }
     }
 
@@ -1781,12 +1929,19 @@ impl<'src> TableCell<'src> {
             TableCellContent::Simple(content) => {
                 content.resolve_references(resolver, renderer, warnings);
             }
-            TableCellContent::AsciiDoc(blocks) => {
-                for block in blocks.iter_mut() {
-                    block.resolve_references(resolver, renderer, warnings);
-                }
+            TableCellContent::AsciiDoc(cell) => {
+                cell.resolve_references(resolver, renderer, warnings);
             }
         }
+    }
+}
+
+impl<'src> HasSpan<'src> for TableCell<'src> {
+    /// Returns the cell's source span, which begins at the cell's content
+    /// immediately after its separator. Its [line](Span::line) is therefore the
+    /// line on which the cell starts.
+    fn span(&self) -> Span<'src> {
+        self.source
     }
 }
 
@@ -1805,26 +1960,168 @@ pub enum TableCellContent<'src> {
 
     /// Block content: the cell's text parsed as a nested, standalone AsciiDoc
     /// document. Produced by the [`AsciiDoc`](ColumnStyle::AsciiDoc) style.
-    AsciiDoc(Vec<Block<'src>>),
+    AsciiDoc(AsciiDocCell<'src>),
 }
 
-/// Parse the value of the `cols` attribute into a list of columns.
+/// The content of an [`AsciiDoc`](TableCellContent::AsciiDoc) table cell: a
+/// nested, standalone AsciiDoc document.
 ///
-/// The value is a comma-separated list of column specifiers. A specifier may be
-/// preceded by a multiplier (`<n>*`) that repeats the column `n` times. The
-/// alignment operators and proportional width of a specifier are interpreted;
-/// the style operator is not yet.
-fn parse_cols(value: &str) -> Vec<TableColumn> {
-    let mut columns: Vec<TableColumn> = vec![];
+/// Because the cell behaves like its own document, a few render-time decisions
+/// depend on attribute state that is scoped to the cell and gone by the time
+/// the document is rendered. They are therefore resolved while the cell is
+/// parsed and captured here: whether the cell's nested document title is shown
+/// (and its rendered text), and whether the cell's `doctype` is `inline` (in
+/// which case a lone paragraph renders without the usual block wrapper).
+///
+/// A cell whose content has no preprocessor directives is parsed in place from
+/// the parent document's source ([`Borrowed`](Self::Borrowed)). A cell that
+/// expands an `include::` directive owns its preprocessed source
+/// ([`Owned`](Self::Owned)); the owned store is shared behind an [`Arc`] so the
+/// cell stays cheaply cloneable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AsciiDocCell<'src> {
+    /// Parsed in place from the parent document's source.
+    Borrowed(BorrowedCell<'src>),
 
-    for part in value.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
+    /// Parsed from an owned, include-expanded source the cell carries.
+    Owned(Arc<OwnedCell>),
+}
+
+impl<'src> AsciiDocCell<'src> {
+    /// Returns the cell's nested-document title, rendered to its display text.
+    ///
+    /// This is `Some` only when the cell began with a level-0 title line
+    /// (`= Title`) *and* the cell's effective `showtitle`/`notitle` state means
+    /// that title is shown; otherwise it is `None`.
+    pub fn title(&self) -> Option<&str> {
+        match self {
+            Self::Borrowed(cell) => cell.title.as_deref(),
+            Self::Owned(cell) => cell.borrow_dependent().title.as_deref(),
         }
+    }
 
-        if let Some((count, spec)) = part.split_once('*') {
-            let repeat = count.trim().parse::<usize>().unwrap_or(1).max(1);
+    /// Returns `true` when the cell's `doctype` resolves to `inline`.
+    ///
+    /// An `inline` document renders a lone paragraph as bare inline content,
+    /// without the enclosing block wrapper.
+    pub fn is_inline(&self) -> bool {
+        match self {
+            Self::Borrowed(cell) => cell.inline,
+            Self::Owned(cell) => cell.borrow_dependent().inline,
+        }
+    }
+
+    /// Returns the blocks parsed from the cell's content.
+    pub fn blocks(&self) -> &[Block<'_>] {
+        match self {
+            Self::Borrowed(cell) => &cell.blocks,
+            Self::Owned(cell) => &cell.borrow_dependent().blocks,
+        }
+    }
+
+    /// Resolves any deferred cross-references in the cell's blocks.
+    fn resolve_references(
+        &mut self,
+        resolver: &dyn ReferenceResolver,
+        renderer: &dyn InlineSubstitutionRenderer,
+        warnings: &mut Vec<ReferenceWarning>,
+    ) {
+        match self {
+            Self::Borrowed(cell) => {
+                for block in &mut cell.blocks {
+                    block.resolve_references(resolver, renderer, warnings);
+                }
+            }
+            // The owned store is shared behind an `Arc`, but references are
+            // resolved immediately after parsing while the cell is still its sole
+            // owner, so `get_mut` succeeds.
+            Self::Owned(cell) => {
+                if let Some(cell) = Arc::get_mut(cell) {
+                    cell.with_dependent_mut(|_, dependent| {
+                        for block in &mut dependent.blocks {
+                            block.resolve_references(resolver, renderer, warnings);
+                        }
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// An [`AsciiDoc`](TableCellContent::AsciiDoc) cell parsed in place from the
+/// parent document's source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowedCell<'src> {
+    title: Option<String>,
+    inline: bool,
+    blocks: Vec<Block<'src>>,
+}
+
+self_cell! {
+    /// An [`AsciiDoc`](TableCellContent::AsciiDoc) cell that owns its
+    /// (include-expanded) source, with the parsed blocks borrowing from it.
+    pub struct OwnedCell {
+        owner: String,
+
+        #[covariant]
+        dependent: OwnedCellInner,
+    }
+
+    impl {Debug, Eq, PartialEq}
+}
+
+/// The parsed contents of an [`OwnedCell`], borrowing its owned source.
+#[derive(Debug, Eq, PartialEq)]
+struct OwnedCellInner<'src> {
+    title: Option<String>,
+    inline: bool,
+    blocks: Vec<Block<'src>>,
+}
+
+/// Parse the value of the `cols` attribute into a list of columns, mirroring
+/// Asciidoctor's `parse_colspecs`.
+///
+/// All spaces are first removed from the value. A wholly blank value yields no
+/// columns (the caller then takes the column count from the first row), and a
+/// lone integer (the deprecated `cols="3"` form) yields that many default
+/// columns. Otherwise the value is a list of column specifiers separated by
+/// commas, or by semicolons when no comma is present. An empty record (e.g. the
+/// trailing field of `cols="1,,1"`) contributes a default column, and a
+/// specifier may be preceded by a multiplier (`<n>*`) that repeats the column
+/// `n` times. Each specifier's alignment operators, proportional width, and
+/// [style operator](parse_col_spec) are interpreted.
+fn parse_cols(value: &str) -> Vec<TableColumn> {
+    // Asciidoctor strips every space from the cols value before parsing, so
+    // `cols=" 1, 1 "` is equivalent to `cols="1,1"`.
+    let records: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // A wholly blank cols value is ignored: the caller falls back to the column
+    // count of the first row.
+    if records.is_empty() {
+        return vec![];
+    }
+
+    // Deprecated single-integer form: `cols=3` is equivalent to `cols="3*"` and
+    // produces that many equally sized columns.
+    if let Ok(count) = records.parse::<usize>() {
+        return vec![TableColumn::default(); count];
+    }
+
+    // Split on commas when present, otherwise on semicolons (Asciidoctor accepts
+    // either as the column-spec separator, but not a mix). Empty records are
+    // kept: each one contributes a default column.
+    let parts: Vec<&str> = if records.contains(',') {
+        records.split(',').collect()
+    } else {
+        records.split(';').collect()
+    };
+
+    let mut columns: Vec<TableColumn> = vec![];
+    for part in parts {
+        if part.is_empty() {
+            columns.push(TableColumn::default());
+        } else if let Some((count, spec)) = part.split_once('*') {
+            let repeat = count.parse::<usize>().unwrap_or(1).max(1);
             let column = parse_col_spec(spec);
             for _ in 0..repeat {
                 columns.push(column.clone());
@@ -2019,21 +2316,27 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// Scan a region for PSV cell boundaries, returning the [specifier](CellSpec)
 /// and raw (untrimmed) content span of each cell.
 ///
-/// A cell boundary is the table's `separator` (the vertical bar (`|`) by
-/// default, the exclamation mark (`!`) for a nested table, or any string set
-/// with the `separator` attribute, e.g. the broken bar `¦`) that appears at the
-/// start of a line or is preceded by whitespace, optionally with a
-/// [cell specifier](CellSpec) (e.g. `^`, `2+`, `.>`) directly in front of the
-/// separator. The token immediately preceding a separator is taken to be a
-/// specifier when it parses as one (see [`parse_cell_spec`]); a token that
-/// doesn't parse as a specifier means the separator is not a cell boundary.
-/// Content before the first boundary is ignored.
+/// Every unescaped occurrence of the table's `separator` (the vertical bar
+/// (`|`) by default, the exclamation mark (`!`) for a nested table, or any
+/// string set with the `separator` attribute, e.g. the broken bar `¦`) is a
+/// cell boundary, matching Asciidoctor. The token immediately preceding a
+/// separator is treated as that cell's [specifier](CellSpec) (e.g. `^`, `2+`,
+/// `.>`) only when it parses as one (see [`parse_cell_spec`]) *and* is anchored
+/// at the line start or preceded by whitespace; otherwise the token is ordinary
+/// content of the preceding cell and the separator is a plain boundary (so the
+/// `a` in `|a|b` is content, not a style operator). Content before the first
+/// boundary is ignored.
 ///
-/// An escaped separator (e.g. `\|`) is preceded by a backslash, which is not a
-/// valid specifier, so the separator already fails the boundary test and needs
-/// no special handling here; the backslash is stripped later in
-/// [`TableCell::parse`].
-fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
+/// A separator immediately preceded by a backslash (e.g. `\|`) is escaped: it
+/// is literal content rather than a boundary, and the backslash is stripped
+/// later in [`TableCell::parse`]. Only the single byte before the separator is
+/// inspected, so `\\|` is also read as an escaped separator — matching
+/// Asciidoctor, whose check is likewise the single-character
+/// `pre_match.end_with? '\'`.
+fn scan_cells<'src>(
+    region: Span<'src>,
+    separator: &str,
+) -> (Vec<RawCell<'src>>, Option<Span<'src>>) {
     let data = region.data();
     let bytes = data.as_bytes();
     let len = bytes.len();
@@ -2045,6 +2348,9 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
     // The content start and specifier of the cell currently being accumulated.
     let mut content_start: Option<usize> = None;
     let mut cur_spec = CellSpec::default();
+    // The span of a cell recovered from content that precedes the first
+    // separator (see below); `Some` drives a missing-leading-separator warning.
+    let mut recovered: Option<Span<'src>> = None;
     let mut i = 0;
 
     while i < len {
@@ -2052,12 +2358,18 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
             .get(i..)
             .is_some_and(|rest| rest.starts_with(separator))
         {
+            // A separator immediately preceded by a backslash is escaped: it is
+            // literal content, not a cell boundary. The backslash is stripped
+            // from the rendered cell later (see `TableCell::parse`).
+            if i > 0 && bytes.get(i - 1).copied() == Some(b'\\') {
+                i += sep_len;
+                continue;
+            }
+
             // Walk back to the start of the token directly preceding this
             // separator. The token (a possible cell specifier) runs back to the
             // previous whitespace, tab, or newline, or to the start of the
-            // region; either way the token is anchored at a line start or after
-            // whitespace, as a cell boundary requires. (When `tok_start == i`
-            // the token is empty and the separator is plain.)
+            // region.
             let mut tok_start = i;
             while tok_start > 0
                 && !matches!(
@@ -2075,21 +2387,47 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
                 parse_cell_spec(token)
             };
 
-            if let Some(spec) = spec {
-                if let Some(start) = content_start {
-                    // The previous cell's content ends at the start of this
-                    // cell's specifier; the separating whitespace, included in
-                    // the slice, is trimmed later in `TableCell::parse`.
+            // Every unescaped separator is a cell boundary (matching
+            // Asciidoctor). When the token is empty or a valid specifier it
+            // belongs to the *next* cell, so the previous cell's content ends
+            // before the token. Otherwise the token is ordinary content of the
+            // previous cell (e.g. the `a` in `|a|b`, where `a` is not preceded
+            // by whitespace and so is not a specifier), the separator is plain,
+            // and the next cell takes the default specifier.
+            let (content_end, next_spec) = match spec {
+                Some(spec) => (tok_start, spec),
+                None => (i, CellSpec::default()),
+            };
+
+            match content_start {
+                Some(start) => {
+                    // The separating whitespace, included in the slice, is
+                    // trimmed later in `TableCell::parse`.
                     cells.push(RawCell {
                         spec: cur_spec,
-                        content: region.slice(start..tok_start),
+                        content: region.slice(start..content_end),
                     });
                 }
-                cur_spec = spec;
-                content_start = Some(i + sep_len);
-                i += sep_len;
-                continue;
+                None => {
+                    // No cell has been opened yet, so this is the table's first
+                    // separator. Non-blank content in front of it means the first
+                    // cell is missing its leading separator; recover that content
+                    // as the first cell (with the default specifier) and record
+                    // its span so the caller can warn, matching Asciidoctor.
+                    let leading = region.slice(0..content_end);
+                    if !leading.data().trim().is_empty() {
+                        cells.push(RawCell {
+                            spec: CellSpec::default(),
+                            content: leading,
+                        });
+                        recovered = Some(leading);
+                    }
+                }
             }
+            cur_spec = next_spec;
+            content_start = Some(i + sep_len);
+            i += sep_len;
+            continue;
         }
 
         i += 1;
@@ -2102,7 +2440,7 @@ fn scan_cells<'src>(region: Span<'src>, separator: &str) -> Vec<RawCell<'src>> {
         });
     }
 
-    cells
+    (cells, recovered)
 }
 
 /// Parse a cell specifier, returning its [span and overrides](CellSpec), or
@@ -2275,4 +2613,126 @@ fn trim_surrounding_whitespace(s: Span<'_>) -> Span<'_> {
     let start = data.len() - data.trim_start().len();
     let len = data.trim().len();
     s.slice(start..start + len)
+}
+
+/// Trim a PSV cell's content according to its [style](ColumnStyle), matching
+/// Asciidoctor's `Table::Cell` initializer:
+///
+/// * A [`Literal`](ColumnStyle::Literal) cell has its trailing whitespace
+///   removed and any leading blank lines stripped, but the leading indentation
+///   of its first content line is preserved (so an indented literal cell keeps
+///   its indentation).
+/// * An [`AsciiDoc`](ColumnStyle::AsciiDoc) cell likewise removes trailing
+///   whitespace; if the remaining content begins with a newline it strips the
+///   leading blank lines (preserving the first content line's indentation, so a
+///   leading-indented line is interpreted as a literal block), otherwise it
+///   strips the leading whitespace.
+/// * Every other style has all surrounding whitespace removed.
+fn trim_cell_content(s: Span<'_>, style: ColumnStyle) -> Span<'_> {
+    let data = s.data();
+    match style {
+        ColumnStyle::Literal => {
+            let end = data.trim_end().len();
+            let mut start = 0;
+            while data[start..end].starts_with('\n') {
+                start += 1;
+            }
+            s.slice(start..end)
+        }
+        ColumnStyle::AsciiDoc => {
+            let end = data.trim_end().len();
+            if data[..end].starts_with('\n') {
+                let mut start = 0;
+                while data[start..end].starts_with('\n') {
+                    start += 1;
+                }
+                s.slice(start..end)
+            } else {
+                let start = end - data[..end].trim_start().len();
+                s.slice(start..end)
+            }
+        }
+        _ => trim_surrounding_whitespace(s),
+    }
+}
+
+/// Returns the first non-blank line in `rest`, or `None` when every remaining
+/// line is blank (or `rest` is empty).
+fn first_nonblank_line(mut rest: Span<'_>) -> Option<Span<'_>> {
+    while !rest.is_empty() {
+        let line = rest.take_line();
+        if !line.item.data().trim().is_empty() {
+            return Some(line.item);
+        }
+        rest = line.after;
+    }
+    None
+}
+
+/// Returns `true` when `line` begins a new PSV cell, i.e. it contains the
+/// separator and the text before the first separator (after any leading
+/// whitespace) is either empty or a valid cell specifier. A line that continues
+/// the previous cell returns `false`.
+fn psv_line_starts_cell(line: &str, separator: &str) -> bool {
+    match line.find(separator) {
+        Some(pos) => {
+            let prefix = line[..pos].trim_start();
+            prefix.is_empty() || parse_cell_spec(prefix).is_some()
+        }
+        None => false,
+    }
+}
+
+/// Returns `true` when `line` contains an odd number of double quotes, i.e. it
+/// opens a quoted CSV/TSV value that is not closed on the same line.
+fn line_has_unclosed_quote(line: &str) -> bool {
+    line.bytes().filter(|&b| b == b'"').count() % 2 == 1
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{AsciiDocCell, OwnedCell, OwnedCellInner};
+    use crate::parser::{
+        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+    };
+
+    /// A resolver that resolves nothing; the owned-cell resolution path under
+    /// test carries no references, so it is never actually consulted.
+    struct NoopResolver;
+
+    impl ReferenceResolver for NoopResolver {
+        fn resolve(&self, _context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
+            None
+        }
+    }
+
+    /// When an owned (include-expanded) AsciiDoc cell is shared behind more
+    /// than one `Arc` reference, `resolve_references` cannot obtain a
+    /// mutable borrow of the store and leaves it untouched rather than
+    /// panicking. Production code resolves while the cell is its sole
+    /// owner, so this defensive branch is exercised here by deliberately
+    /// holding a second reference.
+    #[test]
+    fn resolve_references_skips_shared_owned_cell() {
+        let mut cell = AsciiDocCell::Owned(Arc::new(OwnedCell::new(String::new(), |_source| {
+            OwnedCellInner {
+                title: None,
+                inline: false,
+                blocks: vec![],
+            }
+        })));
+
+        // Hold a second reference to the same store so `Arc::get_mut` fails.
+        let shared = cell.clone();
+
+        let mut warnings = vec![];
+        cell.resolve_references(&NoopResolver, &HtmlSubstitutionRenderer {}, &mut warnings);
+
+        // Resolution was skipped silently: no warnings, and the two references
+        // still describe the same (unmodified) cell.
+        assert!(warnings.is_empty());
+        assert_eq!(cell, shared);
+    }
 }

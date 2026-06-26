@@ -282,11 +282,26 @@ fn escaped_cell_separator() {
 }
 
 #[test]
-fn cols_with_empty_specifier() {
-    // Empty entries in the `cols` list (e.g. from a doubled comma) are skipped.
-    let table = parse_table("[cols=\"1,,1\"]\n|===\n|a |b\n|===");
+fn separator_after_backslash_is_escaped() {
+    // The escape check inspects only the single byte before the separator, so a
+    // separator preceded by a backslash is escaped even when that backslash is
+    // itself preceded by another one. `|a\\|b` is therefore one cell whose
+    // content is `a\|b` (the escaping backslash is stripped), matching
+    // Asciidoctor, whose check is likewise the single-character
+    // `pre_match.end_with? '\'`.
+    let table = parse_table("|===\n|a\\\\|b\n|===");
 
-    assert_eq!(table.columns().len(), 2);
+    assert_eq!(table.body_rows().len(), 1);
+    assert_eq!(row_text(&table.body_rows()[0]), vec!["a\\|b".to_string()]);
+}
+
+#[test]
+fn cols_with_empty_specifier() {
+    // An empty entry in the `cols` list (e.g. from a doubled comma) contributes a
+    // default column, matching Asciidoctor: `cols="1,,1"` yields three columns.
+    let table = parse_table("[cols=\"1,,1\"]\n|===\n|a |b |c\n|===");
+
+    assert_eq!(table.columns().len(), 3);
 }
 
 #[test]
@@ -561,7 +576,7 @@ fn asciidoc_cell_resolves_references_in_nested_blocks() {
         .unwrap();
 
     let blocks = match table.body_rows()[0].cells()[0].content() {
-        TableCellContent::AsciiDoc(blocks) => blocks,
+        TableCellContent::AsciiDoc(cell) => cell.blocks(),
         TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
     };
 
@@ -591,7 +606,7 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
         .unwrap();
 
     let blocks = match table.body_rows()[0].cells()[0].content() {
-        TableCellContent::AsciiDoc(blocks) => blocks,
+        TableCellContent::AsciiDoc(cell) => cell.blocks(),
         TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
     };
 
@@ -620,7 +635,8 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
 /// Collect the rendered text of every block in an AsciiDoc cell.
 fn asciidoc_cell_text(table: &TableBlock<'_>, row: usize, col: usize) -> String {
     match table.body_rows()[row].cells()[col].content() {
-        TableCellContent::AsciiDoc(blocks) => blocks
+        TableCellContent::AsciiDoc(cell) => cell
+            .blocks()
             .iter()
             .filter_map(|block| block.rendered_content())
             .collect::<Vec<_>>()
@@ -738,29 +754,27 @@ fn cell_specifier_span_operator_without_factor_locates_separator() {
 }
 
 #[test]
-fn non_specifier_token_is_not_a_cell_separator() {
+fn non_specifier_token_is_a_plain_cell_separator() {
     // A token in front of a `|` that does not parse as a cell specifier (here the
-    // word `foo`, which is more than a single style letter) means the `|` is not
-    // a cell separator: `a foo|b` is a single cell whose content includes the
-    // literal `|`.
+    // word `foo`, which is more than a single style letter) is ordinary content:
+    // the `|` is still a plain cell separator, so `a foo|b` is two cells (matching
+    // Asciidoctor).
     let table = parse_table("|===\n|a foo|b\n|===");
 
-    assert_eq!(table.columns().len(), 1);
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
-    assert_eq!(rows, vec![vec!["a foo|b".to_string()]]);
+    assert_eq!(rows, vec![vec!["a foo".to_string(), "b".to_string()]]);
 }
 
 #[test]
-fn dot_not_followed_by_vertical_operator_is_not_a_cell_separator() {
+fn dot_not_followed_by_vertical_operator_is_a_plain_cell_separator() {
     // A vertical alignment operator is a dot followed by `<`, `>`, or `^`. A dot
     // followed by anything else (here `.x`) is not a valid cell specifier, so the
-    // `|` is not a cell separator: `a .x|b` is a single cell whose content
-    // includes the literal `.x|`.
+    // `.x` is content and the `|` is a plain cell separator: `a .x|b` is two cells
+    // (matching Asciidoctor).
     let table = parse_table("|===\n|a .x|b\n|===");
 
-    assert_eq!(table.columns().len(), 1);
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
-    assert_eq!(rows, vec![vec!["a .x|b".to_string()]]);
+    assert_eq!(rows, vec![vec!["a .x".to_string(), "b".to_string()]]);
 }
 
 #[test]
@@ -792,9 +806,11 @@ fn cell_span_exceeding_columns_drops_overrunning_row() {
 fn row_fully_covered_by_rowspans_drops_following_cell() {
     // Two row-spanning cells (`.2+`) together cover every column of the next row,
     // so that row has no cells of its own to close it. The following cell (`c1`)
-    // therefore overruns the pre-filled row and is dropped with it (matching
-    // Asciidoctor), leaving the remaining cells aligned: `c2` and `d1` form the
-    // second body row and the short final row holds `d2`.
+    // therefore overruns the pre-filled row and is dropped with it (a column-count
+    // overrun warning), leaving `c2` and `d1` aligned as the second body row. The
+    // trailing `d2` cell can't fill a row of its own, so the table ends on an
+    // incomplete row that is dropped with an end-of-table warning (matching
+    // Asciidoctor, which renders only two rows here).
     let mut parser = Parser::default();
     let maw = Block::parse(
         Span::new("[cols=\"2*\"]\n|===\n.2+|a .2+|b\n|c1 |c2\n|d1 |d2\n|==="),
@@ -811,6 +827,16 @@ fn row_fully_covered_by_rowspans_drops_following_cell() {
             .count(),
         1
     );
+    assert_eq!(
+        maw.warnings
+            .iter()
+            .filter(|w| matches!(
+                w.warning,
+                crate::warnings::WarningType::TableDroppingIncompleteRowAtEndOfTable
+            ))
+            .count(),
+        1
+    );
 
     let table = match maw.item.unwrap().item {
         Block::Table(table) => table,
@@ -822,7 +848,6 @@ fn row_fully_covered_by_rowspans_drops_following_cell() {
         vec![
             vec!["a".to_string(), "b".to_string()],
             vec!["c2".to_string(), "d1".to_string()],
-            vec!["d2".to_string()],
         ]
     );
 }
@@ -1011,9 +1036,24 @@ fn csv_unclosed_quote_is_literal() {
     let table = parse_table("[format=csv]\n|===\n\",a\n|===");
     assert_eq!(table.columns().len(), 1);
     assert_eq!(row_text(&table.body_rows()[0]), ["\",a"]);
+}
 
-    // A cell that is a single bare quote is an unclosed, empty quoted value.
-    let table = parse_table("[format=csv]\n|===\n\"\n|===");
+#[test]
+fn csv_lone_quote_is_unclosed_and_empty_with_warning() {
+    // A cell that is a single bare quote is an unclosed, empty quoted value: it is
+    // set to empty and an error is logged (matching Asciidoctor).
+    let mut parser = Parser::default();
+    let maw = Block::parse(Span::new("[format=csv]\n|===\n\"\n|==="), &mut parser);
+
+    assert!(maw.warnings.iter().any(|w| matches!(
+        w.warning,
+        crate::warnings::WarningType::TableCsvDataHasUnclosedQuote
+    )));
+
+    let table = match maw.item.unwrap().item {
+        Block::Table(table) => table,
+        other => panic!("expected a table block, got {other:?}"),
+    };
     assert_eq!(table.columns().len(), 1);
     assert_eq!(row_text(&table.body_rows()[0]), [""]);
 }

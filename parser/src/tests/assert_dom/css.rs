@@ -13,6 +13,9 @@ use crate::tests::assert_dom::virtual_dom::VirtualNode;
 /// - `tag > child` - Find direct children only
 /// - `tag:first-of-type` - Find first occurrence of tag among siblings
 /// - `tag:not(selector)` - Find elements that do NOT match the inner selector
+/// - `tag:nth-child(N)` - Find the element that is the Nth child of its parent
+/// - `tag:empty` - Find elements with no children and no text
+/// - Pseudo-classes may be chained, e.g. `td:nth-child(3):empty`
 ///
 /// # Example
 ///
@@ -25,40 +28,58 @@ use crate::tests::assert_dom::virtual_dom::VirtualNode;
 pub(crate) fn query_css<'a>(root: &'a VirtualNode, selector: &str) -> Vec<&'a VirtualNode> {
     let selector = selector.trim();
 
+    // A descendant selector can reach the same node through more than one
+    // matching ancestor (e.g. `.tableblock h1` where both the `<table>` and the
+    // `<td>` carry the `tableblock` class). De-duplicate so each node is counted
+    // once, matching a real CSS engine.
+    let mut seen: Vec<*const VirtualNode> = Vec::new();
     query_descendant_or_self(root, selector)
+        .into_iter()
+        .filter(|node| {
+            let ptr = *node as *const VirtualNode;
+            if seen.contains(&ptr) {
+                false
+            } else {
+                seen.push(ptr);
+                true
+            }
+        })
+        .collect()
 }
 
-/// Finds the position of a space that acts as a descendant combinator.
-/// Returns `None` if there are no descendant combinator spaces.
+/// Finds the position of the first space that acts as a descendant combinator,
+/// scanning the whole pattern. Returns `None` if there are none.
 ///
-/// This distinguishes between:
+/// A space is a descendant combinator only when it is not merely whitespace
+/// padding a `>` or `+` combinator. This distinguishes between:
 /// - `div p` - space is a descendant combinator
-/// - `div > p` - space is just whitespace around `>`
-/// - `div + p` - space is just whitespace around `+`
+/// - `div > p` - spaces are just whitespace around `>`
+/// - `div + p` - spaces are just whitespace around `+`
+/// - `a > b c` - the space before `c` is a descendant combinator even though it
+///   follows a `>` combinator earlier in the pattern
 fn find_descendant_combinator_space(pattern: &str) -> Option<usize> {
-    let gt_pos = pattern.find('>');
-    let plus_pos = pattern.find('+');
-
-    // Find first space.
     for (i, ch) in pattern.char_indices() {
-        if ch == ' ' {
-            // Check if this space is before any `>` or `+` combinator.
-            let before_gt = gt_pos.is_none_or(|gt| i < gt);
-            let before_plus = plus_pos.is_none_or(|plus| i < plus);
-
-            if before_gt && before_plus {
-                // This space comes before any other combinators.
-                // Check if the next non-whitespace character is a combinator.
-                let rest = pattern[i..].trim_start();
-                if rest.starts_with('>') || rest.starts_with('+') {
-                    // This is whitespace before a combinator, not a descendant combinator.
-                    continue;
-                }
-
-                // This is a descendant combinator.
-                return Some(i);
-            }
+        if ch != ' ' {
+            continue;
         }
+
+        // Whitespace immediately before a `>`/`+` combinator is not a descendant
+        // combinator (e.g. the space in `div >`).
+        let rest = pattern[i..].trim_start();
+        if rest.starts_with('>') || rest.starts_with('+') {
+            continue;
+        }
+
+        // Whitespace immediately after a `>`/`+` combinator (or leading the
+        // pattern) is not a descendant combinator either (e.g. the space in
+        // `div > p`).
+        let prev = pattern[..i].trim_end();
+        if prev.is_empty() || prev.ends_with('>') || prev.ends_with('+') {
+            continue;
+        }
+
+        // A simple selector on both sides: this is a descendant combinator.
+        return Some(i);
     }
 
     None
@@ -207,6 +228,32 @@ fn query_with_direct_child_constraint<'a>(
     // Find which combinator appears first to process them in order.
     let plus_pos = pattern.find('+');
     let gt_pos = pattern.find('>');
+    let space_pos = find_descendant_combinator_space(pattern);
+
+    // Process a descendant combinator first if it is the leftmost combinator
+    // (e.g. the ` ` in `td .paragraph`, reached after stripping the preceding
+    // `>` steps of `table > tbody > tr > td .paragraph`). The constrained child
+    // matches a direct child; the rest is an unconstrained descendant search.
+    if let Some(space) = space_pos
+        && gt_pos.is_none_or(|gt| space < gt)
+        && plus_pos.is_none_or(|plus| space < plus)
+    {
+        let (first, rest) = pattern.split_at(space);
+        let first = first.trim();
+        let rest = rest.trim();
+
+        let mut results = Vec::new();
+        for child in &node.children {
+            if matches_selector_with_context(child, first, Some(node)) {
+                // The descendant combinator excludes the matched child itself, so
+                // search its subtrees rather than the child node.
+                for grandchild in &child.children {
+                    results.extend(query_descendant_or_self(grandchild, rest));
+                }
+            }
+        }
+        return results;
+    }
 
     // Process `>` first if it appears before `+`.
     if let Some(gt) = gt_pos
@@ -302,7 +349,8 @@ fn query_with_direct_child_constraint<'a>(
 /// - ID selector: `[@id="foo"]` or `#foo`
 /// - Text content: `[text()="value"]`
 /// - Index: `[1]`, `[2]`, etc. (handled by `apply_numeric_predicate`)
-/// - Pseudo-selectors: `:first-of-type`
+/// - Pseudo-selectors: `:first-of-type`, `:not(...)`, `:nth-child(N)`, `:empty`
+///   (and chains thereof, e.g. `:nth-child(3):empty`)
 fn matches_selector_with_context(
     node: &VirtualNode,
     selector: &str,
@@ -392,8 +440,39 @@ fn matches_selector_with_context(
     true
 }
 
-/// Checks if a node matches a pseudo-selector.
+/// Checks if a node matches a pseudo-selector, which may be a chain of several
+/// pseudo-classes (e.g. `nth-child(3):empty`). Every pseudo-class in the chain
+/// must match.
 fn matches_pseudo_selector(node: &VirtualNode, pseudo: &str, parent: Option<&VirtualNode>) -> bool {
+    split_pseudo_chain(pseudo.trim())
+        .iter()
+        .all(|part| matches_single_pseudo(node, part, parent))
+}
+
+/// Splits a pseudo-selector chain on top-level `:` separators, leaving colons
+/// inside parentheses (e.g. a nested `:not(...)`) untouched.
+/// `nth-child(3):empty` becomes `["nth-child(3)", "empty"]`.
+fn split_pseudo_chain(pseudo: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0;
+    for (i, ch) in pseudo.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ':' if depth == 0 => {
+                parts.push(&pseudo[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&pseudo[start..]);
+    parts.into_iter().filter(|p| !p.is_empty()).collect()
+}
+
+/// Checks if a node matches a single pseudo-class.
+fn matches_single_pseudo(node: &VirtualNode, pseudo: &str, parent: Option<&VirtualNode>) -> bool {
     let pseudo = pseudo.trim();
 
     // Handle :not() pseudo-class.
@@ -403,6 +482,20 @@ fn matches_pseudo_selector(node: &VirtualNode, pseudo: &str, parent: Option<&Vir
             return !matches_inner_not_selector(node, inner.trim());
         }
         return false; // Malformed :not().
+    }
+
+    // Handle :nth-child(N) pseudo-class (1-indexed position among siblings).
+    if let Some(arg) = pseudo.strip_prefix("nth-child(") {
+        if let Some(arg) = arg.strip_suffix(')')
+            && let Ok(n) = arg.trim().parse::<usize>()
+            && let Some(parent) = parent
+        {
+            return parent
+                .children
+                .get(n.wrapping_sub(1))
+                .is_some_and(|child| std::ptr::eq(child as *const _, node as *const _));
+        }
+        return false; // Malformed or unsupported :nth-child() argument.
     }
 
     match pseudo {
@@ -564,9 +657,61 @@ fn matches_single_predicate(node: &VirtualNode, predicate: &str) -> bool {
         }
     }
 
+    // CSS-style attribute substring selector: [attr*="value"]. As with the
+    // exact-match form below, `class` and `id` live on their own node fields
+    // rather than in `attributes`; `class` is matched against the rendered
+    // (space-joined) class list so the substring may span class boundaries.
+    if let Some((attr_name, value_part)) = predicate.split_once("*=") {
+        let attr_name = attr_name.trim();
+        let value = unquote_attr_value(value_part);
+        return match attr_name {
+            "class" => node.classes.join(" ").contains(value.as_str()),
+            "id" => node
+                .id
+                .as_deref()
+                .is_some_and(|id| id.contains(value.as_str())),
+            _ => node
+                .attributes
+                .get(attr_name)
+                .is_some_and(|v| v.contains(&value)),
+        };
+    }
+
+    // CSS-style attribute value selector without the `@` prefix:
+    // [attr="value"]. (The `@`-prefixed form is handled above.)
+    if let Some((attr_name, value_part)) = predicate.split_once('=') {
+        let attr_name = attr_name.trim();
+        let value = unquote_attr_value(value_part);
+        match attr_name {
+            "class" => {
+                return value
+                    .split_whitespace()
+                    .all(|c| node.classes.iter().any(|nc| nc == c));
+            }
+            "id" => return node.id.as_deref() == Some(value.as_str()),
+            _ => return node.attributes.get(attr_name).map(|v| v.as_str()) == Some(value.as_str()),
+        }
+    }
+
     // Numeric predicate [N]: Would need to be handled by caller with context.
     // For now, just return `true` to pass through.
     true
+}
+
+/// Strips surrounding single or double quotes (and whitespace) from a CSS
+/// attribute selector value.
+fn unquote_attr_value(value_part: &str) -> String {
+    let trimmed = value_part.trim();
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('\'')
+                .and_then(|s| s.strip_suffix('\''))
+        })
+        .unwrap_or(trimmed);
+    unescape_css_string(unquoted)
 }
 
 /// Unescapes CSS string literals.
@@ -686,6 +831,53 @@ mod tests {
     }
 
     #[test]
+    fn query_nth_child_and_pseudo_chain() {
+        // A two-row, three-column table whose middle row has an empty trailing
+        // cell. Exercises `:nth-child(N)` and a pseudo chain (`:nth-child(3):empty`).
+        let doc = Parser::default().parse("[format=csv]\n|===\na,b,c\n1,2,\n|===");
+        let vdom = doc.to_virtual_dom();
+
+        assert_eq!(query_css(&vdom, "tbody > tr").len(), 2);
+        assert_eq!(query_css(&vdom, "tbody > tr:nth-child(1) > td").len(), 3);
+        assert_eq!(query_css(&vdom, "tbody > tr:nth-child(2) > td").len(), 3);
+
+        // Only the second row's third cell is empty.
+        assert_eq!(
+            query_css(&vdom, "tbody > tr:nth-child(2) > td:nth-child(3):empty").len(),
+            1
+        );
+        assert_eq!(
+            query_css(&vdom, "tbody > tr:nth-child(1) > td:nth-child(3):empty").len(),
+            0
+        );
+
+        // A position that no sibling occupies matches nothing.
+        assert_eq!(query_css(&vdom, "tbody > tr:nth-child(3)").len(), 0);
+    }
+
+    #[test]
+    fn query_child_chain_then_descendant() {
+        // A chain of `>` child combinators followed by a trailing descendant
+        // combinator (`a > b > c d`). The descendant step is reached only after
+        // the preceding `>` steps are stripped, so it must be handled inside the
+        // direct-child traversal, not just at the top level.
+        let doc = Parser::default().parse("[cols=\"1a\"]\n|===\n|AsciiDoc content\n|===");
+        let vdom = doc.to_virtual_dom();
+
+        // The paragraph sits at td > div.content > div.paragraph, i.e. it is a
+        // descendant (not a direct child) of the `td`.
+        assert_eq!(query_css(&vdom, "table > tbody > tr > td").len(), 1);
+        assert_eq!(
+            query_css(&vdom, "table > tbody > tr > td .paragraph").len(),
+            1
+        );
+
+        // A descendant step that itself precedes a further child combinator
+        // (`td .content > .paragraph`) is also handled.
+        assert_eq!(query_css(&vdom, "td .content > .paragraph").len(), 1);
+    }
+
+    #[test]
     fn query_full_ulist_selector() {
         let doc = Parser::default().parse("* bullet 1\n. numbered 1.1");
         let vdom = doc.to_virtual_dom();
@@ -707,6 +899,29 @@ mod tests {
 
         // Verify the attribute value.
         assert_eq!(result[0].attributes.get("start"), Some(&"2".to_string()));
+    }
+
+    #[test]
+    fn query_attribute_substring_selector() {
+        // The `[attr*="value"]` substring selector must consult the dedicated
+        // `class` and `id` node fields, not just `attributes`.
+        let node = VirtualNode::new("table")
+            .with_classes(["tableblock", "fit-content"])
+            .with_id("results")
+            .with_attribute("style", "width: 50%;");
+
+        // `class` matches against the space-joined class list.
+        assert_eq!(query_css(&node, "table[class*=\"fit\"]").len(), 1);
+        assert_eq!(query_css(&node, "table[class*=\"block\"]").len(), 1);
+        assert_eq!(query_css(&node, "table[class*=\"nope\"]").len(), 0);
+
+        // `id` matches against the id field.
+        assert_eq!(query_css(&node, "table[id*=\"sult\"]").len(), 1);
+        assert_eq!(query_css(&node, "table[id*=\"nope\"]").len(), 0);
+
+        // An ordinary attribute matches against its value.
+        assert_eq!(query_css(&node, "table[style*=\"width\"]").len(), 1);
+        assert_eq!(query_css(&node, "table[style*=\"height\"]").len(), 0);
     }
 
     #[test]

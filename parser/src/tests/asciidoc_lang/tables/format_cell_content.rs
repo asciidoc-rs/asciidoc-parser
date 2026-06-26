@@ -47,7 +47,8 @@ fn asciidoc_cell_text(doc: &crate::Document<'_>) -> String {
         .expect("expected a table block");
 
     match table.body_rows()[0].cells()[0].content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => blocks
+        crate::blocks::TableCellContent::AsciiDoc(cell) => cell
+            .blocks()
             .iter()
             .filter_map(|block| block.rendered_content())
             .collect::<Vec<_>>()
@@ -325,7 +326,8 @@ The `a` can also be specified on the column in the `cols` attribute on the table
         crate::blocks::TableCellContent::Simple(_)
     ));
     match row.cells()[1].content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             assert_eq!(blocks.len(), 1);
             assert_eq!(blocks[0].raw_context().as_ref(), "list");
         }
@@ -378,7 +380,8 @@ include::example$cell.adoc[tag=adoc]
         crate::blocks::TableCellContent::Simple(_)
     ));
     match row.cells()[1].content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             assert_eq!(blocks.len(), 2);
             assert_eq!(blocks[0].raw_context().as_ref(), "paragraph");
             assert_eq!(blocks[1].raw_context().as_ref(), "list");
@@ -395,7 +398,8 @@ include::example$cell.adoc[tag=adoc]
         crate::blocks::TableCellContent::Simple(_)
     ));
     match row.cells()[1].content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             assert_eq!(blocks.len(), 2);
             assert_eq!(blocks[0].raw_context().as_ref(), "paragraph");
             assert_eq!(blocks[1].raw_context().as_ref(), "listing");
@@ -422,7 +426,8 @@ As such, it inherits attributes from the parent document.
         })
         .expect("expected a table block");
     match table.body_rows()[0].cells()[0].content() {
-        crate::blocks::TableCellContent::AsciiDoc(blocks) => {
+        crate::blocks::TableCellContent::AsciiDoc(cell) => {
+            let blocks = cell.blocks();
             assert_eq!(blocks.len(), 1);
             match &blocks[0] {
                 crate::blocks::Block::Simple(simple) => {
