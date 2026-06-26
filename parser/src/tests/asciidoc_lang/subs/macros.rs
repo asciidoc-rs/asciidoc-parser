@@ -305,20 +305,38 @@ mod default_macros_substitution {
         );
     }
 
-    #[ignore]
     #[test]
     fn tables() {
-        to_do_verifies!(
+        verifies!(
             r#"
 |Tables |Varies
 
 "#
         );
 
-        todo!("Write test once table parsing is implemented");
+        // The macros substitution applies to default table cells but not to
+        // literal (`l`) cells, hence "Varies".
+        let doc = Parser::default()
+            .parse("|===\n|https://example.org[Example]\nl|https://example.org[Example]\n|===");
 
-        // Blocked on https://github.com/asciidoc-rs/asciidoc-parser/issues/296:
-        // Implement table parsing
+        let Some(Block::Table(table)) = doc.nested_blocks().next() else {
+            panic!("expected a table block");
+        };
+
+        let cells: Vec<_> = table.body_rows().iter().flat_map(|r| r.cells()).collect();
+
+        let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
+            panic!("expected simple cell content");
+        };
+        assert_eq!(
+            default_cell.rendered(),
+            r#"<a href="https://example.org">Example</a>"#
+        );
+
+        let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
+            panic!("expected simple cell content");
+        };
+        assert_eq!(literal_cell.rendered(), "https://example.org[Example]");
     }
 
     #[test]
