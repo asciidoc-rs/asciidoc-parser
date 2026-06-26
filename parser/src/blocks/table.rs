@@ -1701,6 +1701,7 @@ pub struct TableCell<'src> {
     colspan: usize,
     rowspan: usize,
     content: TableCellContent<'src>,
+    source: Span<'src>,
 }
 
 impl<'src> TableCell<'src> {
@@ -1771,6 +1772,10 @@ impl<'src> TableCell<'src> {
             colspan: raw.spec.colspan.max(1),
             rowspan: raw.spec.rowspan.max(1),
             content,
+            // The cell's source begins at its content, immediately after the
+            // separator (before any trimming), so the cell's reported line is
+            // the separator's line.
+            source: raw.content,
         }
     }
 
@@ -1797,6 +1802,7 @@ impl<'src> TableCell<'src> {
             column.style
         };
 
+        let source = field.content;
         let content = process_content(field.content, field.replacement, style, parser, warnings);
 
         Self {
@@ -1806,6 +1812,7 @@ impl<'src> TableCell<'src> {
             colspan: 1,
             rowspan: 1,
             content,
+            source,
         }
     }
 
@@ -1883,6 +1890,15 @@ impl<'src> TableCell<'src> {
                 }
             }
         }
+    }
+}
+
+impl<'src> HasSpan<'src> for TableCell<'src> {
+    /// Returns the cell's source span, which begins at the cell's content
+    /// immediately after its separator. Its [line](Span::line) is therefore the
+    /// line on which the cell starts.
+    fn span(&self) -> Span<'src> {
+        self.source
     }
 }
 

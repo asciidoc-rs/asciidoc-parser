@@ -1283,6 +1283,25 @@ mod psv {
      {
         let doc = Parser::default().parse("|===\na|\n $ command\na| paragraph\n|===");
 
+        // Source-map line numbers: the table starts on line 1; cell 1's
+        // separator is on line 2 and its inner document begins on line 3 (the
+        // indented `$ command`); cell 2 is on line 4.
+        let table = match doc.nested_blocks().next() {
+            Some(crate::blocks::Block::Table(table)) => table,
+            other => panic!("expected a table block, got {other:?}"),
+        };
+        assert_eq!(table.span().line(), 1);
+
+        let cell1 = &table.body_rows()[0].cells()[0];
+        assert_eq!(cell1.span().line(), 2);
+        let crate::blocks::TableCellContent::AsciiDoc(inner) = cell1.content() else {
+            panic!("expected an AsciiDoc cell");
+        };
+        assert_eq!(inner.blocks()[0].span().line(), 3);
+
+        let cell2 = &table.body_rows()[1].cells()[0];
+        assert_eq!(cell2.span().line(), 4);
+
         assert_css(&doc, "td", 2);
         assert_xpath(&doc, "(//td)[1]//*[@class=\"literalblock\"]", 1);
         assert_xpath(&doc, "(//td)[2]//*[@class=\"paragraph\"]", 1);
