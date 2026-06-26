@@ -1405,13 +1405,18 @@ mod psv {
         assert_xpath(&doc, "/table/tbody/tr/td[2]//table/tbody/tr/td", 1);
     }
 
-    // The following depend on document option/attribute inheritance into the
-    // nested AsciiDoc-cell document (to_dir, toc, doctitle), which the crate
-    // does not yet model.
+    // Attribute/option inheritance into the nested AsciiDoc-cell document is
+    // implemented; the following remain unported for narrower reasons. The
+    // `to_dir` test needs the nested cell exposed as an introspectable document
+    // object carrying inherited options. The `toc` tests need TOC rendering (a
+    // separate unimplemented feature); the doctitle test is rendered-output
+    // based.
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): AsciiDoc table cell should inherit the to_dir option.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/545): AsciiDoc
+    // table cell should expose the nested document for introspection of inherited
+    // options (here, `to_dir`).
     fn asciidoc_table_cell_should_inherit_to_dir_option_from_parent_document() {}
 
     #[test]
