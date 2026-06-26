@@ -172,6 +172,38 @@ static HTML_ATTR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*"([^"]*)""#).unwrap()
 });
 
+/// Matches an inline `{set:cellbgcolor:VALUE}` / `{set:cellbgcolor!}` attribute
+/// directive in cell text. The capture group holds the value for the set form;
+/// the unset (`!`) form leaves it absent.
+static CELL_BGCOLOR_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"\{set:cellbgcolor(?::([^}]*)|!)\}").unwrap()
+});
+
+/// Applies any `{set:cellbgcolor:…}` / `{set:cellbgcolor!}` directives found in
+/// a cell's rendered text, updating `current` to the resulting cell-background
+/// color (the document attribute persists across cells), and returns the text
+/// with the directives stripped.
+///
+/// The crate's substitution layer does not yet implement the `{set:NAME:VALUE}`
+/// attribute-assignment reference (a sibling of the counter references tracked
+/// in <https://github.com/asciidoc-rs/asciidoc-parser/issues/514>), so the
+/// directives survive into the cell's rendered string. This test-only helper
+/// interprets the `cellbgcolor` case so the table renderer can reproduce
+/// Asciidoctor's per-cell `background-color` style.
+fn apply_cellbgcolor_directives(rendered: &str, current: &mut Option<String>) -> String {
+    if !rendered.contains("{set:cellbgcolor") {
+        return rendered.to_string();
+    }
+
+    CELL_BGCOLOR_DIRECTIVE
+        .replace_all(rendered, |caps: &regex::Captures<'_>| {
+            *current = caps.get(1).map(|value| value.as_str().to_string());
+            String::new()
+        })
+        .into_owned()
+}
+
 /// Parses the attributes from an opening tag's content and applies them to
 /// `node`, routing `id` and `class` to their dedicated fields and everything
 /// else into the generic attribute map.
@@ -974,16 +1006,25 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
     }
     node.children.push(colgroup);
 
+    // The `cellbgcolor` document attribute set inside a cell persists to later
+    // cells, so the resolved background color is threaded through the rows in
+    // render order (header, body, footer).
+    let mut cell_bgcolor: Option<String> = None;
+
     if let Some(header) = table.header_row() {
         let mut thead = VirtualNode::new("thead");
-        thead.children.push(table_row_to_node(header, true, false));
+        thead
+            .children
+            .push(table_row_to_node(header, true, false, &mut cell_bgcolor));
         node.children.push(thead);
     }
 
     if !table.body_rows().is_empty() {
         let mut tbody = VirtualNode::new("tbody");
         for row in table.body_rows() {
-            tbody.children.push(table_row_to_node(row, false, true));
+            tbody
+                .children
+                .push(table_row_to_node(row, false, true, &mut cell_bgcolor));
         }
         node.children.push(tbody);
     }
@@ -992,7 +1033,9 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
     // thead, tbody, tfoot.
     if let Some(footer) = table.footer_row() {
         let mut tfoot = VirtualNode::new("tfoot");
-        tfoot.children.push(table_row_to_node(footer, false, true));
+        tfoot
+            .children
+            .push(table_row_to_node(footer, false, true, &mut cell_bgcolor));
         node.children.push(tfoot);
     }
 
@@ -1003,7 +1046,12 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
 /// cells become `<th>` and their content is not wrapped in a paragraph);
 /// otherwise cells are `<td>` and body content is wrapped in a
 /// `<p class="tableblock">` (`wrap_in_paragraph`).
-fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bool) -> VirtualNode {
+fn table_row_to_node(
+    row: &TableRow<'_>,
+    header_row: bool,
+    wrap_in_paragraph: bool,
+    cell_bgcolor: &mut Option<String>,
+) -> VirtualNode {
     let mut tr = VirtualNode::new("tr");
 
     for cell in row.cells() {
@@ -1031,7 +1079,10 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
 
         match cell.content() {
             TableCellContent::Simple(content) => {
-                let rendered = content.rendered().to_string();
+                // Interpret and strip any `{set:cellbgcolor:…}` directive before
+                // rendering the cell text; the resolved color is applied as an
+                // inline `style` below.
+                let rendered = apply_cellbgcolor_directives(content.rendered(), cell_bgcolor);
 
                 match cell.style() {
                     // A literal cell renders its content verbatim inside a
@@ -1124,6 +1175,12 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
 
                 cell_node.children.push(content);
             }
+        }
+
+        // Apply the currently-effective cell background color (set by this cell's
+        // own `{set:cellbgcolor:…}` directive or persisted from an earlier cell).
+        if let Some(color) = cell_bgcolor.as_deref() {
+            cell_node = cell_node.with_attribute("style", format!("background-color: {color};"));
         }
 
         tr.children.push(cell_node);

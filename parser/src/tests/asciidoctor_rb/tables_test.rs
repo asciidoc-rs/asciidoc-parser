@@ -1458,10 +1458,36 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (issue TBD): the `{set:cellbgcolor:...}` counter attribute is not
-    // supported, so per-cell background colors are not applied.
-    fn cell_background_color() {}
+    fn cell_background_color() {
+        let doc = Parser::default().parse(
+            "[cols=\"1e,1\", options=\"header\"]\n|===\n|{set:cellbgcolor:green}green\n|{set:cellbgcolor!}\nplain\n|{set:cellbgcolor:red}red\n|{set:cellbgcolor!}\nplain\n|===",
+        );
+
+        // The first cell sets `cellbgcolor` to green, so its header cell carries
+        // the background color; the second cell unsets it, so the next header
+        // cell has none. The attribute persists across cells, so the body cell
+        // that sets red is red, and the final cell unsets it again.
+        assert_xpath(
+            &doc,
+            "(/table/thead/tr/th)[1][@style=\"background-color: green;\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/table/thead/tr/th)[2][@style=\"background-color: green;\"]",
+            0,
+        );
+        assert_xpath(
+            &doc,
+            "(/table/tbody/tr/td)[1][@style=\"background-color: red;\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/table/tbody/tr/td)[2][@style=\"background-color: green;\"]",
+            0,
+        );
+    }
 
     #[test]
     fn should_warn_if_table_block_is_not_terminated() {
