@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 
 use self_cell::self_cell;
 
@@ -1098,7 +1098,11 @@ fn build_psv_table<'src>(
 
     let mut raw_rows: Vec<Vec<RawCell<'src>>> = vec![];
     if ncols > 0 {
-        let mut active_rowspans: Vec<usize> = vec![0];
+        // A queue: each completed row consumes the slots carried into it from the
+        // front (`pop_front`), while a multi-row cell reserves slots in the rows it
+        // extends into via the back. `VecDeque` keeps both ends O(1); a `Vec` would
+        // pay an O(n) shift on every `remove(0)`.
+        let mut active_rowspans: VecDeque<usize> = VecDeque::from([0]);
         let mut column_visits = 0usize;
         let mut current_row: Vec<RawCell<'src>> = vec![];
 
@@ -1123,7 +1127,7 @@ fn build_psv_table<'src>(
 
             // The slots carried into the current row are `active_rowspans[0]`; the
             // vector is never empty here, so the fallback is unreachable.
-            let carried = active_rowspans.first().copied().unwrap_or(0);
+            let carried = active_rowspans.front().copied().unwrap_or(0);
             let effective = column_visits + carried;
             if effective >= ncols {
                 if effective == ncols {
@@ -1139,9 +1143,9 @@ fn build_psv_table<'src>(
                     });
                 }
                 column_visits = 0;
-                active_rowspans.remove(0);
+                active_rowspans.pop_front();
                 if active_rowspans.is_empty() {
-                    active_rowspans.push(0);
+                    active_rowspans.push_back(0);
                 }
             }
         }
@@ -1627,10 +1631,17 @@ fn process_content<'src>(
             let owned = OwnedCell::new(expanded, |source| {
                 // Warnings from the owned parse borrow the owned source and so
                 // cannot escape it; the include path is rare and currently
-                // warning-free, so they are dropped here.
+                // warning-free, so they are dropped here. The `debug_assert`
+                // turns any future warning added to this path into a loud test
+                // failure rather than a silent loss.
                 let mut owned_warnings: Vec<Warning<'_>> = vec![];
                 let (title, inline, blocks) =
                     parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
+                debug_assert!(
+                    owned_warnings.is_empty(),
+                    "warnings from an include-expanded AsciiDoc cell are dropped; \
+                     propagate them before adding any to this path"
+                );
                 OwnedCellInner {
                     title,
                     inline,
