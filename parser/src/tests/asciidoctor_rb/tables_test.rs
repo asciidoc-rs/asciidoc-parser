@@ -1365,8 +1365,9 @@ mod psv {
 
     #[test]
     #[ignore]
-    // TODO (issue TBD): Footnotes must not be shared between an AsciiDoc table
-    // cell and the main document.
+    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/544):
+    // Footnotes must not be shared between an AsciiDoc table cell and the main
+    // document.
     fn footnotes_should_not_be_shared_between_an_asciidoc_table_cell_and_the_main_document() {}
 
     // Backend-specific test omitted: DocBook ("callout numbers should be
