@@ -126,6 +126,11 @@ If the quote is a single line or paragraph (i.e., a styled paragraph), you can p
 ----
 include::example$quote.adoc[tag=para2-c]
 ----
+"#
+    );
+
+    verifies!(
+        r#"
 <.> Mark lead-in text explaining the context or setting of the quote using a period (`.`). (optional)
 <.> For content that doesn't require the preservation of line breaks, set `quote` in the first position of the attribute list.
 <.> The second position contains who the excerpt is attributed to. (optional)
@@ -137,6 +142,25 @@ The result of <<ex-style>> is displayed below.
 include::example$quote.adoc[tag=para2]
 
 "#
+    );
+
+    // The `para2` example exercises every callout: a lead-in title (the `.`
+    // line), the `quote` style with attribution and citation positions, and the
+    // quote text on the following line.
+    let doc = Parser::default().parse(
+        ".After landing the cloaked Klingon bird of prey in Golden Gate park:\n[quote,Captain James T. Kirk,Star Trek IV: The Voyage Home]\nEverybody remember where we parked.",
+    );
+    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    assert_eq!(quote.content_model(), ContentModel::Simple);
+    assert_eq!(
+        quote.title(),
+        Some("After landing the cloaked Klingon bird of prey in Golden Gate park:")
+    );
+    assert_eq!(quote.attribution(), Some("Captain James T. Kirk"));
+    assert_eq!(quote.citetitle(), Some("Star Trek IV: The Voyage Home"));
+    assert_eq!(
+        quote.content().unwrap().rendered(),
+        "Everybody remember where we parked."
     );
 }
 
@@ -172,9 +196,30 @@ If the quote or excerpt is more than one paragraph, place the text between delim
 include::example$quote.adoc[tag=comp]
 ----
 
+"#
+    );
+
+    verifies!(
+        r#"
 The result of <<ex-block>> is displayed below.
 
 include::example$quote.adoc[tag=comp]
+"#
+    );
+
+    // The `comp` example: a multi-paragraph quote block attributed to a source
+    // with no citation.
+    let doc = Parser::default().parse(
+        "[quote,Monty Python and the Holy Grail]\n____\nDennis: Come and see the violence inherent in the system. Help! Help! I'm being repressed!\n\nKing Arthur: Bloody peasant!\n\nDennis: Oh, what a giveaway!\n____",
+    );
+    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    assert_eq!(quote.content_model(), ContentModel::Compound);
+    assert_eq!(quote.attribution(), Some("Monty Python and the Holy Grail"));
+    assert!(quote.citetitle().is_none());
+    assert_eq!(quote.blocks().len(), 3);
+
+    non_normative!(
+        r#"
 // end::basic[]
 
 "#
@@ -226,11 +271,29 @@ You can turn a single paragraph into a blockquote by:
 include::example$quote.adoc[tag=abbr]
 ----
 
+"#
+    );
+
+    verifies!(
+        r#"
 The result of <<ex-quoted>> is displayed below.
 
 include::example$quote.adoc[tag=abbr]
 
 "#
+    );
+
+    // The `abbr` example: a two-line quoted paragraph with an attribution and
+    // citation supplied on the `--` line.
+    let doc = Parser::default().parse(
+        "\"I hold it that a little rebellion now and then is a good thing,\nand as necessary in the political world as storms in the physical.\"\n-- Thomas Jefferson, Papers of Thomas Jefferson: Volume 11",
+    );
+    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    assert_eq!(quote.content_model(), ContentModel::Simple);
+    assert_eq!(quote.attribution(), Some("Thomas Jefferson"));
+    assert_eq!(
+        quote.citetitle(),
+        Some("Papers of Thomas Jefferson: Volume 11")
     );
 }
 
@@ -307,11 +370,28 @@ This syntax was adopted both to ease the transition from Markdown and because it
 include::example$quote.adoc[tag=md]
 ----
 
+"#
+    );
+
+    verifies!(
+        r#"
 The result of <<ex-md>> is displayed below.
 
 include::example$quote.adoc[tag=md]
 
 "#
+    );
+
+    // The `md` example renders as a quote block whose `-- ` line becomes the
+    // attribution.
+    let doc = Parser::default().parse(
+        "> I hold it that a little rebellion now and then is a good thing,\n> and as necessary in the political world as storms in the physical.\n> -- Thomas Jefferson, Papers of Thomas Jefferson: Volume 11",
+    );
+    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    assert_eq!(quote.attribution(), Some("Thomas Jefferson"));
+    assert_eq!(
+        quote.citetitle(),
+        Some("Papers of Thomas Jefferson: Volume 11")
     );
 
     verifies!(
@@ -340,12 +420,26 @@ Like Markdown, Asciidoctor supports some block content inside the blockquote, in
 include::example$quote.adoc[tag=md-alt]
 ....
 
+"#
+    );
+
+    verifies!(
+        r#"
 Here's how the conversation from <<ex-md-block>> is rendered.
 
 include::example$quote.adoc[tag=md-alt]
 
 "#
     );
+
+    // The `md-alt` example: nested blockquotes and a list inside a Markdown
+    // blockquote. The outer blockquote plus the three nested ones make four
+    // quote blocks in all.
+    let doc = Parser::default().parse(
+        "> > What's new?\n>\n> I've got Markdown in my AsciiDoc!\n>\n> > Like what?\n>\n> * Blockquotes\n> * Headings\n> * Fenced code blocks\n>\n> > Is there more?\n>\n> Yep. AsciiDoc and Markdown share a lot of common syntax already.",
+    );
+    assert_css(&doc, ".quoteblock", 4);
+    assert_css(&doc, ".ulist", 1);
 
     verifies!(
         r#"
