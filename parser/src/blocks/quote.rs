@@ -413,19 +413,18 @@ impl<'src> QuoteBlock<'src> {
 
         let body = lines.join("\n");
 
-        // The stripped body owns its source; its blocks borrow from it.
+        // The stripped body owns its source; its blocks borrow from it. Warnings
+        // from the owned parse reference spans in that owned source, so they
+        // cannot be returned to the caller as `Warning<'src>`. Their
+        // [`WarningType`]s (which carry no borrowed data) are collected instead
+        // and re-anchored at the blockquote's own source span below: the
+        // `>`-stripped body is not contiguous in the document source, so a
+        // precise location is not available anyway, but the diagnostic itself
+        // must not be lost.
+        let mut nested_warning_types: Vec<WarningType> = vec![];
         let owned = OwnedQuoteBlocks::new(body, |source| {
-            // Warnings from the owned parse borrow the owned source and so
-            // cannot escape it. Markdown-style blockquotes are used for simple
-            // content, so this path is currently warning-free; the
-            // `debug_assert` turns any future warning into a loud test failure
-            // rather than a silent loss.
-            let maw = parse_blocks_until(Span::new(source), |_| false, parser);
-            debug_assert!(
-                maw.warnings.is_empty(),
-                "warnings from a Markdown-style blockquote are dropped; \
-                 propagate them before adding any to this path"
-            );
+            let mut maw = parse_blocks_until(Span::new(source), |_| false, parser);
+            nested_warning_types.extend(maw.warnings.drain(..).map(|w| w.warning));
             OwnedQuoteBlocksInner {
                 blocks: maw.item.item,
             }
@@ -435,6 +434,11 @@ impl<'src> QuoteBlock<'src> {
             .source
             .trim_remainder(after)
             .trim_trailing_whitespace();
+
+        let warnings = nested_warning_types
+            .into_iter()
+            .map(|warning| Warning { source, warning })
+            .collect();
 
         Some(MatchAndWarnings {
             item: Some(MatchedItem {
@@ -455,7 +459,7 @@ impl<'src> QuoteBlock<'src> {
                 },
                 after: after.discard_empty_lines(),
             }),
-            warnings: vec![],
+            warnings,
         })
     }
 
@@ -639,11 +643,15 @@ fn non_empty(s: &str) -> Option<&str> {
 /// quoted text.
 ///
 /// The attribution line begins with `--` followed by at least one space or tab
-/// and then more text. Returns the text before that line (the quoted text) and
-/// the attribution text (everything after the `--` marker and its trailing
-/// whitespace), or `None` if no attribution line is present.
+/// and then more text. The **last** such line is used (matching Asciidoctor's
+/// greedy match and the Markdown-style path), so a `-- …` that appears earlier
+/// in the quoted body does not prematurely terminate the quote. Returns the
+/// text before that line (the quoted text) and the attribution text (everything
+/// after the `--` marker and its trailing whitespace), or `None` if no
+/// attribution line is present.
 fn split_at_attribution_line(data: &str) -> Option<(&str, &str)> {
     let mut line_start = 0;
+    let mut attribution: Option<(usize, &str)> = None;
 
     for line in data.split_inclusive('\n') {
         let trimmed = line.strip_suffix('\n').unwrap_or(line);
@@ -653,18 +661,18 @@ fn split_at_attribution_line(data: &str) -> Option<(&str, &str)> {
         {
             let attribution_text = rest.trim_start_matches([' ', '\t']);
             // `line_start > 0` ensures there is at least one line of quoted text
-            // before the attribution line; `line_start` is a line boundary, so
-            // `split_at` never lands inside a character.
+            // before the attribution line.
             if !attribution_text.is_empty() && line_start > 0 {
-                let (quoted, _) = data.split_at(line_start);
-                return Some((quoted, attribution_text));
+                attribution = Some((line_start, attribution_text));
             }
         }
 
         line_start += line.len();
     }
 
-    None
+    // `line_start` is always a line boundary, so `split_at` never lands inside a
+    // character.
+    attribution.map(|(start, text)| (data.split_at(start).0, text))
 }
 
 /// Returns the span of the paragraph that begins at `source`: all lines up to
@@ -702,10 +710,26 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
         self.content.as_ref().map(|content| content.rendered())
     }
 
+    /// Returns the nested blocks of a `____`-delimited quote.
+    ///
+    /// **Note:** a Markdown-style blockquote's nested blocks borrow the block's
+    /// own owned source rather than the document source, so they cannot be
+    /// returned through this `'src`-bound trait method and this iterator is
+    /// empty for them. Use [`QuoteBlock::blocks()`] to read the nested blocks
+    /// of any compound quote, Markdown-style or not. (Rendering and
+    /// reference resolution go through `blocks()` and an explicit
+    /// crate-internal `resolve_references`, so this gap is internal to the
+    /// crate.)
     fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
         self.blocks.iter()
     }
 
+    /// Returns a mutable slice of the nested blocks of a `____`-delimited
+    /// quote.
+    ///
+    /// See [the note on `nested_blocks()`](Self::nested_blocks): a
+    /// Markdown-style blockquote's nested blocks are not reachable through
+    /// this method.
     fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
     }
@@ -978,6 +1002,21 @@ mod tests {
     }
 
     #[test]
+    fn quoted_paragraph_uses_last_attribution_line() {
+        // A `-- …` that appears earlier in the quoted body does not terminate
+        // the quote; the last attribution line wins (matching Asciidoctor).
+        let block =
+            parse_one("\"line one\n-- not really an attribution\nline two\"\n-- Real Attribution");
+        let quote = as_quote(&block);
+        assert_eq!(quote.attribution(), Some("Real Attribution"));
+        let rendered = quote.content().unwrap().rendered();
+        assert!(
+            rendered.contains("line one") && rendered.contains("line two"),
+            "content was: {rendered}"
+        );
+    }
+
+    #[test]
     fn attribution_with_empty_name_keeps_citation() {
         // A `--` line of the form `-- , citation` has no attribution but still
         // yields a citation.
@@ -1005,6 +1044,25 @@ mod tests {
         let quote = as_quote(&block);
         assert_eq!(quote.attribution(), Some("Someone"));
         assert_eq!(quote.blocks().len(), 1);
+    }
+
+    #[test]
+    fn markdown_blockquote_propagates_nested_warning() {
+        // A warning produced while parsing the (owned, `>`-stripped) body — here
+        // an unterminated nested delimited block — is re-anchored at the
+        // blockquote's own span and surfaced to the caller, rather than being
+        // dropped (or panicking a debug build).
+        let mut parser = Parser::default();
+        let maw = Block::parse(crate::Span::new("> ____\n> unclosed"), &mut parser);
+
+        let block = maw.item.unwrap().item;
+        assert_eq!(block.raw_context().deref(), "quote");
+        assert_eq!(
+            maw.warnings.first().unwrap().warning,
+            WarningType::UnterminatedDelimitedBlock
+        );
+        // The warning is anchored at the blockquote's source span.
+        assert_eq!(maw.warnings.first().unwrap().source, block.span());
     }
 
     #[test]
