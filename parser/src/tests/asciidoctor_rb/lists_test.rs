@@ -460,36 +460,34 @@ mod bulleted_lists {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/456):
-        // Enable this test when admonitions are implemented.
         fn an_admonition_paragraph_attached_by_a_line_continuation_to_a_list_item_with_wrapped_text_should_produce_admonition()
          {
-            let _doc = Parser::default()
+            let doc = Parser::default()
                 .parse("- first-line text\n  wrapped text\n+\nNOTE: This is a note.\n");
-            todo!("assert_css: 'ul', output, 1");
-            todo!("assert_css: 'ul > li', output, 1");
-            todo!("assert_css: 'ul > li > p', output, 1");
-            todo!(
-                "assert_xpath: '//ul/li/p[text()=\"first-line text\\nwrapped text\"]', output, 1"
+            assert_css(&doc, "ul", 1);
+            assert_css(&doc, "ul > li", 1);
+            assert_css(&doc, "ul > li > p", 1);
+            assert_xpath(
+                &doc,
+                "//ul/li/p[text()=\"first-line text\nwrapped text\"]",
+                1,
             );
-            todo!("assert_css: 'ul > li > p + .admonitionblock.note', output, 1");
-            todo!(
-                "assert_xpath: '//ul/li/*[@class=\"admonitionblock note\"]//td[@class=\"content\"][normalize-space(text())=\"This is a note.\"]', output, 1"
+            assert_css(&doc, "ul > li > p + .admonitionblock.note", 1);
+            assert_xpath(
+                &doc,
+                "//ul/li/*[@class=\"admonitionblock note\"]//td[@class=\"content\"][normalize-space(text())=\"This is a note.\"]",
+                1,
             );
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/456):
-        // Enable this test when admonitions are implemented.
         fn paragraph_like_blocks_attached_to_an_ancestor_list_item_by_a_list_continuation_should_produce_blocks()
          {
-            let _doc = Parser::default().parse("* parent\n ** child\n\n+\nNOTE: This is a note.\n\n* another parent\n ** another child\n\n+\n'''\n");
-            todo!("assert_css: 'ul ul .admonitionblock.note', output, 0");
-            todo!("assert_xpath: '(//ul)[1]/li/*[@class=\"admonitionblock note\"]', output, 1");
-            todo!("assert_css: 'ul ul hr', output, 0");
-            todo!("assert_xpath: '(//ul)[1]/li/hr', output, 1");
+            let doc = Parser::default().parse("* parent\n ** child\n\n+\nNOTE: This is a note.\n\n* another parent\n ** another child\n\n+\n'''\n");
+            assert_css(&doc, "ul ul .admonitionblock.note", 0);
+            assert_xpath(&doc, "(//ul)[1]/li/*[@class=\"admonitionblock note\"]", 1);
+            assert_css(&doc, "ul ul hr", 0);
+            assert_xpath(&doc, "(//ul)[1]/li/hr", 1);
         }
 
         #[test]

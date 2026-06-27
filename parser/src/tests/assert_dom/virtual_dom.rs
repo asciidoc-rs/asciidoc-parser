@@ -11,10 +11,10 @@ use regex::Regex;
 use crate::{
     Document, HasSpan,
     blocks::{
-        Block, Break, ColumnStyle, CompoundDelimitedBlock, Frame, Grid, HorizontalAlignment,
-        IsBlock, ListBlock, ListItem, ListItemMarker, ListType, MediaBlock, Preamble,
-        RawDelimitedBlock, SectionBlock, SimpleBlock, SimpleBlockStyle, Stripes, TableBlock,
-        TableCellContent, TableColumn, TableRow, VerticalAlignment,
+        AdmonitionBlock, Block, Break, ColumnStyle, CompoundDelimitedBlock, ContentModel, Frame,
+        Grid, HorizontalAlignment, IsBlock, ListBlock, ListItem, ListItemMarker, ListType,
+        MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock, SimpleBlockStyle,
+        Stripes, TableBlock, TableCellContent, TableColumn, TableRow, VerticalAlignment,
     },
 };
 
@@ -365,8 +365,12 @@ impl ToVirtualDom for Document<'_> {
 /// skip adding a separate title element for those.
 fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
     // Check if this block type handles its own title internally. Lists render
-    // their title inside the list wrapper; tables render it as a <caption>.
-    let handles_title_internally = matches!(block, Block::List(_) | Block::Table(_));
+    // their title inside the list wrapper; tables render it as a <caption>;
+    // admonitions render it inside the content cell.
+    let handles_title_internally = matches!(
+        block,
+        Block::List(_) | Block::Table(_) | Block::Admonition(_)
+    );
 
     // Add title as a separate sibling element if the block doesn't handle it
     // internally.
@@ -448,6 +452,7 @@ impl ToVirtualDom for Block<'_> {
             Block::Media(media) => media_to_node(media),
             Block::RawDelimited(raw) => raw_delimited_to_node(raw),
             Block::CompoundDelimited(compound) => compound_delimited_to_node(compound),
+            Block::Admonition(admonition) => admonition_to_node(admonition),
             Block::Table(table) => table_to_node(table),
             Block::Preamble(preamble) => preamble_to_node(preamble),
             Block::Break(break_) => break_to_node(break_),
@@ -876,11 +881,90 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
         node = node.with_id(id);
     }
 
+    // Render each child through `add_block_with_title` (rather than a bare
+    // `child.to_virtual_dom()`) so that a child block's title surfaces as a
+    // sibling `div.title` and a child paragraph is wrapped in `div.paragraph`,
+    // matching Asciidoctor's output. This applies to every compound block type
+    // (example, sidebar, quote, open), not just admonitions: before this, a
+    // titled child inside one of these blocks had its title dropped.
     for child in compound.nested_blocks() {
-        node.children.push(child.to_virtual_dom());
+        add_block_with_title(&mut node, child);
     }
 
     node
+}
+
+fn admonition_to_node<'a>(admonition: &'a AdmonitionBlock<'a>) -> VirtualNode {
+    // The outer wrapper carries `admonitionblock`, the admonition name (e.g.
+    // `note`), then any roles. The ID, if any, is set on this element.
+    let mut node = VirtualNode::new("div")
+        .with_class("admonitionblock")
+        .with_class(admonition.name());
+
+    for role in admonition.roles() {
+        node = node.with_class(role);
+    }
+
+    if let Some(id) = admonition.id() {
+        node = node.with_id(id);
+    }
+
+    // The label/icon and content are laid out in a single-row table.
+    let mut icon_cell = VirtualNode::new("td").with_class("icon");
+    if admonition.icons_font() {
+        // With font icons enabled, the label is rendered as a Font Awesome icon
+        // whose `title` carries the caption text.
+        icon_cell = icon_cell.with_child(
+            VirtualNode::new("i")
+                .with_class("fa")
+                .with_class(format!("icon-{}", admonition.name()))
+                .with_attribute("title", admonition.label()),
+        );
+    } else {
+        // Otherwise the caption text (or emoji glyph) is shown as a title.
+        icon_cell = icon_cell.with_child(
+            VirtualNode::new("div")
+                .with_class("title")
+                .with_text(admonition.label()),
+        );
+    }
+
+    let mut content_cell = VirtualNode::new("td").with_class("content");
+
+    // The admonition's own title renders inside the content cell, before the
+    // content itself.
+    if let Some(title) = admonition.title() {
+        content_cell
+            .children
+            .push(VirtualNode::new("div").with_class("title").with_text(title));
+    }
+
+    match admonition.content_model() {
+        ContentModel::Compound => {
+            for child in admonition.nested_blocks() {
+                add_block_with_title(&mut content_cell, child);
+            }
+        }
+
+        // Simple content is rendered directly in the content cell (no wrapping
+        // paragraph), matching Asciidoctor's HTML output.
+        _ => {
+            if let Some(content) = admonition.content() {
+                let rendered = content.rendered();
+                if rendered.contains('<') {
+                    content_cell.children.extend(parse_html_content(rendered));
+                } else {
+                    content_cell.text = Some(decode_html_entities(rendered));
+                }
+            }
+        }
+    }
+
+    let row = VirtualNode::new("tr")
+        .with_child(icon_cell)
+        .with_child(content_cell);
+
+    node.with_child(VirtualNode::new("table").with_child(row))
 }
 
 fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {

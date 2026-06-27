@@ -1,3 +1,6 @@
+mod admonition;
+pub(crate) use admonition::AdmonitionBlock;
+
 mod block;
 pub(crate) use block::Block;
 
