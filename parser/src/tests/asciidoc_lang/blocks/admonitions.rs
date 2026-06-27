@@ -19,10 +19,15 @@ The only requirement is that they be offset from the main text and labeled appro
 
 #[test]
 fn admonition_types() {
-    verifies!(
+    non_normative!(
         r#"
 == Admonition types
 
+"#
+    );
+
+    verifies!(
+        r#"
 The rendered style of an admonition is determined by the assigned type (i.e., name).
 The AsciiDoc language provides five admonition types represented by the following labels:
 
@@ -49,7 +54,7 @@ The label becomes visible to the reader unless icons are enabled, in which case 
     assert_css(&doc, ".admonitionblock.caution", 1);
     assert_css(&doc, ".admonitionblock.warning", 1);
 
-    // The label may be specified as a paragraph prefix...
+    // The label may be specified as a paragraph prefix ...
     let mut parser = Parser::default();
     let block =
         crate::blocks::Block::parse(crate::Span::new("NOTE: paragraph prefix"), &mut parser)
@@ -59,7 +64,7 @@ The label becomes visible to the reader unless icons are enabled, in which case 
     assert_eq!(block.resolved_context().as_ref(), "admonition");
     assert_eq!(block.declared_style(), Some("NOTE"));
 
-    // ...or as the block style.
+    // ... or as the block style.
     let mut parser = Parser::default();
     let block = crate::blocks::Block::parse(crate::Span::new("[NOTE]\nblock style"), &mut parser)
         .unwrap_if_no_warnings()
@@ -90,10 +95,15 @@ To find a deeper analysis, see https://www.differencebetween.com/difference-betw
 
 #[test]
 fn admonition_paragraph_syntax() {
-    verifies!(
+    non_normative!(
         r#"
 == Admonition syntax
 
+"#
+    );
+
+    verifies!(
+        r#"
 When you want to call attention to a single paragraph, start the first line of the paragraph with the label you want to use.
 The label must be uppercase and followed by a colon (`:`).
 
@@ -187,10 +197,15 @@ include::example$admonition.adoc[tag=bl-nest]
 
 #[test]
 fn enable_admonition_icons() {
-    verifies!(
+    non_normative!(
         r#"
 == Enable admonition icons
 
+"#
+    );
+
+    verifies!(
+        r#"
 In the examples above, the admonition is rendered in a callout box with the style label in the gutter.
 You can replace the textual labels with font icons by setting the `icons` attribute on the document and assigning it the value `font`.
 
@@ -203,6 +218,11 @@ You can replace the textual labels with font icons by setting the `icons` attrib
 include::example$admonition.adoc[tag=para]
 ----
 
+"#
+    );
+
+    non_normative!(
+        r#"
 Learn more about using Font Awesome or custom icons with admonitions in xref:macros:icons-font.adoc[].
 
 "#
@@ -233,10 +253,15 @@ Learn more about using Font Awesome or custom icons with admonitions in xref:mac
 
 #[test]
 fn using_emoji_for_admonition_icons() {
-    verifies!(
+    non_normative!(
         r#"
 == Using emoji for admonition icons
 
+"#
+    );
+
+    verifies!(
+        r#"
 If image-based or font-based icons are not available, you can leverage the admonition caption to display an emoji (or any symbol from Unicode) in the place of the admonition label, thus giving you an alternative way to make admonition icons.
 
 If the `icons` attribute is not set on the document, the admonition label is shown as text (e.g., CAUTION).

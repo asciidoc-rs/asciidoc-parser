@@ -100,7 +100,6 @@ impl<'src> std::fmt::Debug for Block<'src> {
                 .finish(),
 
             Block::Admonition(block) => f.debug_tuple("Block::Admonition").field(block).finish(),
-
             Block::Table(block) => f.debug_tuple("Block::Table").field(block).finish(),
             Block::Preamble(block) => f.debug_tuple("Block::Preamble").field(block).finish(),
             Block::Break(break_) => f.debug_tuple("Block::Break").field(break_).finish(),
