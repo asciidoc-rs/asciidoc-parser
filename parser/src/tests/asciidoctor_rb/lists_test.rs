@@ -472,7 +472,7 @@ mod bulleted_lists {
                 "//ul/li/p[text()=\"first-line text\nwrapped text\"]",
                 1,
             );
-            assert_css(&doc, "ul > li > .admonitionblock.note", 1);
+            assert_css(&doc, "ul > li > p + .admonitionblock.note", 1);
             assert_xpath(
                 &doc,
                 "//ul/li/*[@class=\"admonitionblock note\"]//td[@class=\"content\"][normalize-space(text())=\"This is a note.\"]",

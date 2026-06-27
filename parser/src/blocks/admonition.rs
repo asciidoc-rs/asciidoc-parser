@@ -97,6 +97,12 @@ impl<'src> AdmonitionBlock<'src> {
         // An admonition style masquerades only over an example block, an open
         // block, or a paragraph. Over an example or open block it yields
         // compound content.
+        //
+        // For a valid example/open delimiter, `CompoundDelimitedBlock::parse`
+        // always returns `item: Some(..)` — even for an unterminated block, in
+        // which case it also reports an `UnterminatedDelimitedBlock` warning.
+        // Those `warnings` are bound here and forwarded through `finish`, so no
+        // diagnostic is lost on the masquerade path.
         if is_example_or_open_delimiter(&first_line)
             && let Some(MatchAndWarnings {
                 item: Some(inner),
@@ -613,6 +619,23 @@ mod tests {
         assert!(admonition.content().is_none());
         assert!(admonition.rendered_content().is_none());
         assert_eq!(admonition.nested_blocks().count(), 1);
+    }
+
+    #[test]
+    fn masquerade_propagates_unterminated_warning() {
+        // An unterminated example block under an admonition style still parses
+        // as a (compound) admonition, and its `UnterminatedDelimitedBlock`
+        // warning is not swallowed by the masquerade path.
+        let mut parser = Parser::default();
+        let maw = Block::parse(crate::Span::new("[NOTE]\n====\nunclosed"), &mut parser);
+
+        let block = maw.item.unwrap().item;
+        assert!(matches!(block, Block::Admonition(_)));
+        assert_eq!(maw.warnings.len(), 1);
+        assert_eq!(
+            maw.warnings.first().unwrap().warning,
+            crate::warnings::WarningType::UnterminatedDelimitedBlock
+        );
     }
 
     #[test]

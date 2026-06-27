@@ -881,6 +881,12 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
         node = node.with_id(id);
     }
 
+    // Render each child through `add_block_with_title` (rather than a bare
+    // `child.to_virtual_dom()`) so that a child block's title surfaces as a
+    // sibling `div.title` and a child paragraph is wrapped in `div.paragraph`,
+    // matching Asciidoctor's output. This applies to every compound block type
+    // (example, sidebar, quote, open), not just admonitions: before this, a
+    // titled child inside one of these blocks had its title dropped.
     for child in compound.nested_blocks() {
         add_block_with_title(&mut node, child);
     }
