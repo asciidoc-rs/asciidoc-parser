@@ -189,6 +189,13 @@ impl<'src> AdmonitionBlock<'src> {
             );
         }
 
+        // Unreachable in practice: `parse_paragraph` is only called after
+        // `admonition_paragraph_prefix` matched, which requires a non-whitespace
+        // character after the label on the first line (trailing whitespace is
+        // trimmed before the match). `content_start` therefore points at
+        // non-empty content, so `SimpleBlock::parse` always returns `Some`. This
+        // fall-through is kept as a defensive default that mirrors
+        // `parse_masquerade`.
         MatchAndWarnings {
             item: None,
             warnings: vec![],
@@ -431,6 +438,9 @@ mod tests {
     fn as_admonition<'a>(block: &'a Block<'a>) -> &'a crate::blocks::AdmonitionBlock<'a> {
         match block {
             Block::Admonition(admonition) => admonition,
+            // Only reached if a test parses an input that is not an admonition;
+            // it exists to fail that test loudly, so it is uncovered while the
+            // tests pass.
             other => panic!("expected an admonition block, got {other:?}"),
         }
     }
