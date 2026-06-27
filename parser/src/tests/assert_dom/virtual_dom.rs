@@ -967,11 +967,7 @@ fn collapsible_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
         // Asciidoctor's output for the example paragraph style).
         _ => {
             if let Some(rendered) = block.rendered_content() {
-                if rendered.contains('<') {
-                    content.children.extend(parse_html_content(rendered));
-                } else {
-                    content.text = Some(decode_html_entities(rendered));
-                }
+                content = content.with_html_content(rendered);
             }
         }
     }
