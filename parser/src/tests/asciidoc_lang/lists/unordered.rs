@@ -99,6 +99,8 @@ include::example$unordered.adoc[tag=base]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -139,6 +141,8 @@ include::example$unordered.adoc[tag=base]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -179,6 +183,8 @@ include::example$unordered.adoc[tag=base]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -290,6 +296,8 @@ include::example$unordered.adoc[tag=base-t]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -330,6 +338,8 @@ include::example$unordered.adoc[tag=base-t]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -370,6 +380,8 @@ include::example$unordered.adoc[tag=base-t]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -482,6 +494,8 @@ You should reserve the hyphen for lists that only have a single level because th
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -522,6 +536,8 @@ You should reserve the hyphen for lists that only have a single level because th
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -562,6 +578,8 @@ You should reserve the hyphen for lists that only have a single level because th
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -683,6 +701,8 @@ See xref:separating.adoc[] for more details.
                                     style: SimpleBlockStyle::Paragraph,
                                     title_source: None,
                                     title: None,
+                                    caption: None,
+                                    number: None,
                                     anchor: None,
                                     anchor_reftext: None,
                                     attrlist: None,
@@ -723,6 +743,8 @@ See xref:separating.adoc[] for more details.
                                     style: SimpleBlockStyle::Paragraph,
                                     title_source: None,
                                     title: None,
+                                    caption: None,
+                                    number: None,
                                     anchor: None,
                                     anchor_reftext: None,
                                     attrlist: None,
@@ -769,6 +791,8 @@ See xref:separating.adoc[] for more details.
                         style: SimpleBlockStyle::Paragraph,
                         title_source: None,
                         title: None,
+                        caption: None,
+                        number: None,
                         anchor: None,
                         anchor_reftext: None,
                         attrlist: None,
@@ -802,6 +826,8 @@ See xref:separating.adoc[] for more details.
                                     style: SimpleBlockStyle::Paragraph,
                                     title_source: None,
                                     title: None,
+                                    caption: None,
+                                    number: None,
                                     anchor: None,
                                     anchor_reftext: None,
                                     attrlist: None,
@@ -842,6 +868,8 @@ See xref:separating.adoc[] for more details.
                                     style: SimpleBlockStyle::Paragraph,
                                     title_source: None,
                                     title: None,
+                                    caption: None,
+                                    number: None,
                                     anchor: None,
                                     anchor_reftext: None,
                                     attrlist: None,
@@ -947,8 +975,7 @@ include::example$unordered.adoc[tag=nest]
                                 offset: 34,
                             },),
                             blocks: &[
-                                Block::Simple(SimpleBlock {
-                                    content: Content {
+                                Block::Simple(SimpleBlock { content: Content {
                                         original: Span {
                                             data: "West wood maze",
                                             line: 2,
@@ -956,20 +983,12 @@ include::example$unordered.adoc[tag=nest]
                                             offset: 36,
                                         },
                                         rendered: "West wood maze",
-                                    },
-                                    source: Span {
+                                    }, source: Span {
                                         data: "West wood maze",
                                         line: 2,
                                         col: 3,
                                         offset: 36,
-                                    },
-                                    style: SimpleBlockStyle::Paragraph,
-                                    title_source: None,
-                                    title: None,
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
+                                    }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),
                                 Block::List(ListBlock {
                                     type_: ListType::Unordered,
                                     items: &[
@@ -981,8 +1000,7 @@ include::example$unordered.adoc[tag=nest]
                                                 offset: 51,
                                             },),
                                             blocks: &[
-                                                Block::Simple(SimpleBlock {
-                                                    content: Content {
+                                                Block::Simple(SimpleBlock { content: Content {
                                                         original: Span {
                                                             data: "Maze heart",
                                                             line: 3,
@@ -990,20 +1008,12 @@ include::example$unordered.adoc[tag=nest]
                                                             offset: 54,
                                                         },
                                                         rendered: "Maze heart",
-                                                    },
-                                                    source: Span {
+                                                    }, source: Span {
                                                         data: "Maze heart",
                                                         line: 3,
                                                         col: 4,
                                                         offset: 54,
-                                                    },
-                                                    style: SimpleBlockStyle::Paragraph,
-                                                    title_source: None,
-                                                    title: None,
-                                                    anchor: None,
-                                                    anchor_reftext: None,
-                                                    attrlist: None,
-                                                },),
+                                                    }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),
                                                 Block::List(ListBlock {
                                                     type_: ListType::Unordered,
                                                     items: &[Block::ListItem(ListItem {
@@ -1013,8 +1023,7 @@ include::example$unordered.adoc[tag=nest]
                                                             col: 1,
                                                             offset: 65,
                                                         },),
-                                                        blocks: &[Block::Simple(SimpleBlock {
-                                                            content: Content {
+                                                        blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                                 original: Span {
                                                                     data: "Reflection pool",
                                                                     line: 4,
@@ -1022,20 +1031,12 @@ include::example$unordered.adoc[tag=nest]
                                                                     offset: 69,
                                                                 },
                                                                 rendered: "Reflection pool",
-                                                            },
-                                                            source: Span {
+                                                            }, source: Span {
                                                                 data: "Reflection pool",
                                                                 line: 4,
                                                                 col: 5,
                                                                 offset: 69,
-                                                            },
-                                                            style: SimpleBlockStyle::Paragraph,
-                                                            title_source: None,
-                                                            title: None,
-                                                            anchor: None,
-                                                            anchor_reftext: None,
-                                                            attrlist: None,
-                                                        },),],
+                                                            }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                                         source: Span {
                                                             data: "*** Reflection pool",
                                                             line: 4,
@@ -1076,8 +1077,7 @@ include::example$unordered.adoc[tag=nest]
                                                 col: 1,
                                                 offset: 85,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Secret exit",
                                                         line: 5,
@@ -1085,20 +1085,12 @@ include::example$unordered.adoc[tag=nest]
                                                         offset: 88,
                                                     },
                                                     rendered: "Secret exit",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Secret exit",
                                                     line: 5,
                                                     col: 4,
                                                     offset: 88,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "** Secret exit",
                                                 line: 5,
@@ -1140,8 +1132,7 @@ include::example$unordered.adoc[tag=nest]
                                 col: 1,
                                 offset: 100,
                             },),
-                            blocks: &[Block::Simple(SimpleBlock {
-                                content: Content {
+                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                     original: Span {
                                         data: "Untracked file in git repository",
                                         line: 6,
@@ -1149,20 +1140,12 @@ include::example$unordered.adoc[tag=nest]
                                         offset: 102,
                                     },
                                     rendered: "Untracked file in git repository",
-                                },
-                                source: Span {
+                                }, source: Span {
                                     data: "Untracked file in git repository",
                                     line: 6,
                                     col: 3,
                                     offset: 102,
-                                },
-                                style: SimpleBlockStyle::Paragraph,
-                                title_source: None,
-                                title: None,
-                                anchor: None,
-                                anchor_reftext: None,
-                                attrlist: None,
-                            },),],
+                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                             source: Span {
                                 data: "* Untracked file in git repository",
                                 line: 6,
@@ -1247,8 +1230,7 @@ The indentation is not significant and may aid in visualizing the nesting level.
                                 col: 1,
                                 offset: 0,
                             },),
-                            blocks: &[Block::Simple(SimpleBlock {
-                                content: Content {
+                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                     original: Span {
                                         data: "Edgar Allan Poe",
                                         line: 1,
@@ -1256,20 +1238,12 @@ The indentation is not significant and may aid in visualizing the nesting level.
                                         offset: 2,
                                     },
                                     rendered: "Edgar Allan Poe",
-                                },
-                                source: Span {
+                                }, source: Span {
                                     data: "Edgar Allan Poe",
                                     line: 1,
                                     col: 3,
                                     offset: 2,
-                                },
-                                style: SimpleBlockStyle::Paragraph,
-                                title_source: None,
-                                title: None,
-                                anchor: None,
-                                anchor_reftext: None,
-                                attrlist: None,
-                            },),],
+                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                             source: Span {
                                 data: "* Edgar Allan Poe",
                                 line: 1,
@@ -1287,8 +1261,7 @@ The indentation is not significant and may aid in visualizing the nesting level.
                                 col: 2,
                                 offset: 19,
                             },),
-                            blocks: &[Block::Simple(SimpleBlock {
-                                content: Content {
+                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                     original: Span {
                                         data: "Sheri S. Tepper",
                                         line: 2,
@@ -1296,20 +1269,12 @@ The indentation is not significant and may aid in visualizing the nesting level.
                                         offset: 21,
                                     },
                                     rendered: "Sheri S. Tepper",
-                                },
-                                source: Span {
+                                }, source: Span {
                                     data: "Sheri S. Tepper",
                                     line: 2,
                                     col: 4,
                                     offset: 21,
-                                },
-                                style: SimpleBlockStyle::Paragraph,
-                                title_source: None,
-                                title: None,
-                                anchor: None,
-                                anchor_reftext: None,
-                                attrlist: None,
-                            },),],
+                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                             source: Span {
                                 data: " * Sheri S. Tepper",
                                 line: 2,
@@ -1327,8 +1292,7 @@ The indentation is not significant and may aid in visualizing the nesting level.
                                 col: 6,
                                 offset: 42,
                             },),
-                            blocks: &[Block::Simple(SimpleBlock {
-                                content: Content {
+                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                     original: Span {
                                         data: "Bill Bryson",
                                         line: 3,
@@ -1336,20 +1300,12 @@ The indentation is not significant and may aid in visualizing the nesting level.
                                         offset: 44,
                                     },
                                     rendered: "Bill Bryson",
-                                },
-                                source: Span {
+                                }, source: Span {
                                     data: "Bill Bryson",
                                     line: 3,
                                     col: 8,
                                     offset: 44,
-                                },
-                                style: SimpleBlockStyle::Paragraph,
-                                title_source: None,
-                                title: None,
-                                anchor: None,
-                                anchor_reftext: None,
-                                attrlist: None,
-                            },),],
+                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                             source: Span {
                                 data: "     * Bill Bryson",
                                 line: 3,
@@ -1445,8 +1401,7 @@ include::example$unordered.adoc[tag=max]
                                     ),
                                     blocks: &[
                                         Block::Simple(
-                                            SimpleBlock {
-                                                content: Content {
+                                            SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Level 1 list item",
                                                         line: 1,
@@ -1454,20 +1409,12 @@ include::example$unordered.adoc[tag=max]
                                                         offset: 2,
                                                     },
                                                     rendered: "Level 1 list item",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Level 1 list item",
                                                     line: 1,
                                                     col: 3,
                                                     offset: 2,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },
                                         ),
                                         Block::List(
                                             ListBlock {
@@ -1485,8 +1432,7 @@ include::example$unordered.adoc[tag=max]
                                                             ),
                                                             blocks: &[
                                                                 Block::Simple(
-                                                                    SimpleBlock {
-                                                                        content: Content {
+                                                                    SimpleBlock { content: Content {
                                                                             original: Span {
                                                                                 data: "Level 2 list item",
                                                                                 line: 2,
@@ -1494,20 +1440,12 @@ include::example$unordered.adoc[tag=max]
                                                                                 offset: 23,
                                                                             },
                                                                             rendered: "Level 2 list item",
-                                                                        },
-                                                                        source: Span {
+                                                                        }, source: Span {
                                                                             data: "Level 2 list item",
                                                                             line: 2,
                                                                             col: 4,
                                                                             offset: 23,
-                                                                        },
-                                                                        style: SimpleBlockStyle::Paragraph,
-                                                                        title_source: None,
-                                                                        title: None,
-                                                                        anchor: None,
-                                                                        anchor_reftext: None,
-                                                                        attrlist: None,
-                                                                    },
+                                                                        }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },
                                                                 ),
                                                                 Block::List(
                                                                     ListBlock {
@@ -1525,8 +1463,7 @@ include::example$unordered.adoc[tag=max]
                                                                                     ),
                                                                                     blocks: &[
                                                                                         Block::Simple(
-                                                                                            SimpleBlock {
-                                                                                                content: Content {
+                                                                                            SimpleBlock { content: Content {
                                                                                                     original: Span {
                                                                                                         data: "Level 3 list item",
                                                                                                         line: 3,
@@ -1534,20 +1471,12 @@ include::example$unordered.adoc[tag=max]
                                                                                                         offset: 45,
                                                                                                     },
                                                                                                     rendered: "Level 3 list item",
-                                                                                                },
-                                                                                                source: Span {
+                                                                                                }, source: Span {
                                                                                                     data: "Level 3 list item",
                                                                                                     line: 3,
                                                                                                     col: 5,
                                                                                                     offset: 45,
-                                                                                                },
-                                                                                                style: SimpleBlockStyle::Paragraph,
-                                                                                                title_source: None,
-                                                                                                title: None,
-                                                                                                anchor: None,
-                                                                                                anchor_reftext: None,
-                                                                                                attrlist: None,
-                                                                                            },
+                                                                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },
                                                                                         ),
                                                                                         Block::List(
                                                                                             ListBlock {
@@ -1565,8 +1494,7 @@ include::example$unordered.adoc[tag=max]
                                                                                                             ),
                                                                                                             blocks: &[
                                                                                                                 Block::Simple(
-                                                                                                                    SimpleBlock {
-                                                                                                                        content: Content {
+                                                                                                                    SimpleBlock { content: Content {
                                                                                                                             original: Span {
                                                                                                                                 data: "Level 4 list item",
                                                                                                                                 line: 4,
@@ -1574,20 +1502,12 @@ include::example$unordered.adoc[tag=max]
                                                                                                                                 offset: 68,
                                                                                                                             },
                                                                                                                             rendered: "Level 4 list item",
-                                                                                                                        },
-                                                                                                                        source: Span {
+                                                                                                                        }, source: Span {
                                                                                                                             data: "Level 4 list item",
                                                                                                                             line: 4,
                                                                                                                             col: 6,
                                                                                                                             offset: 68,
-                                                                                                                        },
-                                                                                                                        style: SimpleBlockStyle::Paragraph,
-                                                                                                                        title_source: None,
-                                                                                                                        title: None,
-                                                                                                                        anchor: None,
-                                                                                                                        anchor_reftext: None,
-                                                                                                                        attrlist: None,
-                                                                                                                    },
+                                                                                                                        }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },
                                                                                                                 ),
                                                                                                                 Block::List(
                                                                                                                     ListBlock {
@@ -1605,8 +1525,7 @@ include::example$unordered.adoc[tag=max]
                                                                                                                                     ),
                                                                                                                                     blocks: &[
                                                                                                                                         Block::Simple(
-                                                                                                                                            SimpleBlock {
-                                                                                                                                                content: Content {
+                                                                                                                                            SimpleBlock { content: Content {
                                                                                                                                                     original: Span {
                                                                                                                                                         data: "Level 5 list item",
                                                                                                                                                         line: 5,
@@ -1614,20 +1533,12 @@ include::example$unordered.adoc[tag=max]
                                                                                                                                                         offset: 92,
                                                                                                                                                     },
                                                                                                                                                     rendered: "Level 5 list item",
-                                                                                                                                                },
-                                                                                                                                                source: Span {
+                                                                                                                                                }, source: Span {
                                                                                                                                                     data: "Level 5 list item",
                                                                                                                                                     line: 5,
                                                                                                                                                     col: 7,
                                                                                                                                                     offset: 92,
-                                                                                                                                                },
-                                                                                                                                                style: SimpleBlockStyle::Paragraph,
-                                                                                                                                                title_source: None,
-                                                                                                                                                title: None,
-                                                                                                                                                anchor: None,
-                                                                                                                                                anchor_reftext: None,
-                                                                                                                                                attrlist: None,
-                                                                                                                                            },
+                                                                                                                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },
                                                                                                                                         ),
                                                                                                                                         Block::List(
                                                                                                                                             ListBlock {
@@ -1645,8 +1556,7 @@ include::example$unordered.adoc[tag=max]
                                                                                                                                                             ),
                                                                                                                                                             blocks: &[
                                                                                                                                                                 Block::Simple(
-                                                                                                                                                                    SimpleBlock {
-                                                                                                                                                                        content: Content {
+                                                                                                                                                                    SimpleBlock { content: Content {
                                                                                                                                                                             original: Span {
                                                                                                                                                                                 data: "etc.",
                                                                                                                                                                                 line: 6,
@@ -1654,20 +1564,12 @@ include::example$unordered.adoc[tag=max]
                                                                                                                                                                                 offset: 117,
                                                                                                                                                                             },
                                                                                                                                                                             rendered: "etc.",
-                                                                                                                                                                        },
-                                                                                                                                                                        source: Span {
+                                                                                                                                                                        }, source: Span {
                                                                                                                                                                             data: "etc.",
                                                                                                                                                                             line: 6,
                                                                                                                                                                             col: 8,
                                                                                                                                                                             offset: 117,
-                                                                                                                                                                        },
-                                                                                                                                                                        style: SimpleBlockStyle::Paragraph,
-                                                                                                                                                                        title_source: None,
-                                                                                                                                                                        title: None,
-                                                                                                                                                                        anchor: None,
-                                                                                                                                                                        anchor_reftext: None,
-                                                                                                                                                                        attrlist: None,
-                                                                                                                                                                    },
+                                                                                                                                                                        }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },
                                                                                                                                                                 ),
                                                                                                                                                             ],
                                                                                                                                                             source: Span {
@@ -1823,8 +1725,7 @@ include::example$unordered.adoc[tag=max]
                                     ),
                                     blocks: &[
                                         Block::Simple(
-                                            SimpleBlock {
-                                                content: Content {
+                                            SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Level 1 list item",
                                                         line: 7,
@@ -1832,20 +1733,12 @@ include::example$unordered.adoc[tag=max]
                                                         offset: 124,
                                                     },
                                                     rendered: "Level 1 list item",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Level 1 list item",
                                                     line: 7,
                                                     col: 3,
                                                     offset: 124,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },
                                         ),
                                     ],
                                     source: Span {
@@ -1945,8 +1838,7 @@ After all, we're shooting for plain text markup that is readable _as is_.
                                 offset: 0,
                             },),
                             blocks: &[
-                                Block::Simple(SimpleBlock {
-                                    content: Content {
+                                Block::Simple(SimpleBlock { content: Content {
                                         original: Span {
                                             data: "Level 1 list item",
                                             line: 1,
@@ -1954,20 +1846,12 @@ After all, we're shooting for plain text markup that is readable _as is_.
                                             offset: 2,
                                         },
                                         rendered: "Level 1 list item",
-                                    },
-                                    source: Span {
+                                    }, source: Span {
                                         data: "Level 1 list item",
                                         line: 1,
                                         col: 3,
                                         offset: 2,
-                                    },
-                                    style: SimpleBlockStyle::Paragraph,
-                                    title_source: None,
-                                    title: None,
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
+                                    }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),
                                 Block::List(ListBlock {
                                     type_: ListType::Unordered,
                                     items: &[Block::ListItem(ListItem {
@@ -1977,8 +1861,7 @@ After all, we're shooting for plain text markup that is readable _as is_.
                                             col: 1,
                                             offset: 20,
                                         },),
-                                        blocks: &[Block::Simple(SimpleBlock {
-                                            content: Content {
+                                        blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                 original: Span {
                                                     data: "Level 2 list item",
                                                     line: 2,
@@ -1986,20 +1869,12 @@ After all, we're shooting for plain text markup that is readable _as is_.
                                                     offset: 22,
                                                 },
                                                 rendered: "Level 2 list item",
-                                            },
-                                            source: Span {
+                                            }, source: Span {
                                                 data: "Level 2 list item",
                                                 line: 2,
                                                 col: 3,
                                                 offset: 22,
-                                            },
-                                            style: SimpleBlockStyle::Paragraph,
-                                            title_source: None,
-                                            title: None,
-                                            anchor: None,
-                                            anchor_reftext: None,
-                                            attrlist: None,
-                                        },),],
+                                            }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                         source: Span {
                                             data: "- Level 2 list item",
                                             line: 2,
@@ -2040,8 +1915,7 @@ After all, we're shooting for plain text markup that is readable _as is_.
                                 col: 1,
                                 offset: 40,
                             },),
-                            blocks: &[Block::Simple(SimpleBlock {
-                                content: Content {
+                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                     original: Span {
                                         data: "Level 1 list item",
                                         line: 3,
@@ -2049,20 +1923,12 @@ After all, we're shooting for plain text markup that is readable _as is_.
                                         offset: 42,
                                     },
                                     rendered: "Level 1 list item",
-                                },
-                                source: Span {
+                                }, source: Span {
                                     data: "Level 1 list item",
                                     line: 3,
                                     col: 3,
                                     offset: 42,
-                                },
-                                style: SimpleBlockStyle::Paragraph,
-                                title_source: None,
-                                title: None,
-                                anchor: None,
-                                anchor_reftext: None,
-                                attrlist: None,
-                            },),],
+                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                             source: Span {
                                 data: "* Level 1 list item",
                                 line: 3,

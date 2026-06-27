@@ -15,6 +15,8 @@ pub(crate) struct SimpleBlock {
     pub style: SimpleBlockStyle,
     pub title_source: Option<Span>,
     pub title: Option<&'static str>,
+    pub caption: Option<&'static str>,
+    pub number: Option<usize>,
     pub anchor: Option<Span>,
     pub anchor_reftext: Option<Span>,
     pub attrlist: Option<Attrlist>,
@@ -28,6 +30,8 @@ impl fmt::Debug for SimpleBlock {
             .field("style", &self.style)
             .field("title_source", &self.title_source)
             .field("title", &self.title)
+            .field("caption", &self.caption)
+            .field("number", &self.number)
             .field("anchor", &self.anchor)
             .field("anchor_reftext", &self.anchor_reftext)
             .field("attrlist", &self.attrlist)
@@ -71,6 +75,21 @@ fn fixture_eq_observed(fixture: &SimpleBlock, observed: &crate::blocks::SimpleBl
         && let Some(ref observed_title) = observed.title()
         && fixture_title != observed_title
     {
+        return false;
+    }
+
+    if fixture.caption.is_some() != observed.caption().is_some() {
+        return false;
+    }
+
+    if let Some(ref fixture_caption) = fixture.caption
+        && let Some(ref observed_caption) = observed.caption()
+        && fixture_caption != observed_caption
+    {
+        return false;
+    }
+
+    if fixture.number != observed.number() {
         return false;
     }
 

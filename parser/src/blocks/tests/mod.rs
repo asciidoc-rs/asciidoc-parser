@@ -138,6 +138,106 @@ mod as_list_item {
     }
 }
 
+mod caption_and_number {
+    use crate::{
+        blocks::{Block, IsBlock},
+        span::Span,
+        tests::prelude::*,
+    };
+
+    /// Parses `input` as a single block, ignoring any warnings.
+    fn parse_block(input: &'static str) -> Block<'static> {
+        let mut parser = Parser::default();
+        Block::parse(Span::new(input), &mut parser)
+            .item
+            .unwrap()
+            .item
+    }
+
+    #[test]
+    fn non_captionable_blocks_have_no_caption_or_number() {
+        // Every `Block` variant that is not a captionable context reports no
+        // caption and no number, exercising the `Block` delegation arms and the
+        // default `IsBlock::caption`/`IsBlock::number` implementations.
+        let inputs = [
+            "a paragraph.",           // Simple
+            "image::example.png[]",   // Media
+            "== Section\n",           // Section
+            "----\ncode\n----",       // RawDelimited (listing)
+            "--\nopen\n--",           // CompoundDelimited (open)
+            "****\nsidebar\n****",    // CompoundDelimited (sidebar)
+            "NOTE: an admonition.",   // Admonition
+            "[quote]\n____\nq\n____", // Quote
+            "* item",                 // List
+            "'''",                    // Break
+            ":author: Jane",          // DocumentAttribute
+        ];
+
+        for input in inputs {
+            let block = parse_block(input);
+            assert!(block.caption().is_none(), "caption for {input:?}");
+            assert!(block.number().is_none(), "number for {input:?}");
+        }
+
+        // A ListItem (reached only as a nested block of a List).
+        let list = parse_block("* item one");
+        let mut saw_list_item = false;
+        for item in list.nested_blocks() {
+            assert!(matches!(item, Block::ListItem(_)));
+            assert!(item.caption().is_none());
+            assert!(item.number().is_none());
+            saw_list_item = true;
+        }
+        assert!(saw_list_item);
+
+        // An untitled table is captionable but, lacking a title, is unnumbered.
+        let table = parse_block("|===\n|a\n|===");
+        assert!(table.caption().is_none());
+        assert!(table.number().is_none());
+
+        // A Preamble (synthesized for content that precedes the first section).
+        let doc = Parser::default().parse("= Title\n\nintro paragraph.\n\n== Section\n\nbody.");
+        let preamble = doc.nested_blocks().next().unwrap();
+        assert!(matches!(preamble, Block::Preamble(_)));
+        assert!(preamble.caption().is_none());
+        assert!(preamble.number().is_none());
+    }
+
+    #[test]
+    fn captionable_blocks_expose_caption_and_number_via_block_enum() {
+        // A titled example and a titled table surface their caption prefix and
+        // number through the `Block` enum's delegation.
+        let example = parse_block(".Onomatopoeia\n====\nbody.\n====");
+        assert_eq!(example.caption(), Some("Example 1. "));
+        assert_eq!(example.number(), Some(1));
+
+        let table = parse_block(".A table\n|===\n|a\n|===");
+        assert_eq!(table.caption(), Some("Table 1. "));
+        assert_eq!(table.number(), Some(1));
+    }
+
+    #[test]
+    fn literal_styled_block_in_list_item_is_reparsed() {
+        // A `[literal]`-styled block attached to a list item is skipped by the
+        // speculative simple-block parse (because it is literal) and re-parsed
+        // through the list-item path. It carries no caption or number.
+        let doc = Parser::default().parse("* item\n+\n[literal]\nliteral text\n");
+
+        let list = doc.nested_blocks().next().unwrap();
+        let item = list.nested_blocks().next().unwrap();
+
+        // The literal block is attached to the list item and renders verbatim.
+        let literal = item
+            .nested_blocks()
+            .find(|b| b.declared_style() == Some("literal"))
+            .unwrap();
+
+        assert_eq!(literal.rendered_content(), Some("literal text"));
+        assert!(literal.caption().is_none());
+        assert!(literal.number().is_none());
+    }
+}
+
 mod error_cases {
     use std::ops::Deref;
 
@@ -208,6 +308,8 @@ mod error_cases {
                         style: SimpleBlockStyle::Paragraph,
                         title_source: None,
                         title: None,
+                        caption: None,
+                        number: None,
                         anchor: None,
                         anchor_reftext: None,
                         attrlist: None,
@@ -231,6 +333,8 @@ mod error_cases {
                         style: SimpleBlockStyle::Paragraph,
                         title_source: None,
                         title: None,
+                        caption: None,
+                        number: None,
                         anchor: None,
                         anchor_reftext: None,
                         attrlist: None,
@@ -254,6 +358,8 @@ mod error_cases {
                         style: SimpleBlockStyle::Paragraph,
                         title_source: None,
                         title: None,
+                        caption: None,
+                        number: None,
                         anchor: None,
                         anchor_reftext: None,
                         attrlist: None,
@@ -347,6 +453,8 @@ mod error_cases {
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -440,6 +548,8 @@ mod error_cases {
                     style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -536,6 +646,8 @@ mod error_cases {
                         style: SimpleBlockStyle::Paragraph,
                         title_source: None,
                         title: None,
+                        caption: None,
+                        number: None,
                         anchor: None,
                         anchor_reftext: None,
                         attrlist: None,

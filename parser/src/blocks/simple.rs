@@ -3,7 +3,7 @@ use crate::{
     attributes::Attrlist,
     blocks::{
         CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker, RawDelimitedBlock,
-        metadata::BlockMetadata,
+        caption::assign_block_caption, metadata::BlockMetadata,
     },
     content::{Content, SubstitutionGroup},
     span::MatchedItem,
@@ -54,6 +54,8 @@ pub struct SimpleBlock<'src> {
     style: SimpleBlockStyle,
     title_source: Option<Span<'src>>,
     title: Option<String>,
+    caption: Option<String>,
+    number: Option<usize>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -77,6 +79,19 @@ impl<'src> SimpleBlock<'src> {
             &[],
         )?;
 
+        // A paragraph carrying a captionable block style (e.g. `[example]`) is
+        // captioned and numbered just like its delimited counterpart. The raw
+        // context is `paragraph`; `assign_block_caption` resolves the block
+        // style to the captioning context.
+        let caption = assign_block_caption(
+            parser,
+            "paragraph",
+            metadata.attrlist.as_ref(),
+            metadata.title.is_some(),
+        );
+        let number = caption.as_ref().and_then(|caption| caption.number);
+        let caption = caption.map(|caption| caption.prefix);
+
         Some(MatchedItem {
             item: Self {
                 content,
@@ -87,6 +102,8 @@ impl<'src> SimpleBlock<'src> {
                 style,
                 title_source: metadata.title_source,
                 title: metadata.title.clone(),
+                caption,
+                number,
                 anchor: metadata.anchor,
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),
@@ -114,6 +131,19 @@ impl<'src> SimpleBlock<'src> {
             parent_list_markers,
         )?;
 
+        // A paragraph carrying a captionable block style (e.g. `[example]`) is
+        // captioned and numbered just like its delimited counterpart. The raw
+        // context is `paragraph`; `assign_block_caption` resolves the block
+        // style to the captioning context.
+        let caption = assign_block_caption(
+            parser,
+            "paragraph",
+            metadata.attrlist.as_ref(),
+            metadata.title.is_some(),
+        );
+        let number = caption.as_ref().and_then(|caption| caption.number);
+        let caption = caption.map(|caption| caption.prefix);
+
         Some(MatchedItem {
             item: Self {
                 content,
@@ -124,6 +154,8 @@ impl<'src> SimpleBlock<'src> {
                 style,
                 title_source: metadata.title_source,
                 title: metadata.title.clone(),
+                caption,
+                number,
                 anchor: metadata.anchor,
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),
@@ -153,6 +185,19 @@ impl<'src> SimpleBlock<'src> {
             &[],
         )?;
 
+        // A paragraph carrying a captionable block style (e.g. `[example]`) is
+        // captioned and numbered just like its delimited counterpart. The raw
+        // context is `paragraph`; `assign_block_caption` resolves the block
+        // style to the captioning context.
+        let caption = assign_block_caption(
+            parser,
+            "paragraph",
+            metadata.attrlist.as_ref(),
+            metadata.title.is_some(),
+        );
+        let number = caption.as_ref().and_then(|caption| caption.number);
+        let caption = caption.map(|caption| caption.prefix);
+
         Some(MatchedItem {
             item: Self {
                 content,
@@ -163,6 +208,8 @@ impl<'src> SimpleBlock<'src> {
                 style,
                 title_source: metadata.title_source,
                 title: metadata.title.clone(),
+                caption,
+                number,
                 anchor: metadata.anchor,
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),
@@ -189,6 +236,8 @@ impl<'src> SimpleBlock<'src> {
                 style,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -456,6 +505,14 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
         self.title.as_deref()
     }
 
+    fn caption(&self) -> Option<&str> {
+        self.caption.as_deref()
+    }
+
+    fn number(&self) -> Option<usize> {
+        self.number
+    }
+
     fn anchor(&'src self) -> Option<Span<'src>> {
         self.anchor
     }
@@ -584,6 +641,8 @@ mod tests {
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -643,6 +702,8 @@ mod tests {
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -689,6 +750,8 @@ mod tests {
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -736,6 +799,8 @@ mod tests {
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {

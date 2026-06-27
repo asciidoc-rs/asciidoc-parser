@@ -393,6 +393,8 @@ include::example$section.adoc[tag=content]
                         style: SimpleBlockStyle::Paragraph,
                         title_source: None,
                         title: None,
+                        caption: None,
+                        number: None,
                         anchor: None,
                         anchor_reftext: None,
                         attrlist: None,

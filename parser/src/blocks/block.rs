@@ -234,6 +234,14 @@ impl<'src> Block<'src> {
         let is_literal =
             metadata.attrlist.as_ref().and_then(|a| a.block_style()) == Some("literal");
 
+        // A simple block may be parsed speculatively inside the `!is_literal`
+        // branch below (to detect the "metadata with no block" edge case). When
+        // that speculative parse succeeds it is reused as the final result rather
+        // than re-parsed, so that the captioning side effect of
+        // `SimpleBlock::parse` (which can consume a caption counter) happens at
+        // most once per block.
+        let mut simple_block_mi = None;
+
         if !is_literal {
             if let Some(mut adm_maw) = AdmonitionBlock::parse(&metadata, parser)
                 && let Some(adm) = adm_maw.item
@@ -459,7 +467,7 @@ impl<'src> Block<'src> {
             // another block, but there isn't.
 
             // The following check disables that spin loop.
-            let simple_block_mi = if let Some(plm) = parent_list_markers {
+            simple_block_mi = if let Some(plm) = parent_list_markers {
                 SimpleBlock::parse_for_list_item(&metadata, parser, is_continuation, plm)
             } else {
                 SimpleBlock::parse(&metadata, parser)
@@ -475,7 +483,8 @@ impl<'src> Block<'src> {
                 });
 
                 // Remove the metadata content so that SimpleBlock will read the title/attrlist
-                // line(s) as regular content.
+                // line(s) as regular content. The speculative parse failed, so the
+                // block is re-parsed below with this stripped metadata.
                 metadata.title_source = None;
                 metadata.title = None;
                 metadata.anchor = None;
@@ -484,11 +493,18 @@ impl<'src> Block<'src> {
             }
         }
 
-        // If no other block kind matches, we can always use SimpleBlock.
-        let simple_block_mi = if let Some(plm) = parent_list_markers {
-            SimpleBlock::parse_for_list_item(&metadata, parser, is_continuation, plm)
-        } else {
-            SimpleBlock::parse(&metadata, parser)
+        // If no other block kind matches, we can always use SimpleBlock. Reuse the
+        // speculative parse from the `!is_literal` branch when it succeeded;
+        // otherwise (a literal block, or metadata stripped above) parse now.
+        let simple_block_mi = match simple_block_mi {
+            Some(mi) => Some(mi),
+            None => {
+                if let Some(plm) = parent_list_markers {
+                    SimpleBlock::parse_for_list_item(&metadata, parser, is_continuation, plm)
+                } else {
+                    SimpleBlock::parse(&metadata, parser)
+                }
+            }
         };
 
         let mut result = MatchAndWarnings {
@@ -743,6 +759,42 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Preamble(b) => b.title(),
             Self::Break(b) => b.title(),
             Self::DocumentAttribute(b) => b.title(),
+        }
+    }
+
+    fn caption(&self) -> Option<&str> {
+        match self {
+            Self::Simple(b) => b.caption(),
+            Self::Media(b) => b.caption(),
+            Self::Section(b) => b.caption(),
+            Self::List(b) => b.caption(),
+            Self::ListItem(b) => b.caption(),
+            Self::RawDelimited(b) => b.caption(),
+            Self::CompoundDelimited(b) => b.caption(),
+            Self::Admonition(b) => b.caption(),
+            Self::Quote(b) => b.caption(),
+            Self::Table(b) => b.caption(),
+            Self::Preamble(b) => b.caption(),
+            Self::Break(b) => b.caption(),
+            Self::DocumentAttribute(b) => b.caption(),
+        }
+    }
+
+    fn number(&self) -> Option<usize> {
+        match self {
+            Self::Simple(b) => b.number(),
+            Self::Media(b) => b.number(),
+            Self::Section(b) => b.number(),
+            Self::List(b) => b.number(),
+            Self::ListItem(b) => b.number(),
+            Self::RawDelimited(b) => b.number(),
+            Self::CompoundDelimited(b) => b.number(),
+            Self::Admonition(b) => b.number(),
+            Self::Quote(b) => b.number(),
+            Self::Table(b) => b.number(),
+            Self::Preamble(b) => b.number(),
+            Self::Break(b) => b.number(),
+            Self::DocumentAttribute(b) => b.number(),
         }
     }
 

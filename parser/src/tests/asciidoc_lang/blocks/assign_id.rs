@@ -62,6 +62,8 @@ Content of delimited example block
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -75,6 +77,8 @@ Content of delimited example block
             },
             title_source: None,
             title: None,
+            caption: None,
+            number: None,
             anchor: None,
             anchor_reftext: None,
             attrlist: Some(Attrlist {

@@ -179,6 +179,8 @@ include::example$image.adoc[tag=in-url]
                     style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,

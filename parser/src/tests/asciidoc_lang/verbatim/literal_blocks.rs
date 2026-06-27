@@ -80,6 +80,8 @@ include::example$literal.adoc[tag=indent]
                 style: SimpleBlockStyle::Literal,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -159,6 +161,8 @@ include::example$literal.adoc[tag=style]
                 style: SimpleBlockStyle::Literal,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {

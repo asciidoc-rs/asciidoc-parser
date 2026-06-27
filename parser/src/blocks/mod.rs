@@ -32,6 +32,8 @@ pub use block::Block;
 mod r#break;
 pub use r#break::{Break, BreakType};
 
+pub(crate) mod caption;
+
 mod compound_delimited;
 pub use compound_delimited::CompoundDelimitedBlock;
 

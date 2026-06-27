@@ -82,6 +82,8 @@ include::example$ordered.adoc[tag=base-num]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -122,6 +124,8 @@ include::example$ordered.adoc[tag=base-num]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -162,6 +166,8 @@ include::example$ordered.adoc[tag=base-num]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -270,6 +276,8 @@ include::example$ordered.adoc[tag=base]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -310,6 +318,8 @@ include::example$ordered.adoc[tag=base]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -350,6 +360,8 @@ include::example$ordered.adoc[tag=base]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -460,6 +472,8 @@ include::example$ordered.adoc[tag=base-num-start]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -500,6 +514,8 @@ include::example$ordered.adoc[tag=base-num-start]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -540,6 +556,8 @@ include::example$ordered.adoc[tag=base-num-start]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -647,6 +665,8 @@ The start value is always a positive integer value, even when using a different 
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -687,6 +707,8 @@ The start value is always a positive integer value, even when using a different 
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -727,6 +749,8 @@ The start value is always a positive integer value, even when using a different 
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -867,6 +891,8 @@ include::example$ordered.adoc[tag=reversed]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -907,6 +933,8 @@ include::example$ordered.adoc[tag=reversed]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -947,6 +975,8 @@ include::example$ordered.adoc[tag=reversed]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -1075,6 +1105,8 @@ include::example$ordered.adoc[tag=base-t]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -1115,6 +1147,8 @@ include::example$ordered.adoc[tag=base-t]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -1155,6 +1189,8 @@ include::example$ordered.adoc[tag=base-t]
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -1267,8 +1303,7 @@ include::example$ordered.adoc[tag=nest]
                                 col: 1,
                                 offset: 0,
                             },),
-                            blocks: &[Block::Simple(SimpleBlock {
-                                content: Content {
+                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                     original: Span {
                                         data: "Step 1",
                                         line: 1,
@@ -1276,20 +1311,12 @@ include::example$ordered.adoc[tag=nest]
                                         offset: 2,
                                     },
                                     rendered: "Step 1",
-                                },
-                                source: Span {
+                                }, source: Span {
                                     data: "Step 1",
                                     line: 1,
                                     col: 3,
                                     offset: 2,
-                                },
-                                style: SimpleBlockStyle::Paragraph,
-                                title_source: None,
-                                title: None,
-                                anchor: None,
-                                anchor_reftext: None,
-                                attrlist: None,
-                            },),],
+                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                             source: Span {
                                 data: ". Step 1",
                                 line: 1,
@@ -1308,8 +1335,7 @@ include::example$ordered.adoc[tag=nest]
                                 offset: 9,
                             },),
                             blocks: &[
-                                Block::Simple(SimpleBlock {
-                                    content: Content {
+                                Block::Simple(SimpleBlock { content: Content {
                                         original: Span {
                                             data: "Step 2",
                                             line: 2,
@@ -1317,20 +1343,12 @@ include::example$ordered.adoc[tag=nest]
                                             offset: 11,
                                         },
                                         rendered: "Step 2",
-                                    },
-                                    source: Span {
+                                    }, source: Span {
                                         data: "Step 2",
                                         line: 2,
                                         col: 3,
                                         offset: 11,
-                                    },
-                                    style: SimpleBlockStyle::Paragraph,
-                                    title_source: None,
-                                    title: None,
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
+                                    }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),
                                 Block::List(ListBlock {
                                     type_: ListType::Ordered,
                                     items: &[
@@ -1341,8 +1359,7 @@ include::example$ordered.adoc[tag=nest]
                                                 col: 1,
                                                 offset: 18,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Step 2a",
                                                         line: 3,
@@ -1350,20 +1367,12 @@ include::example$ordered.adoc[tag=nest]
                                                         offset: 21,
                                                     },
                                                     rendered: "Step 2a",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Step 2a",
                                                     line: 3,
                                                     col: 4,
                                                     offset: 21,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: ".. Step 2a",
                                                 line: 3,
@@ -1381,8 +1390,7 @@ include::example$ordered.adoc[tag=nest]
                                                 col: 1,
                                                 offset: 29,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Step 2b",
                                                         line: 4,
@@ -1390,20 +1398,12 @@ include::example$ordered.adoc[tag=nest]
                                                         offset: 32,
                                                     },
                                                     rendered: "Step 2b",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Step 2b",
                                                     line: 4,
                                                     col: 4,
                                                     offset: 32,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: ".. Step 2b",
                                                 line: 4,
@@ -1445,8 +1445,7 @@ include::example$ordered.adoc[tag=nest]
                                 col: 1,
                                 offset: 40,
                             },),
-                            blocks: &[Block::Simple(SimpleBlock {
-                                content: Content {
+                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                     original: Span {
                                         data: "Step 3",
                                         line: 5,
@@ -1454,20 +1453,12 @@ include::example$ordered.adoc[tag=nest]
                                         offset: 42,
                                     },
                                     rendered: "Step 3",
-                                },
-                                source: Span {
+                                }, source: Span {
                                     data: "Step 3",
                                     line: 5,
                                     col: 3,
                                     offset: 42,
-                                },
-                                style: SimpleBlockStyle::Paragraph,
-                                title_source: None,
-                                title: None,
-                                anchor: None,
-                                anchor_reftext: None,
-                                attrlist: None,
-                            },),],
+                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                             source: Span {
                                 data: ". Step 3",
                                 line: 5,
@@ -1573,8 +1564,7 @@ include::example$ordered.adoc[tag=mix]
                                 offset: 0,
                             },),
                             blocks: &[
-                                Block::Simple(SimpleBlock {
-                                    content: Content {
+                                Block::Simple(SimpleBlock { content: Content {
                                         original: Span {
                                             data: "Linux",
                                             line: 1,
@@ -1582,20 +1572,12 @@ include::example$ordered.adoc[tag=mix]
                                             offset: 2,
                                         },
                                         rendered: "Linux",
-                                    },
-                                    source: Span {
+                                    }, source: Span {
                                         data: "Linux",
                                         line: 1,
                                         col: 3,
                                         offset: 2,
-                                    },
-                                    style: SimpleBlockStyle::Paragraph,
-                                    title_source: None,
-                                    title: None,
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
+                                    }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),
                                 Block::List(ListBlock {
                                     type_: ListType::Unordered,
                                     items: &[
@@ -1606,8 +1588,7 @@ include::example$ordered.adoc[tag=mix]
                                                 col: 1,
                                                 offset: 8,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Fedora",
                                                         line: 2,
@@ -1615,20 +1596,12 @@ include::example$ordered.adoc[tag=mix]
                                                         offset: 10,
                                                     },
                                                     rendered: "Fedora",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Fedora",
                                                     line: 2,
                                                     col: 3,
                                                     offset: 10,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "* Fedora",
                                                 line: 2,
@@ -1646,8 +1619,7 @@ include::example$ordered.adoc[tag=mix]
                                                 col: 1,
                                                 offset: 17,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Ubuntu",
                                                         line: 3,
@@ -1655,20 +1627,12 @@ include::example$ordered.adoc[tag=mix]
                                                         offset: 19,
                                                     },
                                                     rendered: "Ubuntu",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Ubuntu",
                                                     line: 3,
                                                     col: 3,
                                                     offset: 19,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "* Ubuntu",
                                                 line: 3,
@@ -1686,8 +1650,7 @@ include::example$ordered.adoc[tag=mix]
                                                 col: 1,
                                                 offset: 26,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Slackware",
                                                         line: 4,
@@ -1695,20 +1658,12 @@ include::example$ordered.adoc[tag=mix]
                                                         offset: 28,
                                                     },
                                                     rendered: "Slackware",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Slackware",
                                                     line: 4,
                                                     col: 3,
                                                     offset: 28,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "* Slackware",
                                                 line: 4,
@@ -1751,8 +1706,7 @@ include::example$ordered.adoc[tag=mix]
                                 offset: 38,
                             },),
                             blocks: &[
-                                Block::Simple(SimpleBlock {
-                                    content: Content {
+                                Block::Simple(SimpleBlock { content: Content {
                                         original: Span {
                                             data: "BSD",
                                             line: 5,
@@ -1760,20 +1714,12 @@ include::example$ordered.adoc[tag=mix]
                                             offset: 40,
                                         },
                                         rendered: "BSD",
-                                    },
-                                    source: Span {
+                                    }, source: Span {
                                         data: "BSD",
                                         line: 5,
                                         col: 3,
                                         offset: 40,
-                                    },
-                                    style: SimpleBlockStyle::Paragraph,
-                                    title_source: None,
-                                    title: None,
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
+                                    }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),
                                 Block::List(ListBlock {
                                     type_: ListType::Unordered,
                                     items: &[
@@ -1784,8 +1730,7 @@ include::example$ordered.adoc[tag=mix]
                                                 col: 1,
                                                 offset: 44,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "FreeBSD",
                                                         line: 6,
@@ -1793,20 +1738,12 @@ include::example$ordered.adoc[tag=mix]
                                                         offset: 46,
                                                     },
                                                     rendered: "FreeBSD",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "FreeBSD",
                                                     line: 6,
                                                     col: 3,
                                                     offset: 46,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "* FreeBSD",
                                                 line: 6,
@@ -1824,8 +1761,7 @@ include::example$ordered.adoc[tag=mix]
                                                 col: 1,
                                                 offset: 54,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "NetBSD",
                                                         line: 7,
@@ -1833,20 +1769,12 @@ include::example$ordered.adoc[tag=mix]
                                                         offset: 56,
                                                     },
                                                     rendered: "NetBSD",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "NetBSD",
                                                     line: 7,
                                                     col: 3,
                                                     offset: 56,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "* NetBSD",
                                                 line: 7,
@@ -1956,8 +1884,7 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                 offset: 0,
                             },),
                             blocks: &[
-                                Block::Simple(SimpleBlock {
-                                    content: Content {
+                                Block::Simple(SimpleBlock { content: Content {
                                         original: Span {
                                             data: "Linux",
                                             line: 1,
@@ -1965,20 +1892,12 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                             offset: 2,
                                         },
                                         rendered: "Linux",
-                                    },
-                                    source: Span {
+                                    }, source: Span {
                                         data: "Linux",
                                         line: 1,
                                         col: 3,
                                         offset: 2,
-                                    },
-                                    style: SimpleBlockStyle::Paragraph,
-                                    title_source: None,
-                                    title: None,
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
+                                    }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),
                                 Block::List(ListBlock {
                                     type_: ListType::Unordered,
                                     items: &[
@@ -1989,8 +1908,7 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                 col: 3,
                                                 offset: 11,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Fedora",
                                                         line: 3,
@@ -1998,20 +1916,12 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                         offset: 13,
                                                     },
                                                     rendered: "Fedora",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Fedora",
                                                     line: 3,
                                                     col: 5,
                                                     offset: 13,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "  * Fedora",
                                                 line: 3,
@@ -2029,8 +1939,7 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                 col: 3,
                                                 offset: 22,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Ubuntu",
                                                         line: 4,
@@ -2038,20 +1947,12 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                         offset: 24,
                                                     },
                                                     rendered: "Ubuntu",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Ubuntu",
                                                     line: 4,
                                                     col: 5,
                                                     offset: 24,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "  * Ubuntu",
                                                 line: 4,
@@ -2069,8 +1970,7 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                 col: 3,
                                                 offset: 33,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "Slackware",
                                                         line: 5,
@@ -2078,20 +1978,12 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                         offset: 35,
                                                     },
                                                     rendered: "Slackware",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "Slackware",
                                                     line: 5,
                                                     col: 5,
                                                     offset: 35,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "  * Slackware",
                                                 line: 5,
@@ -2134,8 +2026,7 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                 offset: 46,
                             },),
                             blocks: &[
-                                Block::Simple(SimpleBlock {
-                                    content: Content {
+                                Block::Simple(SimpleBlock { content: Content {
                                         original: Span {
                                             data: "BSD",
                                             line: 7,
@@ -2143,20 +2034,12 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                             offset: 48,
                                         },
                                         rendered: "BSD",
-                                    },
-                                    source: Span {
+                                    }, source: Span {
                                         data: "BSD",
                                         line: 7,
                                         col: 3,
                                         offset: 48,
-                                    },
-                                    style: SimpleBlockStyle::Paragraph,
-                                    title_source: None,
-                                    title: None,
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
+                                    }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),
                                 Block::List(ListBlock {
                                     type_: ListType::Unordered,
                                     items: &[
@@ -2167,8 +2050,7 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                 col: 3,
                                                 offset: 55,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "FreeBSD",
                                                         line: 9,
@@ -2176,20 +2058,12 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                         offset: 57,
                                                     },
                                                     rendered: "FreeBSD",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "FreeBSD",
                                                     line: 9,
                                                     col: 5,
                                                     offset: 57,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "  * FreeBSD",
                                                 line: 9,
@@ -2207,8 +2081,7 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                 col: 3,
                                                 offset: 67,
                                             },),
-                                            blocks: &[Block::Simple(SimpleBlock {
-                                                content: Content {
+                                            blocks: &[Block::Simple(SimpleBlock { content: Content {
                                                     original: Span {
                                                         data: "NetBSD",
                                                         line: 10,
@@ -2216,20 +2089,12 @@ The description list page demonstrates how to xref:description.adoc#three-hybrid
                                                         offset: 69,
                                                     },
                                                     rendered: "NetBSD",
-                                                },
-                                                source: Span {
+                                                }, source: Span {
                                                     data: "NetBSD",
                                                     line: 10,
                                                     col: 5,
                                                     offset: 69,
-                                                },
-                                                style: SimpleBlockStyle::Paragraph,
-                                                title_source: None,
-                                                title: None,
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
+                                                }, style: SimpleBlockStyle::Paragraph, title_source: None, title: None, caption: None, number: None, anchor: None, anchor_reftext: None, attrlist: None, },),],
                                             source: Span {
                                                 data: "  * NetBSD",
                                                 line: 10,
@@ -2455,6 +2320,8 @@ Now the paragraph will remain as a paragraph.
                     style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,

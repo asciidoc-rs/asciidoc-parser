@@ -573,6 +573,8 @@ mod tests {
                     style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -615,6 +617,8 @@ mod tests {
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -650,7 +654,7 @@ mod tests {
 
         assert_eq!(
             format!("{:#?}", li.item),
-            "ListItem {\n    marker: ListItemMarker::Hyphen(\n        Span {\n            data: \"-\",\n            line: 1,\n            col: 1,\n            offset: 0,\n        },\n    ),\n    blocks: &[\n        Block::Simple(\n            SimpleBlock {\n                content: Content {\n                    original: Span {\n                        data: \"blah\",\n                        line: 1,\n                        col: 3,\n                        offset: 2,\n                    },\n                    rendered: \"blah\",\n                },\n                source: Span {\n                    data: \"blah\",\n                    line: 1,\n                    col: 3,\n                    offset: 2,\n                },\n                style: SimpleBlockStyle::Paragraph,\n                title_source: None,\n                title: None,\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n}"
+            "ListItem {\n    marker: ListItemMarker::Hyphen(\n        Span {\n            data: \"-\",\n            line: 1,\n            col: 1,\n            offset: 0,\n        },\n    ),\n    blocks: &[\n        Block::Simple(\n            SimpleBlock {\n                content: Content {\n                    original: Span {\n                        data: \"blah\",\n                        line: 1,\n                        col: 3,\n                        offset: 2,\n                    },\n                    rendered: \"blah\",\n                },\n                source: Span {\n                    data: \"blah\",\n                    line: 1,\n                    col: 3,\n                    offset: 2,\n                },\n                style: SimpleBlockStyle::Paragraph,\n                title_source: None,\n                title: None,\n                caption: None,\n                number: None,\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n}"
         );
     }
 
@@ -696,6 +700,8 @@ mod tests {
                     style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,

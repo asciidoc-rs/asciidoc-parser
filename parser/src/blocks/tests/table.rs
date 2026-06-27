@@ -334,6 +334,7 @@ fn titled_table_is_captioned() {
 
     assert_eq!(table.title(), Some("A table with a title"));
     assert_eq!(table.caption(), Some("Table 1. "));
+    assert_eq!(table.number(), Some(1));
 }
 
 #[test]
@@ -343,6 +344,23 @@ fn untitled_table_has_no_caption() {
 
     assert!(table.title().is_none());
     assert!(table.caption().is_none());
+    assert!(table.number().is_none());
+}
+
+#[test]
+fn caption_and_number_are_reported_through_the_isblock_trait() {
+    // A generic `T: IsBlock` consumer resolves to the trait methods rather than
+    // the inherent ones, so a captioned table must be reported correctly through
+    // the trait interface too (not silently `None`).
+    fn via_trait<'src>(block: &impl IsBlock<'src>) -> (Option<String>, Option<usize>) {
+        (block.caption().map(str::to_string), block.number())
+    }
+
+    let table = parse_table(".A table with a title\n|===\n|a |b\n|===");
+    assert_eq!(via_trait(&table), (Some("Table 1. ".to_string()), Some(1)));
+
+    let untitled = parse_table("|===\n|a |b\n|===");
+    assert_eq!(via_trait(&untitled), (None, None));
 }
 
 #[test]
@@ -352,15 +370,22 @@ fn captioned_tables_are_numbered_in_document_order() {
     let doc = Parser::default()
         .parse(".First\n|===\n|a\n|===\n\n|===\n|b\n|===\n\n.Second\n|===\n|c\n|===");
 
-    let captions: Vec<Option<&str>> = doc
+    let captions: Vec<(Option<&str>, Option<usize>)> = doc
         .nested_blocks()
         .filter_map(|block| match block {
-            Block::Table(table) => Some(table.caption()),
+            Block::Table(table) => Some((table.caption(), table.number())),
             _ => None,
         })
         .collect();
 
-    assert_eq!(captions, vec![Some("Table 1. "), None, Some("Table 2. ")]);
+    assert_eq!(
+        captions,
+        vec![
+            (Some("Table 1. "), Some(1)),
+            (None, None),
+            (Some("Table 2. "), Some(2)),
+        ]
+    );
 }
 
 #[test]
@@ -443,17 +468,22 @@ fn caption_attribute_does_not_consume_a_table_number() {
         ".First\n|===\n|a\n|===\n\n[caption=\"Table A. \"]\n.Custom\n|===\n|b\n|===\n\n.Third\n|===\n|c\n|===",
     );
 
-    let captions: Vec<Option<&str>> = doc
+    let captions: Vec<(Option<&str>, Option<usize>)> = doc
         .nested_blocks()
         .filter_map(|block| match block {
-            Block::Table(table) => Some(table.caption()),
+            Block::Table(table) => Some((table.caption(), table.number())),
             _ => None,
         })
         .collect();
 
+    // The explicitly-captioned middle table carries its label but no number.
     assert_eq!(
         captions,
-        vec![Some("Table 1. "), Some("Table A. "), Some("Table 2. ")]
+        vec![
+            (Some("Table 1. "), Some(1)),
+            (Some("Table A. "), None),
+            (Some("Table 2. "), Some(2)),
+        ]
     );
 }
 
@@ -502,15 +532,22 @@ fn empty_caption_attribute_does_not_consume_a_table_number() {
         ".First\n|===\n|a\n|===\n\n[caption=]\n.Unlabeled\n|===\n|b\n|===\n\n.Third\n|===\n|c\n|===",
     );
 
-    let captions: Vec<Option<&str>> = doc
+    let captions: Vec<(Option<&str>, Option<usize>)> = doc
         .nested_blocks()
         .filter_map(|block| match block {
-            Block::Table(table) => Some(table.caption()),
+            Block::Table(table) => Some((table.caption(), table.number())),
             _ => None,
         })
         .collect();
 
-    assert_eq!(captions, vec![Some("Table 1. "), None, Some("Table 2. ")]);
+    assert_eq!(
+        captions,
+        vec![
+            (Some("Table 1. "), Some(1)),
+            (None, None),
+            (Some("Table 2. "), Some(2)),
+        ]
+    );
 }
 
 #[test]

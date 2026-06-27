@@ -6,7 +6,8 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
+        Block, ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata,
+        parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
     document::InterpretedValue,
@@ -99,6 +100,7 @@ pub struct TableBlock<'src> {
     title_source: Option<Span<'src>>,
     title: Option<String>,
     caption: Option<String>,
+    number: Option<usize>,
     frame: Frame,
     grid: Grid,
     stripes: Stripes,
@@ -242,40 +244,25 @@ impl<'src> TableBlock<'src> {
             opts_header || (!opts_noheader && !line1_blank && line2_blank && first_row_complete);
 
         // A titled table is given a caption (e.g. "Table 1. ") that a processor
-        // prepends to the title.
-        //
-        // An explicit `caption` attribute on the table sets the label verbatim
-        // (including any trailing whitespace) and is used as-is, with no
-        // automatically incremented number; it applies even when
-        // `table-caption` has been unset. An explicitly empty `caption` (e.g.
-        // `[caption=]`) removes the label entirely, so the title renders with no
-        // prefix. Otherwise the label comes from the `table-caption` attribute
-        // (which defaults to "Table"), and each such captioned table consumes
-        // the next value of a document-wide table counter. When `table-caption`
-        // is unset and no explicit `caption` is given, no caption (and no
-        // number) is assigned.
+        // prepends to the title, drawn from the `table-caption` attribute (which
+        // defaults to "Table"); each such captioned table consumes the next
+        // value of a document-wide table counter. An explicit `caption`
+        // attribute sets the label verbatim with no number; an explicitly empty
+        // `caption` (e.g. `[caption=]`) removes the label entirely. When
+        // `table-caption` is unset and no explicit `caption` is given, no caption
+        // (and no number) is assigned. See [`assign_block_caption`] for the full,
+        // shared rules.
         //
         // Computed before the cell iterator below borrows `parser` immutably, so
         // that the mutable counter update does not conflict with that borrow.
-        let caption = if metadata.title.is_some() {
-            match metadata
-                .attrlist
-                .as_ref()
-                .and_then(|a| a.named_attribute("caption"))
-            {
-                Some(attr) if attr.value().is_empty() => None,
-                Some(attr) => Some(attr.value().to_string()),
-                None => match parser.attribute_value("table-caption") {
-                    InterpretedValue::Value(label) if !label.is_empty() => {
-                        let number = parser.assign_table_number();
-                        Some(format!("{label} {number}. "))
-                    }
-                    _ => None,
-                },
-            }
-        } else {
-            None
-        };
+        let caption = assign_block_caption(
+            parser,
+            "table",
+            metadata.attrlist.as_ref(),
+            metadata.title.is_some(),
+        );
+        let number = caption.as_ref().and_then(|caption| caption.number);
+        let caption = caption.map(|caption| caption.prefix);
 
         // The `frame` and `grid` attributes control the table's borders, and the
         // `stripes` attribute controls zebra striping. The borders each default
@@ -342,6 +329,7 @@ impl<'src> TableBlock<'src> {
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
                     caption,
+                    number,
                     frame,
                     grid,
                     stripes,
@@ -367,6 +355,18 @@ impl<'src> TableBlock<'src> {
     /// explicit `caption` is given, or when an empty `caption` was supplied.
     pub fn caption(&self) -> Option<&str> {
         self.caption.as_deref()
+    }
+
+    /// Returns the number assigned to this table, if any.
+    ///
+    /// A titled table for which the `table-caption` attribute is set is
+    /// numbered with an automatically incremented, document-wide table counter
+    /// (the same number that appears in its [`caption`](Self::caption), e.g.
+    /// the `1` in `"Table 1. "`). The number is absent when the table is
+    /// not captioned, or when its caption comes from an explicit
+    /// (unnumbered) `caption` attribute.
+    pub fn number(&self) -> Option<usize> {
+        self.number
     }
 
     /// Returns the columns of this table.
@@ -507,6 +507,18 @@ impl<'src> IsBlock<'src> for TableBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    // These forward to the inherent `caption()`/`number()` (the documented
+    // public accessors) so that the captioned table is reported correctly
+    // through the trait interface too — `dyn IsBlock` / generic `T: IsBlock`
+    // consumers resolve to these rather than the inherent methods.
+    fn caption(&self) -> Option<&str> {
+        self.caption.as_deref()
+    }
+
+    fn number(&self) -> Option<usize> {
+        self.number
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {
