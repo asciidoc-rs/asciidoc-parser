@@ -1615,23 +1615,27 @@ include::example$complex.adoc[tag=complex-o]
                                         attrlist: None,
                                         substitution_group: SubstitutionGroup::Verbatim,
                                     },),
-                                    Block::Simple(SimpleBlock {
-                                        content: Content {
+                                    Block::Admonition(AdmonitionBlock {
+                                        variant: AdmonitionVariant::Note,
+                                        label: "Note",
+                                        icons_font: false,
+                                        content_model: ContentModel::Simple,
+                                        content: Some(Content {
                                             original: Span {
-                                                data: "NOTE: The header is optional.",
+                                                data: "The header is optional.",
                                                 line: 10,
-                                                col: 1,
-                                                offset: 132,
+                                                col: 7,
+                                                offset: 138,
                                             },
-                                            rendered: "NOTE: The header is optional.",
-                                        },
+                                            rendered: "The header is optional.",
+                                        },),
+                                        blocks: &[],
                                         source: Span {
                                             data: "NOTE: The header is optional.",
                                             line: 10,
                                             col: 1,
                                             offset: 132,
                                         },
-                                        style: SimpleBlockStyle::Paragraph,
                                         title_source: None,
                                         title: None,
                                         anchor: None,

@@ -4,9 +4,9 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Break, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItem, ListItemMarker,
-        MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock, TableBlock,
-        metadata::BlockMetadata,
+        AdmonitionBlock, Break, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItem,
+        ListItemMarker, MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock,
+        TableBlock, metadata::BlockMetadata, starts_with_admonition_label,
     },
     content::{Content, SubstitutionGroup},
     document::{Attribute, RefType},
@@ -61,6 +61,11 @@ pub enum Block<'src> {
     /// A delimited block that can contain other blocks.
     CompoundDelimited(CompoundDelimitedBlock<'src>),
 
+    /// An admonition draws attention to a statement by taking it out of the
+    /// content's flow and labeling it with a priority (e.g., a note or a
+    /// warning).
+    Admonition(AdmonitionBlock<'src>),
+
     /// A table block arranges content into a grid of rows and columns.
     Table(TableBlock<'src>),
 
@@ -93,6 +98,8 @@ impl<'src> std::fmt::Debug for Block<'src> {
                 .debug_tuple("Block::CompoundDelimited")
                 .field(block)
                 .finish(),
+
+            Block::Admonition(block) => f.debug_tuple("Block::Admonition").field(block).finish(),
 
             Block::Table(block) => f.debug_tuple("Block::Table").field(block).finish(),
             Block::Preamble(block) => f.debug_tuple("Block::Preamble").field(block).finish(),
@@ -159,6 +166,7 @@ impl<'src> Block<'src> {
             && !first_line.contains(";;")
             && !TableBlock::is_table_delimiter(&first_line)
             && !ListItemMarker::starts_with_marker(first_line)
+            && !starts_with_admonition_label(first_line)
             && parent_list_markers.is_none()
             && let Some(MatchedItem {
                 item: simple_block,
@@ -210,6 +218,32 @@ impl<'src> Block<'src> {
             metadata.attrlist.as_ref().and_then(|a| a.block_style()) == Some("literal");
 
         if !is_literal {
+            if let Some(mut adm_maw) = AdmonitionBlock::parse(&metadata, parser)
+                && let Some(adm) = adm_maw.item
+            {
+                if !adm_maw.warnings.is_empty() {
+                    warnings.append(&mut adm_maw.warnings);
+                }
+
+                let block = Self::Admonition(adm.item);
+
+                Self::register_block_id(
+                    block.id(),
+                    block.title(),
+                    block.span(),
+                    parser,
+                    &mut warnings,
+                );
+
+                return MatchAndWarnings {
+                    item: Some(MatchedItem {
+                        item: block,
+                        after: adm.after,
+                    }),
+                    warnings,
+                };
+            }
+
             if let Some(mut rdb_maw) = RawDelimitedBlock::parse(&metadata, parser)
                 && let Some(rdb) = rdb_maw.item
             {
@@ -509,10 +543,28 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.content_model(),
             Self::RawDelimited(b) => b.content_model(),
             Self::CompoundDelimited(b) => b.content_model(),
+            Self::Admonition(b) => b.content_model(),
             Self::Table(b) => b.content_model(),
             Self::Preamble(b) => b.content_model(),
             Self::Break(b) => b.content_model(),
             Self::DocumentAttribute(b) => b.content_model(),
+        }
+    }
+
+    fn declared_style(&'src self) -> Option<&'src str> {
+        match self {
+            Self::Simple(b) => b.declared_style(),
+            Self::Media(b) => b.declared_style(),
+            Self::Section(b) => b.declared_style(),
+            Self::List(b) => b.declared_style(),
+            Self::ListItem(b) => b.declared_style(),
+            Self::RawDelimited(b) => b.declared_style(),
+            Self::CompoundDelimited(b) => b.declared_style(),
+            Self::Admonition(b) => b.declared_style(),
+            Self::Table(b) => b.declared_style(),
+            Self::Preamble(b) => b.declared_style(),
+            Self::Break(b) => b.declared_style(),
+            Self::DocumentAttribute(b) => b.declared_style(),
         }
     }
 
@@ -525,6 +577,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.rendered_content(),
             Self::RawDelimited(b) => b.rendered_content(),
             Self::CompoundDelimited(b) => b.rendered_content(),
+            Self::Admonition(b) => b.rendered_content(),
             Self::Table(b) => b.rendered_content(),
             Self::Preamble(b) => b.rendered_content(),
             Self::Break(b) => b.rendered_content(),
@@ -541,6 +594,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.raw_context(),
             Self::RawDelimited(b) => b.raw_context(),
             Self::CompoundDelimited(b) => b.raw_context(),
+            Self::Admonition(b) => b.raw_context(),
             Self::Table(b) => b.raw_context(),
             Self::Preamble(b) => b.raw_context(),
             Self::Break(b) => b.raw_context(),
@@ -557,6 +611,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.nested_blocks(),
             Self::RawDelimited(b) => b.nested_blocks(),
             Self::CompoundDelimited(b) => b.nested_blocks(),
+            Self::Admonition(b) => b.nested_blocks(),
             Self::Table(b) => b.nested_blocks(),
             Self::Preamble(b) => b.nested_blocks(),
             Self::Break(b) => b.nested_blocks(),
@@ -573,6 +628,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.nested_blocks_mut(),
             Self::RawDelimited(b) => b.nested_blocks_mut(),
             Self::CompoundDelimited(b) => b.nested_blocks_mut(),
+            Self::Admonition(b) => b.nested_blocks_mut(),
             Self::Table(b) => b.nested_blocks_mut(),
             Self::Preamble(b) => b.nested_blocks_mut(),
             Self::Break(b) => b.nested_blocks_mut(),
@@ -589,6 +645,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.content_mut(),
             Self::RawDelimited(b) => b.content_mut(),
             Self::CompoundDelimited(b) => b.content_mut(),
+            Self::Admonition(b) => b.content_mut(),
             Self::Table(b) => b.content_mut(),
             Self::Preamble(b) => b.content_mut(),
             Self::Break(b) => b.content_mut(),
@@ -605,6 +662,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.title_source(),
             Self::RawDelimited(b) => b.title_source(),
             Self::CompoundDelimited(b) => b.title_source(),
+            Self::Admonition(b) => b.title_source(),
             Self::Table(b) => b.title_source(),
             Self::Preamble(b) => b.title_source(),
             Self::Break(b) => b.title_source(),
@@ -621,6 +679,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.title(),
             Self::RawDelimited(b) => b.title(),
             Self::CompoundDelimited(b) => b.title(),
+            Self::Admonition(b) => b.title(),
             Self::Table(b) => b.title(),
             Self::Preamble(b) => b.title(),
             Self::Break(b) => b.title(),
@@ -637,6 +696,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.anchor(),
             Self::RawDelimited(b) => b.anchor(),
             Self::CompoundDelimited(b) => b.anchor(),
+            Self::Admonition(b) => b.anchor(),
             Self::Table(b) => b.anchor(),
             Self::Preamble(b) => b.anchor(),
             Self::Break(b) => b.anchor(),
@@ -653,6 +713,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.anchor_reftext(),
             Self::RawDelimited(b) => b.anchor_reftext(),
             Self::CompoundDelimited(b) => b.anchor_reftext(),
+            Self::Admonition(b) => b.anchor_reftext(),
             Self::Table(b) => b.anchor_reftext(),
             Self::Preamble(b) => b.anchor_reftext(),
             Self::Break(b) => b.anchor_reftext(),
@@ -669,6 +730,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.attrlist(),
             Self::RawDelimited(b) => b.attrlist(),
             Self::CompoundDelimited(b) => b.attrlist(),
+            Self::Admonition(b) => b.attrlist(),
             Self::Table(b) => b.attrlist(),
             Self::Preamble(b) => b.attrlist(),
             Self::Break(b) => b.attrlist(),
@@ -685,6 +747,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::ListItem(b) => b.substitution_group(),
             Self::RawDelimited(b) => b.substitution_group(),
             Self::CompoundDelimited(b) => b.substitution_group(),
+            Self::Admonition(b) => b.substitution_group(),
             Self::Table(b) => b.substitution_group(),
             Self::Preamble(b) => b.substitution_group(),
             Self::Break(b) => b.substitution_group(),
@@ -703,6 +766,7 @@ impl<'src> HasSpan<'src> for Block<'src> {
             Self::ListItem(b) => b.span(),
             Self::RawDelimited(b) => b.span(),
             Self::CompoundDelimited(b) => b.span(),
+            Self::Admonition(b) => b.span(),
             Self::Table(b) => b.span(),
             Self::Preamble(b) => b.span(),
             Self::Break(b) => b.span(),

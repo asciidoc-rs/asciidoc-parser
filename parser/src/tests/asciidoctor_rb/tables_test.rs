@@ -1079,10 +1079,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/456): The
-    // admonition inside the open block does not render as `.admonitionblock`.
-    // Enable when admonitions are implemented.
     fn basic_asciidoc_cell() {
         let doc = Parser::default().parse("|===\na|--\nNOTE: content\n\ncontent\n--\n|===");
 
@@ -1151,15 +1147,41 @@ mod psv {
         assert_rendered_contains(&doc, "{backend-html5-doctype-article}");
     }
 
-    // Deferred: "should not allow AsciiDoc table cell to set a document
-    // attribute that was hard set by the API" (Ruby 1457) observes the lock via
-    // a NOTE admonition's icon, and admonitions are not implemented. The same
-    // API-lock path is covered by
-    // `should_not_allow_locked_attribute_unset_in_parent_document_to_be_set_in_asciidoc_table_cell`.
+    #[test]
+    fn should_not_allow_asciidoc_table_cell_to_set_a_document_attribute_that_was_hard_set_by_the_api()
+     {
+        // `icons` is hard set to `font` by the API, so the cell's `:icons:`
+        // (which would otherwise change it) is ignored: the cell's NOTE
+        // admonition still renders with a font-based icon.
+        let doc = Parser::default()
+            .with_intrinsic_attribute("icons", "font", ModificationContext::ApiOnly)
+            .parse(
+                "|===\na|\n:icons:\n\nNOTE: This admonition does not have a font-based icon.\n|===",
+            );
 
-    // Deferred: "should not allow AsciiDoc table cell to set a document
-    // attribute that was hard unset by the API" (Ruby 1472) — same admonition
-    // dependency as above.
+        assert_css(&doc, "td.icon .title", 0);
+        assert_css(&doc, "td.icon i.icon-note", 1);
+    }
+
+    #[test]
+    fn should_not_allow_asciidoc_table_cell_to_set_a_document_attribute_that_was_hard_unset_by_the_api()
+     {
+        // `icons` is hard unset by the API, so the cell's `:icons: font` is
+        // ignored: the cell's NOTE admonition renders with a text label.
+        let doc = Parser::default()
+            .with_intrinsic_attribute_bool("icons", false, ModificationContext::ApiOnly)
+            .parse(
+                "|===\na|\n:icons: font\n\nNOTE: This admonition does not have a font-based icon.\n|===",
+            );
+
+        assert_css(&doc, "td.icon .title", 1);
+        assert_css(&doc, "td.icon i.icon-note", 0);
+        assert_xpath(
+            &doc,
+            "//td[@class=\"icon\"]/*[@class=\"title\"][text()=\"Note\"]",
+            1,
+        );
+    }
 
     #[test]
     fn should_keep_attribute_unset_in_asciidoc_table_cell_if_unset_in_parent_document() {
@@ -1260,10 +1282,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/456): The
-    // NOTE admonition and nested blocks do not render as `.admonitionblock` /
-    // `.dlist` inside the cell. Enable when admonitions are implemented.
     fn asciidoc_content() {
         let doc = Parser::default().parse(
             "[cols=\"1e,1,5a\"]\n|===\n|Name |Backends |Description\n\n|badges |xhtml11, html5 |\nLink badges.\n\n[NOTE]\n====\nThe path names are relative.\n====\n|docinfo |All backends |\nThese attributes control docinfo:\n\ndocinfo:: Include x\ndocinfo1:: Include y\n|===",

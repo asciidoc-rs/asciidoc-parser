@@ -61,6 +61,11 @@ impl<'src> CompoundDelimitedBlock<'src> {
         }
     }
 
+    /// Consume this block and return its nested blocks.
+    pub(crate) fn into_nested_blocks(self) -> Vec<Block<'src>> {
+        self.blocks
+    }
+
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,

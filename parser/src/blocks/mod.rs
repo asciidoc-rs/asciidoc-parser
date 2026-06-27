@@ -22,6 +22,10 @@
 //! Block>` throughout the codebase, but also needed to provide for
 //! externally-described block types.
 
+mod admonition;
+pub use admonition::AdmonitionBlock;
+pub(crate) use admonition::starts_with_admonition_label;
+
 mod block;
 pub use block::Block;
 
@@ -32,6 +36,7 @@ mod compound_delimited;
 pub use compound_delimited::CompoundDelimitedBlock;
 
 mod context;
+pub use context::AdmonitionVariant;
 pub(crate) use context::is_built_in_context;
 
 mod is_block;

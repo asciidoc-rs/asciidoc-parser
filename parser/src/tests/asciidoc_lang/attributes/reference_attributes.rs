@@ -165,23 +165,27 @@ Actually, please don't.
                     anchor_reftext: None,
                     attrlist: None,
                 },),
-                Block::Simple(SimpleBlock {
-                    content: Content {
+                Block::Admonition(AdmonitionBlock {
+                    variant: AdmonitionVariant::Warning,
+                    label: "Warning",
+                    icons_font: false,
+                    content_model: ContentModel::Simple,
+                    content: Some(Content {
                         original: Span {
-                            data: "WARNING: {disclaimer}\nIf you're missing a lime colored sock, file a ticket in\nthe {url-repo}/issues[Asciidoctor issue tracker].\n(Actually, please don't).",
+                            data: "{disclaimer}\nIf you're missing a lime colored sock, file a ticket in\nthe {url-repo}/issues[Asciidoctor issue tracker].\n(Actually, please don't).",
                             line: 8,
-                            col: 1,
-                            offset: 230,
+                            col: 10,
+                            offset: 239,
                         },
-                        rendered: "WARNING: Don&#8217;t pet the wild Wolpertingers. We&#8217;re not responsible for any loss of hair, chocolate, or purple socks.\nIf you&#8217;re missing a lime colored sock, file a ticket in\nthe <a href=\"https://github.com/asciidoctor/asciidoctor/issues\">Asciidoctor issue tracker</a>.\n(Actually, please don&#8217;t).",
-                    },
+                        rendered: "Don&#8217;t pet the wild Wolpertingers. We&#8217;re not responsible for any loss of hair, chocolate, or purple socks.\nIf you&#8217;re missing a lime colored sock, file a ticket in\nthe <a href=\"https://github.com/asciidoctor/asciidoctor/issues\">Asciidoctor issue tracker</a>.\n(Actually, please don&#8217;t).",
+                    },),
+                    blocks: &[],
                     source: Span {
                         data: "WARNING: {disclaimer}\nIf you're missing a lime colored sock, file a ticket in\nthe {url-repo}/issues[Asciidoctor issue tracker].\n(Actually, please don't).",
                         line: 8,
                         col: 1,
                         offset: 230,
                     },
-                    style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
                     anchor: None,
@@ -249,23 +253,27 @@ Our servers don't like them either.
                     offset: 0,
                 },
             },
-            blocks: &[Block::Simple(SimpleBlock {
-                content: Content {
+            blocks: &[Block::Admonition(AdmonitionBlock {
+                variant: AdmonitionVariant::Tip,
+                label: "Tip",
+                icons_font: false,
+                content_model: ContentModel::Simple,
+                content: Some(Content {
                     original: Span {
-                        data: "TIP: Wolpertingers don't like temperatures above 100{deg}C.\nOur servers don't like them either.",
+                        data: "Wolpertingers don't like temperatures above 100{deg}C.\nOur servers don't like them either.",
                         line: 1,
-                        col: 1,
-                        offset: 0,
+                        col: 6,
+                        offset: 5,
                     },
-                    rendered: "TIP: Wolpertingers don&#8217;t like temperatures above 100&#176;C.\nOur servers don&#8217;t like them either.",
-                },
+                    rendered: "Wolpertingers don&#8217;t like temperatures above 100&#176;C.\nOur servers don&#8217;t like them either.",
+                },),
+                blocks: &[],
                 source: Span {
                     data: "TIP: Wolpertingers don't like temperatures above 100{deg}C.\nOur servers don't like them either.",
                     line: 1,
                     col: 1,
                     offset: 0,
                 },
-                style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
                 anchor: None,
