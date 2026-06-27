@@ -587,19 +587,19 @@ mod tests {
     #[test]
     fn not_an_admonition_when_lowercase_label() {
         let block = parse_one("note: not an admonition");
-        assert!(matches!(block, Block::Simple(_)));
+        assert_eq!(block.raw_context().deref(), "paragraph");
     }
 
     #[test]
     fn not_an_admonition_without_separating_space() {
         let block = parse_one("NOTE:no space");
-        assert!(matches!(block, Block::Simple(_)));
+        assert_eq!(block.raw_context().deref(), "paragraph");
     }
 
     #[test]
     fn not_an_admonition_for_partial_label() {
         let block = parse_one("NOTES: a longer word");
-        assert!(matches!(block, Block::Simple(_)));
+        assert_eq!(block.raw_context().deref(), "paragraph");
     }
 
     #[test]
@@ -607,7 +607,7 @@ mod tests {
         // Indented content is a literal block; the leading whitespace means the
         // line is not an admonition paragraph.
         let block = parse_one("  NOTE: indented text");
-        assert!(matches!(block, Block::Simple(_)));
+        assert_eq!(block.raw_context().deref(), "paragraph");
     }
 
     #[test]
@@ -630,7 +630,7 @@ mod tests {
         let maw = Block::parse(crate::Span::new("[NOTE]\n====\nunclosed"), &mut parser);
 
         let block = maw.item.unwrap().item;
-        assert!(matches!(block, Block::Admonition(_)));
+        assert_eq!(block.raw_context().deref(), "admonition");
         assert_eq!(maw.warnings.len(), 1);
         assert_eq!(
             maw.warnings.first().unwrap().warning,
@@ -707,6 +707,65 @@ mod tests {
         let block = parse_one("NOTE: clone me");
         let admonition = as_admonition(&block).clone();
         assert_eq!(admonition.variant(), AdmonitionVariant::Note);
+    }
+
+    #[test]
+    fn masquerade_without_content_is_not_an_admonition() {
+        // A masquerade style with no following block content cannot form an
+        // admonition; the masquerade parser reports no block and the line is
+        // treated as an ordinary block with a missing-block warning.
+        let mut parser = Parser::default();
+        let maw = Block::parse(crate::Span::new("[NOTE]\n"), &mut parser);
+
+        // The lone attribute list has no block to attach to: a missing-block
+        // warning is emitted and the line is treated as an ordinary paragraph,
+        // not an admonition.
+        let block = maw.item.unwrap().item;
+        assert_eq!(block.raw_context().deref(), "paragraph");
+        assert_eq!(maw.warnings.len(), 1);
+        assert_eq!(
+            maw.warnings.first().unwrap().warning,
+            crate::warnings::WarningType::MissingBlockAfterTitleOrAttributeList
+        );
+    }
+
+    #[test]
+    fn block_enum_delegates_to_admonition() {
+        // Exercise the `Block`-level `IsBlock`/`Debug` arms for an admonition
+        // (rather than calling through the unwrapped `AdmonitionBlock`).
+        let simple = parse_one("NOTE: text");
+        assert_eq!(simple.content_model(), ContentModel::Simple);
+        assert_eq!(simple.rendered_content(), Some("text"));
+        assert_eq!(simple.raw_context().deref(), "admonition");
+        assert_eq!(simple.declared_style(), Some("NOTE"));
+        assert!(simple.title_source().is_none());
+        assert!(simple.anchor_reftext().is_none());
+        assert_eq!(simple.substitution_group(), SubstitutionGroup::Normal);
+        assert!(simple.nested_blocks().next().is_none());
+        assert!(format!("{simple:?}").starts_with("Block::Admonition"));
+
+        let compound = parse_one("[NOTE]\n====\nx\n====");
+        assert_eq!(compound.content_model(), ContentModel::Compound);
+        assert_eq!(compound.nested_blocks().count(), 1);
+    }
+
+    #[test]
+    fn block_declared_style_for_non_admonition_kinds() {
+        // The `Block::declared_style` delegation returns `None` for block kinds
+        // that have no positional style: a media block, a list item, and a
+        // document-attribute block.
+        let media = parse_one("image::a.png[]");
+        assert_eq!(media.raw_context().deref(), "image");
+        assert!(media.declared_style().is_none());
+
+        let list = parse_one("* item");
+        let item = list.nested_blocks().next().unwrap();
+        assert_eq!(item.raw_context().deref(), "list_item");
+        assert!(item.declared_style().is_none());
+
+        let attribute = parse_one(":foo: bar");
+        assert_eq!(attribute.raw_context().deref(), "attribute");
+        assert!(attribute.declared_style().is_none());
     }
 
     mod caption_and_icons {
