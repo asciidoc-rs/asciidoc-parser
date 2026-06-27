@@ -368,8 +368,10 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
     // Check if this block type handles its own title internally. Lists render
     // their title inside the list wrapper; tables render it as a <caption>;
     // admonitions render it inside the content cell; a collapsible block renders
-    // it as the `<summary>` toggle text.
+    // it as the `<summary>` toggle text; a sidebar renders it as the first child
+    // of its `div.content` wrapper.
     let handles_title_internally = is_collapsible(block)
+        || is_sidebar(block)
         || matches!(
             block,
             Block::List(_) | Block::Table(_) | Block::Admonition(_) | Block::Quote(_)
@@ -414,6 +416,13 @@ impl ToVirtualDom for Block<'_> {
         // markup.
         if is_collapsible(self) {
             return collapsible_to_node(self);
+        }
+
+        // A sidebar block (the `****` structural container or the `[sidebar]`
+        // paragraph style) renders as `div.sidebarblock > div.content`, with its
+        // title and content nested inside the content wrapper.
+        if is_sidebar(self) {
+            return sidebar_to_node(self);
         }
 
         match self {
@@ -965,6 +974,65 @@ fn collapsible_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
         // A collapsible paragraph holds inline content, rendered directly inside
         // the content wrapper without a wrapping paragraph (matching
         // Asciidoctor's output for the example paragraph style).
+        _ => {
+            if let Some(rendered) = block.rendered_content() {
+                content = content.with_html_content(rendered);
+            }
+        }
+    }
+
+    node.children.push(content);
+    node
+}
+
+/// Returns `true` if `block` is a sidebar block: the `****` structural
+/// container or a paragraph carrying the `sidebar` style, both of which resolve
+/// to the `sidebar` context.
+fn is_sidebar<'a>(block: &'a Block<'a>) -> bool {
+    block.resolved_context().as_ref() == "sidebar"
+}
+
+/// Renders a sidebar block, matching Asciidoctor's HTML output.
+///
+/// The outer `div.sidebarblock` carries the block's id and roles; its sole
+/// child is a `div.content` wrapper. A title, if present, is rendered as the
+/// first child of the content wrapper (a `div.title`), unlike an example block
+/// whose title is a numbered caption placed outside the content. A delimited
+/// sidebar encloses other blocks (rendered through `add_block_with_title` so
+/// their own titles and paragraph wrappers surface); a sidebar paragraph holds
+/// inline content rendered directly inside the content wrapper without a `<p>`
+/// wrapper.
+fn sidebar_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
+    let mut node = VirtualNode::new("div").with_class("sidebarblock");
+
+    for role in block.roles() {
+        node = node.with_class(role);
+    }
+
+    if let Some(id) = block.id() {
+        node = node.with_id(id);
+    }
+
+    let mut content = VirtualNode::new("div").with_class("content");
+
+    // The title, when present, is the first child of the content wrapper.
+    if let Some(title) = block.title() {
+        content
+            .children
+            .push(VirtualNode::new("div").with_class("title").with_text(title));
+    }
+
+    match block.content_model() {
+        // A delimited sidebar encloses other blocks.
+        ContentModel::Compound => {
+            for child in block.nested_blocks() {
+                add_block_with_title(&mut content, child);
+            }
+        }
+
+        // A sidebar paragraph holds inline content, rendered directly inside the
+        // content wrapper without a wrapping paragraph (matching Asciidoctor's
+        // output for the sidebar paragraph style).
         _ => {
             if let Some(rendered) = block.rendered_content() {
                 content = content.with_html_content(rendered);
