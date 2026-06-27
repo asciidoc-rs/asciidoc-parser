@@ -143,8 +143,10 @@ Roads? Where we're going, we don't need roads.
 
     assert_eq!(
         block,
-        Block::Simple(SimpleBlock {
-            content: Content {
+        Block::Quote(QuoteBlock {
+            type_: QuoteType::Quote,
+            content_model: ContentModel::Simple,
+            content: Some(Content {
                 original: Span {
                     data: "Roads? Where we're going, we don't need roads.",
                     line: 2,
@@ -152,14 +154,16 @@ Roads? Where we're going, we don't need roads.
                     offset: 14,
                 },
                 rendered: "Roads? Where we&#8217;re going, we don&#8217;t need roads.",
-            },
+            }),
+            blocks: &[],
+            attribution: None,
+            citetitle: None,
             source: Span {
                 data: "[quote#roads]\nRoads? Where we're going, we don't need roads.",
                 line: 1,
                 col: 1,
                 offset: 0,
             },
-            style: SimpleBlockStyle::Paragraph,
             title_source: None,
             title: None,
             anchor: None,
@@ -212,8 +216,10 @@ Roads? Where we're going, we don't need roads.
 
     assert_eq!(
         block,
-        Block::Simple(SimpleBlock {
-            content: Content {
+        Block::Quote(QuoteBlock {
+            type_: QuoteType::Quote,
+            content_model: ContentModel::Simple,
+            content: Some(Content {
                 original: Span {
                     data: "Roads? Where we're going, we don't need roads.",
                     line: 2,
@@ -221,14 +227,16 @@ Roads? Where we're going, we don't need roads.
                     offset: 50,
                 },
                 rendered: "Roads? Where we&#8217;re going, we don&#8217;t need roads.",
-            },
+            }),
+            blocks: &[],
+            attribution: Some("Dr. Emmett Brown"),
+            citetitle: Some("Back to the Future"),
             source: Span {
                 data: "[quote#roads,Dr. Emmett Brown,Back to the Future]\nRoads? Where we're going, we don't need roads.",
                 line: 1,
                 col: 1,
                 offset: 0,
             },
-            style: SimpleBlockStyle::Paragraph,
             title_source: None,
             title: None,
             anchor: None,

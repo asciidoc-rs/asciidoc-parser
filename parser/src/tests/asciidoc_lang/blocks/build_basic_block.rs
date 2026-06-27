@@ -326,8 +326,10 @@ However, note that the lines of a styled paragraph are first parsed like a parag
 
     assert_eq!(
         mi.item,
-        Block::Simple(SimpleBlock {
-            content: Content {
+        Block::Quote(QuoteBlock {
+            type_: QuoteType::Quote,
+            content_model: ContentModel::Simple,
+            content: Some(Content {
                 original: Span {
                     data: "Never do today what you can put off `'til tomorrow.",
                     line: 2,
@@ -335,14 +337,16 @@ However, note that the lines of a styled paragraph are first parsed like a parag
                     offset: 8,
                 },
                 rendered: "Never do today what you can put off &#8217;til tomorrow.",
-            },
+            }),
+            blocks: &[],
+            attribution: None,
+            citetitle: None,
             source: Span {
                 data: "[quote]\nNever do today what you can put off `'til tomorrow.",
                 line: 1,
                 col: 1,
                 offset: 0,
             },
-            style: SimpleBlockStyle::Paragraph,
             title_source: None,
             title: None,
             anchor: None,
@@ -364,7 +368,7 @@ However, note that the lines of a styled paragraph are first parsed like a parag
         },)
     );
 
-    assert_eq!(mi.item.raw_context().as_ref(), "paragraph");
+    assert_eq!(mi.item.raw_context().as_ref(), "quote");
     assert_eq!(mi.item.resolved_context().as_ref(), "quote");
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
 }

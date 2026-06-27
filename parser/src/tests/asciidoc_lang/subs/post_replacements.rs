@@ -277,7 +277,7 @@ mod default_post_replacements_substitution {
 
         let block1 = doc.nested_blocks().next().unwrap();
 
-        let Block::CompoundDelimited(block1) = block1 else {
+        let Block::Quote(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 

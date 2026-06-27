@@ -1955,7 +1955,10 @@ If there is a closing single quote, and the first character is not an escaped si
                         offset: 0,
                     },
                 },
-                blocks: &[Block::CompoundDelimited(CompoundDelimitedBlock {
+                blocks: &[Block::Quote(QuoteBlock {
+                    type_: QuoteType::Quote,
+                    content_model: ContentModel::Compound,
+                    content: None,
                     blocks: &[Block::Simple(SimpleBlock {
                         content: Content {
                             original: Span {
@@ -1979,7 +1982,8 @@ If there is a closing single quote, and the first character is not an escaped si
                         anchor_reftext: None,
                         attrlist: None,
                     },),],
-                    context: "quote",
+                    attribution: None,
+                    citetitle: None,
                     source: Span {
                         data: "[quote, author='*Strong* and _emphasis_']\n____\nThis shows formatting substitutions in single-quoted values\n____",
                         line: 1,
@@ -2061,7 +2065,10 @@ That's because the parser already knows to look for the closing square bracket a
                         offset: 0,
                     },
                 },
-                blocks: &[Block::CompoundDelimited(CompoundDelimitedBlock {
+                blocks: &[Block::Quote(QuoteBlock {
+                    type_: QuoteType::Quote,
+                    content_model: ContentModel::Compound,
+                    content: None,
                     blocks: &[Block::Simple(SimpleBlock {
                         content: Content {
                             original: Span {
@@ -2085,7 +2092,8 @@ That's because the parser already knows to look for the closing square bracket a
                         anchor_reftext: None,
                         attrlist: None,
                     },),],
-                    context: "quote",
+                    attribution: None,
+                    citetitle: None,
                     source: Span {
                         data: "[quote, author=my [bracketed] name]\n____\nWho wrote this, anyway?\n____",
                         line: 1,

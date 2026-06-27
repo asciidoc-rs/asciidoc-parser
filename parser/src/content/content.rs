@@ -110,6 +110,17 @@ impl<'src> Content<'src> {
         self.rendered.as_ref()
     }
 
+    /// Returns an owned copy of the final text after all substitutions have
+    /// been applied.
+    ///
+    /// Unlike [`rendered()`](Self::rendered), this does not tie the returned
+    /// value to the `'src` lifetime, so it can be called on a short-lived
+    /// `Content` built solely to render a fragment (e.g. a block's attribution
+    /// or citation text).
+    pub(crate) fn rendered_owned(&self) -> String {
+        self.rendered.as_ref().to_string()
+    }
+
     /// Returns `true` if `self` contains no text.
     pub fn is_empty(&self) -> bool {
         self.rendered.as_ref().is_empty()
