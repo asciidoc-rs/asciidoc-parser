@@ -8,7 +8,7 @@ pub(crate) use crate::{
     HasSpan, Parser,
     blocks::{
         AdmonitionVariant, ColumnStyle, ContentModel, Frame, Grid, HorizontalAlignment, IsBlock,
-        SectionType, SimpleBlockStyle, Stripes, VerticalAlignment,
+        QuoteType, SectionType, SimpleBlockStyle, Stripes, VerticalAlignment,
     },
     content::SubstitutionGroup,
     parser::ModificationContext,

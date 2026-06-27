@@ -13,8 +13,9 @@ use crate::{
     blocks::{
         AdmonitionBlock, Block, Break, ColumnStyle, CompoundDelimitedBlock, ContentModel, Frame,
         Grid, HorizontalAlignment, IsBlock, ListBlock, ListItem, ListItemMarker, ListType,
-        MediaBlock, Preamble, RawDelimitedBlock, SectionBlock, SimpleBlock, SimpleBlockStyle,
-        Stripes, TableBlock, TableCellContent, TableColumn, TableRow, VerticalAlignment,
+        MediaBlock, Preamble, QuoteBlock, QuoteType, RawDelimitedBlock, SectionBlock, SimpleBlock,
+        SimpleBlockStyle, Stripes, TableBlock, TableCellContent, TableColumn, TableRow,
+        VerticalAlignment,
     },
 };
 
@@ -369,7 +370,7 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
     // admonitions render it inside the content cell.
     let handles_title_internally = matches!(
         block,
-        Block::List(_) | Block::Table(_) | Block::Admonition(_)
+        Block::List(_) | Block::Table(_) | Block::Admonition(_) | Block::Quote(_)
     );
 
     // Add title as a separate sibling element if the block doesn't handle it
@@ -453,6 +454,7 @@ impl ToVirtualDom for Block<'_> {
             Block::RawDelimited(raw) => raw_delimited_to_node(raw),
             Block::CompoundDelimited(compound) => compound_delimited_to_node(compound),
             Block::Admonition(admonition) => admonition_to_node(admonition),
+            Block::Quote(quote) => quote_to_node(quote),
             Block::Table(table) => table_to_node(table),
             Block::Preamble(preamble) => preamble_to_node(preamble),
             Block::Break(break_) => break_to_node(break_),
@@ -965,6 +967,113 @@ fn admonition_to_node<'a>(admonition: &'a AdmonitionBlock<'a>) -> VirtualNode {
         .with_child(content_cell);
 
     node.with_child(VirtualNode::new("table").with_child(row))
+}
+
+fn quote_to_node<'a>(quote: &'a QuoteBlock<'a>) -> VirtualNode {
+    // The outer wrapper carries `quoteblock` or `verseblock`, then any roles.
+    let block_class = format!("{}block", quote.type_().name());
+    let mut node = VirtualNode::new("div").with_class(block_class);
+
+    for role in quote.roles() {
+        node = node.with_class(role);
+    }
+
+    if let Some(id) = quote.id() {
+        node = node.with_id(id);
+    }
+
+    // A quote/verse block's title renders inside the wrapper, before the
+    // content.
+    if let Some(title) = quote.title() {
+        node.children
+            .push(VirtualNode::new("div").with_class("title").with_text(title));
+    }
+
+    match quote.type_() {
+        // A verse renders its content verbatim inside `<pre class="content">`.
+        QuoteType::Verse => {
+            let rendered = quote
+                .content()
+                .map(|c| c.rendered().to_string())
+                .unwrap_or_default();
+            node.children.push(
+                VirtualNode::new("pre")
+                    .with_class("content")
+                    .with_text(rendered),
+            );
+        }
+
+        // A quote renders its content inside `<blockquote>`. Compound content
+        // (a delimited or markdown-style quote) holds nested blocks; simple
+        // content (a styled or quoted paragraph) holds inline text rendered
+        // directly, without a wrapping paragraph.
+        QuoteType::Quote => {
+            let mut blockquote = VirtualNode::new("blockquote");
+
+            match quote.content_model() {
+                ContentModel::Compound => {
+                    // `blocks()` (rather than `nested_blocks()`) is used so that
+                    // a Markdown-style blockquote's nested blocks, which borrow
+                    // the block's own owned source, are rendered too.
+                    for child in quote.blocks() {
+                        add_block_with_title(&mut blockquote, child);
+                    }
+                }
+
+                _ => {
+                    if let Some(content) = quote.content() {
+                        let rendered = content.rendered();
+                        if rendered.contains('<') {
+                            blockquote.children.extend(parse_html_content(rendered));
+                        } else {
+                            blockquote.text = Some(decode_html_entities(rendered));
+                        }
+                    }
+                }
+            }
+
+            node.children.push(blockquote);
+        }
+    }
+
+    // The attribution (and optional citation) render in a trailing
+    // `<div class="attribution">`, introduced by an em dash.
+    if let Some(attribution_node) = quote_attribution_node(quote) {
+        node.children.push(attribution_node);
+    }
+
+    node
+}
+
+/// Builds the `<div class="attribution">` for a quote or verse block, or `None`
+/// when the block has neither an attribution nor a citation.
+fn quote_attribution_node(quote: &QuoteBlock<'_>) -> Option<VirtualNode> {
+    let attribution = quote.attribution();
+    let citetitle = quote.citetitle();
+
+    if attribution.is_none() && citetitle.is_none() {
+        return None;
+    }
+
+    let mut node = VirtualNode::new("div").with_class("attribution");
+
+    // The attribution text is introduced by an em dash. When only a citation is
+    // present (no attribution), the em dash is omitted and the citation stands
+    // alone.
+    if let Some(attribution) = attribution {
+        // The em dash is emitted as a numeric entity so the lead text stays
+        // ASCII for `parse_html_content` (which is not multi-byte safe); it is
+        // decoded back to `—` when the text node is built.
+        let lead = format!("&#8212; {attribution}");
+        node.children.extend(parse_html_content(&lead));
+    }
+
+    if let Some(citetitle) = citetitle {
+        node.children
+            .push(VirtualNode::new("cite").with_html_content(citetitle));
+    }
+
+    Some(node)
 }
 
 fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {

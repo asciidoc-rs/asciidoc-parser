@@ -650,7 +650,10 @@ ____
 
         assert_eq!(
             mi.item,
-            Block::CompoundDelimited(CompoundDelimitedBlock {
+            Block::Quote(QuoteBlock {
+                type_: QuoteType::Quote,
+                content_model: ContentModel::Compound,
+                content: None,
                 blocks: &[Block::Simple(SimpleBlock {
                     content: Content {
                         original: Span {
@@ -674,7 +677,8 @@ ____
                     anchor_reftext: None,
                     attrlist: None,
                 },),],
-                context: "quote",
+                attribution: Some("Dr. Emmett Brown"),
+                citetitle: None,
                 source: Span {
                     data: "[quote.movie#roads,Dr. Emmett Brown]\n____\nRoads? Where we're going, we don't need roads.\n____",
                     line: 1,

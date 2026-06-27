@@ -25,6 +25,9 @@ pub(crate) use media::MediaBlock;
 mod preamble;
 pub(crate) use preamble::Preamble;
 
+mod quote;
+pub(crate) use quote::QuoteBlock;
+
 mod raw_delimited;
 pub(crate) use raw_delimited::RawDelimitedBlock;
 

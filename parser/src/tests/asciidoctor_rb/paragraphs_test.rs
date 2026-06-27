@@ -2271,66 +2271,70 @@ mod literal {
     }
 }
 
+// Adapted from the `context 'Quote'` section of Asciidoctor's paragraphs test
+// suite. The blockquote feature was unimplemented when the rest of this file
+// was first ported, so these were left in the `port_from_ruby` stub below.
+mod quote {
+    use crate::tests::prelude::*;
+
+    #[test]
+    fn single_line_quote_paragraph() {
+        let doc = Parser::default().parse("[quote]\nFamous quote.");
+        assert_xpath(&doc, "//*[@class = \"quoteblock\"]", 1);
+        // A styled quote paragraph renders its text directly inside the
+        // blockquote, not wrapped in a `<p>`.
+        assert_xpath(&doc, "//*[@class = \"quoteblock\"]//p", 0);
+        assert_rendered_contains(&doc, "Famous quote.");
+    }
+
+    #[test]
+    fn quote_paragraph_terminates_at_list_continuation() {
+        let doc = Parser::default().parse("[quote]\nA famouse quote.\n+");
+        assert_css(&doc, ".quoteblock", 1);
+        // The list-continuation marker (`+`) terminates the quote paragraph and
+        // becomes its own paragraph.
+        assert_css(&doc, ".paragraph", 1);
+        assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text() = \"+\"]", 1);
+    }
+
+    #[test]
+    fn verse_paragraph() {
+        let doc = Parser::default().parse("[verse]\nFamous verse.");
+        assert_xpath(&doc, "//*[@class = \"verseblock\"]", 1);
+        assert_xpath(&doc, "//*[@class = \"verseblock\"]/pre", 1);
+        assert_xpath(&doc, "//*[@class = \"verseblock\"]//p", 0);
+        assert_xpath(
+            &doc,
+            "//*[@class = \"verseblock\"]/pre[normalize-space(text()) = \"Famous verse.\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_perform_normal_subs_on_a_verse_paragraph() {
+        let doc = Parser::default().parse("[verse]\n_GET /groups/link:#group-id[{group-id}]_");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.rendered_content(),
+            Some("<em>GET /groups/<a href=\"#group-id\">{group-id}</a></em>")
+        );
+    }
+
+    #[test]
+    fn quote_paragraph_should_honor_explicit_subs_list() {
+        let doc = Parser::default().parse("[subs=\"specialcharacters\"]\n[quote]\n*Hey Jude*");
+        // Only special-character substitution runs, so the `*` is left intact
+        // (not converted to a `<strong>`).
+        assert_rendered_contains(&doc, "*Hey Jude*");
+    }
+}
+
 #[ignore]
 #[test]
 fn port_from_ruby() {
     todo!(
         "Port this: {}",
         r###"
-  context 'Quote' do
-    test 'single-line quote paragraph' do
-      input = <<~'EOS'
-      [quote]
-      Famous quote.
-      EOS
-      output = convert_string input
-      assert_xpath '//*[@class = "quoteblock"]', output, 1
-      assert_xpath '//*[@class = "quoteblock"]//p', output, 0
-      assert_xpath '//*[@class = "quoteblock"]//*[contains(text(), "Famous quote.")]', output, 1
-    end
-
-    test 'quote paragraph terminates at list continuation' do
-      input = <<~'EOS'
-      [quote]
-      A famouse quote.
-      +
-      EOS
-      output = convert_string_to_embedded input
-      assert_css '.quoteblock:root', output, 1
-      assert_css '.paragraph:root', output, 1
-      assert_xpath %(/*[@class="paragraph"]/p[text() = "+"]), output, 1
-    end
-
-    test 'verse paragraph' do
-      output = convert_string "[verse]\nFamous verse."
-      assert_xpath '//*[@class = "verseblock"]', output, 1
-      assert_xpath '//*[@class = "verseblock"]/pre', output, 1
-      assert_xpath '//*[@class = "verseblock"]//p', output, 0
-      assert_xpath '//*[@class = "verseblock"]/pre[normalize-space(text()) = "Famous verse."]', output, 1
-    end
-
-    test 'should perform normal subs on a verse paragraph' do
-      input = <<~'EOS'
-      [verse]
-      _GET /groups/link:#group-id[\{group-id\}]_
-      EOS
-
-      output = convert_string_to_embedded input
-      assert_includes output, '<pre class="content"><em>GET /groups/<a href="#group-id">{group-id}</a></em></pre>'
-    end
-
-    test 'quote paragraph should honor explicit subs list' do
-      input = <<~'EOS'
-      [subs="specialcharacters"]
-      [quote]
-      *Hey Jude*
-      EOS
-
-      output = convert_string_to_embedded input
-      assert_includes output, '*Hey Jude*'
-    end
-  end
-
   context 'special' do
     test 'note multiline syntax' do
       Asciidoctor::ADMONITION_STYLES.each do |style|

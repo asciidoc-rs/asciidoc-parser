@@ -60,6 +60,9 @@ pub(crate) mod parse_utils;
 mod preamble;
 pub use preamble::Preamble;
 
+mod quote;
+pub use quote::{QuoteBlock, QuoteType};
+
 mod raw_delimited;
 pub use raw_delimited::RawDelimitedBlock;
 

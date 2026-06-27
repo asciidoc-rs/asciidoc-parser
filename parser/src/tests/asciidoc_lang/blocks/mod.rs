@@ -1,6 +1,7 @@
 mod add_title;
 mod admonitions;
 mod assign_id;
+mod blockquotes;
 mod breaks;
 mod build_basic_block;
 mod delimited;
