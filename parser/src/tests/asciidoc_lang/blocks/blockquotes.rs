@@ -2,6 +2,13 @@ use crate::tests::prelude::*;
 
 track_file!("docs/modules/blocks/pages/blockquotes.adoc");
 
+fn as_quote<'a>(block: &'a crate::blocks::Block<'a>) -> &'a crate::blocks::QuoteBlock<'a> {
+    match block {
+        crate::blocks::Block::Quote(quote) => quote,
+        other => panic!("expected a quote block, got {other:?}"),
+    }
+}
+
 non_normative!(
     r#"
 = Blockquotes
@@ -65,11 +72,35 @@ These positional attributes are all optional.
 Quote or excerpt text
 ----
 
+"#
+    );
+
+    verifies!(
+        r#"
 You can include an optional space after the comma that separates each positional attribute.
 If an attribute value includes a comma, enclose the value in double or single quotes.
 
 "#
     );
+
+    // An optional space after each comma is allowed and is not part of the
+    // attribute value.
+    let doc =
+        Parser::default().parse("[quote, Albert Einstein, Riddles of the Sphinx]\n____\nx\n____");
+    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    assert_eq!(quote.attribution(), Some("Albert Einstein"));
+    assert_eq!(quote.citetitle(), Some("Riddles of the Sphinx"));
+
+    // A value that itself contains a comma is enclosed in double (or single)
+    // quotes so the comma is not read as an attribute separator.
+    let doc = Parser::default().parse("[quote,\"Doe, Jane\",A Book]\n____\nx\n____");
+    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    assert_eq!(quote.attribution(), Some("Doe, Jane"));
+    assert_eq!(quote.citetitle(), Some("A Book"));
+
+    let doc = Parser::default().parse("[quote,'Doe, Jane',A Book]\n____\nx\n____");
+    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    assert_eq!(quote.attribution(), Some("Doe, Jane"));
 
     verifies!(
         r#"
@@ -85,10 +116,7 @@ If the quote is a single line or paragraph (i.e., a styled paragraph), you can p
 
     assert_css(&doc, ".quoteblock", 1);
 
-    let block = doc.nested_blocks().next().unwrap();
-    let crate::blocks::Block::Quote(quote) = block else {
-        panic!("Expected a quote block, got {block:?}");
-    };
+    let quote = as_quote(doc.nested_blocks().next().unwrap());
     assert_eq!(quote.content_model(), ContentModel::Simple);
 
     non_normative!(
