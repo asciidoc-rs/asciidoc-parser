@@ -21,7 +21,11 @@ use crate::{
 /// | `====`    | Example      |
 /// | `--`      | Open         |
 /// | `****`    | Sidebar      |
-/// | `____`    | Quote        |
+///
+/// The quote delimiter (`____`) is also recognized by `is_valid_delimiter` (so
+/// paragraph and list parsing stop at it), but a `____` block is parsed as a
+/// [`QuoteBlock`](crate::blocks::QuoteBlock) rather than a
+/// `CompoundDelimitedBlock`.
 #[derive(Clone, Eq, PartialEq)]
 pub struct CompoundDelimitedBlock<'src> {
     blocks: Vec<Block<'src>>,
