@@ -305,17 +305,14 @@ impl<'src> QuoteBlock<'src> {
         }
 
         // Locate the attribution line: the first line that begins with `--`
-        // followed by whitespace and at least one more character.
-        let parts = split_at_attribution_line(data)?;
-        let AttributionSplit {
-            quoted_end,
-            attribution_start,
-        } = parts;
+        // followed by whitespace and at least one more character. Splits the
+        // paragraph into the quoted text and the attribution text.
+        let (quoted, attribution_text) = split_at_attribution_line(data)?;
 
-        // The text before the attribution line, with surrounding whitespace
-        // removed, must be wrapped in double quotes.
-        let quoted = data.get(..quoted_end)?.trim_end();
+        // The quoted text, with surrounding whitespace removed, must be wrapped
+        // in double quotes.
         let inner = quoted
+            .trim_end()
             .strip_prefix('"')
             .and_then(|s| s.strip_suffix('"'))
             .filter(|inner| !inner.is_empty())?;
@@ -328,8 +325,7 @@ impl<'src> QuoteBlock<'src> {
         SubstitutionGroup::Normal.apply(&mut content, parser, None);
 
         // The attribution line provides the attribution and (optional) citation.
-        let attribution_text = data.get(attribution_start..).unwrap_or("").trim();
-        let (attribution, citetitle) = split_attribution_line(attribution_text, parser);
+        let (attribution, citetitle) = split_attribution_line(attribution_text.trim(), parser);
 
         let source = metadata
             .source
@@ -382,8 +378,10 @@ impl<'src> QuoteBlock<'src> {
         // A description list takes precedence over a Markdown-style blockquote:
         // the `>` marker is a valid prefix for a description-list term, so a
         // line like `> term:: def` is a description list, not a blockquote.
-        if let Some(marker) = ListItemMarker::parse(metadata.block_start, parser)
-            && matches!(marker.item, ListItemMarker::DefinedTerm { .. })
+        if let Some(MatchedItem {
+            item: ListItemMarker::DefinedTerm { .. },
+            ..
+        }) = ListItemMarker::parse(metadata.block_start, parser)
         {
             return None;
         }
@@ -637,24 +635,14 @@ fn non_empty(s: &str) -> Option<&str> {
     if s.is_empty() { None } else { Some(s) }
 }
 
-/// The byte offsets that split a quoted paragraph's content from its
-/// attribution line.
-struct AttributionSplit {
-    /// The byte offset of the newline that ends the quoted text.
-    quoted_end: usize,
-
-    /// The byte offset of the attribution text (just after `--` and its
-    /// trailing whitespace).
-    attribution_start: usize,
-}
-
-/// Finds the attribution line in a quoted paragraph.
+/// Finds the attribution line in a quoted paragraph and splits it from the
+/// quoted text.
 ///
 /// The attribution line begins with `--` followed by at least one space or tab
-/// and then more text. Returns the offset of the newline that precedes it and
-/// the offset of the attribution text, or `None` if no attribution line is
-/// present.
-fn split_at_attribution_line(data: &str) -> Option<AttributionSplit> {
+/// and then more text. Returns the text before that line (the quoted text) and
+/// the attribution text (everything after the `--` marker and its trailing
+/// whitespace), or `None` if no attribution line is present.
+fn split_at_attribution_line(data: &str) -> Option<(&str, &str)> {
     let mut line_start = 0;
 
     for line in data.split_inclusive('\n') {
@@ -664,12 +652,12 @@ fn split_at_attribution_line(data: &str) -> Option<AttributionSplit> {
             && (rest.starts_with(' ') || rest.starts_with('\t'))
         {
             let attribution_text = rest.trim_start_matches([' ', '\t']);
+            // `line_start > 0` ensures there is at least one line of quoted text
+            // before the attribution line; `line_start` is a line boundary, so
+            // `split_at` never lands inside a character.
             if !attribution_text.is_empty() && line_start > 0 {
-                let whitespace_len = rest.len() - attribution_text.len();
-                return Some(AttributionSplit {
-                    quoted_end: line_start,
-                    attribution_start: line_start + 2 + whitespace_len,
-                });
+                let (quoted, _) = data.split_at(line_start);
+                return Some((quoted, attribution_text));
             }
         }
 
@@ -960,6 +948,75 @@ mod tests {
     }
 
     #[test]
+    fn empty_quoted_paragraph_is_not_a_quote() {
+        // A pair of quotes wrapping no text is not a quoted paragraph.
+        let block = parse_one("\"\"\n-- Someone");
+        assert_eq!(block.raw_context().deref(), "paragraph");
+    }
+
+    #[test]
+    fn unclosed_quoted_paragraph_is_not_a_quote() {
+        // An opening quote with no closing quote is not a quoted paragraph.
+        let block = parse_one("\"no closing quote\n-- Someone");
+        assert_eq!(block.raw_context().deref(), "paragraph");
+    }
+
+    #[test]
+    fn dash_line_without_attribution_text_is_not_a_quote() {
+        // A `-- ` line with no attribution text after it is not an attribution
+        // line, so this is an ordinary paragraph.
+        let block = parse_one("\"A quote.\"\n--  ");
+        assert_eq!(block.raw_context().deref(), "paragraph");
+    }
+
+    #[test]
+    fn quoted_paragraph_tab_separated_attribution() {
+        // The `--` attribution marker may be separated from the text by a tab.
+        let block = parse_one("\"A quote.\"\n--\tSomeone");
+        let quote = as_quote(&block);
+        assert_eq!(quote.attribution(), Some("Someone"));
+    }
+
+    #[test]
+    fn attribution_with_empty_name_keeps_citation() {
+        // A `--` line of the form `-- , citation` has no attribution but still
+        // yields a citation.
+        let block = parse_one("\"A quote.\"\n-- , Just a citation");
+        let quote = as_quote(&block);
+        assert!(quote.attribution().is_none());
+        assert_eq!(quote.citetitle(), Some("Just a citation"));
+    }
+
+    #[test]
+    fn styled_paragraph_with_no_content_is_not_a_quote() {
+        // A `[quote]` style with no following content cannot form a styled
+        // paragraph; the lone attribute list is treated as an ordinary block.
+        let mut parser = Parser::default();
+        let maw = Block::parse(crate::Span::new("[quote]\n"), &mut parser);
+        let block = maw.item.unwrap().item;
+        assert_eq!(block.raw_context().deref(), "paragraph");
+    }
+
+    #[test]
+    fn markdown_blockquote_tab_attribution_after_blank() {
+        // A trailing blank (`>`) line before the `--` attribution is discarded,
+        // and the attribution marker may be tab-separated.
+        let block = parse_one("> A quote.\n>\n> --\tSomeone");
+        let quote = as_quote(&block);
+        assert_eq!(quote.attribution(), Some("Someone"));
+        assert_eq!(quote.blocks().len(), 1);
+    }
+
+    #[test]
+    fn markdown_blockquote_double_dash_without_space_is_content() {
+        // A trailing `--` not followed by whitespace is content, not an
+        // attribution.
+        let block = parse_one("> A quote.\n> --nospace");
+        let quote = as_quote(&block);
+        assert!(quote.attribution().is_none());
+    }
+
+    #[test]
     fn markdown_blockquote_basic() {
         let block = parse_one("> A markdown quote.");
         let quote = as_quote(&block);
@@ -1004,10 +1061,7 @@ mod tests {
         // A `>`-prefixed description-list term is a description list, not a
         // Markdown-style blockquote.
         let block = parse_one("> term:: definition");
-        assert!(
-            matches!(block, Block::List(_)),
-            "expected a list block, got {block:?}"
-        );
+        assert_eq!(block.raw_context().deref(), "list");
     }
 
     #[test]
@@ -1031,13 +1085,10 @@ mod tests {
             "[quote,Lewis Carroll,'See https://example.com/lc[the bio]']\n____\nAny road.\n____",
         );
         let quote = as_quote(&block);
+        let citetitle = quote.citetitle().unwrap();
         assert!(
-            quote
-                .citetitle()
-                .unwrap()
-                .contains("<a href=\"https://example.com/lc\">the bio</a>"),
-            "citation was: {:?}",
-            quote.citetitle()
+            citetitle.contains("<a href=\"https://example.com/lc\">the bio</a>"),
+            "citation was: {citetitle}"
         );
     }
 
@@ -1052,10 +1103,14 @@ mod tests {
         assert!(compound.anchor_reftext().is_none());
         assert!(compound.attrlist().is_none());
         assert_eq!(compound.substitution_group(), SubstitutionGroup::Normal);
+        assert_eq!(compound.nested_blocks().count(), 1);
+        assert!(compound.title().is_none());
+        assert!(compound.declared_style().is_none());
         assert!(format!("{compound:?}").starts_with("Block::Quote"));
 
         let simple = parse_one("[verse]\nverse text");
         assert_eq!(simple.rendered_content(), Some("verse text"));
+        assert_eq!(simple.content_model(), ContentModel::Simple);
     }
 
     #[test]
