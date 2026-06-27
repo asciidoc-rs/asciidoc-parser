@@ -273,7 +273,7 @@ fn is_example_or_open_delimiter(line: &Span<'_>) -> bool {
         return true;
     }
 
-    data.len() >= 4 && data.starts_with("====") && data[4..].chars().all(|c| c == '=')
+    data.len() >= 4 && data.chars().all(|c| c == '=')
 }
 
 /// Resolve the caption (label) text for an admonition variant from the current
