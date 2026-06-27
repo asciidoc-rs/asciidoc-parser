@@ -367,11 +367,13 @@ impl ToVirtualDom for Document<'_> {
 fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
     // Check if this block type handles its own title internally. Lists render
     // their title inside the list wrapper; tables render it as a <caption>;
-    // admonitions render it inside the content cell.
-    let handles_title_internally = matches!(
-        block,
-        Block::List(_) | Block::Table(_) | Block::Admonition(_) | Block::Quote(_)
-    );
+    // admonitions render it inside the content cell; a collapsible block renders
+    // it as the `<summary>` toggle text.
+    let handles_title_internally = is_collapsible(block)
+        || matches!(
+            block,
+            Block::List(_) | Block::Table(_) | Block::Admonition(_) | Block::Quote(_)
+        );
 
     // Add title as a separate sibling element if the block doesn't handle it
     // internally.
@@ -407,6 +409,13 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
 
 impl ToVirtualDom for Block<'_> {
     fn to_virtual_dom(&self) -> VirtualNode {
+        // A collapsible example block or paragraph renders as an HTML disclosure
+        // element (`<details>`/`<summary>`) rather than its usual example-block
+        // markup.
+        if is_collapsible(self) {
+            return collapsible_to_node(self);
+        }
+
         match self {
             Block::Simple(simple) => {
                 // Comment blocks should not be rendered.
@@ -893,6 +902,81 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
         add_block_with_title(&mut node, child);
     }
 
+    node
+}
+
+/// Returns `true` if `block` is a collapsible block: an example block (or
+/// example-styled paragraph) carrying the `collapsible` option.
+///
+/// Asciidoctor keeps such a block's context as `example` and renders it as an
+/// HTML disclosure element rather than an example block. The same option on any
+/// other context (a sidebar, an open block, a plain paragraph, etc.) is
+/// ignored, so the resolved context being `example` is the single gate for the
+/// collapsible rendering. This also distinguishes a collapsible paragraph
+/// (`[example%collapsible]`, whose `example` style resolves to the `example`
+/// context) from a bare `[%collapsible]` paragraph (which has no `example`
+/// style and is therefore not collapsible).
+fn is_collapsible<'a>(block: &'a Block<'a>) -> bool {
+    block.resolved_context().as_ref() == "example" && block.has_option("collapsible")
+}
+
+/// Renders a collapsible block as an HTML disclosure element.
+///
+/// The block's title becomes the `<summary>` toggle text, defaulting to
+/// `Details` when no title is set. The `open` option adds the boolean `open`
+/// attribute so the disclosure starts expanded. The block's id and roles travel
+/// to the `<details>` element, mirroring Asciidoctor's HTML output. Unlike an
+/// example block, a collapsible block is never numbered and carries no caption
+/// prefix on its toggle text.
+fn collapsible_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
+    let mut node = VirtualNode::new("details");
+
+    // The `open` option expands the disclosure by default.
+    if block.has_option("open") {
+        node = node.with_attribute("open", "");
+    }
+
+    if let Some(id) = block.id() {
+        node = node.with_id(id);
+    }
+
+    for role in block.roles() {
+        node = node.with_class(role);
+    }
+
+    // The toggle text is the block's title, or the default caption "Details".
+    let summary_text = block.title().unwrap_or("Details");
+    node.children.push(
+        VirtualNode::new("summary")
+            .with_class("title")
+            .with_text(summary_text),
+    );
+
+    let mut content = VirtualNode::new("div").with_class("content");
+
+    match block.content_model() {
+        // A collapsible (example) block encloses other blocks.
+        ContentModel::Compound => {
+            for child in block.nested_blocks() {
+                add_block_with_title(&mut content, child);
+            }
+        }
+
+        // A collapsible paragraph holds inline content, rendered directly inside
+        // the content wrapper without a wrapping paragraph (matching
+        // Asciidoctor's output for the example paragraph style).
+        _ => {
+            if let Some(rendered) = block.rendered_content() {
+                if rendered.contains('<') {
+                    content.children.extend(parse_html_content(rendered));
+                } else {
+                    content.text = Some(decode_html_entities(rendered));
+                }
+            }
+        }
+    }
+
+    node.children.push(content);
     node
 }
 

@@ -4,6 +4,7 @@ mod assign_id;
 mod blockquotes;
 mod breaks;
 mod build_basic_block;
+mod collapsible;
 mod delimited;
 mod discrete_headings;
 mod hard_line_breaks;
