@@ -80,6 +80,22 @@ Sidebars are used to visually separate auxiliary bits of content that supplement
         "//div[@class=\"sidebarblock\"]/div[@class=\"content\"][contains(normalize-space(text()), \"Sidebars are used to visually separate auxiliary bits of content that supplement the main text.\")]",
         1,
     );
+
+    // A title on a sidebar paragraph is rendered as the first child of
+    // `div.content`, and it survives alongside inline markup in the body: the
+    // title `div.title` and the rendered `<strong>` are siblings inside the
+    // content wrapper.
+    let doc = Parser::default().parse(".My Title\n[sidebar]\nThis is *bold* content.");
+    assert_xpath(
+        &doc,
+        "//div[@class=\"sidebarblock\"]/div[@class=\"content\"]/div[@class=\"title\"][text()=\"My Title\"]",
+        1,
+    );
+    assert_xpath(
+        &doc,
+        "//div[@class=\"sidebarblock\"]/div[@class=\"content\"]/strong[text()=\"bold\"]",
+        1,
+    );
 }
 
 #[test]

@@ -1015,13 +1015,6 @@ fn sidebar_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
 
     let mut content = VirtualNode::new("div").with_class("content");
 
-    // The title, when present, is the first child of the content wrapper.
-    if let Some(title) = block.title() {
-        content
-            .children
-            .push(VirtualNode::new("div").with_class("title").with_text(title));
-    }
-
     match block.content_model() {
         // A delimited sidebar encloses other blocks.
         ContentModel::Compound => {
@@ -1038,6 +1031,17 @@ fn sidebar_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
                 content = content.with_html_content(rendered);
             }
         }
+    }
+
+    // The title, when present, is the first child of the content wrapper. It is
+    // inserted *after* the body content because `with_html_content` replaces the
+    // children vector when the rendered content contains inline markup; pushing
+    // the title first would let that replacement silently drop it.
+    if let Some(title) = block.title() {
+        content.children.insert(
+            0,
+            VirtualNode::new("div").with_class("title").with_text(title),
+        );
     }
 
     node.children.push(content);
