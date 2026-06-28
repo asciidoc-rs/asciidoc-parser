@@ -127,16 +127,24 @@ impl<'src> QuoteBlock<'src> {
         let is_quote_delimiter = is_quote_verse_delimiter(&first_line);
 
         // A `[quote]` or `[verse]` style masquerades over a quote-delimited
-        // block or a paragraph.
+        // block, an open block, or a paragraph.
         if let Some(type_) = styled_type {
             if is_quote_delimiter {
                 return Some(Self::parse_delimited(metadata, parser, type_));
             }
 
+            // A `[quote]`/`[verse]` style also masquerades over an open block
+            // (`--`): the open delimiter adopts the quote/verse context. This is
+            // unique to the open block — every other structural container (below)
+            // keeps its own context and ignores the style.
+            if first_line.data() == "--" {
+                return Some(Self::parse_delimited(metadata, parser, type_));
+            }
+
             // The style is set on some other structural container (example,
-            // open, sidebar, listing, literal, passthrough, table). That
-            // container keeps its own context and the style is ignored, so this
-            // is not a blockquote.
+            // sidebar, listing, literal, passthrough, table). That container
+            // keeps its own context and the style is ignored, so this is not a
+            // blockquote.
             if RawDelimitedBlock::is_valid_delimiter(&first_line)
                 || CompoundDelimitedBlock::is_valid_delimiter(&first_line)
                 || TableBlock::is_table_delimiter(&first_line)

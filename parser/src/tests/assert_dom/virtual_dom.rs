@@ -374,6 +374,7 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
     let handles_title_internally = is_collapsible(block)
         || is_sidebar(block)
         || is_example(block)
+        || is_open(block)
         || matches!(
             block,
             Block::List(_) | Block::Table(_) | Block::Admonition(_) | Block::Quote(_)
@@ -896,6 +897,20 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
     node
 }
 
+/// Renders a compound delimited block, matching Asciidoctor's HTML output.
+///
+/// In practice this only ever renders an open block (`div.openblock`): the
+/// other compound containers are intercepted earlier — a sidebar by
+/// [`is_sidebar`], an example by [`is_example`], a quote/verse masquerade by
+/// [`QuoteBlock`], an admonition masquerade by [`AdmonitionBlock`], and a
+/// verbatim masquerade (`source`/`listing`/`literal`) by [`RawDelimitedBlock`].
+///
+/// The outer `div.openblock` carries the block's id and roles. An optional
+/// title is rendered as a `div.title` placed *before* the content wrapper
+/// (unlike a sidebar, whose title sits inside the content). The nested blocks
+/// are wrapped in a `div.content`, each routed through [`add_block_with_title`]
+/// so a child's own title surfaces as a sibling `div.title` and a child
+/// paragraph is wrapped in `div.paragraph`.
 fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> VirtualNode {
     let context = compound.raw_context();
     let class = format!("{}block", context.as_ref());
@@ -910,15 +925,17 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
         node = node.with_id(id);
     }
 
-    // Render each child through `add_block_with_title` (rather than a bare
-    // `child.to_virtual_dom()`) so that a child block's title surfaces as a
-    // sibling `div.title` and a child paragraph is wrapped in `div.paragraph`,
-    // matching Asciidoctor's output. This applies to every compound block type
-    // (example, sidebar, quote, open), not just admonitions: before this, a
-    // titled child inside one of these blocks had its title dropped.
-    for child in compound.nested_blocks() {
-        add_block_with_title(&mut node, child);
+    // The title, when present, precedes the content wrapper.
+    if let Some(title) = compound.title() {
+        node.children
+            .push(VirtualNode::new("div").with_class("title").with_text(title));
     }
+
+    let mut content = VirtualNode::new("div").with_class("content");
+    for child in compound.nested_blocks() {
+        add_block_with_title(&mut content, child);
+    }
+    node.children.push(content);
 
     node
 }
@@ -999,6 +1016,20 @@ fn collapsible_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
 /// to the `sidebar` context.
 fn is_sidebar<'a>(block: &'a Block<'a>) -> bool {
     block.resolved_context().as_ref() == "sidebar"
+}
+
+/// Returns `true` if `block` is an open block: the `--` structural container,
+/// rendered by [`compound_delimited_to_node`] as `div.openblock`.
+///
+/// Only a delimited open block (a [`Block::CompoundDelimited`] resolving to the
+/// `open` context) qualifies. Every masquerade style on a `--` block is
+/// intercepted earlier — by [`is_sidebar`], [`is_example`], `QuoteBlock`,
+/// `AdmonitionBlock`, or `RawDelimitedBlock` — so a `CompoundDelimited` block
+/// that reaches here always resolves to `open`. Like a sidebar, an open block
+/// renders its own title (as a `div.title` before its content wrapper), so
+/// [`add_block_with_title`] must not also emit one.
+fn is_open<'a>(block: &'a Block<'a>) -> bool {
+    matches!(block, Block::CompoundDelimited(_)) && block.resolved_context().as_ref() == "open"
 }
 
 /// Renders a sidebar block, matching Asciidoctor's HTML output.

@@ -231,8 +231,14 @@ impl<'src> Block<'src> {
             mut warnings,
         } = BlockMetadata::parse(source, parser);
 
-        let is_literal =
-            metadata.attrlist.as_ref().and_then(|a| a.block_style()) == Some("literal");
+        // The `[literal]` block style normally marks a literal *paragraph*,
+        // which is handled directly as a simple (literal) block below, bypassing
+        // the delimited-block parsers. The one exception is when it is set on an
+        // open block (`--`), where it masquerades as a verbatim literal block;
+        // that case must fall through to `RawDelimitedBlock`.
+        let is_literal = metadata.attrlist.as_ref().and_then(|a| a.block_style())
+            == Some("literal")
+            && metadata.block_start.take_normalized_line().item.data() != "--";
 
         // A simple block may be parsed speculatively inside the `!is_literal`
         // branch below (to detect the "metadata with no block" edge case). When
