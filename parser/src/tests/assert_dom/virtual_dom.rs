@@ -552,6 +552,7 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
                 ("dl", "dlist")
             }
         }
+        ListType::Callout => ("ol", "colist"),
     };
 
     let mut list_element = VirtualNode::new(list_tag);
@@ -709,9 +710,9 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
     // Wrap the list in a div container (matching Asciidoctor's HTML structure).
     let mut wrapper = VirtualNode::new("div").with_class(base_class);
 
-    // For ordered lists, add style class to the wrapper based on marker length,
-    // but only if no explicit style is declared.
-    if list.type_() == ListType::Ordered
+    // For ordered and callout lists, add style class to the wrapper based on
+    // marker length, but only if no explicit style is declared.
+    if matches!(list.type_(), ListType::Ordered | ListType::Callout)
         && list.declared_style().is_none()
         && let Some(style) = list.marker_style()
     {

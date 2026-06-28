@@ -148,6 +148,7 @@ impl<'src> ListBlock<'src> {
             ListItemMarker::RomanNumeralLower(_) => ListType::Ordered,
             ListItemMarker::RomanNumeralUpper(_) => ListType::Ordered,
             ListItemMarker::ArabicNumeral(_) => ListType::Ordered,
+            ListItemMarker::Callout(_) => ListType::Callout,
 
             ListItemMarker::DefinedTerm {
                 term: _,
@@ -203,6 +204,7 @@ impl<'src> ListBlock<'src> {
                 }
             }
             ListItemMarker::ArabicNumeral(_) => Some("arabic"),
+            ListItemMarker::Callout(_) => Some("arabic"),
             ListItemMarker::AlphaListLower(_) => Some("loweralpha"),
             ListItemMarker::AlphaListCapital(_) => Some("upperalpha"),
             ListItemMarker::RomanNumeralLower(_) => Some("lowerroman"),
@@ -285,6 +287,11 @@ pub enum ListType {
     /// A description list is an association list that consists of one or more
     /// terms (or sets of terms) that each have a description.
     Description,
+
+    /// A callout list provides annotations for lines in a preceding verbatim
+    /// block. Its items are marked with `<1>`, `<2>`, … (or `<.>` for automatic
+    /// numbering).
+    Callout,
 }
 
 impl std::fmt::Debug for ListType {
@@ -293,6 +300,7 @@ impl std::fmt::Debug for ListType {
             ListType::Unordered => write!(f, "ListType::Unordered"),
             ListType::Ordered => write!(f, "ListType::Ordered"),
             ListType::Description => write!(f, "ListType::Description"),
+            ListType::Callout => write!(f, "ListType::Callout"),
         }
     }
 }
@@ -528,6 +536,43 @@ mod tests {
             format!("{:#?}", ListType::Description),
             "ListType::Description"
         );
+
+        assert_eq!(format!("{:#?}", ListType::Callout), "ListType::Callout");
+    }
+
+    #[test]
+    fn callout_list() {
+        let list = list_parse("<1> First\n<2> Second\n").unwrap();
+
+        assert_eq!(list.item.type_(), ListType::Callout);
+        assert_eq!(list.item.marker_style(), Some("arabic"));
+
+        let items: Vec<_> = list.item.nested_blocks().collect();
+        assert_eq!(items.len(), 2);
+
+        assert_eq!(
+            items[0].nested_blocks().next().unwrap().rendered_content(),
+            Some("First")
+        );
+        assert_eq!(
+            items[1].nested_blocks().next().unwrap().rendered_content(),
+            Some("Second")
+        );
+    }
+
+    #[test]
+    fn callout_list_auto_numbered() {
+        // `<.>` markers form a single callout list.
+        let list = list_parse("<.> First\n<.> Second\n<.> Third\n").unwrap();
+
+        assert_eq!(list.item.type_(), ListType::Callout);
+        assert_eq!(list.item.nested_blocks().count(), 3);
+    }
+
+    #[test]
+    fn callout_list_marker_only_trailing_bracket_is_not_a_list() {
+        // `1>` (trailing bracket only) is not a callout list marker.
+        assert!(list_parse("1> Not a callout list item\n").is_none());
     }
 
     #[test]

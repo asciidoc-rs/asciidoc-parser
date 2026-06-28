@@ -157,6 +157,15 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// reference could not be resolved and the renderer should emit a sensible
     /// fallback (e.g. a link to the raw target with bracketed text).
     fn render_xref(&self, params: &XrefRenderParams, dest: &mut String);
+
+    /// Renders a [callout] number that annotates a line in a verbatim block.
+    ///
+    /// The renderer should write an appropriate rendering of the callout number
+    /// to `dest`. The rendering typically depends on whether font-based or
+    /// image-based icons are enabled (via the `icons` document attribute).
+    ///
+    /// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
+    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String);
 }
 
 /// Specifies which special character is being replaced in a call to
@@ -332,6 +341,41 @@ pub struct LinkRenderParams<'a> {
 pub enum LinkRenderType {
     /// TEMPORARY: I don't know the different types of links yet.
     Link,
+}
+
+/// Provides parameters for rendering a [callout] number.
+///
+/// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
+#[derive(Clone, Debug)]
+pub struct CalloutRenderParams<'a> {
+    /// The callout number to display. For automatically-numbered callouts
+    /// (`<.>`), this is the resolved sequential number.
+    pub number: &'a str,
+
+    /// The guard surrounding the callout in the source. This controls whether
+    /// (and how) the line-comment or XML-comment characters that hide the
+    /// callout in the raw source are preserved in the output when icons are not
+    /// enabled.
+    pub guard: CalloutGuard<'a>,
+
+    /// Parser. The renderer reads the `icons`, `iconsdir`, and `icontype`
+    /// document attributes to decide how to render the callout.
+    pub parser: &'a Parser,
+}
+
+/// Describes the characters that guard (hide) a callout number in verbatim
+/// source.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CalloutGuard<'a> {
+    /// A line-comment (or absent) guard. Holds the line-comment prefix that
+    /// precedes the callout in the source (e.g. `# `), or an empty string when
+    /// the callout is not tucked behind a line comment. When icons are not
+    /// enabled, the prefix is preserved ahead of the rendered callout number.
+    LineComment(&'a str),
+
+    /// An XML comment guard (`<!--N-->`). When icons are not enabled, the XML
+    /// comment delimiters are preserved around the rendered callout number.
+    Xml,
 }
 
 /// Provides parameters for rendering a cross-reference.
@@ -739,6 +783,39 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     r##"<a href="#{target}">{text}</a>"##,
                     target = params.target
                 ));
+            }
+        }
+    }
+
+    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
+        let n = params.number;
+        let parser = params.parser;
+
+        if parser.attribute_value("icons").as_maybe_str() == Some("font") {
+            dest.push_str(&format!(
+                r#"<i class="conum" data-value="{n}"></i><b>({n})</b>"#
+            ));
+        } else if parser.has_attribute("icons") {
+            let icontype = parser
+                .attribute_value("icontype")
+                .as_maybe_str()
+                .unwrap_or("png")
+                .to_owned();
+
+            let icon = format!("callouts/{n}.{icontype}");
+            let src = self.image_uri(&icon, parser, Some("iconsdir"));
+
+            dest.push_str(&format!(r#"<img src="{src}" alt="{n}">"#));
+        } else {
+            match params.guard {
+                CalloutGuard::Xml => {
+                    dest.push_str(&format!(r#"&lt;!--<b class="conum">({n})</b>--&gt;"#));
+                }
+
+                CalloutGuard::LineComment(prefix) => {
+                    dest.push_str(prefix);
+                    dest.push_str(&format!(r#"<b class="conum">({n})</b>"#));
+                }
             }
         }
     }

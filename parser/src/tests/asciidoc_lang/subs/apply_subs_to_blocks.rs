@@ -132,12 +132,9 @@ For source blocks, this substitution step enables syntax highlighting as well.
         );
     }
 
-    #[ignore]
     #[test]
     fn callouts() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Implement this test when implementing callouts.
-        to_do_verifies!(
+        verifies!(
             r#"
 `callouts`:: Substitution step that processes callouts in literal, listing, and source blocks.
 
@@ -154,9 +151,11 @@ For source blocks, this substitution step enables syntax highlighting as well.
             panic!("Unexpected block type: {block1:?}");
         };
 
+        // The verbatim group applies only special characters and callouts; the
+        // input has no callout markers, so only `&` is replaced.
         assert_eq!(
             block1.content().rendered(),
-            "This &amp; that and icon:github[] +\nanother line with a{sp}space there ..."
+            "This &amp; _that_ and icon:github[] +\nanother line with a{sp}space there ..."
         );
     }
 
@@ -596,8 +595,9 @@ include::example$subs.adoc[tag=subs-add]
     #[ignore]
     #[test]
     fn example_subtract() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Implement this test when implementing callouts.
+        // The `subs=-callouts` modifier is now supported, but this example is
+        // still blocked on `include::example$subs.adoc[tag=...]` resolution in
+        // the test harness.
 
         to_do_verifies!(
             r#"
@@ -616,8 +616,9 @@ include::example$subs.adoc[tag=subs-sub]
     #[ignore]
     #[test]
     fn plus_before_or_after() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Implement this test when implementing callouts.
+        // The `subs=-callouts` modifier is now supported, but this example is
+        // still blocked on `include::example$subs.adoc[tag=...]` resolution in
+        // the test harness.
 
         to_do_verifies!(
             r#"

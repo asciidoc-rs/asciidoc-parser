@@ -845,6 +845,10 @@ mod tests {
         fn render_xref(&self, params: &crate::parser::XrefRenderParams, dest: &mut String) {
             dest.push_str(&format!("[XREF:{}]", params.target));
         }
+
+        fn render_callout(&self, params: &crate::parser::CalloutRenderParams, dest: &mut String) {
+            dest.push_str(&format!("[CALLOUT:{}]", params.number));
+        }
     }
 
     #[test]

@@ -40,6 +40,10 @@ pub enum ListItemMarker<'src> {
     /// Explicit Arabic numeral followed by dot (e.g., "7.").
     ArabicNumeral(Span<'src>),
 
+    /// A callout list marker (`<1>` or `<.>`), used to annotate lines in a
+    /// preceding verbatim block.
+    Callout(Span<'src>),
+
     /// A term to be defined.
     DefinedTerm {
         /// The name of the term being defined.
@@ -56,10 +60,23 @@ pub enum ListItemMarker<'src> {
 impl<'src> ListItemMarker<'src> {
     pub(crate) fn starts_with_marker(source: Span<'src>) -> bool {
         LIST_ITEM_MARKER.is_match(source.data())
+            || CALLOUT_LIST_MARKER.is_match(source.discard_whitespace().data())
     }
 
     pub(crate) fn parse(source: Span<'src>, parser: &Parser) -> Option<MatchedItem<'src, Self>> {
         let source = source.discard_whitespace();
+
+        // A callout list marker (`<1>` or `<.>`) is not matched by
+        // `LIST_ITEM_MARKER`, so it is checked first.
+        if let Some(captures) = CALLOUT_LIST_MARKER.captures(source.data()) {
+            let marker = source.slice(0..captures[1].len());
+            let after = source.slice_from(captures[1].len()..).discard_whitespace();
+
+            return Some(MatchedItem {
+                item: Self::Callout(marker),
+                after,
+            });
+        }
 
         if let Some(captures) = LIST_ITEM_MARKER.captures(source.data()) {
             let marker = source.slice(0..captures[1].len());
@@ -272,6 +289,10 @@ impl<'src> ListItemMarker<'src> {
                 matches!(other, Self::ArabicNumeral(_other_span))
             }
 
+            Self::Callout(_self_span) => {
+                matches!(other, Self::Callout(_other_span))
+            }
+
             Self::DefinedTerm {
                 term: _,
                 marker: self_marker,
@@ -375,6 +396,7 @@ impl<'src> HasSpan<'src> for ListItemMarker<'src> {
             Self::RomanNumeralLower(x) => *x,
             Self::RomanNumeralUpper(x) => *x,
             Self::ArabicNumeral(x) => *x,
+            Self::Callout(x) => *x,
 
             Self::DefinedTerm {
                 term: _,
@@ -418,6 +440,8 @@ impl std::fmt::Debug for ListItemMarker<'_> {
                 .field(x)
                 .finish(),
 
+            Self::Callout(x) => f.debug_tuple("ListItemMarker::Callout").field(x).finish(),
+
             Self::DefinedTerm {
                 term,
                 marker,
@@ -445,6 +469,22 @@ static LIST_ITEM_MARKER: LazyLock<Regex> = LazyLock::new(|| {
                 |[a-zA-Z]\.             # Letter followed by dot (alpha list)
                 |[ivxlcdm]+\)           # Lowercase Roman numerals followed by )
                 |[IVXLCDM]+\)           # Uppercase Roman numerals followed by )
+            )
+            [\ \t]                  # Required whitespace after marker
+        "#,
+    )
+    .unwrap()
+});
+
+/// Matches a callout list item marker: `<` followed by a number or `.`, then
+/// `>`, then required whitespace. Mirrors Asciidoctor's `CalloutListRx`.
+static CALLOUT_LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?x)
+            ^                       # Start of line
+            (                       # Capture group 1: the marker
+                <(?:\d+|\.)>            # `<` then digits or a dot, then `>`
             )
             [\ \t]                  # Required whitespace after marker
         "#,
@@ -985,5 +1025,78 @@ mod tests {
                 offset: 3,
             }
         );
+    }
+
+    #[test]
+    fn callout() {
+        // Not callout markers: no leading bracket, no trailing whitespace, or
+        // a non-numeric/non-dot body.
+        assert!(lim_parse("1> blah").is_none());
+        assert!(lim_parse("<1>blah").is_none());
+        assert!(lim_parse("<1>").is_none());
+        assert!(lim_parse("<a> blah").is_none());
+
+        let lim = lim_parse("<1> blah").unwrap();
+
+        assert_eq!(
+            lim.item,
+            ListItemMarker::Callout(Span {
+                data: "<1>",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },)
+        );
+
+        assert_eq!(
+            lim.after,
+            Span {
+                data: "blah",
+                line: 1,
+                col: 5,
+                offset: 4,
+            }
+        );
+
+        assert_eq!(
+            lim.item.span(),
+            Span {
+                data: "<1>",
+                line: 1,
+                col: 1,
+                offset: 0,
+            }
+        );
+
+        // Ordinal helpers do not apply to callout markers.
+        assert!(lim.item.ordinal_value().is_none());
+        assert!(lim.item.ordinal_to_marker_text(1).is_none());
+
+        // Callout markers of any number match each other (so a single list is
+        // formed), but not markers of other kinds.
+        let lim2 = lim_parse("<.> blah").unwrap();
+        assert_eq!(
+            lim2.item,
+            ListItemMarker::Callout(Span {
+                data: "<.>",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },)
+        );
+        assert!(lim.item.is_match_for(&lim2.item));
+        assert!(!lim.item.is_match_for(&lim_parse("- blah").unwrap().item));
+
+        assert_eq!(
+            format!("{:#?}", lim.item),
+            "ListItemMarker::Callout(\n    Span {\n        data: \"<1>\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n)"
+        );
+
+        assert!(crate::blocks::ListItemMarker::starts_with_marker(
+            crate::Span::new("<1> blah")
+        ));
+        assert!(!crate::blocks::ListItemMarker::starts_with_marker(
+            crate::Span::new("1> blah")
+        ));
     }
 }

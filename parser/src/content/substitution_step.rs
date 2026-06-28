@@ -9,8 +9,8 @@ use crate::{
     document::InterpretedValue,
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
-        CharacterReplacementType, InlineSubstitutionRenderer, QuoteScope, QuoteType,
-        SpecialCharacter,
+        CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
+        QuoteScope, QuoteType, SpecialCharacter,
     },
 };
 
@@ -73,8 +73,8 @@ impl SubstitutionStep {
             Self::PostReplacement => {
                 apply_post_replacements(content, parser, attrlist);
             }
-            _ => {
-                todo!("Implement apply for SubstitutionStep::{self:?}");
+            Self::Callouts => {
+                apply_callouts(content, parser, attrlist);
             }
         }
     }
@@ -744,6 +744,188 @@ static HARD_LINE_BREAK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?m)^(.*) \+$"#).unwrap()
 });
 
+/// Processes [callouts] in literal, listing, and source blocks.
+///
+/// Callout numbers (`<1>`, `<.>`, or `<!--1-->` for XML) that appear at the end
+/// of a line are replaced with the renderer's callout markup. Callouts may be
+/// tucked behind a line comment (`//`, `#`, `--`, or `;;` by default, or a
+/// custom prefix specified by the `line-comment` attribute), and a callout may
+/// be escaped with a leading backslash to render it literally.
+///
+/// This substitution runs after [special characters] have been replaced, so the
+/// angle brackets that delimit a callout appear in `content.rendered` as
+/// `&lt;` and `&gt;`. This mirrors Asciidoctor's `sub_callouts` /
+/// `CalloutSourceRx`.
+///
+/// [callouts]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
+/// [special characters]: https://docs.asciidoctor.org/asciidoc/latest/subs/special-characters/
+fn apply_callouts(content: &mut Content<'_>, parser: &Parser, attrlist: Option<&Attrlist<'_>>) {
+    // A callout's opening bracket is always rendered as `&lt;` by the special
+    // characters substitution, so we can cheaply skip content without any.
+    if !content.rendered.contains("&lt;") {
+        return;
+    }
+
+    // The `line-comment` attribute (block-level, falling back to document-level)
+    // customizes or disables line-comment recognition:
+    //
+    // * absent           -> default prefixes (`//`, `#`, `--`, `;;`) and XML
+    //   callouts are recognized.
+    // * present (custom)  -> only the given prefix is recognized; XML callouts are
+    //   not.
+    // * present but empty -> no line-comment prefix is recognized; XML callouts are
+    //   not.
+    let line_comment: Option<String> = attrlist
+        .and_then(|a| a.named_attribute("line-comment"))
+        .map(|a| a.value().to_string())
+        .or_else(|| {
+            if parser.has_attribute("line-comment") {
+                Some(
+                    parser
+                        .attribute_value("line-comment")
+                        .as_maybe_str()
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            } else {
+                None
+            }
+        });
+
+    let (callout_rx, tail_rx) = build_callout_regexes(line_comment.as_deref());
+
+    let replacer = CalloutReplacer {
+        renderer: &*parser.renderer,
+        parser,
+        autonum: 0,
+        tail: &tail_rx,
+    };
+
+    if let Cow::Owned(new_result) =
+        replace_with_lookahead(&callout_rx, content.rendered.as_ref(), replacer)
+    {
+        content.rendered = new_result.into();
+    }
+}
+
+/// Builds the `(callout, tail)` regex pair for the given `line-comment` mode.
+///
+/// The `callout` regex matches a single callout token (with the optional
+/// line-comment prefix and escape that may precede it). The `tail` regex is
+/// used to emulate Asciidoctor's trailing-position lookahead: a matched callout
+/// is only honored when the remainder of its line consists solely of further
+/// callouts. Rust's regex engine supports neither lookahead nor backreferences,
+/// so the lookahead is applied manually against the post-match text.
+fn build_callout_regexes(line_comment: Option<&str>) -> (Regex, Regex) {
+    #[allow(clippy::unwrap_used)]
+    match line_comment {
+        // Default: recognize the common line-comment prefixes and XML callouts.
+        None => {
+            let callout = Regex::new(
+                r"(?P<prefix>(?://|#|--|;;) ?)?(?P<esc>\\)?(?:&lt;!--(?P<xnum>\d+|\.)--&gt;|&lt;(?P<num>\d+|\.)&gt;)",
+            )
+            .unwrap();
+
+            let tail =
+                Regex::new(r"^(?: ?\\?(?:&lt;!--(?:\d+|\.)--&gt;|&lt;(?:\d+|\.)&gt;))*(?:\n|$)")
+                    .unwrap();
+
+            (callout, tail)
+        }
+
+        // A custom or empty `line-comment`: only the bare (non-XML) callout form
+        // is recognized, optionally behind the custom prefix.
+        Some(prefix) => {
+            let prefix_pattern = if prefix.is_empty() {
+                String::new()
+            } else {
+                format!(r"(?P<prefix>{} ?)?", regex::escape(prefix))
+            };
+
+            let callout = Regex::new(&format!(
+                r"{prefix_pattern}(?P<esc>\\)?&lt;(?P<num>\d+|\.)&gt;"
+            ))
+            .unwrap();
+
+            let tail = Regex::new(r"^(?: ?\\?&lt;(?:\d+|\.)&gt;)*(?:\n|$)").unwrap();
+
+            (callout, tail)
+        }
+    }
+}
+
+/// Replacer that renders each trailing callout token, emulating Asciidoctor's
+/// `sub_callouts`.
+struct CalloutReplacer<'r> {
+    renderer: &'r dyn InlineSubstitutionRenderer,
+    parser: &'r Parser,
+
+    /// Running counter for automatically-numbered (`<.>`) callouts, scoped to a
+    /// single block.
+    autonum: u32,
+
+    /// Trailing-position lookahead regex (see [`build_callout_regexes`]).
+    tail: &'r Regex,
+}
+
+impl LookaheadReplacer for CalloutReplacer<'_> {
+    fn replace_append(
+        &mut self,
+        caps: &Captures<'_>,
+        dest: &mut String,
+        after: &str,
+    ) -> LookaheadResult {
+        // Honor the trailing-position requirement: a callout is only recognized
+        // when nothing but further callouts follows it on the line.
+        if !self.tail.is_match(after) {
+            dest.push_str(&caps[0]);
+            return LookaheadResult::Continue;
+        }
+
+        // Honor the escape: emit the matched text with the escaping backslash
+        // removed so the callout renders literally.
+        if caps.name("esc").is_some() {
+            dest.push_str(&caps[0].replacen('\\', "", 1));
+            return LookaheadResult::Continue;
+        }
+
+        let (number_raw, is_xml) = if let Some(xnum) = caps.name("xnum") {
+            (xnum.as_str(), true)
+        } else {
+            // The regex guarantees one of `xnum` or `num` is present.
+            #[allow(clippy::unwrap_used)]
+            (caps.name("num").unwrap().as_str(), false)
+        };
+
+        let number = if number_raw == "." {
+            self.autonum += 1;
+            self.autonum.to_string()
+        } else {
+            number_raw.to_string()
+        };
+
+        // Mirror Asciidoctor's guard resolution: a captured line-comment prefix
+        // takes precedence; otherwise an XML callout uses the XML guard; failing
+        // both, there is no guard.
+        let guard = match caps.name("prefix") {
+            Some(prefix) => CalloutGuard::LineComment(prefix.as_str()),
+            None if is_xml => CalloutGuard::Xml,
+            None => CalloutGuard::LineComment(""),
+        };
+
+        self.renderer.render_callout(
+            &CalloutRenderParams {
+                number: &number,
+                guard,
+                parser: self.parser,
+            },
+            dest,
+        );
+
+        LookaheadResult::Continue
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -941,18 +1123,188 @@ mod tests {
     mod callouts {
         use crate::{
             content::{Content, SubstitutionStep},
+            parser::ModificationContext,
             strings::CowStr,
             tests::prelude::*,
         };
 
+        /// Builds a `Content` whose `rendered` text is `text` (as if special
+        /// characters had already been substituted), applies the callouts step,
+        /// and returns the resulting rendered text.
+        fn render_callouts(text: &str, parser: &Parser) -> String {
+            let mut content = Content::from(crate::Span::new(text));
+            // `Content::from` copies the source verbatim into `rendered`, which
+            // is exactly the post-special-characters state we want to exercise.
+            SubstitutionStep::Callouts.apply(&mut content, parser, None);
+            content.rendered.to_string()
+        }
+
         #[test]
-        #[should_panic]
-        fn not_yet_implemented() {
+        fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
             SubstitutionStep::Callouts.apply(&mut content, &p, None);
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
+        }
+
+        #[test]
+        fn no_callouts() {
+            let p = Parser::default();
+            assert_eq!(render_callouts("just some text", &p), "just some text");
+        }
+
+        #[test]
+        fn lt_without_callout_is_untouched() {
+            let p = Parser::default();
+            assert_eq!(render_callouts("a &lt;b&gt; c", &p), "a &lt;b&gt; c");
+        }
+
+        #[test]
+        fn basic_explicit() {
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("require 'x' &lt;1&gt;", &p),
+                r#"require 'x' <b class="conum">(1)</b>"#
+            );
+        }
+
+        #[test]
+        fn line_comment_prefix_preserved() {
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("puts 'x' # &lt;1&gt;", &p),
+                r#"puts 'x' # <b class="conum">(1)</b>"#
+            );
+        }
+
+        #[test]
+        fn multiple_on_one_line() {
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("puts x &lt;5&gt;&lt;6&gt;", &p),
+                r#"puts x <b class="conum">(5)</b><b class="conum">(6)</b>"#
+            );
+        }
+
+        #[test]
+        fn not_at_end_of_line() {
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("puts \"&lt;1&gt; in the middle\"", &p),
+                "puts \"&lt;1&gt; in the middle\""
+            );
+        }
+
+        #[test]
+        fn auto_numbering() {
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("a &lt;.&gt;\nb &lt;.&gt;\nc &lt;.&gt;", &p),
+                "a <b class=\"conum\">(1)</b>\nb <b class=\"conum\">(2)</b>\nc <b class=\"conum\">(3)</b>"
+            );
+        }
+
+        #[test]
+        fn mixed_numbering_ignores_explicit() {
+            // Auto-numbering is not aware of explicit numbers.
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("a &lt;.&gt;\nb &lt;1&gt;\nc &lt;.&gt;", &p),
+                "a <b class=\"conum\">(1)</b>\nb <b class=\"conum\">(1)</b>\nc <b class=\"conum\">(2)</b>"
+            );
+        }
+
+        #[test]
+        fn xml_callout() {
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("&lt;child/&gt; &lt;!--1--&gt;", &p),
+                r#"&lt;child/&gt; &lt;!--<b class="conum">(1)</b>--&gt;"#
+            );
+        }
+
+        #[test]
+        fn half_xml_comment_is_not_a_callout() {
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("First line &lt;1--&gt;", &p),
+                "First line &lt;1--&gt;"
+            );
+        }
+
+        #[test]
+        fn escaped_callout() {
+            let p = Parser::default();
+            assert_eq!(
+                render_callouts("require 'x' # \\&lt;1&gt;", &p),
+                "require 'x' # &lt;1&gt;"
+            );
+        }
+
+        #[test]
+        fn icons_font() {
+            let p = Parser::default().with_intrinsic_attribute(
+                "icons",
+                "font",
+                ModificationContext::Anywhere,
+            );
+            assert_eq!(
+                render_callouts("puts x # &lt;1&gt;", &p),
+                r#"puts x <i class="conum" data-value="1"></i><b>(1)</b>"#
+            );
+        }
+
+        #[test]
+        fn icons_image() {
+            let p = Parser::default().with_intrinsic_attribute(
+                "icons",
+                "",
+                ModificationContext::Anywhere,
+            );
+            assert_eq!(
+                render_callouts("puts x &lt;1&gt;", &p),
+                r#"puts x <img src="./images/icons/callouts/1.png" alt="1">"#
+            );
+        }
+
+        #[test]
+        fn custom_line_comment_prefix() {
+            // line-comment=% (Erlang). Only `%` is recognized as a prefix.
+            let mut content = Content::from(crate::Span::new("hello() -> % &lt;1&gt;"));
+            let attrlist = crate::attributes::Attrlist::parse(
+                crate::Span::new("source,erlang,line-comment=%"),
+                &Parser::default(),
+                crate::attributes::AttrlistContext::Block,
+            )
+            .item
+            .item;
+            let p = Parser::default();
+            SubstitutionStep::Callouts.apply(&mut content, &p, Some(&attrlist));
+            assert_eq!(
+                content.rendered.to_string(),
+                r#"hello() -> % <b class="conum">(1)</b>"#
+            );
+        }
+
+        #[test]
+        fn disabled_line_comment_preserves_leading_chars() {
+            // line-comment= (empty) disables prefix recognition, so the `--`
+            // before the callout is preserved verbatim.
+            let mut content = Content::from(crate::Span::new("-- &lt;1&gt;"));
+            let attrlist = crate::attributes::Attrlist::parse(
+                crate::Span::new("source,asciidoc,line-comment="),
+                &Parser::default(),
+                crate::attributes::AttrlistContext::Block,
+            )
+            .item
+            .item;
+            let p = Parser::default();
+            SubstitutionStep::Callouts.apply(&mut content, &p, Some(&attrlist));
+            assert_eq!(
+                content.rendered.to_string(),
+                r#"-- <b class="conum">(1)</b>"#
+            );
         }
     }
 }
