@@ -19,6 +19,12 @@ use crate::{
 /// | `----`    | Listing      |
 /// | `....`    | Literal      |
 /// | `++++`    | Passthrough  |
+///
+/// In addition, an open-block delimiter (`--`) is recognized here when it
+/// carries a verbatim masquerade style: `source` or `listing` (parsed as a
+/// listing block) or `literal` (parsed as a literal block). Every other open
+/// block is handled by
+/// [`CompoundDelimitedBlock`](crate::blocks::CompoundDelimitedBlock).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RawDelimitedBlock<'src> {
     content: Content<'src>,
@@ -63,37 +69,51 @@ impl<'src> RawDelimitedBlock<'src> {
         parser: &mut Parser,
     ) -> Option<MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>>> {
         let delimiter = metadata.block_start.take_normalized_line();
+        let delimiter_data = delimiter.item.data();
 
-        if delimiter.item.len() < 4 {
-            return None;
-        }
-
-        let (content_model, context, mut substitution_group) = match delimiter
-            .item
-            .data()
-            .split_at_checked(delimiter.item.data().len().min(4))?
-            .0
-        {
-            "////" => (ContentModel::Raw, "comment", SubstitutionGroup::None),
-            "----" => (
-                ContentModel::Verbatim,
-                "listing",
-                SubstitutionGroup::Verbatim,
-            ),
-            "...." => (
-                ContentModel::Verbatim,
-                "literal",
-                SubstitutionGroup::Verbatim,
-            ),
-            "++++" => (ContentModel::Raw, "pass", SubstitutionGroup::Pass),
-            _ => {
+        // A `--` open-block delimiter normally forms a compound (open) block, but
+        // a verbatim masquerade style (`source`, `listing`, or `literal`) set on
+        // it turns the block into a verbatim raw block. Every other delimiter
+        // must be at least four characters long.
+        let (content_model, context, mut substitution_group) = if delimiter_data == "--" {
+            // A plain or compound-styled open block returns `None` here and is
+            // handled by `CompoundDelimitedBlock` instead.
+            open_block_verbatim_masquerade(metadata.attrlist.as_ref())?
+        } else {
+            if delimiter.item.len() < 4 {
                 return None;
             }
-        };
 
-        if !Self::is_valid_delimiter(&delimiter.item) {
-            return None;
-        }
+            let block_type = match delimiter_data
+                .split_at_checked(delimiter_data.len().min(4))?
+                .0
+            {
+                "////" => (ContentModel::Raw, "comment", SubstitutionGroup::None),
+                "----" => (
+                    ContentModel::Verbatim,
+                    "listing",
+                    SubstitutionGroup::Verbatim,
+                ),
+                "...." => (
+                    ContentModel::Verbatim,
+                    "literal",
+                    SubstitutionGroup::Verbatim,
+                ),
+                "++++" => (ContentModel::Raw, "pass", SubstitutionGroup::Pass),
+                _ => {
+                    return None;
+                }
+            };
+
+            // The four-character delimiters require a validity check (the
+            // trailing characters must match the first four); the `--` open
+            // delimiter is matched exactly above.
+            if !Self::is_valid_delimiter(&delimiter.item) {
+                return None;
+            }
+
+            block_type
+        };
 
         let content_start = delimiter.after;
         let mut next = content_start;
@@ -167,6 +187,33 @@ impl<'src> RawDelimitedBlock<'src> {
     /// Return the interpreted content of this block.
     pub fn content(&self) -> &Content<'src> {
         &self.content
+    }
+}
+
+/// Resolve a verbatim masquerade style set on an open block (`--`).
+///
+/// A block style replaces the open-block context only on an open block (every
+/// other delimited block keeps its own context). When that style is one of the
+/// verbatim contexts — `source` and `listing` (both rendered as a listing
+/// block), or `literal` — the open block becomes a verbatim raw block. Returns
+/// the resulting content model, context, and substitution group, or `None` when
+/// the style is absent or names a non-verbatim context (e.g. `sidebar`,
+/// `example`, `quote`), which is handled elsewhere.
+fn open_block_verbatim_masquerade(
+    attrlist: Option<&Attrlist<'_>>,
+) -> Option<(ContentModel, &'static str, SubstitutionGroup)> {
+    match attrlist?.block_style()? {
+        "source" | "listing" => Some((
+            ContentModel::Verbatim,
+            "listing",
+            SubstitutionGroup::Verbatim,
+        )),
+        "literal" => Some((
+            ContentModel::Verbatim,
+            "literal",
+            SubstitutionGroup::Verbatim,
+        )),
+        _ => None,
     }
 }
 
