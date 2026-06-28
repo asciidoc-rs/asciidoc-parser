@@ -16,3 +16,4 @@ mod paragraphs;
 mod preamble_and_lead;
 mod sidebars;
 mod troubleshoot_blocks;
+mod verses;
