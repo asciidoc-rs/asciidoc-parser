@@ -19,6 +19,12 @@ use crate::{
 /// | `----`    | Listing      |
 /// | `....`    | Literal      |
 /// | `++++`    | Passthrough  |
+///
+/// In addition, an open-block delimiter (`--`) is recognized here when it
+/// carries a verbatim masquerade style: `source` or `listing` (parsed as a
+/// listing block) or `literal` (parsed as a literal block). Every other open
+/// block is handled by
+/// [`CompoundDelimitedBlock`](crate::blocks::CompoundDelimitedBlock).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RawDelimitedBlock<'src> {
     content: Content<'src>,
