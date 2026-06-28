@@ -59,8 +59,11 @@ pub enum ListItemMarker<'src> {
 
 impl<'src> ListItemMarker<'src> {
     pub(crate) fn starts_with_marker(source: Span<'src>) -> bool {
-        LIST_ITEM_MARKER.is_match(source.data())
-            || CALLOUT_LIST_MARKER.is_match(source.discard_whitespace().data())
+        // Discard leading whitespace before matching, mirroring `parse` (which
+        // does the same for every marker kind), so both marker regexes see the
+        // same input.
+        let source = source.discard_whitespace();
+        LIST_ITEM_MARKER.is_match(source.data()) || CALLOUT_LIST_MARKER.is_match(source.data())
     }
 
     pub(crate) fn parse(source: Span<'src>, parser: &Parser) -> Option<MatchedItem<'src, Self>> {
@@ -1097,6 +1100,15 @@ mod tests {
         ));
         assert!(!crate::blocks::ListItemMarker::starts_with_marker(
             crate::Span::new("1> blah")
+        ));
+
+        // Leading whitespace is discarded consistently for every marker kind,
+        // matching `parse`.
+        assert!(crate::blocks::ListItemMarker::starts_with_marker(
+            crate::Span::new("  <1> blah")
+        ));
+        assert!(crate::blocks::ListItemMarker::starts_with_marker(
+            crate::Span::new("  - blah")
         ));
     }
 }
