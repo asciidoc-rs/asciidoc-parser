@@ -119,6 +119,7 @@ When using the HTML5 backend with the default Asciidoctor stylesheet, tables str
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -301,6 +302,7 @@ As seen below, the columns stretch across the width of the page according to the
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -525,6 +527,7 @@ The columns, displayed in the table below, have adjusted across the width of the
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -678,6 +681,7 @@ The columns, displayed in the table below, have adjusted across the width of the
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -876,6 +880,7 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -1029,6 +1034,7 @@ For instance, both `[cols="15%,30%,55%"]` and `[cols="15,30,55"]` are valid.
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {

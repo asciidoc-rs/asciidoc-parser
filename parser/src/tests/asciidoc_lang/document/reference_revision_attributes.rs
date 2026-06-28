@@ -112,6 +112,8 @@ image::reference-revision-line.png["Revision line and rendered revision referenc
                     style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: Some(Attrlist {
@@ -320,6 +322,8 @@ If you don't want the default version label to be displayed in the byline, xref:
                     style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: Some(Attrlist {

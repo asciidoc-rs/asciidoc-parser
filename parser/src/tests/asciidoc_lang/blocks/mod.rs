@@ -7,6 +7,7 @@ mod build_basic_block;
 mod collapsible;
 mod delimited;
 mod discrete_headings;
+mod example_blocks;
 mod hard_line_breaks;
 mod index;
 mod paragraph_alignment;

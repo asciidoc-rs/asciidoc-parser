@@ -151,6 +151,8 @@ mod tests {
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -194,6 +196,8 @@ mod tests {
                     style: SimpleBlockStyle::Paragraph,
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -235,6 +239,8 @@ mod tests {
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -255,7 +261,7 @@ mod tests {
 
         assert_eq!(
             format!("{preamble:#?}"),
-            "Block::Preamble(\n    Preamble {\n        blocks: &[\n            Block::Simple(\n                SimpleBlock {\n                    content: Content {\n                        original: Span {\n                            data: \"Some early words go here.\",\n                            line: 3,\n                            col: 1,\n                            offset: 18,\n                        },\n                        rendered: \"Some early words go here.\",\n                    },\n                    source: Span {\n                        data: \"Some early words go here.\",\n                        line: 3,\n                        col: 1,\n                        offset: 18,\n                    },\n                    style: SimpleBlockStyle::Paragraph,\n                    title_source: None,\n                    title: None,\n                    anchor: None,\n                    anchor_reftext: None,\n                    attrlist: None,\n                },\n            ),\n        ],\n        source: Span {\n            data: \"Some early words go here.\",\n            line: 3,\n            col: 1,\n            offset: 18,\n        },\n    },\n)"
+            "Block::Preamble(\n    Preamble {\n        blocks: &[\n            Block::Simple(\n                SimpleBlock {\n                    content: Content {\n                        original: Span {\n                            data: \"Some early words go here.\",\n                            line: 3,\n                            col: 1,\n                            offset: 18,\n                        },\n                        rendered: \"Some early words go here.\",\n                    },\n                    source: Span {\n                        data: \"Some early words go here.\",\n                        line: 3,\n                        col: 1,\n                        offset: 18,\n                    },\n                    style: SimpleBlockStyle::Paragraph,\n                    title_source: None,\n                    title: None,\n                    caption: None,\n                    number: None,\n                    anchor: None,\n                    anchor_reftext: None,\n                    attrlist: None,\n                },\n            ),\n        ],\n        source: Span {\n            data: \"Some early words go here.\",\n            line: 3,\n            col: 1,\n            offset: 18,\n        },\n    },\n)"
         );
 
         assert_eq!(

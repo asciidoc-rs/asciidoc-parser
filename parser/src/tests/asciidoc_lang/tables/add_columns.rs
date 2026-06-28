@@ -247,6 +247,7 @@ Or, you could adjust the width of an individual column by xref:adjust-column-wid
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -398,6 +399,7 @@ The integer `3`, combined with the `+*+` operator, indicates that the table will
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -619,6 +621,7 @@ As shown below, <<ex-spec-and-multiplier>> creates a table containing a xref:adj
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -841,6 +844,7 @@ The table in <<ex-implicit>> has three columns since its first row contains thre
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,

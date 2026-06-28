@@ -135,6 +135,7 @@ Taking into account any xref:span-cells.adoc[spans], which are applied via a <<s
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -358,6 +359,7 @@ Now, let's add two more cells to the table.
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -526,6 +528,7 @@ The cells in a row can be entered on the same line or consecutive lines because 
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -776,6 +779,7 @@ Any leading and trailing spaces around the cell content are stripped and don't a
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -957,6 +961,7 @@ Entering cells on consecutive lines can improve the readability (and debugging) 
                 title_source: None,
                 title: None,
                 caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {

@@ -369,9 +369,11 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
     // their title inside the list wrapper; tables render it as a <caption>;
     // admonitions render it inside the content cell; a collapsible block renders
     // it as the `<summary>` toggle text; a sidebar renders it as the first child
-    // of its `div.content` wrapper.
+    // of its `div.content` wrapper; an example block renders it as a numbered
+    // caption before its `div.content` wrapper.
     let handles_title_internally = is_collapsible(block)
         || is_sidebar(block)
+        || is_example(block)
         || matches!(
             block,
             Block::List(_) | Block::Table(_) | Block::Admonition(_) | Block::Quote(_)
@@ -423,6 +425,13 @@ impl ToVirtualDom for Block<'_> {
         // title and content nested inside the content wrapper.
         if is_sidebar(self) {
             return sidebar_to_node(self);
+        }
+
+        // An example block (the `====` structural container or the `[example]`
+        // paragraph style) renders as `div.exampleblock > div.content`, with a
+        // numbered caption preceding the content wrapper.
+        if is_example(self) {
+            return example_to_node(self);
         }
 
         match self {
@@ -1042,6 +1051,79 @@ fn sidebar_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
             0,
             VirtualNode::new("div").with_class("title").with_text(title),
         );
+    }
+
+    node.children.push(content);
+    node
+}
+
+/// Returns `true` if `block` is an example block: the `====` delimited
+/// container or a paragraph carrying the `example` style, both of which resolve
+/// to the `example` context.
+///
+/// A collapsible example block resolves to the same context but renders as an
+/// HTML disclosure element instead; it is handled by [`is_collapsible`] before
+/// this check is reached, so it never falls through to the example rendering.
+fn is_example<'a>(block: &'a Block<'a>) -> bool {
+    block.resolved_context().as_ref() == "example"
+}
+
+/// Renders an example block, matching Asciidoctor's HTML output.
+///
+/// The outer `div.exampleblock` carries the block's id and roles; its body is
+/// wrapped in a `div.content`. A delimited example encloses other blocks
+/// (rendered through `add_block_with_title` so their own titles and paragraph
+/// wrappers surface); an example paragraph holds inline content rendered
+/// directly inside the content wrapper without a `<p>` wrapper.
+///
+/// A titled example block is rendered with a `div.title` caption placed
+/// *before* the content wrapper — unlike a sidebar, whose title sits inside the
+/// content. The caption prefix and number are computed during parsing and
+/// stored on the block (see [`IsBlock::caption`]); when present the prefix is
+/// prepended to the title (e.g. "Example 1. Onomatopoeia"), otherwise the bare
+/// title is shown.
+fn example_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
+    let mut node = VirtualNode::new("div").with_class("exampleblock");
+
+    for role in block.roles() {
+        node = node.with_class(role);
+    }
+
+    if let Some(id) = block.id() {
+        node = node.with_id(id);
+    }
+
+    // The caption prefix (e.g. "Example 1. ") was assigned during parsing; the
+    // converter simply prepends it to the title.
+    if let Some(title) = block.title() {
+        let caption_text = match block.caption() {
+            Some(prefix) => format!("{prefix}{title}"),
+            None => title.to_string(),
+        };
+        node.children.push(
+            VirtualNode::new("div")
+                .with_class("title")
+                .with_text(caption_text),
+        );
+    }
+
+    let mut content = VirtualNode::new("div").with_class("content");
+
+    match block.content_model() {
+        // A delimited example encloses other blocks.
+        ContentModel::Compound => {
+            for child in block.nested_blocks() {
+                add_block_with_title(&mut content, child);
+            }
+        }
+
+        // An example paragraph holds inline content, rendered directly inside the
+        // content wrapper without a wrapping paragraph.
+        _ => {
+            if let Some(rendered) = block.rendered_content() {
+                content = content.with_html_content(rendered);
+            }
+        }
     }
 
     node.children.push(content);

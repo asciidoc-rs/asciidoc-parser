@@ -446,6 +446,8 @@ The AsciiDoc block style effectively creates a nested, standalone AsciiDoc docum
                                 style: SimpleBlockStyle::Paragraph,
                                 title_source: None,
                                 title: None,
+                                caption: None,
+                                number: None,
                                 anchor: None,
                                 anchor_reftext: None,
                                 attrlist: None,
@@ -484,6 +486,7 @@ The AsciiDoc block style effectively creates a nested, standalone AsciiDoc docum
             title_source: None,
             title: None,
             caption: None,
+            number: None,
             anchor: None,
             anchor_reftext: None,
             attrlist: Some(Attrlist {

@@ -285,6 +285,35 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     /// Returns the rendered title for this block, if present.
     fn title(&self) -> Option<&str>;
 
+    /// Returns the caption prefix for this block, if it has one.
+    ///
+    /// A *captionable* block (e.g. an example block or a table) that has a
+    /// [title](Self::title) is given a caption: a label and an automatically
+    /// incremented number that a converter prepends to the title (e.g.
+    /// `"Example 1. "`, including the trailing separator and space). The prefix
+    /// combines a label drawn from a document attribute (e.g.
+    /// `example-caption`) with the block's [number](Self::number).
+    ///
+    /// The caption is absent when the block has no title, when its caption
+    /// attribute has been unset, or when an explicitly empty caption was
+    /// supplied. An explicit `caption` attribute overrides the prefix with a
+    /// verbatim, unnumbered label. The default implementation returns `None`.
+    fn caption(&self) -> Option<&str> {
+        None
+    }
+
+    /// Returns the automatically assigned number for this block, if it has one.
+    ///
+    /// Captionable blocks are numbered, per context, in document order as they
+    /// finish parsing (so a nested captioned block is numbered before its
+    /// container). The number is the bare counter value that appears in the
+    /// block's [caption](Self::caption) prefix. It is absent when the block is
+    /// not captioned, or when its caption comes from an explicit (unnumbered)
+    /// `caption` attribute. The default implementation returns `None`.
+    fn number(&self) -> Option<usize> {
+        None
+    }
+
     /// Returns the anchor for this block, if present.
     fn anchor(&'src self) -> Option<Span<'src>>;
 

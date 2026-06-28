@@ -67,9 +67,15 @@ pub struct Parser {
     /// child sections as a normal section or appendix.)
     pub(crate) topmost_section_type: SectionType,
 
-    /// Number most recently assigned to a captioned table. Incremented each
-    /// time a titled table receives an automatic caption (e.g. "Table 1.").
-    pub(crate) last_table_number: usize,
+    /// Per-context counters for captioned blocks, keyed by counter name (e.g.
+    /// `example-number`, `table-number`).
+    ///
+    /// Each captionable block context (example, table, …) maintains an
+    /// independent, document-wide sequence. A counter is incremented each time
+    /// a block of that context receives an automatically numbered caption
+    /// (e.g. "Example 1.", "Table 1."). This mirrors Asciidoctor's
+    /// per-context `Document#counters`.
+    pub(crate) counters: HashMap<String, usize>,
 
     /// Canonical names of attributes that are locked against modification from
     /// the document body for the current scope.
@@ -114,7 +120,7 @@ impl Default for Parser {
             },
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,
-            last_table_number: 0,
+            counters: HashMap::new(),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
         }
@@ -190,8 +196,8 @@ impl Parser {
         // Reset section numbering for each new document.
         self.last_section_number = SectionNumber::default();
 
-        // Reset table numbering for each new document.
-        self.last_table_number = 0;
+        // Reset captioned-block numbering for each new document.
+        self.counters.clear();
 
         Document::parse(&preprocessed_source, source_map, self)
     }
@@ -628,14 +634,17 @@ impl Parser {
         }
     }
 
-    /// Assigns the next sequential number to a captioned table and returns it.
+    /// Increments the document-wide counter named `name` and returns its new
+    /// value.
     ///
-    /// Tables are numbered in document order, but only those that actually
-    /// receive a caption (i.e. titled tables for which the `table-caption`
-    /// attribute is set) consume a number.
-    pub(crate) fn assign_table_number(&mut self) -> usize {
-        self.last_table_number += 1;
-        self.last_table_number
+    /// Captioned blocks are numbered in document order within their context,
+    /// but only those that actually receive an automatically numbered caption
+    /// consume a number. This mirrors Asciidoctor's
+    /// `Document#increment_and_store_counter`.
+    pub(crate) fn increment_counter(&mut self, name: &str) -> usize {
+        let counter = self.counters.entry(name.to_string()).or_insert(0);
+        *counter += 1;
+        *counter
     }
 }
 

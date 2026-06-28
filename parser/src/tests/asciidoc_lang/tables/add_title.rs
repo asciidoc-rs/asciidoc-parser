@@ -139,6 +139,7 @@ fn add_a_title_to_a_table() {
                 }),
                 title: Some("A table with a title"),
                 caption: Some("Table 1. "),
+                number: Some(1),
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
