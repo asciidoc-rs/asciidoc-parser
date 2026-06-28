@@ -592,14 +592,9 @@ include::example$subs.adoc[tag=subs-add]
         );
     }
 
-    #[ignore]
     #[test]
     fn example_subtract() {
-        // The `subs=-callouts` modifier is now supported, but this example is
-        // still blocked on `include::example$subs.adoc[tag=...]` resolution in
-        // the test harness.
-
-        to_do_verifies!(
+        verifies!(
             r#"
 Similarly, you can remove the `callouts` substitution from a block's default substitution group by placing the minus (`-`) modifier in front of the `callouts` value.
 
@@ -611,16 +606,36 @@ include::example$subs.adoc[tag=subs-sub]
 
 "#
         );
+
+        use inline_file_handler::InlineFileHandler;
+
+        // Preload the `subs-sub` example (an illegal XML tag) via the debug-only
+        // include handler.
+        let handler = InlineFileHandler::from_pairs([(
+            "example$subs.adoc",
+            "[source,xml,subs=\"-callouts\"]\n.An illegal XML tag\n----\n<1>\n  content inside \"1\" tag\n</1>\n----",
+        )]);
+
+        let mut parser = Parser::default().with_include_file_handler(handler);
+        let doc = parser.parse("include::example$subs.adoc[tag=subs-sub]\n");
+
+        let block = doc.nested_blocks().next().unwrap();
+        let Block::RawDelimited(block) = block else {
+            panic!("Unexpected block type: {block:?}");
+        };
+
+        // Removing `callouts` from the verbatim group leaves only special
+        // characters, so the lone `<1>` is rendered literally rather than as a
+        // callout number.
+        assert_eq!(
+            block.content().rendered(),
+            "&lt;1&gt;\n  content inside \"1\" tag\n&lt;/1&gt;"
+        );
     }
 
-    #[ignore]
     #[test]
     fn plus_before_or_after() {
-        // The `subs=-callouts` modifier is now supported, but this example is
-        // still blocked on `include::example$subs.adoc[tag=...]` resolution in
-        // the test harness.
-
-        to_do_verifies!(
+        verifies!(
             r#"
 You can also specify whether the substitution type is added to the end of the substitution group.
 If a `{plus}` comes before the name of the substitution, then it's added to the end of the existing list, whereas if a `{plus}` comes after the name, it's added to the beginning of the list.
@@ -633,6 +648,32 @@ include::example$subs.adoc[tag=subs-multi]
 In the above example, the `attributes` substitution step is added to the beginning of the default substitution group, the `replacements` step is added to the end of the group, and the `callouts` step is removed from the group.
 
 "#
+        );
+
+        use inline_file_handler::InlineFileHandler;
+
+        // Preload the `subs-multi` example via the debug-only include handler.
+        let handler = InlineFileHandler::from_pairs([(
+            "example$subs.adoc",
+            "[source,xml,subs=\"attributes+,+replacements,-callouts\"]\n----\n<version>{version}</version>\n<copyright>(C) ACME</copyright>\n<1>\n  content inside \"1\" tag\n</1>\n----",
+        )]);
+
+        let mut parser = Parser::default()
+            .with_intrinsic_attribute("version", "1.0", ModificationContext::Anywhere)
+            .with_include_file_handler(handler);
+        let doc = parser.parse("include::example$subs.adoc[tag=subs-multi]\n");
+
+        let block = doc.nested_blocks().next().unwrap();
+        let Block::RawDelimited(block) = block else {
+            panic!("Unexpected block type: {block:?}");
+        };
+
+        // `attributes` (prepended) resolves `{version}`, `replacements`
+        // (appended) converts `(C)`, and `callouts` (removed) leaves the lone
+        // `<1>` literal.
+        assert_eq!(
+            block.content().rendered(),
+            "&lt;version&gt;1.0&lt;/version&gt;\n&lt;copyright&gt;&#169; ACME&lt;/copyright&gt;\n&lt;1&gt;\n  content inside \"1\" tag\n&lt;/1&gt;"
         );
     }
 
