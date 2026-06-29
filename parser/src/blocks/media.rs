@@ -148,7 +148,7 @@ impl<'src> MediaBlock<'src> {
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
                     anchor: metadata.anchor,
-                    anchor_reftext: None,
+                    anchor_reftext: metadata.anchor_reftext,
                     attrlist: metadata.attrlist.clone(),
                 },
 
