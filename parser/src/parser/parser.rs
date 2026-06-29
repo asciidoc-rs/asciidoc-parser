@@ -115,9 +115,9 @@ pub struct Parser {
     /// Wrapped in a [`RefCell`] because attribute references are replaced deep
     /// inside the attributes substitution step, where only a shared `&Parser`
     /// is available. Each entry stores the byte offset and length of the source
-    /// span the warning refers to (rather than a borrowed [`Span`](crate::Span),
-    /// which the lifetime-free `Parser` cannot hold), so the warnings can be
-    /// turned into
+    /// span the warning refers to (rather than a borrowed
+    /// [`Span`](crate::Span), which the lifetime-free `Parser` cannot
+    /// hold), so the warnings can be turned into
     /// spanned [`Warning`]s once the document's owned source is available.
     substitution_warnings: RefCell<Vec<SubstitutionWarning>>,
 }
