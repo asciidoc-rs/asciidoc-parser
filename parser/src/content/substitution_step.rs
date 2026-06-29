@@ -3,7 +3,7 @@ use std::{borrow::Cow, sync::LazyLock};
 use regex::{Captures, Regex, RegexBuilder, Replacer};
 
 use crate::{
-    Parser,
+    Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::Content,
     document::InterpretedValue,
@@ -12,6 +12,7 @@ use crate::{
         CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
         QuoteScope, QuoteType, SpecialCharacter,
     },
+    warnings::WarningType,
 };
 
 /// Each substitution type replaces characters, markup, attribute references,
@@ -450,25 +451,97 @@ static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\\?\{([A-Za-z0-9_][A-Za-z0-9_-]*)\}"#).unwrap()
 });
 
+/// How the processor handles a reference to a missing attribute, controlled by
+/// the [`attribute-missing`] document attribute.
+///
+/// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AttributeMissing {
+    /// Leave the reference in place (the default).
+    Skip,
+
+    /// Drop the reference, but not the line that contains it.
+    Drop,
+
+    /// Drop the entire line on which the reference occurs.
+    DropLine,
+
+    /// Leave the reference in place and record a warning.
+    Warn,
+}
+
+impl AttributeMissing {
+    /// Resolves the `attribute-missing` setting from `parser`. An absent or
+    /// unrecognized value falls back to [`Skip`](Self::Skip), matching
+    /// Asciidoctor.
+    fn from_parser(parser: &Parser) -> Self {
+        match parser.attribute_value("attribute-missing").as_maybe_str() {
+            Some("drop") => Self::Drop,
+            Some("drop-line") => Self::DropLine,
+            Some("warn") => Self::Warn,
+            _ => Self::Skip,
+        }
+    }
+}
+
 #[derive(Debug)]
-struct AttributeReplacer<'p>(&'p Parser);
+struct AttributeReplacer<'p> {
+    parser: &'p Parser,
+
+    /// How to handle a reference to a missing attribute.
+    mode: AttributeMissing,
+
+    /// Source span of the content being processed, used to locate any `warn`
+    /// warning that is recorded.
+    source: Span<'p>,
+
+    /// Set to `true` when a (non-escaped) reference to a missing attribute is
+    /// encountered, so the caller can drop the whole line in
+    /// [`AttributeMissing::DropLine`] mode.
+    missing_on_line: bool,
+}
 
 impl Replacer for AttributeReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
+        let escaped = caps[0].starts_with('\\');
         let attr_name = &caps[1];
 
-        // TO DO: Handle alternative responses ('skip', etc.) for missing attributes.
-        if !self.0.has_attribute(attr_name) {
-            dest.push_str(&caps[0]);
+        if !self.parser.has_attribute(attr_name) {
+            // An escaped reference (e.g. `\{id}`) to an attribute that isn't set
+            // is left exactly as written and is never treated as a missing
+            // reference, so it neither drops the line nor warns.
+            if escaped {
+                dest.push_str(&caps[0]);
+                return;
+            }
+
+            match self.mode {
+                AttributeMissing::Skip => dest.push_str(&caps[0]),
+                AttributeMissing::Drop => {
+                    // Drop the reference, leaving the rest of the line intact.
+                }
+                AttributeMissing::DropLine => {
+                    // Mark the line for removal; whatever is written to `dest`
+                    // here is discarded with it.
+                    self.missing_on_line = true;
+                }
+                AttributeMissing::Warn => {
+                    dest.push_str(&caps[0]);
+                    self.parser.record_substitution_warning(
+                        self.source,
+                        WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
+                    );
+                }
+            }
             return;
         }
 
-        if caps[0].starts_with('\\') {
+        if escaped {
             dest.push_str(&caps[0][1..]);
             return;
         }
 
-        if let InterpretedValue::Value(value) = self.0.attribute_value(attr_name) {
+        if let InterpretedValue::Value(value) = self.parser.attribute_value(attr_name) {
             dest.push_str(value.as_ref());
         }
         // Language description is unclear as to what happens for "set" and
@@ -481,17 +554,59 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
         return;
     }
 
-    let mut result: Cow<'_, str> = content.rendered.to_string().into();
+    let mode = AttributeMissing::from_parser(parser);
+    let source = content.original();
 
-    if let Cow::Owned(new_result) =
-        ATTRIBUTE_REFERENCE.replace_all(&result, AttributeReplacer(parser))
-    {
-        result = new_result.into();
+    // Attribute references are replaced line by line so that, in `drop-line`
+    // mode, an individual line carrying a missing reference can be removed
+    // without disturbing the lines around it. A reference cannot span a line
+    // break, so this matches what a single whole-text pass would produce for
+    // every other mode.
+    let mut out = String::with_capacity(content.rendered.len());
+    let mut changed = false;
+    let mut wrote_line = false;
+
+    for line in content.rendered.split('\n') {
+        if !line.contains('{') {
+            if wrote_line {
+                out.push('\n');
+            }
+            out.push_str(line);
+            wrote_line = true;
+            continue;
+        }
+
+        let mut replacer = AttributeReplacer {
+            parser,
+            mode,
+            source,
+            missing_on_line: false,
+        };
+
+        let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
+
+        if replacer.missing_on_line && mode == AttributeMissing::DropLine {
+            // Drop the entire line, including its line break.
+            changed = true;
+            continue;
+        }
+
+        if let Cow::Owned(_) = replaced {
+            changed = true;
+        }
+
+        if wrote_line {
+            out.push('\n');
+        }
+        out.push_str(&replaced);
+        wrote_line = true;
     }
-    // If it's Cow::Borrowed, there was no match for this pattern, so no
-    // need to pay for a new string allocation.
 
-    content.rendered = result.into();
+    // If nothing was replaced or dropped, leave the (borrowed) rendering as-is
+    // rather than paying for the rebuilt string.
+    if changed {
+        content.rendered = out.into();
+    }
 }
 
 fn apply_character_replacements(
@@ -1137,6 +1252,113 @@ mod tests {
                 content.rendered,
                 CowStr::Boxed("bl{sp}ah".to_string().into_boxed_str())
             );
+        }
+
+        mod attribute_missing {
+            #![allow(clippy::indexing_slicing)]
+
+            use crate::{
+                content::{Content, SubstitutionStep},
+                parser::ModificationContext,
+                tests::prelude::*,
+                warnings::WarningType,
+            };
+
+            fn parser_with_mode(mode: &str) -> Parser {
+                Parser::default().with_intrinsic_attribute(
+                    "attribute-missing",
+                    mode,
+                    ModificationContext::Anywhere,
+                )
+            }
+
+            fn render(text: &str, parser: &Parser) -> String {
+                let mut content = Content::from(crate::Span::new(text));
+                SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+                content.rendered.to_string()
+            }
+
+            #[test]
+            fn skip_is_default() {
+                let p = Parser::default();
+                assert_eq!(render("Hello, {name}!", &p), "Hello, {name}!");
+                assert!(p.take_substitution_warnings().is_empty());
+            }
+
+            #[test]
+            fn skip_explicit() {
+                let p = parser_with_mode("skip");
+                assert_eq!(render("Hello, {name}!", &p), "Hello, {name}!");
+            }
+
+            #[test]
+            fn unknown_value_falls_back_to_skip() {
+                let p = parser_with_mode("bogus");
+                assert_eq!(render("Hello, {name}!", &p), "Hello, {name}!");
+            }
+
+            #[test]
+            fn drop_removes_only_the_reference() {
+                let p = parser_with_mode("drop");
+                assert_eq!(render("Hello, {name}!", &p), "Hello, !");
+            }
+
+            #[test]
+            fn drop_keeps_resolvable_references() {
+                let p = parser_with_mode("drop");
+                assert_eq!(render("a {sp}b {missing} c", &p), "a  b  c");
+            }
+
+            #[test]
+            fn drop_line_removes_the_whole_line() {
+                let p = parser_with_mode("drop-line");
+                assert_eq!(render("Hello, {name}!\nSecond line.", &p), "Second line.");
+            }
+
+            #[test]
+            fn drop_line_only_drops_lines_with_a_missing_reference() {
+                let p = parser_with_mode("drop-line");
+                assert_eq!(
+                    render("first {sp}line\nsecond {missing} line\nthird line", &p),
+                    "first  line\nthird line"
+                );
+            }
+
+            #[test]
+            fn drop_line_can_empty_the_content() {
+                let p = parser_with_mode("drop-line");
+                assert_eq!(render("{missing}", &p), "");
+            }
+
+            #[test]
+            fn warn_leaves_the_reference_and_records_a_warning() {
+                let p = parser_with_mode("warn");
+                assert_eq!(render("Hello, {name}!", &p), "Hello, {name}!");
+
+                let warnings = p.take_substitution_warnings();
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(
+                    warnings[0].warning,
+                    WarningType::SkippingReferenceToMissingAttribute("name".to_string())
+                );
+            }
+
+            #[test]
+            fn warn_records_one_warning_per_missing_reference() {
+                let p = parser_with_mode("warn");
+                assert_eq!(render("a {x} b {y} c", &p), "a {x} b {y} c");
+                assert_eq!(p.take_substitution_warnings().len(), 2);
+            }
+
+            #[test]
+            fn escaped_missing_reference_is_left_verbatim_and_never_dropped() {
+                let p = parser_with_mode("drop-line");
+                assert_eq!(
+                    render("In the path /items/\\{id}, x.", &p),
+                    "In the path /items/\\{id}, x."
+                );
+                assert!(p.take_substitution_warnings().is_empty());
+            }
         }
     }
 

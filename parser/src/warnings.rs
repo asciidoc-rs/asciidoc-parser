@@ -97,6 +97,9 @@ pub enum WarningType {
 
     #[error("Dropping cells from incomplete row; detected end of table")]
     TableDroppingIncompleteRowAtEndOfTable,
+
+    #[error("skipping reference to missing attribute: {0}")]
+    SkippingReferenceToMissingAttribute(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -197,6 +200,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::TableDroppingIncompleteRowAtEndOfTable => {
                 write!(f, "WarningType::TableDroppingIncompleteRowAtEndOfTable")
             }
+
+            WarningType::SkippingReferenceToMissingAttribute(name) => f
+                .debug_tuple("WarningType::SkippingReferenceToMissingAttribute")
+                .field(name)
+                .finish(),
         }
     }
 }
@@ -494,6 +502,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::TableDroppingIncompleteRowAtEndOfTable"
+                );
+            }
+
+            #[test]
+            fn skipping_reference_to_missing_attribute() {
+                let warning = WarningType::SkippingReferenceToMissingAttribute("name".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::SkippingReferenceToMissingAttribute(\"name\")"
                 );
             }
         }

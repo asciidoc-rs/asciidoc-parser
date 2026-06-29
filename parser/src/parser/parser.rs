@@ -108,6 +108,36 @@ pub struct Parser {
     /// Wrapped in a [`RefCell`] because callouts are registered deep inside the
     /// callouts substitution step, where only a shared `&Parser` is available.
     callouts: RefCell<CalloutCatalog>,
+
+    /// Warnings produced while replacing attribute references (e.g. a reference
+    /// to a missing attribute when `attribute-missing` is `warn`).
+    ///
+    /// Wrapped in a [`RefCell`] because attribute references are replaced deep
+    /// inside the attributes substitution step, where only a shared `&Parser`
+    /// is available. Each entry stores the byte offset and length of the source
+    /// span the warning refers to (rather than a borrowed [`Span`], which the
+    /// lifetime-free `Parser` cannot hold), so the warnings can be turned into
+    /// spanned [`Warning`]s once the document's owned source is available.
+    substitution_warnings: RefCell<Vec<SubstitutionWarning>>,
+}
+
+/// A warning recorded while replacing attribute references, stored in a form
+/// that does not borrow the source so it can live on the [`Parser`].
+///
+/// The `offset`/`len` pair locates the relevant text within the (preprocessed)
+/// document source; [`Parser::take_substitution_warnings`] reconstitutes a
+/// spanned [`Warning`] from it.
+#[derive(Clone, Debug)]
+pub(crate) struct SubstitutionWarning {
+    /// Byte offset into the document source of the span this warning refers to.
+    pub(crate) offset: usize,
+
+    /// Byte length of the span this warning refers to.
+    pub(crate) len: usize,
+
+    /// The type of warning, already carrying any owned data it needs (such as
+    /// the missing attribute's name).
+    pub(crate) warning: WarningType,
 }
 
 /// Tracks the callout numbers defined by verbatim blocks so that a callout list
@@ -145,6 +175,7 @@ impl Default for Parser {
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
             callouts: RefCell::new(CalloutCatalog::default()),
+            substitution_warnings: RefCell::new(vec![]),
         }
     }
 }
@@ -217,6 +248,9 @@ impl Parser {
 
         // Start each parse with an empty callout catalog.
         *self.callouts.borrow_mut() = CalloutCatalog::default();
+
+        // Start each parse with no pending substitution warnings.
+        self.substitution_warnings.borrow_mut().clear();
 
         // Reset section numbering for each new document.
         self.last_section_number = SectionNumber::default();
@@ -415,6 +449,50 @@ impl Parser {
     /// to the next list.
     pub(crate) fn close_callout_list(&self) {
         self.callouts.borrow_mut().current.clear();
+    }
+
+    /// Records a warning produced while replacing attribute references.
+    ///
+    /// Takes `&self` so it can be called from the attributes substitution step,
+    /// which only holds a shared reference to the parser. `source` locates the
+    /// text the warning refers to; its byte offset and length are stored so a
+    /// spanned [`Warning`] can be reconstructed later (see
+    /// [`take_substitution_warnings`](Self::take_substitution_warnings)).
+    pub(crate) fn record_substitution_warning(
+        &self,
+        source: crate::Span<'_>,
+        warning: WarningType,
+    ) {
+        self.substitution_warnings
+            .borrow_mut()
+            .push(SubstitutionWarning {
+                offset: source.byte_offset(),
+                len: source.len(),
+                warning,
+            });
+    }
+
+    /// Returns the number of substitution warnings recorded so far.
+    ///
+    /// Used together with [`truncate_substitution_warnings`] to discard
+    /// warnings recorded while parsing an owned (e.g. include-expanded) source,
+    /// whose offsets do not refer to the primary document source.
+    ///
+    /// [`truncate_substitution_warnings`]: Self::truncate_substitution_warnings
+    pub(crate) fn substitution_warnings_len(&self) -> usize {
+        self.substitution_warnings.borrow().len()
+    }
+
+    /// Discards any substitution warnings recorded since the buffer held `len`
+    /// entries.
+    pub(crate) fn truncate_substitution_warnings(&self, len: usize) {
+        self.substitution_warnings.borrow_mut().truncate(len);
+    }
+
+    /// Takes the substitution warnings recorded during parsing, leaving the
+    /// buffer empty.
+    pub(crate) fn take_substitution_warnings(&self) -> Vec<SubstitutionWarning> {
+        std::mem::take(&mut *self.substitution_warnings.borrow_mut())
     }
 
     /// Generate a unique ID derived from `base_id` and register it in the

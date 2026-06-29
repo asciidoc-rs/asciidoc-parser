@@ -84,6 +84,19 @@ impl<'src> Document<'src> {
                 warnings.append(&mut maw_blocks.warnings);
             }
 
+            // Warnings recorded while replacing attribute references (e.g. a
+            // reference to a missing attribute under `attribute-missing=warn`)
+            // are collected on the parser, where only owned offsets — not
+            // borrowed spans — can live. Now that the document's owned source is
+            // available, turn each one back into a spanned `Warning`.
+            let root = Span::new(owned_src);
+            for sw in parser.take_substitution_warnings() {
+                warnings.push(Warning {
+                    source: root.slice(sw.offset..sw.offset + sw.len),
+                    warning: sw.warning,
+                });
+            }
+
             let mut blocks = maw_blocks.item.item;
             let mut has_content_blocks = false;
             let mut preamble_split_index: Option<usize> = None;

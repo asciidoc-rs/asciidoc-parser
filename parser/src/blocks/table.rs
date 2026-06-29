@@ -1664,8 +1664,16 @@ fn process_content<'src>(
                 // turns any future warning added to this path into a loud test
                 // failure rather than a silent loss.
                 let mut owned_warnings: Vec<Warning<'_>> = vec![];
+
+                // Substitution warnings (e.g. `attribute-missing=warn`) recorded
+                // while parsing this owned source carry offsets into it, not the
+                // primary document source, so they too must be discarded.
+                let substitution_warnings_mark = parser.substitution_warnings_len();
+
                 let (title, inline, toc, blocks) =
                     parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
+
+                parser.truncate_substitution_warnings(substitution_warnings_mark);
 
                 debug_assert!(
                     owned_warnings.is_empty(),

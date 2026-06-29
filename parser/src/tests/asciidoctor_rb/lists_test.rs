@@ -2704,7 +2704,13 @@ mod description_lists_dlist {
         #[test]
         #[ignore]
         // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/478):
-        // Enable this test after `attribute-missing` is handled.
+        // `attribute-missing` is now handled for inline content substitution
+        // (see `attributes::unresolved_references`), but this case additionally
+        // requires substituting attribute references in a *block macro target*
+        // (`image::{unresolved}[]`) and dropping the whole block when the target
+        // resolves to a missing attribute under `attribute-missing=drop-line`.
+        // That block-level drop mechanism is not yet implemented. Enable this
+        // test once it is.
         fn should_continue_to_parse_subsequent_blocks_attached_to_list_item_after_first_block_is_dropped()
          {
             let _doc = Parser::default().parse(
