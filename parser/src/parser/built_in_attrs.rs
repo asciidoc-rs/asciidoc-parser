@@ -8,59 +8,62 @@ use crate::{
 pub(super) fn built_in_attrs() -> HashMap<String, AttributeValue> {
     let mut attrs: HashMap<String, AttributeValue> = HashMap::new();
 
-    attrs.insert(
-        "blank".to_owned(),
-        AttributeValue {
-            allowable_value: AllowableValue::Any,
-            modification_context: ModificationContext::ApiOnly,
-            value: InterpretedValue::Value("".into()),
-        },
-    );
+    // ## Character replacement attributes
+    //
+    // These provide portable replacements for common typographical marks,
+    // non-visible characters, escapes for characters with special meaning in
+    // AsciiDoc, and passthroughs for characters that get encoded by default.
+    // See `docs/modules/attributes/pages/character-replacement-ref.adoc`.
+    //
+    // The entries below are listed in the same order they appear on that
+    // reference page. The replacement values match Ruby Asciidoctor's
+    // `INTRINSIC_ATTRIBUTES` table (e.g. `cpp` resolves to `C&#43;&#43;`, not a
+    // literal `C++`).
+    let char_replacement = |value: &str| AttributeValue {
+        allowable_value: AllowableValue::Any,
+        modification_context: ModificationContext::ApiOnly,
+        value: InterpretedValue::Value(value.into()),
+    };
 
-    attrs.insert(
-        "empty".to_owned(),
-        AttributeValue {
-            allowable_value: AllowableValue::Any,
-            modification_context: ModificationContext::ApiOnly,
-            value: InterpretedValue::Value("".into()),
-        },
-    );
+    // `blank` is an alias for `empty` for those who find this terminology
+    // clearer.
+    attrs.insert("blank".to_owned(), char_replacement(""));
+    attrs.insert("empty".to_owned(), char_replacement(""));
+    attrs.insert("sp".to_owned(), char_replacement(" "));
+    attrs.insert("nbsp".to_owned(), char_replacement("&#160;"));
+    attrs.insert("zwsp".to_owned(), char_replacement("&#8203;"));
+    attrs.insert("wj".to_owned(), char_replacement("&#8288;"));
+    attrs.insert("apos".to_owned(), char_replacement("&#39;"));
+    attrs.insert("quot".to_owned(), char_replacement("&#34;"));
+    attrs.insert("lsquo".to_owned(), char_replacement("&#8216;"));
+    attrs.insert("rsquo".to_owned(), char_replacement("&#8217;"));
+    attrs.insert("ldquo".to_owned(), char_replacement("&#8220;"));
+    attrs.insert("rdquo".to_owned(), char_replacement("&#8221;"));
+    attrs.insert("deg".to_owned(), char_replacement("&#176;"));
+    attrs.insert("plus".to_owned(), char_replacement("&#43;"));
+    attrs.insert("brvbar".to_owned(), char_replacement("&#166;"));
+    attrs.insert("vbar".to_owned(), char_replacement("|"));
+    attrs.insert("amp".to_owned(), char_replacement("&"));
+    attrs.insert("lt".to_owned(), char_replacement("<"));
+    attrs.insert("gt".to_owned(), char_replacement(">"));
+    attrs.insert("startsb".to_owned(), char_replacement("["));
+    attrs.insert("endsb".to_owned(), char_replacement("]"));
+    attrs.insert("caret".to_owned(), char_replacement("^"));
+    attrs.insert("asterisk".to_owned(), char_replacement("*"));
+    attrs.insert("tilde".to_owned(), char_replacement("~"));
+    attrs.insert("backslash".to_owned(), char_replacement("\\"));
+    attrs.insert("backtick".to_owned(), char_replacement("`"));
+    attrs.insert("two-colons".to_owned(), char_replacement("::"));
+    attrs.insert("two-semicolons".to_owned(), char_replacement(";;"));
+    // `cpp` is deprecated in favor of `cxx`; both resolve to the same value.
+    attrs.insert("cpp".to_owned(), char_replacement("C&#43;&#43;"));
+    attrs.insert("cxx".to_owned(), char_replacement("C&#43;&#43;"));
+    attrs.insert("pp".to_owned(), char_replacement("&#43;&#43;"));
 
-    attrs.insert(
-        "sp".to_owned(),
-        AttributeValue {
-            allowable_value: AllowableValue::Any,
-            modification_context: ModificationContext::ApiOnly,
-            value: InterpretedValue::Value(" ".into()),
-        },
-    );
-
-    attrs.insert(
-        "vbar".to_owned(),
-        AttributeValue {
-            allowable_value: AllowableValue::Any,
-            modification_context: ModificationContext::ApiOnly,
-            value: InterpretedValue::Value("|".into()),
-        },
-    );
-
-    attrs.insert(
-        "deg".to_owned(),
-        AttributeValue {
-            allowable_value: AllowableValue::Any,
-            modification_context: ModificationContext::ApiOnly,
-            value: InterpretedValue::Value("&#176;".into()),
-        },
-    );
-
-    attrs.insert(
-        "plus".to_owned(),
-        AttributeValue {
-            allowable_value: AllowableValue::Any,
-            modification_context: ModificationContext::ApiOnly,
-            value: InterpretedValue::Value("&#43;".into()),
-        },
-    );
+    // ## Other predefined document attributes
+    //
+    // These configure processor behavior rather than performing character
+    // replacement. Order is not significant.
 
     attrs.insert(
         "toc".to_owned(),
