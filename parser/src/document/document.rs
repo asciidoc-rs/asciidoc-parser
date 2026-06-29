@@ -8,7 +8,7 @@ use crate::{
     Parser, Span,
     attributes::Attrlist,
     blocks::{Block, ContentModel, IsBlock, Preamble, parse_utils::parse_blocks_until},
-    document::{Catalog, Header, TocMode},
+    document::{Catalog, Header, TocConfig, TocMode},
     internal::debug::DebugSliceReference,
     parser::{
         CatalogResolver, InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning, SourceMap,
@@ -46,7 +46,7 @@ struct InternalDependent<'src> {
     source_map: SourceMap,
     catalog: Catalog,
     show_doctitle: bool,
-    toc_mode: TocMode,
+    toc: TocConfig,
 }
 
 self_cell! {
@@ -121,10 +121,11 @@ impl<'src> Document<'src> {
             // default is hidden), so resolve it from the final attribute state.
             let show_doctitle = parser.resolve_show_title(false);
 
-            // The `toc` attribute is header-only, so its placement is fixed once
-            // the header (and body) have been processed. Capture it here, while
-            // the parser still holds the document's resolved attribute state.
-            let toc_mode = TocMode::from_parser(parser);
+            // The `toc` family of attributes is header-only, so the resolved
+            // placement, depth, title, and class are fixed once the header (and
+            // body) have been processed. Capture them here, while the parser
+            // still holds the document's resolved attribute state.
+            let toc = TocConfig::from_parser(parser);
 
             InternalDependent {
                 header,
@@ -134,7 +135,7 @@ impl<'src> Document<'src> {
                 source_map,
                 catalog: parser.take_catalog(),
                 show_doctitle,
-                toc_mode,
+                toc,
             }
         });
 
@@ -167,7 +168,31 @@ impl<'src> Document<'src> {
     ///
     /// [`toc` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/
     pub fn toc_mode(&self) -> TocMode {
-        self.internal.borrow_dependent().toc_mode
+        self.internal.borrow_dependent().toc.mode
+    }
+
+    /// Return the depth of section levels included in this document's table of
+    /// contents, resolved from the [`toclevels` attribute] (default `2`).
+    ///
+    /// [`toclevels` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/levels/
+    pub fn toc_levels(&self) -> usize {
+        self.internal.borrow_dependent().toc.levels
+    }
+
+    /// Return the title of this document's table of contents, resolved from the
+    /// [`toc-title` attribute] (default _Table of Contents_).
+    ///
+    /// [`toc-title` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/title/
+    pub fn toc_title(&self) -> &str {
+        &self.internal.borrow_dependent().toc.title
+    }
+
+    /// Return the CSS class applied to this document's table of contents
+    /// container, resolved from the [`toc-class` attribute] (default `toc`).
+    ///
+    /// [`toc-class` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/
+    pub fn toc_class(&self) -> &str {
+        &self.internal.borrow_dependent().toc.class
     }
 
     /// Return an iterator over any warnings found during parsing.

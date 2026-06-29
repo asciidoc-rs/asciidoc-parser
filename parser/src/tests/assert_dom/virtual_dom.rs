@@ -7,6 +7,7 @@
 use std::{
     cell::{Cell, RefCell},
     sync::LazyLock,
+    thread::LocalKey,
 };
 
 use regex::Regex;
@@ -46,40 +47,72 @@ thread_local! {
     static ICONS_MODE: Cell<IconsMode> = const { Cell::new(IconsMode::None) };
 }
 
-/// The number of section levels included in a table of contents when
-/// `toclevels` is not overridden. This matches Asciidoctor's default of 2
-/// (sections up to and including `===`). The virtual DOM does not yet read a
-/// custom `toclevels`, so every TOC uses this depth.
-const DEFAULT_TOCLEVELS: usize = 2;
+/// A fully resolved table of contents, ready to render: the prebuilt section
+/// list (already pruned to the configured `toclevels`), the title text (from
+/// `toc-title`), and the container CSS class (from `toc-class`).
+#[derive(Clone)]
+struct TocData {
+    /// The nested `<ul>` of section links, or `None` when the document has no
+    /// sections.
+    ul: Option<VirtualNode>,
 
-thread_local! {
-    /// The table-of-contents section list for the current `toc: macro` scope.
-    ///
-    /// The virtual DOM builder has no document context threaded through it, so
-    /// when a document (or nested AsciiDoc cell) renders with `toc: macro`, its
-    /// prebuilt list is stashed here for the duration of the body render and a
-    /// `toc::[]` macro reads it from here. The outer `Option` distinguishes "a
-    /// macro scope is active" (`Some`) from "no macro scope" (`None`, where a
-    /// stray `toc::[]` renders nothing); the inner `Option` is the `<ul>`, which
-    /// is `None` when the scope has no sections.
-    static MACRO_TOC: RefCell<Option<Option<VirtualNode>>> = const { RefCell::new(None) };
+    /// The TOC title text (`toc-title`).
+    title: String,
+
+    /// The CSS class on the `div` container (`toc-class`).
+    class: String,
 }
 
-/// Restores [`MACRO_TOC`] to its previous value when dropped, so nested
-/// AsciiDoc cells can mask the enclosing document's macro scope and reinstate
-/// it afterward.
-struct MacroTocGuard(Option<Option<VirtualNode>>);
-
-impl Drop for MacroTocGuard {
-    fn drop(&mut self) {
-        MACRO_TOC.with(|m| *m.borrow_mut() = self.0.take());
+impl TocData {
+    /// Builds the table of contents from a document's (or cell's) resolved
+    /// `toc` configuration and its top-level `blocks`.
+    fn build(levels: usize, title: &str, class: &str, blocks: &[Block]) -> Self {
+        Self {
+            ul: build_toc_ul(blocks, 1, levels),
+            title: title.to_string(),
+            class: class.to_string(),
+        }
     }
 }
 
-/// Sets [`MACRO_TOC`] to `value` for the current scope, returning a guard that
-/// restores the previous value on drop.
-fn scoped_macro_toc(value: Option<Option<VirtualNode>>) -> MacroTocGuard {
-    MacroTocGuard(MACRO_TOC.with(|m| m.replace(value)))
+thread_local! {
+    /// The table of contents for the current `toc: macro` scope.
+    ///
+    /// The virtual DOM builder has no document context threaded through it, so
+    /// when a document (or nested AsciiDoc cell) renders with `toc: macro`, its
+    /// prebuilt TOC is stashed here for the duration of the body render and a
+    /// `toc::[]` macro reads it from here. `Some` means a macro scope is active;
+    /// `None` means no macro scope (a stray `toc::[]` then renders nothing).
+    static MACRO_TOC: RefCell<Option<TocData>> = const { RefCell::new(None) };
+
+    /// The table of contents for the current `toc: preamble` scope, consumed by
+    /// the preamble while it renders. `Some` means a preamble-placed TOC is
+    /// pending; `None` means none is (so the preamble renders no TOC).
+    static PREAMBLE_TOC: RefCell<Option<TocData>> = const { RefCell::new(None) };
+}
+
+/// Restores a stashed-TOC thread-local to its previous value when dropped, so
+/// nested AsciiDoc cells can mask the enclosing document's scope and reinstate
+/// it afterward.
+struct TocScopeGuard {
+    key: &'static LocalKey<RefCell<Option<TocData>>>,
+    prev: Option<TocData>,
+}
+
+impl Drop for TocScopeGuard {
+    fn drop(&mut self) {
+        self.key.with(|c| *c.borrow_mut() = self.prev.take());
+    }
+}
+
+/// Sets the stashed-TOC thread-local `key` to `value` for the current scope,
+/// returning a guard that restores the previous value on drop.
+fn scoped_toc(
+    key: &'static LocalKey<RefCell<Option<TocData>>>,
+    value: Option<TocData>,
+) -> TocScopeGuard {
+    let prev = key.with(|c| c.replace(value));
+    TocScopeGuard { key, prev }
 }
 
 /// A regular expression matching a `toc::[]` block macro line (with any
@@ -94,16 +127,16 @@ fn is_toc_macro(block: &Block) -> bool {
             && TOC_MACRO.is_match(simple.content().original().data().trim()))
 }
 
-/// Renders a `toc::[]` block macro: the prebuilt section list for the active
-/// `toc: macro` scope, wrapped in a `div.toc` carrying the macro's id (default
-/// `toc`). Returns `None` when no macro scope is active, in which case the
-/// macro renders nothing (matching Asciidoctor, which drops `toc::[]` unless
-/// `toc: macro` is in effect).
+/// Renders a `toc::[]` block macro: the table of contents for the active
+/// `toc: macro` scope, carrying the macro's id (default `toc`). Returns `None`
+/// when no macro scope is active, in which case the macro renders nothing
+/// (matching Asciidoctor, which drops `toc::[]` unless `toc: macro` is in
+/// effect).
 fn toc_macro_node(block: &Block) -> Option<VirtualNode> {
     MACRO_TOC.with(|m| {
         m.borrow()
             .as_ref()
-            .map(|ul| toc_block(block.id().unwrap_or("toc"), true, ul.clone()))
+            .map(|data| toc_block(block.id().unwrap_or("toc"), true, data))
     })
 }
 
@@ -144,25 +177,28 @@ fn build_toc_ul(blocks: &[Block], level: usize, max_level: usize) -> Option<Virt
     (!ul.children.is_empty()).then_some(ul)
 }
 
-/// Wraps a table-of-contents list in its `div.toc` container.
+/// Wraps a table-of-contents list in its container `div`.
 ///
 /// `id` is the container id (`toc` for an automatic placement, or the `toc::[]`
 /// macro's id). `title_class` adds `class="title"` to the title element, which
 /// Asciidoctor does for a `toc::[]` macro rendered in the document body but not
-/// for the automatic top-of-document TOC. `ul` is the section list, omitted
-/// when the document has no sections.
-fn toc_block(id: &str, title_class: bool, ul: Option<VirtualNode>) -> VirtualNode {
-    let mut node = VirtualNode::new("div").with_id(id).with_class("toc");
+/// for the automatic top-of-document TOC. `data` supplies the section list
+/// (omitted when the document has no sections), the title text, and the
+/// container CSS class.
+fn toc_block(id: &str, title_class: bool, data: &TocData) -> VirtualNode {
+    let mut node = VirtualNode::new("div")
+        .with_id(id)
+        .with_class(data.class.as_str());
 
     let mut title = VirtualNode::new("div")
         .with_id(format!("{id}title"))
-        .with_text("Table of Contents");
+        .with_text(data.title.as_str());
     if title_class {
         title = title.with_class("title");
     }
     node.children.push(title);
 
-    if let Some(ul) = ul {
+    if let Some(ul) = data.ul.clone() {
         node.children.push(ul);
     }
 
@@ -527,18 +563,37 @@ impl ToVirtualDom for Document<'_> {
             node.children.push(VirtualNode::new("h1").with_text(title));
         }
 
-        // Resolve the table of contents from the `toc` attribute. An automatic
-        // placement renders the TOC at the top of the body; a `macro` placement
-        // stashes the section list for a `toc::[]` macro in the body to pick up.
+        // Resolve the table of contents from the `toc` family of attributes.
+        // `auto`/`left`/`right` render the TOC at the top of the body;
+        // `preamble` defers it to the preamble; `macro` stashes it for a
+        // `toc::[]` macro in the body to pick up. (The side-column styling of
+        // `left`/`right` needs the standalone HTML body framing this embeddable
+        // virtual DOM does not model, so they render like `auto` here, which is
+        // also Asciidoctor's documented fallback for embeddable output.)
         let toc_mode = self.toc_mode();
-        let toc_ul = (toc_mode != TocMode::Disabled)
-            .then(|| build_toc_ul(self.nested_blocks().as_slice(), 1, DEFAULT_TOCLEVELS))
-            .flatten();
+        let toc_data = toc_mode.is_enabled().then(|| {
+            TocData::build(
+                self.toc_levels(),
+                self.toc_title(),
+                self.toc_class(),
+                self.nested_blocks().as_slice(),
+            )
+        });
 
-        if toc_mode == TocMode::Auto {
-            node.children.push(toc_block("toc", false, toc_ul.clone()));
+        // Guards keeping a stashed TOC alive for the duration of the body
+        // render (dropped, and the thread-locals restored, when this returns).
+        let mut _macro_scope = None;
+        let mut _preamble_scope = None;
+        match toc_mode {
+            TocMode::Auto | TocMode::Left | TocMode::Right => {
+                if let Some(data) = &toc_data {
+                    node.children.push(toc_block("toc", false, data));
+                }
+            }
+            TocMode::Preamble => _preamble_scope = Some(scoped_toc(&PREAMBLE_TOC, toc_data)),
+            TocMode::Macro => _macro_scope = Some(scoped_toc(&MACRO_TOC, toc_data)),
+            TocMode::Disabled => {}
         }
-        let _macro_toc = (toc_mode == TocMode::Macro).then(|| scoped_macro_toc(Some(toc_ul)));
 
         // Add child blocks, including block titles as separate siblings.
         for block in self.nested_blocks() {
@@ -1847,21 +1902,42 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                         .push(VirtualNode::new("h1").with_text(title));
                 }
 
-                // The cell is a standalone document with its own `toc` setting
-                // (not inherited from the parent). Resolve it the same way as the
-                // top-level document, and always enter a macro scope for the cell
-                // body so a `toc::[]` here never picks up the parent's sections.
+                // The cell is a standalone document with its own `toc`
+                // configuration (not inherited from the parent). Resolve it the
+                // same way as the top-level document.
                 let toc_mode = cell.toc_mode();
-                let toc_ul = (toc_mode != TocMode::Disabled)
-                    .then(|| build_toc_ul(cell.blocks(), 1, DEFAULT_TOCLEVELS))
-                    .flatten();
+                let toc_data = toc_mode.is_enabled().then(|| {
+                    TocData::build(
+                        cell.toc_levels(),
+                        cell.toc_title(),
+                        cell.toc_class(),
+                        cell.blocks(),
+                    )
+                });
 
-                if toc_mode == TocMode::Auto {
-                    content
-                        .children
-                        .push(toc_block("toc", false, toc_ul.clone()));
+                if matches!(toc_mode, TocMode::Auto | TocMode::Left | TocMode::Right)
+                    && let Some(data) = &toc_data
+                {
+                    content.children.push(toc_block("toc", false, data));
                 }
-                let _macro_toc = scoped_macro_toc((toc_mode == TocMode::Macro).then_some(toc_ul));
+
+                // Always (re)scope both stashes for the cell body so a `toc::[]`
+                // inside the cell never picks up the parent document's TOC; only
+                // a cell with its own `toc: macro`/`toc: preamble` provides one.
+                let _macro_scope = scoped_toc(
+                    &MACRO_TOC,
+                    match toc_mode {
+                        TocMode::Macro => toc_data.clone(),
+                        _ => None,
+                    },
+                );
+                let _preamble_scope = scoped_toc(
+                    &PREAMBLE_TOC,
+                    match toc_mode {
+                        TocMode::Preamble => toc_data,
+                        _ => None,
+                    },
+                );
 
                 if cell.is_inline() {
                     // An `inline` doctype renders block content as bare inline
@@ -2089,6 +2165,14 @@ fn preamble_to_node<'a>(preamble: &'a Preamble<'a>) -> VirtualNode {
         }
 
         node.children.push(child.to_virtual_dom());
+    }
+
+    // A `toc: preamble` placement renders the table of contents immediately
+    // below the preamble's content (inside the preamble container). Taking it
+    // ensures it renders only once, even though there is only ever one
+    // preamble.
+    if let Some(data) = PREAMBLE_TOC.with(|p| p.borrow_mut().take()) {
+        node.children.push(toc_block("toc", false, &data));
     }
 
     node
@@ -2351,14 +2435,73 @@ mod tests {
         }
 
         #[test]
-        fn placement_values_are_automatic() {
-            for placement in ["left", "right", "preamble"] {
-                let doc = Parser::default()
-                    .parse(&format!("= Title\n:toc: {placement}\n\n== Section\n\nhi"));
+        fn empty_toc_resolves_to_auto() {
+            // An explicit `:toc: auto` and an empty `:toc:` both resolve to the
+            // automatic top-of-body placement.
+            for value in ["", " auto"] {
+                let doc =
+                    Parser::default().parse(&format!("= Title\n:toc:{value}\n\n== Section\n\nhi"));
 
-                assert_eq!(doc.toc_mode(), TocMode::Auto, "placement: {placement}");
-                assert_css(&doc, ".toc", 1);
+                assert_eq!(doc.toc_mode(), TocMode::Auto, "value: {value:?}");
+                let vdom = doc.to_virtual_dom();
+                assert_eq!(vdom.children[0].id.as_deref(), Some("toc"));
             }
+        }
+
+        #[test]
+        fn left_and_right_render_like_auto_at_top() {
+            // `left`/`right` request a side column in standalone HTML, but this
+            // embeddable virtual DOM (Asciidoctor's documented fallback) renders
+            // them like `auto`: a `div#toc` at the top of the body.
+            for (value, mode) in [("left", TocMode::Left), ("right", TocMode::Right)] {
+                let doc =
+                    Parser::default().parse(&format!("= Title\n:toc: {value}\n\n== Section\n\nhi"));
+
+                assert_eq!(doc.toc_mode(), mode, "value: {value}");
+                assert_css(&doc, "#toc.toc", 1);
+
+                let vdom = doc.to_virtual_dom();
+                assert_eq!(vdom.children[0].id.as_deref(), Some("toc"));
+            }
+        }
+
+        #[test]
+        fn preamble_toc_renders_below_preamble() {
+            let doc = Parser::default()
+                .parse("= Title\n:toc: preamble\n\nintro para\n\n== Section\n\nhi");
+
+            assert_eq!(doc.toc_mode(), TocMode::Preamble);
+
+            // Exactly one TOC, and it lives inside the preamble (not at the top
+            // of the body), as the last child after the preamble's content.
+            assert_css(&doc, ".toc", 1);
+            assert_css(&doc, "#preamble > #toc.toc", 1);
+
+            let vdom = doc.to_virtual_dom();
+            assert_ne!(vdom.children[0].id.as_deref(), Some("toc"));
+
+            let preamble = vdom
+                .children
+                .iter()
+                .find(|c| c.id.as_deref() == Some("preamble"))
+                .expect("preamble present");
+            assert_eq!(
+                preamble.children.last().and_then(|c| c.id.as_deref()),
+                Some("toc")
+            );
+
+            // A preamble TOC's title carries no `class="title"` (like `auto`).
+            assert_css(&doc, "#toctitle.title", 0);
+        }
+
+        #[test]
+        fn preamble_toc_absent_without_preamble() {
+            // The CAUTION on the position page: a `toc: preamble` placement does
+            // not appear when the document has no preamble.
+            let doc = Parser::default().parse("= Title\n:toc: preamble\n\n== Section\n\nhi");
+
+            assert_eq!(doc.toc_mode(), TocMode::Preamble);
+            assert_css(&doc, ".toc", 0);
         }
 
         #[test]
@@ -2368,9 +2511,89 @@ mod tests {
 
             // The default `toclevels` is 2, so the `==` and `===` sections appear
             // but the `====` (level 3) section is excluded.
+            assert_eq!(doc.toc_levels(), 2);
             assert_css(&doc, "ul.sectlevel1", 1);
             assert_css(&doc, "ul.sectlevel2", 1);
             assert_css(&doc, "ul.sectlevel3", 0);
+        }
+
+        #[test]
+        fn toclevels_controls_toc_depth() {
+            let doc = Parser::default().parse(
+                "= Title\n:toc:\n:toclevels: 3\n\n== L1\n\n=== L2\n\n==== L3\n\n===== L4\n\nx",
+            );
+
+            // `toclevels: 3` includes `==`, `===`, and `====`, but not `=====`.
+            assert_eq!(doc.toc_levels(), 3);
+            assert_css(&doc, "ul.sectlevel1", 1);
+            assert_css(&doc, "ul.sectlevel2", 1);
+            assert_css(&doc, "ul.sectlevel3", 1);
+            assert_css(&doc, "ul.sectlevel4", 0);
+        }
+
+        #[test]
+        fn toclevels_zero_is_coerced_to_one() {
+            // With no parts, `toclevels: 0` is coerced to `1`.
+            let doc =
+                Parser::default().parse("= Title\n:toc:\n:toclevels: 0\n\n== L1\n\n=== L2\n\nx");
+
+            assert_eq!(doc.toc_levels(), 1);
+            assert_css(&doc, "ul.sectlevel1", 1);
+            assert_css(&doc, "ul.sectlevel2", 0);
+        }
+
+        #[test]
+        fn invalid_toclevels_falls_back_to_default() {
+            let doc = Parser::default()
+                .parse("= Title\n:toc:\n:toclevels: huge\n\n== L1\n\n=== L2\n\n==== L3\n\nx");
+
+            assert_eq!(doc.toc_levels(), 2);
+            assert_css(&doc, "ul.sectlevel2", 1);
+            assert_css(&doc, "ul.sectlevel3", 0);
+        }
+
+        #[test]
+        fn custom_toc_title() {
+            let doc = Parser::default()
+                .parse("= Title\n:toc:\n:toc-title: Table of Adventures\n\n== Section\n\nhi");
+
+            assert_eq!(doc.toc_title(), "Table of Adventures");
+            let vdom = doc.to_virtual_dom();
+            let title = &vdom.children[0].children[0];
+            assert_eq!(title.id.as_deref(), Some("toctitle"));
+            assert_eq!(title.text.as_deref(), Some("Table of Adventures"));
+        }
+
+        #[test]
+        fn empty_toc_title_renders_empty() {
+            // An empty `:toc-title:` yields an empty title heading.
+            let doc = Parser::default().parse("= Title\n:toc:\n:toc-title:\n\n== Section\n\nhi");
+
+            assert_eq!(doc.toc_title(), "");
+            let vdom = doc.to_virtual_dom();
+            assert_eq!(vdom.children[0].children[0].text.as_deref(), Some(""));
+        }
+
+        #[test]
+        fn custom_toc_class() {
+            let doc = Parser::default()
+                .parse("= Title\n:toc:\n:toc-class: floating-toc\n\n== Section\n\nhi");
+
+            assert_eq!(doc.toc_class(), "floating-toc");
+            // The container carries the custom class in place of the default.
+            assert_css(&doc, "#toc.floating-toc", 1);
+            assert_css(&doc, "#toc.toc", 0);
+        }
+
+        #[test]
+        fn toc_defaults_when_attributes_unset() {
+            // With `toc` enabled but the others unset, the resolved depth, title,
+            // and class are the documented defaults.
+            let doc = Parser::default().parse("= Title\n:toc:\n\n== Section\n\nhi");
+
+            assert_eq!(doc.toc_levels(), 2);
+            assert_eq!(doc.toc_title(), "Table of Contents");
+            assert_eq!(doc.toc_class(), "toc");
         }
 
         #[test]

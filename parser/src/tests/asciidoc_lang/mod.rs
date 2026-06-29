@@ -35,4 +35,5 @@ mod sections;
 mod subs;
 mod tables;
 mod text;
+mod toc;
 mod verbatim;
