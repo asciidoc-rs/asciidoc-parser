@@ -157,6 +157,23 @@ impl<'src> ListBlock<'src> {
             } => ListType::Description,
         };
 
+        // A callout list annotates the callouts of a preceding verbatim block.
+        // Each item, by position, must correspond to a callout that was
+        // registered while substituting that block; warn about any that does
+        // not, then close the list so the next block's callouts start fresh.
+        if type_ == ListType::Callout {
+            for (index, item) in items.iter().enumerate() {
+                let ordinal = (index + 1) as u32;
+                if !parser.callout_defined(ordinal) {
+                    warnings.push(Warning {
+                        source: item.span(),
+                        warning: WarningType::NoCalloutFound(ordinal as usize),
+                    });
+                }
+            }
+            parser.close_callout_list();
+        }
+
         Some(MatchedItem {
             item: Self {
                 type_,
@@ -329,6 +346,25 @@ mod tests {
         assert!(warnings.is_empty());
 
         result
+    }
+
+    /// Like [`list_parse`], but also returns the warnings produced. Used for
+    /// callout lists, which warn when an item has no matching callout in a
+    /// preceding verbatim block.
+    fn list_parse_with_warnings<'a>(
+        source: &'a str,
+    ) -> (
+        Option<MatchedItem<'a, crate::blocks::ListBlock<'a>>>,
+        Vec<Warning<'a>>,
+    ) {
+        let mut parser = crate::Parser::default();
+        let mut warnings: Vec<Warning<'a>> = vec![];
+
+        let metadata = BlockMetadata::parse(crate::Span::new(source), &mut parser).item;
+
+        let result = crate::blocks::list::ListBlock::parse(&metadata, &mut parser, &mut warnings);
+
+        (result, warnings)
     }
 
     #[test]
@@ -542,7 +578,10 @@ mod tests {
 
     #[test]
     fn callout_list() {
-        let list = list_parse("<1> First\n<2> Second\n").unwrap();
+        // Parsed in isolation (no preceding verbatim block), so each item warns
+        // that it has no matching callout.
+        let (list, warnings) = list_parse_with_warnings("<1> First\n<2> Second\n");
+        let list = list.unwrap();
 
         assert_eq!(list.item.type_(), ListType::Callout);
         assert_eq!(list.item.marker_style(), Some("arabic"));
@@ -558,15 +597,28 @@ mod tests {
             items[1].nested_blocks().next().unwrap().rendered_content(),
             Some("Second")
         );
+
+        let warning_types: Vec<_> = warnings.iter().map(|w| &w.warning).collect();
+        assert_eq!(
+            warning_types,
+            vec![
+                &WarningType::NoCalloutFound(1),
+                &WarningType::NoCalloutFound(2),
+            ]
+        );
     }
 
     #[test]
     fn callout_list_auto_numbered() {
         // `<.>` markers form a single callout list.
-        let list = list_parse("<.> First\n<.> Second\n<.> Third\n").unwrap();
+        let (list, warnings) = list_parse_with_warnings("<.> First\n<.> Second\n<.> Third\n");
+        let list = list.unwrap();
 
         assert_eq!(list.item.type_(), ListType::Callout);
         assert_eq!(list.item.nested_blocks().count(), 3);
+
+        // No preceding verbatim block defines these callouts.
+        assert_eq!(warnings.len(), 3);
     }
 
     #[test]

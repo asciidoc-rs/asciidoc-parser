@@ -904,6 +904,12 @@ impl LookaheadReplacer for CalloutReplacer<'_> {
             number_raw.to_string()
         };
 
+        // Register this callout so the callout list that annotates this block
+        // can be validated against the callouts it references.
+        if let Ok(n) = number.parse::<u32>() {
+            self.parser.register_callout(n);
+        }
+
         // Mirror Asciidoctor's guard resolution: a captured line-comment prefix
         // takes precedence; otherwise an XML callout uses the XML guard; failing
         // both, there is no guard.

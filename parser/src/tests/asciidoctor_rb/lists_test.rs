@@ -4929,23 +4929,42 @@ mod callout_lists {
     }
 
     #[test]
-    #[ignore]
     fn should_not_recognize_callouts_in_an_indented_description_list_paragraph() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Enable once the memory logger ("no callout found for <1>") is
-        // available.
-        let _doc = Parser::default().parse("foo::\n  bar <1>\n\n<1> Not pointing to a callout\n");
-        todo!("memory logger test");
+        let doc = Parser::default().parse("foo::\n  bar <1>\n\n<1> Not pointing to a callout\n");
+
+        // The `<1>` in the indented description-list paragraph is not a callout;
+        // it is rendered literally and produces no conum.
+        assert_xpath(&doc, "//dl//b", 0);
+        assert_output_contains(&doc, "bar &lt;1&gt;");
+
+        // The `<1> ...` line below is recognized as a callout list item.
+        assert_xpath(&doc, "//ol/li", 1);
+        assert_output_contains(&doc, "Not pointing to a callout");
+
+        // ...but it points at a callout that does not exist. Asciidoctor logs
+        // this via its memory logger; this crate surfaces it as a document
+        // warning instead.
+        let warnings: Vec<_> = doc.warnings().map(|w| &w.warning).collect();
+        assert_eq!(warnings, vec![&WarningType::NoCalloutFound(1)]);
     }
 
     #[test]
-    #[ignore]
     fn should_not_recognize_callouts_in_an_indented_outline_list_paragraph() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Enable once the memory logger ("no callout found for <1>") is
-        // available.
-        let _doc = Parser::default().parse("* foo\n  bar <1>\n\n<1> Not pointing to a callout\n");
-        todo!("memory logger test");
+        let doc = Parser::default().parse("* foo\n  bar <1>\n\n<1> Not pointing to a callout\n");
+
+        // The `<1>` folded into the outline-list item's paragraph is not a
+        // callout; it is rendered literally and produces no conum.
+        assert_xpath(&doc, "//ul//b", 0);
+        assert_output_contains(&doc, "foo\nbar &lt;1&gt;");
+
+        // The `<1> ...` line below is recognized as a callout list item.
+        assert_xpath(&doc, "//ol/li", 1);
+        assert_output_contains(&doc, "Not pointing to a callout");
+
+        // ...but it points at a callout that does not exist (surfaced as a
+        // document warning in place of Asciidoctor's memory logger).
+        let warnings: Vec<_> = doc.warnings().map(|w| &w.warning).collect();
+        assert_eq!(warnings, vec![&WarningType::NoCalloutFound(1)]);
     }
 
     #[test]
