@@ -50,20 +50,22 @@ impl TocMode {
     /// Resolves the table-of-contents placement from a parser's current `toc`
     /// attribute state.
     pub(crate) fn from_parser(parser: &Parser) -> Self {
-        match parser.attribute_value("toc") {
-            InterpretedValue::Unset => Self::Disabled,
-            InterpretedValue::Value(ref v) => match v.trim() {
-                "macro" => Self::Macro,
-                "left" => Self::Left,
-                "right" => Self::Right,
-                "preamble" => Self::Preamble,
-                // An explicit `auto`, or any other (unrecognized) value, is
-                // treated as an automatic placement, matching Asciidoctor (which
-                // renders an auto-placed TOC for any non-positional value).
-                _ => Self::Auto,
-            },
-            // An empty `:toc:` resolves to `auto`.
-            InterpretedValue::Set => Self::Auto,
+        let value = parser.attribute_value("toc");
+        if value == InterpretedValue::Unset {
+            return Self::Disabled;
+        }
+
+        // `toc` has a built-in default of `auto`, so a bare `:toc:` resolves to
+        // `Value("auto")` (never `Set`). An explicit `auto`, or any other
+        // (unrecognized) value, is treated as an automatic placement, matching
+        // Asciidoctor (which renders an auto-placed TOC for any non-positional
+        // value).
+        match value.as_maybe_str().map(str::trim) {
+            Some("macro") => Self::Macro,
+            Some("left") => Self::Left,
+            Some("right") => Self::Right,
+            Some("preamble") => Self::Preamble,
+            _ => Self::Auto,
         }
     }
 
