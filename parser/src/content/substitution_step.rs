@@ -1326,5 +1326,20 @@ mod tests {
                 r#"-- <b class="conum">(1)</b>"#
             );
         }
+
+        #[test]
+        fn document_line_comment_attribute() {
+            // The `line-comment` attribute can be set at the document level
+            // (here, with no block attrlist), and is honored as a fallback.
+            let p = Parser::default().with_intrinsic_attribute(
+                "line-comment",
+                "%",
+                ModificationContext::Anywhere,
+            );
+            assert_eq!(
+                render_callouts("hello() -> % &lt;1&gt;", &p),
+                r#"hello() -> % <b class="conum">(1)</b>"#
+            );
+        }
     }
 }

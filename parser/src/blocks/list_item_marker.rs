@@ -1104,6 +1104,12 @@ mod tests {
         assert!(lim.item.is_match_for(&lim2.item));
         assert!(!lim.item.is_match_for(&lim_parse("- blah").unwrap().item));
 
+        // An explicit `<N>` marker reports its number; an automatic `<.>`
+        // marker and any non-callout marker report `None`.
+        assert_eq!(lim.item.callout_number(), Some(1));
+        assert!(lim2.item.callout_number().is_none());
+        assert!(lim_parse("- blah").unwrap().item.callout_number().is_none());
+
         assert_eq!(
             format!("{:#?}", lim.item),
             "ListItemMarker::Callout(\n    Span {\n        data: \"<1>\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n)"
