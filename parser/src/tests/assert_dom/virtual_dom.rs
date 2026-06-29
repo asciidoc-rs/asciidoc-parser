@@ -4,7 +4,7 @@
 //! documents for testing purposes. It maps AsciiDoc block structures to their
 //! HTML equivalents, enabling XPath-like queries for test assertions.
 
-use std::sync::LazyLock;
+use std::{cell::Cell, sync::LazyLock};
 
 use regex::Regex;
 
@@ -17,7 +17,46 @@ use crate::{
         SimpleBlockStyle, Stripes, TableBlock, TableCellContent, TableColumn, TableRow,
         VerticalAlignment,
     },
+    document::InterpretedValue,
 };
+
+/// The document-wide `icons` mode, which controls how callouts and callout
+/// lists render. The virtual DOM builder has no document context threaded
+/// through it, so this is captured once at the top of
+/// [`Document::to_virtual_dom`] and read where callout lists are built.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum IconsMode {
+    /// No `icons` attribute: callouts render as text conums and callout lists
+    /// as an ordered list.
+    None,
+
+    /// `icons` set (without `font`): image-based callout icons and an icon
+    /// table for callout lists.
+    Image,
+
+    /// `icons=font`: font-based callout icons and an icon table for callout
+    /// lists.
+    Font,
+}
+
+thread_local! {
+    static ICONS_MODE: Cell<IconsMode> = const { Cell::new(IconsMode::None) };
+}
+
+/// Resolves the document's `icons` mode from its header attributes.
+fn icons_mode_from_document(doc: &Document) -> IconsMode {
+    for attr in doc.header().attributes() {
+        if attr.name().data() == "icons" {
+            return match attr.value() {
+                InterpretedValue::Value(v) if v == "font" => IconsMode::Font,
+                InterpretedValue::Unset => IconsMode::None,
+                // `:icons:` (set, empty) or any other value enables image icons.
+                _ => IconsMode::Image,
+            };
+        }
+    }
+    IconsMode::None
+}
 
 /// Decodes common HTML entities to their character equivalents.
 ///
@@ -136,9 +175,17 @@ fn try_parse_element(text: &str, pos: usize) -> Option<(VirtualNode, usize)> {
     let tag_content = &text[pos + 1..pos + 1 + tag_end];
     let tag_name = extract_tag_name(tag_content)?;
 
-    // Check for self-closing tag.
-    if tag_content.ends_with('/') {
-        return None; // Ignore self-closing tags.
+    // Void elements (e.g. `<img>`, `<br>`) and explicitly self-closing tags
+    // have no closing tag; emit them as childless element nodes (preserving
+    // their attributes) and advance past the opening tag.
+    const VOID_ELEMENTS: &[&str] = &[
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+        "track", "wbr",
+    ];
+    if tag_content.ends_with('/') || VOID_ELEMENTS.iter().any(|v| *v == tag_name) {
+        let after_opening = pos + 1 + tag_end + 1;
+        let element = apply_tag_attributes(VirtualNode::new(tag_name), tag_content);
+        return Some((element, after_opening));
     }
 
     // Find the closing tag.
@@ -335,6 +382,10 @@ pub trait ToVirtualDom {
 
 impl ToVirtualDom for Document<'_> {
     fn to_virtual_dom(&self) -> VirtualNode {
+        // Capture the document-wide icons mode so callout lists (built without
+        // any document context) can render an icon table when appropriate.
+        ICONS_MODE.with(|m| m.set(icons_mode_from_document(self)));
+
         let mut node = VirtualNode::new("div").with_class("document");
 
         // Add document ID if present.
@@ -538,6 +589,15 @@ fn simple_block_to_node<'a>(block: &'a SimpleBlock<'a>) -> VirtualNode {
 }
 
 fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
+    // When icons are enabled, a callout list renders as an icon table rather
+    // than an ordered list (matching Asciidoctor's `convert_colist`).
+    if list.type_() == ListType::Callout {
+        let icons = ICONS_MODE.with(|m| m.get());
+        if icons != IconsMode::None {
+            return colist_icon_table_to_node(list, icons);
+        }
+    }
+
     // Horizontal description lists render as tables instead of dl elements.
     let is_horizontal =
         list.type_() == ListType::Description && list.declared_style() == Some("horizontal");
@@ -743,6 +803,80 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
     wrapper
 }
 
+/// Renders a callout list as an icon table (`div.colist > table`), matching
+/// Asciidoctor's `convert_colist` when the `icons` attribute is set.
+fn colist_icon_table_to_node<'a>(list: &'a ListBlock<'a>, icons: IconsMode) -> VirtualNode {
+    let mut wrapper = VirtualNode::new("div").with_class("colist");
+
+    // The marker style (always "arabic" for callout lists) is added to the
+    // wrapper, producing `<div class="colist arabic">`.
+    if let Some(style) = list.marker_style() {
+        wrapper = wrapper.with_class(style);
+    }
+
+    for role in list.roles() {
+        wrapper = wrapper.with_class(role);
+    }
+
+    if let Some(id) = list.id() {
+        wrapper = wrapper.with_id(id);
+    }
+
+    if let Some(title) = list.title() {
+        wrapper
+            .children
+            .push(VirtualNode::new("div").with_class("title").with_text(title));
+    }
+
+    let mut table = VirtualNode::new("table");
+
+    for (index, item) in list.nested_blocks().enumerate() {
+        let num = index + 1;
+
+        let mut row = VirtualNode::new("tr");
+
+        // Icon cell.
+        let mut icon_cell = VirtualNode::new("td");
+        match icons {
+            IconsMode::Font => {
+                icon_cell.children.push(
+                    VirtualNode::new("i")
+                        .with_class("conum")
+                        .with_attribute("data-value", num.to_string()),
+                );
+                icon_cell
+                    .children
+                    .push(VirtualNode::new("b").with_text(num.to_string()));
+            }
+            IconsMode::Image => {
+                icon_cell.children.push(
+                    VirtualNode::new("img")
+                        .with_attribute("src", format!("./images/icons/callouts/{num}.png"))
+                        .with_attribute("alt", num.to_string()),
+                );
+            }
+            IconsMode::None => {}
+        }
+        row.children.push(icon_cell);
+
+        // Text cell: the callout list item's annotation text.
+        let mut text_cell = VirtualNode::new("td");
+        if let Some(text) = item
+            .nested_blocks()
+            .next()
+            .and_then(|b| b.rendered_content())
+        {
+            text_cell = text_cell.with_html_content(text);
+        }
+        row.children.push(text_cell);
+
+        table.children.push(row);
+    }
+
+    wrapper.children.push(table);
+    wrapper
+}
+
 fn list_item_to_node<'a>(item: &'a ListItem<'a>) -> VirtualNode {
     let mut node = VirtualNode::new("li");
 
@@ -879,9 +1013,10 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
                 }
             }
 
-            // Add the block's rendered content to the code element.
+            // Add the block's rendered content to the code element, parsing any
+            // inline HTML (e.g. callout conums) into child nodes.
             if let Some(content) = raw.rendered_content() {
-                code = code.with_text(content);
+                code = code.with_html_content(content);
             }
 
             let pre = VirtualNode::new("pre").with_child(code);
@@ -889,7 +1024,7 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
         } else {
             let mut pre = VirtualNode::new("pre");
             if let Some(content) = raw.rendered_content() {
-                pre = pre.with_text(content);
+                pre = pre.with_html_content(content);
             }
             node.children.push(pre);
         }

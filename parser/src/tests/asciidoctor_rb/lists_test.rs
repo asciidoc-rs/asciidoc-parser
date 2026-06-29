@@ -5043,19 +5043,60 @@ mod callout_lists {
     }
 
     #[test]
-    #[ignore]
     fn callout_list_with_icons_enabled() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Enable once image-based callout icons render as DOM nodes inside
-        // verbatim blocks and the callout list renders as an icon table.
+        // `:icons:` (set, empty) enables image-based callout icons.
+        let doc = Parser::default().parse(":icons:\n[source, ruby]\n----\nrequire 'asciidoctor' # <1>\ndoc = Asciidoctor::Document.new('Hello, World!') # <2>\nputs doc.convert # <3>\n----\n<1> Describe the first line\n<2> Describe the second line\n<3> Describe the third line\n");
+
+        // The verbatim block renders each callout as an image inside the code.
+        assert_css(&doc, ".listingblock code > img", 3);
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"listingblock\"]//code/img)[1][@src=\"./images/icons/callouts/1.png\"][@alt=\"1\"]",
+            1,
+        );
+
+        // The callout list renders as an icon table.
+        assert_css(&doc, ".colist table td img", 3);
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"colist arabic\"]//td/img)[1][@src=\"./images/icons/callouts/1.png\"][@alt=\"1\"]",
+            1,
+        );
     }
 
     #[test]
-    #[ignore]
     fn callout_list_with_font_based_icons_enabled() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Enable once font-based callout icons render as DOM nodes inside
-        // verbatim blocks and the callout list renders as an icon table.
+        // `:icons: font` enables font-based callout icons.
+        let doc = Parser::default().parse(":icons: font\n[source]\n----\nrequire 'asciidoctor' # <1>\ndoc = Asciidoctor::Document.new('Hello, World!') #<2>\nputs doc.convert #<3>\n----\n<1> Describe the first line\n<2> Describe the second line\n<3> Describe the third line\n");
+
+        // The verbatim block renders each callout as a font icon followed by a
+        // bold number inside the code.
+        assert_css(&doc, ".listingblock code > i", 3);
+        assert_xpath(&doc, "(/div[@class=\"listingblock\"]//code/i)[1]", 1);
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"listingblock\"]//code/i)[1][@class=\"conum\"][@data-value=\"1\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"listingblock\"]//code/i)[1]/following-sibling::b[text()=\"(1)\"]",
+            1,
+        );
+
+        // The callout list renders as an icon table.
+        assert_css(&doc, ".colist table td i", 3);
+        assert_xpath(&doc, "(/div[@class=\"colist arabic\"]//td/i)[1]", 1);
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"colist arabic\"]//td/i)[1][@class=\"conum\"][@data-value=\"1\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"colist arabic\"]//td/i)[1]/following-sibling::b[text()=\"1\"]",
+            1,
+        );
     }
 
     #[test]
