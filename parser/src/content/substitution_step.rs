@@ -494,7 +494,7 @@ struct AttributeReplacer<'p> {
     /// Source span of the content being processed, used to locate any `warn`
     /// warning that is recorded.
     ///
-    /// TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/564): This
+    /// TO DO (<https://github.com/asciidoc-rs/asciidoc-parser/issues/564>): This
     /// is the whole content span, not the span of the individual reference, so
     /// every `warn` warning in a block points at the same (coarse) location.
     /// Replacement happens on already-substituted `rendered` text, which has no
