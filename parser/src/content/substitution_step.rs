@@ -769,9 +769,9 @@ fn apply_callouts(content: &mut Content<'_>, parser: &Parser, attrlist: Option<&
     // The `line-comment` attribute (block-level, falling back to document-level)
     // customizes or disables line-comment recognition:
     //
-    // * absent           -> default prefixes (`//`, `#`, `--`, `;;`) and XML
-    //   callouts are recognized.
-    // * present (custom)  -> only the given prefix is recognized; XML callouts are
+    // * absent -> default prefixes (`//`, `#`, `--`, `;;`) and XML callouts are
+    //   recognized.
+    // * present (custom) -> only the given prefix is recognized; XML callouts are
     //   not.
     // * present but empty -> no line-comment prefix is recognized; XML callouts are
     //   not.
