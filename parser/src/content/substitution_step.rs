@@ -798,7 +798,7 @@ fn apply_callouts(content: &mut Content<'_>, parser: &Parser, attrlist: Option<&
         renderer: &*parser.renderer,
         parser,
         autonum: 0,
-        tail: &tail_rx,
+        tail: tail_rx,
     };
 
     if let Cow::Owned(new_result) =
@@ -808,6 +808,29 @@ fn apply_callouts(content: &mut Content<'_>, parser: &Parser, attrlist: Option<&
     }
 }
 
+/// Callout regex for the default `line-comment` mode: recognizes the common
+/// line-comment prefixes and XML callouts.
+static DEFAULT_CALLOUT_RX: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r"(?P<prefix>(?://|#|--|;;) ?)?(?P<esc>\\)?(?:&lt;!--(?P<xnum>\d+|\.)--&gt;|&lt;(?P<num>\d+|\.)&gt;)",
+    )
+    .unwrap()
+});
+
+/// Trailing-position lookahead regex for the default `line-comment` mode.
+static DEFAULT_CALLOUT_TAIL_RX: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"^(?: ?\\?(?:&lt;!--(?:\d+|\.)--&gt;|&lt;(?:\d+|\.)&gt;))*(?:\n|$)").unwrap()
+});
+
+/// Trailing-position lookahead regex for a custom or empty `line-comment` mode
+/// (no XML callout form).
+static CUSTOM_CALLOUT_TAIL_RX: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"^(?: ?\\?&lt;(?:\d+|\.)&gt;)*(?:\n|$)").unwrap()
+});
+
 /// Builds the `(callout, tail)` regex pair for the given `line-comment` mode.
 ///
 /// The `callout` regex matches a single callout token (with the optional
@@ -816,22 +839,14 @@ fn apply_callouts(content: &mut Content<'_>, parser: &Parser, attrlist: Option<&
 /// is only honored when the remainder of its line consists solely of further
 /// callouts. Rust's regex engine supports neither lookahead nor backreferences,
 /// so the lookahead is applied manually against the post-match text.
-fn build_callout_regexes(line_comment: Option<&str>) -> (Regex, Regex) {
-    #[allow(clippy::unwrap_used)]
+///
+/// The default-mode regexes and both tail regexes are constant, so they are
+/// built once. Only a custom (non-empty) prefix requires building a regex from
+/// the attribute value, which is borrowed otherwise.
+fn build_callout_regexes(line_comment: Option<&str>) -> (Cow<'static, Regex>, &'static Regex) {
     match line_comment {
         // Default: recognize the common line-comment prefixes and XML callouts.
-        None => {
-            let callout = Regex::new(
-                r"(?P<prefix>(?://|#|--|;;) ?)?(?P<esc>\\)?(?:&lt;!--(?P<xnum>\d+|\.)--&gt;|&lt;(?P<num>\d+|\.)&gt;)",
-            )
-            .unwrap();
-
-            let tail =
-                Regex::new(r"^(?: ?\\?(?:&lt;!--(?:\d+|\.)--&gt;|&lt;(?:\d+|\.)&gt;))*(?:\n|$)")
-                    .unwrap();
-
-            (callout, tail)
-        }
+        None => (Cow::Borrowed(&DEFAULT_CALLOUT_RX), &DEFAULT_CALLOUT_TAIL_RX),
 
         // A custom or empty `line-comment`: only the bare (non-XML) callout form
         // is recognized, optionally behind the custom prefix.
@@ -842,14 +857,13 @@ fn build_callout_regexes(line_comment: Option<&str>) -> (Regex, Regex) {
                 format!(r"(?P<prefix>{} ?)?", regex::escape(prefix))
             };
 
+            #[allow(clippy::unwrap_used)]
             let callout = Regex::new(&format!(
                 r"{prefix_pattern}(?P<esc>\\)?&lt;(?P<num>\d+|\.)&gt;"
             ))
             .unwrap();
 
-            let tail = Regex::new(r"^(?: ?\\?&lt;(?:\d+|\.)&gt;)*(?:\n|$)").unwrap();
-
-            (callout, tail)
+            (Cow::Owned(callout), &CUSTOM_CALLOUT_TAIL_RX)
         }
     }
 }
