@@ -83,7 +83,7 @@ pub enum WarningType {
     #[error("No callout found for <{0}>")]
     NoCalloutFound(usize),
 
-    #[error("callout list item index: expected {0}, got {1}")]
+    #[error("Callout list item index: expected {0}, got {1}")]
     CalloutListItemOutOfSequence(usize, usize),
 
     #[error("Dropping table cell because it exceeds the specified number of columns")]
