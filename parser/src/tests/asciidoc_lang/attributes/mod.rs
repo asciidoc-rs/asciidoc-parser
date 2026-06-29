@@ -13,5 +13,6 @@ mod options;
 mod positional_and_named_attributes;
 mod reference_attributes;
 mod role;
+mod unresolved_references;
 mod unset_attributes;
 mod wrap_values;
