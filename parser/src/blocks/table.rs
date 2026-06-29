@@ -10,7 +10,7 @@ use crate::{
         parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
-    document::{InterpretedValue, TocMode},
+    document::{InterpretedValue, TocConfig, TocMode},
     parser::{
         InlineSubstitutionRenderer, ModificationContext, ReferenceResolver, ReferenceWarning,
         preprocessor::preprocess,
@@ -1664,7 +1664,7 @@ fn process_content<'src>(
                 // turns any future warning added to this path into a loud test
                 // failure rather than a silent loss.
                 let mut owned_warnings: Vec<Warning<'_>> = vec![];
-                let (title, inline, toc_mode, blocks) =
+                let (title, inline, toc, blocks) =
                     parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
 
                 debug_assert!(
@@ -1676,18 +1676,17 @@ fn process_content<'src>(
                 OwnedCellInner {
                     title,
                     inline,
-                    toc_mode,
+                    toc,
                     blocks,
                 }
             });
             AsciiDocCell::Owned(Arc::new(owned))
         } else {
-            let (title, inline, toc_mode, blocks) =
-                parse_asciidoc_cell_body(trimmed, parser, warnings);
+            let (title, inline, toc, blocks) = parse_asciidoc_cell_body(trimmed, parser, warnings);
             AsciiDocCell::Borrowed(BorrowedCell {
                 title,
                 inline,
-                toc_mode,
+                toc,
                 blocks,
             })
         };
@@ -1726,7 +1725,7 @@ fn parse_asciidoc_cell_body<'src>(
     content: Span<'src>,
     parser: &mut Parser,
     warnings: &mut Vec<Warning<'src>>,
-) -> (Option<String>, bool, TocMode, Vec<Block<'src>>) {
+) -> (Option<String>, bool, TocConfig, Vec<Block<'src>>) {
     let first_line = content.take_line();
     let (title_source, body) = if first_line.item.data().starts_with("= ") {
         (
@@ -1761,12 +1760,12 @@ fn parse_asciidoc_cell_body<'src>(
     };
 
     // The cell is its own standalone document, so its table-of-contents
-    // placement comes from the cell's own `toc` attribute (which it does not
-    // inherit from the parent). Resolve it here, before the caller restores the
-    // parent's attribute snapshot.
-    let toc_mode = TocMode::from_parser(parser);
+    // configuration comes from the cell's own `toc` family of attributes (which
+    // it does not inherit from the parent). Resolve it here, before the caller
+    // restores the parent's attribute snapshot.
+    let toc = TocConfig::from_parser(parser);
 
-    (title, inline, toc_mode, maw.item.item)
+    (title, inline, toc, maw.item.item)
 }
 
 /// Returns `true` when the cell content holds an `include::` preprocessor
@@ -2069,9 +2068,33 @@ impl<'src> AsciiDocCell<'src> {
     /// cell's own `toc` attribute and is independent of the parent document's
     /// setting.
     pub fn toc_mode(&self) -> TocMode {
+        self.toc().mode
+    }
+
+    /// Returns the depth of section levels included in the cell's table of
+    /// contents, resolved from the cell's own `toclevels` attribute (default
+    /// `2`).
+    pub fn toc_levels(&self) -> usize {
+        self.toc().levels
+    }
+
+    /// Returns the title of the cell's table of contents, resolved from the
+    /// cell's own `toc-title` attribute (default _Table of Contents_).
+    pub fn toc_title(&self) -> &str {
+        &self.toc().title
+    }
+
+    /// Returns the CSS class applied to the cell's table-of-contents container,
+    /// resolved from the cell's own `toc-class` attribute (default `toc`).
+    pub fn toc_class(&self) -> &str {
+        &self.toc().class
+    }
+
+    /// Returns the resolved table-of-contents configuration for the cell.
+    pub(crate) fn toc(&self) -> &TocConfig {
         match self {
-            Self::Borrowed(cell) => cell.toc_mode,
-            Self::Owned(cell) => cell.borrow_dependent().toc_mode,
+            Self::Borrowed(cell) => &cell.toc,
+            Self::Owned(cell) => &cell.borrow_dependent().toc,
         }
     }
 
@@ -2119,7 +2142,7 @@ impl<'src> AsciiDocCell<'src> {
 pub struct BorrowedCell<'src> {
     title: Option<String>,
     inline: bool,
-    toc_mode: TocMode,
+    toc: TocConfig,
     blocks: Vec<Block<'src>>,
 }
 
@@ -2141,7 +2164,7 @@ self_cell! {
 struct OwnedCellInner<'src> {
     title: Option<String>,
     inline: bool,
-    toc_mode: TocMode,
+    toc: TocConfig,
     blocks: Vec<Block<'src>>,
 }
 
@@ -2788,7 +2811,7 @@ fn line_has_unclosed_quote(line: &str) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use super::{AsciiDocCell, OwnedCell, OwnedCellInner, TocMode};
+    use super::{AsciiDocCell, OwnedCell, OwnedCellInner, TocConfig};
     use crate::parser::{
         HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
     };
@@ -2815,7 +2838,7 @@ mod tests {
             OwnedCellInner {
                 title: None,
                 inline: false,
-                toc_mode: TocMode::Disabled,
+                toc: TocConfig::disabled(),
                 blocks: vec![],
             }
         })));

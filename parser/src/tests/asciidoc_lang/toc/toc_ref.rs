@@ -1,0 +1,65 @@
+use crate::tests::prelude::*;
+
+track_file!("docs/modules/toc/pages/toc-ref.adoc");
+
+// This page is a per-converter (backend) reference table for the `toc` family
+// of attributes. This crate is a parser with no converter backends, so the
+// backend-specific rows are non-normative here; the documented default
+// behaviors (placement, `toclevels`, `toc-title`, `toc-class`) are verified on
+// the index, levels, and title pages.
+
+non_normative!(
+    r#"
+= TOC Attributes Reference
+:endash: &#8211;
+
+//[cols="1,1,2,2,1"]
+[%autowidth]
+|===
+|Attribute |Values |Example Syntax |Notes |Backends
+
+.4+|`toc`
+|`auto`, `left`, `right`, `macro`, `preamble`
+|`:toc: left`
+|Not set by default.
+Defaults to `auto` if value is unspecified.
+|html
+
+|`auto`, `macro`, `preamble`
+|`:toc: macro`
+|Not set by default.
+Defaults to `auto` if value is unspecified.
+|html (embeddable)
+
+|`auto`
+|`:toc:`
+|Not set by default.
+When the title page is enabled in PDF output, the table of contents is placed directly after the title page.
+|pdf
+
+|`auto`
+|`:toc:`
+|Not set by default.
+The placement and styling of the table of contents is determined by the DocBook toolchain configuration.
+|docbook
+
+|`toclevels`
+|0{endash}5
+|`:toclevels: 4`
+|Default value is `2`.
+|html, pdf
+
+|`toc-title`
+|user-defined
+|`:toc-title: Contents`
+|Default value is _Table of Contents_.
+|html, pdf
+
+|`toc-class`
+|valid CSS class name
+|`:toc-class: floating-toc`
+|Default value is _toc_.
+|html
+|===
+"#
+);

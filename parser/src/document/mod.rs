@@ -24,4 +24,5 @@ mod revision_line;
 pub use revision_line::RevisionLine;
 
 mod toc;
+pub(crate) use toc::TocConfig;
 pub use toc::TocMode;
