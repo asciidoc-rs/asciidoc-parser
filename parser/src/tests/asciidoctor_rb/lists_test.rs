@@ -5059,15 +5059,25 @@ mod callout_lists {
     }
 
     #[test]
-    #[ignore]
     fn should_match_trailing_line_separator_in_text_of_list_item() {
-        // TO DO: Unicode line separator (U+2028) handling in list item text.
+        // A Unicode LINE SEPARATOR (U+2028) is an ordinary character within a
+        // callout list item's text; it is not treated as a line break.
+        let doc =
+            Parser::default().parse("----\nA <1>\nB <2>\nC <3>\n----\n<1> a\n<2> b\u{2028}\n<3> c");
+
+        assert_css(&doc, "li", 3);
+        assert_xpath(&doc, "(//li)[2]/p[text()=\"b\u{2028}\"]", 1);
     }
 
     #[test]
-    #[ignore]
     fn should_match_line_separator_in_text_of_list_item() {
-        // TO DO: Unicode line separator (U+2028) handling in list item text.
+        // A Unicode LINE SEPARATOR (U+2028) embedded mid-text is preserved
+        // within the callout list item's text.
+        let doc = Parser::default()
+            .parse("----\nA <1>\nB <2>\nC <3>\n----\n<1> a\n<2> b\u{2028}b\n<3> c");
+
+        assert_css(&doc, "li", 3);
+        assert_xpath(&doc, "(//li)[2]/p[text()=\"b\u{2028}b\"]", 1);
     }
 }
 
