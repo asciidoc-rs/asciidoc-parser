@@ -8,7 +8,7 @@ use crate::{
     Parser, Span,
     attributes::Attrlist,
     blocks::{Block, ContentModel, IsBlock, Preamble, parse_utils::parse_blocks_until},
-    document::{Catalog, Header},
+    document::{Catalog, Header, TocMode},
     internal::debug::DebugSliceReference,
     parser::{
         CatalogResolver, InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning, SourceMap,
@@ -46,6 +46,7 @@ struct InternalDependent<'src> {
     source_map: SourceMap,
     catalog: Catalog,
     show_doctitle: bool,
+    toc_mode: TocMode,
 }
 
 self_cell! {
@@ -120,6 +121,11 @@ impl<'src> Document<'src> {
             // default is hidden), so resolve it from the final attribute state.
             let show_doctitle = parser.resolve_show_title(false);
 
+            // The `toc` attribute is header-only, so its placement is fixed once
+            // the header (and body) have been processed. Capture it here, while
+            // the parser still holds the document's resolved attribute state.
+            let toc_mode = TocMode::from_parser(parser);
+
             InternalDependent {
                 header,
                 blocks,
@@ -128,6 +134,7 @@ impl<'src> Document<'src> {
                 source_map,
                 catalog: parser.take_catalog(),
                 show_doctitle,
+                toc_mode,
             }
         });
 
@@ -153,6 +160,14 @@ impl<'src> Document<'src> {
     /// embedded document shows its title only when `showtitle` is set.
     pub fn show_doctitle(&self) -> bool {
         self.internal.borrow_dependent().show_doctitle
+    }
+
+    /// Return where (and whether) this document's table of contents is
+    /// generated, resolved from the [`toc` attribute].
+    ///
+    /// [`toc` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/
+    pub fn toc_mode(&self) -> TocMode {
+        self.internal.borrow_dependent().toc_mode
     }
 
     /// Return an iterator over any warnings found during parsing.

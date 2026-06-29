@@ -1424,10 +1424,9 @@ mod psv {
     }
 
     // Attribute/option inheritance into the nested AsciiDoc-cell document is
-    // implemented; the following remain unported for narrower reasons. The
-    // `to_dir` test needs the nested cell exposed as an introspectable document
-    // object carrying inherited options; the `toc` tests need TOC rendering (a
-    // separate unimplemented feature).
+    // implemented; the `to_dir` test below remains unported for a narrower
+    // reason: it needs the nested cell exposed as an introspectable document
+    // object carrying inherited options.
 
     #[test]
     #[ignore]
@@ -1437,28 +1436,58 @@ mod psv {
     fn asciidoc_table_cell_should_inherit_to_dir_option_from_parent_document() {}
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/546): AsciiDoc
-    // table cell should not inherit the toc setting.
-    fn asciidoc_table_cell_should_not_inherit_toc_setting_from_parent_document() {}
+    fn asciidoc_table_cell_should_not_inherit_toc_setting_from_parent_document() {
+        let doc = Parser::default().parse(
+            "= Document Title\n:toc:\n\n== Section\n\n|===\na|\n== Section in Nested Document\n\ncontent\n|===",
+        );
+
+        // The outer document renders one TOC; the nested cell does not inherit
+        // the `toc` setting, so no TOC appears inside the table.
+        assert_css(&doc, ".toc", 1);
+        assert_css(&doc, "table .toc", 0);
+    }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/546): enabling
-    // toc in an AsciiDoc table cell.
-    fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell() {}
+    fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell() {
+        let doc = Parser::default().parse(
+            "= Document Title\n\n== Section A\n\n|===\na|\n= Subdocument Title\n:toc:\n\n== Subdocument Section A\n\ncontent\n|===",
+        );
+
+        // The outer document has no TOC; the cell enables its own, so the single
+        // TOC is the one inside the table.
+        assert_css(&doc, ".toc", 1);
+        assert_css(&doc, "table .toc", 1);
+    }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/546): enabling
-    // toc in an AsciiDoc table cell even if hard unset by the API.
-    fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell_even_if_hard_unset_by_api() {}
+    fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell_even_if_hard_unset_by_api() {
+        // Hard-unsetting `toc` through the API (Ruby's `toc => nil`) suppresses
+        // the outer document's TOC but does not prevent the cell — a standalone
+        // nested document, and `toc` is one of the attributes a cell may set —
+        // from enabling its own.
+        let doc = Parser::default()
+            .with_intrinsic_attribute_bool("toc", false, ModificationContext::ApiOnly)
+            .parse(
+                "= Document Title\n\n== Section A\n\n|===\na|\n= Subdocument Title\n:toc:\n\n== Subdocument Section A\n\ncontent\n|===",
+            );
+
+        assert_css(&doc, ".toc", 1);
+        assert_css(&doc, "table .toc", 1);
+    }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/546): enabling
-    // toc in both the outer document and an AsciiDoc table cell.
-    fn should_be_able_to_enable_toc_in_both_outer_document_and_in_an_asciidoc_table_cell() {}
+    fn should_be_able_to_enable_toc_in_both_outer_document_and_in_an_asciidoc_table_cell() {
+        let doc = Parser::default().parse(
+            "= Document Title\n:toc:\n\n== Section A\n\n|===\na|\n= Subdocument Title\n:toc: macro\n\n[#table-cell-toc]\ntoc::[]\n\n== Subdocument Section A\n\ncontent\n|===",
+        );
+
+        // Two TOCs: the outer document's automatic TOC (`#toc`) and the cell's
+        // `toc::[]` macro TOC (carrying the `#table-cell-toc` id).
+        assert_css(&doc, ".toc", 2);
+        assert_css(&doc, "#toc", 1);
+        assert_css(&doc, "table .toc", 1);
+        assert_css(&doc, "table #table-cell-toc", 1);
+    }
 
     #[test]
     fn document_in_an_asciidoc_table_cell_should_not_see_doctitle_of_parent() {
