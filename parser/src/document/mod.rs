@@ -22,3 +22,6 @@ pub use header::Header;
 
 mod revision_line;
 pub use revision_line::RevisionLine;
+
+mod toc;
+pub use toc::TocMode;
