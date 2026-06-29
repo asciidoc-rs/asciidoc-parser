@@ -2702,25 +2702,17 @@ mod description_lists_dlist {
         }
 
         #[test]
-        #[ignore]
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/478):
-        // `attribute-missing` is now handled for inline content substitution
-        // (see `attributes::unresolved_references`), but this case additionally
-        // requires substituting attribute references in a *block macro target*
-        // (`image::{unresolved}[]`) and dropping the whole block when the target
-        // resolves to a missing attribute under `attribute-missing=drop-line`.
-        // That block-level drop mechanism is not yet implemented. Enable this
-        // test once it is.
         fn should_continue_to_parse_subsequent_blocks_attached_to_list_item_after_first_block_is_dropped()
          {
-            let _doc = Parser::default().parse(
+            let doc = Parser::default().parse(
                 ":attribute-missing: drop-line\n\nterm::\n+\nimage::{unresolved}[]\n+\nparagraph\n",
             );
-            todo!("assert_css: 'dl', output, 1");
-            todo!("assert_css: 'dl > dt', output, 1");
-            todo!("assert_css: 'dl > dt + dd', output, 1");
-            todo!("assert_css: 'dl > dt + dd > .imageblock', output, 0");
-            todo!("assert_css: 'dl > dt + dd > .paragraph', output, 1");
+
+            assert_css(&doc, "dl", 1);
+            assert_css(&doc, "dl > dt", 1);
+            assert_css(&doc, "dl > dt + dd", 1);
+            assert_css(&doc, "dl > dt + dd > .imageblock", 0);
+            assert_css(&doc, "dl > dt + dd > .paragraph", 1);
         }
 
         #[test]

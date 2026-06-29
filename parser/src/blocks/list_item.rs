@@ -5,7 +5,7 @@ use crate::{
     attributes::Attrlist,
     blocks::{
         Block, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItemMarker,
-        RawDelimitedBlock, SimpleBlock, metadata::BlockMetadata,
+        RawDelimitedBlock, SimpleBlock, block::BlockParseOutcome, metadata::BlockMetadata,
     },
     content::Content,
     internal::debug::DebugSliceReference,
@@ -388,7 +388,23 @@ impl<'src> ListItem<'src> {
             );
             warnings.extend(indented_block_maw.warnings);
 
-            let Some(indented_block_mi) = indented_block_maw.item else {
+            // A block dropped at parse time (`attribute-missing=drop-line` on a
+            // block-macro target) attaches nothing, but — like a real block —
+            // it consumes any active continuation and requires the next block
+            // to be indented or reintroduced with a `+`. (A dropped block is
+            // always a block macro, never `+`-prefixed content, so it can't set
+            // `had_content_starting_with_plus`.)
+            if let BlockParseOutcome::Dropped(after) = indented_block_maw.item {
+                next = after;
+                continuation_active = false;
+                next_block_must_be_indented = true;
+                continue;
+            }
+
+            // `NoMatch` only arises for empty/blank input, which is filtered out
+            // above before we get here; the defensive `break` mirrors the
+            // pre-drop-line code path.
+            let BlockParseOutcome::Parsed(indented_block_mi) = indented_block_maw.item else {
                 break;
             };
 

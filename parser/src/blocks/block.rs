@@ -6,7 +6,8 @@ use crate::{
     blocks::{
         AdmonitionBlock, Break, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItem,
         ListItemMarker, MediaBlock, Preamble, QuoteBlock, RawDelimitedBlock, SectionBlock,
-        SimpleBlock, TableBlock, metadata::BlockMetadata, starts_with_admonition_label,
+        SimpleBlock, TableBlock, media::TargetResolution, metadata::BlockMetadata,
+        starts_with_admonition_label,
     },
     content::{Content, SubstitutionGroup},
     document::{Attribute, RefType},
@@ -117,14 +118,67 @@ impl<'src> std::fmt::Debug for Block<'src> {
     }
 }
 
+/// Outcome of attempting to parse a single [`Block`].
+///
+/// Most blocks parse to [`Parsed`](Self::Parsed). [`Dropped`](Self::Dropped)
+/// supports `attribute-missing=drop-line`: when a block-macro target references
+/// a missing attribute, Asciidoctor discards the whole block, which the parser
+/// must distinguish both from a successful parse and from "no block matched"
+/// (so the block-collection loops advance past the dropped source rather than
+/// spinning or mis-parsing it).
+// `Parsed` embeds a `Block`, which is itself a large enum (see the matching
+// allow on `Block`). This outcome is short-lived and returned by value on the
+// hot parse path, so boxing it would just trade the size for an allocation.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum BlockParseOutcome<'src> {
+    /// A block was parsed.
+    Parsed(MatchedItem<'src, Block<'src>>),
+
+    /// The input was recognized as a block macro but dropped at parse time
+    /// because its target referenced a missing attribute under
+    /// `attribute-missing=drop-line`. The contained span is where parsing
+    /// should resume (the dropped block's `after`).
+    Dropped(Span<'src>),
+
+    /// No block matched. This happens only for empty or all-blank input.
+    NoMatch,
+}
+
 impl<'src> Block<'src> {
     /// Parse a block of any type and return a `Block` that describes it.
     ///
     /// Consumes any blank lines before and after the block.
+    ///
+    /// This is a test-only convenience wrapper over
+    /// [`parse_with_outcome`](Self::parse_with_outcome) that flattens the
+    /// drop-line outcome to an `Option`; production code uses
+    /// `parse_with_outcome` so it can react to a dropped block.
+    #[cfg(test)]
     pub(crate) fn parse(
         source: Span<'src>,
         parser: &mut Parser,
     ) -> MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>> {
+        let MatchAndWarnings { item, warnings } = Self::parse_internal(source, parser, None, false);
+
+        MatchAndWarnings {
+            item: match item {
+                BlockParseOutcome::Parsed(mi) => Some(mi),
+                BlockParseOutcome::Dropped(_) | BlockParseOutcome::NoMatch => None,
+            },
+            warnings,
+        }
+    }
+
+    /// Parse a block of any type, returning the full [`BlockParseOutcome`] so a
+    /// block-collection loop can advance past a block that was dropped at parse
+    /// time (`attribute-missing=drop-line`). Consumes any blank lines before
+    /// and after the block.
+    ///
+    /// This is the entry point used by production block-collection loops.
+    pub(crate) fn parse_with_outcome(
+        source: Span<'src>,
+        parser: &mut Parser,
+    ) -> MatchAndWarnings<'src, BlockParseOutcome<'src>> {
         Self::parse_internal(source, parser, None, false)
     }
 
@@ -143,17 +197,18 @@ impl<'src> Block<'src> {
         parser: &mut Parser,
         parent_list_markers: &[ListItemMarker<'src>],
         is_continuation: bool,
-    ) -> MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>> {
+    ) -> MatchAndWarnings<'src, BlockParseOutcome<'src>> {
         Self::parse_internal(source, parser, Some(parent_list_markers), is_continuation)
     }
 
-    /// Shared parser for [`Block::parse`] and [`Block::parse_for_list_item`].
+    /// Shared parser for [`parse_with_outcome`](Self::parse_with_outcome) and
+    /// [`parse_for_list_item`](Self::parse_for_list_item).
     fn parse_internal(
         source: Span<'src>,
         parser: &mut Parser,
         parent_list_markers: Option<&[ListItemMarker<'src>]>,
         is_continuation: bool,
-    ) -> MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>> {
+    ) -> MatchAndWarnings<'src, BlockParseOutcome<'src>> {
         // Optimization: If the first line doesn't match any of the early indications
         // for delimited blocks, titles, or attrlists, we can skip directly to treating
         // this as a simple block. That saves quite a bit of parsing time.
@@ -202,7 +257,7 @@ impl<'src> Block<'src> {
             );
 
             return MatchAndWarnings {
-                item: Some(MatchedItem { item: block, after }),
+                item: BlockParseOutcome::Parsed(MatchedItem { item: block, after }),
                 warnings,
             };
         }
@@ -216,7 +271,7 @@ impl<'src> Block<'src> {
             parser.set_attribute_from_body(&attr.item, &mut warnings);
 
             return MatchAndWarnings {
-                item: Some(MatchedItem {
+                item: BlockParseOutcome::Parsed(MatchedItem {
                     item: Self::DocumentAttribute(attr.item),
                     after: attr.after,
                 }),
@@ -267,7 +322,7 @@ impl<'src> Block<'src> {
                 );
 
                 return MatchAndWarnings {
-                    item: Some(MatchedItem {
+                    item: BlockParseOutcome::Parsed(MatchedItem {
                         item: block,
                         after: adm.after,
                     }),
@@ -293,7 +348,7 @@ impl<'src> Block<'src> {
                 );
 
                 return MatchAndWarnings {
-                    item: Some(MatchedItem {
+                    item: BlockParseOutcome::Parsed(MatchedItem {
                         item: block,
                         after: quote.after,
                     }),
@@ -319,7 +374,7 @@ impl<'src> Block<'src> {
                 );
 
                 return MatchAndWarnings {
-                    item: Some(MatchedItem {
+                    item: BlockParseOutcome::Parsed(MatchedItem {
                         item: block,
                         after: rdb.after,
                     }),
@@ -345,7 +400,7 @@ impl<'src> Block<'src> {
                 );
 
                 return MatchAndWarnings {
-                    item: Some(MatchedItem {
+                    item: BlockParseOutcome::Parsed(MatchedItem {
                         item: block,
                         after: cdb.after,
                     }),
@@ -371,7 +426,7 @@ impl<'src> Block<'src> {
                 );
 
                 return MatchAndWarnings {
-                    item: Some(MatchedItem {
+                    item: BlockParseOutcome::Parsed(MatchedItem {
                         item: block,
                         after: table.after,
                     }),
@@ -384,16 +439,26 @@ impl<'src> Block<'src> {
 
             if line.item.starts_with("image::")
                 || line.item.starts_with("video::")
-                || line.item.starts_with("video::")
+                || line.item.starts_with("audio::")
             {
                 let mut media_block_maw = MediaBlock::parse(&metadata, parser);
 
-                if let Some(media_block) = media_block_maw.item {
+                if let Some(mut media_block) = media_block_maw.item {
                     // Only propagate warnings from media block parsing if we think this
                     // *is* a media block. Otherwise, there would likely be too many false
                     // positives.
                     if !media_block_maw.warnings.is_empty() {
                         warnings.append(&mut media_block_maw.warnings);
+                    }
+
+                    // Resolve attribute references in the macro target. Under
+                    // `attribute-missing=drop-line`, a reference to a missing
+                    // attribute drops the entire block (Asciidoctor behavior).
+                    if media_block.item.resolve_target(parser) == TargetResolution::Drop {
+                        return MatchAndWarnings {
+                            item: BlockParseOutcome::Dropped(media_block.after),
+                            warnings,
+                        };
                     }
 
                     let block = Self::Media(media_block.item);
@@ -407,7 +472,7 @@ impl<'src> Block<'src> {
                     );
 
                     return MatchAndWarnings {
-                        item: Some(MatchedItem {
+                        item: BlockParseOutcome::Parsed(MatchedItem {
                             item: block,
                             after: media_block.after,
                         }),
@@ -427,7 +492,7 @@ impl<'src> Block<'src> {
                 // continue quietly if `SectionBlock` parser rejects this block.
 
                 return MatchAndWarnings {
-                    item: Some(MatchedItem {
+                    item: BlockParseOutcome::Parsed(MatchedItem {
                         item: Self::Section(mi_section_block.item),
                         after: mi_section_block.after,
                     }),
@@ -444,7 +509,7 @@ impl<'src> Block<'src> {
                 // Continue quietly if `Break` parser rejects this block.
 
                 return MatchAndWarnings {
-                    item: Some(MatchedItem {
+                    item: BlockParseOutcome::Parsed(MatchedItem {
                         item: Self::Break(mi_break.item),
                         after: mi_break.after,
                     }),
@@ -459,7 +524,7 @@ impl<'src> Block<'src> {
                 && let Some(mi_list) = ListBlock::parse(&metadata, parser, &mut warnings)
             {
                 return MatchAndWarnings {
-                    item: Some(MatchedItem {
+                    item: BlockParseOutcome::Parsed(MatchedItem {
                         item: Self::List(mi_list.item),
                         after: mi_list.after,
                     }),
@@ -514,14 +579,17 @@ impl<'src> Block<'src> {
         };
 
         let mut result = MatchAndWarnings {
-            item: simple_block_mi.map(|mi| MatchedItem {
-                item: Self::Simple(mi.item),
-                after: mi.after,
-            }),
+            item: match simple_block_mi {
+                Some(mi) => BlockParseOutcome::Parsed(MatchedItem {
+                    item: Self::Simple(mi.item),
+                    after: mi.after,
+                }),
+                None => BlockParseOutcome::NoMatch,
+            },
             warnings,
         };
 
-        if let Some(ref matched_item) = result.item {
+        if let BlockParseOutcome::Parsed(ref matched_item) = result.item {
             Self::register_block_id(
                 matched_item.item.id(),
                 matched_item.item.title(),

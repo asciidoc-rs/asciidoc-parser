@@ -2,6 +2,7 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
+    content::substitute_attributes_in_macro_target,
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -12,6 +13,7 @@ use crate::{
 pub struct MediaBlock<'src> {
     type_: MediaType,
     target: Span<'src>,
+    resolved_target: CowStr<'src>,
     macro_attrlist: Attrlist<'src>,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
@@ -19,6 +21,18 @@ pub struct MediaBlock<'src> {
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
+}
+
+/// Outcome of resolving attribute references in a media block's target via
+/// [`MediaBlock::resolve_target`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TargetResolution {
+    /// The target was resolved and stored; the block should be kept.
+    Keep,
+
+    /// The target referenced a missing attribute under
+    /// `attribute-missing=drop-line`, so the entire block should be dropped.
+    Drop,
 }
 
 /// A media type may be one of three different types.
@@ -124,6 +138,11 @@ impl<'src> MediaBlock<'src> {
                 item: Self {
                     type_,
                     target: target.item,
+                    // Attribute references in the target are resolved later, in
+                    // `resolve_target` (which also decides whether a missing
+                    // reference should drop the whole block); until then, the
+                    // resolved target mirrors the raw target verbatim.
+                    resolved_target: target.item.data().into(),
                     macro_attrlist: macro_attrlist.item.item,
                     source,
                     title_source: metadata.title_source,
@@ -145,8 +164,44 @@ impl<'src> MediaBlock<'src> {
     }
 
     /// Return a [`Span`] describing the macro target.
+    ///
+    /// This is the target exactly as written in the source, _before_ any
+    /// attribute references within it are resolved. See
+    /// [`resolved_target()`](Self::resolved_target) for the resolved form.
     pub fn target(&'src self) -> Option<&'src Span<'src>> {
         Some(&self.target)
+    }
+
+    /// Return the macro target after any attribute references within it have
+    /// been resolved (honoring the [`attribute-missing`] document attribute).
+    ///
+    /// For the common case of a target with no attribute references, this is
+    /// identical to the text of [`target()`](Self::target).
+    ///
+    /// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
+    pub fn resolved_target(&self) -> &str {
+        self.resolved_target.as_ref()
+    }
+
+    /// Resolve attribute references in this block's target, honoring the
+    /// [`attribute-missing`] document attribute.
+    ///
+    /// On success the resolved target is stored (see
+    /// [`resolved_target()`](Self::resolved_target)) and
+    /// [`TargetResolution::Keep`] is returned. When the target references a
+    /// missing attribute and `attribute-missing=drop-line` is in effect,
+    /// [`TargetResolution::Drop`] is returned and the caller drops the
+    /// entire block.
+    ///
+    /// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
+    pub(crate) fn resolve_target(&mut self, parser: &Parser) -> TargetResolution {
+        match substitute_attributes_in_macro_target(self.target, parser) {
+            Some(resolved) => {
+                self.resolved_target = resolved;
+                TargetResolution::Keep
+            }
+            None => TargetResolution::Drop,
+        }
     }
 
     /// Return the macro's attribute list.
@@ -698,6 +753,142 @@ mod tests {
                 warning: WarningType::EmptyAttributeValue,
             }]
         );
+    }
+
+    mod target_resolution {
+        #![allow(clippy::indexing_slicing)]
+
+        use crate::{
+            blocks::{MediaBlock, media::TargetResolution, metadata::BlockMetadata},
+            parser::ModificationContext,
+            tests::prelude::*,
+            warnings::WarningType,
+        };
+
+        /// Parses `input` as a media block and resolves its target against
+        /// `parser`, returning the resolved [`MediaBlock`] (or `None` if the
+        /// block was dropped).
+        fn resolve<'i>(input: &'i str, parser: &mut Parser) -> Option<MediaBlock<'i>> {
+            let mut block = MediaBlock::parse(&BlockMetadata::new(input), parser)
+                .unwrap_if_no_warnings()
+                .unwrap()
+                .item;
+
+            match block.resolve_target(parser) {
+                TargetResolution::Keep => Some(block),
+                TargetResolution::Drop => None,
+            }
+        }
+
+        fn parser_with_mode(mode: &str) -> Parser {
+            Parser::default().with_intrinsic_attribute(
+                "attribute-missing",
+                mode,
+                ModificationContext::Anywhere,
+            )
+        }
+
+        #[test]
+        fn target_without_reference_is_unchanged() {
+            // The fast path (no `{`) returns the borrowed target verbatim.
+            let mut p = Parser::default();
+            let block = resolve("image::foo.png[]", &mut p).unwrap();
+            assert_eq!(block.resolved_target(), "foo.png");
+        }
+
+        #[test]
+        fn resolves_a_defined_reference() {
+            let mut p = Parser::default().with_intrinsic_attribute(
+                "name",
+                "bar",
+                ModificationContext::Anywhere,
+            );
+            let block = resolve("image::pre-{name}-post.png[]", &mut p).unwrap();
+            assert_eq!(block.resolved_target(), "pre-bar-post.png");
+        }
+
+        #[test]
+        fn skip_leaves_a_missing_reference_in_place() {
+            // `skip` is the default `attribute-missing` mode.
+            let mut p = Parser::default();
+            let block = resolve("image::a{missing}b.png[]", &mut p).unwrap();
+            assert_eq!(block.resolved_target(), "a{missing}b.png");
+            assert!(p.take_substitution_warnings().is_empty());
+        }
+
+        #[test]
+        fn drop_removes_only_the_missing_reference() {
+            let mut p = parser_with_mode("drop");
+            let block = resolve("image::a{missing}b.png[]", &mut p).unwrap();
+            assert_eq!(block.resolved_target(), "ab.png");
+        }
+
+        #[test]
+        fn warn_leaves_the_reference_and_records_a_warning() {
+            let mut p = parser_with_mode("warn");
+            let block = resolve("image::a{missing}b.png[]", &mut p).unwrap();
+            assert_eq!(block.resolved_target(), "a{missing}b.png");
+
+            let warnings = p.take_substitution_warnings();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::SkippingReferenceToMissingAttribute("missing".to_string())
+            );
+        }
+
+        #[test]
+        fn drop_line_drops_the_whole_block() {
+            let mut p = parser_with_mode("drop-line");
+            assert!(resolve("image::a{missing}b.png[]", &mut p).is_none());
+        }
+
+        #[test]
+        fn drop_line_keeps_a_block_whose_reference_resolves() {
+            let mut p = parser_with_mode("drop-line").with_intrinsic_attribute(
+                "name",
+                "bar",
+                ModificationContext::Anywhere,
+            );
+            let block = resolve("image::{name}.png[]", &mut p).unwrap();
+            assert_eq!(block.resolved_target(), "bar.png");
+        }
+
+        #[test]
+        fn drop_line_drops_a_top_level_block_but_keeps_following_blocks() {
+            // Exercises the drop at the document (non-list) level, which flows
+            // through `parse_blocks_until`.
+            let doc = Parser::default().parse(
+                ":attribute-missing: drop-line\n\nimage::{unresolved}[]\n\nparagraph after\n",
+            );
+
+            assert_css(&doc, ".imageblock", 0);
+            assert_css(&doc, ".paragraph", 1);
+        }
+
+        #[test]
+        fn drop_line_drops_a_top_level_audio_block() {
+            // Audio is a block macro too, so it honors `drop-line` just like an
+            // image block.
+            let doc = Parser::default().parse(
+                ":attribute-missing: drop-line\n\naudio::{unresolved}[]\n\nparagraph after\n",
+            );
+
+            assert_css(&doc, ".audioblock", 0);
+            assert_css(&doc, ".paragraph", 1);
+        }
+
+        #[test]
+        fn escaped_missing_reference_never_drops_the_block() {
+            // An escaped reference is not a missing reference, so even under
+            // `drop-line` the block survives. (As elsewhere in the crate, the
+            // escaping backslash is preserved verbatim by the attribute
+            // substitution.)
+            let mut p = parser_with_mode("drop-line");
+            let block = resolve("image::a\\{missing}b.png[]", &mut p).unwrap();
+            assert_eq!(block.resolved_target(), "a\\{missing}b.png");
+            assert!(p.take_substitution_warnings().is_empty());
+        }
     }
 
     mod media_type {
