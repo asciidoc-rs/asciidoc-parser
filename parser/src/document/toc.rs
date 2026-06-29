@@ -140,15 +140,16 @@ impl TocConfig {
 }
 
 /// Resolves the `toclevels` depth. Accepted values are the integers 0 through
-/// 5; the value `0` is coerced to `1` (this crate has no multipart-book parts,
-/// so level 0 sections never appear), and any unparseable value falls back to
-/// the default of 2.
+/// 5: the value `0` is coerced to `1` (this crate has no multipart-book parts,
+/// so level 0 sections never appear) and values above `5` are clamped to `5`,
+/// matching the documented range. Any unparseable value falls back to the
+/// default of 2.
 fn resolve_levels(parser: &Parser) -> usize {
     parser
         .attribute_value("toclevels")
         .as_maybe_str()
         .and_then(|s| s.trim().parse::<usize>().ok())
-        .map(|n| n.max(1))
+        .map(|n| n.clamp(1, 5))
         .unwrap_or(DEFAULT_TOCLEVELS)
 }
 
@@ -217,8 +218,10 @@ mod tests {
     fn levels_default_and_overrides() {
         assert_eq!(doc_with(":toc:").toc_levels(), 2);
         assert_eq!(doc_with(":toc:\n:toclevels: 5").toc_levels(), 5);
-        // `0` is coerced to `1`; an unparseable value falls back to the default.
+        // `0` is coerced to `1`, values above `5` are clamped to `5`, and an
+        // unparseable value falls back to the default.
         assert_eq!(doc_with(":toc:\n:toclevels: 0").toc_levels(), 1);
+        assert_eq!(doc_with(":toc:\n:toclevels: 6").toc_levels(), 5);
         assert_eq!(doc_with(":toc:\n:toclevels: nope").toc_levels(), 2);
     }
 
