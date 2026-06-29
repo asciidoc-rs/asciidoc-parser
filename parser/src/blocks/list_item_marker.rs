@@ -249,6 +249,20 @@ impl<'src> ListItemMarker<'src> {
         }
     }
 
+    /// Returns the explicit number of a `<N>` callout marker, or `None` for an
+    /// automatically-numbered (`<.>`) callout or any non-callout marker.
+    pub(crate) fn callout_number(&self) -> Option<u32> {
+        match self {
+            Self::Callout(span) => span
+                .data()
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .parse::<u32>()
+                .ok(),
+            _ => None,
+        }
+    }
+
     /// Test for equality, disregarding span offsets.
     pub(crate) fn is_match_for(&self, other: &Self) -> bool {
         match self {

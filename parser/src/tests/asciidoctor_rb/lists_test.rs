@@ -4968,13 +4968,24 @@ mod callout_lists {
     }
 
     #[test]
-    #[ignore]
     fn should_warn_if_numbers_in_callout_list_are_out_of_sequence() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Enable once the memory logger (callout-list out-of-sequence /
-        // "no callout found" warnings) is available.
-        let _doc = Parser::default().parse("----\n<beans> <1>\n  <bean class=\"com.example.HelloWorld\"/>\n</beans>\n----\n<1> Container of beans.\nBeans are fun.\n<3> An actual bean.\n");
-        todo!("memory logger test");
+        let doc = Parser::default().parse("----\n<beans> <1>\n  <bean class=\"com.example.HelloWorld\"/>\n</beans>\n----\n<1> Container of beans.\nBeans are fun.\n<3> An actual bean.\n");
+
+        // The callout list has two items.
+        assert_xpath(&doc, "//ol/li", 2);
+
+        // The verbatim block defines only callout 1, so the second item (whose
+        // marker is `<3>`) is both out of sequence and has no matching callout.
+        // Asciidoctor logs these via its memory logger; this crate surfaces them
+        // as document warnings.
+        let warnings: Vec<_> = doc.warnings().map(|w| &w.warning).collect();
+        assert_eq!(
+            warnings,
+            vec![
+                &WarningType::CalloutListItemOutOfSequence(2, 3),
+                &WarningType::NoCalloutFound(2),
+            ]
+        );
     }
 
     #[test]

@@ -83,6 +83,9 @@ pub enum WarningType {
     #[error("No callout found for <{0}>")]
     NoCalloutFound(usize),
 
+    #[error("callout list item index: expected {0}, got {1}")]
+    CalloutListItemOutOfSequence(usize, usize),
+
     #[error("Dropping table cell because it exceeds the specified number of columns")]
     TableCellExceedsColumnCount,
 
@@ -171,6 +174,12 @@ impl std::fmt::Debug for WarningType {
             WarningType::NoCalloutFound(number) => f
                 .debug_tuple("WarningType::NoCalloutFound")
                 .field(number)
+                .finish(),
+
+            WarningType::CalloutListItemOutOfSequence(expected, actual) => f
+                .debug_tuple("WarningType::CalloutListItemOutOfSequence")
+                .field(expected)
+                .field(actual)
                 .finish(),
 
             WarningType::TableCellExceedsColumnCount => {
@@ -445,6 +454,16 @@ mod tests {
                 let warning = WarningType::NoCalloutFound(2);
                 let debug_output = format!("{:?}", warning);
                 assert_eq!(debug_output, "WarningType::NoCalloutFound(2)");
+            }
+
+            #[test]
+            fn callout_list_item_out_of_sequence() {
+                let warning = WarningType::CalloutListItemOutOfSequence(2, 3);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::CalloutListItemOutOfSequence(2, 3)"
+                );
             }
 
             #[test]

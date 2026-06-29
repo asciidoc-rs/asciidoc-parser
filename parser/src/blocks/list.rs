@@ -158,16 +158,34 @@ impl<'src> ListBlock<'src> {
         };
 
         // A callout list annotates the callouts of a preceding verbatim block.
-        // Each item, by position, must correspond to a callout that was
-        // registered while substituting that block; warn about any that does
-        // not, then close the list so the next block's callouts start fresh.
+        // For each item (by position): an explicit `<N>` marker that doesn't
+        // match the item's position is out of sequence, and an item position
+        // with no callout registered while substituting the block has no
+        // matching callout. Both mirror Asciidoctor's `parse_callout_list`
+        // warnings. The list is then closed so the next block's callouts start
+        // fresh.
         if type_ == ListType::Callout {
             for (index, item) in items.iter().enumerate() {
-                let ordinal = (index + 1) as u32;
-                if !parser.callout_defined(ordinal) {
+                let position = (index + 1) as u32;
+
+                if let Some(marker_number) = item
+                    .as_list_item()
+                    .and_then(|li| li.list_item_marker().callout_number())
+                    && marker_number != position
+                {
                     warnings.push(Warning {
                         source: item.span(),
-                        warning: WarningType::NoCalloutFound(ordinal as usize),
+                        warning: WarningType::CalloutListItemOutOfSequence(
+                            position as usize,
+                            marker_number as usize,
+                        ),
+                    });
+                }
+
+                if !parser.callout_defined(position) {
+                    warnings.push(Warning {
+                        source: item.span(),
+                        warning: WarningType::NoCalloutFound(position as usize),
                     });
                 }
             }
