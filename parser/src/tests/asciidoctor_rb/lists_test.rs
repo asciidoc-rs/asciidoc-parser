@@ -4764,8 +4764,6 @@ mod description_lists_redux {
 mod callout_lists {
     // Adapted from Asciidoctor's callout list tests.
     //
-    // Implemented as part of https://github.com/asciidoc-rs/asciidoc-parser/issues/311.
-    //
     // Conum markup inside a verbatim block is part of the block's rendered
     // content string (it is not promoted to a DOM node, since the crate does
     // not parse verbatim content as HTML), so it is asserted with
