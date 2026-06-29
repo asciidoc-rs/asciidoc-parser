@@ -697,10 +697,10 @@ impl Parser {
         self.attribute_values.insert(attr_name, attribute_value);
     }
 
-    /// Called from [`Block::parse()`] to accept or reject an attribute value
-    /// from a document (body) attribute.
+    /// Called while parsing a block (see [`Block::parse_with_outcome()`]) to
+    /// accept or reject an attribute value from a document (body) attribute.
     ///
-    /// [`Block::parse()`]: crate::blocks::Block::parse
+    /// [`Block::parse_with_outcome()`]: crate::blocks::Block::parse_with_outcome
     pub(crate) fn set_attribute_from_body<'src>(
         &mut self,
         attr: &Attribute<'src>,

@@ -12,6 +12,7 @@ use crate::{
         CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
         QuoteScope, QuoteType, SpecialCharacter,
     },
+    strings::CowStr,
     warnings::WarningType,
 };
 
@@ -613,6 +614,47 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
     if changed {
         content.rendered = out.into();
     }
+}
+
+/// Applies the attribute-references substitution to a block macro target (the
+/// portion between the `::` and the `[` of an `image::`, `video::`, or
+/// `audio::` macro), honoring the [`attribute-missing`] document attribute.
+///
+/// Block macro targets are always a single line, so (unlike
+/// [`apply_attributes`]) there is no line splitting. Returns `None` when the
+/// target references a missing attribute under
+/// [`AttributeMissing::DropLine`] — signaling that the entire block should be
+/// dropped — and otherwise returns the substituted target.
+///
+/// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
+pub(crate) fn substitute_attributes_in_macro_target<'src>(
+    target: Span<'src>,
+    parser: &Parser,
+) -> Option<CowStr<'src>> {
+    let text = target.data();
+
+    // Without a reference there is nothing to substitute (and nothing that
+    // could trigger a drop), so the borrowed target is returned as-is.
+    if !text.contains('{') {
+        return Some(text.into());
+    }
+
+    let mode = AttributeMissing::from_parser(parser);
+
+    let mut replacer = AttributeReplacer {
+        parser,
+        mode,
+        source: target,
+        missing_on_line: false,
+    };
+
+    let replaced = ATTRIBUTE_REFERENCE.replace_all(text, replacer.by_ref());
+
+    if replacer.missing_on_line && mode == AttributeMissing::DropLine {
+        return None;
+    }
+
+    Some(replaced.into())
 }
 
 fn apply_character_replacements(
