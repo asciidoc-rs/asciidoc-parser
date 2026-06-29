@@ -6,7 +6,7 @@ use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::Content,
-    document::InterpretedValue,
+    document::{InterpretedValue, RefType},
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
@@ -378,6 +378,14 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                         .as_ref()
                         .and_then(|a| a.id().map(|s| s.to_string()));
 
+                    // Assigning an ID to inline quoted text (e.g.,
+                    // `[#free_the_world]#free the world#`) makes that phrase
+                    // referenceable, so register it in the catalog. A duplicate
+                    // ID here is non-fatal (first registration wins).
+                    if let Some(id) = &id {
+                        let _ = self.parser.register_ref(id, None, RefType::Anchor);
+                    }
+
                     self.parser.renderer.render_quoted_substitition(
                         type_, self.scope, attrlist, id, &caps[3], dest,
                     );
@@ -412,6 +420,14 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                 let id = attrlist
                     .as_ref()
                     .and_then(|a| a.id().map(|s| s.to_string()));
+
+                // Assigning an ID to inline quoted text (e.g.,
+                // `[#free_the_world]#free the world#`) makes that phrase
+                // referenceable, so register it in the catalog. A duplicate ID
+                // here is non-fatal (first registration wins).
+                if let Some(id) = &id {
+                    let _ = self.parser.register_ref(id, None, RefType::Anchor);
+                }
 
                 self.parser
                     .renderer

@@ -468,7 +468,17 @@ Specifically, it does not support named attributes, only the attribute shorthand
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "idname",
+                        RefEntry {
+                            id: "idname",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }

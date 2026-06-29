@@ -845,7 +845,17 @@ The id (`#`) shorthand can be used on inline quoted text.
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "free_the_world",
+                        RefEntry {
+                            id: "free_the_world",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }
@@ -1282,7 +1292,17 @@ The shorthand form in an attribute list does not impose this restriction.
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "1start_with_number",
+                        RefEntry {
+                            id: "1start_with_number",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }
@@ -1634,7 +1654,17 @@ include::example$id.adoc[tag=anchor-shorthand]
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "bookmark-b",
+                        RefEntry {
+                            id: "bookmark-b",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }
