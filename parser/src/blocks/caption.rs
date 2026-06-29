@@ -43,13 +43,21 @@ pub(crate) fn caption_attribute_name(context: &str) -> Option<&'static str> {
 /// The `prefix` is the text prepended to the block's title (e.g. `"Example 1.
 /// "`, including the trailing separator and space). The `number` is the bare
 /// counter value (e.g. `1`); it is `None` when an explicit caption override is
-/// in effect, since overrides are not numbered.
+/// in effect (overrides are not numbered) and also when an auto-numbered
+/// block's context counter holds a non-integer value (see [`Caption::number`]).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Caption {
     /// The caption prefix prepended to the title (e.g. `"Example 1. "`).
     pub(crate) prefix: String,
 
-    /// The bare counter value, or `None` for an explicit (unnumbered) caption.
+    /// The bare counter value, or `None` when the block is not numbered.
+    ///
+    /// This is `None` for an explicit (unnumbered) caption override. Because a
+    /// context's caption number is the document attribute `<context>-number`
+    /// (shared with `{counter:<context>-number}`), it is *also* `None` for an
+    /// auto-numbered block when that attribute has been set to a non-integer
+    /// value (e.g. `:table-number: A`): the prefix still shows the value, but
+    /// there is no bare integer to expose here.
     pub(crate) number: Option<usize>,
 }
 
@@ -158,10 +166,13 @@ pub(crate) fn assign_caption(
     // receives no caption and no number.
     match parser.attribute_value(attr_name) {
         InterpretedValue::Value(label) if !label.is_empty() => {
-            let number = parser.increment_counter(&format!("{context}-number"));
+            // The caption number is the counter named `<context>-number`, shared
+            // with any `{counter:<context>-number}` reference in the document.
+            let value = parser.counter(&format!("{context}-number"), None);
+            let prefix = format!("{label} {value}. ");
             Some(Caption {
-                prefix: format!("{label} {number}. "),
-                number: Some(number),
+                prefix,
+                number: value.parse::<usize>().ok(),
             })
         }
         _ => None,
