@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.16.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.15.2...v0.16.0)
+_29 June 2026_
+
+### Added
+
+* Finish implementation of TOC parsing ([#561](https://github.com/asciidoc-rs/asciidoc-parser/pull/561))
+* Add table of contents (toc) rendering ([#560](https://github.com/asciidoc-rs/asciidoc-parser/pull/560))
+* Add support for callouts ([#559](https://github.com/asciidoc-rs/asciidoc-parser/pull/559))
+* Add support for open blocks ([#556](https://github.com/asciidoc-rs/asciidoc-parser/pull/556))
+* Add support for example blocks ([#555](https://github.com/asciidoc-rs/asciidoc-parser/pull/555))
+* Add support for sidebars ([#554](https://github.com/asciidoc-rs/asciidoc-parser/pull/554))
+* Add support for collapsible blocks ([#553](https://github.com/asciidoc-rs/asciidoc-parser/pull/553))
+* Add support for blockquotes ([#552](https://github.com/asciidoc-rs/asciidoc-parser/pull/552))
+* Add support for admonitions ([#551](https://github.com/asciidoc-rs/asciidoc-parser/pull/551))
+
+### Other
+
+* Add spec coverage for archived blocks pages (styles.adoc, nest.adoc) ([#558](https://github.com/asciidoc-rs/asciidoc-parser/pull/558))
+* Add spec coverage for verse blocks (verses.adoc) ([#557](https://github.com/asciidoc-rs/asciidoc-parser/pull/557))
+
 ## [0.15.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.15.1...v0.15.2)
 _26 June 2026_
 
