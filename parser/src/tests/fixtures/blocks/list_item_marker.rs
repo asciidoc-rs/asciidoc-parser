@@ -15,6 +15,7 @@ pub(crate) enum ListItemMarker {
     RomanNumeralLower(Span),
     RomanNumeralUpper(Span),
     ArabicNumeral(Span),
+    Callout(Span),
 
     #[allow(unused)] // TEMPORARY while building
     DefinedTerm {
@@ -56,6 +57,8 @@ impl fmt::Debug for ListItemMarker {
                 .debug_tuple("ListItemMarker::ArabicNumeral")
                 .field(x)
                 .finish(),
+
+            Self::Callout(x) => f.debug_tuple("ListItemMarker::Callout").field(x).finish(),
 
             Self::DefinedTerm {
                 term,
@@ -142,6 +145,11 @@ fn fixture_eq_observed(
             crate::blocks::ListItemMarker::ArabicNumeral(observed_span) => {
                 fixture_span == observed_span
             }
+            _ => false,
+        },
+
+        ListItemMarker::Callout(fixture_span) => match observed {
+            crate::blocks::ListItemMarker::Callout(observed_span) => fixture_span == observed_span,
             _ => false,
         },
 

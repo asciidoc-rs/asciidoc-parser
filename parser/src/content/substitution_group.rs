@@ -104,7 +104,10 @@ impl SubstitutionGroup {
             }
 
             if step == "v" || step == "verbatim" {
-                steps = vec![SubstitutionStep::SpecialCharacters];
+                steps = vec![
+                    SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
+                ];
                 continue;
             }
 
@@ -143,6 +146,7 @@ impl SubstitutionGroup {
                 "r" | "replacements" => SubstitutionStep::CharacterReplacements,
                 "m" | "macros" => SubstitutionStep::Macros,
                 "p" | "post_replacements" => SubstitutionStep::PostReplacement,
+                "callouts" => SubstitutionStep::Callouts,
                 _ => {
                     return None;
                 }
@@ -232,7 +236,10 @@ impl SubstitutionGroup {
                 SubstitutionStep::AttributeReferences,
             ],
 
-            Self::Verbatim => &[SubstitutionStep::SpecialCharacters],
+            Self::Verbatim => &[
+                SubstitutionStep::SpecialCharacters,
+                SubstitutionStep::Callouts,
+            ],
 
             Self::Pass | Self::None => &[],
 
@@ -453,12 +460,20 @@ mod tests {
                 SubstitutionGroup::from_custom_string(None, "v,-r"),
                 Some(SubstitutionGroup::Custom(vec![
                     SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
                 ]))
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "v,-c"),
-                Some(SubstitutionGroup::Custom(vec![]))
+                Some(SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]))
+            );
+
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "v,-callouts"),
+                Some(SubstitutionGroup::Custom(vec![
+                    SubstitutionStep::SpecialCharacters,
+                ]))
             );
         }
 
@@ -481,6 +496,7 @@ mod tests {
                 SubstitutionGroup::from_custom_string(None, "v,m"),
                 Some(SubstitutionGroup::Custom(vec![
                     SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
                     SubstitutionStep::Macros,
                 ]))
             );
@@ -505,6 +521,7 @@ mod tests {
                 SubstitutionGroup::from_custom_string(None, "v,m"),
                 Some(SubstitutionGroup::Custom(vec![
                     SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
                     SubstitutionStep::Macros,
                 ]))
             );
@@ -520,6 +537,7 @@ mod tests {
                 Some(SubstitutionGroup::Custom(vec![
                     SubstitutionStep::AttributeReferences,
                     SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
                 ]))
             );
 
@@ -540,6 +558,7 @@ mod tests {
                 ),
                 Some(SubstitutionGroup::Custom(vec![
                     SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
                     SubstitutionStep::AttributeReferences,
                 ]))
             );

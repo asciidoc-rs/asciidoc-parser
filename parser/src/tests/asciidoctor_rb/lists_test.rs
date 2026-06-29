@@ -4762,38 +4762,42 @@ mod description_lists_redux {
 }
 
 mod callout_lists {
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-    // Implement these tests once callouts are implemented.
+    // Adapted from Asciidoctor's callout list tests.
+    //
+    // Conum markup inside a verbatim block is part of the block's rendered
+    // content string (it is not promoted to a DOM node, since the crate does
+    // not parse verbatim content as HTML), so it is asserted with
+    // `assert_output_contains`/`refute_output_contains` rather than an XPath
+    // node query. Tests that require infrastructure this crate does not have —
+    // the memory logger (for "no callout found" / out-of-sequence warnings),
+    // DocBook output, callout icon image/table rendering, or U+2028 line
+    // separators — remain `#[ignore]`d and are noted individually.
     use crate::tests::prelude::*;
 
     #[test]
-    #[ignore]
     fn does_not_recognize_callout_list_denoted_by_markers_that_only_have_a_trailing_bracket() {
-        let _doc = Parser::default()
+        let doc = Parser::default()
             .parse("----\nrequire 'asciidoctor' # <1>\n----\n1> Not a callout list item\n");
-        todo!("assert_css: '.colist', output, 0");
+        assert_css(&doc, ".colist", 0);
     }
 
     #[test]
-    #[ignore]
     fn should_not_hang_if_obsolete_callout_list_is_found_inside_list_item() {
-        let _doc = Parser::default().parse("* foo\n1> bar\n");
-        todo!("assert_css: '.colist', output, 0");
+        let doc = Parser::default().parse("* foo\n1> bar\n");
+        assert_css(&doc, ".colist", 0);
     }
 
     #[test]
-    #[ignore]
     fn should_not_hang_if_obsolete_callout_list_is_found_inside_dlist_item() {
-        let _doc = Parser::default().parse("foo::\n1> bar\n");
-        todo!("assert_css: '.colist', output, 0");
+        let doc = Parser::default().parse("foo::\n1> bar\n");
+        assert_css(&doc, ".colist", 0);
     }
 
     #[test]
-    #[ignore]
     fn should_recognize_auto_numberd_callout_list_inside_list() {
-        let _doc =
+        let doc =
             Parser::default().parse("----\nrequire 'asciidoctor' # <1>\n----\n* foo\n<.> bar\n");
-        todo!("assert_css: '.colist', output, 1");
+        assert_css(&doc, ".colist", 1);
     }
 
     #[test]
@@ -4833,16 +4837,24 @@ mod callout_lists {
     }
 
     #[test]
-    #[ignore]
     fn callout_list_retains_block_content() {
-        let _doc = Parser::default().parse("[source, ruby]\n----\nrequire 'asciidoctor' # <1>\ndoc = Asciidoctor::Document.new('Hello, World!') # <2>\nputs doc.convert # <3>\n----\n<1> Imports the library\nas a RubyGem\n<2> Creates a new document\n* Scans the lines for known blocks\n* Converts the lines into blocks\n<3> Renders the document\n+\nYou can write this to file rather than printing to stdout.\n");
-        todo!("assert_xpath: '//ol/li', output, 3");
-        todo!(
-            "assert_xpath: '((//ol/li)[1]/p[text()=\"Imports the library\\nas a RubyGem\"])', output, 1"
+        let doc = Parser::default().parse("[source, ruby]\n----\nrequire 'asciidoctor' # <1>\ndoc = Asciidoctor::Document.new('Hello, World!') # <2>\nputs doc.convert # <3>\n----\n<1> Imports the library\nas a RubyGem\n<2> Creates a new document\n* Scans the lines for known blocks\n* Converts the lines into blocks\n<3> Renders the document\n+\nYou can write this to file rather than printing to stdout.\n");
+
+        // The callout list has three items.
+        assert_xpath(&doc, "//ol/li", 3);
+
+        // The first item's text wraps onto a second line.
+        assert_output_contains(&doc, "Imports the library\nas a RubyGem");
+
+        // The second item retains a nested unordered list with two items.
+        assert_css(&doc, ".colist ol li ul", 1);
+        assert_css(&doc, ".colist ol li ul li", 2);
+
+        // The third item retains its continuation paragraph.
+        assert_output_contains(
+            &doc,
+            "You can write this to file rather than printing to stdout.",
         );
-        todo!("assert_xpath: '((//ol/li)[2]//ul)', output, 1");
-        todo!("assert_xpath: '((//ol/li)[2]//ul/li)', output, 2");
-        todo!("assert_xpath: '((//ol/li)[3]//p)', output, 2");
     }
 
     #[test]
@@ -4852,147 +4864,185 @@ mod callout_lists {
     }
 
     #[test]
-    #[ignore]
     fn escaped_callout_should_not_be_interpreted_as_a_callout() {
-        let _doc = Parser::default().parse("[source,text]\n----\nrequire 'asciidoctor' # \\<1>\nAsciidoctor.convert 'convert me!' \\<2>\n----\n");
-        todo!("assert_css: 'pre b', output, 0");
-        todo!("assert_includes output, ' # &lt;1&gt;'");
-        todo!("assert_includes output, ' &lt;2&gt;'");
+        let doc = Parser::default().parse("[source,text]\n----\nrequire 'asciidoctor' # \\<1>\nAsciidoctor.convert 'convert me!' \\<2>\n----\n");
+
+        // No callout numbers are rendered.
+        refute_output_contains(&doc, "conum");
+
+        // The escaped callouts are rendered literally (sans backslash).
+        assert_output_contains(&doc, " # &lt;1&gt;");
+        assert_output_contains(&doc, " &lt;2&gt;");
     }
 
     #[test]
-    #[ignore]
     fn should_autonumber_dot_callouts() {
-        let _doc = Parser::default().parse("[source, ruby]\n----\nrequire 'asciidoctor' # <.>\ndoc = Asciidoctor::Document.new('Hello, World!') # <.>\nputs doc.convert # <.>\n----\n<.> Describe the first line\n<.> Describe the second line\n<.> Describe the third line\n");
-        todo!("xmlnodes_at_css 'pre'");
-        todo!("assert_includes pre_html, '(1)'");
-        todo!("assert_includes pre_html, '(2)'");
-        todo!("assert_includes pre_html, '(3)'");
-        todo!("assert_css: '.colist ol', output, 1");
-        todo!("assert_css: '.colist ol li', output, 3");
+        let doc = Parser::default().parse("[source, ruby]\n----\nrequire 'asciidoctor' # <.>\ndoc = Asciidoctor::Document.new('Hello, World!') # <.>\nputs doc.convert # <.>\n----\n<.> Describe the first line\n<.> Describe the second line\n<.> Describe the third line\n");
+
+        // The `<.>` markers in the verbatim block are numbered sequentially.
+        assert_output_contains(&doc, r#"<b class="conum">(1)</b>"#);
+        assert_output_contains(&doc, r#"<b class="conum">(2)</b>"#);
+        assert_output_contains(&doc, r#"<b class="conum">(3)</b>"#);
+
+        // The callout list has three items.
+        assert_css(&doc, ".colist ol", 1);
+        assert_css(&doc, ".colist ol li", 3);
     }
 
     #[test]
-    #[ignore]
     fn should_not_recognize_callouts_in_middle_of_line() {
-        let _doc = Parser::default().parse("[source, ruby]\n----\nputs \"The syntax <1> at the end of the line makes a code callout\"\n----\n");
-        todo!("assert_xpath: '//b', output, 0");
+        let doc = Parser::default().parse("[source, ruby]\n----\nputs \"The syntax <1> at the end of the line makes a code callout\"\n----\n");
+        refute_output_contains(&doc, "conum");
     }
 
     #[test]
-    #[ignore]
     fn should_allow_multiple_callouts_on_the_same_line() {
-        let _doc = Parser::default().parse("[source, ruby]\n----\nrequire 'asciidoctor' <1>\ndoc = Asciidoctor.load('Hello, World!') # <2> <3> <4>\nputs doc.convert <5><6>\nexit 0\n----\n<1> Require library\n<2> Load document from String\n<3> Uses default backend and doctype\n<4> One more for good luck\n<5> Renders document to String\n<6> Prints output to stdout\n");
-        todo!("assert_xpath: '//code/b', output, 6");
-        todo!("assert_match: / <b class=\"conum\">\\(1\\)<\\/b>$/");
-        todo!(
-            "assert_match: / <b class=\"conum\">\\(2\\)<\\/b> <b class=\"conum\">\\(3\\)<\\/b> <b class=\"conum\">\\(4\\)<\\/b>$/"
+        let doc = Parser::default().parse("[source, ruby]\n----\nrequire 'asciidoctor' <1>\ndoc = Asciidoctor.load('Hello, World!') # <2> <3> <4>\nputs doc.convert <5><6>\nexit 0\n----\n<1> Require library\n<2> Load document from String\n<3> Uses default backend and doctype\n<4> One more for good luck\n<5> Renders document to String\n<6> Prints output to stdout\n");
+
+        // A single trailing callout.
+        assert_output_contains(&doc, r#" <b class="conum">(1)</b>"#);
+
+        // Three space-separated callouts behind a line comment.
+        assert_output_contains(
+            &doc,
+            r#" <b class="conum">(2)</b> <b class="conum">(3)</b> <b class="conum">(4)</b>"#,
         );
-        todo!("assert_match: / <b class=\"conum\">\\(5\\)<\\/b><b class=\"conum\">\\(6\\)<\\/b>$/");
+
+        // Two adjacent callouts.
+        assert_output_contains(&doc, r#" <b class="conum">(5)</b><b class="conum">(6)</b>"#);
     }
 
     #[test]
-    #[ignore]
     fn should_allow_xml_comment_style_callouts() {
-        let _doc = Parser::default().parse("[source, xml]\n----\n<section>\n  <title>Section Title</title> <!--1-->\n  <simpara>Just a paragraph</simpara> <!--2-->\n</section>\n----\n<1> The title is required\n<2> The content isn't\n");
-        todo!("assert_xpath: '//b', output, 2");
-        todo!("assert_xpath: '//b[text()=\"(1)\"]', output, 1");
-        todo!("assert_xpath: '//b[text()=\"(2)\"]', output, 1");
+        let doc = Parser::default().parse("[source, xml]\n----\n<section>\n  <title>Section Title</title> <!--1-->\n  <simpara>Just a paragraph</simpara> <!--2-->\n</section>\n----\n<1> The title is required\n<2> The content isn't\n");
+
+        assert_output_contains(&doc, r#"&lt;!--<b class="conum">(1)</b>--&gt;"#);
+        assert_output_contains(&doc, r#"&lt;!--<b class="conum">(2)</b>--&gt;"#);
     }
 
     #[test]
-    #[ignore]
     fn should_not_allow_callouts_with_half_an_xml_comment() {
-        let _doc = Parser::default().parse("----\nFirst line <1-->\nSecond line <2-->\n----\n");
-        todo!("assert_xpath: '//b', output, 0");
+        let doc = Parser::default().parse("----\nFirst line <1-->\nSecond line <2-->\n----\n");
+        refute_output_contains(&doc, "conum");
     }
 
     #[test]
-    #[ignore]
     fn should_not_recognize_callouts_in_an_indented_description_list_paragraph() {
-        let _doc = Parser::default().parse("foo::\n  bar <1>\n\n<1> Not pointing to a callout\n");
-        todo!("memory logger test");
-        todo!("assert_xpath: '//dl//b', output, 0");
-        todo!("assert_xpath: '//dl/dd/p[text()=\"bar <1>\"]', output, 1");
-        todo!("assert_xpath: '//ol/li/p[text()=\"Not pointing to a callout\"]', output, 1");
-        todo!("assert_message logger, :WARN, '<stdin>: line 4: no callout found for <1>'");
+        let doc = Parser::default().parse("foo::\n  bar <1>\n\n<1> Not pointing to a callout\n");
+
+        // The `<1>` in the indented description-list paragraph is not a callout;
+        // it is rendered literally and produces no conum.
+        assert_xpath(&doc, "//dl//b", 0);
+        assert_output_contains(&doc, "bar &lt;1&gt;");
+
+        // The `<1> ...` line below is recognized as a callout list item.
+        assert_xpath(&doc, "//ol/li", 1);
+        assert_output_contains(&doc, "Not pointing to a callout");
+
+        // ...but it points at a callout that does not exist. Asciidoctor logs
+        // this via its memory logger; this crate surfaces it as a document
+        // warning instead.
+        let warnings: Vec<_> = doc.warnings().map(|w| &w.warning).collect();
+        assert_eq!(warnings, vec![&WarningType::NoCalloutFound(1)]);
     }
 
     #[test]
-    #[ignore]
     fn should_not_recognize_callouts_in_an_indented_outline_list_paragraph() {
-        let _doc = Parser::default().parse("* foo\n  bar <1>\n\n<1> Not pointing to a callout\n");
-        todo!("memory logger test");
-        todo!("assert_xpath: '//ul//b', output, 0");
-        todo!("assert_xpath: '//ul/li/p[text()=\"foo\\nbar <1>\"]', output, 1");
-        todo!("assert_xpath: '//ol/li/p[text()=\"Not pointing to a callout\"]', output, 1");
-        todo!("assert_message logger, :WARN, '<stdin>: line 4: no callout found for <1>'");
+        let doc = Parser::default().parse("* foo\n  bar <1>\n\n<1> Not pointing to a callout\n");
+
+        // The `<1>` folded into the outline-list item's paragraph is not a
+        // callout; it is rendered literally and produces no conum.
+        assert_xpath(&doc, "//ul//b", 0);
+        assert_output_contains(&doc, "foo\nbar &lt;1&gt;");
+
+        // The `<1> ...` line below is recognized as a callout list item.
+        assert_xpath(&doc, "//ol/li", 1);
+        assert_output_contains(&doc, "Not pointing to a callout");
+
+        // ...but it points at a callout that does not exist (surfaced as a
+        // document warning in place of Asciidoctor's memory logger).
+        let warnings: Vec<_> = doc.warnings().map(|w| &w.warning).collect();
+        assert_eq!(warnings, vec![&WarningType::NoCalloutFound(1)]);
     }
 
     #[test]
-    #[ignore]
     fn should_warn_if_numbers_in_callout_list_are_out_of_sequence() {
-        let _doc = Parser::default().parse("----\n<beans> <1>\n  <bean class=\"com.example.HelloWorld\"/>\n</beans>\n----\n<1> Container of beans.\nBeans are fun.\n<3> An actual bean.\n");
-        todo!("memory logger test");
-        todo!("assert_xpath: '//ol/li', output, 2");
-        todo!(
-            "assert_messages logger, [[:WARN, '<stdin>: line 8: callout list item index: expected 2, got 3'], [:WARN, '<stdin>: line 8: no callout found for <2>']]"
+        let doc = Parser::default().parse("----\n<beans> <1>\n  <bean class=\"com.example.HelloWorld\"/>\n</beans>\n----\n<1> Container of beans.\nBeans are fun.\n<3> An actual bean.\n");
+
+        // The callout list has two items.
+        assert_xpath(&doc, "//ol/li", 2);
+
+        // The verbatim block defines only callout 1, so the second item (whose
+        // marker is `<3>`) is both out of sequence and has no matching callout.
+        // Asciidoctor logs these via its memory logger; this crate surfaces them
+        // as document warnings.
+        let warnings: Vec<_> = doc.warnings().map(|w| &w.warning).collect();
+        assert_eq!(
+            warnings,
+            vec![
+                &WarningType::CalloutListItemOutOfSequence(2, 3),
+                &WarningType::NoCalloutFound(2),
+            ]
         );
     }
 
     #[test]
-    #[ignore]
     fn should_preserve_line_comment_chars_that_precede_callout_number_if_icons_is_not_set() {
-        let _doc = Parser::default().parse("[source,ruby]\n----\nputs 'Hello, world!' # <1>\n----\n<1> Ruby\n\n[source,groovy]\n----\nprintln 'Hello, world!' // <1>\n----\n<1> Groovy\n\n[source,clojure]\n----\n(def hello (fn [] \"Hello, world!\")) ;; <1>\n(hello)\n----\n<1> Clojure\n\n[source,haskell]\n----\nmain = putStrLn \"Hello, World!\" -- <1>\n----\n<1> Haskell\n");
-        todo!("xmlnodes_at_css 'pre'");
-        todo!("assert_xpath: '//b', output, 4");
-        todo!("assert_equal: nodes[0].text, 'puts 'Hello, world!' # (1)'");
-        todo!("assert_equal: nodes[1].text, 'println 'Hello, world!' // (1)'");
-        todo!(
-            "assert_equal: nodes[2].text, '(def hello (fn [] \"Hello, world!\")) ;; (1)\\n(hello)'"
-        );
-        todo!("assert_equal: nodes[3].text, 'main = putStrLn \"Hello, World!\" -- (1)'");
+        let doc = Parser::default().parse("[source,ruby]\n----\nputs 'Hello, world!' # <1>\n----\n<1> Ruby\n\n[source,groovy]\n----\nprintln 'Hello, world!' // <1>\n----\n<1> Groovy\n\n[source,clojure]\n----\n(def hello (fn [] \"Hello, world!\")) ;; <1>\n(hello)\n----\n<1> Clojure\n\n[source,haskell]\n----\nmain = putStrLn \"Hello, World!\" -- <1>\n----\n<1> Haskell\n");
+
+        // When icons are not enabled, the line-comment characters are retained
+        // ahead of the rendered callout.
+        assert_output_contains(&doc, r#"# <b class="conum">(1)</b>"#);
+        assert_output_contains(&doc, r#"// <b class="conum">(1)</b>"#);
+        assert_output_contains(&doc, r#";; <b class="conum">(1)</b>"#);
+        assert_output_contains(&doc, r#"-- <b class="conum">(1)</b>"#);
     }
 
     #[test]
-    #[ignore]
     fn should_remove_line_comment_chars_that_precede_callout_number_if_icons_is_font() {
-        let _doc = Parser::default().parse("[source,ruby]\n----\nputs 'Hello, world!' # <1>\n----\n<1> Ruby\n\n[source,groovy]\n----\nprintln 'Hello, world!' // <1>\n----\n<1> Groovy\n\n[source,clojure]\n----\n(def hello (fn [] \"Hello, world!\")) ;; <1>\n(hello)\n----\n<1> Clojure\n\n[source,haskell]\n----\nmain = putStrLn \"Hello, World!\" -- <1>\n----\n<1> Haskell\n");
-        todo!("xmlnodes_at_css 'pre'");
-        todo!("assert_css: 'pre b', output, 4");
-        todo!("assert_css: 'pre i.conum', output, 4");
-        todo!("assert_equal: nodes[0].text, 'puts 'Hello, world!' (1)'");
-        todo!("assert_equal: nodes[1].text, 'println 'Hello, world!' (1)'");
-        todo!("assert_equal: nodes[2].text, '(def hello (fn [] \"Hello, world!\")) (1)\\n(hello)'");
-        todo!("assert_equal: nodes[3].text, 'main = putStrLn \"Hello, World!\" (1)'");
-    }
+        let doc = Parser::default()
+            .with_intrinsic_attribute("icons", "font", ModificationContext::Anywhere)
+            .parse("[source,ruby]\n----\nputs 'Hello, world!' # <1>\n----\n<1> Ruby\n\n[source,groovy]\n----\nprintln 'Hello, world!' // <1>\n----\n<1> Groovy\n\n[source,clojure]\n----\n(def hello (fn [] \"Hello, world!\")) ;; <1>\n(hello)\n----\n<1> Clojure\n\n[source,haskell]\n----\nmain = putStrLn \"Hello, World!\" -- <1>\n----\n<1> Haskell\n");
 
-    #[test]
-    #[ignore]
-    fn should_allow_line_comment_chars_that_precede_callout_number_to_be_specified() {
-        let _doc = Parser::default().parse("[source,erlang,line-comment=%]\n----\nhello_world() -> % <1>\n  io:fwrite(\"hello, world~n\"). %<2>\n----\n<1> Erlang function clause head.\n<2> ~n adds a new line to the output.\n");
-        todo!("xmlnodes_at_css 'pre'");
-        todo!("assert_xpath: '//b', output, 2");
-        todo!(
-            "assert_equal: nodes[0].text, 'hello_world() -> % (1)\\n  io:fwrite(\"hello, world~n\"). %(2)'"
+        // When font icons are enabled, the line-comment characters are removed.
+        assert_output_contains(
+            &doc,
+            r#"'Hello, world!' <i class="conum" data-value="1"></i><b>(1)</b>"#,
         );
+        refute_output_contains(&doc, "# <i");
+        refute_output_contains(&doc, "// <i");
+        refute_output_contains(&doc, ";; <i");
+        refute_output_contains(&doc, "-- <i");
     }
 
     #[test]
-    #[ignore]
+    fn should_allow_line_comment_chars_that_precede_callout_number_to_be_specified() {
+        let doc = Parser::default().parse("[source,erlang,line-comment=%]\n----\nhello_world() -> % <1>\n  io:fwrite(\"hello, world~n\"). %<2>\n----\n<1> Erlang function clause head.\n<2> ~n adds a new line to the output.\n");
+
+        assert_output_contains(&doc, r#"% <b class="conum">(1)</b>"#);
+        assert_output_contains(&doc, r#"%<b class="conum">(2)</b>"#);
+    }
+
+    #[test]
     fn should_allow_line_comment_chars_preceding_callout_number_to_be_configurable_when_source_highlighter_is_coderay()
      {
-        let _doc = Parser::default().parse("[source,html,line-comment=-#]\n----\n-# <1>\n%p Hello\n----\n<1> Prints a paragraph with the text \"Hello\"\n");
-        todo!("xmlnodes_at_css 'pre'");
-        todo!("assert_xpath: '//b', output, 1");
-        todo!("assert_equal: nodes[0].text, '-# (1)\\n%p Hello'");
+        // Syntax highlighting is out of scope for this crate; only the
+        // configurable line-comment behavior is exercised here.
+        let doc = Parser::default().parse("[source,html,line-comment=-#]\n----\n-# <1>\n%p Hello\n----\n<1> Prints a paragraph with the text \"Hello\"\n");
+
+        assert_output_contains(&doc, r#"-# <b class="conum">(1)</b>"#);
+        assert_output_contains(&doc, "%p Hello");
     }
 
     #[test]
-    #[ignore]
     fn should_not_eat_whitespace_before_callout_number_if_line_comment_attribute_is_empty() {
-        let _doc = Parser::default().parse("[source,asciidoc,line-comment=]\n----\n-- <1>\n----\n<1> The start of an open block.\n");
-        todo!("assert_includes output, '-- <i class=\"conum\"'");
+        let doc = Parser::default()
+            .with_intrinsic_attribute("icons", "font", ModificationContext::Anywhere)
+            .parse("[source,asciidoc,line-comment=]\n----\n-- <1>\n----\n<1> The start of an open block.\n");
+
+        // With line-comment processing disabled, the `--` (and its trailing
+        // space) before the callout is preserved verbatim.
+        assert_output_contains(&doc, r#"-- <i class="conum""#);
     }
 
     #[test]
@@ -5002,63 +5052,82 @@ mod callout_lists {
     }
 
     #[test]
-    #[ignore]
     fn callout_list_with_icons_enabled() {
-        let _doc = Parser::default().parse("[source, ruby]\n----\nrequire 'asciidoctor' # <1>\ndoc = Asciidoctor::Document.new('Hello, World!') # <2>\nputs doc.convert # <3>\n----\n<1> Describe the first line\n<2> Describe the second line\n<3> Describe the third line\n");
-        todo!("assert_css: '.listingblock code > img', output, 3");
-        todo!(
-            "assert_xpath: '(/div[@class=\"listingblock\"]//code/img)[1][@src=\"./images/icons/callouts/1.png\"][@alt=\"1\"]', output, 1"
+        // `:icons:` (set, empty) enables image-based callout icons.
+        let doc = Parser::default().parse(":icons:\n[source, ruby]\n----\nrequire 'asciidoctor' # <1>\ndoc = Asciidoctor::Document.new('Hello, World!') # <2>\nputs doc.convert # <3>\n----\n<1> Describe the first line\n<2> Describe the second line\n<3> Describe the third line\n");
+
+        // The verbatim block renders each callout as an image inside the code.
+        assert_css(&doc, ".listingblock code > img", 3);
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"listingblock\"]//code/img)[1][@src=\"./images/icons/callouts/1.png\"][@alt=\"1\"]",
+            1,
         );
-        todo!("additional assertions");
-        todo!("assert_css: '.colist table td img', output, 3");
-        todo!(
-            "assert_xpath: '(/div[@class=\"colist arabic\"]//td/img)[1][@src=\"./images/icons/callouts/1.png\"][@alt=\"1\"]', output, 1"
+
+        // The callout list renders as an icon table.
+        assert_css(&doc, ".colist table td img", 3);
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"colist arabic\"]//td/img)[1][@src=\"./images/icons/callouts/1.png\"][@alt=\"1\"]",
+            1,
         );
-        todo!("additional assertions");
     }
 
     #[test]
-    #[ignore]
     fn callout_list_with_font_based_icons_enabled() {
-        let _doc = Parser::default().parse("[source]\n----\nrequire 'asciidoctor' # <1>\ndoc = Asciidoctor::Document.new('Hello, World!') #<2>\nputs doc.convert #<3>\n----\n<1> Describe the first line\n<2> Describe the second line\n<3> Describe the third line\n");
-        todo!("assert_css: '.listingblock code > i', output, 3");
-        todo!("assert_xpath: '(/div[@class=\"listingblock\"]//code/i)[1]', output, 1");
-        todo!(
-            "assert_xpath: '(/div[@class=\"listingblock\"]//code/i)[1][@class=\"conum\"][@data-value=\"1\"]', output, 1"
+        // `:icons: font` enables font-based callout icons.
+        let doc = Parser::default().parse(":icons: font\n[source]\n----\nrequire 'asciidoctor' # <1>\ndoc = Asciidoctor::Document.new('Hello, World!') #<2>\nputs doc.convert #<3>\n----\n<1> Describe the first line\n<2> Describe the second line\n<3> Describe the third line\n");
+
+        // The verbatim block renders each callout as a font icon followed by a
+        // bold number inside the code.
+        assert_css(&doc, ".listingblock code > i", 3);
+        assert_xpath(&doc, "(/div[@class=\"listingblock\"]//code/i)[1]", 1);
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"listingblock\"]//code/i)[1][@class=\"conum\"][@data-value=\"1\"]",
+            1,
         );
-        todo!(
-            "assert_xpath: '(/div[@class=\"listingblock\"]//code/i)[1]/following-sibling::b[text()=\"(1)\"]', output, 1"
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"listingblock\"]//code/i)[1]/following-sibling::b[text()=\"(1)\"]",
+            1,
         );
-        todo!("additional assertions");
-        todo!("assert_css: '.colist table td i', output, 3");
-        todo!("assert_xpath: '(/div[@class=\"colist arabic\"]//td/i)[1]', output, 1");
-        todo!(
-            "assert_xpath: '(/div[@class=\"colist arabic\"]//td/i)[1][@class=\"conum\"][@data-value=\"1\"]', output, 1"
+
+        // The callout list renders as an icon table.
+        assert_css(&doc, ".colist table td i", 3);
+        assert_xpath(&doc, "(/div[@class=\"colist arabic\"]//td/i)[1]", 1);
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"colist arabic\"]//td/i)[1][@class=\"conum\"][@data-value=\"1\"]",
+            1,
         );
-        todo!(
-            "assert_xpath: '(/div[@class=\"colist arabic\"]//td/i)[1]/following-sibling::b[text()=\"1\"]', output, 1"
+        assert_xpath(
+            &doc,
+            "(/div[@class=\"colist arabic\"]//td/i)[1]/following-sibling::b[text()=\"1\"]",
+            1,
         );
-        todo!("additional assertions");
     }
 
     #[test]
-    #[ignore]
     fn should_match_trailing_line_separator_in_text_of_list_item() {
-        let _doc =
+        // A Unicode LINE SEPARATOR (U+2028) is an ordinary character within a
+        // callout list item's text; it is not treated as a line break.
+        let doc =
             Parser::default().parse("----\nA <1>\nB <2>\nC <3>\n----\n<1> a\n<2> b\u{2028}\n<3> c");
-        todo!("Unicode line separator (U+2028) in test input");
-        todo!("assert_css: 'li', output, 3");
-        todo!("assert_xpath: '((//li)[2]/p[text()=\"b\u{2028}\"])', output, 1");
+
+        assert_css(&doc, "li", 3);
+        assert_xpath(&doc, "(//li)[2]/p[text()=\"b\u{2028}\"]", 1);
     }
 
     #[test]
-    #[ignore]
     fn should_match_line_separator_in_text_of_list_item() {
-        let _doc = Parser::default()
+        // A Unicode LINE SEPARATOR (U+2028) embedded mid-text is preserved
+        // within the callout list item's text.
+        let doc = Parser::default()
             .parse("----\nA <1>\nB <2>\nC <3>\n----\n<1> a\n<2> b\u{2028}b\n<3> c");
-        todo!("Unicode line separator (U+2028) in test input");
-        todo!("assert_css: 'li', output, 3");
-        todo!("assert_xpath: '((//li)[2]/p[text()=\"b\u{2028}b\"])', output, 1");
+
+        assert_css(&doc, "li", 3);
+        assert_xpath(&doc, "(//li)[2]/p[text()=\"b\u{2028}b\"]", 1);
     }
 }
 

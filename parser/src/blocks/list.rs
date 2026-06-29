@@ -148,6 +148,7 @@ impl<'src> ListBlock<'src> {
             ListItemMarker::RomanNumeralLower(_) => ListType::Ordered,
             ListItemMarker::RomanNumeralUpper(_) => ListType::Ordered,
             ListItemMarker::ArabicNumeral(_) => ListType::Ordered,
+            ListItemMarker::Callout(_) => ListType::Callout,
 
             ListItemMarker::DefinedTerm {
                 term: _,
@@ -155,6 +156,41 @@ impl<'src> ListBlock<'src> {
                 source: _,
             } => ListType::Description,
         };
+
+        // A callout list annotates the callouts of a preceding verbatim block.
+        // For each item (by position): an explicit `<N>` marker that doesn't
+        // match the item's position is out of sequence, and an item position
+        // with no callout registered while substituting the block has no
+        // matching callout. Both mirror Asciidoctor's `parse_callout_list`
+        // warnings. The list is then closed so the next block's callouts start
+        // fresh.
+        if type_ == ListType::Callout {
+            for (index, item) in items.iter().enumerate() {
+                let position = (index + 1) as u32;
+
+                if let Some(marker_number) = item
+                    .as_list_item()
+                    .and_then(|li| li.list_item_marker().callout_number())
+                    && marker_number != position
+                {
+                    warnings.push(Warning {
+                        source: item.span(),
+                        warning: WarningType::CalloutListItemOutOfSequence(
+                            position as usize,
+                            marker_number as usize,
+                        ),
+                    });
+                }
+
+                if !parser.callout_defined(position) {
+                    warnings.push(Warning {
+                        source: item.span(),
+                        warning: WarningType::NoCalloutFound(position as usize),
+                    });
+                }
+            }
+            parser.close_callout_list();
+        }
 
         Some(MatchedItem {
             item: Self {
@@ -203,6 +239,7 @@ impl<'src> ListBlock<'src> {
                 }
             }
             ListItemMarker::ArabicNumeral(_) => Some("arabic"),
+            ListItemMarker::Callout(_) => Some("arabic"),
             ListItemMarker::AlphaListLower(_) => Some("loweralpha"),
             ListItemMarker::AlphaListCapital(_) => Some("upperalpha"),
             ListItemMarker::RomanNumeralLower(_) => Some("lowerroman"),
@@ -285,6 +322,11 @@ pub enum ListType {
     /// A description list is an association list that consists of one or more
     /// terms (or sets of terms) that each have a description.
     Description,
+
+    /// A callout list provides annotations for lines in a preceding verbatim
+    /// block. Its items are marked with `<1>`, `<2>`, … (or `<.>` for automatic
+    /// numbering).
+    Callout,
 }
 
 impl std::fmt::Debug for ListType {
@@ -293,6 +335,7 @@ impl std::fmt::Debug for ListType {
             ListType::Unordered => write!(f, "ListType::Unordered"),
             ListType::Ordered => write!(f, "ListType::Ordered"),
             ListType::Description => write!(f, "ListType::Description"),
+            ListType::Callout => write!(f, "ListType::Callout"),
         }
     }
 }
@@ -321,6 +364,25 @@ mod tests {
         assert!(warnings.is_empty());
 
         result
+    }
+
+    /// Like [`list_parse`], but also returns the warnings produced. Used for
+    /// callout lists, which warn when an item has no matching callout in a
+    /// preceding verbatim block.
+    fn list_parse_with_warnings<'a>(
+        source: &'a str,
+    ) -> (
+        Option<MatchedItem<'a, crate::blocks::ListBlock<'a>>>,
+        Vec<Warning<'a>>,
+    ) {
+        let mut parser = crate::Parser::default();
+        let mut warnings: Vec<Warning<'a>> = vec![];
+
+        let metadata = BlockMetadata::parse(crate::Span::new(source), &mut parser).item;
+
+        let result = crate::blocks::list::ListBlock::parse(&metadata, &mut parser, &mut warnings);
+
+        (result, warnings)
     }
 
     #[test]
@@ -528,6 +590,59 @@ mod tests {
             format!("{:#?}", ListType::Description),
             "ListType::Description"
         );
+
+        assert_eq!(format!("{:#?}", ListType::Callout), "ListType::Callout");
+    }
+
+    #[test]
+    fn callout_list() {
+        // Parsed in isolation (no preceding verbatim block), so each item warns
+        // that it has no matching callout.
+        let (list, warnings) = list_parse_with_warnings("<1> First\n<2> Second\n");
+        let list = list.unwrap();
+
+        assert_eq!(list.item.type_(), ListType::Callout);
+        assert_eq!(list.item.marker_style(), Some("arabic"));
+
+        let items: Vec<_> = list.item.nested_blocks().collect();
+        assert_eq!(items.len(), 2);
+
+        assert_eq!(
+            items[0].nested_blocks().next().unwrap().rendered_content(),
+            Some("First")
+        );
+        assert_eq!(
+            items[1].nested_blocks().next().unwrap().rendered_content(),
+            Some("Second")
+        );
+
+        let warning_types: Vec<_> = warnings.iter().map(|w| &w.warning).collect();
+        assert_eq!(
+            warning_types,
+            vec![
+                &WarningType::NoCalloutFound(1),
+                &WarningType::NoCalloutFound(2),
+            ]
+        );
+    }
+
+    #[test]
+    fn callout_list_auto_numbered() {
+        // `<.>` markers form a single callout list.
+        let (list, warnings) = list_parse_with_warnings("<.> First\n<.> Second\n<.> Third\n");
+        let list = list.unwrap();
+
+        assert_eq!(list.item.type_(), ListType::Callout);
+        assert_eq!(list.item.nested_blocks().count(), 3);
+
+        // No preceding verbatim block defines these callouts.
+        assert_eq!(warnings.len(), 3);
+    }
+
+    #[test]
+    fn callout_list_marker_only_trailing_bracket_is_not_a_list() {
+        // `1>` (trailing bracket only) is not a callout list marker.
+        assert!(list_parse("1> Not a callout list item\n").is_none());
     }
 
     #[test]

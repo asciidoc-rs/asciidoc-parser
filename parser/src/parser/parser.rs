@@ -101,6 +101,27 @@ pub struct Parser {
     /// `separator` attribute. The counter is incremented and decremented around
     /// each AsciiDoc cell, so it nests correctly.
     pub(crate) nested_document_depth: usize,
+
+    /// Catalog of callout numbers registered by verbatim blocks, used to
+    /// validate the callout lists that annotate them.
+    ///
+    /// Wrapped in a [`RefCell`] because callouts are registered deep inside the
+    /// callouts substitution step, where only a shared `&Parser` is available.
+    callouts: RefCell<CalloutCatalog>,
+}
+
+/// Tracks the callout numbers defined by verbatim blocks so that a callout list
+/// can be validated against the callouts it annotates.
+///
+/// This mirrors the relevant behavior of Asciidoctor's `Callouts` catalog: each
+/// verbatim block registers the callout numbers it defines into the current
+/// list, and each callout list checks its items against that list (warning
+/// about any item with no matching callout) before the list is closed.
+#[derive(Clone, Debug, Default)]
+struct CalloutCatalog {
+    /// Callout numbers registered (in document order) since the last callout
+    /// list was closed.
+    current: Vec<u32>,
 }
 
 impl Default for Parser {
@@ -123,6 +144,7 @@ impl Default for Parser {
             counters: HashMap::new(),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
+            callouts: RefCell::new(CalloutCatalog::default()),
         }
     }
 }
@@ -192,6 +214,9 @@ impl Parser {
         // NOTE: `Document::parse` will transfer the catalog to itself at the end of the
         // parsing operation. Start each parse with a fresh catalog.
         *self.catalog.borrow_mut() = Catalog::new();
+
+        // Start each parse with an empty callout catalog.
+        *self.callouts.borrow_mut() = CalloutCatalog::default();
 
         // Reset section numbering for each new document.
         self.last_section_number = SectionNumber::default();
@@ -370,6 +395,26 @@ impl Parser {
         self.catalog
             .borrow_mut()
             .register_ref(id, reftext, ref_type)
+    }
+
+    /// Registers a callout number defined by a verbatim block.
+    ///
+    /// Takes `&self` so it can be called from the callouts substitution step,
+    /// which only holds a shared reference to the parser.
+    pub(crate) fn register_callout(&self, number: u32) {
+        self.callouts.borrow_mut().current.push(number);
+    }
+
+    /// Returns `true` if a callout numbered `number` was registered for the
+    /// current (not-yet-closed) callout list.
+    pub(crate) fn callout_defined(&self, number: u32) -> bool {
+        self.callouts.borrow().current.contains(&number)
+    }
+
+    /// Closes the current callout list, so callouts registered afterward belong
+    /// to the next list.
+    pub(crate) fn close_callout_list(&self) {
+        self.callouts.borrow_mut().current.clear();
     }
 
     /// Generate a unique ID derived from `base_id` and register it in the
@@ -844,6 +889,10 @@ mod tests {
 
         fn render_xref(&self, params: &crate::parser::XrefRenderParams, dest: &mut String) {
             dest.push_str(&format!("[XREF:{}]", params.target));
+        }
+
+        fn render_callout(&self, params: &crate::parser::CalloutRenderParams, dest: &mut String) {
+            dest.push_str(&format!("[CALLOUT:{}]", params.number));
         }
     }
 

@@ -170,6 +170,7 @@ You can inspect the value stored in an attribute using this trick:
                 substitution_group: SubstitutionGroup::Custom(vec![
                     SubstitutionStep::AttributeReferences,
                     SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
                 ],),
             },)
         );
@@ -252,6 +253,7 @@ If the macro is absent, the value is processed with the header substitution grou
                 substitution_group: SubstitutionGroup::Custom(vec![
                     SubstitutionStep::AttributeReferences,
                     SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
                 ],),
             },)
         );

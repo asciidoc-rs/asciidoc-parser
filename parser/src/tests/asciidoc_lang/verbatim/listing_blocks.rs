@@ -257,6 +257,7 @@ See xref:subs:apply-subs-to-blocks.adoc[] to learn more about the `subs` attribu
 
     let sg = vec![
         SubstitutionStep::SpecialCharacters,
+        SubstitutionStep::Callouts,
         SubstitutionStep::AttributeReferences,
     ];
 

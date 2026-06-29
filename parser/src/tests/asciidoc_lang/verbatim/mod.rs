@@ -1,3 +1,4 @@
+mod callouts;
 mod highlight_lines;
 mod highlight_php;
 mod listing_blocks;

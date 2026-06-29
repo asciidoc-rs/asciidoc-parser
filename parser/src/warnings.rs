@@ -80,6 +80,12 @@ pub enum WarningType {
     #[error("List item index: expected {0}, got {1}")]
     ListItemOutOfSequence(String, String),
 
+    #[error("No callout found for <{0}>")]
+    NoCalloutFound(usize),
+
+    #[error("Callout list item index: expected {0}, got {1}")]
+    CalloutListItemOutOfSequence(usize, usize),
+
     #[error("Dropping table cell because it exceeds the specified number of columns")]
     TableCellExceedsColumnCount,
 
@@ -161,6 +167,17 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::ListItemOutOfSequence(expected, actual) => f
                 .debug_tuple("WarningType::ListItemOutOfSequence")
+                .field(expected)
+                .field(actual)
+                .finish(),
+
+            WarningType::NoCalloutFound(number) => f
+                .debug_tuple("WarningType::NoCalloutFound")
+                .field(number)
+                .finish(),
+
+            WarningType::CalloutListItemOutOfSequence(expected, actual) => f
+                .debug_tuple("WarningType::CalloutListItemOutOfSequence")
                 .field(expected)
                 .field(actual)
                 .finish(),
@@ -429,6 +446,23 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::ListItemOutOfSequence(\"y\", \"z\")"
+                );
+            }
+
+            #[test]
+            fn no_callout_found() {
+                let warning = WarningType::NoCalloutFound(2);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::NoCalloutFound(2)");
+            }
+
+            #[test]
+            fn callout_list_item_out_of_sequence() {
+                let warning = WarningType::CalloutListItemOutOfSequence(2, 3);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::CalloutListItemOutOfSequence(2, 3)"
                 );
             }
 
