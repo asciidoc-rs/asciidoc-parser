@@ -185,6 +185,10 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         "outfilesuffix".to_owned(),
         any(ApiOrHeader, Value(".html".into())),
     );
+
+    // TO DO: `relfilesuffix` should default to the current value of
+    // `outfilesuffix` rather than a hardcoded `.html`; they diverge for
+    // non-HTML backends (e.g. `.xml` for DocBook).
     attrs.insert("relfilesuffix".to_owned(), set(Anywhere, ".html"));
     attrs.insert("webfonts".to_owned(), empty(ApiOrHeader, Set));
 
