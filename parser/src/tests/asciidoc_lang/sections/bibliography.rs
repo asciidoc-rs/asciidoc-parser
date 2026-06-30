@@ -114,10 +114,11 @@ Bibliography entries are declared as items in an unordered list.
     // anchor is registered and rendered.
     let doc = Parser::default()
         .parse("[bibliography]\n== References\n\n* [[[pp]]] Andy Hunt & Dave Thomas. 1999.\n");
+
     assert_css(&doc, ".ulist.bibliography ul li", 1);
     assert_css(&doc, "a#pp", 1);
 
-    non_normative!(
+    verifies!(
         r#"
 .Bibliography with references
 [source]
@@ -127,6 +128,21 @@ include::example$bibliography.adoc[tag=base]
 
 "#
     );
+
+    // The `base` example included above, with the `include::` directive expanded
+    // by inlining the example's `base` tag: two entries in a bibliography
+    // section, each cross-referenced from the introductory paragraph.
+    let doc = Parser::default().parse(
+        "_The Pragmatic Programmer_ <<pp>> should be required reading for all developers.\nTo learn all about design patterns, refer to the book by the \"`Gang of Four`\" <<gof>>.\n\n[bibliography]\n== References\n\n* [[[pp]]] Andy Hunt & Dave Thomas. The Pragmatic Programmer:\nFrom Journeyman to Master. Addison-Wesley. 1999.\n* [[[gof,gang]]] Erich Gamma, Richard Helm, Ralph Johnson & John Vlissides.\nDesign Patterns: Elements of Reusable Object-Oriented Software. Addison-Wesley. 1994.\n",
+    );
+
+    assert_css(&doc, ".ulist.bibliography", 1);
+    assert_css(&doc, "a#pp", 1);
+    assert_css(&doc, "a#gof", 1);
+
+    let paragraphs = rendered_paragraphs(&doc);
+    assert!(paragraphs[0].contains("<a href=\"#pp\">[pp]</a>"));
+    assert!(paragraphs[0].contains("<a href=\"#gof\">[gang]</a>"));
 
     verifies!(
         r#"
@@ -144,6 +160,7 @@ Using this label, you can then reference the entry from anywhere above the bibli
     let doc = Parser::default().parse(
         "Refer to <<pp>>.\n\n[bibliography]\n== References\n\n* [[[pp]]] Andy Hunt & Dave Thomas. 1999.\n",
     );
+
     let paragraphs = rendered_paragraphs(&doc);
     assert!(paragraphs[0].contains("<a href=\"#pp\">[pp]</a>"));
     assert!(paragraphs[1].starts_with("<a id=\"pp\"></a>[pp] "));
@@ -152,6 +169,7 @@ Using this label, you can then reference the entry from anywhere above the bibli
     // recognized as a bibliography anchor.
     let doc =
         Parser::default().parse("[bibliography]\n== References\n\n* [[[1984]]] George Orwell.\n");
+
     assert!(rendered_paragraphs(&doc)[0].starts_with("[[[1984]]] "));
 
     non_normative!(
@@ -176,6 +194,7 @@ This prevents the anchor from being matched as a bibliography anchor or a normal
     // matched neither as a bibliography anchor nor as a normal anchor.
     let doc =
         Parser::default().parse("[bibliography]\n== References\n\n* [\\[[word]]] Not an anchor.\n");
+
     let rendered = &rendered_paragraphs(&doc)[0];
     assert!(rendered.contains("[[[word]]]"));
     assert!(!rendered.contains("<a id=\"word\""));
@@ -194,6 +213,7 @@ If you specify xreftext on the bibliography anchor (e.g., `+[[[label,xreftext]]]
     let doc = Parser::default().parse(
         "See <<pp>> and <<gof>>.\n\n[bibliography]\n== References\n\n* [[[pp]]] Andy Hunt.\n* [[[gof,gang]]] Erich Gamma.\n",
     );
+
     let paragraphs = rendered_paragraphs(&doc);
     assert!(paragraphs[0].contains("<a href=\"#pp\">[pp]</a>"));
     assert!(paragraphs[0].contains("<a href=\"#gof\">[gang]</a>"));
@@ -211,6 +231,7 @@ For example, `+[[[label,1]]]+` will be converted to `[1]`.
     // A numeric xreftext makes the anchor and reference appear as that number.
     let doc = Parser::default()
         .parse("Read <<ref>>.\n\n[bibliography]\n== References\n\n* [[[ref,1]]] An entry.\n");
+
     let paragraphs = rendered_paragraphs(&doc);
     assert!(paragraphs[0].contains("<a href=\"#ref\">[1]</a>"));
     assert!(paragraphs[1].starts_with("<a id=\"ref\"></a>[1] "));
