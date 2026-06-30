@@ -504,7 +504,10 @@ The following message will also be inserted into the output:
     // the inserted message.
     let warnings: Vec<_> = doc.warnings().collect();
     assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0].warning, WarningType::IncludeFileNotFound);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::IncludeFileNotFound("content.adoc".to_owned())
+    );
     assert_eq!(
         warnings[0].source.data(),
         "Unresolved directive in my-document.adoc - include::content.adoc[]"

@@ -104,8 +104,8 @@ pub enum WarningType {
     #[error("invalid substitution type for stem macro: {0}")]
     InvalidSubstitutionTypeForStemMacro(String),
 
-    #[error("include file not found")]
-    IncludeFileNotFound,
+    #[error("include file not found: {0}")]
+    IncludeFileNotFound(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -217,7 +217,10 @@ impl std::fmt::Debug for WarningType {
                 .field(subs)
                 .finish(),
 
-            WarningType::IncludeFileNotFound => write!(f, "WarningType::IncludeFileNotFound"),
+            WarningType::IncludeFileNotFound(target) => f
+                .debug_tuple("WarningType::IncludeFileNotFound")
+                .field(target)
+                .finish(),
         }
     }
 }
@@ -540,9 +543,12 @@ mod tests {
 
             #[test]
             fn include_file_not_found() {
-                let warning = WarningType::IncludeFileNotFound;
+                let warning = WarningType::IncludeFileNotFound("content.adoc".to_string());
                 let debug_output = format!("{:?}", warning);
-                assert_eq!(debug_output, "WarningType::IncludeFileNotFound");
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeFileNotFound(\"content.adoc\")"
+                );
             }
         }
     }

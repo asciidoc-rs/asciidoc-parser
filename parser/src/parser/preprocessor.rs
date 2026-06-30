@@ -169,7 +169,7 @@ impl<'p> PreprocessorState<'p> {
                     self.warnings.push(DeferredWarning {
                         offset: self.output.len(),
                         len: replacement.len(),
-                        warning: WarningType::IncludeFileNotFound,
+                        warning: WarningType::IncludeFileNotFound(target),
                     });
 
                     self.output_line_number += 1;
@@ -502,7 +502,10 @@ mod tests {
         // A warning is recorded for the unresolved include, pointing at the
         // "Unresolved directive" text in the output.
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].warning, WarningType::IncludeFileNotFound);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeFileNotFound("missing.adoc".to_owned())
+        );
         assert_eq!(
             &processed_source[warnings[0].offset..warnings[0].offset + warnings[0].len],
             "Unresolved directive in main.adoc - include::missing.adoc[]"
@@ -570,7 +573,10 @@ mod tests {
 
         // With no handler at all, the include is likewise unresolved and warned.
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].warning, WarningType::IncludeFileNotFound);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeFileNotFound("missing.adoc".to_owned())
+        );
 
         assert_eq!(
             source_map.original_file_and_line(1),

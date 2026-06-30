@@ -257,91 +257,75 @@ include::example$source.adoc[tag=src-inc]
 
     let doc = Parser::default().parse("[,ruby]\n----\ninclude::app.rb[]\n----");
 
+    // The structure is asserted at the block level (rather than via a full
+    // `Document` fixture) because the unresolved-include warning below carries an
+    // owned target string, which the `&'static` warnings fixture can't express.
+    assert_eq!(doc.nested_blocks().count(), 1);
+
+    let block = doc.nested_blocks().next().unwrap();
+
     assert_eq!(
-        doc,
-        Document {
-            header: Header {
-                title_source: None,
-                title: None,
-                attributes: &[],
-                author_line: None,
-                revision_line: None,
-                comments: &[],
-                source: Span {
-                    data: "",
-                    line: 1,
+        block,
+        &Block::RawDelimited(RawDelimitedBlock {
+            content: Content {
+                original: Span {
+                    data: "Unresolved directive in (root file) - include::app.rb[]",
+                    line: 3,
                     col: 1,
-                    offset: 0,
+                    offset: 13,
                 },
+                rendered: "Unresolved directive in (root file) - include::app.rb[]",
             },
-            blocks: &[Block::RawDelimited(RawDelimitedBlock {
-                content: Content {
-                    original: Span {
-                        data: "Unresolved directive in (root file) - include::app.rb[]",
-                        line: 3,
-                        col: 1,
-                        offset: 13,
-                    },
-                    rendered: "Unresolved directive in (root file) - include::app.rb[]",
-                },
-                content_model: ContentModel::Verbatim,
-                context: "listing",
-                source: Span {
-                    data: "[,ruby]\n----\nUnresolved directive in (root file) - include::app.rb[]\n----",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                title_source: None,
-                title: None,
-                caption: None,
-                number: None,
-                anchor: None,
-                anchor_reftext: None,
-                attrlist: Some(Attrlist {
-                    attributes: &[
-                        ElementAttribute {
-                            name: None,
-                            value: "",
-                            shorthand_items: &[],
-                        },
-                        ElementAttribute {
-                            name: None,
-                            value: "ruby",
-                            shorthand_items: &[],
-                        },
-                    ],
-                    anchor: None,
-                    source: Span {
-                        data: ",ruby",
-                        line: 1,
-                        col: 2,
-                        offset: 1,
-                    },
-                },),
-                substitution_group: SubstitutionGroup::Verbatim,
-            },),],
+            content_model: ContentModel::Verbatim,
+            context: "listing",
             source: Span {
                 data: "[,ruby]\n----\nUnresolved directive in (root file) - include::app.rb[]\n----",
                 line: 1,
                 col: 1,
                 offset: 0,
             },
-            warnings: &[Warning {
+            title_source: None,
+            title: None,
+            caption: None,
+            number: None,
+            anchor: None,
+            anchor_reftext: None,
+            attrlist: Some(Attrlist {
+                attributes: &[
+                    ElementAttribute {
+                        name: None,
+                        value: "",
+                        shorthand_items: &[],
+                    },
+                    ElementAttribute {
+                        name: None,
+                        value: "ruby",
+                        shorthand_items: &[],
+                    },
+                ],
+                anchor: None,
                 source: Span {
-                    data: "Unresolved directive in (root file) - include::app.rb[]",
-                    line: 3,
-                    col: 1,
-                    offset: 13,
+                    data: ",ruby",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
                 },
-                warning: WarningType::IncludeFileNotFound,
-            }],
-            source_map: SourceMap(&[]),
-            catalog: Catalog {
-                refs: HashMap::from([]),
-                reftext_to_id: HashMap::from([]),
-            },
-        }
+            },),
+            substitution_group: SubstitutionGroup::Verbatim,
+        },)
+    );
+
+    // The include target could not be resolved (no handler is configured), so a
+    // warning is emitted carrying the unresolved target.
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::IncludeFileNotFound("app.rb".to_owned())
+    );
+    assert_eq!(
+        warnings[0].source.data(),
+        "Unresolved directive in (root file) - include::app.rb[]"
     );
 }
 
