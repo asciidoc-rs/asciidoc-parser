@@ -1,3 +1,4 @@
+mod audio_and_video;
 mod autolinks;
 mod complex_urls;
 mod icon_macro;
