@@ -3961,6 +3961,63 @@ mod macros {
                 &["The panthera tigris is the largest cat species.\n"]
             );
         }
+
+        #[test]
+        fn flow_shorthand_strips_see_and_seealso() {
+            // The DocBook-only `see`/`see-also` structure is not modeled, but
+            // Asciidoctor strips the `see` (` >> `) and `see-also` (` &> `)
+            // clauses from a *visible* term's inline text regardless of backend,
+            // leaving only the primary term in the flow of text.
+            let doc =
+                Parser::default().parse("((Flash >> HTML 5)) and ((HTML 5 &> CSS 3 &> SVG)) done.");
+            assert_eq!(rendered_paragraphs(&doc), &["Flash and HTML 5 done."]);
+        }
+
+        #[test]
+        fn flow_macro_strips_see_and_seealso_attributes() {
+            // For the macro form, `see`/`see-also` are named attributes, so the
+            // visible inline text is just the first positional attribute.
+            let doc = Parser::default().parse(
+                "indexterm2:[Flash,see=HTML 5] and indexterm2:[HTML 5,see-also=\"CSS 3, SVG\"] done.",
+            );
+            assert_eq!(rendered_paragraphs(&doc), &["Flash and HTML 5 done."]);
+        }
+
+        #[test]
+        fn flow_term_with_entities_but_no_see_clause_is_preserved() {
+            // A visible term may contain `>`/`&` (rendered as entities) without
+            // forming a `see`/`see-also` clause; the whole term is then kept.
+            let doc = Parser::default().parse("A ((tom >& jerry)) term.");
+            assert_eq!(rendered_paragraphs(&doc), &["A tom &gt;&amp; jerry term."]);
+        }
+
+        #[test]
+        fn flow_macro_without_positional_term_falls_back_to_argument() {
+            // When the argument carries only named attributes (no positional
+            // primary term), Asciidoctor displays the raw argument text.
+            let doc = Parser::default().parse("Only named indexterm2:[see=HTML 5] here.");
+            assert_eq!(rendered_paragraphs(&doc), &["Only named see=HTML 5 here."]);
+        }
+
+        #[test]
+        fn escape_macro_forms() {
+            // A backslash before either macro form is honored: the macro is
+            // emitted literally (without the backslash) and not interpreted.
+            let doc =
+                Parser::default().parse("A \\indexterm:[Tigers] and \\indexterm2:[Lancelot] here.");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &["A indexterm:[Tigers] and indexterm2:[Lancelot] here."]
+            );
+        }
+
+        #[test]
+        fn empty_macro_argument_is_passed_through() {
+            // A truly empty argument does not match the macro (Asciidoctor
+            // requires at least one character), so it is emitted verbatim.
+            let doc = Parser::default().parse("an indexterm:[] here");
+            assert_eq!(rendered_paragraphs(&doc), &["an indexterm:[] here"]);
+        }
     }
 
     #[ignore]
