@@ -14,6 +14,10 @@ mod catalog;
 pub(crate) use catalog::DuplicateIdError;
 pub use catalog::{Catalog, RefEntry, RefType};
 
+mod docinfo;
+pub(crate) use docinfo::Docinfo;
+pub use docinfo::DocinfoLocation;
+
 mod document;
 pub use document::Document;
 
