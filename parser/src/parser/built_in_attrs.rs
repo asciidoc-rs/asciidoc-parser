@@ -1,11 +1,31 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::LazyLock};
 
 use crate::{
     document::InterpretedValue,
     parser::{AllowableValue, AttributeValue, ModificationContext},
 };
 
+/// The built-in attribute table is identical for every parser, so build it
+/// once and hand out cheap clones. Cloning copies the hash table layout
+/// without re-hashing each key, which matters because [`Parser::default`]
+/// (and therefore this function) is called once per parse.
+///
+/// [`Parser::default`]: crate::Parser::default
+static BUILT_IN_ATTRS: LazyLock<HashMap<String, AttributeValue>> =
+    LazyLock::new(build_built_in_attrs);
+
+static BUILT_IN_DEFAULT_VALUES: LazyLock<HashMap<String, String>> =
+    LazyLock::new(build_built_in_default_values);
+
 pub(super) fn built_in_attrs() -> HashMap<String, AttributeValue> {
+    BUILT_IN_ATTRS.clone()
+}
+
+pub(super) fn built_in_default_values() -> HashMap<String, String> {
+    BUILT_IN_DEFAULT_VALUES.clone()
+}
+
+fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     let mut attrs: HashMap<String, AttributeValue> = HashMap::new();
 
     // ## Character replacement attributes
@@ -171,7 +191,7 @@ pub(super) fn built_in_attrs() -> HashMap<String, AttributeValue> {
     attrs
 }
 
-pub(super) fn built_in_default_values() -> HashMap<String, String> {
+fn build_built_in_default_values() -> HashMap<String, String> {
     let mut defaults: HashMap<String, String> = HashMap::new();
 
     defaults.insert("example-caption".to_owned(), "Example".to_owned());
