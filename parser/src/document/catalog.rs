@@ -18,8 +18,8 @@ pub struct Catalog {
 
     /// Footnotes registered (in document order) while substituting inline
     /// macros. Each entry corresponds to a `footnote:[…]` macro that *defined*
-    /// a footnote; subsequent references to an existing footnote (via a repeated
-    /// ID) reuse an entry rather than adding a new one.
+    /// a footnote; subsequent references to an existing footnote (via a
+    /// repeated ID) reuse an entry rather than adding a new one.
     ///
     /// A nested document (an AsciiDoc table cell) keeps its own footnote list:
     /// footnotes defined inside a cell are *not* shared with the main document.
@@ -178,9 +178,7 @@ impl Catalog {
 
     /// Returns the registered footnote with the given ID, if one exists.
     pub(crate) fn footnote_with_id(&self, id: &str) -> Option<&Footnote> {
-        self.footnotes
-            .iter()
-            .find(|f| f.id.as_deref() == Some(id))
+        self.footnotes.iter().find(|f| f.id.as_deref() == Some(id))
     }
 
     /// Removes and returns the current footnote list, leaving an empty list

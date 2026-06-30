@@ -1,0 +1,190 @@
+use crate::tests::prelude::*;
+
+track_file!("docs/modules/macros/pages/footnote.adoc");
+
+non_normative!(
+    r#"
+= Footnotes
+
+AsciiDoc provides the `footnote` macro for adding footnotes to your document.
+A footnote is a reference to an item in a footnote list.
+The footnote is defined in AsciiDoc at the location of the reference, but the text is extracted to an item in the footnote list.
+You can refer to the same footnote in multiple locations by assigning an ID to the first occurrence and referencing that ID in subsequent occurrences.
+
+NOTE: All AsciiDoc processors, including Asciidoctor, currently implement footnotes as endnotes.
+The placement and numbering of footnotes can be customized using a custom converter.
+
+== Footnote macro syntax
+
+"#
+);
+
+#[test]
+fn macro_syntax() {
+    verifies!(
+        r#"
+You can insert footnotes into your document using the footnote macro.
+The text of the footnote is defined between the square brackets of the footnote macro (`+footnote:[text]+`).
+The footnote macro accepts an optional ID using the target of the macro (`+footnote:id[text]+`).
+Specifying an ID allows you to refer to that same footnote from multiple locations in the document.
+To make a reference to a previously defined footnote, you specify the ID in the target without specifying text (`+footnote:id[]+`).
+
+"#
+    );
+
+    // The text between the square brackets defines the footnote. An inline
+    // marker is left in the flow of text and the text is extracted to the
+    // document's footnote registry.
+    let doc = Parser::default().parse("The footnote.footnote:[The text.]");
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[
+            r##"The footnote.<sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>"##
+        ]
+    );
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(footnotes[0].index, 1);
+    assert_eq!(footnotes[0].id, None);
+    assert_eq!(footnotes[0].text, "The text.");
+
+    // An ID supplied in the macro target lets the same footnote be referenced
+    // again with empty text (`footnote:id[]`); the reference reuses the
+    // original footnote's number and registers no new footnote.
+    let doc = Parser::default().parse("First.footnote:fn1[Shared text.] Again.footnote:fn1[]");
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[
+            r##"First.<sup class="footnote" id="_footnote_fn1">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup> Again.<sup class="footnoteref">[<a class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>"##
+        ]
+    );
+    assert_eq!(doc.catalog().footnotes().len(), 1);
+
+    // If both an ID and text are specified but the ID was already defined by an
+    // earlier footnote, the later text is ignored: the reference resolves to
+    // the original footnote.
+    let doc = Parser::default().parse("First.footnote:fn1[Original.] Again.footnote:fn1[Ignored.]");
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(footnotes[0].text, "Original.");
+}
+
+non_normative!(
+    r#"
+.Footnote syntax
+[source#ex-footnote]
+----
+include::example$footnote.adoc[tag=base-c]
+----
+<.> Insert the footnote macro directly after any punctuation.
+Note that the footnote macro only uses a single colon (`:`).
+<.> Insert the footnote's content within the square brackets (`+[]+`).
+The text may span several lines.
+<.> If you plan to reuse a footnote, specify a unique ID in the target position.
+<.> To reference an existing footnote, you only need to specify the ID of the footnote in the target slot.
+The text between the square brackets should be empty.
+If both the ID and text are specified, and the ID has already been defined by an earlier footnote, the text is ignored.
+
+TIP: If you find that having to put the footnote macro directly adjacent to a word makes it difficult to read, you can insert an attribute reference in between that resolves to an empty string (e.g., `+word{empty}footnote:[text]+`).
+
+"#
+);
+
+#[test]
+fn numbered_consecutively() {
+    verifies!(
+        r#"
+The footnotes are numbered consecutively throughout the article.
+
+"#
+    );
+
+    let doc = Parser::default()
+        .parse("One.footnote:[First.] Two.footnote:[Second.] Three.footnote:[Third.]");
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(
+        footnotes.iter().map(|f| f.index).collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+}
+
+non_normative!(
+    r#"
+The results of <<ex-footnote>> are displayed below.
+
+[.unstyled]
+|===
+a|
+include::example$footnote.adoc[tag=base-x]
+|===
+
+Just like normal paragraph text, you can use text formatting markup in the text of the footnote.
+
+== Externalizing a footnote
+
+Since footnotes are defined using an inline macro, the footnote content must be inserted alongside the text it's annotating.
+This requirement can make the text harder to read.
+You can solve this problem by externalizing your footnotes using document attributes.
+
+When defining a document attribute that holds a footnote, you can name the document attributes whatever you want.
+A common practice is to name the attribute using the `fn-` prefix.
+The name of the attribute can be as verbose (`fn-disclaimer`) or concise (`fn-1`) as you prefer.
+
+Here's the previous example with the footnotes defined in document attributes and inserted using attribute references.
+
+.Externalized footnote
+[source]
+----
+include::example$footnote.adoc[tag=externalized]
+----
+
+Notice you still get the benefit of seeing where the footnote is placed without all the noise.
+And since the footnotes are now defined in the document header, they could be further externalized to an include file.
+
+This approach works since attribute references are expanded before footnotes are parsed.
+However, this technique does not work if you have text formatting markup in the text of the footnote (e.g., `+*bold*+`).
+That markup will not be interpreted.
+That's because the attributes substitution (which replaces attribute references) is applied _after_ the quotes substitution (which interprets text formatting markup).
+In order to use text formatting markup in the text of the footnote, you need to configure the substitutions on the value of the attribute entry using the `\pass:[]` macro.
+
+The following example demonstrates how to configure the substitutions applied to the text of an externalized footnote so that text formatting markup is honored.
+
+.Externalized footnote with text formatting
+[source]
+----
+include::example$footnote.adoc[tag=externalized-format]
+----
+
+The `c,q` target on the pass macro instructs the processor to apply the special characters substitution followed by the quotes substitution.
+That means the text formatting in the footnote text will already be applied when the footnote is inserted using an attribute reference.
+
+== Footnotes in headings
+
+Footnotes are *not officially supported in headings* (section titles and discrete headings) in pre-spec AsciiDoc.
+While the footnote gets parsed, there's no guarantee that it will work properly and may require workarounds.
+This limitation may be lifted once the AsciiDoc Language is defined by the specification.
+
+If you use a footnote in a heading, you'll likely find that the footnote index is wrong (either not incremented or out of order).
+That's because headings (section titles and discrete headings) get converted out of document order for the purpose of generating IDs, populating up cross references, and eagerly resolving attribute references.
+
+The only way to workaround this limitation is by assigning an explicit ID *and* reftext to any heading that contains a footnote.
+For example:
+
+[source]
+----
+See <<heading>>.
+
+[[heading,Heading]]
+== Headingfootnote:[This is a heading with a footnote]
+----
+
+Assigning an explicit ID and reftext to a heading will prevent the heading from being converted eagerly (thus deferring the footnote substitution) until the heading is rendered.
+
+As a result, the footnote macro in the heading will be processed in document order.
+
+This workaround will also prevent the footnote number from reappearing in the text of an xref.
+
+Even with this workaround, you still have to avoid using attribute references in the heading as those also causes the heading to be converted eagerly (which forces substitutions to be applied).
+If you use an attribute reference in the heading, the footnotes will be processed out of document order.
+"#
+);

@@ -533,11 +533,13 @@ impl Parser {
             .parse::<i64>()
             .unwrap_or(0);
 
-        self.catalog.borrow_mut().register_footnote(crate::document::Footnote {
-            index,
-            id: id.map(|s| s.to_owned()),
-            text,
-        });
+        self.catalog
+            .borrow_mut()
+            .register_footnote(crate::document::Footnote {
+                index,
+                id: id.map(|s| s.to_owned()),
+                text,
+            });
 
         index
     }
@@ -1254,11 +1256,7 @@ mod tests {
             }
         }
 
-        fn render_footnote(
-            &self,
-            params: &crate::parser::FootnoteRenderParams,
-            dest: &mut String,
-        ) {
+        fn render_footnote(&self, params: &crate::parser::FootnoteRenderParams, dest: &mut String) {
             match params.index {
                 Some(index) => dest.push_str(&format!("[FOOTNOTE:{index}]")),
                 None => dest.push_str(&format!("[FOOTNOTE:{}]", params.text)),

@@ -450,8 +450,8 @@ pub struct IndexTermRenderParams<'a> {
 ///   `true`): a later occurrence (`footnote:id[]`) that reuses an existing
 ///   footnote's number.
 /// * An *unresolved* reference (`index` is `None`, `is_reference` is `true`): a
-///   reference whose ID was never defined; the renderer emits a visible
-///   error marker built from [`text`](Self::text).
+///   reference whose ID was never defined; the renderer emits a visible error
+///   marker built from [`text`](Self::text).
 ///
 /// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
 #[derive(Clone, Debug)]

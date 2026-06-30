@@ -4020,316 +4020,413 @@ mod macros {
         }
     }
 
+    /// Ported from the `Macros` > footnote tests in Asciidoctor's
+    /// `test/substitutions_test.rb`.
+    mod footnotes {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn single_line_footnote_macro_is_registered_and_output() {
+            let doc = Parser::default().parse("Sentence text footnote:[An example footnote.].");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"Sentence text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>."##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].id, None);
+            assert_eq!(footnotes[0].text, "An example footnote.");
+        }
+
+        #[test]
+        fn multi_line_footnote_macro_is_output_without_newline() {
+            let doc = Parser::default()
+                .parse("Sentence text footnote:[An example footnote\nwith wrapped text.].");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"Sentence text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>."##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].id, None);
+            assert_eq!(footnotes[0].text, "An example footnote with wrapped text.");
+        }
+
+        #[test]
+        fn escaped_closing_square_bracket_is_unescaped_when_converted() {
+            let doc = Parser::default().parse("footnote:[a \\] b].");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"<sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>."##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].text, "a ] b");
+        }
+
+        #[test]
+        fn footnote_macro_can_be_directly_adjacent_to_preceding_word() {
+            let doc = Parser::default().parse("Sentence textfootnote:[An example footnote.].");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"Sentence text<sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>."##
+                ]
+            );
+        }
+
+        #[test]
+        fn footnote_macro_may_contain_an_escaped_backslash() {
+            let doc = Parser::default()
+                .parse("footnote:[\\]]\nfootnote:[a \\] b]\nfootnote:[a \\]\\] b]");
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 3);
+            assert_eq!(footnotes[0].text, "]");
+            assert_eq!(footnotes[1].text, "a ] b");
+            assert_eq!(footnotes[2].text, "a ]] b");
+        }
+
+        #[test]
+        fn footnote_macro_may_contain_a_link_macro() {
+            let doc =
+                Parser::default().parse("Share your code. footnote:[https://github.com[GitHub]]");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"Share your code. <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>"##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(
+                footnotes[0].text,
+                r#"<a href="https://github.com">GitHub</a>"#
+            );
+        }
+
+        #[test]
+        fn footnote_macro_may_contain_a_plain_url() {
+            let doc = Parser::default()
+                .parse("the JLine footnote:[https://github.com/jline/jline2]\nlibrary.");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    "the JLine <sup class=\"footnote\">[<a id=\"_footnoteref_1\" class=\"footnote\" href=\"#_footnotedef_1\" title=\"View footnote.\">1</a>]</sup>\nlibrary."
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(
+                footnotes[0].text,
+                r#"<a href="https://github.com/jline/jline2" class="bare">https://github.com/jline/jline2</a>"#
+            );
+        }
+
+        #[test]
+        fn footnote_macro_followed_by_a_semicolon_may_contain_a_plain_url() {
+            let doc = Parser::default()
+                .parse("the JLine footnote:[https://github.com/jline/jline2];\nlibrary.");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    "the JLine <sup class=\"footnote\">[<a id=\"_footnoteref_1\" class=\"footnote\" href=\"#_footnotedef_1\" title=\"View footnote.\">1</a>]</sup>;\nlibrary."
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(
+                footnotes[0].text,
+                r#"<a href="https://github.com/jline/jline2" class="bare">https://github.com/jline/jline2</a>"#
+            );
+        }
+
+        #[test]
+        fn footnote_macro_may_contain_text_formatting() {
+            let doc = Parser::default().parse(
+                "You can download patches from the product page.footnote:[Only available with an _active_ subscription.]",
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(
+                footnotes[0].text,
+                "Only available with an <em>active</em> subscription."
+            );
+        }
+
+        #[test]
+        fn footnote_macro_may_contain_an_anchor_macro() {
+            let doc = Parser::default().parse("text footnote:[a [[b]] [[c\\]\\] d]");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>"##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].text, r#"a <a id="b"></a> [[c]] d"#);
+        }
+
+        #[test]
+        fn should_increment_index_of_subsequent_footnote_macros() {
+            let doc = Parser::default().parse(
+                "Sentence text footnote:[An example footnote.]. Sentence text footnote:[Another footnote.].",
+            );
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"Sentence text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>. Sentence text <sup class="footnote">[<a id="_footnoteref_2" class="footnote" href="#_footnotedef_2" title="View footnote.">2</a>]</sup>."##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 2);
+            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].id, None);
+            assert_eq!(footnotes[0].text, "An example footnote.");
+            assert_eq!(footnotes[1].index, 2);
+            assert_eq!(footnotes[1].id, None);
+            assert_eq!(footnotes[1].text, "Another footnote.");
+        }
+
+        #[test]
+        fn footnoteref_macro_with_id_and_single_line_text_is_registered() {
+            let doc = Parser::default()
+                .parse(":compat-mode:\n\nSentence text footnoteref:[ex1, An example footnote.].");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"Sentence text <sup class="footnote" id="_footnote_ex1">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>."##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].id.as_deref(), Some("ex1"));
+            assert_eq!(footnotes[0].text, "An example footnote.");
+        }
+
+        #[test]
+        fn footnoteref_macro_with_id_and_multi_line_text_is_registered_without_newlines() {
+            let doc = Parser::default().parse(
+                ":compat-mode:\n\nSentence text footnoteref:[ex1, An example footnote\nwith wrapped text.].",
+            );
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"Sentence text <sup class="footnote" id="_footnote_ex1">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>."##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].id.as_deref(), Some("ex1"));
+            assert_eq!(footnotes[0].text, "An example footnote with wrapped text.");
+        }
+
+        #[test]
+        fn footnoteref_macro_with_id_should_refer_to_footnoteref_with_same_id() {
+            let doc = Parser::default().parse(
+                ":compat-mode:\n\nSentence text footnoteref:[ex1, An example footnote.]. Sentence text footnoteref:[ex1].",
+            );
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r##"Sentence text <sup class="footnote" id="_footnote_ex1">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>. Sentence text <sup class="footnoteref">[<a class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>."##
+                ]
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].id.as_deref(), Some("ex1"));
+            assert_eq!(footnotes[0].text, "An example footnote.");
+        }
+
+        #[test]
+        fn unresolved_footnote_reference_produces_a_warning_and_red_fallback() {
+            let doc = Parser::default().parse("Sentence text.footnote:ex1[]");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &[
+                    r#"Sentence text.<sup class="footnoteref red" title="Unresolved footnote reference.">[ex1]</sup>"#
+                ]
+            );
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::InvalidFootnoteReference("ex1".to_string())
+            );
+        }
+
+        #[test]
+        fn footnoteref_macro_warns_when_compat_mode_is_not_enabled() {
+            let doc = Parser::default()
+                .parse("Sentence text.footnoteref:[fn1,Commentary on this sentence.]");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::DeprecatedFootnorefMacro(
+                    "footnoteref:[fn1,Commentary on this sentence.]".to_string()
+                )
+            );
+        }
+
+        #[test]
+        fn inline_footnote_macro_can_define_and_reference_a_footnote() {
+            let doc = Parser::default().parse(
+                ":compat-mode:\n\nYou can download the software from the product page.footnote:sub[Option only available if you have an active subscription.]\n\nYou can also file a support request.footnote:sub[]\n\nIf all else fails, you can give us a call.footnoteref:[sub]",
+            );
+
+            // The footnote is defined once and referenced twice.
+            assert_eq!(doc.catalog().footnotes().len(), 1);
+            // Every occurrence links to the single footnote definition.
+            assert_css(&doc, r##"a[href="#_footnotedef_1"]"##, 3);
+            // Setting compat mode suppresses the footnoteref deprecation warning.
+            assert_eq!(doc.warnings().count(), 0);
+        }
+
+        #[test]
+        fn should_parse_multiple_footnote_references_in_a_single_line() {
+            let doc = Parser::default().parse(
+                "notable text.footnote:id[about this [text\\]], footnote:id[], footnote:id[]",
+            );
+
+            // One defining occurrence and two references, all numbered 1.
+            assert_css(&doc, "sup.footnote", 1);
+            assert_css(&doc, "sup.footnoteref", 2);
+            assert_xpath(&doc, r#"//a[@class="footnote"]"#, 3);
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].text, "about this [text]");
+        }
+
+        #[test]
+        fn should_not_register_footnote_with_id_and_text_if_id_already_registered() {
+            let doc = Parser::default().parse(
+                ":fn-notable-text: footnote:id[about this text]\n\nnotable text.{fn-notable-text}\n\nmore notable text.{fn-notable-text}",
+            );
+
+            assert_css(&doc, "sup.footnote", 1);
+            assert_css(&doc, "sup.footnoteref", 1);
+            assert_eq!(doc.catalog().footnotes().len(), 1);
+        }
+
+        #[test]
+        fn should_not_resolve_an_inline_footnote_macro_missing_both_id_and_text() {
+            let doc = Parser::default().parse(
+                "The footnote:[] macro can be used for defining and referencing footnotes.\n\nThe footnoteref:[] macro is now deprecated.",
+            );
+
+            assert_rendered_contains(&doc, "The footnote:[] macro");
+            assert_rendered_contains(&doc, "The footnoteref:[] macro");
+            assert!(doc.catalog().footnotes().is_empty());
+        }
+
+        #[test]
+        fn inline_footnote_macro_can_define_a_numeric_id() {
+            let doc = Parser::default().parse(
+                "You can download the software from the product page.footnote:1[Option only available if you have an active subscription.]",
+            );
+
+            assert_css(&doc, "sup#_footnote_1", 1);
+            assert_css(&doc, "a#_footnoteref_1", 1);
+            assert_css(&doc, r##"a[href="#_footnotedef_1"]"##, 1);
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].id.as_deref(), Some("1"));
+        }
+
+        #[test]
+        fn inline_footnote_macro_can_define_an_id_with_unicode_word_characters() {
+            let doc = Parser::default().parse(
+                "L'origine du mot forêt{blank}footnote:forêt[un massif forestier] est complexe.\n\nQu'est-ce qu'une forêt ?{blank}footnote:forêt[]",
+            );
+
+            // (The DOM-based assert helpers can't slice the multi-byte `ê`, so
+            // the rendered markup is checked directly.)
+            let paras = rendered_paragraphs(&doc);
+            assert!(
+                paras[0].contains(r#"<sup class="footnote" id="_footnote_forêt">"#),
+                "{}",
+                paras[0]
+            );
+            // Both occurrences link to footnote 1.
+            assert!(paras[0].contains(r##"href="#_footnotedef_1""##));
+            assert!(paras[1].contains(r##"href="#_footnotedef_1""##));
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].id.as_deref(), Some("forêt"));
+            assert_eq!(footnotes[0].text, "un massif forestier");
+        }
+
+        // ---------------------------------------------------------------------
+        // Deferred: these depend on features the crate does not yet implement.
+
+        #[test]
+        #[ignore]
+        // TODO: Resolve deferred cross-references (and bibliography references)
+        // inside footnote text. The crate defers cross-reference resolution to a
+        // document-level pass over block content; because a footnote's text is
+        // extracted out of the block, an `<<id>>` / `xref:id[]` inside a footnote
+        // is not yet reached by that pass and stays unresolved in the stored
+        // footnote text. (Covers the Ruby tests "a footnote macro may contain a
+        // shorthand xref" / "an xref macro" and "should be able to reference a
+        // bibliography entry in a footnote".)
+        fn footnote_macro_may_contain_an_xref() {}
+
+        #[test]
+        #[ignore]
+        // TODO: Honor passthrough (`pass:[]` / `pass:q[]`) substitutions in the
+        // value of an externalized footnote attribute (e.g.
+        // `:fn-disclaimer: pass:q[footnote:[…_italic_…]]`).
+        fn externalized_footnote_macro_may_contain_text_formatting() {}
+
+        // Backend-specific test omitted: "subsequent footnote macros with
+        // escaped URLs should be restored in DocBook" asserts only against
+        // DocBook output (`backend: 'docbook'`), which the crate does not
+        // target.
+
+        #[test]
+        #[ignore]
+        // TODO: Footnotes used in section titles are converted out of document
+        // order (titles are converted eagerly to generate IDs), so their
+        // numbering differs from document order. The crate does not yet model
+        // the eager out-of-order conversion of section titles.
+        fn footnotes_in_headings_are_numbered_out_of_sequence() {}
+    }
+
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby_2() {
         todo!(
             "{}",
             r###"
-        test 'a single-line footnote macro should be registered and output as a footnote' do
-            para = block_from_string 'Sentence text footnote:[An example footnote.].'
-            assert_equal %(Sentence text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>.), para.sub_macros(para.source)
-            assert_equal 1, para.document.catalog[:footnotes].size
-            footnote = para.document.catalog[:footnotes].first
-            assert_equal 1, footnote.index
-            assert_nil footnote.id
-            assert_equal 'An example footnote.', footnote.text
-        end
-
-        test 'a multi-line footnote macro should be registered and output as a footnote without newline' do
-            para = block_from_string "Sentence text footnote:[An example footnote\nwith wrapped text.]."
-            assert_equal %(Sentence text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>.), para.sub_macros(para.source)
-            assert_equal 1, para.document.catalog[:footnotes].size
-            footnote = para.document.catalog[:footnotes].first
-            assert_equal 1, footnote.index
-            assert_nil footnote.id
-            assert_equal 'An example footnote with wrapped text.', footnote.text
-        end
-
-        test 'an escaped closing square bracket in a footnote should be unescaped when converted' do
-            para = block_from_string %(footnote:[a #{BACKSLASH}] b].)
-            assert_equal %(<sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>.), para.sub_macros(para.source)
-            assert_equal 1, para.document.catalog[:footnotes].size
-            footnote = para.document.catalog[:footnotes].first
-            assert_equal 'a ] b', footnote.text
-        end
-
-        test 'a footnote macro can be directly adjacent to preceding word' do
-            para = block_from_string 'Sentence textfootnote:[An example footnote.].'
-            assert_equal 'Sentence text<sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>.', para.sub_macros(para.source)
-        end
-
-        test 'a footnote macro may contain an escaped backslash' do
-            para = block_from_string "footnote:[\\]]\nfootnote:[a \\] b]\nfootnote:[a \\]\\] b]"
-            para.sub_macros para.source
-            assert_equal 3, para.document.catalog[:footnotes].size
-            footnote1 = para.document.catalog[:footnotes][0]
-            assert_equal ']', footnote1.text
-            footnote2 = para.document.catalog[:footnotes][1]
-            assert_equal 'a ] b', footnote2.text
-            footnote3 = para.document.catalog[:footnotes][2]
-            assert_equal 'a ]] b', footnote3.text
-        end
-
-        test 'a footnote macro may contain a link macro' do
-            para = block_from_string 'Share your code. footnote:[https://github.com[GitHub]]'
-            assert_equal %(Share your code. <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>), para.sub_macros(para.source)
-            assert_equal 1, para.document.catalog[:footnotes].size
-            footnote1 = para.document.catalog[:footnotes][0]
-            assert_equal '<a href="https://github.com">GitHub</a>', footnote1.text
-        end
-
-        test 'a footnote macro may contain a plain URL' do
-            para = block_from_string %(the JLine footnote:[https://github.com/jline/jline2]\nlibrary.)
-            result = para.sub_macros para.source
-            assert_equal %(the JLine <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>\nlibrary.), result
-            assert_equal 1, para.document.catalog[:footnotes].size
-            fn1 = para.document.catalog[:footnotes].first
-            assert_equal '<a href="https://github.com/jline/jline2" class="bare">https://github.com/jline/jline2</a>', fn1.text
-        end
-
-        test 'a footnote macro followed by a semi-colon may contain a plain URL' do
-            para = block_from_string %(the JLine footnote:[https://github.com/jline/jline2];\nlibrary.)
-            result = para.sub_macros para.source
-            assert_equal %(the JLine <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>;\nlibrary.), result
-            assert_equal 1, para.document.catalog[:footnotes].size
-            fn1 = para.document.catalog[:footnotes].first
-            assert_equal '<a href="https://github.com/jline/jline2" class="bare">https://github.com/jline/jline2</a>', fn1.text
-        end
-
-        test 'a footnote macro may contain text formatting' do
-            para = block_from_string 'You can download patches from the product page.footnote:[Only available with an _active_ subscription.]'
-            para.convert
-            footnotes = para.document.catalog[:footnotes]
-            assert_equal 1, footnotes.size
-            assert_equal 'Only available with an <em>active</em> subscription.', footnotes[0].text
-        end
-
-        test 'an externalized footnote macro may contain text formatting' do
-            input = <<~'EOS'
-            :fn-disclaimer: pass:q[footnote:[Only available with an _active_ subscription.]]
-
-            You can download patches from the production page.{fn-disclaimer}
-            EOS
-            doc = document_from_string input
-            doc.convert
-            footnotes = doc.catalog[:footnotes]
-            assert_equal 1, footnotes.size
-            assert_equal 'Only available with an <em>active</em> subscription.', footnotes[0].text
-        end
-
-        test 'a footnote macro may contain a shorthand xref' do
-            # specialcharacters escaping is simulated
-            para = block_from_string 'text footnote:[&lt;&lt;_install,install&gt;&gt;]'
-            doc = para.document
-            doc.register :refs, ['_install', (Asciidoctor::Inline.new doc, :anchor, 'Install', type: :ref, target: '_install'), 'Install']
-            catalog = doc.catalog
-            assert_equal %(text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>), para.sub_macros(para.source)
-            assert_equal 1, catalog[:footnotes].size
-            footnote1 = catalog[:footnotes][0]
-            assert_equal '<a href="#_install">install</a>', footnote1.text
-        end
-
-        test 'a footnote macro may contain an xref macro' do
-            para = block_from_string 'text footnote:[xref:_install[install]]'
-            doc = para.document
-            doc.register :refs, ['_install', (Asciidoctor::Inline.new doc, :anchor, 'Install', type: :ref, target: '_install'), 'Install']
-            catalog = doc.catalog
-            assert_equal %(text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>), para.sub_macros(para.source)
-            assert_equal 1, catalog[:footnotes].size
-            footnote1 = catalog[:footnotes][0]
-            assert_equal '<a href="#_install">install</a>', footnote1.text
-        end
-
-        test 'a footnote macro may contain an anchor macro' do
-            para = block_from_string 'text footnote:[a [[b]] [[c\]\] d]'
-            assert_equal %(text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>), para.sub_macros(para.source)
-            assert_equal 1, para.document.catalog[:footnotes].size
-            footnote1 = para.document.catalog[:footnotes][0]
-            assert_equal 'a <a id="b"></a> [[c]] d', footnote1.text
-        end
-
-        test 'subsequent footnote macros with escaped URLs should be restored in DocBook' do
-            input = 'foofootnote:[+http://example.com+]barfootnote:[+http://acme.com+]baz'
-
-            result = convert_string_to_embedded input, doctype: 'inline', backend: 'docbook'
-            assert_equal 'foo<footnote><simpara>http://example.com</simpara></footnote>bar<footnote><simpara>http://acme.com</simpara></footnote>baz', result
-        end
-
-        test 'should increment index of subsequent footnote macros' do
-            para = block_from_string 'Sentence text footnote:[An example footnote.]. Sentence text footnote:[Another footnote.].'
-            assert_equal 'Sentence text <sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>. Sentence text <sup class="footnote">[<a id="_footnoteref_2" class="footnote" href="#_footnotedef_2" title="View footnote.">2</a>]</sup>.', para.sub_macros(para.source)
-            assert_equal 2, para.document.catalog[:footnotes].size
-            footnote1 = para.document.catalog[:footnotes][0]
-            assert_equal 1, footnote1.index
-            assert_nil footnote1.id
-            assert_equal 'An example footnote.', footnote1.text
-            footnote2 = para.document.catalog[:footnotes][1]
-            assert_equal 2, footnote2.index
-            assert_nil footnote2.id
-            assert_equal 'Another footnote.', footnote2.text
-        end
-
-        test 'a footnoteref macro with id and single-line text should be registered and output as a footnote' do
-            para = block_from_string 'Sentence text footnoteref:[ex1, An example footnote.].', attributes: { 'compat-mode' => '' }
-            assert_equal %(Sentence text <sup class="footnote" id="_footnote_ex1">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>.), para.sub_macros(para.source)
-            assert_equal 1, para.document.catalog[:footnotes].size
-            footnote = para.document.catalog[:footnotes].first
-            assert_equal 1, footnote.index
-            assert_equal 'ex1', footnote.id
-            assert_equal 'An example footnote.', footnote.text
-        end
-
-        test 'a footnoteref macro with id and multi-line text should be registered and output as a footnote without newlines' do
-            para = block_from_string "Sentence text footnoteref:[ex1, An example footnote\nwith wrapped text.].", attributes: { 'compat-mode' => '' }
-            assert_equal %(Sentence text <sup class="footnote" id="_footnote_ex1">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>.), para.sub_macros(para.source)
-            assert_equal 1, para.document.catalog[:footnotes].size
-            footnote = para.document.catalog[:footnotes].first
-            assert_equal 1, footnote.index
-            assert_equal 'ex1', footnote.id
-            assert_equal 'An example footnote with wrapped text.', footnote.text
-        end
-
-        test 'a footnoteref macro with id should refer to footnoteref with same id' do
-            para = block_from_string 'Sentence text footnoteref:[ex1, An example footnote.]. Sentence text footnoteref:[ex1].', attributes: { 'compat-mode' => '' }
-            assert_equal %(Sentence text <sup class="footnote" id="_footnote_ex1">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>. Sentence text <sup class="footnoteref">[<a class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup>.), para.sub_macros(para.source)
-            assert_equal 1, para.document.catalog[:footnotes].size
-            footnote = para.document.catalog[:footnotes].first
-            assert_equal 1, footnote.index
-            assert_equal 'ex1', footnote.id
-            assert_equal 'An example footnote.', footnote.text
-        end
-
-        test 'an unresolved footnote reference should produce a warning message and output fallback text in red' do
-            input = 'Sentence text.footnote:ex1[]'
-            using_memory_logger do |logger|
-            para = block_from_string input
-            output = para.sub_macros para.source
-            assert_equal 'Sentence text.<sup class="footnoteref red" title="Unresolved footnote reference.">[ex1]</sup>', output
-            assert_message logger, :WARN, 'invalid footnote reference: ex1'
-            end
-        end
-
-        test 'using a footnoteref macro should generate a warning when compat mode is not enabled' do
-            input = 'Sentence text.footnoteref:[fn1,Commentary on this sentence.]'
-            using_memory_logger do |logger|
-            para = block_from_string input
-            para.sub_macros para.source
-            assert_message logger, :WARN, 'found deprecated footnoteref macro: footnoteref:[fn1,Commentary on this sentence.]; use footnote macro with target instead'
-            end
-        end
-
-        test 'inline footnote macro can be used to define and reference a footnote reference' do
-            input = <<~'EOS'
-            You can download the software from the product page.footnote:sub[Option only available if you have an active subscription.]
-
-            You can also file a support request.footnote:sub[]
-
-            If all else fails, you can give us a call.footnoteref:[sub]
-            EOS
-
-            using_memory_logger do |logger|
-            output = convert_string_to_embedded input, attributes: { 'compat-mode' => '' }
-            assert_css '#_footnotedef_1', output, 1
-            assert_css 'p a[href="#_footnotedef_1"]', output, 3
-            assert_css '#footnotes .footnote', output, 1
-            assert_empty logger
-            end
-        end
-
-        test 'should parse multiple footnote references in a single line' do
-            input = 'notable text.footnote:id[about this [text\]], footnote:id[], footnote:id[]'
-            output = convert_string_to_embedded input
-            assert_xpath '(//p)[1]/sup[starts-with(@class,"footnote")]', output, 3
-            assert_xpath '(//p)[1]/sup[@class="footnote"]', output, 1
-            assert_xpath '(//p)[1]/sup[@class="footnoteref"]', output, 2
-            assert_xpath '(//p)[1]/sup[starts-with(@class,"footnote")]/a[@class="footnote"][text()="1"]', output, 3
-            assert_css '#footnotes .footnote', output, 1
-        end
-
-        test 'should not register footnote with id and text if id already registered' do
-            input = <<~'EOS'
-            :fn-notable-text: footnote:id[about this text]
-
-            notable text.{fn-notable-text}
-
-            more notable text.{fn-notable-text}
-            EOS
-            output = convert_string_to_embedded input
-            assert_xpath '(//p)[1]/sup[@class="footnote"]', output, 1
-            assert_xpath '(//p)[2]/sup[@class="footnoteref"]', output, 1
-            assert_css '#footnotes .footnote', output, 1
-        end
-
-        test 'should not resolve an inline footnote macro missing both id and text' do
-            input = <<~'EOS'
-            The footnote:[] macro can be used for defining and referencing footnotes.
-
-            The footnoteref:[] macro is now deprecated.
-            EOS
-
-            output = convert_string_to_embedded input
-            assert_includes output, 'The footnote:[] macro'
-            assert_includes output, 'The footnoteref:[] macro'
-        end
-
-        test 'inline footnote macro can define a numeric id without conflicting with auto-generated ID' do
-            input = 'You can download the software from the product page.footnote:1[Option only available if you have an active subscription.]'
-
-            output = convert_string_to_embedded input
-            assert_css '#_footnote_1', output, 1
-            assert_css 'p sup#_footnote_1', output, 1
-            assert_css 'p a#_footnoteref_1', output, 1
-            assert_css 'p a[href="#_footnotedef_1"]', output, 1
-            assert_css '#footnotes #_footnotedef_1', output, 1
-        end
-
-        test 'inline footnote macro can define an id that uses any word characters in Unicode' do
-            input = <<~'EOS'
-            L'origine du mot forêt{blank}footnote:forêt[un massif forestier] est complexe.
-
-            Qu'est-ce qu'une forêt ?{blank}footnote:forêt[]
-            EOS
-            output = convert_string_to_embedded input
-            assert_css '#_footnote_forêt', output, 1
-            assert_css '#_footnotedef_1', output, 1
-            assert_xpath '//a[@class="footnote"][text()="1"]', output, 2
-        end
-
-        test 'should be able to reference a bibliography entry in a footnote' do
-            input = <<~'EOS'
-            Choose a design pattern.footnote:[See <<gof>> to find a collection of design patterns.]
-
-            [bibliography]
-            == Bibliography
-
-            * [[[gof]]] Erich Gamma, et al. _Design Patterns: Elements of Reusable Object-Oriented Software._ Addison-Wesley. 1994.
-            EOS
-
-            result = convert_string_to_embedded input
-            assert_include '<a href="#_footnoteref_1">1</a>. See <a href="#gof">[gof]</a> to find a collection of design patterns.', result
-        end
-
-        test 'footnotes in headings are expected to be numbered out of sequence' do
-            input = <<~'EOS'
-            == Section 1
-
-            para.footnote:[first footnote]
-
-            == Section 2footnote:[second footnote]
-
-            para.footnote:[third footnote]
-            EOS
-
-            result = convert_string_to_embedded input
-            footnote_refs = xmlnodes_at_css 'a.footnote', result
-            footnote_defs = xmlnodes_at_css 'div.footnote', result
-            assert_equal 3, footnote_refs.length
-            assert_equal %w(1 1 2), footnote_refs.map(&:text)
-            assert_equal 3, footnote_defs.length
-            assert_equal ['1. second footnote', '1. first footnote', '2. third footnote'], footnote_defs.map(&:text).map(&:strip)
-        end
-
         context 'Button macro' do
             test 'btn macro' do
             para = block_from_string 'btn:[Save]', attributes: { 'experimental' => '' }

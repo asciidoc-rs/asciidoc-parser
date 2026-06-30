@@ -113,8 +113,9 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
     // *text* is extracted out of the flow of text (only a superscript marker is
     // left behind), so any macro inside the footnote that has already been
     // substituted at this point (images, links, anchors, index terms) is
-    // captured as part of the footnote text. Cross-references are deferred and
-    // therefore not yet resolved inside footnote text (see issue #545).
+    // captured as part of the footnote text. Cross-references, by contrast, are
+    // resolved in a later document-level pass, so an `<<id>>` inside a footnote
+    // is not yet resolved in the extracted footnote text.
     if found_macroish && text.contains("tnote") {
         let replacer = InlineFootnoteMacroReplacer {
             parser,
