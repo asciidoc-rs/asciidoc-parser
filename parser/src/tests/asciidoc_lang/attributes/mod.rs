@@ -7,6 +7,7 @@ mod character_replacement_ref;
 mod counters;
 mod custom_attributes;
 mod document_attributes;
+mod document_attributes_ref;
 mod element_attributes;
 mod id;
 mod inline_attribute_entries;

@@ -1633,7 +1633,7 @@ fn process_content<'src>(
         // context. Relax their context for the duration of the cell so a body
         // assignment is honored; the snapshot restore reverts it afterward.
         for name in ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES {
-            if let Some(attr) = parser.attribute_values.get_mut(*name) {
+            if let Some(attr) = Arc::make_mut(&mut parser.attribute_values).get_mut(*name) {
                 attr.modification_context = ModificationContext::Anywhere;
             }
         }
@@ -1647,7 +1647,7 @@ fn process_content<'src>(
         // document starts without a table of contents and may enable its own.
         // Reset the value to unset; the relax loop above already made `toc`
         // modifiable inside the cell, so a cell-body `:toc:` is still honored.
-        if let Some(toc) = parser.attribute_values.get_mut("toc") {
+        if let Some(toc) = Arc::make_mut(&mut parser.attribute_values).get_mut("toc") {
             toc.value = InterpretedValue::Unset;
         }
 

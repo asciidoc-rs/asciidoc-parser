@@ -2,6 +2,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
+    sync::Arc,
 };
 
 use crate::{
@@ -22,10 +23,15 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct Parser {
     /// Attribute values at current state of parsing.
-    pub(crate) attribute_values: HashMap<String, AttributeValue>,
+    ///
+    /// Shared (copy-on-write via [`Arc`]) with the immutable built-in attribute
+    /// table, so creating or cloning a parser does not deep-copy the table; the
+    /// map is only copied the first time this parser modifies an attribute.
+    pub(crate) attribute_values: Arc<HashMap<String, AttributeValue>>,
 
-    /// Default values for attributes if "set."
-    default_attribute_values: HashMap<String, String>,
+    /// Default values for attributes if "set." Immutable after construction and
+    /// shared via [`Arc`] (never copied per parser).
+    default_attribute_values: Arc<HashMap<String, String>>,
 
     /// Specifies how the basic raw text of a simple block will be converted to
     /// the format which will ultimately be presented in the final output.
@@ -397,7 +403,7 @@ impl Parser {
     /// modifiable from the document body so the cell may still set its own
     /// doctype.
     pub(crate) fn force_doctype(&mut self, value: &str) {
-        self.attribute_values.insert(
+        Arc::make_mut(&mut self.attribute_values).insert(
             "doctype".to_string(),
             AttributeValue {
                 allowable_value: AllowableValue::Any,
@@ -413,11 +419,11 @@ impl Parser {
     /// (defined) value. References to any other doctype stay undefined and so
     /// render literally.
     pub(crate) fn refresh_doctype_derived_attr(&mut self) {
-        self.attribute_values
+        Arc::make_mut(&mut self.attribute_values)
             .retain(|name, _| !name.starts_with("backend-html5-doctype-"));
 
         if let InterpretedValue::Value(doctype) = self.attribute_value("doctype") {
-            self.attribute_values.insert(
+            Arc::make_mut(&mut self.attribute_values).insert(
                 format!("backend-html5-doctype-{doctype}"),
                 AttributeValue {
                     allowable_value: AllowableValue::Any,
@@ -459,7 +465,7 @@ impl Parser {
             value: InterpretedValue::Value(value.as_ref().to_string()),
         };
 
-        self.attribute_values
+        Arc::make_mut(&mut self.attribute_values)
             .insert(name.as_ref().to_lowercase(), attribute_value);
 
         self
@@ -632,7 +638,7 @@ impl Parser {
             },
         };
 
-        self.attribute_values
+        Arc::make_mut(&mut self.attribute_values)
             .insert(name.as_ref().to_lowercase(), attribute_value);
 
         self
@@ -773,7 +779,7 @@ impl Parser {
         self.counter_values.borrow_mut().remove(&attr_name);
 
         let is_doctype = attr_name == "doctype";
-        self.attribute_values.insert(attr_name, attribute_value);
+        Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
         if is_doctype {
             self.refresh_doctype_derived_attr();
         }
@@ -797,7 +803,7 @@ impl Parser {
         };
 
         self.counter_values.borrow_mut().remove(&attr_name);
-        self.attribute_values.insert(attr_name, attribute_value);
+        Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
     }
 
     /// Called while parsing a block (see [`Block::parse_with_outcome()`]) to
@@ -841,7 +847,7 @@ impl Parser {
         self.counter_values.borrow_mut().remove(&attr_name);
 
         let is_doctype = attr_name == "doctype";
-        self.attribute_values.insert(attr_name, attribute_value);
+        Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
         if is_doctype {
             self.refresh_doctype_derived_attr();
         }
@@ -1288,7 +1294,7 @@ mod tests {
 
             // With `doctype` unset (no `Value`), a refresh clears any existing
             // derived attribute and defines none.
-            parser.attribute_values.remove("doctype");
+            std::sync::Arc::make_mut(&mut parser.attribute_values).remove("doctype");
             parser.refresh_doctype_derived_attr();
 
             assert_eq!(parser.attribute_value("doctype"), InterpretedValue::Unset);
