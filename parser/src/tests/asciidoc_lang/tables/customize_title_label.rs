@@ -225,12 +225,12 @@ If you want the caption of the table to only consist of the caption label, use t
 "#
     );
 
-    // Reproducing this example requires two features the parser does not yet
-    // support: setting a block's title through a `title` attribute, and the
-    // `{counter:table-number}` counter reference. The example is tracked here
-    // but not yet exercised.
+    // The `{counter:table-number}` counter reference is now supported, but this
+    // form additionally requires setting a block's title through a `title`
+    // attribute (`title=...` in the attribute list), which the parser does not
+    // yet support. The example is tracked here but not yet exercised.
     //
-    // TODO: Promote to `verifies!` once counter support lands.
+    // TODO: Promote to `verifies!` once the `title` block attribute lands.
     // https://github.com/asciidoc-rs/asciidoc-parser/issues/514
     to_do_verifies!(
         r#"
@@ -244,7 +244,7 @@ include::example$table.adoc[tag=b-col-h]
     );
 
     if false {
-        todo!("block title attribute and counter:table-number support");
+        todo!("block title attribute support");
     }
 }
 
@@ -257,12 +257,7 @@ Alternately, you can write is as follows:
 "#
     );
 
-    // Reproducing this example requires `{counter:table-number}` counter
-    // support, which is not yet implemented.
-    //
-    // TODO: Promote to `verifies!` once counter support lands.
-    // https://github.com/asciidoc-rs/asciidoc-parser/issues/514
-    to_do_verifies!(
+    verifies!(
         r#"
 [source]
 ----
@@ -273,7 +268,15 @@ include::example$table.adoc[tag=b-col-h]
 "#
     );
 
-    if false {
-        todo!("counter:table-number support");
-    }
+    // Here the title is supplied normally (`.{empty}`, which resolves to an
+    // empty title), so only counter support — now available — is needed. The
+    // `caption` value resolves `{table-caption}` to its default ("Table") and
+    // `{counter:table-number}` to the table's number, yielding "Table 1".
+    // (`example$table.adoc[tag=b-col-h]` is inlined here to avoid depending on
+    // include resolution.)
+    let doc = Parser::default().parse(
+        ".{empty}\n[caption=\"{table-caption} {counter:table-number}\"]\n[%header,cols=2*]\n|===\n|Name of Column 1\n|Name of Column 2\n\n|Cell in column 1, row 1\n|Cell in column 2, row 1\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|===",
+    );
+
+    assert_xpath(&doc, "//caption[text()=\"Table 1\"]", 1);
 }
