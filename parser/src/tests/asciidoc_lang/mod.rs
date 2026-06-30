@@ -26,6 +26,7 @@
 mod attributes;
 mod blocks;
 mod directives;
+mod docinfo;
 mod document;
 mod lists;
 mod macros;

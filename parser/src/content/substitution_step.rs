@@ -703,6 +703,67 @@ pub(crate) fn substitute_attributes_in_macro_target<'src>(
     Some(replaced.into())
 }
 
+/// Applies the attribute-references substitution to free-standing text (such as
+/// the content of a [docinfo file]), honoring the [`attribute-missing`]
+/// document attribute, and returns the substituted result.
+///
+/// Unlike [`apply_attributes`], this operates on owned text that is not part of
+/// the document source. Substitution is performed line by line so that, in
+/// `drop-line` mode, an individual line carrying a missing reference can be
+/// removed without disturbing the lines around it.
+///
+/// Any `warn`-mode warnings it records on `parser` refer to offsets within
+/// `text` (not the document source); callers that do not want such warnings
+/// surfaced should discard them via
+/// [`Parser::truncate_substitution_warnings`](crate::Parser).
+///
+/// [docinfo file]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
+/// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
+pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> String {
+    if !text.contains('{') {
+        return text.to_string();
+    }
+
+    let mode = AttributeMissing::from_parser(parser);
+    let source = Span::new(text);
+
+    let mut out = String::with_capacity(text.len());
+    let mut wrote_line = false;
+
+    for line in text.split('\n') {
+        if !line.contains('{') {
+            if wrote_line {
+                out.push('\n');
+            }
+            out.push_str(line);
+            wrote_line = true;
+            continue;
+        }
+
+        let mut replacer = AttributeReplacer {
+            parser,
+            mode,
+            source,
+            missing_on_line: false,
+        };
+
+        let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
+
+        if replacer.missing_on_line && mode == AttributeMissing::DropLine {
+            // Drop the entire line, including its line break.
+            continue;
+        }
+
+        if wrote_line {
+            out.push('\n');
+        }
+        out.push_str(&replaced);
+        wrote_line = true;
+    }
+
+    out
+}
+
 fn apply_character_replacements(
     content: &mut Content<'_>,
     renderer: &dyn InlineSubstitutionRenderer,

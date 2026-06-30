@@ -176,6 +176,19 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         },
     );
 
+    // The file extension of the output file (always begins with a period). It
+    // defaults to `.html` and may be overridden in the header or via the API.
+    // Docinfo file names are built from this suffix so they match the output
+    // file extension.
+    attrs.insert(
+        "outfilesuffix".to_owned(),
+        AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::ApiOrHeader,
+            value: InterpretedValue::Value(".html".to_owned()),
+        },
+    );
+
     // The document type defaults to `article` and may be set in the header or
     // via the API. The derived `backend-html5-doctype-{doctype}` attribute is
     // defined (empty) only for the active doctype; it is kept in sync by

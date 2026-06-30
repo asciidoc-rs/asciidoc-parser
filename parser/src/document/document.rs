@@ -8,7 +8,7 @@ use crate::{
     Parser, Span,
     attributes::Attrlist,
     blocks::{Block, ContentModel, IsBlock, Preamble, parse_utils::parse_blocks_until},
-    document::{Catalog, Header, TocConfig, TocMode},
+    document::{Catalog, Docinfo, DocinfoLocation, Header, TocConfig, TocMode},
     internal::debug::DebugSliceReference,
     parser::{
         CatalogResolver, InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning, SourceMap,
@@ -47,6 +47,7 @@ struct InternalDependent<'src> {
     catalog: Catalog,
     show_doctitle: bool,
     toc: TocConfig,
+    docinfo: Docinfo,
 }
 
 self_cell! {
@@ -140,6 +141,10 @@ impl<'src> Document<'src> {
             // still holds the document's resolved attribute state.
             let toc = TocConfig::from_parser(parser);
 
+            // Resolve docinfo from the final attribute state and the parser's
+            // configured docinfo file handler (empty when no handler is set).
+            let docinfo = Docinfo::resolve(parser);
+
             InternalDependent {
                 header,
                 blocks,
@@ -149,6 +154,7 @@ impl<'src> Document<'src> {
                 catalog: parser.take_catalog(),
                 show_doctitle,
                 toc,
+                docinfo,
             }
         });
 
@@ -206,6 +212,28 @@ impl<'src> Document<'src> {
     /// [`toc-class` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/
     pub fn toc_class(&self) -> &str {
         &self.internal.borrow_dependent().toc.class
+    }
+
+    /// Return this document's resolved [docinfo] content for `location`.
+    ///
+    /// [Docinfo] is custom content read from external *docinfo files* and
+    /// injected into the head, header, or footer of the converted output. The
+    /// returned string is the concatenation of the applicable shared and
+    /// private docinfo files (shared first, matching Asciidoctor), with
+    /// `docinfosubs` substitutions already applied.
+    ///
+    /// An empty string is returned when no docinfo applies to the location —
+    /// for example when no [`DocinfoFileHandler`] was configured on the parser,
+    /// the `docinfo` attribute did not enable that scope/location, or no
+    /// matching file was found. Docinfo files are resolved through a
+    /// caller-supplied [`DocinfoFileHandler`], since this crate does not read
+    /// from the filesystem itself.
+    ///
+    /// [docinfo]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
+    /// [Docinfo]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
+    /// [`DocinfoFileHandler`]: crate::parser::DocinfoFileHandler
+    pub fn docinfo(&self, location: DocinfoLocation) -> &str {
+        self.internal.borrow_dependent().docinfo.content(location)
     }
 
     /// Return an iterator over any warnings found during parsing.
