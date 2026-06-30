@@ -7,6 +7,7 @@ mod chapters;
 mod colophon;
 mod custom_ids;
 mod dedication;
+mod glossary;
 mod id_prefix_and_separator;
 mod numbers;
 mod part_numbers_and_signifier;
