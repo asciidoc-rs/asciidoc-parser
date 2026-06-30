@@ -581,11 +581,8 @@ mod tests {
         // The backslash is stripped even when there is no primary file name (and
         // thus no include handler) so the escape behaves identically.
         let source = "\\include::partial.adoc[]";
-
         let parser = Parser::default();
-
         let (processed_source, _source_map) = preprocess(source, &parser);
-
         assert_eq!(processed_source, "include::partial.adoc[]\n");
     }
 
@@ -594,11 +591,8 @@ mod tests {
         // A backslash followed by something that is not a valid include directive
         // (here, no attribute brackets) is left untouched.
         let source = "\\include::partial.adoc";
-
         let parser = Parser::default().with_primary_file_name("main.adoc");
-
         let (processed_source, _source_map) = preprocess(source, &parser);
-
         assert_eq!(processed_source, "\\include::partial.adoc\n");
     }
 
@@ -607,11 +601,8 @@ mod tests {
         // Only a single leading backslash is treated as an escape; a double
         // backslash is left as-is.
         let source = "\\\\include::partial.adoc[]";
-
         let parser = Parser::default().with_primary_file_name("main.adoc");
-
         let (processed_source, _source_map) = preprocess(source, &parser);
-
         assert_eq!(processed_source, "\\\\include::partial.adoc[]\n");
     }
 
