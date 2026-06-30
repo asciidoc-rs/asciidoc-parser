@@ -566,6 +566,15 @@ The block title will be displayed with a caption label and number, as shown here
     assert_eq!(block.number(), Some(1));
 }
 
+// This block is documentation scaffolding that saves and restores the
+// `example-number` counter (via `ifdef::` conditional directives) so the
+// rendered example below always displays as `Example 1.`. It is kept
+// non-normative because conditional preprocessor directives
+// (`ifdef`/`ifndef`/`ifeval`) are not yet implemented; once they are, this can
+// be promoted to verified coverage asserting the counter save/restore.
+//
+// TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/589): implement
+// conditional preprocessor directives and verify this block.
 non_normative!(
     r#"
 :example-caption: Example
