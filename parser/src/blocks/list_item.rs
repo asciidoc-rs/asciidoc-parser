@@ -36,6 +36,7 @@ impl<'src> ListItem<'src> {
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         parent_list_markers: &[ListItemMarker<'src>],
+        is_bibliography: bool,
         parser: &mut Parser,
         warnings: &mut Vec<Warning<'src>>,
     ) -> Option<MatchedItem<'src, Self>> {
@@ -96,14 +97,25 @@ impl<'src> ListItem<'src> {
             block_start: principal_start,
         };
 
+        // In a bibliography list, the principal text may begin with a
+        // bibliography anchor (`[[[id]]]`). Flag the parser so the inline macros
+        // substitution applied while parsing this principal text recognizes it.
+        // The flag is cleared immediately afterward so it never leaks into any
+        // nested blocks (e.g. a nested list) attached to this item.
+        parser.in_bibliography_list_item.set(is_bibliography);
+
         // For description lists, the content after the marker can be empty.
         // For other list types, we require content.
-        let mut next = if let Some(simple_block_mi) = SimpleBlock::parse_for_list_item(
+        let simple_block_for_list_item = SimpleBlock::parse_for_list_item(
             &no_metadata,
             parser,
             false,
             &list_markers_including_peer,
-        ) {
+        );
+
+        parser.in_bibliography_list_item.set(false);
+
+        let mut next = if let Some(simple_block_mi) = simple_block_for_list_item {
             // If the principal text is empty (e.g. from {empty} attribute reference),
             // drop it from the parse tree.
             if !simple_block_mi.item.content().is_empty() {
@@ -592,8 +604,13 @@ mod tests {
 
         let metadata = BlockMetadata::parse(crate::Span::new(source), &mut parser).item;
 
-        let result =
-            crate::blocks::list_item::ListItem::parse(&metadata, &[], &mut parser, &mut warnings);
+        let result = crate::blocks::list_item::ListItem::parse(
+            &metadata,
+            &[],
+            false,
+            &mut parser,
+            &mut warnings,
+        );
 
         assert!(warnings.is_empty());
 
