@@ -46,18 +46,22 @@ impl<'src> ListBlock<'src> {
     ) -> Option<MatchedItem<'src, Self>> {
         let source = metadata.block_start.discard_empty_lines();
 
-        // A list carries the `bibliography` style when it is explicitly marked
-        // `[bibliography]` or when it is a top-level list within a bibliography
-        // section (the section implicitly adds the style to each of its
-        // unordered lists). A nested list never inherits the section style — only
-        // its own `[bibliography]` attribute counts — so the implicit case is
-        // gated on `parent_list_markers` being empty.
-        let bibliography_style_active = metadata
+        // A list carries the `bibliography` style in two ways, which differ in
+        // scope (matching Asciidoctor):
+        //
+        // * An explicit `[bibliography]` attribute marks the list a bibliography
+        //   regardless of its type (even an ordered list).
+        // * A `bibliography` section implicitly marks each of its top-level *unordered*
+        //   lists (only) a bibliography. A nested list never inherits the section
+        //   style, so this is gated on `parent_list_markers` being empty; the list-type
+        //   restriction is applied below, once the type is known.
+        let own_style_bibliography = metadata
             .attrlist
             .as_ref()
             .and_then(|attrlist| attrlist.block_style())
-            == Some("bibliography")
-            || (parent_list_markers.is_empty() && parser.parsing_bibliography_section_body);
+            == Some("bibliography");
+        let section_propagated_bibliography =
+            parent_list_markers.is_empty() && parser.parsing_bibliography_section_body;
 
         let mut items: Vec<Block<'src>> = vec![];
         let mut next_item_source = source;
@@ -138,16 +142,19 @@ impl<'src> ListBlock<'src> {
                 }
             }
 
-            // The bibliography anchor (`[[[id]]]`) is recognized only in the
-            // principal text of an unordered-list item; pass that context down so
-            // the item's inline substitution can detect it.
-            let item_is_bibliography = bibliography_style_active
-                && matches!(
-                    this_item_marker,
-                    ListItemMarker::Asterisks(_)
-                        | ListItemMarker::Hyphen(_)
-                        | ListItemMarker::Bullet(_)
-                );
+            // The bibliography anchor (`[[[id]]]`) is recognized in the principal
+            // text of any item of an explicitly-styled bibliography list, or of an
+            // unordered-list item when the style is inherited from the section.
+            // Pass that context down so the item's inline substitution can detect
+            // it.
+            let item_is_bibliography = own_style_bibliography
+                || (section_propagated_bibliography
+                    && matches!(
+                        this_item_marker,
+                        ListItemMarker::Asterisks(_)
+                            | ListItemMarker::Hyphen(_)
+                            | ListItemMarker::Bullet(_)
+                    ));
 
             let Some(list_item_mi) = ListItem::parse(
                 &list_item_metadata,
@@ -231,8 +238,10 @@ impl<'src> ListBlock<'src> {
                     .is_some_and(|li| li.checkbox().is_some())
             });
 
-        // The `bibliography` style applies only to unordered lists.
-        let is_bibliography = bibliography_style_active && type_ == ListType::Unordered;
+        // An explicit `[bibliography]` style applies to any list type; the style
+        // inherited from a section applies only to unordered lists.
+        let is_bibliography = own_style_bibliography
+            || (section_propagated_bibliography && type_ == ListType::Unordered);
 
         Some(MatchedItem {
             item: Self {

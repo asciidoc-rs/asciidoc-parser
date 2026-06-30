@@ -17,11 +17,13 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
     let found_macroish = found_square_bracket && found_colon;
     // let found_macroish_short = found_macroish && text.contains(":[");
 
-    // Bibliography anchors (`[[[id]]]` / `[[[id,xreftext]]]`) are recognized only
-    // in the principal text of a bibliography list item; the parser sets a flag
-    // while substituting that text. This runs before the inline-anchor pass below
-    // so a bibliography anchor is consumed as a whole rather than being mistaken
-    // for a regular inline anchor (`[[id]]`) wrapped in square brackets.
+    // A bibliography anchor (`[[[id]]]` / `[[[id,xreftext]]]`) is recognized only
+    // when it prefixes the principal text of a bibliography list item; the parser
+    // sets a flag while substituting that text. This runs before the inline-anchor
+    // pass below so the prefix anchor is consumed as a whole rather than being
+    // mistaken for a regular inline anchor (`[[id]]`) wrapped in square brackets.
+    // The regex is `^`-anchored, so a `[[[…]]]` appearing later in the entry falls
+    // through to the inline-anchor pass (matching Asciidoctor).
     if found_square_bracket && text.contains("[[[") && parser.in_bibliography_list_item.get() {
         let replacer = InlineBiblioAnchorReplacer {
             parser,
@@ -740,11 +742,19 @@ impl Replacer for InlineEmailReplacer<'_> {
     }
 }
 
-/// Matches a bibliography anchor at the start of a bibliography list item.
+/// Matches a bibliography anchor that prefixes a bibliography list item.
 ///
-/// The label must be _non-numeric_ (it may contain digits, but must not begin
-/// with one), so a list item that opens with something like `[[[1984]]]` is
-/// left untouched. An optional xreftext follows a comma.
+/// The anchor is matched only at the very start of the entry (`^`), mirroring
+/// Asciidoctor: a `[[[…]]]` appearing later in the text is left to the regular
+/// inline-anchor pass. The label must be _non-numeric_ (it may contain digits,
+/// but must not begin with one), so an entry that opens with something like
+/// `[[[1984]]]` is left untouched. An optional xreftext follows a comma.
+///
+/// A leading backslash is deliberately *not* accepted as an escape: `\[[[id]]]`
+/// does not begin with `[[[`, so it simply isn't a bibliography anchor (the
+/// backslash and inner `[[id]]` are handled by the inline-anchor pass, matching
+/// Asciidoctor). The documented escape `[\[[id]]]` likewise does not start with
+/// `[[[` and is handled there.
 ///
 /// ## Examples
 ///
@@ -754,13 +764,13 @@ static INLINE_BIBLIO_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?x)
-        (\\)?                           # (1) optional escape backslash
+        ^                               # the anchor must prefix the entry
         \[\[\[                          # opening triple bracket
-          (                             # (2) bibliography label
+          (                             # (1) bibliography label
             [\p{Alphabetic}_:]              # first char: letter, '_' or ':' (never a digit)
             [\p{Alphabetic}\p{Nd}_\-:.]*    # rest: letters/digits/_/-/:/.
           )
-          (?: , \s* (.+?) )?            # (3) optional xreftext after a comma
+          (?: , \s* (.+?) )?            # (2) optional xreftext after a comma
         \]\]\]                          # closing triple bracket
         "#,
     )
@@ -778,19 +788,13 @@ struct InlineBiblioAnchorReplacer<'p, 's> {
 
 impl Replacer for InlineBiblioAnchorReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        if caps.get(1).is_some() {
-            // Honor the escape: emit the anchor literally (sans backslash).
-            dest.push_str(&caps[0][1..]);
-            return;
-        }
-
-        let id = &caps[2];
+        let id = &caps[1];
 
         // The displayed reference text is the xreftext if supplied, otherwise the
         // label itself, always enclosed in square brackets (e.g. `[gof]`). This
         // same bracketed text is registered as the entry's reftext so a
         // cross-reference to the entry renders identically.
-        let label = caps.get(3).map(|m| m.as_str()).unwrap_or(id);
+        let label = caps.get(2).map(|m| m.as_str()).unwrap_or(id);
         let reftext = format!("[{label}]");
 
         if self
@@ -2346,6 +2350,73 @@ mod tests {
                     catalog: Catalog::default(),
                 }
             );
+        }
+    }
+
+    mod bibliography_anchor {
+        #![allow(clippy::indexing_slicing)]
+
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn recognized_only_when_it_prefixes_the_entry() {
+            // A `[[[id]]]` that does not prefix the entry is not a bibliography
+            // anchor: it falls through to the regular inline-anchor pass (matching
+            // Asciidoctor), rendering as `[<a id="mid"></a>]` rather than the
+            // bibliography form `<a id="mid"></a>[mid]`.
+            let doc = Parser::default().parse("[bibliography]\n* Smith. See [[[mid]]] inline.\n");
+
+            let rendered = &rendered_paragraphs(&doc)[0];
+            assert!(
+                rendered.contains("[<a id=\"mid\"></a>]"),
+                "unexpected: {rendered}"
+            );
+            assert!(!rendered.contains("<a id=\"mid\"></a>[mid]"));
+
+            // The entry is registered as a normal anchor, not a bibliography one.
+            assert_eq!(
+                doc.catalog().get_ref("mid").map(|e| e.ref_type.clone()),
+                Some(crate::document::RefType::Anchor)
+            );
+        }
+
+        #[test]
+        fn leading_backslash_is_not_a_bibliography_escape() {
+            // A leading backslash does not escape a bibliography anchor (the only
+            // documented escape is `[\[[id]]]`). `\[[[id]]]` does not begin with
+            // `[[[`, so it is not a bibliography anchor; the backslash stays
+            // literal and the inner `[[id]]` becomes a normal inline anchor,
+            // matching Asciidoctor's `\[<a id="x"></a>]`.
+            let doc = Parser::default().parse("[bibliography]\n* \\[[[x]]] Leading backslash.\n");
+
+            let rendered = &rendered_paragraphs(&doc)[0];
+            assert!(
+                rendered.starts_with("\\[<a id=\"x\"></a>]"),
+                "unexpected: {rendered}"
+            );
+        }
+
+        #[test]
+        fn explicit_style_applies_to_an_ordered_list() {
+            // An explicit `[bibliography]` attribute applies to any list type, so
+            // an ordered list's entries are recognized as bibliography anchors,
+            // matching Asciidoctor (`<div class="olist bibliography">`).
+            let doc = Parser::default().parse("[bibliography]\n. [[[ord]]] Ordered entry.\n");
+
+            assert_css(&doc, ".olist.bibliography", 1);
+            assert!(rendered_paragraphs(&doc)[0].starts_with("<a id=\"ord\"></a>[ord] "));
+        }
+
+        #[test]
+        fn section_style_does_not_apply_to_an_ordered_list() {
+            // The style inherited from a `bibliography` section applies only to
+            // unordered lists, so an ordered list in that section is not a
+            // bibliography list; its leading `[[[id]]]` is a regular inline anchor.
+            let doc = Parser::default()
+                .parse("[bibliography]\n== References\n\n. [[[ord]]] Ordered entry.\n");
+
+            assert_css(&doc, ".bibliography", 0);
+            assert!(rendered_paragraphs(&doc)[0].starts_with("[<a id=\"ord\"></a>] "));
         }
     }
 }
