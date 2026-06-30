@@ -166,6 +166,22 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
     fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String);
+
+    /// Renders an [index term].
+    ///
+    /// A *flow* (visible) index term ([`IndexTermRenderParams::visible_term`]
+    /// is `Some`) appears in the flow of text, so the renderer should write
+    /// the term text to `dest`. A *concealed* index term ([`visible_term`]
+    /// is `None`) does not appear in the rendered text, so the renderer
+    /// should typically write nothing.
+    ///
+    /// Note that the built-in HTML5 converter never builds an index catalog;
+    /// index terms only contribute markup in output formats (such as DocBook or
+    /// PDF) that generate an index.
+    ///
+    /// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
+    /// [`visible_term`]: IndexTermRenderParams::visible_term
+    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String);
 }
 
 /// Specifies which special character is being replaced in a call to
@@ -396,6 +412,18 @@ pub struct XrefRenderParams<'a> {
 
     /// The resolved destination, or `None` if the reference is unresolved.
     pub resolved: Option<&'a ResolvedReference>,
+}
+
+/// Provides parameters for rendering an [index term].
+///
+/// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
+#[derive(Clone, Debug)]
+pub struct IndexTermRenderParams<'a> {
+    /// For a *flow* (visible) index term (`((term))` or `indexterm2:[term]`),
+    /// the already-substituted primary term text to display in the flow of
+    /// text. `None` for a *concealed* index term (`(((p, s, t)))` or
+    /// `indexterm:[p, s, t]`), which produces no visible output.
+    pub visible_term: Option<&'a str>,
 }
 
 /// Implementation of [`InlineSubstitutionRenderer`] that renders substitutions
@@ -836,6 +864,15 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     dest.push_str(&format!(r#"<b class="conum">({n})</b>"#));
                 }
             }
+        }
+    }
+
+    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String) {
+        // The HTML5 converter does not generate an index, so a concealed index
+        // term produces no output and a flow index term renders only its
+        // (already-substituted) visible term text.
+        if let Some(term) = params.visible_term {
+            dest.push_str(term);
         }
     }
 }

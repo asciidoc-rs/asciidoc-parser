@@ -16,8 +16,8 @@ pub use include_file_handler::IncludeFileHandler;
 mod inline_substitution_renderer;
 pub use inline_substitution_renderer::{
     CalloutGuard, CalloutRenderParams, CharacterReplacementType, HtmlSubstitutionRenderer,
-    IconRenderParams, ImageRenderParams, InlineSubstitutionRenderer, LinkRenderParams,
-    LinkRenderType, QuoteScope, QuoteType, SpecialCharacter, XrefRenderParams,
+    IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineSubstitutionRenderer,
+    LinkRenderParams, LinkRenderType, QuoteScope, QuoteType, SpecialCharacter, XrefRenderParams,
 };
 
 mod parser;

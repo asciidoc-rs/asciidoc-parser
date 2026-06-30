@@ -1192,6 +1192,17 @@ mod tests {
         fn render_callout(&self, params: &crate::parser::CalloutRenderParams, dest: &mut String) {
             dest.push_str(&format!("[CALLOUT:{}]", params.number));
         }
+
+        fn render_index_term(
+            &self,
+            params: &crate::parser::IndexTermRenderParams,
+            dest: &mut String,
+        ) {
+            match params.visible_term {
+                Some(term) => dest.push_str(&format!("[INDEXTERM:{term}]")),
+                None => dest.push_str("[INDEXTERM]"),
+            }
+        }
     }
 
     #[test]
