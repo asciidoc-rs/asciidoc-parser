@@ -114,7 +114,35 @@ non_normative!(
 \include::target[leveloffset=__offset__,lines=__ranges__,tag(s)=__name(s)__,indent=__depth__,encoding=__encoding__,opts=optional]
 ----
 
+"#
+);
+
+#[test]
+fn target_is_required() {
+    verifies!(
+        r#"
 The target is required.
+"#
+    );
+
+    // An include directive with an empty target is not a valid directive, so it
+    // is left untouched rather than processed or reported as unresolved. This
+    // matches Asciidoctor, which renders `include::[]` literally.
+    let handler = InlineFileHandler::from_pairs([("", "SHOULD NOT APPEAR")]);
+
+    let doc = Parser::default()
+        .with_primary_file_name("main.adoc")
+        .with_include_file_handler(handler)
+        .parse("Before.\n\ninclude::[]\n\nAfter.");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["Before.", "include::[]", "After."]);
+}
+
+non_normative!(
+    r#"
 The target may be an absolute path, a path relative to the current document, or a URL.
 "#
 );
