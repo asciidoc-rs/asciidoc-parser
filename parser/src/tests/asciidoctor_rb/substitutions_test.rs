@@ -4390,8 +4390,9 @@ mod macros {
 
         #[test]
         #[ignore]
-        // TODO: Resolve deferred cross-references (and bibliography references)
-        // inside footnote text. The crate defers cross-reference resolution to a
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/592):
+        // Resolve deferred cross-references (and bibliography references) inside
+        // footnote text. The crate defers cross-reference resolution to a
         // document-level pass over block content; because a footnote's text is
         // extracted out of the block, an `<<id>>` / `xref:id[]` inside a footnote
         // is not yet reached by that pass and stays unresolved in the stored
@@ -4402,8 +4403,9 @@ mod macros {
 
         #[test]
         #[ignore]
-        // TODO: Honor passthrough (`pass:[]` / `pass:q[]`) substitutions in the
-        // value of an externalized footnote attribute (e.g.
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/593):
+        // Honor passthrough (`pass:[]` / `pass:q[]`) substitutions in the value
+        // of an externalized footnote attribute (e.g.
         // `:fn-disclaimer: pass:q[footnote:[…_italic_…]]`).
         fn externalized_footnote_macro_may_contain_text_formatting() {}
 
@@ -4414,10 +4416,11 @@ mod macros {
 
         #[test]
         #[ignore]
-        // TODO: Footnotes used in section titles are converted out of document
-        // order (titles are converted eagerly to generate IDs), so their
-        // numbering differs from document order. The crate does not yet model
-        // the eager out-of-order conversion of section titles.
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/594):
+        // Footnotes used in section titles are converted out of document order
+        // (titles are converted eagerly to generate IDs), so their numbering
+        // differs from document order. The crate does not yet model the eager
+        // out-of-order conversion of section titles.
         fn footnotes_in_headings_are_numbered_out_of_sequence() {}
     }
 
