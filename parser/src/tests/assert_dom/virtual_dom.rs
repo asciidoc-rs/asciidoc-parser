@@ -1142,67 +1142,35 @@ fn list_item_to_node<'a>(item: &'a ListItem<'a>) -> VirtualNode {
 /// Renders a checklist (i.e. task list) item, matching Asciidoctor's
 /// `convert_ulist` for a list carrying the `checklist` option.
 ///
-/// This is like [`list_item_to_node`], except the principal paragraph of a
-/// checklist item is prefixed with a checkbox marker. The marker form depends
-/// on the list's options and the document's `icons` mode: an `<input>` checkbox
-/// for an interactive list, a Font Awesome `<i>` icon when `icons=font`, or a
-/// plain check-mark/ballot-box glyph otherwise. Items without checkbox syntax
-/// (e.g. a plain bullet mixed into a checklist) render with no marker prefix.
+/// The `<li>` (roles, id, principal paragraph, and any continuation blocks) is
+/// built exactly as for an ordinary item by [`list_item_to_node`]; the only
+/// difference is that a checklist item's principal paragraph is prefixed with a
+/// checkbox marker. The marker form depends on the list's options and the
+/// document's `icons` mode: an `<input>` checkbox for an interactive list, a
+/// Font Awesome `<i>` icon when `icons=font`, or a plain check-mark/ballot-box
+/// glyph otherwise. Items without checkbox syntax (e.g. a plain bullet mixed
+/// into a checklist) render with no marker prefix.
 fn checklist_item_to_node<'a>(
     item: &'a ListItem<'a>,
     interactive: bool,
     icons_font: bool,
 ) -> VirtualNode {
-    let mut node = VirtualNode::new("li");
+    let mut node = list_item_to_node(item);
 
-    for role in item.roles() {
-        node = node.with_class(role);
-    }
-
-    if let Some(id) = item.id() {
-        node = node.with_id(id);
-    }
-
-    let nested = item.nested_blocks().collect::<Vec<_>>();
-    let has_multiple_blocks = nested.len() > 1;
-
-    for (index, child) in nested.iter().enumerate() {
-        let child_vdom = child.to_virtual_dom();
-
-        // The principal paragraph (the first block) carries the checkbox marker
-        // when this item has checkbox syntax.
-        if index == 0
-            && let Some(checked) = item.checkbox()
-        {
-            node.children.push(prepend_checklist_marker(
-                child_vdom,
-                checked,
-                interactive,
-                icons_font,
-            ));
-            continue;
-        }
-
-        // Wrap continuation paragraphs in div.paragraph, exactly as
-        // `list_item_to_node` does.
-        if has_multiple_blocks
-            && index > 0
-            && child_vdom.tag == "p"
-            && child_vdom.classes.is_empty()
-        {
-            let wrapper = VirtualNode::new("div")
-                .with_class("paragraph")
-                .with_child(child_vdom);
-            node.children.push(wrapper);
-        } else {
-            node.children.push(child_vdom);
-        }
+    // The principal paragraph is always the first child (continuation blocks, if
+    // any, follow it). Prefix it with the checkbox marker when this item has
+    // checkbox syntax.
+    if let Some(checked) = item.checkbox()
+        && let Some(principal) = node.children.first_mut()
+    {
+        prepend_checklist_marker(principal, checked, interactive, icons_font);
     }
 
     node
 }
 
-/// Prepends a checkbox marker to a checklist item's principal paragraph.
+/// Prepends a checkbox marker to a checklist item's principal paragraph,
+/// in place.
 ///
 /// The paragraph's existing content (text or inline child nodes) is preserved
 /// and the marker nodes are inserted ahead of it. Because `text()` queries read
@@ -1210,11 +1178,11 @@ fn checklist_item_to_node<'a>(
 /// direct text on the paragraph is first demoted to a leading text child so the
 /// marker can sit before it.
 fn prepend_checklist_marker(
-    mut p: VirtualNode,
+    p: &mut VirtualNode,
     checked: bool,
     interactive: bool,
     icons_font: bool,
-) -> VirtualNode {
+) {
     let mut children = checklist_marker_nodes(checked, interactive, icons_font);
 
     // Demote any direct text to a leading child so it survives alongside the
@@ -1227,7 +1195,6 @@ fn prepend_checklist_marker(
 
     children.append(&mut p.children);
     p.children = children;
-    p
 }
 
 /// Builds the marker nodes for a checklist item's checkbox.

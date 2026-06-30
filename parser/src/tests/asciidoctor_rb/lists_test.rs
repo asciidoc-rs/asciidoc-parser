@@ -5259,6 +5259,38 @@ mod checklists {
             assert!(!list.is_checklist());
         }
     }
+
+    // Not a direct port: this guards the rendering path where a checklist item
+    // has a continuation block. The checkbox marker must stay on the principal
+    // paragraph, and the continuation paragraph must still be wrapped in
+    // div.paragraph (as for an ordinary list item).
+    #[test]
+    fn checklist_item_with_continuation_block() {
+        let doc = Parser::default().parse("* [x] done\n+\ncontinuation paragraph\n\n* [ ] todo\n");
+
+        let checklist = first_list(&doc);
+        assert!(checklist.is_checklist());
+
+        // First item: principal paragraph carries the check-mark marker, and the
+        // continuation paragraph is wrapped in div.paragraph.
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[1]/p[text()=\"\u{2713} done\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[1]/div[@class=\"paragraph\"]/p[text()=\"continuation paragraph\"]",
+            1,
+        );
+
+        // Second item: unchecked marker, no continuation.
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[2]/p[text()=\"\u{274f} todo\"]",
+            1,
+        );
+    }
 }
 
 mod lists_model {
