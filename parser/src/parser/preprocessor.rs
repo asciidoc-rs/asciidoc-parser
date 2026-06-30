@@ -153,6 +153,13 @@ impl<'p> PreprocessorState<'p> {
 
                     // Re-report the including file if there's more content.
                     has_reported_file = false;
+                } else if attrlist.has_option("optional") {
+                    // `opts=optional`: a target that can't be resolved is dropped
+                    // silently — neither the "Unresolved directive" text nor a
+                    // warning is produced (matching Asciidoctor). Nothing is
+                    // emitted for this line; re-anchor the source map so the lines
+                    // that follow map back to their correct original line numbers.
+                    has_reported_file = false;
                 } else {
                     // The target could not be resolved. Replace the directive with
                     // an "Unresolved directive" message in the output (as
@@ -593,6 +600,35 @@ mod tests {
         assert_eq!(
             source_map.original_file_and_line(4),
             Some(SourceLine(Some("main.adoc".to_owned()), 4))
+        );
+    }
+
+    #[test]
+    fn optional_include_dropped_silently() {
+        // `opts=optional` drops an unresolved include with no output text and no
+        // warning, while keeping the source map aligned for the lines that follow.
+        let source = "Before.\n\ninclude::missing.adoc[opts=optional]\n\nAfter.";
+
+        // Handler doesn't provide missing.adoc.
+        let handler = InlineFileHandler::from_pairs([("other.adoc", "Other content")]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, warnings) = preprocess(source, &parser);
+
+        // The directive line is gone; no "Unresolved directive" text is inserted.
+        assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
+        assert!(warnings.is_empty());
+
+        assert_eq!(
+            source_map.original_file_and_line(1),
+            Some(SourceLine(Some("main.adoc".to_owned()), 1)) // Before.
+        );
+        assert_eq!(
+            source_map.original_file_and_line(4),
+            Some(SourceLine(Some("main.adoc".to_owned()), 5)) // After.
         );
     }
 

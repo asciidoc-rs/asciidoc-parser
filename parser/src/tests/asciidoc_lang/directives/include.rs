@@ -517,10 +517,34 @@ The following message will also be inserted into the output:
 non_normative!(
     r#"
 To fix the problem, edit the file path and run the converter again.
+"#
+);
+
+#[test]
+fn opts_optional_drops_unresolved_include() {
+    verifies!(
+        r#"
 If you don't want the AsciiDoc processor to emit a warning, but rather drop the include that cannot be found, add the `opts=optional` attribute to the include directive.
 
 "#
-);
+    );
+
+    // The handler does not provide content.adoc, but `opts=optional` means the
+    // unresolved directive is dropped silently: no "Unresolved directive" text is
+    // inserted and no warning is emitted.
+    let handler = InlineFileHandler::from_pairs([("other.adoc", "unused")]);
+
+    let doc = Parser::default()
+        .with_primary_file_name("my-document.adoc")
+        .with_include_file_handler(handler)
+        .parse("Before.\n\ninclude::content.adoc[opts=optional]\n\nAfter.");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["Before.", "After."]);
+    assert_eq!(doc.warnings().count(), 0);
+}
 
 #[test]
 fn attribute_reference_in_include_path() {
