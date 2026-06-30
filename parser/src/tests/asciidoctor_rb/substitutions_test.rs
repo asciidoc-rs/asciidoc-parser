@@ -3741,6 +3741,228 @@ mod macros {
         );
     }
 
+    mod index_terms {
+        //! Ported from Asciidoctor's `substitutions_test.rs` index-term cases.
+        //!
+        //! These were previously stubbed (un-ported Ruby) because index terms
+        //! weren't implemented. The crate targets HTML5 output, which never
+        //! builds an index catalog, so the original `catalog[:indexterms]`
+        //! assertions (commented out even in Ruby) and the DocBook-only
+        //! `see`/`see-also` cases are intentionally omitted. What remains is
+        //! the inline rendering each macro produces: a concealed term
+        //! (`indexterm:[…]` / `(((…)))`) disappears, and a flow term
+        //! (`indexterm2:[…]` / `((…))`) leaves its primary term in the text.
+
+        use crate::tests::prelude::*;
+
+        const SENTENCE: &str = "The tiger (Panthera tigris) is the largest cat species.";
+
+        #[test]
+        fn concealed_macro_with_primary_term() {
+            // 'a single-line index term macro with a primary term should be
+            // registered as an index reference'
+            for macro_ in ["indexterm:[Tigers]", "(((Tigers)))"] {
+                let doc = Parser::default().parse(&format!("{SENTENCE}\n{macro_}"));
+                assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
+            }
+        }
+
+        #[test]
+        fn concealed_macro_with_primary_and_secondary_terms() {
+            // 'a single-line index term macro with primary and secondary terms ...'
+            for macro_ in ["indexterm:[Big cats, Tigers]", "(((Big cats, Tigers)))"] {
+                let doc = Parser::default().parse(&format!("{SENTENCE}\n{macro_}"));
+                assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
+            }
+        }
+
+        #[test]
+        fn concealed_macro_with_primary_secondary_and_tertiary_terms() {
+            // 'a single-line index term macro with primary, secondary and
+            // tertiary terms ...'
+            for macro_ in [
+                "indexterm:[Big cats,Tigers , Panthera tigris]",
+                "(((Big cats,Tigers , Panthera tigris)))",
+            ] {
+                let doc = Parser::default().parse(&format!("{SENTENCE}\n{macro_}"));
+                assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
+            }
+        }
+
+        #[test]
+        fn multiline_concealed_macro_is_compacted() {
+            // 'a multi-line index term macro should be compacted and registered ...'
+            for macro_ in ["indexterm:[Panthera\ntigris]", "(((Panthera\ntigris)))"] {
+                let doc = Parser::default().parse(&format!("{SENTENCE}\n{macro_}"));
+                assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
+            }
+        }
+
+        #[test]
+        fn escape_concealed_term_when_second_bracket_escaped() {
+            // 'should escape concealed index term if second bracket is preceded
+            // by a backslash'
+            let doc = Parser::default()
+                .parse("National Institute of Science and Technology (\\((NIST)))");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &["National Institute of Science and Technology (((NIST)))"]
+            );
+        }
+
+        #[test]
+        fn escape_only_enclosing_brackets() {
+            // 'should only escape enclosing brackets if concealed index term is
+            // preceded by a backslash'
+            let doc = Parser::default()
+                .parse("National Institute of Science and Technology \\(((NIST)))");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &["National Institute of Science and Technology (NIST)"]
+            );
+        }
+
+        #[test]
+        fn does_not_split_terms_on_commas_inside_quotes() {
+            // 'should not split index terms on commas inside of quoted terms'
+            // The quoted comma keeps the term intact; the concealed term renders
+            // nothing, so only the leading sentence remains.
+            let macro_form =
+                "Tigers are big, scary cats.\nindexterm:[Tigers, \"[Big\\],\nscary cats\"]";
+            let shorthand = "Tigers are big, scary cats.\n(((Tigers, \"[Big],\nscary cats\")))";
+            for input in [macro_form, shorthand] {
+                let doc = Parser::default().parse(input);
+                assert_eq!(
+                    rendered_paragraphs(&doc),
+                    &["Tigers are big, scary cats.\n"]
+                );
+            }
+        }
+
+        #[test]
+        fn normal_substitutions_applied_to_concealed_macro() {
+            // 'normal substitutions are performed on an index term macro'
+            // The concealed term renders nothing regardless of inner formatting.
+            for macro_ in ["indexterm:[*Tigers*]", "(((*Tigers*)))"] {
+                let doc = Parser::default().parse(&format!("{SENTENCE}\n{macro_}"));
+                assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
+            }
+        }
+
+        #[test]
+        fn registers_multiple_concealed_macros() {
+            // 'registers multiple index term macros'
+            let doc =
+                Parser::default().parse(&format!("{SENTENCE}\n(((Tigers)))\n(((Animals,Cats)))"));
+            assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n\n")]);
+        }
+
+        #[test]
+        fn concealed_term_may_contain_round_brackets() {
+            // 'an index term macro with round bracket syntax may contain round
+            // brackets in term'
+            let doc =
+                Parser::default().parse(&format!("{SENTENCE}\n(((Tiger (Panthera tigris))))"));
+            assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
+        }
+
+        #[test]
+        fn shorthand_does_not_consume_trailing_round_bracket() {
+            // HTML5 analogue of the DocBook-only test 'visible shorthand index
+            // term macro should not consume trailing round bracket'.
+            let doc = Parser::default().parse("(text with ((index term)))");
+            assert_eq!(rendered_paragraphs(&doc), &["(text with index term)"]);
+        }
+
+        #[test]
+        fn shorthand_does_not_consume_leading_round_bracket() {
+            // HTML5 analogue of 'visible shorthand index term macro should not
+            // consume leading round bracket'.
+            let doc = Parser::default().parse("(((index term)) for text)");
+            assert_eq!(rendered_paragraphs(&doc), &["(index term for text)"]);
+        }
+
+        #[test]
+        fn concealed_term_may_contain_square_brackets() {
+            // 'an index term macro with square bracket syntax may contain square
+            // brackets in term'
+            let doc = Parser::default().parse(&format!(
+                "{SENTENCE}\nindexterm:[Tiger [Panthera tigris\\]]"
+            ));
+            assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
+        }
+
+        #[test]
+        fn flow_macro_retains_term_inline() {
+            // 'a single-line index term 2 macro should be registered ... and
+            // retain term inline'
+            for input in [
+                "The indexterm2:[tiger] (Panthera tigris) is the largest cat species.",
+                "The ((tiger)) (Panthera tigris) is the largest cat species.",
+            ] {
+                let doc = Parser::default().parse(input);
+                assert_eq!(rendered_paragraphs(&doc), &[SENTENCE.to_string()]);
+            }
+        }
+
+        #[test]
+        fn multiline_flow_macro_is_compacted() {
+            // 'a multi-line index term 2 macro should be compacted ... and retain
+            // term inline'
+            let expected = "The panthera tigris is the largest cat species.";
+            for input in [
+                "The indexterm2:[ panthera\ntigris ] is the largest cat species.",
+                "The (( panthera\ntigris )) is the largest cat species.",
+            ] {
+                let doc = Parser::default().parse(input);
+                assert_eq!(rendered_paragraphs(&doc), &[expected.to_string()]);
+            }
+        }
+
+        #[test]
+        fn registers_multiple_flow_macros() {
+            // 'registers multiple index term 2 macros'
+            let doc = Parser::default()
+                .parse("The ((tiger)) (Panthera tigris) is the largest ((cat)) species.");
+            assert_eq!(rendered_paragraphs(&doc), &[SENTENCE.to_string()]);
+        }
+
+        #[test]
+        fn escape_visible_term() {
+            // 'should escape visible index term if preceded by a backslash'
+            let doc = Parser::default()
+                .parse("The \\((tiger)) (Panthera tigris) is the largest \\((cat)) species.");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &["The ((tiger)) (Panthera tigris) is the largest ((cat)) species."]
+            );
+        }
+
+        #[test]
+        fn normal_substitutions_applied_to_flow_macro() {
+            // 'normal substitutions are performed on an index term 2 macro'
+            let doc = Parser::default()
+                .parse("The ((*tiger*)) (Panthera tigris) is the largest cat species.");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &["The <strong>tiger</strong> (Panthera tigris) is the largest cat species."]
+            );
+        }
+
+        #[test]
+        fn flow_and_concealed_shorthand_do_not_interfere() {
+            // 'index term 2 macro with round bracket syntex should not interfer
+            // with index term macro with round bracket syntax'
+            let doc = Parser::default().parse(
+                "The ((panthera tigris)) is the largest cat species.\n(((Big cats,Tigers)))",
+            );
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &["The panthera tigris is the largest cat species.\n"]
+            );
+        }
+    }
+
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby_2() {
@@ -4049,325 +4271,6 @@ mod macros {
             assert_equal %w(1 1 2), footnote_refs.map(&:text)
             assert_equal 3, footnote_defs.length
             assert_equal ['1. second footnote', '1. first footnote', '2. third footnote'], footnote_defs.map(&:text).map(&:strip)
-        end
-
-        test 'a single-line index term macro with a primary term should be registered as an index reference' do
-            sentence = "The tiger (Panthera tigris) is the largest cat species.\n"
-            macros = ['indexterm:[Tigers]', '(((Tigers)))']
-            macros.each do |macro|
-            para = block_from_string "#{sentence}#{macro}"
-            output = para.sub_macros para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['Tigers'], para.document.catalog[:indexterms].first
-            end
-        end
-
-        test 'a single-line index term macro with primary and secondary terms should be registered as an index reference' do
-            sentence = "The tiger (Panthera tigris) is the largest cat species.\n"
-            macros = ['indexterm:[Big cats, Tigers]', '(((Big cats, Tigers)))']
-            macros.each do |macro|
-            para = block_from_string "#{sentence}#{macro}"
-            output = para.sub_macros para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['Big cats', 'Tigers'], para.document.catalog[:indexterms].first
-            end
-        end
-
-        test 'a single-line index term macro with primary, secondary and tertiary terms should be registered as an index reference' do
-            sentence = "The tiger (Panthera tigris) is the largest cat species.\n"
-            macros = ['indexterm:[Big cats,Tigers , Panthera tigris]', '(((Big cats,Tigers , Panthera tigris)))']
-            macros.each do |macro|
-            para = block_from_string "#{sentence}#{macro}"
-            output = para.sub_macros para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['Big cats', 'Tigers', 'Panthera tigris'], para.document.catalog[:indexterms].first
-            end
-        end
-
-        test 'a multi-line index term macro should be compacted and registered as an index reference' do
-            sentence = "The tiger (Panthera tigris) is the largest cat species.\n"
-            macros = ["indexterm:[Panthera\ntigris]", "(((Panthera\ntigris)))"]
-            macros.each do |macro|
-            para = block_from_string "#{sentence}#{macro}"
-            output = para.sub_macros para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['Panthera tigris'], para.document.catalog[:indexterms].first
-            end
-        end
-
-        test 'should escape concealed index term if second bracket is preceded by a backslash' do
-            input = %[National Institute of Science and Technology (#{BACKSLASH}((NIST)))]
-            doc = document_from_string input, standalone: false
-            output = doc.convert
-            assert_xpath '//p[text()="National Institute of Science and Technology (((NIST)))"]', output, 1
-            #assert doc.catalog[:indexterms].empty?
-        end
-
-        test 'should only escape enclosing brackets if concealed index term is preceded by a backslash' do
-            input = %[National Institute of Science and Technology #{BACKSLASH}(((NIST)))]
-            doc = document_from_string input, standalone: false
-            output = doc.convert
-            assert_xpath '//p[text()="National Institute of Science and Technology (NIST)"]', output, 1
-            #term = doc.catalog[:indexterms].first
-            #assert_equal 1, term.size
-            #assert_equal 'NIST', term.first
-        end
-
-        test 'should not split index terms on commas inside of quoted terms' do
-            inputs = []
-            inputs.push <<~'EOS'
-            Tigers are big, scary cats.
-            indexterm:[Tigers, "[Big\],
-            scary cats"]
-            EOS
-            inputs.push <<~'EOS'
-            Tigers are big, scary cats.
-            (((Tigers, "[Big],
-            scary cats")))
-            EOS
-
-            inputs.each do |input|
-            para = block_from_string input
-            output = para.sub_macros para.source
-            assert_equal input.lines.first, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #terms = para.document.catalog[:indexterms].first
-            #assert_equal 2, terms.size
-            #assert_equal 'Tigers', terms.first
-            #assert_equal '[Big], scary cats', terms.last
-            end
-        end
-
-        test 'normal substitutions are performed on an index term macro' do
-            sentence = "The tiger (Panthera tigris) is the largest cat species.\n"
-            macros = ['indexterm:[*Tigers*]', '(((*Tigers*)))']
-            macros.each do |macro|
-            para = block_from_string "#{sentence}#{macro}"
-            output = para.apply_subs para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['<strong>Tigers</strong>'], para.document.catalog[:indexterms].first
-            end
-        end
-
-        test 'registers multiple index term macros' do
-            sentence = 'The tiger (Panthera tigris) is the largest cat species.'
-            macros = "(((Tigers)))\n(((Animals,Cats)))"
-            para = block_from_string "#{sentence}\n#{macros}"
-            output = para.sub_macros para.source
-            assert_equal sentence, output.rstrip
-            #assert_equal 2, para.document.catalog[:indexterms].size
-            #assert_equal ['Tigers'], para.document.catalog[:indexterms][0]
-            #assert_equal ['Animals', 'Cats'], para.document.catalog[:indexterms][1]
-        end
-
-        test 'an index term macro with round bracket syntax may contain round brackets in term' do
-            sentence = "The tiger (Panthera tigris) is the largest cat species.\n"
-            macro = '(((Tiger (Panthera tigris))))'
-            para = block_from_string "#{sentence}#{macro}"
-            output = para.sub_macros para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['Tiger (Panthera tigris)'], para.document.catalog[:indexterms].first
-        end
-
-        test 'visible shorthand index term macro should not consume trailing round bracket' do
-            input = '(text with ((index term)))'
-            expected = <<~'EOS'.chop
-            (text with <indexterm>
-            <primary>index term</primary>
-            </indexterm>index term)
-            EOS
-            #expected_term = ['index term']
-            para = block_from_string input, backend: :docbook
-            output = para.sub_macros para.source
-            assert_equal expected, output
-            #indexterms_table = para.document.catalog[:indexterms]
-            #assert_equal 1, indexterms_table.size
-            #assert_equal expected_term, indexterms_table[0]
-        end
-
-        test 'visible shorthand index term macro should not consume leading round bracket' do
-            input = '(((index term)) for text)'
-            expected = <<~'EOS'.chop
-            (<indexterm>
-            <primary>index term</primary>
-            </indexterm>index term for text)
-            EOS
-            #expected_term = ['index term']
-            para = block_from_string input, backend: :docbook
-            output = para.sub_macros para.source
-            assert_equal expected, output
-            #indexterms_table = para.document.catalog[:indexterms]
-            #assert_equal 1, indexterms_table.size
-            #assert_equal expected_term, indexterms_table[0]
-        end
-
-        test 'an index term macro with square bracket syntax may contain square brackets in term' do
-            sentence = "The tiger (Panthera tigris) is the largest cat species.\n"
-            macro = 'indexterm:[Tiger [Panthera tigris\\]]'
-            para = block_from_string "#{sentence}#{macro}"
-            output = para.sub_macros para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['Tiger [Panthera tigris]'], para.document.catalog[:indexterms].first
-        end
-
-        test 'a single-line index term 2 macro should be registered as an index reference and retain term inline' do
-            sentence = 'The tiger (Panthera tigris) is the largest cat species.'
-            macros = ['The indexterm2:[tiger] (Panthera tigris) is the largest cat species.', 'The ((tiger)) (Panthera tigris) is the largest cat species.']
-            macros.each do |macro|
-            para = block_from_string macro
-            output = para.sub_macros para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['tiger'], para.document.catalog[:indexterms].first
-            end
-        end
-
-        test 'a multi-line index term 2 macro should be compacted and registered as an index reference and retain term inline' do
-            sentence = 'The panthera tigris is the largest cat species.'
-            macros = ["The indexterm2:[ panthera\ntigris ] is the largest cat species.", "The (( panthera\ntigris )) is the largest cat species."]
-            macros.each do |macro|
-            para = block_from_string macro
-            output = para.sub_macros para.source
-            assert_equal sentence, output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['panthera tigris'], para.document.catalog[:indexterms].first
-            end
-        end
-
-        test 'registers multiple index term 2 macros' do
-            sentence = 'The ((tiger)) (Panthera tigris) is the largest ((cat)) species.'
-            para = block_from_string sentence
-            output = para.sub_macros para.source
-            assert_equal 'The tiger (Panthera tigris) is the largest cat species.', output
-            #assert_equal 2, para.document.catalog[:indexterms].size
-            #assert_equal ['tiger'], para.document.catalog[:indexterms][0]
-            #assert_equal ['cat'], para.document.catalog[:indexterms][1]
-        end
-
-        test 'should escape visible index term if preceded by a backslash' do
-            sentence = "The #{BACKSLASH}((tiger)) (Panthera tigris) is the largest #{BACKSLASH}((cat)) species."
-            para = block_from_string sentence
-            output = para.sub_macros para.source
-            assert_equal 'The ((tiger)) (Panthera tigris) is the largest ((cat)) species.', output
-            #assert para.document.catalog[:indexterms].empty?
-        end
-
-        test 'normal substitutions are performed on an index term 2 macro' do
-            sentence = 'The ((*tiger*)) (Panthera tigris) is the largest cat species.'
-            para = block_from_string sentence
-            output = para.apply_subs para.source
-            assert_equal 'The <strong>tiger</strong> (Panthera tigris) is the largest cat species.', output
-            #assert_equal 1, para.document.catalog[:indexterms].size
-            #assert_equal ['<strong>tiger</strong>'], para.document.catalog[:indexterms].first
-        end
-
-        test 'index term 2 macro with round bracket syntex should not interfer with index term macro with round bracket syntax' do
-            sentence = "The ((panthera tigris)) is the largest cat species.\n(((Big cats,Tigers)))"
-            para = block_from_string sentence
-            output = para.sub_macros para.source
-            assert_equal "The panthera tigris is the largest cat species.\n", output
-            #terms = para.document.catalog[:indexterms]
-            #assert_equal 2, terms.size
-            #assert_equal ['panthera tigris'], terms[0]
-            #assert_equal ['Big cats', 'Tigers'], terms[1]
-        end
-
-        test 'should parse visible shorthand index term with see and seealso' do
-            sentence = '((Flash >> HTML 5)) has been supplanted by ((HTML 5 &> CSS 3 &> SVG)).'
-            output = convert_string_to_embedded sentence, backend: 'docbook'
-            indexterm_flash = <<~'EOS'.chop
-            <indexterm>
-            <primary>Flash</primary>
-            <see>HTML 5</see>
-            </indexterm>
-            EOS
-            indexterm_html5 = <<~'EOS'.chop
-            <indexterm>
-            <primary>HTML 5</primary>
-            <seealso>CSS 3</seealso>
-            <seealso>SVG</seealso>
-            </indexterm>
-            EOS
-            assert_includes output, indexterm_flash
-            assert_includes output, indexterm_html5
-        end
-
-        test 'should parse concealed shorthand index term with see and seealso' do
-            sentence = 'Flash(((Flash >> HTML 5))) has been supplanted by HTML 5(((HTML 5 &> CSS 3 &> SVG))).'
-            output = convert_string_to_embedded sentence, backend: 'docbook'
-            indexterm_flash = <<~'EOS'.chop
-            <indexterm>
-            <primary>Flash</primary>
-            <see>HTML 5</see>
-            </indexterm>
-            EOS
-            indexterm_html5 = <<~'EOS'.chop
-            <indexterm>
-            <primary>HTML 5</primary>
-            <seealso>CSS 3</seealso>
-            <seealso>SVG</seealso>
-            </indexterm>
-            EOS
-            assert_includes output, indexterm_flash
-            assert_includes output, indexterm_html5
-        end
-
-        test 'should parse visible index term macro with see and seealso' do
-            sentence = 'indexterm2:[Flash,see=HTML 5] has been supplanted by indexterm2:[HTML 5,see-also="CSS 3, SVG"].'
-            output = convert_string_to_embedded sentence, backend: 'docbook'
-            indexterm_flash = <<~'EOS'.chop
-            <indexterm>
-            <primary>Flash</primary>
-            <see>HTML 5</see>
-            </indexterm>
-            EOS
-            indexterm_html5 = <<~'EOS'.chop
-            <indexterm>
-            <primary>HTML 5</primary>
-            <seealso>CSS 3</seealso>
-            <seealso>SVG</seealso>
-            </indexterm>
-            EOS
-            assert_includes output, indexterm_flash
-            assert_includes output, indexterm_html5
-        end
-
-        test 'should parse concealed index term macro with see and seealso' do
-            sentence = 'Flashindexterm:[Flash,see=HTML 5] has been supplanted by HTML 5indexterm:[HTML 5,see-also="CSS 3, SVG"].'
-            output = convert_string_to_embedded sentence, backend: 'docbook'
-            indexterm_flash = <<~'EOS'.chop
-            <indexterm>
-            <primary>Flash</primary>
-            <see>HTML 5</see>
-            </indexterm>
-            EOS
-            indexterm_html5 = <<~'EOS'.chop
-            <indexterm>
-            <primary>HTML 5</primary>
-            <seealso>CSS 3</seealso>
-            <seealso>SVG</seealso>
-            </indexterm>
-            EOS
-            assert_includes output, indexterm_flash
-            assert_includes output, indexterm_html5
-        end
-
-        test 'should honor secondary and tertiary index terms when primary index term is quoted and contains equals sign' do
-            sentence = 'Assigning variables.'
-            expected = %(#{sentence}<indexterm><primary>name=value</primary><secondary>variable</secondary><tertiary>assignment</tertiary></indexterm>)
-            macros = ['indexterm:["name=value",variable,assignment]', '(((name=value,variable,assignment)))']
-            macros.each do |macro|
-            para = block_from_string %(#{sentence}#{macro}), backend: 'docbook'
-            output = (para.sub_macros para.source).tr ?\n, ''
-            assert_equal expected, output
-            end
         end
 
         context 'Button macro' do
