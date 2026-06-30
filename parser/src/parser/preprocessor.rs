@@ -301,8 +301,8 @@ static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
     #![allow(clippy::indexing_slicing)]
+    #![allow(clippy::unwrap_used)]
 
     use crate::{
         parser::{SourceLine, preprocessor::preprocess},
