@@ -147,9 +147,17 @@ impl<'p> PreprocessorState<'p> {
                         ifh.resolve_target(file_name, &target, &attrlist, self.parser)
                     })
                 {
-                    // TODO: Use process_adoc_include or (TBD) depending on
-                    // whether it's an Asciidoc file type.
-                    self.process_adoc_include(&include_text, Some(&target));
+                    if is_asciidoc_file(&target) {
+                        // AsciiDoc files are run through the preprocessor, so the
+                        // include (and other) directives they contain are
+                        // interpreted.
+                        self.process_adoc_include(&include_text, Some(&target));
+                    } else {
+                        // Non-AsciiDoc files are merged verbatim; the preprocessor
+                        // does not interpret any AsciiDoc directives within them
+                        // (matching Asciidoctor).
+                        self.process_nonadoc_include(&include_text, Some(&target));
+                    }
 
                     // Re-report the including file if there's more content.
                     has_reported_file = false;
@@ -222,6 +230,44 @@ impl<'p> PreprocessorState<'p> {
         self.include_depth -= 1;
     }
 
+    /// Merge the content of a non-AsciiDoc include verbatim.
+    ///
+    /// Unlike [`process_adoc_include`], the content is not scanned for
+    /// preprocessor directives (nested includes, attribute entries, etc.); it
+    /// is inserted as-is, subject only to the line-ending normalization
+    /// that [`Span::take_line`] already performs. This mirrors how
+    /// Asciidoctor treats files that are not recognized as AsciiDoc.
+    ///
+    /// [`process_adoc_include`]: Self::process_adoc_include
+    fn process_nonadoc_include(&mut self, source: &str, file_name: Option<&str>) {
+        let mut source_span = Span::new(source);
+        let mut has_reported_file = false;
+
+        while !source_span.is_empty() {
+            let MatchedItem { item: line, after } = source_span.take_line();
+            source_span = after;
+
+            if !has_reported_file {
+                has_reported_file = true;
+                self.source_map.append(
+                    self.output_line_number,
+                    SourceLine(to_owned(file_name), line.line()),
+                );
+            }
+
+            if line.is_empty() {
+                self.in_document_header = false;
+                self.can_have_attribute = true;
+            } else if !self.in_document_header {
+                self.can_have_attribute = false;
+            }
+
+            self.output_line_number += 1;
+            self.output.push_str(line.data());
+            self.output.push('\n');
+        }
+    }
+
     /// Apply attribute substitution to a string, replacing {attribute-name}
     /// patterns with their corresponding values from the parser.
     fn substitute_attributes(&self, input: &str) -> String {
@@ -266,6 +312,26 @@ impl<'p> PreprocessorState<'p> {
 
 fn to_owned(maybe_file_name: Option<&str>) -> Option<String> {
     maybe_file_name.map(|n| n.to_string())
+}
+
+/// Returns `true` if `target` names an AsciiDoc file, based on its extension.
+///
+/// Per the [include directive] spec, a file is treated as AsciiDoc if it has
+/// one of these extensions: `.asciidoc`, `.adoc`, `.ad`, `.asc`, or `.txt`. The
+/// comparison is case-sensitive, and a target with no extension is not
+/// considered AsciiDoc — both matching Asciidoctor.
+///
+/// [include directive]: https://docs.asciidoctor.org/asciidoc/latest/directives/include/#include-nonasciidoc
+fn is_asciidoc_file(target: &str) -> bool {
+    const ASCIIDOC_EXTENSIONS: [&str; 5] = ["asciidoc", "adoc", "ad", "asc", "txt"];
+
+    let file_name = target.rsplit('/').next().unwrap_or(target);
+
+    match file_name.rsplit_once('.') {
+        // A leading dot (e.g. `.adoc`) denotes a hidden file with no extension.
+        Some((stem, ext)) if !stem.is_empty() => ASCIIDOC_EXTENSIONS.contains(&ext),
+        _ => false,
+    }
 }
 
 static INCLUDE_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
@@ -600,6 +666,79 @@ mod tests {
         assert_eq!(
             source_map.original_file_and_line(4),
             Some(SourceLine(Some("main.adoc".to_owned()), 4))
+        );
+    }
+
+    #[test]
+    fn asciidoc_file_recognition() {
+        use super::is_asciidoc_file;
+
+        // Recognized AsciiDoc extensions.
+        assert!(is_asciidoc_file("foo.asciidoc"));
+        assert!(is_asciidoc_file("foo.adoc"));
+        assert!(is_asciidoc_file("foo.ad"));
+        assert!(is_asciidoc_file("foo.asc"));
+        assert!(is_asciidoc_file("foo.txt"));
+        assert!(is_asciidoc_file("path/to/foo.adoc"));
+        assert!(is_asciidoc_file("a.b.adoc"));
+
+        // Not AsciiDoc.
+        assert!(!is_asciidoc_file("foo.csv"));
+        assert!(!is_asciidoc_file("foo.rb"));
+        assert!(!is_asciidoc_file("path/to/data.csv"));
+        assert!(!is_asciidoc_file("foo")); // no extension
+        assert!(!is_asciidoc_file("foo.ADOC")); // case-sensitive
+        assert!(!is_asciidoc_file(".adoc")); // hidden file, no stem
+    }
+
+    #[test]
+    fn asciidoc_include_processes_nested_directives() {
+        // An included AsciiDoc file is run through the preprocessor, so a nested
+        // include within it is expanded.
+        let source = "include::outer.adoc[]";
+
+        let handler = InlineFileHandler::from_pairs([
+            ("outer.adoc", "Top.\ninclude::inner.adoc[]"),
+            ("inner.adoc", "Nested."),
+        ]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Top.\nNested.\n");
+    }
+
+    #[test]
+    fn non_asciidoc_include_merged_verbatim() {
+        // A non-AsciiDoc file (here `.csv`) is merged verbatim: a nested include
+        // directive within it is left as literal text, not expanded.
+        let source = "include::data.csv[]";
+
+        let handler = InlineFileHandler::from_pairs([
+            ("data.csv", "a,b\ninclude::inner.adoc[]"),
+            ("inner.adoc", "SHOULD NOT APPEAR"),
+        ]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "a,b\ninclude::inner.adoc[]\n");
+        assert!(warnings.is_empty());
+
+        // The verbatim content maps back to the non-AsciiDoc file's lines.
+        assert_eq!(
+            source_map.original_file_and_line(1),
+            Some(SourceLine(Some("data.csv".to_owned()), 1))
+        );
+        assert_eq!(
+            source_map.original_file_and_line(2),
+            Some(SourceLine(Some("data.csv".to_owned()), 2))
         );
     }
 

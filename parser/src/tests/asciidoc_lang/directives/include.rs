@@ -619,11 +619,8 @@ The content of all included content goes through some form of normalization.
     assert_eq!(paras, vec!["Year,Total\n2016,1234"]);
 }
 
-// The remaining details in this section are out of scope for this crate:
-// character-encoding handling (the encoding attribute and BOM detection), the
-// extension-based AsciiDoc-file recognition (this crate treats every included
-// file as AsciiDoc), trailing-whitespace stripping, and preprocessor
-// conditionals (e.g. `ifdef`) are not implemented.
+// Character-encoding handling (the encoding attribute and BOM detection) is out
+// of scope for this crate; included content is assumed to already be UTF-8.
 non_normative!(
     r#"
 The content of each include file is encoded to UTF-8.
@@ -631,7 +628,41 @@ If the encoding attribute is specified on the include directive, the content is 
 If the encoding attribute is not specified, the processor will look for the presence of a BOM and reencode the content from that encoding to UTF-8 accordingly.
 If neither of those conditions are met, the encoding is forced to UTF-8.
 
+"#
+);
+
+#[test]
+fn asciidoc_file_gets_additional_processing() {
+    verifies!(
+        r#"
 If the file is recognized as an AsciiDoc file (i.e., it has one of the following extensions: `.asciidoc`, `.adoc`, `.ad`, `.asc`, or `.txt`) additional normalization and processing is performed.
+"#
+    );
+
+    // An include whose target is recognized as AsciiDoc (by its `.adoc`
+    // extension) is run through the preprocessor, so an include directive nested
+    // within it is itself expanded.
+    let handler = InlineFileHandler::from_pairs([
+        ("chapter.adoc", "Chapter intro.\n\ninclude::fragment.adoc[]"),
+        ("fragment.adoc", "Fragment body."),
+    ]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("include::chapter.adoc[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["Chapter intro.", "Fragment body."]);
+}
+
+// Trailing-whitespace stripping and preprocessor conditionals (e.g. `ifdef`)
+// are not implemented, so the normalization detail and the conditionals bullet
+// below remain non-normative. (The `includes` bullet is covered by the
+// nested-include test that follows.)
+non_normative!(
+    r#"
 First, all trailing whitespace and endlines are removed from each line and replaced with a Unix line feed.
 This normalization is important to how an AsciiDoc processor works.
 Next, the AsciiDoc processor runs the preprocessor on the lines, looking for and interpreting the following directives:
@@ -680,9 +711,38 @@ Including non-AsciiDoc files is normally done to merge output from other program
 ,===
 ----
 
+"#
+);
+
+#[test]
+fn non_asciidoc_file_inserted_verbatim() {
+    verifies!(
+        r#"
 In this case, the include directive does not do any processing of AsciiDoc directives.
 The content is inserted as is (after being normalized).
 
+"#
+    );
+
+    // A non-AsciiDoc include (here a `.csv` file) is merged verbatim: an include
+    // directive nested within it is left as literal text, never expanded.
+    let handler = InlineFileHandler::from_pairs([
+        ("results.csv", "year,total\ninclude::fragment.adoc[]"),
+        ("fragment.adoc", "SHOULD NOT APPEAR"),
+    ]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("include::results.csv[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["year,total\ninclude::fragment.adoc[]"]);
+}
+
+non_normative!(
+    r#"
 ////
 CAUTION: You *can* put AsciiDoc content in a non-AsciiDoc file.
 Its content will still be processed as AsciiDoc, but any include statements will be ignored, and therefore cause errors later in processing.
