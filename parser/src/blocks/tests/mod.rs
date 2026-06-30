@@ -379,6 +379,7 @@ mod error_cases {
                 attrlist: None,
                 section_type: SectionType::Normal,
                 section_id: Some("_section_title"),
+                caption: None,
                 section_number: None,
             }
         );
@@ -580,6 +581,7 @@ mod error_cases {
                 },),
                 section_type: SectionType::Normal,
                 section_id: Some("_section_title_except_it_isnt"),
+                caption: None,
                 section_number: None,
             },)
         );

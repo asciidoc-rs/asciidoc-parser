@@ -211,6 +211,7 @@ image::reference-author.png[Reference the built-in attributes for an author,role
                 attrlist: None,
                 section_type: SectionType::Normal,
                 section_id: Some("_about_kismet_r_lee"),
+                caption: None,
                 section_number: None,
             },),],
             source: Span {

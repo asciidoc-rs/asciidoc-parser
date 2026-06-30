@@ -128,6 +128,7 @@ fn simplest_section_block() {
             attrlist: None,
             section_type: SectionType::Normal,
             section_id: Some("_section_title"),
+            caption: None,
             section_number: None,
         })
     );
@@ -219,6 +220,7 @@ fn has_child_block() {
             attrlist: None,
             section_type: SectionType::Normal,
             section_id: Some("_section_title"),
+            caption: None,
             section_number: None,
         })
     );
@@ -351,6 +353,7 @@ fn title() {
             attrlist: None,
             section_type: SectionType::Normal,
             section_id: Some("_section_title"),
+            caption: None,
             section_number: None,
         })
     );
@@ -516,6 +519,7 @@ fn warn_child_attrlist_has_extra_comma() {
             attrlist: None,
             section_type: SectionType::Normal,
             section_id: Some("_section_title"),
+            caption: None,
             section_number: None,
         })
     );

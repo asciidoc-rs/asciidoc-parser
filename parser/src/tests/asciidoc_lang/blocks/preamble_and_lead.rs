@@ -164,6 +164,7 @@ include::example$preamble.adoc[]
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_certain_peril",),
+                    caption: None,
                     section_number: None,
                 },),
             ],
