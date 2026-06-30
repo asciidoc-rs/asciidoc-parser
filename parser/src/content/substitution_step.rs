@@ -464,8 +464,11 @@ fn apply_quotes(content: &mut Content<'_>, parser: &Parser) {
 }
 
 static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+    // Either a `counter`/`counter2` directive (group 1) with its `name[:seed]`
+    // expression (group 2), or a plain attribute name (group 3). This mirrors
+    // the `counter2?:` branch of Asciidoctor's `AttributeReferenceRx`.
     #[allow(clippy::unwrap_used)]
-    Regex::new(r#"\\?\{([A-Za-z0-9_][A-Za-z0-9_-]*)\}"#).unwrap()
+    Regex::new(r#"\\?\{(?:(counter2?):([^{}]+)|([A-Za-z0-9_][A-Za-z0-9_-]*))\}"#).unwrap()
 });
 
 /// How the processor handles a reference to a missing attribute, controlled by
@@ -527,7 +530,34 @@ struct AttributeReplacer<'p> {
 impl Replacer for AttributeReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         let escaped = caps[0].starts_with('\\');
-        let attr_name = &caps[1];
+
+        // A `counter`/`counter2` directive resolves (and advances) a counter
+        // rather than looking up an existing attribute.
+        if let Some(directive) = caps.get(1) {
+            if escaped {
+                // An escaped counter reference is emitted literally (without the
+                // backslash) and does not advance the counter.
+                dest.push_str(&caps[0][1..]);
+                return;
+            }
+
+            // Group 2 always participates when group 1 does (same alternation
+            // branch). The expression is `name` or `name:seed`.
+            let mut parts = caps[2].splitn(2, ':');
+            let name = parts.next().unwrap_or_default();
+            let seed = parts.next();
+
+            let value = self.parser.counter(name, seed);
+
+            // `counter` displays the new value; `counter2` advances silently.
+            if directive.as_str() == "counter" {
+                dest.push_str(&value);
+            }
+            return;
+        }
+
+        // Otherwise this is a plain attribute reference (group 3).
+        let attr_name = &caps[3];
 
         if !self.parser.has_attribute(attr_name) {
             // An escaped reference (e.g. `\{id}`) to an attribute that isn't set
@@ -1395,6 +1425,39 @@ mod tests {
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("bl{sp}ah".to_string().into_boxed_str())
+            );
+        }
+
+        #[test]
+        fn counter_directive_displays_and_advances() {
+            let mut content = Content::from(crate::Span::new("{counter:n}-{counter:n}"));
+            let p = Parser::default();
+            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed("1-2".to_string().into_boxed_str())
+            );
+        }
+
+        #[test]
+        fn counter2_directive_advances_silently() {
+            let mut content = Content::from(crate::Span::new("{counter2:n}{counter:n}"));
+            let p = Parser::default();
+            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed("2".to_string().into_boxed_str())
+            );
+        }
+
+        #[test]
+        fn escaped_counter_directive_is_literal_and_does_not_advance() {
+            let mut content = Content::from(crate::Span::new("\\{counter:n} {counter:n}"));
+            let p = Parser::default();
+            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed("{counter:n} 1".to_string().into_boxed_str())
             );
         }
 

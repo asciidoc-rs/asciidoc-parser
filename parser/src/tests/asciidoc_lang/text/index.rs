@@ -72,6 +72,7 @@ This stuff is *strong*!
 As you can see, the constrained pair offers a more succinct markup at the tradeoff of having more limited (constrained) use.
 However, it should suffice in most cases, so the abbreviated markup is a benefit.
 You can think of a constrained pair as being a weaker markup hint than an unconstrained pair.
+
 "#
         );
 

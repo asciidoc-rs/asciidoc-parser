@@ -71,15 +71,25 @@ pub struct Parser {
     /// child sections as a normal section or appendix.)
     pub(crate) topmost_section_type: SectionType,
 
-    /// Per-context counters for captioned blocks, keyed by counter name (e.g.
-    /// `example-number`, `table-number`).
+    /// Live values of [counter] attributes, keyed by counter name (e.g.
+    /// `index`, `example-number`, `table-number`).
     ///
-    /// Each captionable block context (example, table, …) maintains an
-    /// independent, document-wide sequence. A counter is incremented each time
-    /// a block of that context receives an automatically numbered caption
-    /// (e.g. "Example 1.", "Table 1."). This mirrors Asciidoctor's
-    /// per-context `Document#counters`.
-    pub(crate) counters: HashMap<String, usize>,
+    /// A counter is a specialized document attribute: its value is *also* the
+    /// value of the document attribute of the same name. Counters are resolved
+    /// (and advanced) deep inside the attribute-reference substitution step,
+    /// where only a shared `&Parser` is available, so the new value is recorded
+    /// here through a [`RefCell`] and read back as an attribute by
+    /// [`attribute_value()`]. An explicit attribute assignment to a counter's
+    /// name supersedes this overlay (and is what allows `:!name:` to reset a
+    /// counter), so every attribute setter clears the matching entry.
+    ///
+    /// Captioned blocks (example, table, …) are numbered with this same
+    /// mechanism: each context's caption number is the counter named
+    /// `<context>-number`, mirroring Asciidoctor's `Document#counter`.
+    ///
+    /// [counter]: https://docs.asciidoctor.org/asciidoc/latest/attributes/counters/
+    /// [`attribute_value()`]: Self::attribute_value
+    pub(crate) counter_values: RefCell<HashMap<String, String>>,
 
     /// Canonical names of attributes that are locked against modification from
     /// the document body for the current scope.
@@ -177,7 +187,7 @@ impl Default for Parser {
             },
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,
-            counters: HashMap::new(),
+            counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
             callouts: RefCell::new(CalloutCatalog::default()),
@@ -261,8 +271,8 @@ impl Parser {
         // Reset section numbering for each new document.
         self.last_section_number = SectionNumber::default();
 
-        // Reset captioned-block numbering for each new document.
-        self.counters.clear();
+        // Reset counter (and captioned-block) numbering for each new document.
+        self.counter_values.borrow_mut().clear();
 
         Document::parse(&preprocessed_source, source_map, self)
     }
@@ -292,6 +302,13 @@ impl Parser {
     ///
     /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     pub fn attribute_value<N: AsRef<str>>(&self, name: N) -> InterpretedValue {
+        // A counter's current value lives in the overlay and supersedes any
+        // earlier value of the attribute of the same name (see
+        // [`counter_values`](Self::counter_values)).
+        if let Some(value) = self.counter_values.borrow().get(name.as_ref()) {
+            return InterpretedValue::Value(value.clone());
+        }
+
         self.attribute_values
             .get(name.as_ref())
             .map(|av| av.value.clone())
@@ -311,7 +328,8 @@ impl Parser {
     ///
     /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     pub fn has_attribute<N: AsRef<str>>(&self, name: N) -> bool {
-        self.attribute_values.contains_key(name.as_ref())
+        self.counter_values.borrow().contains_key(name.as_ref())
+            || self.attribute_values.contains_key(name.as_ref())
     }
 
     /// Returns `true` if the parser has a [document attribute] by this name
@@ -320,6 +338,11 @@ impl Parser {
     /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     pub fn is_attribute_set<N: AsRef<str>>(&self, name: N) -> bool {
+        // A counter always holds a concrete (set) value.
+        if self.counter_values.borrow().contains_key(name.as_ref()) {
+            return true;
+        }
+
         self.attribute_values
             .get(name.as_ref())
             .map(|a| a.value != InterpretedValue::Unset)
@@ -722,6 +745,10 @@ impl Parser {
             value,
         };
 
+        // An explicit assignment supersedes (and resets) any counter of the same
+        // name.
+        self.counter_values.borrow_mut().remove(&attr_name);
+
         let is_doctype = attr_name == "doctype";
         self.attribute_values.insert(attr_name, attribute_value);
         if is_doctype {
@@ -746,6 +773,7 @@ impl Parser {
             value: InterpretedValue::Value(value.as_ref().to_owned()),
         };
 
+        self.counter_values.borrow_mut().remove(&attr_name);
         self.attribute_values.insert(attr_name, attribute_value);
     }
 
@@ -785,6 +813,10 @@ impl Parser {
             value: attr.value().clone(),
         };
 
+        // An explicit assignment supersedes (and resets) any counter of the same
+        // name. This is what lets `:!name:` reset a counter.
+        self.counter_values.borrow_mut().remove(&attr_name);
+
         let is_doctype = attr_name == "doctype";
         self.attribute_values.insert(attr_name, attribute_value);
         if is_doctype {
@@ -810,18 +842,124 @@ impl Parser {
         }
     }
 
-    /// Increments the document-wide counter named `name` and returns its new
-    /// value.
+    /// Resolves a [counter] of the given `name`, advancing it to the next value
+    /// in its sequence and returning that value.
     ///
-    /// Captioned blocks are numbered in document order within their context,
-    /// but only those that actually receive an automatically numbered caption
-    /// consume a number. This mirrors Asciidoctor's
-    /// `Document#increment_and_store_counter`.
-    pub(crate) fn increment_counter(&mut self, name: &str) -> usize {
-        let counter = self.counters.entry(name.to_string()).or_insert(0);
-        *counter += 1;
-        *counter
+    /// A counter is a specialized document attribute: its value is stored as
+    /// (and read back from) the attribute of the same name, so a later
+    /// `{name}` reference shows the current value and an attribute assignment
+    /// such as `:!name:` resets it. Each resolution advances the counter:
+    ///
+    /// * an integer value is incremented (`1` -> `2`);
+    /// * any other value is advanced like Ruby's `String#succ` (`a` -> `b`, `z`
+    ///   -> `aa`, `Az` -> `Ba`), matching Asciidoctor.
+    ///
+    /// `seed` (from the `{counter:name:seed}` form) supplies the first value,
+    /// but only when the counter is currently unset; otherwise it is ignored.
+    /// With no seed the sequence starts at `1`.
+    ///
+    /// This mirrors Asciidoctor's `Document#counter`.
+    ///
+    /// [counter]: https://docs.asciidoctor.org/asciidoc/latest/attributes/counters/
+    pub(crate) fn counter(&self, name: &str, seed: Option<&str>) -> String {
+        let next = match self.attribute_value(name) {
+            InterpretedValue::Value(current) if !current.is_empty() => next_counter_value(&current),
+            _ => match seed {
+                Some(seed) if !seed.is_empty() => seed.to_string(),
+                _ => "1".to_string(),
+            },
+        };
+
+        self.counter_values
+            .borrow_mut()
+            .insert(name.to_string(), next.clone());
+
+        next
     }
+}
+
+/// Advances a counter value to the next value in its sequence, mirroring
+/// Asciidoctor's `Helpers.nextval`.
+///
+/// A canonical integer string (one that round-trips through integer parsing,
+/// e.g. `7` but not `07` or `+7`) is incremented numerically. Anything else is
+/// advanced with [`string_succ`].
+fn next_counter_value(current: &str) -> String {
+    if let Ok(n) = current.parse::<i64>()
+        && n.to_string() == current
+    {
+        // `saturating_add` keeps a counter that has somehow reached `i64::MAX`
+        // pinned there rather than panicking (debug) or wrapping (release).
+        return n.saturating_add(1).to_string();
+    }
+
+    string_succ(current)
+}
+
+/// Returns the successor of a string, mirroring Ruby's `String#succ` for the
+/// ASCII cases that AsciiDoc counters can produce.
+///
+/// The right-most alphanumeric character is incremented within its own class
+/// (digits, lowercase letters, uppercase letters), carrying leftward on
+/// wrap-around (`9` -> `0`, `z` -> `a`, `Z` -> `A`) and prepending a fresh
+/// leading character (`1`, `a`, or `A`) when the carry runs off the front
+/// (`z` -> `aa`, `Zz` -> `AAa`). A string with no alphanumeric characters has
+/// the code point of its last character incremented.
+fn string_succ(current: &str) -> String {
+    let chars: Vec<char> = current.chars().collect();
+
+    // Without an alphanumeric to carry through, Ruby increments the code point
+    // of the final character.
+    if !chars.iter().any(char::is_ascii_alphanumeric) {
+        let mut chars = chars;
+        if let Some(last) = chars.last_mut() {
+            *last = char::from_u32(*last as u32 + 1).unwrap_or(*last);
+        }
+        return chars.into_iter().collect();
+    }
+
+    // Walk right to left. `carrying` stays true while we are still looking for
+    // (or carrying through) the alphanumeric run: trailing non-alphanumeric
+    // characters are passed over unchanged, then the right-most alphanumeric is
+    // incremented within its class and any wrap-around carries leftward to the
+    // next alphanumeric. When the carry runs off the front, a fresh leading
+    // character of the same class is prepended (`z` -> `aa`, `9` -> `10`).
+    let mut out_rev: Vec<char> = Vec::with_capacity(chars.len() + 1);
+    let mut carrying = true;
+    let mut lead = '1';
+
+    for &c in chars.iter().rev() {
+        if carrying && c.is_ascii_alphanumeric() {
+            // Increment within the character's class, carrying on wrap-around.
+            // The arms are exhaustive over ASCII alphanumerics, so the catch-all
+            // can only be `Z` (the one value not matched above).
+            let (next, carry) = match c {
+                '0'..='8' | 'a'..='y' | 'A'..='Y' => ((c as u8 + 1) as char, false),
+                '9' => ('0', true),
+                'z' => ('a', true),
+                _ => ('A', true),
+            };
+            out_rev.push(next);
+            carrying = carry;
+            // On a carry, remember the class of leading character to prepend if
+            // the carry runs off the front; `next` is `0`, `a`, or `A` here.
+            lead = match next {
+                '0' => '1',
+                'a' => 'a',
+                _ => 'A',
+            };
+        } else {
+            // Either the carry is spent, or this is a trailing non-alphanumeric
+            // we pass over while still searching for the run to increment.
+            out_rev.push(c);
+        }
+    }
+
+    if carrying {
+        out_rev.push(lead);
+    }
+
+    out_rev.into_iter().rev().collect()
 }
 
 fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
@@ -1196,6 +1334,89 @@ mod tests {
                     .as_deref(),
                 Some(".adoc")
             );
+        }
+    }
+
+    mod counter {
+        use super::super::next_counter_value;
+        use crate::{document::InterpretedValue, tests::prelude::*};
+
+        #[test]
+        fn next_counter_value_integer() {
+            assert_eq!(next_counter_value("1"), "2");
+            assert_eq!(next_counter_value("9"), "10");
+            assert_eq!(next_counter_value("0"), "1");
+            assert_eq!(next_counter_value("-1"), "0");
+        }
+
+        #[test]
+        fn next_counter_value_non_canonical_integer_is_advanced_as_a_string() {
+            // A leading zero (or sign) does not round-trip through integer
+            // parsing, so it is advanced like a string instead.
+            assert_eq!(next_counter_value("07"), "08");
+            assert_eq!(next_counter_value("+5"), "+6");
+            // A leading-zero value still carries digit-to-digit like a string.
+            assert_eq!(next_counter_value("09"), "10");
+            assert_eq!(next_counter_value("099"), "100");
+        }
+
+        #[test]
+        fn next_counter_value_saturates_at_i64_max() {
+            // A counter pinned at `i64::MAX` stays there rather than panicking
+            // (debug) or wrapping (release).
+            let max = i64::MAX.to_string();
+            assert_eq!(next_counter_value(&max), max);
+        }
+
+        #[test]
+        fn next_counter_value_characters() {
+            assert_eq!(next_counter_value("a"), "b");
+            assert_eq!(next_counter_value("A"), "B");
+            assert_eq!(next_counter_value("z"), "aa");
+            assert_eq!(next_counter_value("Z"), "AA");
+            assert_eq!(next_counter_value("az"), "ba");
+            assert_eq!(next_counter_value("zz"), "aaa");
+            assert_eq!(next_counter_value("Zz"), "AAa");
+        }
+
+        #[test]
+        fn next_counter_value_trailing_non_alphanumeric() {
+            // The right-most alphanumeric is incremented; trailing punctuation is
+            // left in place.
+            assert_eq!(next_counter_value("a)"), "b)");
+        }
+
+        #[test]
+        fn next_counter_value_no_alphanumeric() {
+            // With nothing alphanumeric to carry, the final code point advances.
+            assert_eq!(next_counter_value("{"), "|");
+        }
+
+        #[test]
+        fn counter_defaults_to_one() {
+            let p = Parser::default();
+            assert_eq!(p.counter("x", None), "1");
+            assert_eq!(p.counter("x", None), "2");
+            assert_eq!(
+                p.attribute_value("x"),
+                InterpretedValue::Value("2".to_string())
+            );
+            assert!(p.has_attribute("x"));
+            assert!(p.is_attribute_set("x"));
+        }
+
+        #[test]
+        fn counter_seed_used_only_while_unset() {
+            let p = Parser::default();
+            assert_eq!(p.counter("c", Some("A")), "A");
+            // Once set, a later seed is ignored.
+            assert_eq!(p.counter("c", Some("Q")), "B");
+        }
+
+        #[test]
+        fn counter_empty_seed_falls_back_to_one() {
+            let p = Parser::default();
+            assert_eq!(p.counter("c", Some("")), "1");
         }
     }
 }
