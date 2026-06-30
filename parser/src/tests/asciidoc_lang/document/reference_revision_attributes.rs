@@ -144,6 +144,7 @@ image::reference-revision-line.png["Revision line and rendered revision referenc
                 attrlist: None,
                 section_type: SectionType::Normal,
                 section_id: Some("_colophon"),
+                caption: None,
                 section_number: None,
             },),],
             source: Span {
@@ -354,6 +355,7 @@ If you don't want the default version label to be displayed in the byline, xref:
                 attrlist: None,
                 section_type: SectionType::Normal,
                 section_id: Some("_colophon"),
+                caption: None,
                 section_number: None,
             },),],
             source: Span {

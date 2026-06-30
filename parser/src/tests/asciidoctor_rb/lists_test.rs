@@ -334,6 +334,7 @@ mod bulleted_lists {
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_lists",),
+                        caption: None,
                         section_number: None,
                     },),],
                     source: Span {
@@ -5136,54 +5137,160 @@ mod callout_lists {
 }
 
 mod checklists {
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/481):
-    // Enable these tests when checklists are implemented.
-    use crate::tests::prelude::*;
+    use crate::{
+        blocks::{Block, ListType},
+        tests::prelude::*,
+    };
+
+    /// Returns the first block of `doc` as a [`ListBlock`], panicking if it is
+    /// not a list.
+    ///
+    /// [`ListBlock`]: crate::blocks::ListBlock
+    fn first_list<'a>(doc: &'a crate::Document<'a>) -> &'a crate::blocks::ListBlock<'a> {
+        match doc.nested_blocks().next() {
+            Some(Block::List(list)) => list,
+            other => panic!("expected a list block, got {other:?}"),
+        }
+    }
 
     #[test]
-    #[ignore]
     fn should_create_checklist_if_at_least_one_item_has_checkbox_syntax() {
-        let _doc = Parser::default()
+        let doc = Parser::default()
             .parse("- [ ] todo\n- [x] done\n- [ ] another todo\n- [*] another done\n- plain\n");
-        todo!("document_from_string test");
-    }
 
-    #[test]
-    #[ignore]
-    fn entry_is_not_a_checklist_item_if_the_closing_bracket_is_not_immediately_followed_by_the_space_character()
-     {
-        let _doc = Parser::default()
-            .parse("- [ ]    todo\n- [x] \t done\n- [ ]\t  another todo\n- [x]\t  another done\n");
-        todo!("document_from_string test");
-    }
+        let checklist = first_list(&doc);
+        assert!(checklist.is_checklist());
 
-    #[test]
-    #[ignore]
-    fn should_create_checklist_with_font_icons_if_at_least_one_item_has_checkbox_syntax_and_icons_attribute_is_font()
-     {
-        let _doc = Parser::default().parse("- [ ] todo\n- [x] done\n- plain\n");
-        todo!("assert_css: '.ulist.checklist', output, 1");
-        todo!("assert_css: '.ulist.checklist li i.fa-check-square-o', output, 1");
-        todo!("assert_css: '.ulist.checklist li i.fa-square-o', output, 1");
-        todo!(
-            "assert_xpath: '(/*[@class=\"ulist checklist\"]/ul/li)[3]/p[text()=\"plain\"]', output, 1"
+        let items: Vec<_> = checklist.nested_blocks().collect();
+        assert_eq!(items[0].as_list_item().unwrap().checkbox(), Some(false));
+        assert_eq!(items[1].as_list_item().unwrap().checkbox(), Some(true));
+        assert_eq!(items[4].as_list_item().unwrap().checkbox(), None);
+
+        assert_css(&doc, ".ulist.checklist", 1);
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[1]/p[text()=\"\u{274f} todo\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[2]/p[text()=\"\u{2713} done\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[3]/p[text()=\"\u{274f} another todo\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[4]/p[text()=\"\u{2713} another done\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[5]/p[text()=\"plain\"]",
+            1,
         );
     }
 
     #[test]
-    #[ignore]
-    fn should_create_interactive_checklist_if_interactive_option_is_set_even_with_icons_attribute_is_font()
+    fn entry_is_not_a_checklist_item_if_the_closing_bracket_is_not_immediately_followed_by_the_space_character()
      {
-        let _doc =
-            Parser::default().parse(":icons: font\n\n[%interactive]\n- [ ] todo\n- [x] done\n");
-        todo!("document_from_string test");
+        let doc = Parser::default()
+            .parse("- [ ]    todo\n- [x] \t done\n- [ ]\t  another todo\n- [x]\t  another done\n");
+
+        let checklist = first_list(&doc);
+        assert!(checklist.is_checklist());
+
+        let items: Vec<_> = checklist.nested_blocks().collect();
+        assert_eq!(items[0].as_list_item().unwrap().checkbox(), Some(false));
+        assert_eq!(items[1].as_list_item().unwrap().checkbox(), Some(true));
+        assert_eq!(items[2].as_list_item().unwrap().checkbox(), None);
+        assert_eq!(items[3].as_list_item().unwrap().checkbox(), None);
     }
 
     #[test]
-    #[ignore]
+    fn should_create_checklist_with_font_icons_if_at_least_one_item_has_checkbox_syntax_and_icons_attribute_is_font()
+     {
+        let doc = Parser::default().parse(":icons: font\n\n- [ ] todo\n- [x] done\n- plain\n");
+
+        assert_css(&doc, ".ulist.checklist", 1);
+        assert_css(&doc, ".ulist.checklist li i.fa-check-square-o", 1);
+        assert_css(&doc, ".ulist.checklist li i.fa-square-o", 1);
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[3]/p[text()=\"plain\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_create_interactive_checklist_if_interactive_option_is_set_even_with_icons_attribute_is_font()
+     {
+        let doc =
+            Parser::default().parse(":icons: font\n\n[%interactive]\n- [ ] todo\n- [x] done\n");
+
+        let checklist = first_list(&doc);
+        assert!(checklist.is_checklist());
+        assert!(checklist.has_option("interactive"));
+
+        assert_css(&doc, ".ulist.checklist", 1);
+        assert_css(&doc, ".ulist.checklist li input[type=\"checkbox\"]", 2);
+        assert_css(
+            &doc,
+            ".ulist.checklist li input[type=\"checkbox\"][disabled]",
+            0,
+        );
+        assert_css(
+            &doc,
+            ".ulist.checklist li input[type=\"checkbox\"][checked]",
+            1,
+        );
+    }
+
+    #[test]
     fn should_not_create_checklist_if_checkbox_on_item_is_followed_by_a_tab() {
-        let _doc = Parser::default().parse("- [ ]\ttodo\n");
-        todo!("document_from_string test");
+        for checkbox in ["[ ]", "[x]", "[*]"] {
+            let input = format!("- {checkbox}\ttodo\n");
+            let doc = Parser::default().parse(&input);
+
+            let list = first_list(&doc);
+            assert_eq!(list.type_(), ListType::Unordered);
+            assert!(!list.is_checklist());
+        }
+    }
+
+    // Not a direct port: this guards the rendering path where a checklist item
+    // has a continuation block. The checkbox marker must stay on the principal
+    // paragraph, and the continuation paragraph must still be wrapped in
+    // div.paragraph (as for an ordinary list item).
+    #[test]
+    fn checklist_item_with_continuation_block() {
+        let doc = Parser::default().parse("* [x] done\n+\ncontinuation paragraph\n\n* [ ] todo\n");
+
+        let checklist = first_list(&doc);
+        assert!(checklist.is_checklist());
+
+        // First item: principal paragraph carries the check-mark marker, and the
+        // continuation paragraph is wrapped in div.paragraph.
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[1]/p[text()=\"\u{2713} done\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[1]/div[@class=\"paragraph\"]/p[text()=\"continuation paragraph\"]",
+            1,
+        );
+
+        // Second item: unchecked marker, no continuation.
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"ulist checklist\"]/ul/li)[2]/p[text()=\"\u{274f} todo\"]",
+            1,
+        );
     }
 }
 

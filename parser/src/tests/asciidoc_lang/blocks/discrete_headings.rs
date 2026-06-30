@@ -139,6 +139,7 @@ Discrete headings can be used where sections are not permitted.
                         },),
                         section_type: SectionType::Discrete,
                         section_id: Some("_discrete_heading",),
+                        caption: None,
                         section_number: None,
                     },),
                     Block::Simple(SimpleBlock {
@@ -302,6 +303,7 @@ DocBook refers to a discrete heading as a bridgehead, or free-floating heading.
                         },),
                         section_type: SectionType::Discrete,
                         section_id: Some("_float_heading",),
+                        caption: None,
                         section_number: None,
                     },),
                     Block::Simple(SimpleBlock {

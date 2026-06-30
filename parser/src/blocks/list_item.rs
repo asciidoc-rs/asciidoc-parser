@@ -29,6 +29,7 @@ pub struct ListItem<'src> {
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
+    checkbox: Option<bool>,
 }
 
 impl<'src> ListItem<'src> {
@@ -52,6 +53,38 @@ impl<'src> ListItem<'src> {
 
         let mut blocks: Vec<Block<'src>> = vec![];
 
+        // Detect checklist (i.e. task list) syntax on unordered list items. When
+        // the principal text begins with `[ ] `, `[x] `, or `[*] ` (the closing
+        // bracket immediately followed by a single space character), the item is
+        // a checklist item. `[ ]` is unchecked; `[x]`/`[*]` are checked. The
+        // four-character checkbox marker is then stripped from the principal text.
+        // This mirrors Asciidoctor's `parse_list_item`.
+        let checkbox: Option<bool> = if matches!(
+            marker,
+            ListItemMarker::Hyphen(_) | ListItemMarker::Asterisks(_) | ListItemMarker::Bullet(_)
+        ) {
+            let text = marker_mi.after.data();
+            if text.starts_with("[ ] ") {
+                Some(false)
+            } else if text.starts_with("[x] ") || text.starts_with("[*] ") {
+                Some(true)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // When a checkbox marker is present, the principal text begins four
+        // characters later (after `[x] `). Any whitespace re-exposed by stripping
+        // the checkbox is discarded so the principal text never starts indented
+        // (which would otherwise be misread as a literal block).
+        let principal_start = if checkbox.is_some() {
+            marker_mi.after.slice_from(4..).discard_whitespace()
+        } else {
+            marker_mi.after
+        };
+
         // Text after list item marker is always a simple block with no metadata.
         let no_metadata = BlockMetadata {
             title_source: None,
@@ -59,8 +92,8 @@ impl<'src> ListItem<'src> {
             anchor: None,
             anchor_reftext: None,
             attrlist: None,
-            source: marker_mi.after,
-            block_start: marker_mi.after,
+            source: principal_start,
+            block_start: principal_start,
         };
 
         // For description lists, the content after the marker can be empty.
@@ -455,6 +488,7 @@ impl<'src> ListItem<'src> {
                 anchor: metadata.anchor,
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),
+                checkbox,
             },
             after: next,
         })
@@ -463,6 +497,17 @@ impl<'src> ListItem<'src> {
     /// Returns the list item marker that was used for this item.
     pub fn list_item_marker(&self) -> ListItemMarker<'src> {
         self.marker.clone()
+    }
+
+    /// Returns the checklist (i.e. task list) state of this item.
+    ///
+    /// An unordered list item whose principal text begins with a checkbox
+    /// marker (`[ ] `, `[x] `, or `[*] `) is a checklist item. The returned
+    /// value is `Some(true)` for a checked item (`[x]`/`[*]`), `Some(false)`
+    /// for an unchecked item (`[ ]`), or `None` if the item is not a checklist
+    /// item.
+    pub fn checkbox(&self) -> Option<bool> {
+        self.checkbox
     }
 }
 
@@ -524,6 +569,7 @@ impl std::fmt::Debug for ListItem<'_> {
             .field("anchor", &self.anchor)
             .field("anchor_reftext", &self.anchor_reftext)
             .field("attrlist", &self.attrlist)
+            .field("checkbox", &self.checkbox)
             .finish()
     }
 }
@@ -670,7 +716,7 @@ mod tests {
 
         assert_eq!(
             format!("{:#?}", li.item),
-            "ListItem {\n    marker: ListItemMarker::Hyphen(\n        Span {\n            data: \"-\",\n            line: 1,\n            col: 1,\n            offset: 0,\n        },\n    ),\n    blocks: &[\n        Block::Simple(\n            SimpleBlock {\n                content: Content {\n                    original: Span {\n                        data: \"blah\",\n                        line: 1,\n                        col: 3,\n                        offset: 2,\n                    },\n                    rendered: \"blah\",\n                },\n                source: Span {\n                    data: \"blah\",\n                    line: 1,\n                    col: 3,\n                    offset: 2,\n                },\n                style: SimpleBlockStyle::Paragraph,\n                title_source: None,\n                title: None,\n                caption: None,\n                number: None,\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n}"
+            "ListItem {\n    marker: ListItemMarker::Hyphen(\n        Span {\n            data: \"-\",\n            line: 1,\n            col: 1,\n            offset: 0,\n        },\n    ),\n    blocks: &[\n        Block::Simple(\n            SimpleBlock {\n                content: Content {\n                    original: Span {\n                        data: \"blah\",\n                        line: 1,\n                        col: 3,\n                        offset: 2,\n                    },\n                    rendered: \"blah\",\n                },\n                source: Span {\n                    data: \"blah\",\n                    line: 1,\n                    col: 3,\n                    offset: 2,\n                },\n                style: SimpleBlockStyle::Paragraph,\n                title_source: None,\n                title: None,\n                caption: None,\n                number: None,\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n    checkbox: None,\n}"
         );
     }
 

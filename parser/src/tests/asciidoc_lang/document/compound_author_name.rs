@@ -469,6 +469,7 @@ image::author-attribute-with-compound-name.png[Compound author name displayed in
                 attrlist: None,
                 section_type: SectionType::Normal,
                 section_id: Some("_about_mara_moss_wirribi"),
+                caption: None,
                 section_number: None,
             },),],
             source: Span {

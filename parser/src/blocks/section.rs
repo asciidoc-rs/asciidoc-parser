@@ -9,7 +9,7 @@ use crate::{
         Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
-    document::RefType,
+    document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     strings::CowStr,
@@ -33,6 +33,7 @@ pub struct SectionBlock<'src> {
     attrlist: Option<Attrlist<'src>>,
     section_type: SectionType,
     section_id: Option<String>,
+    caption: Option<String>,
     section_number: Option<SectionNumber>,
 }
 
@@ -74,12 +75,31 @@ impl<'src> SectionBlock<'src> {
 
         // Assign section number BEFORE parsing child blocks so that sections are
         // numbered in document order (parent before children).
-        let section_number =
-            if parser.is_attribute_set("sectnums") && level <= parser.sectnumlevels && !discrete {
-                Some(parser.assign_section_number(level))
-            } else {
-                None
-            };
+        //
+        // Appendix sections are lettered (A, B, ...) independently of `sectnums`
+        // because their title prefix is governed by the `appendix-caption`
+        // attribute (see the "Appendix label" section of the spec). An appendix
+        // root — the section that directly carries the `appendix` style —
+        // therefore always advances the appendix counter so it (and the numbering
+        // of any subsection) can derive its letter, even when `sectnums` is unset.
+        let sectnums_active =
+            parser.is_attribute_set("sectnums") && level <= parser.sectnumlevels && !discrete;
+
+        let is_appendix_root = !discrete && level == 1 && section_type == SectionType::Appendix;
+
+        let (section_number, caption) = if is_appendix_root {
+            parser
+                .last_appendix_section_number
+                .assign_next_number(level);
+            let number = parser.last_appendix_section_number.clone();
+            let caption = appendix_caption(parser, &number);
+            let section_number = if sectnums_active { Some(number) } else { None };
+            (section_number, Some(caption))
+        } else if sectnums_active {
+            (Some(parser.assign_section_number(level)), None)
+        } else {
+            (None, None)
+        };
 
         let mut most_recent_level = level;
 
@@ -150,6 +170,7 @@ impl<'src> SectionBlock<'src> {
                 attrlist: metadata.attrlist.clone(),
                 section_type,
                 section_id,
+                caption,
                 section_number,
             },
             after: blocks.after,
@@ -199,6 +220,21 @@ impl<'src> SectionBlock<'src> {
     }
 }
 
+/// Builds the appendix title prefix (caption) for an appendix root section.
+///
+/// The prefix combines the `appendix-caption` label (which defaults to
+/// "`Appendix`"), the appendix letter (A, B, ...), and a separator. When
+/// `appendix-caption` is set, the prefix is `"<label> <letter>: "`; when it is
+/// unset (or empty), the label is dropped, leaving `"<letter>. "`. This mirrors
+/// Ruby Asciidoctor.
+fn appendix_caption(parser: &Parser, number: &SectionNumber) -> String {
+    let letter = number.to_string();
+    match parser.attribute_value("appendix-caption") {
+        InterpretedValue::Value(label) if !label.is_empty() => format!("{label} {letter}: "),
+        _ => format!("{letter}. "),
+    }
+}
+
 impl<'src> IsBlock<'src> for SectionBlock<'src> {
     fn content_model(&self) -> ContentModel {
         ContentModel::Compound
@@ -241,6 +277,10 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
         self.attrlist.as_ref()
     }
 
+    fn caption(&self) -> Option<&str> {
+        self.caption.as_deref()
+    }
+
     fn id(&'src self) -> Option<&'src str> {
         // First try the default implementation (explicit IDs from anchor or attrlist)
         self.anchor()
@@ -271,6 +311,7 @@ impl std::fmt::Debug for SectionBlock<'_> {
             .field("attrlist", &self.attrlist)
             .field("section_type", &self.section_type)
             .field("section_id", &self.section_id)
+            .field("caption", &self.caption)
             .field("section_number", &self.section_number)
             .finish()
     }
@@ -663,6 +704,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -755,6 +797,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -870,6 +913,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -985,6 +1029,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -1127,6 +1172,7 @@ mod tests {
                             attrlist: None,
                             section_type: SectionType::Normal,
                             section_id: Some("_section_2"),
+                            caption: None,
                             section_number: None,
                         })
                     ],
@@ -1143,6 +1189,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -1235,6 +1282,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -1327,6 +1375,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -1586,6 +1635,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -1678,6 +1728,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -1793,6 +1844,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -1908,6 +1960,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -2050,6 +2103,7 @@ mod tests {
                             attrlist: None,
                             section_type: SectionType::Normal,
                             section_id: Some("_section_2"),
+                            caption: None,
                             section_number: None,
                         })
                     ],
@@ -2066,6 +2120,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -2158,6 +2213,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -2250,6 +2306,7 @@ mod tests {
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section_title"),
+                    caption: None,
                     section_number: None,
                 }
             );
@@ -2910,6 +2967,7 @@ mod tests {
     section_id: Some(
         "_section_title",
     ),
+    caption: None,
     section_number: None,
 }"#
         );

@@ -147,6 +147,7 @@ include::example$section.adoc[tag=b-base]
                                     attrlist: None,
                                     section_type: SectionType::Normal,
                                     section_id: Some("_level_5_section_title"),
+                                    caption: None,
                                     section_number: None,
                                 },),],
                                 source: Span {
@@ -162,6 +163,7 @@ include::example$section.adoc[tag=b-base]
                                 attrlist: None,
                                 section_type: SectionType::Normal,
                                 section_id: Some("_level_4_section_title"),
+                                caption: None,
                                 section_number: None,
                             },),],
                             source: Span {
@@ -177,6 +179,7 @@ include::example$section.adoc[tag=b-base]
                             attrlist: None,
                             section_type: SectionType::Normal,
                             section_id: Some("_level_3_section_title"),
+                            caption: None,
                             section_number: None,
                         },),],
                         source: Span {
@@ -192,6 +195,7 @@ include::example$section.adoc[tag=b-base]
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_level_2_section_title"),
+                        caption: None,
                         section_number: None,
                     },),],
                     source: Span {
@@ -207,6 +211,7 @@ include::example$section.adoc[tag=b-base]
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_level_1_section_title"),
+                    caption: None,
                     section_number: None,
                 },),
                 Block::Section(SectionBlock {
@@ -234,6 +239,7 @@ include::example$section.adoc[tag=b-base]
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_another_level_1_section_title"),
+                    caption: None,
                     section_number: None,
                 },),
             ],
@@ -442,6 +448,7 @@ include::example$section.adoc[tag=content]
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_illegal_nested_section_violates_rule_2"),
+                        caption: None,
                         section_number: None,
                     },),],
                     source: Span {
@@ -457,6 +464,7 @@ include::example$section.adoc[tag=content]
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_first_section"),
+                    caption: None,
                     section_number: None,
                 },),
             ],
@@ -623,6 +631,7 @@ That means the outline of a Markdown document will be converted just fine as an 
                                     attrlist: None,
                                     section_type: SectionType::Normal,
                                     section_id: Some("_level_5_section_title"),
+                                    caption: None,
                                     section_number: None,
                                 },),],
                                 source: Span {
@@ -638,6 +647,7 @@ That means the outline of a Markdown document will be converted just fine as an 
                                 attrlist: None,
                                 section_type: SectionType::Normal,
                                 section_id: Some("_level_4_section_title"),
+                                caption: None,
                                 section_number: None,
                             },),],
                             source: Span {
@@ -653,6 +663,7 @@ That means the outline of a Markdown document will be converted just fine as an 
                             attrlist: None,
                             section_type: SectionType::Normal,
                             section_id: Some("_level_3_section_title"),
+                            caption: None,
                             section_number: None,
                         },),],
                         source: Span {
@@ -668,6 +679,7 @@ That means the outline of a Markdown document will be converted just fine as an 
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_level_2_section_title"),
+                        caption: None,
                         section_number: None,
                     },),],
                     source: Span {
@@ -683,6 +695,7 @@ That means the outline of a Markdown document will be converted just fine as an 
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_level_1_section_title"),
+                    caption: None,
                     section_number: None,
                 },),
                 Block::Section(SectionBlock {
@@ -710,6 +723,7 @@ That means the outline of a Markdown document will be converted just fine as an 
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_another_level_1_section_title"),
+                    caption: None,
                     section_number: None,
                 },),
             ],
