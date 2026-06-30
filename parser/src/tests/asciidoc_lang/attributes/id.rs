@@ -845,7 +845,17 @@ The id (`#`) shorthand can be used on inline quoted text.
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "free_the_world",
+                        RefEntry {
+                            id: "free_the_world",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }
@@ -1282,7 +1292,17 @@ The shorthand form in an attribute list does not impose this restriction.
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "1start_with_number",
+                        RefEntry {
+                            id: "1start_with_number",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }
@@ -1634,8 +1654,314 @@ include::example$id.adoc[tag=anchor-shorthand]
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "bookmark-b",
+                        RefEntry {
+                            id: "bookmark-b",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
+        );
+    }
+
+    #[test]
+    fn invalid_anchor_before_list_item() {
+        verifies!(
+            r#"
+=== On a list item
+
+In addition to being able to define anchors on sections and blocks, anchors can be defined inline wherever you can type normal text (anchors are a macros substitution).
+The anchors in the text get replaced with invisible anchor points in the output.
+
+For example, you would not put an anchor in front of a list item:
+
+.*Invalid* position for an anchor ID in front of a list item
+[source]
+----
+include::example$id.adoc[tag=anchor-wrong]
+----
+
+"#
+        );
+
+        // An anchor in front of a list marker does not produce a list item. The
+        // line is parsed as an ordinary paragraph: the inline anchor is rendered
+        // and registered, and the `*` is left as literal text.
+        let doc = Parser::default().parse("[[anchor-point]]* list item with invalid anchor");
+
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.rendered_content().unwrap(),
+            "<a id=\"anchor-point\"></a>* list item with invalid anchor"
+        );
+
+        assert!(doc.catalog().contains_id("anchor-point"));
+    }
+
+    #[test]
+    fn anchor_on_list_item() {
+        verifies!(
+            r#"
+Instead, you would put it at the start of the text of the list item:
+
+.Define an inline anchor on a list item
+[source]
+----
+include::example$id.adoc[tag=anchor-list-item]
+----
+
+"#
+        );
+
+        // The inline anchor at the start of the principal text is rendered and
+        // registered as the list item's referenceable ID.
+        let doc = Parser::default().parse("* First item\n* [[step2]]Second item\n* Third item");
+
+        assert!(doc.catalog().contains_id("step2"));
+    }
+
+    #[test]
+    fn anchor_on_description_list_item() {
+        verifies!(
+            r#"
+For a description list, the anchor must be placed at the start of the term:
+
+.Define an inline anchor on a description list item
+[source]
+----
+include::example$id.adoc[tag=anchor-dlist-item]
+----
+
+"#
+        );
+
+        // The anchor at the start of each term is registered as the term's
+        // referenceable ID. Its reftext is the explicit value when one is given
+        // (`[[cpu,CPU]]`), otherwise the term text (`Hard drive`).
+        let doc = Parser::default().parse(
+            "[[cpu,CPU]]Central Processing Unit (CPU)::\nThe brain of the computer.\n\n[[hard-drive]]Hard drive::\nPermanent storage for operating system and/or user files.",
+        );
+
+        assert_eq!(
+            doc.catalog().get_ref("cpu").unwrap().reftext.as_deref(),
+            Some("CPU")
+        );
+        assert_eq!(
+            doc.catalog()
+                .get_ref("hard-drive")
+                .unwrap()
+                .reftext
+                .as_deref(),
+            Some("Hard drive")
+        );
+    }
+
+    #[test]
+    fn multiple_anchors_on_list_item() {
+        verifies!(
+            r#"
+You can add multiple anchors to a list item or description list term.
+However, only the first anchor is registered for use as an xref within the document.
+The remaining anchors are auxiliary and are used for making deep links (i.e., accessible from a URL fragment).
+
+"#
+        );
+
+        // Each anchor is rendered as an invisible anchor point and registered so
+        // that it can be the target of a deep link.
+        let doc = Parser::default().parse("* [[a1]][[a2]]Item");
+
+        assert!(doc.catalog().contains_id("a1"));
+        assert!(doc.catalog().contains_id("a2"));
+    }
+
+    #[test]
+    fn anchor_on_table_cell() {
+        verifies!(
+            r#"
+=== On a table cell
+
+You can assign an ID to a table cell by placing an inline anchor at the start of the cell.
+
+.Assigning an ID to a table cell using an inline anchor
+[source]
+----
+|===
+|[[my_cell]]The table cell I want to jump to.
+|===
+----
+
+"#
+        );
+
+        // The inline anchor at the start of the cell is registered as the cell's
+        // referenceable ID.
+        let doc =
+            Parser::default().parse("|===\n|[[my_cell]]The table cell I want to jump to.\n|===");
+
+        assert!(doc.catalog().contains_id("my_cell"));
+    }
+
+    #[test]
+    fn inline_image_adjacent_anchor_shorthand() {
+        verifies!(
+            r#"
+=== On an inline image
+
+You cannot currently define an ID on an inline image.
+Instead you need to place an inline anchor adjacent to it.
+
+.Placing an inline anchor adjacent to an inline image using shorthand
+[source]
+----
+include::example$id.adoc[tag=inline-anchor-brackets]
+----
+
+"#
+        );
+
+        // The anchor adjacent to the inline image is rendered as an anchor point
+        // immediately before the image and registered as a referenceable ID.
+        let doc = Parser::default().parse("[[tiger-image]]image:tiger.png[Image of a tiger]");
+
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.rendered_content().unwrap(),
+            "<a id=\"tiger-image\"></a><span class=\"image\"><img src=\"tiger.png\" alt=\"Image of a tiger\"></span>"
+        );
+
+        assert!(doc.catalog().contains_id("tiger-image"));
+    }
+
+    #[test]
+    fn inline_image_adjacent_anchor_macro() {
+        verifies!(
+            r#"
+Instead of the shorthand form, you can use the macro `anchor` to achieve the same goal.
+
+.Placing an inline anchor adjacent to an inline image using a macro
+[source]
+----
+include::example$id.adoc[tag=inline-anchor-macro]
+----
+
+"#
+        );
+
+        // The `anchor` macro produces the same anchor point and registration as
+        // the shorthand form.
+        let doc = Parser::default().parse("anchor:tiger-image[]image:tiger.png[Image of a tiger]");
+
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.rendered_content().unwrap(),
+            "<a id=\"tiger-image\"></a><span class=\"image\"><img src=\"tiger.png\" alt=\"Image of a tiger\"></span>"
+        );
+
+        assert!(doc.catalog().contains_id("tiger-image"));
+    }
+}
+
+mod add_additional_anchors_to_a_section {
+    use crate::tests::prelude::*;
+
+    #[test]
+    fn section_extra_anchors() {
+        verifies!(
+            r#"
+== Add additional anchors to a section
+
+To add additional anchors to a section (with or without an autogenerated ID), place the anchors in front of the title (without any spaces).
+
+.Add additional anchors to a section using inline anchors
+[source]
+----
+include::example$id.adoc[tag=anchor-header-extra]
+----
+
+"#
+        );
+
+        // The anchors placed in front of the title are registered as additional
+        // (auxiliary) referenceable IDs alongside the section's own ID.
+        let doc = Parser::default().parse("[#version-4_9]\n=== [[current]][[latest]]Version 4.9");
+
+        assert!(doc.catalog().contains_id("version-4_9"));
+        assert!(doc.catalog().contains_id("current"));
+        assert!(doc.catalog().contains_id("latest"));
+    }
+
+    non_normative!(
+        r#"
+CAUTION: You cannot use inline anchors in a section title to make internal references to that section.
+The processor will flag these as possible invalid references.
+These additional anchors are only intended for making deep links using an alternate ID.
+
+Remember that inline anchors are discovered wherever the macros substitution is applied (e.g., paragraph text).
+If text content doesn't belong somewhere, neither does an inline anchor point.
+
+"#
+    );
+}
+
+mod customize_automatic_xreftext {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+== Customize automatic xreftext
+
+It's possible to customize the text that will be used in the cross reference link (called `xreflabel`).
+If not defined, the AsciiDoc processor does it best to find suitable text (the solution differs from case to case).
+In case of an image, the image caption will be used.
+In case of a section header, the text of the section's title will be used.
+
+To define the `xreflabel`, add it in the anchor definition right after the ID (separated by a comma).
+
+"#
+    );
+
+    #[test]
+    fn anchor_xreflabel() {
+        verifies!(
+            r#"
+.An anchor ID with a defined xreflabel. The caption will not be used as link text.
+[source]
+----
+include::example$id.adoc[tag=anchor-xreflabel]
+----
+"#
+        );
+
+        // The reftext supplied after the ID (the `xreflabel`) is used as the
+        // cross-reference link text in preference to the image caption.
+        let doc = Parser::default().parse(
+            "[[tiger-image,Image of a tiger]]\n.This image represents a Bengal tiger also called the Indian tiger\nimage::tiger.png[]\n\nSee <<tiger-image>>.",
+        );
+
+        assert_eq!(
+            doc.catalog()
+                .get_ref("tiger-image")
+                .unwrap()
+                .reftext
+                .as_deref(),
+            Some("Image of a tiger")
+        );
+
+        let xref_paragraph = doc
+            .nested_blocks()
+            .filter_map(|block| block.rendered_content())
+            .find(|rendered| rendered.contains("href"))
+            .unwrap();
+
+        assert_eq!(
+            xref_paragraph,
+            "See <a href=\"#tiger-image\">Image of a tiger</a>."
         );
     }
 }

@@ -6,7 +6,7 @@ use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::Content,
-    document::InterpretedValue,
+    document::{InterpretedValue, RefType},
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
@@ -378,6 +378,14 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                         .as_ref()
                         .and_then(|a| a.id().map(|s| s.to_string()));
 
+                    // Assigning an ID to inline quoted text (e.g.,
+                    // `[#free_the_world]#free the world#`) makes that phrase
+                    // referenceable, so register it in the catalog. A duplicate
+                    // ID here is non-fatal (first registration wins).
+                    if let Some(id) = &id {
+                        let _ = self.parser.register_ref(id, None, RefType::Anchor);
+                    }
+
                     self.parser.renderer.render_quoted_substitition(
                         type_, self.scope, attrlist, id, &caps[3], dest,
                     );
@@ -412,6 +420,14 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                 let id = attrlist
                     .as_ref()
                     .and_then(|a| a.id().map(|s| s.to_string()));
+
+                // Assigning an ID to inline quoted text (e.g.,
+                // `[#free_the_world]#free the world#`) makes that phrase
+                // referenceable, so register it in the catalog. A duplicate ID
+                // here is non-fatal (first registration wins).
+                if let Some(id) = &id {
+                    let _ = self.parser.register_ref(id, None, RefType::Anchor);
+                }
 
                 self.parser
                     .renderer
@@ -1226,6 +1242,25 @@ mod tests {
                 content.rendered,
                 CowStr::Boxed(r#"<span id="id">a few words</span>"#.to_string().into_boxed_str())
             );
+        }
+
+        #[test]
+        fn unconstrained_marked_string_with_id_is_registered() {
+            // An ID assigned to *unconstrained* quoted text (here, `##...##`)
+            // is rendered as the element's `id` and registered in the catalog
+            // so the phrase can be the target of a cross reference.
+            let doc = Parser::default().parse(r#"[#the_id]##marked text##"#);
+
+            assert_eq!(
+                doc.nested_blocks()
+                    .next()
+                    .unwrap()
+                    .rendered_content()
+                    .unwrap(),
+                r#"<span id="the_id">marked text</span>"#
+            );
+
+            assert!(doc.catalog().contains_id("the_id"));
         }
     }
 

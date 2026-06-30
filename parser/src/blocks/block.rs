@@ -250,7 +250,7 @@ impl<'src> Block<'src> {
 
             Self::register_block_id(
                 block.id(),
-                block.title(),
+                Self::block_reftext(&block),
                 block.span(),
                 parser,
                 &mut warnings,
@@ -315,7 +315,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    block.title(),
+                    Self::block_reftext(&block),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -341,7 +341,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    block.title(),
+                    Self::block_reftext(&block),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -367,7 +367,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    block.title(),
+                    Self::block_reftext(&block),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -393,7 +393,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    block.title(),
+                    Self::block_reftext(&block),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -419,7 +419,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    block.title(),
+                    Self::block_reftext(&block),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -465,7 +465,7 @@ impl<'src> Block<'src> {
 
                     Self::register_block_id(
                         block.id(),
-                        block.title(),
+                        Self::block_reftext(&block),
                         block.span(),
                         parser,
                         &mut warnings,
@@ -592,7 +592,7 @@ impl<'src> Block<'src> {
         if let BlockParseOutcome::Parsed(ref matched_item) = result.item {
             Self::register_block_id(
                 matched_item.item.id(),
-                matched_item.item.title(),
+                Self::block_reftext(&matched_item.item),
                 matched_item.item.span(),
                 parser,
                 &mut result.warnings,
@@ -602,23 +602,32 @@ impl<'src> Block<'src> {
         result
     }
 
+    /// Determine the reftext (a.k.a. xreflabel) used as the link text when a
+    /// block is the target of a cross reference. Asciidoctor's precedence is:
+    /// an explicit `reftext` attribute, then the reftext supplied with a
+    /// block anchor (`[[id,reftext]]`), and finally the block title.
+    fn block_reftext<'a>(block: &'a Block<'a>) -> Option<&'a str> {
+        block
+            .attrlist()
+            .and_then(|attrlist| attrlist.named_attribute("reftext"))
+            .map(|attr| attr.value())
+            .or_else(|| block.anchor_reftext().map(|span| span.data()))
+            .or_else(|| block.title())
+    }
+
     /// Register a block's ID with the catalog if the block has an ID.
     ///
     /// This should be called for all block types except `SectionBlock`,
     /// which handles its own catalog registration.
     fn register_block_id(
         id: Option<&str>,
-        title: Option<&str>,
+        reftext: Option<&str>,
         span: Span<'src>,
         parser: &mut Parser,
         warnings: &mut Vec<Warning<'src>>,
     ) {
         if let Some(id) = id
-            && let Err(_duplicate_error) = parser.register_ref(
-                id,
-                title, // Use block title as reftext if available
-                RefType::Anchor,
-            )
+            && let Err(_duplicate_error) = parser.register_ref(id, reftext, RefType::Anchor)
         {
             // If registration fails due to duplicate ID, issue a warning.
             warnings.push(Warning {

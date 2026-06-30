@@ -586,7 +586,17 @@ Formatted text does not support a style, so the first and only positional attrib
                 },
                 warnings: &[],
                 source_map: SourceMap(&[]),
-                catalog: Catalog::default(),
+                catalog: Catalog {
+                    refs: HashMap::from([(
+                        "free-world",
+                        RefEntry {
+                            id: "free-world",
+                            reftext: None,
+                            ref_type: crate::document::RefType::Anchor,
+                        },
+                    )]),
+                    reftext_to_id: HashMap::default(),
+                },
             }
         );
     }
