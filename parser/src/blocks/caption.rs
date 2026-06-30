@@ -392,4 +392,60 @@ mod tests {
             (None, None)
         );
     }
+
+    #[test]
+    fn image_numbering_is_sequential() {
+        let doc = Parser::default().parse(".First\nimage::a.jpg[]\n\n.Second\nimage::b.jpg[]");
+        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        assert_eq!(numbers, vec![Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn image_number_is_stored_in_figure_number_attribute() {
+        // The number is stored in the `figure-number` counter attribute, so a
+        // later reference to it resolves to the assigned value.
+        assert_eq!(
+            rendered_paragraphs(
+                &Parser::default().parse(".Sunset\nimage::sunset.jpg[]\n\n{figure-number}")
+            ),
+            vec!["1".to_string()]
+        );
+    }
+
+    #[test]
+    fn listing_numbering_is_sequential_when_captioned() {
+        let doc = Parser::default()
+            .parse(":listing-caption: Listing\n\n.First\n----\na\n----\n\n.Second\n----\nb\n----");
+        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        assert_eq!(numbers, vec![Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn listing_number_is_stored_in_listing_number_attribute() {
+        // The number is stored in the `listing-number` counter attribute.
+        assert_eq!(
+            rendered_paragraphs(
+                &Parser::default().parse(
+                    ":listing-caption: Listing\n\n.Out\n----\ncode\n----\n\n{listing-number}"
+                )
+            ),
+            vec!["1".to_string()]
+        );
+    }
+
+    #[test]
+    fn dropped_image_does_not_consume_figure_number() {
+        // Under `attribute-missing=drop-line`, an image whose target references a
+        // missing attribute is dropped *before* its caption is assigned, so it
+        // does not consume the `figure-number` counter: the next titled image is
+        // still "Figure 1.".
+        let doc = Parser::default().parse(
+            ":attribute-missing: drop-line\n\n.Gone\nimage::{undefined}.jpg[]\n\n.Kept\nimage::ok.jpg[]",
+        );
+        let captions: Vec<_> = doc
+            .nested_blocks()
+            .map(|b| b.caption().map(str::to_string))
+            .collect();
+        assert_eq!(captions, vec![Some("Figure 1. ".to_string())]);
+    }
 }

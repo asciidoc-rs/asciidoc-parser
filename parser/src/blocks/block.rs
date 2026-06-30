@@ -467,6 +467,11 @@ impl<'src> Block<'src> {
                         };
                     }
 
+                    // Assign the caption only now that the block has survived
+                    // `resolve_target`, so a dropped image does not consume the
+                    // `figure-number` counter and leave a gap in the numbering.
+                    media_block.item.assign_caption(parser);
+
                     let block = Self::Media(media_block.item);
 
                     Self::register_block_id(

@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    blocks::{ContentModel, IsBlock, caption::assign_caption, metadata::BlockMetadata},
+    blocks::{ContentModel, IsBlock, caption, metadata::BlockMetadata},
     content::substitute_attributes_in_macro_target,
     span::MatchedItem,
     strings::CowStr,
@@ -135,37 +135,6 @@ impl<'src> MediaBlock<'src> {
         let source: Span = metadata.source.trim_remainder(line.after);
         let source = source.slice(0..source.trim().len());
 
-        // Only an image is captionable, and it is captioned under the `figure`
-        // context (so its label comes from `figure-caption` and its number from
-        // the `figure-number` counter), mirroring Asciidoctor, which assigns the
-        // caption with the explicit key `figure`. A `caption` attribute on the
-        // macro itself wins over one on the block's attribute list; either
-        // supplies a verbatim, unnumbered override.
-        let caption = if type_ == MediaType::Image {
-            let explicit_caption = macro_attrlist
-                .item
-                .item
-                .named_attribute("caption")
-                .or_else(|| {
-                    metadata
-                        .attrlist
-                        .as_ref()
-                        .and_then(|attrlist| attrlist.named_attribute("caption"))
-                })
-                .map(|attr| attr.value().to_string());
-
-            assign_caption(
-                parser,
-                "figure",
-                metadata.title.is_some(),
-                explicit_caption.as_deref(),
-            )
-        } else {
-            None
-        };
-        let number = caption.as_ref().and_then(|c| c.number);
-        let caption = caption.map(|c| c.prefix);
-
         MatchAndWarnings {
             item: Some(MatchedItem {
                 item: Self {
@@ -180,8 +149,14 @@ impl<'src> MediaBlock<'src> {
                     source,
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
-                    caption,
-                    number,
+                    // The caption (and its number) is assigned later, in
+                    // `assign_caption`, which the caller invokes only once the
+                    // block survives `resolve_target`. Assigning it here would
+                    // consume the `figure-number` counter even for an image that
+                    // is then dropped under `attribute-missing=drop-line`,
+                    // leaving a gap in the figure numbering.
+                    caption: None,
+                    number: None,
                     anchor: metadata.anchor,
                     anchor_reftext: metadata.anchor_reftext,
                     attrlist: metadata.attrlist.clone(),
@@ -237,6 +212,46 @@ impl<'src> MediaBlock<'src> {
             }
             None => TargetResolution::Drop,
         }
+    }
+
+    /// Assign this block's caption (and number) from its context.
+    ///
+    /// Only an image is captionable, and it is captioned under the `figure`
+    /// context (so its label comes from `figure-caption` and its number from
+    /// the `figure-number` counter), mirroring Asciidoctor, which assigns
+    /// the caption with the explicit key `figure`. A `caption` attribute on
+    /// the macro itself wins over one on the block's attribute list; either
+    /// supplies a verbatim, unnumbered override.
+    ///
+    /// This is called by the block parser **after** [`resolve_target`] keeps
+    /// the block, so the auto-numbering counter is never consumed by an
+    /// image that is subsequently dropped under
+    /// `attribute-missing=drop-line`.
+    ///
+    /// [`resolve_target`]: Self::resolve_target
+    pub(crate) fn assign_caption(&mut self, parser: &mut Parser) {
+        if self.type_ != MediaType::Image {
+            return;
+        }
+
+        let explicit_caption = self
+            .macro_attrlist
+            .named_attribute("caption")
+            .or_else(|| {
+                self.attrlist
+                    .as_ref()
+                    .and_then(|attrlist| attrlist.named_attribute("caption"))
+            })
+            .map(|attr| attr.value().to_string());
+
+        let caption = caption::assign_caption(
+            parser,
+            "figure",
+            self.title.is_some(),
+            explicit_caption.as_deref(),
+        );
+        self.number = caption.as_ref().and_then(|c| c.number);
+        self.caption = caption.map(|c| c.prefix);
     }
 
     /// Return the macro's attribute list.
