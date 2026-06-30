@@ -27,6 +27,8 @@ pub(crate) fn preprocess(source: &str, parser: &Parser) -> (String, SourceMap) {
         && !source.starts_with("if")
         && !source.contains("\ninclude::")
         && !source.contains("\nif")
+        && !source.starts_with("\\include::")
+        && !source.contains("\n\\include::")
         && parser.primary_file_name.is_none()
     {
         return (source.to_owned(), SourceMap::default());
@@ -166,8 +168,21 @@ impl<'p> PreprocessorState<'p> {
                     self.can_have_attribute = false;
                 }
 
+                // An escaped include directive (e.g. `\include::foo[]`) is not
+                // processed. The leading backslash is removed and the remainder is
+                // emitted literally, matching Asciidoctor. The backslash is only
+                // removed when what follows is actually an include directive; a
+                // backslash followed by anything else is left untouched.
+                let line_text = if line.starts_with("\\include::")
+                    && INCLUDE_DIRECTIVE.is_match(&line.data()[1..])
+                {
+                    &line.data()[1..]
+                } else {
+                    line.data()
+                };
+
                 self.output_line_number += 1;
-                self.output.push_str(line.data());
+                self.output.push_str(line_text);
                 self.output.push('\n');
             }
         }
@@ -534,6 +549,70 @@ mod tests {
             source_map.original_file_and_line(4),
             Some(SourceLine(Some("main.adoc".to_owned()), 4))
         );
+    }
+
+    #[test]
+    fn escaped_include_directive() {
+        // An escaped include directive is not processed. The leading backslash is
+        // stripped and the remainder is emitted literally (matching Asciidoctor).
+        let source = "Before.\n\n\\include::partial.adoc[]\n\nAfter.";
+
+        let handler = InlineFileHandler::from_pairs([("partial.adoc", "SHOULD NOT APPEAR")]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map) = preprocess(source, &parser);
+
+        assert_eq!(
+            processed_source,
+            "Before.\n\ninclude::partial.adoc[]\n\nAfter.\n"
+        );
+
+        assert_eq!(
+            source_map.original_file_and_line(3),
+            Some(SourceLine(Some("main.adoc".to_owned()), 3))
+        );
+    }
+
+    #[test]
+    fn escaped_include_directive_without_primary_file() {
+        // The backslash is stripped even when there is no primary file name (and
+        // thus no include handler) so the escape behaves identically.
+        let source = "\\include::partial.adoc[]";
+
+        let parser = Parser::default();
+
+        let (processed_source, _source_map) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "include::partial.adoc[]\n");
+    }
+
+    #[test]
+    fn escaped_non_directive_is_unchanged() {
+        // A backslash followed by something that is not a valid include directive
+        // (here, no attribute brackets) is left untouched.
+        let source = "\\include::partial.adoc";
+
+        let parser = Parser::default().with_primary_file_name("main.adoc");
+
+        let (processed_source, _source_map) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "\\include::partial.adoc\n");
+    }
+
+    #[test]
+    fn double_backslash_include_is_unchanged() {
+        // Only a single leading backslash is treated as an escape; a double
+        // backslash is left as-is.
+        let source = "\\\\include::partial.adoc[]";
+
+        let parser = Parser::default().with_primary_file_name("main.adoc");
+
+        let (processed_source, _source_map) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "\\\\include::partial.adoc[]\n");
     }
 
     #[test]

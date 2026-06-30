@@ -1,0 +1,559 @@
+use crate::tests::prelude::{inline_file_handler::InlineFileHandler, *};
+
+track_file!("docs/modules/directives/pages/include.adoc");
+
+non_normative!(
+    r#"
+= Includes
+// Include Directive Syntax and Processing
+// Include Directive Concepts and Syntax
+
+"#
+);
+
+#[test]
+fn intro() {
+    verifies!(
+        r#"
+You can include content from another file into the current AsciiDoc document using the include directive.
+The included content can be AsciiDoc or it can be any other text format.
+Where that content is included in the document determines how it will be processed.
+
+"#
+    );
+
+    let handler = InlineFileHandler::from_pairs([("partial.adoc", "Included paragraph.")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("Before include.\n\ninclude::partial.adoc[]\n\nAfter include.");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(
+        paras,
+        vec!["Before include.", "Included paragraph.", "After include."]
+    );
+}
+
+#[test]
+fn what_is_an_include_directive() {
+    verifies!(
+        r#"
+== What is an include directive?
+
+An [.term]*include directive* imports content from a separate file or URL into the content of the current document.
+When the current document is processed, the include directive syntax is replaced by the contents of the include file.
+Think of the include directive like a file expander.
+The include directive is a <<include-processing,preprocessor directive>>, which means it has no awareness of the surrounding context.
+
+"#
+    );
+
+    // The include directive is replaced by the contents of the include file
+    // even when it appears inside a verbatim listing block, because the
+    // preprocessor has no awareness of the surrounding context.
+    let handler = InlineFileHandler::from_pairs([("expander.adoc", "EXPANDED")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("----\ninclude::expander.adoc[]\n----");
+
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.span().data(), "----\nEXPANDED\n----");
+}
+
+non_normative!(
+    r#"
+== When is an include directive useful?
+
+The include directive is useful when you want to:
+
+* Partition a large document into smaller files for better organization and to make restructuring simpler.footnote:[Always separate consecutive include directives by an empty line unless your intent is to adjoin the content in the include files so it becomes contiguous.]
+* Insert source code from the external files where the code is maintained.
+* Populate tables with output, such as CSV data, from other programs.
+* Create document variants by combining the include directive with xref:conditionals.adoc[conditional preprocessor directives].
+* Reuse content snippets and boilerplate content, such as term definitions, disclaimers, etc., multiple times within the same document.
+* Define a common set of attributes across multiple documents (typically included into the document header).
+
+"#
+);
+
+#[test]
+fn must_be_on_a_line_by_itself() {
+    verifies!(
+        r#"
+[#include-syntax]
+== Include directive syntax
+
+An include directive must be placed on a line by itself with the following syntax:
+
+"#
+    );
+
+    // Because an include directive must be on a line by itself, a directive with
+    // trailing content on the same line is not processed as an include.
+    let handler =
+        InlineFileHandler::from_pairs([("part1.adoc", "First"), ("part2.adoc", "Second")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("include::part1.adoc[] include::part2.adoc[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["include::part1.adoc[] include::part2.adoc[]"]);
+}
+
+non_normative!(
+    r#"
+[listing,subs=+quotes]
+----
+\include::target[leveloffset=__offset__,lines=__ranges__,tag(s)=__name(s)__,indent=__depth__,encoding=__encoding__,opts=optional]
+----
+
+The target is required.
+The target may be an absolute path, a path relative to the current document, or a URL.
+"#
+);
+
+#[test]
+fn target_may_contain_spaces() {
+    verifies!(
+        r#"
+Since the include directive is a line-oriented expression, the target may contain space characters.
+However, the target must not start with a space character (since that would turn it into a description list term).
+"#
+    );
+
+    // A target with internal space characters is resolved.
+    let handler = InlineFileHandler::from_pairs([("my file.adoc", "Spaced target.")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("include::my file.adoc[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["Spaced target."]);
+
+    // A target that starts with a space is not treated as an include directive.
+    let handler2 = InlineFileHandler::from_pairs([(" spaced.adoc", "SHOULD NOT APPEAR")]);
+
+    let doc2 = Parser::default()
+        .with_include_file_handler(handler2)
+        .parse("include:: spaced.adoc[]");
+
+    assert!(
+        !rendered_paragraphs(&doc2)
+            .iter()
+            .any(|p| p.contains("SHOULD NOT APPEAR"))
+    );
+}
+
+non_normative!(
+    r#"
+An absolute or relative path outside the directory of the outermost document will only be honored if the safe mode is unsafe.
+A URL target will only be resolved if the security settings on the processor allows it (e.g., `allow-uri-read`).
+See xref:include-uri.adoc[].
+
+The leveloffset, lines, tag(s), indent, encoding, and opts attributes are optional, thus reducing the simplest case to the following:
+
+"#
+);
+
+#[test]
+fn simplest_case() {
+    verifies!(
+        r#"
+----
+\include::partial.adoc[]
+----
+
+"#
+    );
+
+    let handler = InlineFileHandler::from_pairs([("partial.adoc", "Simplest form.")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("include::partial.adoc[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["Simplest form."]);
+}
+
+non_normative!(
+    r#"
+Specifying the encoding is essential if the include file is not encoded in UTF-8.
+The value of this attribute must be an encoding recognized by Ruby (e.g., utf-8, iso-8859-1, windows-1252, etc), case insenstive.
+If the include file is already encoded in UTF-8 (or contains a BOM), this attribute is unnecessary.
+
+"#
+);
+
+#[test]
+fn consecutive_includes_separated_by_blank_line() {
+    verifies!(
+        r#"
+When using consecutive include directives, you should always separate them by an empty line unless your intention is to adjoin the content in the include files so it becomes contiguous.
+
+For example, if you're using the include directive to include individual chapters, the include directives should be offset from each other by an empty line.
+This strategy avoids relying on empty lines imported from the include file to keep the chapters separated.
+That separation should be encoded in the parent document instead.
+
+----
+\include::chapter01.adoc[]
+
+\include::chapter02.adoc[]
+
+\include::chapter03.adoc[]
+----
+
+"#
+    );
+
+    // Separated by empty lines, the chapters remain distinct blocks.
+    let handler = InlineFileHandler::from_pairs([
+        ("chapter01.adoc", "Chapter one."),
+        ("chapter02.adoc", "Chapter two."),
+        ("chapter03.adoc", "Chapter three."),
+    ]);
+
+    let doc = Parser::default().with_include_file_handler(handler).parse(
+        "include::chapter01.adoc[]\n\ninclude::chapter02.adoc[]\n\ninclude::chapter03.adoc[]",
+    );
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(
+        paras,
+        vec!["Chapter one.", "Chapter two.", "Chapter three."]
+    );
+}
+
+#[test]
+fn consecutive_includes_adjoined() {
+    verifies!(
+        r#"
+On the other hand, if you're using the include directive to lay down contiguous lines, such as common document attribute entries, then you would put the include directives on adjacent lines to avoid inserting empty lines.
+
+----
+= Document Title
+Author Name
+\include::attributes-settings.adoc[]
+\include::attributes-urls.adoc[]
+:url-example: https://example.org
+
+Document body.
+----
+
+"#
+    );
+
+    // Adjacent include directives adjoin the imported lines, so the attribute
+    // entries remain contiguous in the document header.
+    let handler = InlineFileHandler::from_pairs([
+        ("attributes-settings.adoc", ":settings-attr: yes"),
+        ("attributes-urls.adoc", ":url-attr: https://example.com"),
+    ]);
+
+    let doc = Parser::default().with_include_file_handler(handler).parse(
+        "= Document Title\nAuthor Name\ninclude::attributes-settings.adoc[]\ninclude::attributes-urls.adoc[]\n:url-example: https://example.org\n\nDocument body.",
+    );
+
+    let names: Vec<&str> = doc.header().attributes().map(|a| a.name().data()).collect();
+
+    assert_eq!(names, vec!["settings-attr", "url-attr", "url-example"]);
+}
+
+non_normative!(
+    r#"
+In either case, don't rely on the empty lines at the boundaries of the include file.
+And mind where empty lines are used in that include file.
+
+[#include-processing]
+== Include processing
+
+Although the include directive looks like a block macro, *it's not a macro and therefore isn't processed like one*.
+It's a preprocessor directive; it's important to understand the distinction.
+
+include::partial$preprocessor.adoc[]
+The include directive is a preprocessor directive that always adds lines.
+
+"#
+);
+
+#[test]
+fn replaced_by_lines_then_interpreted() {
+    verifies!(
+        r#"
+The best way to think of the include directive is to imagine that it is being replaced by the lines from the include file (i.e., the imported lines).
+Only after the lines from the target of the include directive are added to the current document does the parser read and interpret those lines.
+
+"#
+    );
+
+    // After the imported lines are added, the parser reads and interprets them:
+    // an included section heading becomes a real section block.
+    let handler =
+        InlineFileHandler::from_pairs([("sec.adoc", "== Included Section\n\nSection body.")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("= Doc Title\n\ninclude::sec.adoc[]");
+
+    let block = doc.nested_blocks().next().unwrap();
+    assert!(matches!(block, crate::blocks::Block::Section(_)));
+}
+
+non_normative!(
+    r#"
+IMPORTANT: The include directive is disabled when Asciidoctor is run in secure mode.
+In secure mode, the include directive is converted to a link in the output document.
+See xref:asciidoctor::safe-modes.adoc[] to learn more.
+
+"#
+);
+
+#[test]
+fn escaping_an_include_directive() {
+    verifies!(
+        r#"
+== Escaping an include directive
+
+If you don't want the include directive to be processed, you must escape it using a backslash.
+
+"#
+    );
+
+    // An escaped include directive is not processed: its target is not resolved.
+    // Matching Asciidoctor, the leading backslash is stripped and the remainder
+    // is emitted literally.
+    let handler = InlineFileHandler::from_pairs([("just-an-example.ext", "SHOULD NOT APPEAR")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("\\include::just-an-example.ext[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["include::just-an-example.ext[]"]);
+}
+
+non_normative!(
+    r#"
+// NOTE: the following listing uses indentation to prevent the directive from being processed
+[indent=0]
+----
+ \include::just-an-example.ext[]
+----
+
+"#
+);
+
+#[test]
+fn escaping_required_even_in_verbatim_block() {
+    verifies!(
+        r#"
+Escaping the directive is necessary _even if it appears in a verbatim block_ since it's not aware of the surrounding document structure.
+
+"#
+    );
+
+    // An unescaped include is processed even inside a verbatim block, so escaping
+    // is required there to prevent it from being expanded.
+    let handler = InlineFileHandler::from_pairs([("ex.adoc", "IMPORTED")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("----\ninclude::ex.adoc[]\n----");
+
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.span().data(), "----\nIMPORTED\n----");
+}
+
+non_normative!(
+    r#"
+[#include-resolution]
+== Include file resolution
+
+The path used in an include directive can be relative or absolute.
+
+If the path is relative, the processor resolves the path using the following rules:
+
+* If the include directive is used in the primary (top-level) document, relative paths are resolved relative to the base directory.
+(The base directory defaults to the directory of the primary document and can be overridden from the CLI or API).
+* If the include directive is used in a file that has itself been included, the path is resolved relative to the including (i.e., current) file.
+
+//TODO show examples to contrast a relative vs an absolute include
+
+These defaults make it easy to reason about how the path to the include file is resolved.
+
+If the processor cannot locate the file (perhaps because you mistyped the path), you'll still be able to convert the document.
+However, you'll get the following warning message during conversion:
+
+ asciidoctor: WARNING: my-document.adoc: line 3: include file not found: /.../content.adoc
+
+"#
+);
+
+#[test]
+fn unresolved_directive_inserted_into_output() {
+    verifies!(
+        r#"
+The following message will also be inserted into the output:
+
+ Unresolved directive in my-document.adoc - include::content.adoc[]
+
+"#
+    );
+
+    // When the target cannot be resolved, the directive is replaced in the output
+    // with an "Unresolved directive" message.
+    let handler = InlineFileHandler::from_pairs([("other.adoc", "unused")]);
+
+    let doc = Parser::default()
+        .with_primary_file_name("my-document.adoc")
+        .with_include_file_handler(handler)
+        .parse("Before.\n\ninclude::content.adoc[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(
+        paras,
+        vec![
+            "Before.",
+            "Unresolved directive in my-document.adoc - include::content.adoc[]"
+        ]
+    );
+}
+
+non_normative!(
+    r#"
+To fix the problem, edit the file path and run the converter again.
+If you don't want the AsciiDoc processor to emit a warning, but rather drop the include that cannot be found, add the `opts=optional` attribute to the include directive.
+
+"#
+);
+
+#[test]
+fn attribute_reference_in_include_path() {
+    verifies!(
+        r#"
+If you store your AsciiDoc files in nested folders at different levels, relative file paths can quickly become awkward and inflexible.
+A common pattern to help here is to define the paths in attributes defined in the header, then prefix all include paths with a reference to one of these attributes:
+
+------
+:includedir: _includes
+:sourcedir: ../src/main/java
+
+\include::{includedir}/fragment1.adoc[]
+
+[source,java]
+----
+\include::{sourcedir}/org/asciidoctor/Asciidoctor.java[]
+----
+------
+
+"#
+    );
+
+    // An attribute reference in the include target is resolved before the target
+    // is looked up.
+    let handler = InlineFileHandler::from_pairs([("_includes/fragment1.adoc", "Fragment one.")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse(":includedir: _includes\n\ninclude::{includedir}/fragment1.adoc[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["Fragment one."]);
+}
+
+non_normative!(
+    r#"
+Keep in mind that no matter how Asciidoctor resolves the path to the file, access to that file is limited by the safe mode setting under which Asciidoctor is run.
+If a path violates the security restrictions, it may be truncated.
+
+[#include-nonasciidoc]
+== AsciiDoc vs non-AsciiDoc files
+
+The include directive performs a simple file merge, so it works with any text file.
+// NOTE this point about normalization should probably be moved to an earlier section
+The content of all included content goes through some form of normalization.
+
+The content of each include file is encoded to UTF-8.
+If the encoding attribute is specified on the include directive, the content is reencoded from that encoding to UTF-8.
+If the encoding attribute is not specified, the processor will look for the presence of a BOM and reencode the content from that encoding to UTF-8 accordingly.
+If neither of those conditions are met, the encoding is forced to UTF-8.
+
+If the file is recognized as an AsciiDoc file (i.e., it has one of the following extensions: `.asciidoc`, `.adoc`, `.ad`, `.asc`, or `.txt`) additional normalization and processing is performed.
+First, all trailing whitespace and endlines are removed from each line and replaced with a Unix line feed.
+This normalization is important to how an AsciiDoc processor works.
+Next, the AsciiDoc processor runs the preprocessor on the lines, looking for and interpreting the following directives:
+
+* includes
+* preprocessor conditionals (e.g., `ifdef`)
+//* front matter (if enabled)
+
+"#
+);
+
+#[test]
+fn nested_includes() {
+    verifies!(
+        r#"
+Running the preprocessor on the included content allows includes to be nested, thus provides lot of flexibility in constructing radically different documents with a single primary document and a few command line attributes.
+
+"#
+    );
+
+    // The preprocessor runs on included content, so an include inside an included
+    // file is itself resolved (nested includes).
+    let handler = InlineFileHandler::from_pairs([
+        ("outer.adoc", "Outer top.\n\ninclude::inner.adoc[]"),
+        ("inner.adoc", "Inner content."),
+    ]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("include::outer.adoc[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["Outer top.", "Inner content."]);
+}
+
+non_normative!(
+    r#"
+Including non-AsciiDoc files is normally done to merge output from other programs or populate table data:
+
+----
+.2016 Sales Results
+,===
+\include::sales/2016/results.csv[]
+,===
+----
+
+In this case, the include directive does not do any processing of AsciiDoc directives.
+The content is inserted as is (after being normalized).
+
+////
+CAUTION: You *can* put AsciiDoc content in a non-AsciiDoc file.
+Its content will still be processed as AsciiDoc, but any include statements will be ignored, and therefore cause errors later in processing.
+It is likely to cause confusion, so best avoided.
+////
+"#
+);
