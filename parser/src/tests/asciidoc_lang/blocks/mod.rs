@@ -10,6 +10,7 @@ mod discrete_headings;
 mod example_blocks;
 mod hard_line_breaks;
 mod index;
+mod masquerading;
 mod nest;
 mod open_blocks;
 mod paragraph_alignment;

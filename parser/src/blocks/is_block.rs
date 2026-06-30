@@ -56,10 +56,19 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     ///
     /// [`raw_context()`]: Self::raw_context
     fn resolved_context(&'src self) -> CowStr<'src> {
-        if let Some(declared_style) = self.declared_style()
-            && is_built_in_context(declared_style)
-        {
-            return declared_style.into();
+        if let Some(declared_style) = self.declared_style() {
+            if is_built_in_context(declared_style) {
+                return declared_style.into();
+            }
+
+            // The `source` style is not itself a context; it specializes the
+            // `listing` context (a source block is a listing block with syntax
+            // highlighting). A `source` style therefore resolves the context to
+            // `listing` — for example, `[source]` placed over a `....` literal
+            // block makes it a listing block.
+            if declared_style == "source" {
+                return "listing".into();
+            }
         }
 
         self.raw_context()
