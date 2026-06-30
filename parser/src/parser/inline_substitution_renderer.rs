@@ -660,7 +660,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
         let src = self.icon_uri(params.target, params.attrlist, params.parser);
 
-        let img = if params.parser.has_attribute("icons") {
+        let img = if params.parser.is_attribute_set("icons") {
             let icons = params.parser.attribute_value("icons");
             if let Some(icons) = icons.as_maybe_str()
                 && icons == "font"
@@ -795,7 +795,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             dest.push_str(&format!(
                 r#"<i class="conum" data-value="{n}"></i><b>({n})</b>"#
             ));
-        } else if parser.has_attribute("icons") {
+        } else if parser.is_attribute_set("icons") {
             let icontype = parser
                 .attribute_value("icontype")
                 .as_maybe_str()
