@@ -9,8 +9,8 @@ use crate::{
     blocks::{SectionNumber, SectionType},
     document::{Attribute, Catalog, InterpretedValue, RefType},
     parser::{
-        AllowableValue, AttributeValue, HtmlSubstitutionRenderer, IncludeFileHandler,
-        InlineSubstitutionRenderer, ModificationContext, PathResolver,
+        AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
+        IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
         built_in_attrs::{built_in_attrs, built_in_default_values},
         preprocessor::preprocess,
     },
@@ -43,6 +43,10 @@ pub struct Parser {
 
     /// Handler for resolving include:: directives.
     pub(crate) include_file_handler: Option<Rc<dyn IncludeFileHandler>>,
+
+    /// Handler for resolving docinfo files. If absent, no docinfo content is
+    /// resolved.
+    pub(crate) docinfo_file_handler: Option<Rc<dyn DocinfoFileHandler>>,
 
     /// Document catalog for tracking referenceable elements during parsing.
     /// This is created during parsing and transferred to the Document when
@@ -164,6 +168,7 @@ impl Default for Parser {
             primary_file_name: None,
             path_resolver: PathResolver::default(),
             include_file_handler: None,
+            docinfo_file_handler: None,
             catalog: RefCell::new(Catalog::new()),
             last_section_number: SectionNumber::default(),
             last_appendix_section_number: SectionNumber {
@@ -632,6 +637,53 @@ impl Parser {
         self
     }
 
+    /// Sets the [`DocinfoFileHandler`] for this parser.
+    ///
+    /// The docinfo file handler is responsible for providing the content of
+    /// [docinfo files] requested while resolving a document's docinfo (see the
+    /// `docinfo` attribute). If no handler is provided, no docinfo content is
+    /// resolved and [`Document::docinfo`] returns an empty string for every
+    /// location.
+    ///
+    /// [`DocinfoFileHandler`]: crate::parser::DocinfoFileHandler
+    /// [docinfo files]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
+    /// [`Document::docinfo`]: crate::Document::docinfo
+    pub fn with_docinfo_file_handler<DFH: DocinfoFileHandler + 'static>(
+        mut self,
+        handler: DFH,
+    ) -> Self {
+        self.docinfo_file_handler = Some(Rc::new(handler));
+        self
+    }
+
+    /// Returns the document name (`docname`): the base name of the primary
+    /// file, stripped of its directory and final extension.
+    ///
+    /// This is the `<docname>` used to build private docinfo file names (e.g.
+    /// `mydoc-docinfo.html` for `mydoc.adoc`). Returns `None` when no primary
+    /// file name has been set, in which case private docinfo files cannot be
+    /// resolved.
+    pub(crate) fn docname(&self) -> Option<String> {
+        let primary = self.primary_file_name.as_deref()?;
+
+        // Strip the directory portion (handling both separators, since the
+        // primary file name may have been supplied on either platform).
+        let base = primary.rsplit(['/', '\\']).next().unwrap_or(primary);
+
+        // Strip a single trailing extension, if present. A leading-dot name
+        // (e.g. `.adoc`) has no base name to keep, so treat it as having none.
+        let stem = match base.rfind('.') {
+            Some(0) | None => base,
+            Some(idx) => &base[..idx],
+        };
+
+        if stem.is_empty() {
+            None
+        } else {
+            Some(stem.to_string())
+        }
+    }
+
     /// Called from [`Header::parse()`] to accept or reject an attribute value.
     ///
     /// [`Header::parse()`]: crate::document::Header::parse
@@ -1082,6 +1134,67 @@ mod tests {
             assert_eq!(
                 parser.attribute_value("backend-html5-doctype-article"),
                 InterpretedValue::Unset
+            );
+        }
+    }
+
+    mod docname {
+        use crate::Parser;
+
+        #[test]
+        fn none_without_primary_file_name() {
+            assert_eq!(Parser::default().docname(), None);
+        }
+
+        #[test]
+        fn strips_directory_and_extension() {
+            assert_eq!(
+                Parser::default()
+                    .with_primary_file_name("mydoc.adoc")
+                    .docname()
+                    .as_deref(),
+                Some("mydoc")
+            );
+            assert_eq!(
+                Parser::default()
+                    .with_primary_file_name("docs/guide/mydoc.adoc")
+                    .docname()
+                    .as_deref(),
+                Some("mydoc")
+            );
+            // A Windows-style separator is handled too, since the primary file
+            // name may be supplied on either platform.
+            assert_eq!(
+                Parser::default()
+                    .with_primary_file_name(r"docs\guide\mydoc.adoc")
+                    .docname()
+                    .as_deref(),
+                Some("mydoc")
+            );
+        }
+
+        #[test]
+        fn keeps_name_with_no_extension() {
+            assert_eq!(
+                Parser::default()
+                    .with_primary_file_name("README")
+                    .docname()
+                    .as_deref(),
+                Some("README")
+            );
+        }
+
+        #[test]
+        fn leading_dot_name_is_kept_whole() {
+            // A leading-dot name (e.g. `.adoc`) is treated as a dotfile with no
+            // extension and kept whole, matching Ruby's
+            // `File.basename(".adoc", ".*")`.
+            assert_eq!(
+                Parser::default()
+                    .with_primary_file_name(".adoc")
+                    .docname()
+                    .as_deref(),
+                Some(".adoc")
             );
         }
     }
