@@ -495,18 +495,27 @@ mod bulleted_lists {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Enable this test when callouts are implemented.
         fn should_not_inherit_block_attributes_from_previous_block_when_block_is_attached_using_a_list_continuation()
          {
-            let _doc = Parser::default().parse("* complex list item\n+\n[source,xml]\n----\n<name>value</name> <!--1-->\n----\n<1> a configuration value\n");
-            todo!("doc.blocks[0].items[0].blocks[-1] check");
-            todo!("assert_css: 'ul', output, 1");
-            todo!("assert_css: 'ul > li', output, 1");
-            todo!("assert_css: 'ul > li > p', output, 1");
-            todo!("assert_css: 'ul > li > .listingblock', output, 1");
-            todo!("assert_css: 'ul > li > .colist', output, 1");
+            use crate::blocks::IsBlock;
+
+            let doc = Parser::default().parse("* complex list item\n+\n[source,xml]\n----\n<name>value</name> <!--1-->\n----\n<1> a configuration value\n");
+
+            // The callout list attached to the list item must not inherit the
+            // `[source,xml]` attributes from the preceding listing block. Mirror
+            // the Ruby test's `refute important_message.attributes.key?
+            // 'language'` by checking the list item's last block (the callout
+            // list) carries no attrlist of its own.
+            let list = doc.nested_blocks().next().unwrap();
+            let item = list.nested_blocks().next().unwrap().as_list_item().unwrap();
+            let important_message = item.nested_blocks().last().unwrap();
+            assert!(important_message.attrlist().is_none());
+
+            assert_css(&doc, "ul", 1);
+            assert_css(&doc, "ul > li", 1);
+            assert_css(&doc, "ul > li > p", 1);
+            assert_css(&doc, "ul > li > .listingblock", 1);
+            assert_css(&doc, "ul > li > .colist", 1);
         }
 
         #[test]
@@ -865,17 +874,14 @@ mod bulleted_lists {
         }
 
         #[test]
-        #[ignore]
-        // Cross-reference resolution (#461) is implemented, but this scenario
-        // also depends on callout lists.
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/311):
-        // Enable this test when callouts are implemented.
         fn should_discover_anchor_at_start_of_callout_list_item_text_and_register_it_as_a_reference()
          {
-            let _doc = Parser::default().parse("This is a cross-reference to <<url-mapping>>.\n\n[source,ruby]\n----\nrequire 'sinatra' <1>\n\nget '/hi' do <2> <3>\n  \"Hello World!\"\nend\n----\n<1> Library import\n<2> [[url-mapping,url mapping]]URL mapping\n<3> Response block\n");
-            todo!("doc.catalog[:refs] check");
-            todo!(
-                "assert_xpath: '(//p)[1]/a[@href=\"#url-mapping\"][text()=\"url mapping\"]', output, 1"
+            let doc = Parser::default().parse("This is a cross-reference to <<url-mapping>>.\n\n[source,ruby]\n----\nrequire 'sinatra' <1>\n\nget '/hi' do <2> <3>\n  \"Hello World!\"\nend\n----\n<1> Library import\n<2> [[url-mapping,url mapping]]URL mapping\n<3> Response block\n");
+            assert!(doc.catalog().contains_id("url-mapping"));
+            assert_xpath(
+                &doc,
+                "(//p)[1]/a[@href=\"#url-mapping\"][text()=\"url mapping\"]",
+                1,
             );
         }
     }
