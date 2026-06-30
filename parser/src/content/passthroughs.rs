@@ -5,8 +5,9 @@ use regex::{Captures, Regex, Replacer};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{Content, SubstitutionGroup},
+    content::{Content, SubstitutionGroup, SubstitutionStep},
     parser::{QuoteScope, QuoteType},
+    warnings::WarningType,
 };
 
 /// Saves the content of one passthrough (`+++` or similarly bracketed) passage
@@ -25,7 +26,7 @@ pub(crate) struct Passthrough {
 pub(crate) struct Passthroughs(pub(crate) Vec<Passthrough>);
 
 impl Passthroughs {
-    pub(crate) fn extract_from(content: &mut Content<'_>) -> Self {
+    pub(crate) fn extract_from(content: &mut Content<'_>, parser: &Parser) -> Self {
         let mut passthroughs = Self(vec![]);
 
         // TRANSLATION GUIDE:
@@ -55,9 +56,26 @@ impl Passthroughs {
             }
         }
 
-        // TO DO (#261): When implementing STEM macros, look for the block that starts
-        // with `text.gsub InlineStemMacroRx do` in Ruby Asciidoctor's substitutors.rb
-        // file.
+        // Inline STEM macros (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) are
+        // implicit passthroughs. They are extracted last so that any earlier
+        // passthrough placeholders nested inside a STEM expression are preserved
+        // and recursively restored. (Mirrors the `text.gsub InlineStemMacroRx`
+        // block in Ruby Asciidoctor's substitutors.rb.)
+        {
+            let text = content.rendered.as_ref();
+            if text.contains(':') && (text.contains("stem:") || text.contains("math:")) {
+                let original = content.original();
+                let replacer = InlineStemMacroReplacer {
+                    passthroughs: &mut passthroughs,
+                    parser,
+                    source: original,
+                };
+
+                if let Cow::Owned(new_result) = INLINE_STEM_MACRO.replace_all(text, replacer) {
+                    content.rendered = new_result.into();
+                }
+            }
+        }
 
         passthroughs
     }
@@ -430,6 +448,111 @@ impl Replacer for InlinePassReplacer<'_> {
     }
 }
 
+/// Matches a STEM inline macro (`stem`, and its alternatives `asciimath` and
+/// `latexmath`), which may span multiple lines.
+///
+/// ## Examples
+///
+/// * `stem:[x^2]`
+/// * `asciimath:[x != 0]`
+/// * `latexmath:[\sqrt{4} = 2]`
+///
+/// The content group requires at least one character whose final character is
+/// not a backslash, so an empty macro (e.g. `stem:[]`) is not recognized.
+static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)
+            (\\?)                          # Group 1: optional escape
+            (stem|latexmath|asciimath)     # Group 2: notation
+            :
+            ([a-z]+(?:,[a-z-]+)*)?         # Group 3: optional substitution list
+            \[
+                (.*?[^\\])                 # Group 4: expression (last char not a backslash)
+            \]
+        "#,
+    )
+    .unwrap()
+});
+
+#[derive(Debug)]
+struct InlineStemMacroReplacer<'p> {
+    passthroughs: &'p mut Passthroughs,
+    parser: &'p Parser,
+    source: Span<'p>,
+}
+
+impl Replacer for InlineStemMacroReplacer<'_> {
+    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
+        // Honor the escape: drop the leading backslash and emit the macro
+        // literally.
+        if caps.get(1).is_some_and(|m| !m.as_str().is_empty()) {
+            dest.push_str(&caps[0][1..]);
+            return;
+        }
+
+        let type_ = match &caps[2] {
+            "latexmath" => QuoteType::LatexMath,
+            "asciimath" => QuoteType::AsciiMath,
+            // `stem`: the notation is resolved from the `stem` document
+            // attribute (defaulting to AsciiMath).
+            _ => stem_notation(self.parser),
+        };
+
+        // Unescape any escaped closing brackets in the expression.
+        let mut content = caps[4].to_string();
+        if content.contains("\\]") {
+            content = content.replace("\\]", "]");
+        }
+
+        // Drop legacy enclosing `$…$` around latexmath content (for backwards
+        // compatibility with AsciiDoc.py).
+        if type_ == QuoteType::LatexMath
+            && content.len() >= 2
+            && content.starts_with('$')
+            && content.ends_with('$')
+        {
+            content = content[1..content.len() - 1].to_string();
+        }
+
+        // Resolve the substitution group. When no explicit substitution list is
+        // given, HTML output applies only the special characters substitution.
+        let subs = match caps.get(3).map(|m| m.as_str()) {
+            None => SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+            Some(subs_list) => match SubstitutionGroup::from_custom_string(None, subs_list) {
+                Some(group) => group,
+                None => {
+                    self.parser.record_substitution_warning(
+                        self.source,
+                        WarningType::InvalidSubstitutionTypeForStemMacro(subs_list.to_string()),
+                    );
+                    SubstitutionGroup::None
+                }
+            },
+        };
+
+        self.passthroughs.push(
+            Passthrough {
+                text: content,
+                subs,
+                type_: Some(type_),
+                attrlist: None,
+            },
+            dest,
+        );
+    }
+}
+
+/// Resolves the STEM notation to apply for a bare `stem` macro or block from the
+/// `stem` document attribute. Any value other than `latexmath`, `latex`, or
+/// `tex` (including an unset, empty, or unrecognized value) maps to AsciiMath.
+fn stem_notation(parser: &Parser) -> QuoteType {
+    match parser.attribute_value("stem").as_maybe_str() {
+        Some("latexmath") | Some("latex") | Some("tex") => QuoteType::LatexMath,
+        _ => QuoteType::AsciiMath,
+    }
+}
+
 #[derive(Debug)]
 struct PassthroughRestoreReplacer<'p>(&'p Passthroughs, &'p Parser);
 
@@ -537,7 +660,8 @@ mod tests {
     fn adds_warning_text_for_unresolved_passthrough_id() {
         let mut content =
             crate::content::Content::from(crate::Span::new("pass:q,a[*<{backend}>*]"));
-        let pt = Passthroughs::extract_from(&mut content);
+        let parser_for_extract = Parser::default();
+        let pt = Passthroughs::extract_from(&mut content, &parser_for_extract);
 
         assert_eq!(
             content,

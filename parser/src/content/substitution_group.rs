@@ -176,7 +176,7 @@ impl SubstitutionGroup {
 
         let passthroughs: Option<Passthroughs> =
             if steps.contains(&SubstitutionStep::Macros) || self == &Self::Header {
-                Some(Passthroughs::extract_from(content))
+                Some(Passthroughs::extract_from(content, parser))
             } else {
                 None
             };

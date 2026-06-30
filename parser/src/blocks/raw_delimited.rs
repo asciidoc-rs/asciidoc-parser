@@ -2,7 +2,7 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
-    content::{Content, SubstitutionGroup},
+    content::{Content, SubstitutionGroup, SubstitutionStep},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -99,7 +99,7 @@ impl<'src> RawDelimitedBlock<'src> {
                     "literal",
                     SubstitutionGroup::Verbatim,
                 ),
-                "++++" => (ContentModel::Raw, "pass", SubstitutionGroup::Pass),
+                "++++" => pass_or_stem_block_type(metadata.attrlist.as_ref()),
                 _ => {
                     return None;
                 }
@@ -214,6 +214,27 @@ fn open_block_verbatim_masquerade(
             SubstitutionGroup::Verbatim,
         )),
         _ => None,
+    }
+}
+
+/// Resolve the content model, context, and substitution group for a passthrough
+/// (`++++`) delimited block.
+///
+/// A passthrough block normally has the `pass` context and applies no
+/// substitutions. When it carries a STEM style (`stem`, `asciimath`, or
+/// `latexmath`), it instead becomes a `stem` block: a raw block whose
+/// expression has only the special characters substitution applied (the
+/// notation's math delimiters are added by the converter at render time).
+fn pass_or_stem_block_type(
+    attrlist: Option<&Attrlist<'_>>,
+) -> (ContentModel, &'static str, SubstitutionGroup) {
+    match attrlist.and_then(|a| a.block_style()) {
+        Some("stem") | Some("asciimath") | Some("latexmath") => (
+            ContentModel::Raw,
+            "stem",
+            SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+        ),
+        _ => (ContentModel::Raw, "pass", SubstitutionGroup::Pass),
     }
 }
 
@@ -1372,6 +1393,75 @@ mod tests {
                     rendered: "line1  \n+++++\nline2",
                 }
             );
+        }
+    }
+
+    mod stem {
+        use crate::{blocks::ContentModel, content::SubstitutionStep, tests::prelude::*};
+
+        /// A `[stem]` passthrough block becomes a `stem` block whose expression
+        /// has only the special characters substitution applied. The notation's
+        /// math delimiters are added by the converter at render time, so they do
+        /// not appear in the parsed content.
+        #[test]
+        fn stem_style_block() {
+            let doc = Parser::default().parse("[stem]\n++++\na < b\n++++");
+            let block = doc.nested_blocks().next().unwrap();
+
+            assert_eq!(block.content_model(), ContentModel::Raw);
+            assert_eq!(block.raw_context().as_ref(), "stem");
+            assert_eq!(block.resolved_context().as_ref(), "stem");
+            assert_eq!(block.declared_style(), Some("stem"));
+            assert_eq!(block.rendered_content(), Some("a &lt; b"));
+            assert_eq!(
+                block.substitution_group(),
+                SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters])
+            );
+            assert!(doc.warnings().next().is_none());
+        }
+
+        #[test]
+        fn asciimath_style_block() {
+            let doc = Parser::default().parse("[asciimath]\n++++\nx^2\n++++");
+            let block = doc.nested_blocks().next().unwrap();
+
+            assert_eq!(block.raw_context().as_ref(), "stem");
+            assert_eq!(block.declared_style(), Some("asciimath"));
+            assert_eq!(block.rendered_content(), Some("x^2"));
+        }
+
+        #[test]
+        fn latexmath_style_block() {
+            let doc = Parser::default().parse("[latexmath]\n++++\nC = \\alpha\n++++");
+            let block = doc.nested_blocks().next().unwrap();
+
+            assert_eq!(block.raw_context().as_ref(), "stem");
+            assert_eq!(block.declared_style(), Some("latexmath"));
+            assert_eq!(block.rendered_content(), Some(r"C = \alpha"));
+        }
+
+        /// Without a STEM style, a `++++` block remains a `pass` block with no
+        /// substitutions applied.
+        #[test]
+        fn unstyled_block_is_still_pass() {
+            let doc = Parser::default().parse("++++\na < b\n++++");
+            let block = doc.nested_blocks().next().unwrap();
+
+            assert_eq!(block.raw_context().as_ref(), "pass");
+            assert_eq!(block.rendered_content(), Some("a < b"));
+            assert_eq!(block.substitution_group(), SubstitutionGroup::Pass);
+        }
+
+        /// An explicit `subs` attribute still overrides a STEM block's default
+        /// substitution group.
+        #[test]
+        fn subs_attribute_overrides_stem_default() {
+            let doc = Parser::default().parse("[stem,subs=none]\n++++\na < b\n++++");
+            let block = doc.nested_blocks().next().unwrap();
+
+            assert_eq!(block.raw_context().as_ref(), "stem");
+            assert_eq!(block.rendered_content(), Some("a < b"));
+            assert_eq!(block.substitution_group(), SubstitutionGroup::None);
         }
     }
 

@@ -100,6 +100,9 @@ pub enum WarningType {
 
     #[error("skipping reference to missing attribute: {0}")]
     SkippingReferenceToMissingAttribute(String),
+
+    #[error("invalid substitution type for stem macro: {0}")]
+    InvalidSubstitutionTypeForStemMacro(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -204,6 +207,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::SkippingReferenceToMissingAttribute(name) => f
                 .debug_tuple("WarningType::SkippingReferenceToMissingAttribute")
                 .field(name)
+                .finish(),
+
+            WarningType::InvalidSubstitutionTypeForStemMacro(subs) => f
+                .debug_tuple("WarningType::InvalidSubstitutionTypeForStemMacro")
+                .field(subs)
                 .finish(),
         }
     }
@@ -512,6 +520,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::SkippingReferenceToMissingAttribute(\"name\")"
+                );
+            }
+
+            #[test]
+            fn invalid_substitution_type_for_stem_macro() {
+                let warning = WarningType::InvalidSubstitutionTypeForStemMacro("bogus".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::InvalidSubstitutionTypeForStemMacro(\"bogus\")"
                 );
             }
         }
