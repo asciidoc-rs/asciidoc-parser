@@ -341,6 +341,8 @@ Only after the lines from the target of the include directive are added to the c
     assert!(matches!(block, crate::blocks::Block::Section(_)));
 }
 
+// TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/277):
+// Implement secure mode handling for the include directive.
 non_normative!(
     r#"
 IMPORTANT: The include directive is disabled when Asciidoctor is run in secure mode.
