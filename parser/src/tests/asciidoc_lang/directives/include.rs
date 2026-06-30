@@ -587,6 +587,13 @@ non_normative!(
 Keep in mind that no matter how Asciidoctor resolves the path to the file, access to that file is limited by the safe mode setting under which Asciidoctor is run.
 If a path violates the security restrictions, it may be truncated.
 
+"#
+);
+
+#[test]
+fn merges_any_text_file_with_normalization() {
+    verifies!(
+        r#"
 [#include-nonasciidoc]
 == AsciiDoc vs non-AsciiDoc files
 
@@ -594,6 +601,31 @@ The include directive performs a simple file merge, so it works with any text fi
 // NOTE this point about normalization should probably be moved to an earlier section
 The content of all included content goes through some form of normalization.
 
+"#
+    );
+
+    // The directive merges any text file's content, not just AsciiDoc: here a CSV
+    // fragment is included verbatim. The content is normalized as it is merged —
+    // the CRLF line ending becomes a Unix line feed.
+    let handler = InlineFileHandler::from_pairs([("results.csv", "Year,Total\r\n2016,1234")]);
+
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("include::results.csv[]");
+
+    let paras = rendered_paragraphs(&doc);
+    let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
+
+    assert_eq!(paras, vec!["Year,Total\n2016,1234"]);
+}
+
+// The remaining details in this section are out of scope for this crate:
+// character-encoding handling (the encoding attribute and BOM detection), the
+// extension-based AsciiDoc-file recognition (this crate treats every included
+// file as AsciiDoc), trailing-whitespace stripping, and preprocessor
+// conditionals (e.g. `ifdef`) are not implemented.
+non_normative!(
+    r#"
 The content of each include file is encoded to UTF-8.
 If the encoding attribute is specified on the include directive, the content is reencoded from that encoding to UTF-8.
 If the encoding attribute is not specified, the processor will look for the presence of a BOM and reencode the content from that encoding to UTF-8 accordingly.
