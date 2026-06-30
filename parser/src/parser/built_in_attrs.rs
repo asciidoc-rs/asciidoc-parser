@@ -75,6 +75,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     attrs.insert("backtick".to_owned(), char_replacement("`"));
     attrs.insert("two-colons".to_owned(), char_replacement("::"));
     attrs.insert("two-semicolons".to_owned(), char_replacement(";;"));
+
     // `cpp` is deprecated in favor of `cxx`; both resolve to the same value.
     attrs.insert("cpp".to_owned(), char_replacement("C&#43;&#43;"));
     attrs.insert("cxx".to_owned(), char_replacement("C&#43;&#43;"));
@@ -109,6 +110,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         modification_context: ctx,
         value,
     };
+
     // Set by default to a concrete `default` value. The value is stored directly
     // (not via [`build_built_in_default_values`]) so that setting the attribute
     // with an empty value overrides it with an empty value, rather than
@@ -118,18 +120,21 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         modification_context: ctx,
         value: Value(default.to_owned()),
     };
+
     // Set by default to an empty value (a boolean-style switch).
     let empty = |ctx, value| AttributeValue {
         allowable_value: AllowableValue::Empty,
         modification_context: ctx,
         value,
     };
+
     // Not set by default; has an implied value `(default)` when unset.
     let implied = |ctx, default: &'static str| AttributeValue {
         allowable_value: AllowableValue::Implied(default),
         modification_context: ctx,
         value: Unset,
     };
+
     // Not set by default; an empty value is interpreted as `default`
     // (`_empty_[=default]`).
     let effective = |ctx, default: &str| AttributeValue {
@@ -191,11 +196,13 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ### General content and formatting attributes
     attrs.insert("asset-uri-scheme".to_owned(), implied(ApiOrHeader, "https"));
     attrs.insert("docinfo".to_owned(), effective(ApiOrHeader, "private"));
+
     // `docinfosubs` has an implied default of `attributes`, but that default is
     // applied directly where docinfo substitution is resolved (an unset value
     // means "apply attribute substitution"), so it is recorded here only as
     // metadata.
     attrs.insert("docinfosubs".to_owned(), implied(ApiOrHeader, "attributes"));
+
     // The document type defaults to `article` and may be set in the header or
     // via the API. The derived `backend-html5-doctype-{doctype}` attribute
     // (defined below) is kept in sync by `Parser::refresh_doctype_derived_attr`
@@ -206,6 +213,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     );
     attrs.insert("eqnums".to_owned(), effective(ApiOrHeader, "AMS"));
     attrs.insert("media".to_owned(), implied(ApiOrHeader, "screen"));
+
     // The file extension of the output file (always begins with a period),
     // defaulting to `.html`. Docinfo file names are built from this suffix.
     attrs.insert(
@@ -227,6 +235,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     );
     attrs.insert("iconfont-remote".to_owned(), empty(ApiOrHeader, Set));
     attrs.insert("icons".to_owned(), effective(ApiOrHeader, "image"));
+
     // TO DO: Replace ./images/icons with value of imagesdir if that is non-default.
     attrs.insert("iconsdir".to_owned(), set(Anywhere, "./images/icons"));
     attrs.insert("icontype".to_owned(), implied(Anywhere, "png"));
