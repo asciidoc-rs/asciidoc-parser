@@ -518,7 +518,7 @@ impl Replacer for InlineStemMacroReplacer<'_> {
         // Resolve the substitution group. When no explicit substitution list is
         // given, HTML output applies only the special characters substitution.
         let subs = match caps.get(3).map(|m| m.as_str()) {
-            None => SubstitutionGroup::stem(),
+            None => SubstitutionGroup::Stem,
             Some(subs_list) => match SubstitutionGroup::from_custom_string(None, subs_list) {
                 Some(group) => group,
                 None => {

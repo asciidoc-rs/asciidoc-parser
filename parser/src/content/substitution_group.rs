@@ -54,6 +54,12 @@ pub enum SubstitutionGroup {
     /// these values.
     AttributeEntryValue,
 
+    /// The STEM substitution group is applied to STEM (`stem`, `asciimath`, and
+    /// `latexmath`) content when no explicit substitution list is given. Only
+    /// the special characters substitution is applied (Asciidoctor's basic subs
+    /// for HTML output). Used by both the inline STEM macro and the STEM block.
+    Stem,
+
     /// You can customize the substitutions applied to the content of an inline
     /// pass macro by specifying one or more substitution values. Multiple
     /// values must be separated by commas and may not contain any spaces. The
@@ -67,14 +73,6 @@ pub enum SubstitutionGroup {
 }
 
 impl SubstitutionGroup {
-    /// The substitution group applied to STEM (`stem`, `asciimath`, and
-    /// `latexmath`) content when no explicit substitution list is given: only
-    /// the special characters substitution (Asciidoctor's basic subs for HTML
-    /// output). Used by both the inline STEM macro and the STEM block.
-    pub(crate) fn stem() -> Self {
-        Self::Custom(vec![SubstitutionStep::SpecialCharacters])
-    }
-
     /// Parse the custom substitution group syntax defined in [Custom
     /// substitutions].
     ///
@@ -249,6 +247,8 @@ impl SubstitutionGroup {
                 SubstitutionStep::Callouts,
             ],
 
+            Self::Stem => &[SubstitutionStep::SpecialCharacters],
+
             Self::Pass | Self::None => &[],
 
             Self::Custom(steps) => steps,
@@ -261,13 +261,19 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     mod stem {
-        use crate::{content::SubstitutionStep, tests::prelude::*};
+        use crate::{content::Content, strings::CowStr, tests::prelude::*};
 
         #[test]
-        fn is_special_characters_only() {
+        fn applies_special_characters_only() {
+            // The `Stem` group applies only the special characters substitution:
+            // `<` is escaped, but quotes (`*bold*`) and attribute references
+            // (`{color}`) are left untouched.
+            let mut content = Content::from(crate::Span::new("*a* < {color}"));
+            let p = Parser::default();
+            SubstitutionGroup::Stem.apply(&mut content, &p, None);
             assert_eq!(
-                SubstitutionGroup::stem(),
-                SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters])
+                content.rendered,
+                CowStr::Boxed("*a* &lt; {color}".to_string().into_boxed_str())
             );
         }
     }

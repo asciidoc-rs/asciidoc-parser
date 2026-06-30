@@ -230,7 +230,7 @@ fn pass_or_stem_block_type(
 ) -> (ContentModel, &'static str, SubstitutionGroup) {
     match attrlist.and_then(|a| a.block_style()) {
         Some("stem") | Some("asciimath") | Some("latexmath") => {
-            (ContentModel::Raw, "stem", SubstitutionGroup::stem())
+            (ContentModel::Raw, "stem", SubstitutionGroup::Stem)
         }
         _ => (ContentModel::Raw, "pass", SubstitutionGroup::Pass),
     }
@@ -1395,7 +1395,7 @@ mod tests {
     }
 
     mod stem {
-        use crate::{blocks::ContentModel, content::SubstitutionStep, tests::prelude::*};
+        use crate::{blocks::ContentModel, tests::prelude::*};
 
         /// A `[stem]` passthrough block becomes a `stem` block whose expression
         /// has only the special characters substitution applied. The notation's
@@ -1411,10 +1411,7 @@ mod tests {
             assert_eq!(block.resolved_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("stem"));
             assert_eq!(block.rendered_content(), Some("a &lt; b"));
-            assert_eq!(
-                block.substitution_group(),
-                SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters])
-            );
+            assert_eq!(block.substitution_group(), SubstitutionGroup::Stem);
             assert!(doc.warnings().next().is_none());
         }
 

@@ -144,7 +144,7 @@ All such syntax is passed through to the STEM processor as is.
 }
 
 mod block_stem_content {
-    use crate::{blocks::ContentModel, content::SubstitutionStep, tests::prelude::*};
+    use crate::{blocks::ContentModel, tests::prelude::*};
 
     #[test]
     fn block_stem_syntax() {
@@ -187,10 +187,7 @@ The AsciiDoc processor handles that for you automatically!
         assert_eq!(block.raw_context().as_ref(), "stem");
         assert_eq!(block.declared_style(), Some("stem"));
         assert_eq!(block.rendered_content(), Some("sqrt(4) = 2"));
-        assert_eq!(
-            block.substitution_group(),
-            SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters])
-        );
+        assert_eq!(block.substitution_group(), SubstitutionGroup::Stem);
     }
 }
 
