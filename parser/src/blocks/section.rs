@@ -103,11 +103,28 @@ impl<'src> SectionBlock<'src> {
 
         let mut most_recent_level = level;
 
+        // A section carrying the `bibliography` style implicitly adds that style
+        // to each top-level unordered list in its body (see the "Bibliography
+        // section syntax" section of the spec). Record that we are parsing such a
+        // section's body so `ListBlock::parse` can detect it, and restore the
+        // previous value afterward so the style does not leak into sibling
+        // sections (or, via a non-bibliography subsection, into its children).
+        let is_bibliography_section = !discrete
+            && metadata
+                .attrlist
+                .as_ref()
+                .and_then(|attrlist| attrlist.block_style())
+                == Some("bibliography");
+        let previously_in_bibliography_section = parser.parsing_bibliography_section_body;
+        parser.parsing_bibliography_section_body = is_bibliography_section;
+
         let mut maw_blocks = parse_blocks_until(
             level_and_title.after,
             |i| discrete || peer_or_ancestor_section(*i, level, &mut most_recent_level, warnings),
             parser,
         );
+
+        parser.parsing_bibliography_section_body = previously_in_bibliography_section;
 
         let blocks = maw_blocks.item;
         let source = metadata.source.trim_remainder(blocks.after);

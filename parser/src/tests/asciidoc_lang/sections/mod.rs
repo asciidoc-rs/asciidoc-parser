@@ -2,6 +2,7 @@ mod r#abstract;
 mod abstract_block;
 mod appendix;
 mod auto_ids;
+mod bibliography;
 mod chapters;
 mod colophon;
 mod custom_ids;

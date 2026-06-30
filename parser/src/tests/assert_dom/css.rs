@@ -387,6 +387,14 @@ fn matches_selector_with_context(
         (base_selector, None)
     };
 
+    // Split an `#id` suffix off the tag part so that a combined selector like
+    // `a#taoup` (tag plus id) is honored, not just a standalone `#taoup`.
+    let (tag_part, id_selector) = if let Some(hash_pos) = tag_part.find('#') {
+        (&tag_part[..hash_pos], Some(&tag_part[hash_pos + 1..]))
+    } else {
+        (tag_part, None)
+    };
+
     // Wildcard selector: matches any element.
     if tag_part == "*" {
         if let Some(predicate) = predicate
@@ -394,19 +402,19 @@ fn matches_selector_with_context(
         {
             return false;
         }
-        // Fall through to check class selectors if present.
-    } else {
-        // CSS-style ID selector: `#id`
-        if let Some(id) = tag_part.strip_prefix('#') {
-            if node.id.as_deref() != Some(id) {
-                return false;
-            }
-        } else if !tag_part.is_empty() {
-            // Tag name must match.
-            if node.tag != tag_part {
-                return false;
-            }
+        // Fall through to check id and class selectors if present.
+    } else if !tag_part.is_empty() {
+        // Tag name must match.
+        if node.tag != tag_part {
+            return false;
         }
+    }
+
+    // CSS-style ID selector (`#id`, possibly combined with a tag as in `a#id`).
+    if let Some(id) = id_selector
+        && node.id.as_deref() != Some(id)
+    {
+        return false;
     }
 
     // Check class selectors if present.
