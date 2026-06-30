@@ -820,6 +820,17 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
     let mut list_element = VirtualNode::new(list_tag);
 
+    // A checklist (i.e. task list) renders its `<ul>` with the `checklist`
+    // class. How each checked/unchecked item's marker is drawn depends on
+    // whether the list is interactive and on the document's `icons` mode
+    // (resolved below, matching Asciidoctor's `convert_ulist`).
+    let is_checklist = list.is_checklist();
+    let interactive = is_checklist && list.has_option("interactive");
+    let icons_font = ICONS_MODE.with(|m| m.get()) == IconsMode::Font;
+    if is_checklist {
+        list_element = list_element.with_class("checklist");
+    }
+
     // For ordered lists, add style class to the list element based on marker
     // length, but only if no explicit style is declared.
     if list.type_() == ListType::Ordered
@@ -965,6 +976,10 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
                     }
                 }
             }
+        } else if is_checklist && let Block::ListItem(list_item) = item {
+            list_element
+                .children
+                .push(checklist_item_to_node(list_item, interactive, icons_font));
         } else {
             list_element.children.push(item.to_virtual_dom());
         }
@@ -972,6 +987,12 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
     // Wrap the list in a div container (matching Asciidoctor's HTML structure).
     let mut wrapper = VirtualNode::new("div").with_class(base_class);
+
+    // A checklist's wrapper carries the `checklist` class right after the base
+    // `ulist` class (matching Asciidoctor's `div class="ulist checklist"`).
+    if is_checklist {
+        wrapper = wrapper.with_class("checklist");
+    }
 
     // For ordered and callout lists, add style class to the wrapper based on
     // marker length, but only if no explicit style is declared.
@@ -1116,6 +1137,135 @@ fn list_item_to_node<'a>(item: &'a ListItem<'a>) -> VirtualNode {
     }
 
     node
+}
+
+/// Renders a checklist (i.e. task list) item, matching Asciidoctor's
+/// `convert_ulist` for a list carrying the `checklist` option.
+///
+/// This is like [`list_item_to_node`], except the principal paragraph of a
+/// checklist item is prefixed with a checkbox marker. The marker form depends
+/// on the list's options and the document's `icons` mode: an `<input>` checkbox
+/// for an interactive list, a Font Awesome `<i>` icon when `icons=font`, or a
+/// plain check-mark/ballot-box glyph otherwise. Items without checkbox syntax
+/// (e.g. a plain bullet mixed into a checklist) render with no marker prefix.
+fn checklist_item_to_node<'a>(
+    item: &'a ListItem<'a>,
+    interactive: bool,
+    icons_font: bool,
+) -> VirtualNode {
+    let mut node = VirtualNode::new("li");
+
+    for role in item.roles() {
+        node = node.with_class(role);
+    }
+
+    if let Some(id) = item.id() {
+        node = node.with_id(id);
+    }
+
+    let nested = item.nested_blocks().collect::<Vec<_>>();
+    let has_multiple_blocks = nested.len() > 1;
+
+    for (index, child) in nested.iter().enumerate() {
+        let child_vdom = child.to_virtual_dom();
+
+        // The principal paragraph (the first block) carries the checkbox marker
+        // when this item has checkbox syntax.
+        if index == 0
+            && let Some(checked) = item.checkbox()
+        {
+            node.children.push(prepend_checklist_marker(
+                child_vdom,
+                checked,
+                interactive,
+                icons_font,
+            ));
+            continue;
+        }
+
+        // Wrap continuation paragraphs in div.paragraph, exactly as
+        // `list_item_to_node` does.
+        if has_multiple_blocks
+            && index > 0
+            && child_vdom.tag == "p"
+            && child_vdom.classes.is_empty()
+        {
+            let wrapper = VirtualNode::new("div")
+                .with_class("paragraph")
+                .with_child(child_vdom);
+            node.children.push(wrapper);
+        } else {
+            node.children.push(child_vdom);
+        }
+    }
+
+    node
+}
+
+/// Prepends a checkbox marker to a checklist item's principal paragraph.
+///
+/// The paragraph's existing content (text or inline child nodes) is preserved
+/// and the marker nodes are inserted ahead of it. Because `text()` queries read
+/// either a node's direct text or its children's text (but not both), any
+/// direct text on the paragraph is first demoted to a leading text child so the
+/// marker can sit before it.
+fn prepend_checklist_marker(
+    mut p: VirtualNode,
+    checked: bool,
+    interactive: bool,
+    icons_font: bool,
+) -> VirtualNode {
+    let mut children = checklist_marker_nodes(checked, interactive, icons_font);
+
+    // Demote any direct text to a leading child so it survives alongside the
+    // marker nodes (already entity-decoded, so it is set directly).
+    if let Some(text) = p.text.take() {
+        let mut text_node = VirtualNode::new("text");
+        text_node.text = Some(text);
+        children.push(text_node);
+    }
+
+    children.append(&mut p.children);
+    p.children = children;
+    p
+}
+
+/// Builds the marker nodes for a checklist item's checkbox.
+///
+/// Mirrors Asciidoctor's `convert_ulist`: an interactive list uses an `<input>`
+/// checkbox (with `data-item-complete` and, when checked, the `checked`
+/// attribute); `icons=font` uses a Font Awesome `<i>` icon; otherwise a plain
+/// check-mark (`U+2713`) or ballot box (`U+274F`) glyph is used. Each form is
+/// followed by a single space, matching the spacing in Asciidoctor's output.
+fn checklist_marker_nodes(checked: bool, interactive: bool, icons_font: bool) -> Vec<VirtualNode> {
+    let space = || {
+        let mut node = VirtualNode::new("text");
+        node.text = Some(" ".to_string());
+        node
+    };
+
+    if interactive {
+        let mut input = VirtualNode::new("input")
+            .with_attribute("type", "checkbox")
+            .with_attribute("data-item-complete", if checked { "1" } else { "0" });
+        if checked {
+            input = input.with_attribute("checked", "");
+        }
+        vec![input, space()]
+    } else if icons_font {
+        let icon = VirtualNode::new("i")
+            .with_class("fa")
+            .with_class(if checked {
+                "fa-check-square-o"
+            } else {
+                "fa-square-o"
+            });
+        vec![icon, space()]
+    } else {
+        let mut glyph = VirtualNode::new("text");
+        glyph.text = Some(if checked { "\u{2713} " } else { "\u{274f} " }.to_string());
+        vec![glyph]
+    }
 }
 
 fn section_to_node<'a>(section: &'a SectionBlock<'a>) -> VirtualNode {
