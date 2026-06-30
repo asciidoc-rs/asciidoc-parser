@@ -266,6 +266,34 @@ mod tests {
     }
 
     #[test]
+    fn multi_line_content_mixes_references_and_plain_lines() {
+        // A docinfo file whose lines mix attribute references with plain lines
+        // exercises line-by-line substitution and re-joining of the output.
+        let head = head_for(
+            "= Doc\n:name: World\n:docinfo: shared-head\n\nBody.",
+            &[(
+                "docinfo.html",
+                "<p>Hello {name}</p>\n<p>plain line</p>\n<p>{name} again</p>",
+            )],
+        );
+        assert_eq!(
+            head,
+            "<p>Hello World</p>\n<p>plain line</p>\n<p>World again</p>"
+        );
+    }
+
+    #[test]
+    fn drop_line_removes_docinfo_lines_with_missing_references() {
+        // With `attribute-missing=drop-line`, a docinfo line referencing a
+        // missing attribute is dropped while the surrounding lines are kept.
+        let head = head_for(
+            "= Doc\n:attribute-missing: drop-line\n:docinfo: shared-head\n\nBody.",
+            &[("docinfo.html", "keep one\n{nope}\nkeep two")],
+        );
+        assert_eq!(head, "keep one\nkeep two");
+    }
+
+    #[test]
     fn outfilesuffix_falls_back_to_html() {
         // A bare `:outfilesuffix:` (set, no value) is not a usable suffix, so
         // docinfo file names fall back to the `.html` default.

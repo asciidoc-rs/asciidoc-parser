@@ -694,7 +694,8 @@ impl Parser {
         let base = primary.rsplit(['/', '\\']).next().unwrap_or(primary);
 
         // Strip a single trailing extension, if present. A leading-dot name
-        // (e.g. `.adoc`) has no base name to keep, so treat it as having none.
+        // (e.g. `.adoc`) is treated as having no extension and is kept whole as
+        // the stem, matching Ruby's `File.basename(".adoc", ".*")`.
         let stem = match base.rfind('.') {
             Some(0) | None => base,
             Some(idx) => &base[..idx],
@@ -1319,6 +1320,18 @@ mod tests {
                     .docname()
                     .as_deref(),
                 Some("README")
+            );
+        }
+
+        #[test]
+        fn none_when_path_has_no_file_component() {
+            // A primary file name that ends in a separator has an empty base
+            // name, which yields no document name.
+            assert_eq!(
+                Parser::default()
+                    .with_primary_file_name("docs/guide/")
+                    .docname(),
+                None
             );
         }
 
