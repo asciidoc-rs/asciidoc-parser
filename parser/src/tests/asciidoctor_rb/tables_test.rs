@@ -1382,11 +1382,23 @@ mod psv {
     fn should_catalog_anchor_at_start_of_cell_in_first_row() {}
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/544):
-    // Footnotes must not be shared between an AsciiDoc table cell and the main
-    // document.
-    fn footnotes_should_not_be_shared_between_an_asciidoc_table_cell_and_the_main_document() {}
+    fn footnotes_should_not_be_shared_between_an_asciidoc_table_cell_and_the_main_document() {
+        let doc = Parser::default()
+            .parse("|===\na|AsciiDoc footnote:[A lightweight markup language.]\n|===");
+
+        // The footnote defined inside the cell is numbered and rendered within
+        // the cell's own (nested) document.
+        assert_css(&doc, "sup.footnote", 1);
+        assert_css(&doc, "a#_footnoteref_1", 1);
+
+        // It is *not* shared with the enclosing document: the main document's
+        // footnote registry stays empty, so the footnote would not appear in the
+        // main document's footnote list.
+        assert!(
+            doc.catalog().footnotes().is_empty(),
+            "cell footnote leaked into the main document's registry"
+        );
+    }
 
     // Backend-specific test omitted: DocBook ("callout numbers should be
     // globally unique, including AsciiDoc table cells"). Out of scope: it

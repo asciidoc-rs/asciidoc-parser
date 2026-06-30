@@ -15,6 +15,15 @@ pub struct Catalog {
 
     /// Reverse lookup cache: reftext -> ID.
     pub(crate) reftext_to_id: HashMap<String, String>,
+
+    /// Footnotes registered (in document order) while substituting inline
+    /// macros. Each entry corresponds to a `footnote:[…]` macro that *defined*
+    /// a footnote; subsequent references to an existing footnote (via a repeated
+    /// ID) reuse an entry rather than adding a new one.
+    ///
+    /// A nested document (an AsciiDoc table cell) keeps its own footnote list:
+    /// footnotes defined inside a cell are *not* shared with the main document.
+    pub(crate) footnotes: Vec<Footnote>,
 }
 
 impl Default for Catalog {
@@ -28,6 +37,7 @@ impl Catalog {
         Self {
             refs: HashMap::new(),
             reftext_to_id: HashMap::new(),
+            footnotes: Vec::new(),
         }
     }
 
@@ -155,6 +165,60 @@ impl Catalog {
     pub fn is_empty(&self) -> bool {
         self.refs.is_empty()
     }
+
+    /// Returns the footnotes registered in this document, in document order.
+    pub fn footnotes(&self) -> &[Footnote] {
+        &self.footnotes
+    }
+
+    /// Registers a newly-defined [`Footnote`].
+    pub(crate) fn register_footnote(&mut self, footnote: Footnote) {
+        self.footnotes.push(footnote);
+    }
+
+    /// Returns the registered footnote with the given ID, if one exists.
+    pub(crate) fn footnote_with_id(&self, id: &str) -> Option<&Footnote> {
+        self.footnotes
+            .iter()
+            .find(|f| f.id.as_deref() == Some(id))
+    }
+
+    /// Removes and returns the current footnote list, leaving an empty list
+    /// behind. Used to give a nested document (an AsciiDoc table cell) its own
+    /// footnote registry so its footnotes are not shared with the enclosing
+    /// document.
+    pub(crate) fn take_footnotes(&mut self) -> Vec<Footnote> {
+        std::mem::take(&mut self.footnotes)
+    }
+
+    /// Restores a previously-[taken](Self::take_footnotes) footnote list,
+    /// discarding any footnotes registered in the meantime.
+    pub(crate) fn restore_footnotes(&mut self, footnotes: Vec<Footnote>) {
+        self.footnotes = footnotes;
+    }
+}
+
+/// A footnote registered while substituting the inline `footnote:[…]` macro.
+///
+/// A footnote is defined at the location of its reference, but its text is
+/// extracted to an item in the document's footnote list. The same footnote can
+/// be referenced from multiple locations by assigning it an ID at the first
+/// occurrence and repeating that ID (with empty text) afterward; only the
+/// defining occurrence produces a `Footnote` entry.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Footnote {
+    /// The footnote's sequential number, assigned in document order. Footnotes
+    /// are numbered consecutively throughout the document via the
+    /// `footnote-number` counter.
+    pub index: i64,
+
+    /// The optional ID assigned to this footnote (the target of the macro, e.g.
+    /// `disclaimer` in `footnote:disclaimer[…]`). `None` for an anonymous
+    /// footnote.
+    pub id: Option<String>,
+
+    /// The already-substituted text of the footnote.
+    pub text: String,
 }
 
 impl std::fmt::Debug for Catalog {
@@ -162,6 +226,7 @@ impl std::fmt::Debug for Catalog {
         f.debug_struct("Catalog")
             .field("refs", &DebugHashMapFrom(&self.refs))
             .field("reftext_to_id", &DebugHashMapFrom(&self.reftext_to_id))
+            .field("footnotes", &self.footnotes)
             .finish()
     }
 }

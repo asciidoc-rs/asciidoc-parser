@@ -103,6 +103,16 @@ pub enum WarningType {
 
     #[error("invalid substitution type for stem macro: {0}")]
     InvalidSubstitutionTypeForStemMacro(String),
+
+    /// A footnote reference (`footnote:id[]`) names an ID that was never
+    /// defined by an earlier footnote.
+    #[error("invalid footnote reference: {0}")]
+    InvalidFootnoteReference(String),
+
+    /// The deprecated `footnoteref:[…]` macro was used outside compatibility
+    /// mode. The footnote macro with a target should be used instead.
+    #[error("found deprecated footnoteref macro: {0}; use footnote macro with target instead")]
+    DeprecatedFootnorefMacro(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -212,6 +222,16 @@ impl std::fmt::Debug for WarningType {
             WarningType::InvalidSubstitutionTypeForStemMacro(subs) => f
                 .debug_tuple("WarningType::InvalidSubstitutionTypeForStemMacro")
                 .field(subs)
+                .finish(),
+
+            WarningType::InvalidFootnoteReference(id) => f
+                .debug_tuple("WarningType::InvalidFootnoteReference")
+                .field(id)
+                .finish(),
+
+            WarningType::DeprecatedFootnorefMacro(macro_text) => f
+                .debug_tuple("WarningType::DeprecatedFootnorefMacro")
+                .field(macro_text)
                 .finish(),
         }
     }

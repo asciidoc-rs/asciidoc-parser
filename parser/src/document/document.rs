@@ -1341,6 +1341,7 @@ mod tests {
     catalog: Catalog {
         refs: HashMap::from([]),
         reftext_to_id: HashMap::from([]),
+        footnotes: [],
     },
 }"#
         );

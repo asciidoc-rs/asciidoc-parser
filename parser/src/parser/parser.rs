@@ -508,6 +508,56 @@ impl Parser {
         self.callouts.borrow_mut().current.clear();
     }
 
+    /// Returns the sequential index of an already-defined footnote with the
+    /// given ID, if one exists in the current document's footnote registry.
+    ///
+    /// Takes `&self` so it can be called from the macros substitution step,
+    /// which only holds a shared reference to the parser.
+    pub(crate) fn footnote_index_for_id(&self, id: &str) -> Option<i64> {
+        self.catalog.borrow().footnote_with_id(id).map(|f| f.index)
+    }
+
+    /// Defines a new footnote, advancing the `footnote-number` counter and
+    /// registering the footnote in the current document's registry. Returns the
+    /// number assigned to the footnote.
+    ///
+    /// Takes `&self` so it can be called from the macros substitution step.
+    pub(crate) fn define_footnote(&self, id: Option<&str>, text: String) -> i64 {
+        // Footnotes are numbered consecutively throughout the document via the
+        // `footnote-number` counter, which is seeded to `0` so the first
+        // footnote is numbered `1`. The counter is a document-wide attribute, so
+        // numbering continues across nested documents (AsciiDoc table cells)
+        // even though the footnote *list* does not.
+        let index = self
+            .counter("footnote-number", None)
+            .parse::<i64>()
+            .unwrap_or(0);
+
+        self.catalog.borrow_mut().register_footnote(crate::document::Footnote {
+            index,
+            id: id.map(|s| s.to_owned()),
+            text,
+        });
+
+        index
+    }
+
+    /// Removes and returns the current document's footnote list, leaving an
+    /// empty list behind. Used to give a nested document (an AsciiDoc table
+    /// cell) its own footnote registry; see [`restore_footnotes`].
+    ///
+    /// [`restore_footnotes`]: Self::restore_footnotes
+    pub(crate) fn take_footnotes(&self) -> Vec<crate::document::Footnote> {
+        self.catalog.borrow_mut().take_footnotes()
+    }
+
+    /// Restores a previously-[taken](Self::take_footnotes) footnote list,
+    /// discarding any footnotes registered in the meantime (i.e. those defined
+    /// inside the nested document).
+    pub(crate) fn restore_footnotes(&self, footnotes: Vec<crate::document::Footnote>) {
+        self.catalog.borrow_mut().restore_footnotes(footnotes);
+    }
+
     /// Records a warning produced while replacing attribute references.
     ///
     /// Takes `&self` so it can be called from the attributes substitution step,
@@ -1201,6 +1251,17 @@ mod tests {
             match params.visible_term {
                 Some(term) => dest.push_str(&format!("[INDEXTERM:{term}]")),
                 None => dest.push_str("[INDEXTERM]"),
+            }
+        }
+
+        fn render_footnote(
+            &self,
+            params: &crate::parser::FootnoteRenderParams,
+            dest: &mut String,
+        ) {
+            match params.index {
+                Some(index) => dest.push_str(&format!("[FOOTNOTE:{index}]")),
+                None => dest.push_str(&format!("[FOOTNOTE:{}]", params.text)),
             }
         }
     }
