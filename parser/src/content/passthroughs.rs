@@ -5,7 +5,7 @@ use regex::{Captures, Regex, Replacer};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{Content, SubstitutionGroup, SubstitutionStep},
+    content::{Content, SubstitutionGroup},
     parser::{QuoteScope, QuoteType},
     warnings::WarningType,
 };
@@ -518,7 +518,7 @@ impl Replacer for InlineStemMacroReplacer<'_> {
         // Resolve the substitution group. When no explicit substitution list is
         // given, HTML output applies only the special characters substitution.
         let subs = match caps.get(3).map(|m| m.as_str()) {
-            None => SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+            None => SubstitutionGroup::stem(),
             Some(subs_list) => match SubstitutionGroup::from_custom_string(None, subs_list) {
                 Some(group) => group,
                 None => {
@@ -543,8 +543,8 @@ impl Replacer for InlineStemMacroReplacer<'_> {
     }
 }
 
-/// Resolves the STEM notation to apply for a bare `stem` macro or block from the
-/// `stem` document attribute. Any value other than `latexmath`, `latex`, or
+/// Resolves the STEM notation to apply for a bare `stem` macro or block from
+/// the `stem` document attribute. Any value other than `latexmath`, `latex`, or
 /// `tex` (including an unset, empty, or unrecognized value) maps to AsciiMath.
 fn stem_notation(parser: &Parser) -> QuoteType {
     match parser.attribute_value("stem").as_maybe_str() {

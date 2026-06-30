@@ -5992,8 +5992,8 @@ mod passthroughs {
     mod math_macros {
         use crate::tests::prelude::*;
 
-        /// Assert that the first block of `input` (parsed with `parser`) has the
-        /// given rendered content (the equivalent of Asciidoctor's
+        /// Assert that the first block of `input` (parsed with `parser`) has
+        /// the given rendered content (the equivalent of Asciidoctor's
         /// `para.content`) and that no warnings were raised.
         fn assert_content(parser: Parser, input: &str, expected: &str) {
             let mut parser = parser;
@@ -6210,6 +6210,17 @@ mod passthroughs {
             assert_eq!(
                 warnings[0].warning,
                 WarningType::InvalidSubstitutionTypeForStemMacro("bogus".to_string())
+            );
+        }
+
+        #[test]
+        fn should_not_process_escaped_stem_macro() {
+            // A leading backslash escapes the entire macro: the backslash is
+            // dropped and the macro text is emitted verbatim.
+            assert_content(
+                Parser::default(),
+                r"The \stem:[x^2] macro is escaped.",
+                "The stem:[x^2] macro is escaped.",
             );
         }
     }

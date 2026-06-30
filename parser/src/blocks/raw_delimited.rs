@@ -2,7 +2,7 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
-    content::{Content, SubstitutionGroup, SubstitutionStep},
+    content::{Content, SubstitutionGroup},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -229,11 +229,9 @@ fn pass_or_stem_block_type(
     attrlist: Option<&Attrlist<'_>>,
 ) -> (ContentModel, &'static str, SubstitutionGroup) {
     match attrlist.and_then(|a| a.block_style()) {
-        Some("stem") | Some("asciimath") | Some("latexmath") => (
-            ContentModel::Raw,
-            "stem",
-            SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
-        ),
+        Some("stem") | Some("asciimath") | Some("latexmath") => {
+            (ContentModel::Raw, "stem", SubstitutionGroup::stem())
+        }
         _ => (ContentModel::Raw, "pass", SubstitutionGroup::Pass),
     }
 }
@@ -1401,8 +1399,8 @@ mod tests {
 
         /// A `[stem]` passthrough block becomes a `stem` block whose expression
         /// has only the special characters substitution applied. The notation's
-        /// math delimiters are added by the converter at render time, so they do
-        /// not appear in the parsed content.
+        /// math delimiters are added by the converter at render time, so they
+        /// do not appear in the parsed content.
         #[test]
         fn stem_style_block() {
             let doc = Parser::default().parse("[stem]\n++++\na < b\n++++");

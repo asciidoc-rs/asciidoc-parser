@@ -67,6 +67,14 @@ pub enum SubstitutionGroup {
 }
 
 impl SubstitutionGroup {
+    /// The substitution group applied to STEM (`stem`, `asciimath`, and
+    /// `latexmath`) content when no explicit substitution list is given: only
+    /// the special characters substitution (Asciidoctor's basic subs for HTML
+    /// output). Used by both the inline STEM macro and the STEM block.
+    pub(crate) fn stem() -> Self {
+        Self::Custom(vec![SubstitutionStep::SpecialCharacters])
+    }
+
     /// Parse the custom substitution group syntax defined in [Custom
     /// substitutions].
     ///
@@ -251,6 +259,18 @@ impl SubstitutionGroup {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+
+    mod stem {
+        use crate::{content::SubstitutionStep, tests::prelude::*};
+
+        #[test]
+        fn is_special_characters_only() {
+            assert_eq!(
+                SubstitutionGroup::stem(),
+                SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters])
+            );
+        }
+    }
 
     mod from_custom_string {
         use crate::{
