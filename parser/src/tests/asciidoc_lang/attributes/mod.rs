@@ -3,6 +3,7 @@ mod attribute_entries;
 mod attribute_entry_substitutions;
 mod boolean_attributes;
 mod built_in_attributes;
+mod character_replacement_ref;
 mod custom_attributes;
 mod document_attributes;
 mod element_attributes;
