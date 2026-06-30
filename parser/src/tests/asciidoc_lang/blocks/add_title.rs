@@ -167,6 +167,8 @@ Don't put a space between the dot and the first character of the title.
                 offset: 1,
             },),
             title: Some("Terminal Output"),
+            caption: None,
+            number: None,
             anchor: None,
             anchor_reftext: None,
             attrlist: None,
@@ -252,6 +254,8 @@ stages: [ init, verify, deploy ]
                 offset: 1,
             },),
             title: Some("Specify GitLab CI stages"),
+            caption: None,
+            number: None,
             anchor: None,
             anchor_reftext: None,
             attrlist: Some(Attrlist {
@@ -399,117 +403,275 @@ How the title of a block is displayed depends on the converter and stylesheet yo
 );
 
 #[test]
-#[ignore]
 fn captioned_titles() {
-    // == Captioned titles
+    verifies!(
+        r#"
+== Captioned titles
 
-    // Several block contexts support captioned titles.
-    // A [.term]*captioned title* is a title that's prefixed with a caption
-    // label and a number followed by a dot (e.g., `Table 1. Properties`).
+Several block contexts support captioned titles.
+A [.term]*captioned title* is a title that's prefixed with a caption label and a number followed by a dot (e.g., `Table 1. Properties`).
 
-    // The captioned title is only used if the corresponding caption attribute
-    // is set. Otherwise, the original title is displayed.
+The captioned title is only used if the corresponding caption attribute is set.
+Otherwise, the original title is displayed.
 
-    // The following table lists the blocks that support captioned titles and
-    // the attributes that the converter uses to generate and control them.
+The following table lists the blocks that support captioned titles and the attributes that the converter uses to generate and control them.
 
-    // .Blocks that support captioned titles
-    // [cols=1;m;m]
-    // |===
-    // |Block context | Caption attribute | Counter attribute
+"#
+    );
 
-    // |appendix
-    // |appendix-caption
-    // |appendix-number
+    // A titled, captionable block is given a caption: a label and an
+    // automatically assigned number, followed by a dot and a space (e.g.
+    // `Example 1. `).
+    let doc = Parser::default().parse(".Block content title\n====\nBlock content.\n====");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.caption(), Some("Example 1. "));
+    assert_eq!(block.number(), Some(1));
 
-    // |example
-    // |example-caption
-    // |example-number
+    // The caption is only applied when the corresponding caption attribute is
+    // set. The `listing-caption` attribute is unset by default, so a titled
+    // listing keeps just its original title with no caption...
+    let doc = Parser::default().parse(".Terminal\n----\ncode\n----");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.title(), Some("Terminal"));
+    assert_eq!(block.caption(), None);
 
-    // |image
-    // |figure-caption
-    // |figure-number
-
-    // |listing, source
-    // |listing-caption
-    // |listing-number
-
-    // |table
-    // |table-caption
-    // |table-number
-    // |===
-
-    // All caption attributes are set by default except for the attribute for
-    // listing and source blocks (`listing-caption`). The number is sequential,
-    // computed automatically, and stored in a corresponding counter attribute.
-
-    // Let's assume you've added a title to an example block as follows:
-
-    // [,asciidoc]
-    // ----
-    // .Block that supports captioned title
-    // ====
-    // Block content
-    // ====
-    // ----
-
-    // The block title will be displayed with a caption label and number, as
-    // shown here:
-
-    // :example-caption: Example
-    // ifdef::example-number[:prev-example-number: {example-number}]
-    // :example-number: 0
-
-    // .Block that supports captioned title
-    // ====
-    // Block content
-    // ====
-
-    // :!example-caption:
-    // ifdef::prev-example-number[:example-number: {prev-example-number}]
-    // :!prev-example-number:
-
-    // If you unset the `example-caption` attribute, the caption will not be
-    // prepended to the title.
-
-    // .Block that supports captioned title
-    // ====
-    // Block content
-    // ====
-
-    // The counter attribute (e.g., `example-number`) can be used to influence
-    // the start number for the first block with that context or the next
-    // number selected in the sequence for subsequent occurrences. However,
-    // this practice should be used judiciously.
-
-    // The caption can be overridden using the `caption` attribute on the block.
-    // The value of the caption attribute replaces the entire caption, including
-    // the space that precedes the title.
-
-    // Here's how to define a custom caption on a block:
-
-    // [,asciidoc]
-    // ----
-    // .Block Title
-    // [caption="Example {counter:my-example-number:A}: "]
-    // ====
-    // Block content
-    // ====
-    // ----
-
-    // Here's how the block will be displayed with the custom caption:
-
-    // .Block Title
-    // [caption="Example {counter:my-example-number:A}: "]
-    // ====
-    // Block content
-    // ====
-
-    // Notice we've used a counter attribute in the value of the caption
-    // attribute to create a custom number sequence.
-
-    // If you refer to a block with a custom caption using an xref, you may not
-    // get the result that you expect. Therefore, it's always best to define
-    // custom xref:attributes:id.adoc#customize-automatic-xreftext[xreftext]
-    // when you define a custom caption.
+    // ...whereas setting `listing-caption` enables the captioned title.
+    let doc = Parser::default().parse(":listing-caption: Listing\n\n.Terminal\n----\ncode\n----");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.caption(), Some("Listing 1. "));
 }
+
+#[test]
+fn blocks_that_support_captioned_titles() {
+    verifies!(
+        r#"
+.Blocks that support captioned titles
+[cols=1;m;m]
+|===
+|Block context | Caption attribute | Counter attribute
+
+|appendix
+|appendix-caption
+|appendix-number
+
+|example
+|example-caption
+|example-number
+
+|image
+|figure-caption
+|figure-number
+
+|listing, source
+|listing-caption
+|listing-number
+
+|table
+|table-caption
+|table-number
+|===
+
+All caption attributes are set by default except for the attribute for listing and source blocks (`listing-caption`).
+The number is sequential, computed automatically, and stored in a corresponding counter attribute.
+
+"#
+    );
+
+    // appendix -> appendix-caption: a level-1 `[appendix]` section is captioned
+    // with the `appendix-caption` label ("Appendix" by default).
+    let doc = Parser::default().parse("= Doc\n\n[appendix]\n== Acknowledgements\n\nThanks.");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.caption(), Some("Appendix A: "));
+
+    // example -> example-caption, counted via example-number (set by default).
+    let doc = Parser::default().parse(".Onomatopoeia\n====\nboom\n====");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.caption(), Some("Example 1. "));
+    assert_eq!(block.number(), Some(1));
+
+    // image -> figure-caption, counted via figure-number (set by default).
+    let doc = Parser::default().parse(".Sunset\nimage::sunset.jpg[]");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.caption(), Some("Figure 1. "));
+    assert_eq!(block.number(), Some(1));
+
+    // listing, source -> listing-caption. Unlike the other contexts,
+    // `listing-caption` is *not* set by default, so a titled listing or source
+    // block has no caption until the attribute is set...
+    let doc = Parser::default().parse(".Output\n----\ncode\n----");
+    assert_eq!(doc.nested_blocks().next().unwrap().caption(), None);
+    let doc = Parser::default().parse(".Output\n[source,ruby]\n----\ncode\n----");
+    assert_eq!(doc.nested_blocks().next().unwrap().caption(), None);
+    // ...whereupon both the listing and source contexts are captioned via
+    // `listing-caption` (a source block resolves to the `listing` context).
+    let doc = Parser::default().parse(":listing-caption: Listing\n\n.Output\n----\ncode\n----");
+    assert_eq!(
+        doc.nested_blocks().next().unwrap().caption(),
+        Some("Listing 1. ")
+    );
+    let doc = Parser::default()
+        .parse(":listing-caption: Listing\n\n.Output\n[source,ruby]\n----\ncode\n----");
+    assert_eq!(
+        doc.nested_blocks().next().unwrap().caption(),
+        Some("Listing 1. ")
+    );
+
+    // table -> table-caption, counted via table-number (set by default).
+    let doc = Parser::default().parse(".Properties\n|===\n|Name |Value\n|===");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.caption(), Some("Table 1. "));
+    assert_eq!(block.number(), Some(1));
+
+    // The number is sequential and computed automatically: two titled examples
+    // are numbered 1 and 2 in document order.
+    let doc = Parser::default().parse(".One\n====\na\n====\n\n.Two\n====\nb\n====");
+    let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+    assert_eq!(numbers, vec![Some(1), Some(2)]);
+
+    // The number is stored in the context's counter attribute (here
+    // `example-number`), so a later reference to that attribute resolves to the
+    // assigned number.
+    assert_eq!(
+        rendered_paragraphs(
+            &Parser::default().parse(".Onomatopoeia\n====\nboom\n====\n\n{example-number}")
+        ),
+        vec!["boom".to_string(), "1".to_string()]
+    );
+}
+
+#[test]
+fn captioned_title_example_block() {
+    verifies!(
+        r#"
+Let's assume you've added a title to an example block as follows:
+
+[,asciidoc]
+----
+.Block that supports captioned title
+====
+Block content
+====
+----
+
+The block title will be displayed with a caption label and number, as shown here:
+
+"#
+    );
+
+    let doc =
+        Parser::default().parse(".Block that supports captioned title\n====\nBlock content\n====");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.title(), Some("Block that supports captioned title"));
+    assert_eq!(block.caption(), Some("Example 1. "));
+    assert_eq!(block.number(), Some(1));
+}
+
+non_normative!(
+    r#"
+:example-caption: Example
+ifdef::example-number[:prev-example-number: {example-number}]
+:example-number: 0
+
+.Block that supports captioned title
+====
+Block content
+====
+
+:!example-caption:
+ifdef::prev-example-number[:example-number: {prev-example-number}]
+:!prev-example-number:
+
+"#
+);
+
+#[test]
+fn unset_example_caption_drops_caption() {
+    verifies!(
+        r#"
+If you unset the `example-caption` attribute, the caption will not be prepended to the title.
+
+.Block that supports captioned title
+====
+Block content
+====
+
+"#
+    );
+
+    let doc = Parser::default().parse(
+        ":!example-caption:\n\n.Block that supports captioned title\n====\nBlock content\n====",
+    );
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.title(), Some("Block that supports captioned title"));
+    assert_eq!(block.caption(), None);
+    assert_eq!(block.number(), None);
+}
+
+#[test]
+fn counter_attribute_influences_start_number() {
+    verifies!(
+        r#"
+The counter attribute (e.g., `example-number`) can be used to influence the start number for the first block with that context or the next number selected in the sequence for subsequent occurrences.
+However, this practice should be used judiciously.
+
+"#
+    );
+
+    // Seeding `example-number` influences the next number in the sequence: with
+    // the counter set to 5, the following example is numbered 6.
+    let doc = Parser::default().parse(":example-number: 5\n\n.Later\n====\nx\n====");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.caption(), Some("Example 6. "));
+    assert_eq!(block.number(), Some(6));
+}
+
+#[test]
+fn custom_caption_override() {
+    verifies!(
+        r#"
+The caption can be overridden using the `caption` attribute on the block.
+The value of the caption attribute replaces the entire caption, including the space that precedes the title.
+
+Here's how to define a custom caption on a block:
+
+[,asciidoc]
+----
+.Block Title
+[caption="Example {counter:my-example-number:A}: "]
+====
+Block content
+====
+----
+
+Here's how the block will be displayed with the custom caption:
+
+.Block Title
+[caption="Example {counter:my-example-number:A}: "]
+====
+Block content
+====
+
+"#
+    );
+
+    let doc = Parser::default().parse(
+        ".Block Title\n[caption=\"Example {counter:my-example-number:A}: \"]\n====\nBlock content\n====",
+    );
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.title(), Some("Block Title"));
+
+    // The custom caption replaces the entire caption verbatim (the counter
+    // reference is resolved), including the trailing space, and the block is not
+    // auto-numbered.
+    assert_eq!(block.caption(), Some("Example A: "));
+    assert_eq!(block.number(), None);
+}
+
+non_normative!(
+    r#"
+Notice we've used a counter attribute in the value of the caption attribute to create a custom number sequence.
+
+If you refer to a block with a custom caption using an xref, you may not get the result that you expect.
+Therefore, it's always best to define custom xref:attributes:id.adoc#customize-automatic-xreftext[xreftext] when you define a custom caption.
+"#
+);

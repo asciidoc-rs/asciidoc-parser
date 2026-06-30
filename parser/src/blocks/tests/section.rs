@@ -502,6 +502,8 @@ fn warn_child_attrlist_has_extra_comma() {
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,

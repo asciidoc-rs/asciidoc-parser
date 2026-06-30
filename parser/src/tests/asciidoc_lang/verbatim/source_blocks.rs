@@ -86,6 +86,8 @@ include::example$source.adoc[tag=src-base]
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -185,6 +187,8 @@ include::example$source.adoc[tag=src-implied]
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -290,6 +294,8 @@ include::example$source.adoc[tag=src-inc]
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {

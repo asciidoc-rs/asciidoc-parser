@@ -295,4 +295,101 @@ mod tests {
         let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![None, Some(1)]);
     }
+
+    #[test]
+    fn listing_caption_is_unset_by_default() {
+        // Unlike the other captionable contexts, `listing-caption` is not set by
+        // default, so a titled listing keeps only its title.
+        assert_eq!(
+            first_block_caption(".Title\n----\ncode\n----"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn listing_block_uses_listing_caption_when_set() {
+        assert_eq!(
+            first_block_caption(":listing-caption: Listing\n\n.Title\n----\ncode\n----"),
+            (Some("Listing 1. ".to_string()), Some(1))
+        );
+    }
+
+    #[test]
+    fn source_block_uses_listing_caption() {
+        // A source block resolves to the `listing` context, so it is captioned
+        // via `listing-caption` too.
+        assert_eq!(
+            first_block_caption(
+                ":listing-caption: Listing\n\n.Title\n[source,ruby]\n----\nx\n----"
+            ),
+            (Some("Listing 1. ".to_string()), Some(1))
+        );
+    }
+
+    #[test]
+    fn literal_block_is_never_captioned() {
+        // The `literal` context is not captionable even when titled.
+        assert_eq!(
+            first_block_caption(".Title\n....\ntext\n...."),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn image_uses_figure_caption_and_number() {
+        // An image is captioned under the `figure` context: its label comes from
+        // `figure-caption` and its number from the `figure-number` counter (both
+        // set by default).
+        assert_eq!(
+            first_block_caption(".Sunset\nimage::sunset.jpg[]"),
+            (Some("Figure 1. ".to_string()), Some(1))
+        );
+    }
+
+    #[test]
+    fn image_caption_override_on_macro_wins() {
+        // A `caption` attribute on the macro itself is a verbatim, unnumbered
+        // override, and it takes precedence over one on the block attribute list.
+        assert_eq!(
+            first_block_caption(
+                "[caption=\"Block. \"]\n.Sunset\nimage::sunset.jpg[caption=\"Photo. \"]"
+            ),
+            (Some("Photo. ".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn image_caption_override_on_block_attrlist() {
+        assert_eq!(
+            first_block_caption("[caption=\"Photo. \"]\n.Sunset\nimage::sunset.jpg[]"),
+            (Some("Photo. ".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn image_caption_suppressed_when_figure_caption_unset() {
+        assert_eq!(
+            first_block_caption(":!figure-caption:\n\n.Sunset\nimage::sunset.jpg[]"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn untitled_image_is_not_captioned() {
+        assert_eq!(first_block_caption("image::sunset.jpg[]"), (None, None));
+    }
+
+    #[test]
+    fn video_and_audio_are_not_captioned() {
+        // Only images are captionable media; video and audio never are, even
+        // when titled.
+        assert_eq!(
+            first_block_caption(".Clip\nvideo::movie.mp4[]"),
+            (None, None)
+        );
+        assert_eq!(
+            first_block_caption(".Track\naudio::sound.mp3[]"),
+            (None, None)
+        );
+    }
 }

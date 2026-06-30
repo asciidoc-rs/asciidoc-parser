@@ -391,6 +391,8 @@ name::target[first-positional,second-positional,named="value of named"]
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,

@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
+    blocks::{ContentModel, IsBlock, caption::assign_caption, metadata::BlockMetadata},
     content::substitute_attributes_in_macro_target,
     span::MatchedItem,
     strings::CowStr,
@@ -18,6 +18,8 @@ pub struct MediaBlock<'src> {
     source: Span<'src>,
     title_source: Option<Span<'src>>,
     title: Option<String>,
+    caption: Option<String>,
+    number: Option<usize>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -133,6 +135,37 @@ impl<'src> MediaBlock<'src> {
         let source: Span = metadata.source.trim_remainder(line.after);
         let source = source.slice(0..source.trim().len());
 
+        // Only an image is captionable, and it is captioned under the `figure`
+        // context (so its label comes from `figure-caption` and its number from
+        // the `figure-number` counter), mirroring Asciidoctor, which assigns the
+        // caption with the explicit key `figure`. A `caption` attribute on the
+        // macro itself wins over one on the block's attribute list; either
+        // supplies a verbatim, unnumbered override.
+        let caption = if type_ == MediaType::Image {
+            let explicit_caption = macro_attrlist
+                .item
+                .item
+                .named_attribute("caption")
+                .or_else(|| {
+                    metadata
+                        .attrlist
+                        .as_ref()
+                        .and_then(|attrlist| attrlist.named_attribute("caption"))
+                })
+                .map(|attr| attr.value().to_string());
+
+            assign_caption(
+                parser,
+                "figure",
+                metadata.title.is_some(),
+                explicit_caption.as_deref(),
+            )
+        } else {
+            None
+        };
+        let number = caption.as_ref().and_then(|c| c.number);
+        let caption = caption.map(|c| c.prefix);
+
         MatchAndWarnings {
             item: Some(MatchedItem {
                 item: Self {
@@ -147,6 +180,8 @@ impl<'src> MediaBlock<'src> {
                     source,
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
+                    caption,
+                    number,
                     anchor: metadata.anchor,
                     anchor_reftext: metadata.anchor_reftext,
                     attrlist: metadata.attrlist.clone(),
@@ -238,6 +273,14 @@ impl<'src> IsBlock<'src> for MediaBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    fn caption(&self) -> Option<&str> {
+        self.caption.as_deref()
+    }
+
+    fn number(&self) -> Option<usize> {
+        self.number
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {
@@ -465,6 +508,8 @@ mod tests {
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -533,6 +578,8 @@ mod tests {
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -586,6 +633,8 @@ mod tests {
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -649,6 +698,8 @@ mod tests {
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -725,6 +776,8 @@ mod tests {
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
