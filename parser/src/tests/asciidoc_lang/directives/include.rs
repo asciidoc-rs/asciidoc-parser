@@ -378,8 +378,10 @@ If you don't want the include directive to be processed, you must escape it usin
     assert_eq!(paras, vec!["include::just-an-example.ext[]"]);
 }
 
-non_normative!(
-    r#"
+#[test]
+fn indentation_prevents_processing() {
+    verifies!(
+        r#"
 // NOTE: the following listing uses indentation to prevent the directive from being processed
 [indent=0]
 ----
@@ -387,7 +389,39 @@ non_normative!(
 ----
 
 "#
-);
+    );
+
+    // The indented directive from the spec example does not cause an inclusion:
+    // the listing block retains the directive text verbatim.
+    let doc = Parser::default()
+        .with_include_file_handler(InlineFileHandler::from_pairs([(
+            "just-an-example.ext",
+            "SHOULD NOT APPEAR",
+        )]))
+        .parse("[indent=0]\n----\n \\include::just-an-example.ext[]\n----");
+
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(
+        block.span().data(),
+        "[indent=0]\n----\n \\include::just-an-example.ext[]\n----"
+    );
+
+    // It is the leading whitespace (indentation), not the backslash, that
+    // prevents processing: an indented directive without a backslash is left
+    // untouched too.
+    let doc = Parser::default()
+        .with_include_file_handler(InlineFileHandler::from_pairs([(
+            "just-an-example.ext",
+            "SHOULD NOT APPEAR",
+        )]))
+        .parse("[indent=0]\n----\n include::just-an-example.ext[]\n----");
+
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(
+        block.span().data(),
+        "[indent=0]\n----\n include::just-an-example.ext[]\n----"
+    );
+}
 
 #[test]
 fn escaping_required_even_in_verbatim_block() {
