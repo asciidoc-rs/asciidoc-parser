@@ -1243,6 +1243,25 @@ mod tests {
                 CowStr::Boxed(r#"<span id="id">a few words</span>"#.to_string().into_boxed_str())
             );
         }
+
+        #[test]
+        fn unconstrained_marked_string_with_id_is_registered() {
+            // An ID assigned to *unconstrained* quoted text (here, `##...##`)
+            // is rendered as the element's `id` and registered in the catalog
+            // so the phrase can be the target of a cross reference.
+            let doc = Parser::default().parse(r#"[#the_id]##marked text##"#);
+
+            assert_eq!(
+                doc.nested_blocks()
+                    .next()
+                    .unwrap()
+                    .rendered_content()
+                    .unwrap(),
+                r#"<span id="the_id">marked text</span>"#
+            );
+
+            assert!(doc.catalog().contains_id("the_id"));
+        }
     }
 
     mod attribute_references {
