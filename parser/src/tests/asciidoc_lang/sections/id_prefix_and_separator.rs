@@ -108,6 +108,7 @@ The value of `idprefix` must begin with a valid ID start character and can have 
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("id_section_title",),
+                    caption: None,
                     section_number: None,
                 },),],
                 source: Span {
@@ -206,6 +207,7 @@ If you want to remove the prefix, set the attribute to an empty value.
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("section_title",),
+                    caption: None,
                     section_number: None,
                 },),],
                 source: Span {
@@ -331,6 +333,7 @@ Unless empty, the value of the `idseparator` must be _exactly one valid ID chara
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section.title",),
+                    caption: None,
                     section_number: None,
                 },),],
                 source: Span {
@@ -429,6 +432,7 @@ If you don't want to use a separator, set the attribute to an empty value.
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_sectiontitle",),
+                    caption: None,
                     section_number: None,
                 },),],
                 source: Span {

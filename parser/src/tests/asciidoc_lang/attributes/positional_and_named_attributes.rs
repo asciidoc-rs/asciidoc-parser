@@ -198,6 +198,7 @@ Here's an example that shows how to set an ID on a section using this shorthand 
                 },),
                 section_type: SectionType::Normal,
                 section_id: None,
+                caption: None,
                 section_number: None,
             },)
         );
@@ -267,6 +268,7 @@ Here's an example that shows how to set an ID on an appendix section using this 
                 },),
                 section_type: SectionType::Appendix,
                 section_id: None,
+                caption: Some("Appendix A: "),
                 section_number: None,
             },)
         );

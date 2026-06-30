@@ -334,6 +334,7 @@ mod bulleted_lists {
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_lists",),
+                        caption: None,
                         section_number: None,
                     },),],
                     source: Span {

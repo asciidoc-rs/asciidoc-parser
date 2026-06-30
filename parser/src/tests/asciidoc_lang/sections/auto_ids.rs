@@ -323,6 +323,7 @@ The AsciiDoc processor builds an ID from the title using the following order of 
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_duplicate_title",),
+                        caption: None,
                         section_number: None,
                     },),
                     Block::Section(SectionBlock {
@@ -374,6 +375,7 @@ The AsciiDoc processor builds an ID from the title using the following order of 
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_duplicate_title-2",),
+                        caption: None,
                         section_number: None,
                     },),
                 ],
@@ -565,6 +567,7 @@ By doing so, you can disable ID generation for only certain sections and discret
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_id_generation_on"),
+                        caption: None,
                         section_number: None,
                     },),
                     Block::Section(SectionBlock {
@@ -607,6 +610,7 @@ By doing so, you can disable ID generation for only certain sections and discret
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: None,
+                        caption: None,
                         section_number: None,
                     },),
                     Block::Section(SectionBlock {
@@ -634,6 +638,7 @@ By doing so, you can disable ID generation for only certain sections and discret
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_id_generation_on_again",),
+                        caption: None,
                         section_number: None,
                     },),
                 ],
