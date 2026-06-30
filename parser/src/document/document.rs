@@ -1195,6 +1195,7 @@ mod tests {
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_section_title"),
+                        caption: None,
                         section_number: None,
                     },)
                 ],

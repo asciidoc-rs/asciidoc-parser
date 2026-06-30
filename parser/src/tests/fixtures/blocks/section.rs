@@ -26,6 +26,7 @@ pub(crate) struct SectionBlock {
     pub attrlist: Option<Attrlist>,
     pub section_type: SectionType,
     pub section_id: Option<&'static str>,
+    pub caption: Option<&'static str>,
     pub section_number: Option<SectionNumber>,
 }
 
@@ -43,6 +44,7 @@ impl fmt::Debug for SectionBlock {
             .field("attrlist", &self.attrlist)
             .field("section_type", &self.section_type)
             .field("section_id", &self.section_id)
+            .field("caption", &self.caption)
             .field("section_number", &self.section_number)
             .finish()
     }
@@ -145,6 +147,17 @@ fn fixture_eq_observed(fixture: &SectionBlock, observed: &crate::blocks::Section
     if let Some(ref fixture_section_id) = fixture.section_id
         && let Some(ref observed_section_id) = observed.section_id()
         && fixture_section_id != observed_section_id
+    {
+        return false;
+    }
+
+    if fixture.caption.is_some() != observed.caption().is_some() {
+        return false;
+    }
+
+    if let Some(ref fixture_caption) = fixture.caption
+        && let Some(ref observed_caption) = observed.caption()
+        && fixture_caption != observed_caption
     {
         return false;
     }

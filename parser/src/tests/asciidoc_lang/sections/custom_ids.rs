@@ -87,6 +87,7 @@ include::example$section.adoc[tag=with-anchor-shorthand]
                 },),
                 section_type: SectionType::Normal,
                 section_id: None,
+                caption: None,
                 section_number: None,
             },),],
             source: Span {
@@ -191,6 +192,7 @@ include::example$section.adoc[tag=with-anchor-and-reftext-shorthand]
                 },),
                 section_type: SectionType::Normal,
                 section_id: None,
+                caption: None,
                 section_number: None,
             },),],
             source: Span {
@@ -290,6 +292,7 @@ IMPORTANT: The value of the reftext attribute must be quoted if it contains spac
                 },),
                 section_type: SectionType::Normal,
                 section_id: None,
+                caption: None,
                 section_number: None,
             },),],
             source: Span {
@@ -383,6 +386,7 @@ include::example$section.adoc[tag=with-anchor-and-reftext]
                 attrlist: None,
                 section_type: SectionType::Normal,
                 section_id: None,
+                caption: None,
                 section_number: None,
             },),],
             source: Span {
@@ -486,6 +490,7 @@ Here's how to register auxiliary IDs using inline anchors when using an autogene
                 attrlist: None,
                 section_type: SectionType::Normal,
                 section_id: Some("_section_title",),
+                caption: None,
                 section_number: None,
             },),],
             source: Span {
@@ -591,6 +596,7 @@ fn assign_auxiliary_ids_2() {
                 attrlist: None,
                 section_type: SectionType::Normal,
                 section_id: Some("_section_title",),
+                caption: None,
                 section_number: None,
             },),],
             source: Span {
@@ -721,6 +727,7 @@ These additional anchor points don't interfere with the declaration of the prima
                 },),
                 section_type: SectionType::Normal,
                 section_id: None,
+                caption: None,
                 section_number: None,
             },),],
             source: Span {

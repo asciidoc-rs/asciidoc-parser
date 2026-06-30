@@ -209,6 +209,7 @@ The single quotes around the variable name in the assignment are required to for
                         },),
                         section_type: SectionType::Normal,
                         section_id: None,
+                        caption: None,
                         section_number: None,
                     },),],
                     source: Span {
@@ -224,6 +225,7 @@ The single quotes around the variable name in the assignment are required to for
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_operation"),
+                    caption: None,
                     section_number: None,
                 },),
                 Block::Section(SectionBlock {
@@ -299,6 +301,7 @@ The single quotes around the variable name in the assignment are required to for
                         },),
                         section_type: SectionType::Normal,
                         section_id: None,
+                        caption: None,
                         section_number: None,
                     },),],
                     source: Span {
@@ -314,6 +317,7 @@ The single quotes around the variable name in the assignment are required to for
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_maintenance"),
+                    caption: None,
                     section_number: None,
                 },),
             ],

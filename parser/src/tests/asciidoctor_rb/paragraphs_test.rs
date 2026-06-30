@@ -327,6 +327,7 @@ mod normal {
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_first_section",),
+                        caption: None,
                         section_number: None,
                     },),
                     Block::Section(SectionBlock {
@@ -378,6 +379,7 @@ mod normal {
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_second_section",),
+                        caption: None,
                         section_number: None,
                     },),
                 ],

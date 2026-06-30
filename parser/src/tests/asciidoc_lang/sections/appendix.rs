@@ -35,8 +35,12 @@ include::example$appendix.adoc[tag=appx-article-out]
 "#
     );
 
-    // NOTE: Removed `appendix-caption` and `toc` flags because those aren't
-    // supported (yet?).
+    // NOTE: Removed the `:appendix-caption: Exhibit` and `:toc:` header
+    // attributes from the example. The `appendix-caption` attribute is now
+    // honored (it defaults to "`Appendix`", so the appendix sections below carry
+    // "Appendix A: " / "Appendix B: " captions), but `toc` rendering is still not
+    // supported. A custom `appendix-caption` value is exercised separately in
+    // `appendix_label` below.
     let doc = Parser::default().parse("= Article Title\n:sectnums:\n\n== Section\n\n=== Subsection\n\n[appendix]\n== First Appendix\n\n=== First Subsection\n\n=== Second Subsection\n\n[appendix]\n== Second Appendix");
 
     assert_eq!(
@@ -113,6 +117,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                         attrlist: None,
                         section_type: SectionType::Normal,
                         section_id: Some("_subsection",),
+                        caption: None,
                         section_number: Some(SectionNumber {
                             section_type: SectionType::Normal,
                             components: &[1, 1,],
@@ -131,6 +136,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                     attrlist: None,
                     section_type: SectionType::Normal,
                     section_id: Some("_section",),
+                    caption: None,
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Normal,
                         components: &[1,],
@@ -173,6 +179,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                             attrlist: None,
                             section_type: SectionType::Appendix,
                             section_id: Some("_first_subsection",),
+                            caption: None,
                             section_number: Some(SectionNumber {
                                 section_type: SectionType::Appendix,
                                 components: &[1, 1,],
@@ -203,6 +210,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                             attrlist: None,
                             section_type: SectionType::Appendix,
                             section_id: Some("_second_subsection",),
+                            caption: None,
                             section_number: Some(SectionNumber {
                                 section_type: SectionType::Appendix,
                                 components: &[1, 2,],
@@ -235,6 +243,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                     },),
                     section_type: SectionType::Appendix,
                     section_id: Some("_first_appendix",),
+                    caption: Some("Appendix A: ",),
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Appendix,
                         components: &[1,],
@@ -278,6 +287,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                     },),
                     section_type: SectionType::Appendix,
                     section_id: Some("_second_appendix",),
+                    caption: Some("Appendix B: ",),
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Appendix,
                         components: &[2,],
@@ -379,4 +389,86 @@ include::example$appendix.adoc[tag=appx-book-out]
 "#
 );
 
-// TO DO: Adapt the appendix label portion. Not sure how to handle this yet.
+#[test]
+fn appendix_label() {
+    verifies!(
+        r#"
+[#caption]
+== Appendix label
+
+When rendered, the titles of sections marked as `appendix` will include:
+
+* A label, taken from the value of the `appendix-caption` attribute, which defaults to "`Appendix`"
+* A letter that represents the order of the appendix within the sequence of appendices (A, B, ...)
+* A colon
+* The section title
+
+For example:
+
+ Appendix A: Data Access Matrix
+
+"#
+    );
+
+    // The label is exposed as the section's caption (the prefix a converter
+    // prepends to the section title). With the default `appendix-caption`, the
+    // first appendix is labeled "Appendix A: " and appendices are lettered in
+    // document order. This holds even without `sectnums`, because appendix
+    // labels are controlled by `appendix-caption`, not section numbering.
+    let doc = Parser::default()
+        .parse("= Title\n\n[appendix]\n== Data Access Matrix\n\n[appendix]\n== Error Codes");
+
+    let captions: Vec<Option<&str>> = doc.nested_blocks().map(|b| b.caption()).collect();
+    assert_eq!(captions, vec![Some("Appendix A: "), Some("Appendix B: ")]);
+
+    // The rendered title combines the caption (label + letter + colon) with the
+    // section title, e.g. "Appendix A: Data Access Matrix".
+    let first = doc.nested_blocks().next().unwrap();
+    if let crate::blocks::Block::Section(section) = first {
+        assert_eq!(
+            format!("{}{}", section.caption().unwrap(), section.section_title()),
+            "Appendix A: Data Access Matrix"
+        );
+    } else {
+        panic!("expected the first block to be a section");
+    }
+
+    verifies!(
+        r#"
+The prefix can be modified by setting the `appendix-caption` attribute and overriding the default value with a custom value.
+
+[source]
+----
+:appendix-caption: Exhibit
+----
+
+"#
+    );
+
+    let doc = Parser::default().parse(
+        ":appendix-caption: Exhibit\n\n[appendix]\n== Data Access Matrix\n\n[appendix]\n== Error Codes",
+    );
+
+    let captions: Vec<Option<&str>> = doc.nested_blocks().map(|b| b.caption()).collect();
+    assert_eq!(captions, vec![Some("Exhibit A: "), Some("Exhibit B: ")]);
+
+    verifies!(
+        r#"
+Unset the attribute to remove the prefix.
+
+[source]
+----
+:appendix-caption!:
+----
+"#
+    );
+
+    // Unsetting `appendix-caption` removes the label, but the appendix is still
+    // lettered: the prefix collapses to "<letter>. " (matching Ruby Asciidoctor).
+    let doc = Parser::default().parse(
+        ":appendix-caption!:\n\n[appendix]\n== Data Access Matrix\n\n[appendix]\n== Error Codes",
+    );
+
+    let captions: Vec<Option<&str>> = doc.nested_blocks().map(|b| b.caption()).collect();
+    assert_eq!(captions, vec![Some("A. "), Some("B. ")]);
+}
