@@ -1,3 +1,4 @@
+mod checklist;
 mod continuation;
 mod description;
 mod horizontal;

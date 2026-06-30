@@ -25,6 +25,7 @@ pub struct ListBlock<'src> {
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
+    is_checklist: bool,
 }
 
 impl<'src> ListBlock<'src> {
@@ -192,6 +193,15 @@ impl<'src> ListBlock<'src> {
             parser.close_callout_list();
         }
 
+        // An unordered list is a checklist (i.e. task list) when at least one of
+        // its items has checkbox syntax. This mirrors Asciidoctor, which sets the
+        // `checklist` option on the list once any item carries a checkbox.
+        let is_checklist = type_ == ListType::Unordered
+            && items.iter().any(|item| {
+                item.as_list_item()
+                    .is_some_and(|li| li.checkbox().is_some())
+            });
+
         Some(MatchedItem {
             item: Self {
                 type_,
@@ -206,6 +216,7 @@ impl<'src> ListBlock<'src> {
                 anchor: metadata.anchor,
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),
+                is_checklist,
             },
             after: next_item_source,
         })
@@ -214,6 +225,17 @@ impl<'src> ListBlock<'src> {
     /// Returns the type of this list.
     pub fn type_(&self) -> ListType {
         self.type_
+    }
+
+    /// Returns `true` if this list is a checklist (i.e. task list).
+    ///
+    /// An unordered list becomes a checklist when at least one of its items
+    /// uses checkbox syntax (`[ ]`, `[x]`, or `[*]`). See
+    /// [`ListItem::checkbox`].
+    ///
+    /// [`ListItem::checkbox`]: crate::blocks::ListItem::checkbox
+    pub fn is_checklist(&self) -> bool {
+        self.is_checklist
     }
 
     /// Returns the style class for this list based on the marker length.
@@ -304,6 +326,7 @@ impl std::fmt::Debug for ListBlock<'_> {
             .field("anchor", &self.anchor)
             .field("anchor_reftext", &self.anchor_reftext)
             .field("attrlist", &self.attrlist)
+            .field("is_checklist", &self.is_checklist)
             .finish()
     }
 }
@@ -567,7 +590,7 @@ mod tests {
 
         assert_eq!(
             format!("{:#?}", list.item),
-            "ListBlock {\n    type_: ListType::Unordered,\n    items: &[\n        Block::ListItem(\n            ListItem {\n                marker: ListItemMarker::Hyphen(\n                    Span {\n                        data: \"-\",\n                        line: 1,\n                        col: 1,\n                        offset: 0,\n                    },\n                ),\n                blocks: &[\n                    Block::Simple(\n                        SimpleBlock {\n                            content: Content {\n                                original: Span {\n                                    data: \"blah\",\n                                    line: 1,\n                                    col: 3,\n                                    offset: 2,\n                                },\n                                rendered: \"blah\",\n                            },\n                            source: Span {\n                                data: \"blah\",\n                                line: 1,\n                                col: 3,\n                                offset: 2,\n                            },\n                            style: SimpleBlockStyle::Paragraph,\n                            title_source: None,\n                            title: None,\n                            caption: None,\n                            number: None,\n                            anchor: None,\n                            anchor_reftext: None,\n                            attrlist: None,\n                        },\n                    ),\n                ],\n                source: Span {\n                    data: \"- blah\",\n                    line: 1,\n                    col: 1,\n                    offset: 0,\n                },\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    title_source: None,\n    title: None,\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n}"
+            "ListBlock {\n    type_: ListType::Unordered,\n    items: &[\n        Block::ListItem(\n            ListItem {\n                marker: ListItemMarker::Hyphen(\n                    Span {\n                        data: \"-\",\n                        line: 1,\n                        col: 1,\n                        offset: 0,\n                    },\n                ),\n                blocks: &[\n                    Block::Simple(\n                        SimpleBlock {\n                            content: Content {\n                                original: Span {\n                                    data: \"blah\",\n                                    line: 1,\n                                    col: 3,\n                                    offset: 2,\n                                },\n                                rendered: \"blah\",\n                            },\n                            source: Span {\n                                data: \"blah\",\n                                line: 1,\n                                col: 3,\n                                offset: 2,\n                            },\n                            style: SimpleBlockStyle::Paragraph,\n                            title_source: None,\n                            title: None,\n                            caption: None,\n                            number: None,\n                            anchor: None,\n                            anchor_reftext: None,\n                            attrlist: None,\n                        },\n                    ),\n                ],\n                source: Span {\n                    data: \"- blah\",\n                    line: 1,\n                    col: 1,\n                    offset: 0,\n                },\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n                checkbox: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    title_source: None,\n    title: None,\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n    is_checklist: false,\n}"
         );
 
         assert_eq!(
