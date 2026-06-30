@@ -33,6 +33,7 @@ mod macros;
 mod pass;
 mod root;
 mod sections;
+mod stem;
 mod subs;
 mod tables;
 mod text;

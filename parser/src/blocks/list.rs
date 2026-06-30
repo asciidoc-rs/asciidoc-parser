@@ -26,6 +26,7 @@ pub struct ListBlock<'src> {
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
     is_checklist: bool,
+    is_bibliography: bool,
 }
 
 impl<'src> ListBlock<'src> {
@@ -44,6 +45,23 @@ impl<'src> ListBlock<'src> {
         warnings: &mut Vec<Warning<'src>>,
     ) -> Option<MatchedItem<'src, Self>> {
         let source = metadata.block_start.discard_empty_lines();
+
+        // A list carries the `bibliography` style in two ways, which differ in
+        // scope (matching Asciidoctor):
+        //
+        // * An explicit `[bibliography]` attribute marks the list a bibliography
+        //   regardless of its type (even an ordered list).
+        // * A `bibliography` section implicitly marks each of its top-level *unordered*
+        //   lists (only) a bibliography. A nested list never inherits the section
+        //   style, so this is gated on `parent_list_markers` being empty; the list-type
+        //   restriction is applied below, once the type is known.
+        let own_style_bibliography = metadata
+            .attrlist
+            .as_ref()
+            .and_then(|attrlist| attrlist.block_style())
+            == Some("bibliography");
+        let section_propagated_bibliography =
+            parent_list_markers.is_empty() && parser.parsing_bibliography_section_body;
 
         let mut items: Vec<Block<'src>> = vec![];
         let mut next_item_source = source;
@@ -124,9 +142,27 @@ impl<'src> ListBlock<'src> {
                 }
             }
 
-            let Some(list_item_mi) =
-                ListItem::parse(&list_item_metadata, parent_list_markers, parser, warnings)
-            else {
+            // The bibliography anchor (`[[[id]]]`) is recognized in the principal
+            // text of any item of an explicitly-styled bibliography list, or of an
+            // unordered-list item when the style is inherited from the section.
+            // Pass that context down so the item's inline substitution can detect
+            // it.
+            let item_is_bibliography = own_style_bibliography
+                || (section_propagated_bibliography
+                    && matches!(
+                        this_item_marker,
+                        ListItemMarker::Asterisks(_)
+                            | ListItemMarker::Hyphen(_)
+                            | ListItemMarker::Bullet(_)
+                    ));
+
+            let Some(list_item_mi) = ListItem::parse(
+                &list_item_metadata,
+                parent_list_markers,
+                item_is_bibliography,
+                parser,
+                warnings,
+            ) else {
                 break;
             };
 
@@ -202,6 +238,11 @@ impl<'src> ListBlock<'src> {
                     .is_some_and(|li| li.checkbox().is_some())
             });
 
+        // An explicit `[bibliography]` style applies to any list type; the style
+        // inherited from a section applies only to unordered lists.
+        let is_bibliography = own_style_bibliography
+            || (section_propagated_bibliography && type_ == ListType::Unordered);
+
         Some(MatchedItem {
             item: Self {
                 type_,
@@ -217,6 +258,7 @@ impl<'src> ListBlock<'src> {
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),
                 is_checklist,
+                is_bibliography,
             },
             after: next_item_source,
         })
@@ -236,6 +278,18 @@ impl<'src> ListBlock<'src> {
     /// [`ListItem::checkbox`]: crate::blocks::ListItem::checkbox
     pub fn is_checklist(&self) -> bool {
         self.is_checklist
+    }
+
+    /// Returns `true` if this list carries the `bibliography` style.
+    ///
+    /// A list is a bibliography list when it is an unordered list that is
+    /// either explicitly marked `[bibliography]` or appears as a top-level
+    /// list within a section that carries the `bibliography` style (the
+    /// section implicitly adds the style to each of its unordered lists).
+    /// Each item of such a list may begin with a bibliography anchor
+    /// (`[[[id]]]`).
+    pub fn is_bibliography(&self) -> bool {
+        self.is_bibliography
     }
 
     /// Returns the style class for this list based on the marker length.
@@ -327,6 +381,7 @@ impl std::fmt::Debug for ListBlock<'_> {
             .field("anchor_reftext", &self.anchor_reftext)
             .field("attrlist", &self.attrlist)
             .field("is_checklist", &self.is_checklist)
+            .field("is_bibliography", &self.is_bibliography)
             .finish()
     }
 }
@@ -590,7 +645,7 @@ mod tests {
 
         assert_eq!(
             format!("{:#?}", list.item),
-            "ListBlock {\n    type_: ListType::Unordered,\n    items: &[\n        Block::ListItem(\n            ListItem {\n                marker: ListItemMarker::Hyphen(\n                    Span {\n                        data: \"-\",\n                        line: 1,\n                        col: 1,\n                        offset: 0,\n                    },\n                ),\n                blocks: &[\n                    Block::Simple(\n                        SimpleBlock {\n                            content: Content {\n                                original: Span {\n                                    data: \"blah\",\n                                    line: 1,\n                                    col: 3,\n                                    offset: 2,\n                                },\n                                rendered: \"blah\",\n                            },\n                            source: Span {\n                                data: \"blah\",\n                                line: 1,\n                                col: 3,\n                                offset: 2,\n                            },\n                            style: SimpleBlockStyle::Paragraph,\n                            title_source: None,\n                            title: None,\n                            caption: None,\n                            number: None,\n                            anchor: None,\n                            anchor_reftext: None,\n                            attrlist: None,\n                        },\n                    ),\n                ],\n                source: Span {\n                    data: \"- blah\",\n                    line: 1,\n                    col: 1,\n                    offset: 0,\n                },\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n                checkbox: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    title_source: None,\n    title: None,\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n    is_checklist: false,\n}"
+            "ListBlock {\n    type_: ListType::Unordered,\n    items: &[\n        Block::ListItem(\n            ListItem {\n                marker: ListItemMarker::Hyphen(\n                    Span {\n                        data: \"-\",\n                        line: 1,\n                        col: 1,\n                        offset: 0,\n                    },\n                ),\n                blocks: &[\n                    Block::Simple(\n                        SimpleBlock {\n                            content: Content {\n                                original: Span {\n                                    data: \"blah\",\n                                    line: 1,\n                                    col: 3,\n                                    offset: 2,\n                                },\n                                rendered: \"blah\",\n                            },\n                            source: Span {\n                                data: \"blah\",\n                                line: 1,\n                                col: 3,\n                                offset: 2,\n                            },\n                            style: SimpleBlockStyle::Paragraph,\n                            title_source: None,\n                            title: None,\n                            caption: None,\n                            number: None,\n                            anchor: None,\n                            anchor_reftext: None,\n                            attrlist: None,\n                        },\n                    ),\n                ],\n                source: Span {\n                    data: \"- blah\",\n                    line: 1,\n                    col: 1,\n                    offset: 0,\n                },\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n                checkbox: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    title_source: None,\n    title: None,\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n    is_checklist: false,\n    is_bibliography: false,\n}"
         );
 
         assert_eq!(

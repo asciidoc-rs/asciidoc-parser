@@ -231,7 +231,7 @@ If you want the caption of the table to only consist of the caption label, use t
     // yet support. The example is tracked here but not yet exercised.
     //
     // TODO: Promote to `verifies!` once the `title` block attribute lands.
-    // https://github.com/asciidoc-rs/asciidoc-parser/issues/514
+    // https://github.com/asciidoc-rs/asciidoc-parser/issues/578
     to_do_verifies!(
         r#"
 [source]

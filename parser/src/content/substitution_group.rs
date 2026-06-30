@@ -54,6 +54,12 @@ pub enum SubstitutionGroup {
     /// these values.
     AttributeEntryValue,
 
+    /// The STEM substitution group is applied to STEM (`stem`, `asciimath`, and
+    /// `latexmath`) content when no explicit substitution list is given. Only
+    /// the special characters substitution is applied (Asciidoctor's basic subs
+    /// for HTML output). Used by both the inline STEM macro and the STEM block.
+    Stem,
+
     /// You can customize the substitutions applied to the content of an inline
     /// pass macro by specifying one or more substitution values. Multiple
     /// values must be separated by commas and may not contain any spaces. The
@@ -176,7 +182,7 @@ impl SubstitutionGroup {
 
         let passthroughs: Option<Passthroughs> =
             if steps.contains(&SubstitutionStep::Macros) || self == &Self::Header {
-                Some(Passthroughs::extract_from(content))
+                Some(Passthroughs::extract_from(content, parser))
             } else {
                 None
             };
@@ -241,6 +247,8 @@ impl SubstitutionGroup {
                 SubstitutionStep::Callouts,
             ],
 
+            Self::Stem => &[SubstitutionStep::SpecialCharacters],
+
             Self::Pass | Self::None => &[],
 
             Self::Custom(steps) => steps,
@@ -251,6 +259,24 @@ impl SubstitutionGroup {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+
+    mod stem {
+        use crate::{content::Content, strings::CowStr, tests::prelude::*};
+
+        #[test]
+        fn applies_special_characters_only() {
+            // The `Stem` group applies only the special characters substitution:
+            // `<` is escaped, but quotes (`*bold*`) and attribute references
+            // (`{color}`) are left untouched.
+            let mut content = Content::from(crate::Span::new("*a* < {color}"));
+            let p = Parser::default();
+            SubstitutionGroup::Stem.apply(&mut content, &p, None);
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed("*a* &lt; {color}".to_string().into_boxed_str())
+            );
+        }
+    }
 
     mod from_custom_string {
         use crate::{

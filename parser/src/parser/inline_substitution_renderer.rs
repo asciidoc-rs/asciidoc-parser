@@ -213,6 +213,13 @@ pub enum QuoteType {
 
     /// Surrounds a block of text that may need a `<span>` or similar tag.
     Unquoted,
+
+    /// Inline AsciiMath expression, surrounded by AsciiMath math delimiters.
+    AsciiMath,
+
+    /// Inline LaTeX math expression, surrounded by LaTeX inline math
+    /// delimiters.
+    LatexMath,
 }
 
 /// Specifies whether the block is aligned to word boundaries or not.
@@ -485,6 +492,18 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 } else {
                     wrap_body_in_html_tag(attrlist.as_ref(), "span", id, roles, body, dest);
                 }
+            }
+
+            QuoteType::AsciiMath => {
+                dest.push_str(r"\$");
+                dest.push_str(body);
+                dest.push_str(r"\$");
+            }
+
+            QuoteType::LatexMath => {
+                dest.push_str(r"\(");
+                dest.push_str(body);
+                dest.push_str(r"\)");
             }
         }
     }

@@ -3517,83 +3517,122 @@ mod description_lists_dlist {
         // Backend-specific test omitted: DocBook.
 
         #[test]
-        #[ignore]
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/479):
-        // Enable this test when bibliography parsing is enabled.
         fn should_convert_bibliography_list_with_proper_semantics() {
-            let _doc = Parser::default().parse("[bibliography]\n- [[[taoup]]] Eric Steven Raymond. _The Art of Unix\n  Programming_. Addison-Wesley. ISBN 0-13-142901-9.\n- [[[walsh-muellner]]] Norman Walsh & Leonard Muellner.\n  _DocBook - The Definitive Guide_. O'Reilly & Associates. 1999.\n  ISBN 1-56592-580-7.\n");
-            todo!("assert_css: '.ulist.bibliography', output, 1");
-            todo!("assert_css: '.ulist.bibliography ul', output, 1");
-            todo!("assert_css: '.ulist.bibliography ul li', output, 2");
-            todo!("assert_css: '.ulist.bibliography ul li p', output, 2");
-            todo!("assert_css: '.ulist.bibliography ul li:nth-child(1) p a#taoup', output, 1");
-            todo!("assert_xpath: '//a/*', output, 0");
-            todo!(
-                "assert_xpath: '(//a)[1][starts-with(following-sibling::text(), \"[taoup] \")]', output, 1"
-            );
+            let doc = Parser::default().parse("[bibliography]\n- [[[taoup]]] Eric Steven Raymond. _The Art of Unix\n  Programming_. Addison-Wesley. ISBN 0-13-142901-9.\n- [[[walsh-muellner]]] Norman Walsh & Leonard Muellner.\n  _DocBook - The Definitive Guide_. O'Reilly & Associates. 1999.\n  ISBN 1-56592-580-7.\n");
+
+            assert_css(&doc, ".ulist.bibliography", 1);
+            assert_css(&doc, ".ulist.bibliography ul", 1);
+            assert_css(&doc, ".ulist.bibliography ul li", 2);
+            assert_css(&doc, ".ulist.bibliography ul li p", 2);
+            // Asciidoctor scopes this to the first item with `li:nth-child(1)`;
+            // the test CSS engine can't evaluate `:nth-child` across a descendant
+            // combinator, so the first-item specificity is instead checked against
+            // the rendered paragraph below.
+            assert_css(&doc, ".ulist.bibliography ul li p a#taoup", 1);
+
+            // The bibliography anchor renders as an empty `<a id>` (it has no
+            // child elements) immediately followed by the bracketed label text.
+            assert_xpath(&doc, "//a/*", 0);
+
+            // The crate produces inline content at parse time rather than
+            // rendering whole blocks, so the anchor-then-`[taoup] ` sequence
+            // (asserted via `following-sibling::text()` in Asciidoctor) is checked
+            // against the rendered paragraph directly.
+            let paragraphs = rendered_paragraphs(&doc);
+            assert!(paragraphs[0].starts_with("<a id=\"taoup\"></a>[taoup] "));
+            assert!(paragraphs[1].starts_with("<a id=\"walsh-muellner\"></a>[walsh-muellner] "));
         }
 
         // Backend-specific test omitted: DocBook.
 
         #[test]
-        #[ignore]
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/479):
-        // Enable this test when bibliography parsing is enabled.
         fn should_warn_if_a_bibliography_id_is_already_in_use() {
-            let _doc = Parser::default().parse("[bibliography]\n* [[[Fowler]]] Fowler M. _Analysis Patterns: Reusable Object Models_.\nAddison-Wesley. 1997.\n* [[[Fowler]]] Fowler M. _Analysis Patterns: Reusable Object Models_.\nAddison-Wesley. 1997.\n");
-            todo!("memory logger test");
+            let doc = Parser::default().parse("[bibliography]\n* [[[Fowler]]] Fowler M. _Analysis Patterns: Reusable Object Models_.\nAddison-Wesley. 1997.\n* [[[Fowler]]] Fowler M. _Analysis Patterns: Reusable Object Models_.\nAddison-Wesley. 1997.\n");
+
+            // The duplicate bibliography id is reported (Asciidoctor logs a
+            // warning; this crate surfaces it as a document warning).
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::DuplicateId("Fowler".to_string())
+            );
         }
 
         #[test]
-        #[ignore]
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/479):
-        // Enable this test when bibliography parsing is enabled.
         fn should_automatically_add_bibliography_style_to_top_level_lists_in_bibliography_section()
         {
-            let _doc = Parser::default().parse("[bibliography]\n== Bibliography\n\n.Books\n* [[[taoup]]] Eric Steven Raymond. _The Art of Unix\n  Programming_. Addison-Wesley. ISBN 0-13-142901-9.\n* [[[walsh-muellner]]] Norman Walsh & Leonard Muellner.\n  _DocBook - The Definitive Guide_. O'Reilly & Associates. 1999.\n  ISBN 1-56592-580-7.\n\n.Periodicals\n* [[[doc-writer]]] Doc Writer. _Documentation As Code_. Static Times, 54. August 2016.\n");
-            todo!("document_from_string test");
+            let doc = Parser::default().parse("[bibliography]\n== Bibliography\n\n.Books\n* [[[taoup]]] Eric Steven Raymond. _The Art of Unix\n  Programming_. Addison-Wesley. ISBN 0-13-142901-9.\n* [[[walsh-muellner]]] Norman Walsh & Leonard Muellner.\n  _DocBook - The Definitive Guide_. O'Reilly & Associates. 1999.\n  ISBN 1-56592-580-7.\n\n.Periodicals\n* [[[doc-writer]]] Doc Writer. _Documentation As Code_. Static Times, 54. August 2016.\n");
+
+            // Both top-level unordered lists in the bibliography section inherit
+            // the `bibliography` style, even though neither carries an explicit
+            // `[bibliography]` attribute.
+            assert_css(&doc, ".ulist.bibliography", 2);
+            assert_css(&doc, "a#taoup", 1);
+            assert_css(&doc, "a#walsh-muellner", 1);
+            assert_css(&doc, "a#doc-writer", 1);
         }
 
         #[test]
-        #[ignore]
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/479):
-        // Enable this test when bibliography parsing is enabled.
         fn should_not_recognize_bibliography_anchor_that_begins_with_a_digit() {
-            let _doc = Parser::default().parse(
+            let doc = Parser::default().parse(
                 "[bibliography]\n- [[[1984]]] George Orwell. _1984_. New American Library. 1950.\n",
             );
-            todo!("assert_includes output, '[[[1984]]]'");
-            todo!("assert_xpath: '//a[@id=\"1984\"]', output, 0");
+
+            // A label that begins with a digit is not a bibliography anchor, so
+            // the triple brackets are left untouched and no anchor is generated.
+            let paragraphs = rendered_paragraphs(&doc);
+            assert!(paragraphs[0].starts_with("[[[1984]]] "));
+            assert_xpath(&doc, "//a[@id=\"1984\"]", 0);
         }
 
         #[test]
-        #[ignore]
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/479):
-        // Enable this test when bibliography parsing is enabled.
         fn should_recognize_bibliography_anchor_that_contains_a_digit_but_does_not_start_with_one()
         {
-            let _doc = Parser::default().parse("[bibliography]\n- [[[_1984]]] George Orwell. __1984__. New American Library. 1950.\n");
-            todo!("refute_includes output, '[[[_1984]]]'");
-            todo!("assert_includes output, '[_1984]'");
-            todo!("assert_xpath: '//a[@id=\"_1984\"]', output, 1");
+            let doc = Parser::default().parse("[bibliography]\n- [[[_1984]]] George Orwell. __1984__. New American Library. 1950.\n");
+
+            // A label that merely contains a digit (but starts with `_`) is a
+            // valid bibliography anchor.
+            let paragraphs = rendered_paragraphs(&doc);
+            assert!(!paragraphs[0].contains("[[[_1984]]]"));
+            assert!(paragraphs[0].contains("[_1984]"));
+            assert_xpath(&doc, "//a[@id=\"_1984\"]", 1);
         }
 
         #[test]
-        #[ignore]
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/479):
-        // Enable this test when bibliography parsing is enabled.
         fn should_catalog_bibliography_anchors_in_bibliography_list() {
-            let _doc = Parser::default().parse("= Article Title\n\nPlease read <<Fowler_1997>>.\n\n[bibliography]\n== References\n\n* [[[Fowler_1997]]] Fowler M. _Analysis Patterns: Reusable Object Models_. Addison-Wesley. 1997.\n");
-            todo!("document_from_string test");
+            let doc = Parser::default().parse("= Article Title\n\nPlease read <<Fowler_1997>>.\n\n[bibliography]\n== References\n\n* [[[Fowler_1997]]] Fowler M. _Analysis Patterns: Reusable Object Models_. Addison-Wesley. 1997.\n");
+
+            // The bibliography anchor is cataloged as a bibliography reference
+            // whose reftext is the bracketed label.
+            let entry = doc.catalog().get_ref("Fowler_1997").unwrap();
+            assert_eq!(entry.ref_type, crate::document::RefType::Bibliography);
+            assert_eq!(entry.reftext.as_deref(), Some("[Fowler_1997]"));
+
+            // A cross-reference to the entry, written before the bibliography
+            // appears, resolves to it and renders the bracketed label.
+            let paragraphs = rendered_paragraphs(&doc);
+            assert!(
+                paragraphs[0].contains("<a href=\"#Fowler_1997\">[Fowler_1997]</a>"),
+                "unexpected: {}",
+                paragraphs[0]
+            );
         }
 
         #[test]
-        #[ignore]
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/479):
-        // Enable this test when bibliography parsing is enabled.
         fn should_use_reftext_from_bibliography_anchor_at_xref_and_entry() {
-            let _doc = Parser::default().parse("= Article Title\n\nBegin with <<TMMM>>.\nThen move on to <<Fowler_1997>>.\n\n[bibliography]\n== References\n\n* [[[TMMM]]] Brooks F. _The Mythical Man-Month_. Addison-Wesley. 1975.\n* [[[Fowler_1997,1]]] Fowler M. _Analysis Patterns: Reusable Object Models_. Addison-Wesley. 1997.\n");
-            todo!("document_from_string test");
+            let doc = Parser::default().parse("= Article Title\n\nBegin with <<TMMM>>.\nThen move on to <<Fowler_1997>>.\n\n[bibliography]\n== References\n\n* [[[TMMM]]] Brooks F. _The Mythical Man-Month_. Addison-Wesley. 1975.\n* [[[Fowler_1997,1]]] Fowler M. _Analysis Patterns: Reusable Object Models_. Addison-Wesley. 1997.\n");
+
+            let paragraphs = rendered_paragraphs(&doc);
+
+            // The cross-references use each entry's reftext: the plain label for
+            // `TMMM`, and the explicit xreftext `1` for `Fowler_1997`.
+            assert!(paragraphs[0].contains("<a href=\"#TMMM\">[TMMM]</a>"));
+            assert!(paragraphs[0].contains("<a href=\"#Fowler_1997\">[1]</a>"));
+
+            // The bibliography entries themselves render the same bracketed text.
+            assert!(paragraphs[1].starts_with("<a id=\"TMMM\"></a>[TMMM] "));
+            assert!(paragraphs[2].starts_with("<a id=\"Fowler_1997\"></a>[1] "));
         }
 
         // Backend-specific test omitted: DocBook.

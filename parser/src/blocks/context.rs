@@ -21,6 +21,7 @@ pub(crate) fn is_built_in_context(context: &str) -> bool {
             | "quote"
             | "section"
             | "sidebar"
+            | "stem"
             | "table"
             | "table_cell"
             | "thematic_break"

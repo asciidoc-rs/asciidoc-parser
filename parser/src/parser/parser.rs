@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
     sync::Arc,
@@ -76,6 +76,26 @@ pub struct Parser {
     /// Section type of outermost section. (Used to determine whether to number
     /// child sections as a normal section or appendix.)
     pub(crate) topmost_section_type: SectionType,
+
+    /// True while parsing the direct block children of a section that carries
+    /// the `bibliography` style.
+    ///
+    /// A top-level unordered list parsed in this scope implicitly inherits the
+    /// `bibliography` style (matching Asciidoctor), even without its own
+    /// `[bibliography]` attribute. The flag is saved and restored around each
+    /// section body, so a non-bibliography subsection clears it for its own
+    /// children (the style does not propagate into subsections).
+    pub(crate) parsing_bibliography_section_body: bool,
+
+    /// True while the principal text of a bibliography list item is being
+    /// substituted.
+    ///
+    /// Read through a shared `&Parser` by the macros substitution step so it
+    /// recognizes a leading bibliography anchor (`[[[id]]]`). It is wrapped in
+    /// a [`Cell`] because the substitution code paths (e.g. a regex
+    /// [`Replacer`](regex::Replacer)) only hold a shared reference to the
+    /// parser.
+    pub(crate) in_bibliography_list_item: Cell<bool>,
 
     /// Live values of [counter] attributes, keyed by counter name (e.g.
     /// `index`, `example-number`, `table-number`).
@@ -193,6 +213,8 @@ impl Default for Parser {
             },
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,
+            parsing_bibliography_section_body: false,
+            in_bibliography_list_item: Cell::new(false),
             counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,

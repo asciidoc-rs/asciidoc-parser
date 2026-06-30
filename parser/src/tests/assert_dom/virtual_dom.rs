@@ -870,6 +870,14 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
         list_element = list_element.with_class(style);
     }
 
+    // A bibliography list whose style is inherited from its enclosing section
+    // (rather than declared with `[bibliography]`) still renders with the
+    // `bibliography` class. The `declared_style` guard avoids adding it twice
+    // when the style was declared explicitly.
+    if list.is_bibliography() && list.declared_style() != Some("bibliography") {
+        list_element = list_element.with_class("bibliography");
+    }
+
     for item in list.nested_blocks() {
         // For description lists, we need to create two peer nodes: dt and dd
         // (or tr/td for horizontal lists).
@@ -1007,6 +1015,12 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
     // style). Skip for horizontal dlists since wrapper already has hdlist class.
     if !is_horizontal && let Some(style) = list.declared_style() {
         wrapper = wrapper.with_class(style);
+    }
+
+    // As above, a bibliography list that inherited its style from its section
+    // renders the wrapper with the `bibliography` class.
+    if list.is_bibliography() && list.declared_style() != Some("bibliography") {
+        wrapper = wrapper.with_class("bibliography");
     }
 
     for role in list.roles() {
