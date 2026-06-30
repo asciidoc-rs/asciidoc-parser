@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.17.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.16.0...v0.17.0)
+_30 June 2026_
+
+### Added
+
+* Implement predefined document attributes (document-attributes-ref) ([#577](https://github.com/asciidoc-rs/asciidoc-parser/pull/577))
+* Implement bibliography sections, entries, and anchors ([#479](https://github.com/asciidoc-rs/asciidoc-parser/pull/479)) ([#580](https://github.com/asciidoc-rs/asciidoc-parser/pull/580))
+* Implement STEM (stem/asciimath/latexmath) inline and block support ([#261](https://github.com/asciidoc-rs/asciidoc-parser/pull/261)) ([#576](https://github.com/asciidoc-rs/asciidoc-parser/pull/576))
+* Implement docinfo files (head/header/footer resolution) ([#574](https://github.com/asciidoc-rs/asciidoc-parser/pull/574))
+* Implement appendix caption/label (appendix-caption) ([#575](https://github.com/asciidoc-rs/asciidoc-parser/pull/575))
+* Implement counter attribute references ([#569](https://github.com/asciidoc-rs/asciidoc-parser/pull/569))
+* Add support for checklists (task lists) ([#572](https://github.com/asciidoc-rs/asciidoc-parser/pull/572))
+* Complete ID-attribute features (xreflabel + inline shorthand ID registration) ([#567](https://github.com/asciidoc-rs/asciidoc-parser/pull/567))
+* Implement all predefined character replacement attributes ([#568](https://github.com/asciidoc-rs/asciidoc-parser/pull/568))
+* Drop blocks whose macro target references a missing attribute ([#566](https://github.com/asciidoc-rs/asciidoc-parser/pull/566))
+* Handle unresolved attribute references (attribute-missing) ([#563](https://github.com/asciidoc-rs/asciidoc-parser/pull/563))
+
+### Other
+
+* Enable callout-list tests blocked on callout support ([#311](https://github.com/asciidoc-rs/asciidoc-parser/pull/311)) ([#570](https://github.com/asciidoc-rs/asciidoc-parser/pull/570))
+
 ## [0.16.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.15.2...v0.16.0)
 _29 June 2026_
 
