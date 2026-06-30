@@ -18,3 +18,4 @@ mod special_section_titles;
 mod styles;
 mod title_links;
 mod titles_and_levels;
+mod user_index;

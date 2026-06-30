@@ -7,7 +7,11 @@ use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{Content, content::XrefSegment},
-    parser::{IconRenderParams, ImageRenderParams, LinkRenderParams, LinkRenderType},
+    internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
+    parser::{
+        IconRenderParams, ImageRenderParams, IndexTermRenderParams, LinkRenderParams,
+        LinkRenderType,
+    },
 };
 
 pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
@@ -54,14 +58,19 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
         }
     }
 
-    /*
+    let found_macroish_short = found_macroish && text.contains(":[");
+
     if (text.contains("((") && text.contains("))"))
         || (found_macroish_short && text.contains("dexterm"))
     {
-        todo!("Index term macro");
-        // Port Ruby Asciidoctor's implementation from lines 439..536.
+        let replacer = InlineIndextermReplacer(parser);
+
+        if let Cow::Owned(new_result) =
+            replace_with_lookahead(&INLINE_INDEXTERM, content.rendered(), replacer)
+        {
+            content.rendered = new_result.into();
+        }
     }
-    */
 
     if found_colon && text.contains("://") {
         let replacer = InlineLinkReplacer(parser);
@@ -232,6 +241,193 @@ fn basename(path: &str) -> String {
 
 fn normalize_text_lf_escaped_bracket(text: &str) -> String {
     text.replace("\n", " ").replace("\\]", "]")
+}
+
+/// Matches an [index term] inline macro, in either the macro form
+/// (`indexterm:[…]` / `indexterm2:[…]`) or the shorthand form
+/// (`(((primary, secondary, tertiary)))` / `((primary))`).
+///
+/// The shorthand alternative captures the text between the outermost `((` and
+/// `))`. Asciidoctor anchors the closing `))` with a `(?!\))` look-ahead so
+/// that the *last* pair in a run of parentheses closes the term; Rust's regex
+/// engine has no look-ahead, so [`InlineIndextermReplacer`] re-creates that
+/// behavior by absorbing any trailing `)` that follow the matched `))`.
+///
+/// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
+static INLINE_INDEXTERM: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                         # extended mode; dot matches newline
+        \\?                              # optional escaping backslash
+        (?:
+            (indexterm2?):\[ (.*?[^\\]) \]   # (1) macro name, (2) macro argument
+          |
+            \(\( (.+?) \)\)                  # (3) shorthand enclosed text
+        )
+        "#,
+    )
+    .unwrap()
+});
+
+#[derive(Debug)]
+struct InlineIndextermReplacer<'p>(&'p Parser);
+
+impl LookaheadReplacer for InlineIndextermReplacer<'_> {
+    fn replace_append(
+        &mut self,
+        caps: &Captures<'_>,
+        dest: &mut String,
+        after: &str,
+    ) -> LookaheadResult {
+        // Adapted from Asciidoctor#sub_macros (the `InlineIndextermMacroRx`
+        // branch), found in
+        // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb.
+
+        let parser = self.0;
+
+        // Macro form: `indexterm:[…]` (concealed) or `indexterm2:[…]` (flow).
+        if let Some(name) = caps.get(1) {
+            // Honor the escape: emit the macro text without the backslash.
+            if caps[0].starts_with('\\') {
+                dest.push_str(&caps[0][1..]);
+                return LookaheadResult::Continue;
+            }
+
+            if name.as_str() == "indexterm2" {
+                // A flow index term renders its primary term inline. When the
+                // argument carries an attribute list (it contains `=`), the
+                // first positional attribute is the primary term.
+                let arg = normalize_index_text(&caps[2], true);
+                let term = if arg.contains('=') {
+                    Attrlist::parse(Span::new(&arg), parser, AttrlistContext::Inline)
+                        .item
+                        .item
+                        .nth_attribute(1)
+                        .map(|a| a.value().to_string())
+                        .unwrap_or(arg)
+                } else {
+                    arg
+                };
+
+                parser.renderer.render_index_term(
+                    &IndexTermRenderParams {
+                        visible_term: Some(&term),
+                    },
+                    dest,
+                );
+            } else {
+                // A concealed index term produces no inline output.
+                parser
+                    .renderer
+                    .render_index_term(&IndexTermRenderParams { visible_term: None }, dest);
+            }
+
+            return LookaheadResult::Continue;
+        }
+
+        // Shorthand form: `((…))` / `(((…)))`.
+        //
+        // Absorb any `)` that immediately follow the matched `))` so that the
+        // closing pair is the last in the run, mirroring Asciidoctor's
+        // `(?!\))` look-ahead. Those extra characters are part of this logical
+        // match, so they are skipped (rather than re-scanned) once consumed.
+        let extra = after.bytes().take_while(|b| *b == b')').count();
+        let advance = if extra > 0 {
+            LookaheadResult::SkipAheadAndRetry(caps[0].len() + extra)
+        } else {
+            LookaheadResult::Continue
+        };
+
+        let mut encl_text = String::with_capacity(caps[3].len() + extra);
+        encl_text.push_str(&caps[3]);
+        for _ in 0..extra {
+            encl_text.push(')');
+        }
+
+        let escaped = caps[0].starts_with('\\');
+
+        // Strip the enclosing parentheses (if any) to decide whether the term
+        // is concealed or visible, and which literal parentheses to preserve in
+        // the flow of text. `before`/`trailing` carry literal parentheses that
+        // are adjacent to (but not part of) the index term.
+        let (inner, visible, before, trailing): (&str, bool, &str, &str) = if escaped {
+            if encl_text.starts_with('(') && encl_text.ends_with(')') {
+                // An escaped concealed term still processes a nested flow term.
+                (&encl_text[1..encl_text.len() - 1], true, "(", ")")
+            } else {
+                // Honor the escape: emit the enclosed text verbatim (the full
+                // match, including any absorbed parens, minus the backslash).
+                dest.push_str(&caps[0][1..]);
+                for _ in 0..extra {
+                    dest.push(')');
+                }
+                return advance;
+            }
+        } else if let Some(without_open) = encl_text.strip_prefix('(') {
+            if let Some(inner) = without_open.strip_suffix(')') {
+                // `(((concealed)))`
+                (inner, false, "", "")
+            } else {
+                (without_open, true, "(", "")
+            }
+        } else if let Some(inner) = encl_text.strip_suffix(')') {
+            (inner, true, "", ")")
+        } else {
+            // `((visible))`
+            (&encl_text[..], true, "", "")
+        };
+
+        dest.push_str(before);
+
+        if visible {
+            let term = strip_see_and_seealso(&normalize_index_text(inner, false));
+            parser.renderer.render_index_term(
+                &IndexTermRenderParams {
+                    visible_term: Some(&term),
+                },
+                dest,
+            );
+        } else {
+            parser
+                .renderer
+                .render_index_term(&IndexTermRenderParams { visible_term: None }, dest);
+        }
+
+        dest.push_str(trailing);
+
+        advance
+    }
+}
+
+/// Normalizes the text of an index term: trims surrounding whitespace and
+/// collapses embedded newlines to spaces (Asciidoctor compacts a multi-line
+/// term onto a single line). When `unescape_brackets` is set (the macro forms),
+/// an escaped closing square bracket (`\]`) is also unescaped.
+fn normalize_index_text(text: &str, unescape_brackets: bool) -> String {
+    let normalized = text.trim().replace('\n', " ");
+    if unescape_brackets {
+        normalized.replace("\\]", "]")
+    } else {
+        normalized
+    }
+}
+
+/// Strips a trailing `see` (` >> …`) or `see-also` (` &> …`) clause from a
+/// visible index term, leaving only the primary term to display in the flow of
+/// text. By the time macros are processed, the special-characters substitution
+/// has already turned `>` into `&gt;` and `&` into `&amp;`, so the separators
+/// appear here as ` &gt;&gt; ` and ` &amp;&gt; `.
+fn strip_see_and_seealso(term: &str) -> String {
+    // Cheap guard mirroring Asciidoctor's `term.include? ';&'`.
+    if term.contains(";&") {
+        if let Some((primary, _see)) = term.split_once(" &gt;&gt; ") {
+            return primary.to_string();
+        }
+        if let Some((primary, _see_also)) = term.split_once(" &amp;&gt; ") {
+            return primary.to_string();
+        }
+    }
+    term.to_string()
 }
 
 static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
