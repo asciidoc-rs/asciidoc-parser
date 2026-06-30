@@ -1295,7 +1295,10 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
 }
 
 fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
-    let context = raw.raw_context();
+    // The resolved context applies any masquerade style: a `[literal]` listing
+    // (`----`) renders as a literal block, and a `[listing]`/`[source]` literal
+    // (`....`) renders as a listing block.
+    let context = raw.resolved_context();
 
     let (tag, classes): (&str, Vec<String>) = match context.as_ref() {
         "listing" => ("div", vec!["listingblock".to_string()]),

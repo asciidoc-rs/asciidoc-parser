@@ -190,15 +190,21 @@ impl<'src> RawDelimitedBlock<'src> {
     }
 }
 
-/// Resolve a verbatim masquerade style set on an open block (`--`).
+/// Resolve a raw or verbatim masquerade style set on an open block (`--`).
 ///
 /// A block style replaces the open-block context only on an open block (every
-/// other delimited block keeps its own context). When that style is one of the
-/// verbatim contexts — `source` and `listing` (both rendered as a listing
-/// block), or `literal` — the open block becomes a verbatim raw block. Returns
-/// the resulting content model, context, and substitution group, or `None` when
-/// the style is absent or names a non-verbatim context (e.g. `sidebar`,
-/// `example`, `quote`), which is handled elsewhere.
+/// other delimited block keeps its own context). This parser claims an open
+/// block whose style turns it into a raw delimited block:
+///
+/// * the verbatim contexts — `source` and `listing` (both rendered as a listing
+///   block), or `literal` — make the open block a verbatim raw block; and
+/// * the `pass` context makes the open block a passthrough (raw) block, whose
+///   content is emitted with no substitutions and no block parsing.
+///
+/// Returns the resulting content model, context, and substitution group, or
+/// `None` when the style is absent or names a context that keeps the compound
+/// (open) content model (e.g. `sidebar`, `example`, `quote`), which is handled
+/// elsewhere.
 fn open_block_verbatim_masquerade(
     attrlist: Option<&Attrlist<'_>>,
 ) -> Option<(ContentModel, &'static str, SubstitutionGroup)> {
@@ -213,6 +219,7 @@ fn open_block_verbatim_masquerade(
             "literal",
             SubstitutionGroup::Verbatim,
         )),
+        "pass" => Some((ContentModel::Raw, "pass", SubstitutionGroup::Pass)),
         _ => None,
     }
 }
