@@ -4593,7 +4593,7 @@ mod passthroughs {
         let mut content =
             crate::content::Content::from(crate::Span::new("+++<code>inline code</code>+++"));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -4625,7 +4625,7 @@ mod passthroughs {
         let mut content =
             crate::content::Content::from(crate::Span::new("[role]+++<code>inline code</code>+++"));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -4656,7 +4656,7 @@ mod passthroughs {
         let mut content =
             crate::content::Content::from(crate::Span::new("+++<code>inline\ncode</code>+++"));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -4687,7 +4687,7 @@ mod passthroughs {
         let mut content =
             crate::content::Content::from(crate::Span::new("$$<code>{code}</code>$$"));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -4718,7 +4718,7 @@ mod passthroughs {
         let mut content =
             crate::content::Content::from(crate::Span::new("++<code>{code}</code>++"));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -4904,7 +4904,7 @@ mod passthroughs {
         let mut content =
             crate::content::Content::from(crate::Span::new("$$<code>\n{code}\n</code>$$"));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -4936,7 +4936,7 @@ mod passthroughs {
             "pass:specialcharacters,quotes[<code>['code'\\]</code>]",
         ));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -4971,7 +4971,7 @@ mod passthroughs {
             "pass:specialcharacters,quotes[<code>['more\ncode'\\]</code>]",
         ));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -5050,7 +5050,7 @@ mod passthroughs {
         let mut content =
             crate::content::Content::from(crate::Span::new("pass:q,a[*<{backend}>*]"));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -5107,7 +5107,7 @@ mod passthroughs {
     fn inline_pass_macro_supports_incremental_subs() {
         // TO DO: Restore this test once macro substitutions are implemented.
         let mut content = crate::content::Content::from(crate::Span::new("pass:n,-a[<{backend}>]"));
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -5165,7 +5165,7 @@ mod passthroughs {
     #[test]
     fn should_not_recognize_pass_macro_with_invalid_substitution_list_1() {
         let mut content = crate::content::Content::from(crate::Span::new("pass:,[foobar]"));
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -5186,7 +5186,7 @@ mod passthroughs {
     #[test]
     fn should_not_recognize_pass_macro_with_invalid_substitution_list_2() {
         let mut content = crate::content::Content::from(crate::Span::new("pass:42[foobar]"));
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -5207,7 +5207,7 @@ mod passthroughs {
     #[test]
     fn should_not_recognize_pass_macro_with_invalid_substitution_list_3() {
         let mut content = crate::content::Content::from(crate::Span::new("pass:a,[foobar]"));
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -5500,7 +5500,7 @@ mod passthroughs {
             "$$[(] <'basic form'> <'logical operator'> <'basic form'> [)]$$",
         ));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -5532,7 +5532,7 @@ mod passthroughs {
             r#"pass:specialcharacters[[(\] <'basic form'> <'logical operator'> <'basic form'> [)\]]"#,
         ));
 
-        let pt = Passthroughs::extract_from(&mut content);
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
 
         assert_eq!(
             content,
@@ -5990,11 +5990,238 @@ mod passthroughs {
     }
 
     mod math_macros {
-        #[ignore]
+        use crate::tests::prelude::*;
+
+        /// Assert that the first block of `input` (parsed with `parser`) has
+        /// the given rendered content (the equivalent of Asciidoctor's
+        /// `para.content`) and that no warnings were raised.
+        fn assert_content(parser: Parser, input: &str, expected: &str) {
+            let mut parser = parser;
+            let doc = parser.parse(input);
+            assert_eq!(
+                doc.nested_blocks().next().unwrap().rendered_content(),
+                Some(expected),
+                "input = {input:?}"
+            );
+            assert!(doc.warnings().next().is_none(), "input = {input:?}");
+        }
+
         #[test]
-        fn not_implemented() {
-            todo!("Review Ruby Asciidoctor test suite for `context 'Math macros'`");
-            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/261.
+        fn should_passthrough_text_in_asciimath_macro_and_surround_with_asciimath_delimiters() {
+            assert_content(
+                Parser::default(),
+                "asciimath:[x/x={(1,if x!=0),(text{undefined},if x=0):}]",
+                r"\$x/x={(1,if x!=0),(text{undefined},if x=0):}\$",
+            );
+        }
+
+        #[test]
+        fn should_not_recognize_asciimath_macro_with_no_content() {
+            assert_content(Parser::default(), "asciimath:[]", "asciimath:[]");
+        }
+
+        #[test]
+        fn should_perform_specialcharacters_subs_on_asciimath_macro_content_in_html_backend_by_default()
+         {
+            assert_content(Parser::default(), "asciimath:[a < b]", r"\$a &lt; b\$");
+        }
+
+        #[test]
+        fn should_honor_explicit_subslist_on_asciimath_macro() {
+            let p = Parser::default().with_intrinsic_attribute(
+                "expr",
+                "x != 0",
+                ModificationContext::Anywhere,
+            );
+            assert_content(p, "asciimath:attributes[{expr}]", r"\$x != 0\$");
+        }
+
+        #[test]
+        fn should_passthrough_text_in_latexmath_macro_and_surround_with_latex_math_delimiters() {
+            assert_content(
+                Parser::default(),
+                r"latexmath:[C = \alpha + \beta Y^{\gamma} + \epsilon]",
+                r"\(C = \alpha + \beta Y^{\gamma} + \epsilon\)",
+            );
+        }
+
+        #[test]
+        fn should_strip_legacy_latex_math_delimiters_around_latexmath_content_if_present() {
+            assert_content(
+                Parser::default(),
+                r"latexmath:[$C = \alpha + \beta Y^{\gamma} + \epsilon$]",
+                r"\(C = \alpha + \beta Y^{\gamma} + \epsilon\)",
+            );
+        }
+
+        #[test]
+        fn should_not_recognize_latexmath_macro_with_no_content() {
+            assert_content(Parser::default(), "latexmath:[]", "latexmath:[]");
+        }
+
+        #[test]
+        fn should_unescape_escaped_square_bracket_in_equation() {
+            assert_content(
+                Parser::default(),
+                r"latexmath:[\sqrt[3\]{x}]",
+                r"\(\sqrt[3]{x}\)",
+            );
+        }
+
+        #[test]
+        fn should_perform_specialcharacters_subs_on_latexmath_macro_in_html_backend_by_default() {
+            assert_content(Parser::default(), "latexmath:[a < b]", r"\(a &lt; b\)");
+        }
+
+        #[test]
+        fn should_honor_explicit_subslist_on_latexmath_macro() {
+            let p = Parser::default().with_intrinsic_attribute(
+                "expr",
+                r"\sqrt{4} = 2",
+                ModificationContext::Anywhere,
+            );
+            assert_content(p, "latexmath:attributes[{expr}]", r"\(\sqrt{4} = 2\)");
+        }
+
+        #[test]
+        fn should_passthrough_math_macro_inside_another_passthrough() {
+            assert_content(
+                Parser::default(),
+                "the text [x-]`asciimath:[x = y]` should be passed through as `literal` text",
+                "the text <code>asciimath:[x = y]</code> should be passed through as <code>literal</code> text",
+            );
+
+            assert_content(
+                Parser::default(),
+                "the text `+asciimath:[x = y]+` should be passed through as `literal` text",
+                "the text <code>asciimath:[x = y]</code> should be passed through as <code>literal</code> text",
+            );
+        }
+
+        #[test]
+        fn should_not_recognize_stem_macro_with_no_content() {
+            assert_content(Parser::default(), "stem:[]", "stem:[]");
+        }
+
+        #[test]
+        fn should_passthrough_text_in_stem_macro_and_surround_with_asciimath_delimiters_by_default()
+        {
+            for stem in ["__unset__", "", "asciimath", "bogus"] {
+                let mut p = Parser::default();
+                if stem != "__unset__" {
+                    p = p.with_intrinsic_attribute("stem", stem, ModificationContext::Anywhere);
+                }
+                assert_content(
+                    p,
+                    "stem:[x/x={(1,if x!=0),(text{undefined},if x=0):}]",
+                    r"\$x/x={(1,if x!=0),(text{undefined},if x=0):}\$",
+                );
+            }
+        }
+
+        #[test]
+        fn should_passthrough_text_in_stem_macro_and_surround_with_latex_math_delimiters() {
+            for stem in ["latexmath", "latex", "tex"] {
+                let p = Parser::default().with_intrinsic_attribute(
+                    "stem",
+                    stem,
+                    ModificationContext::Anywhere,
+                );
+                assert_content(
+                    p,
+                    r"stem:[C = \alpha + \beta Y^{\gamma} + \epsilon]",
+                    r"\(C = \alpha + \beta Y^{\gamma} + \epsilon\)",
+                );
+            }
+        }
+
+        #[test]
+        fn should_apply_substitutions_specified_on_stem_macro() {
+            for input in [
+                "stem:c,a[sqrt(x) <=> {solve-for-x}]",
+                "stem:n,-r[sqrt(x) <=> {solve-for-x}]",
+            ] {
+                let p = Parser::default()
+                    .with_intrinsic_attribute("stem", "asciimath", ModificationContext::Anywhere)
+                    .with_intrinsic_attribute("solve-for-x", "13", ModificationContext::Anywhere);
+                assert_content(p, input, r"\$sqrt(x) &lt;=&gt; 13\$");
+            }
+        }
+
+        #[test]
+        fn should_replace_passthroughs_inside_stem_expression() {
+            for (input, expected) in [
+                ("stem:[+1+]", r"\$1\$"),
+                (r"stem:[+\infty-(+\infty)]", r"\$\infty-(\infty)\$"),
+                (r"stem:[+++\infty-(+\infty)++]", r"\$+\infty-(+\infty)\$"),
+            ] {
+                let p = Parser::default().with_intrinsic_attribute(
+                    "stem",
+                    "",
+                    ModificationContext::Anywhere,
+                );
+                assert_content(p, input, expected);
+            }
+        }
+
+        #[test]
+        fn should_allow_passthrough_inside_stem_expression_to_be_escaped() {
+            for (input, expected) in [
+                (r"stem:[\+] and stem:[+]", r"\$+\$ and \$+\$"),
+                (r"stem:[\+1+]", r"\$+1+\$"),
+            ] {
+                let p = Parser::default().with_intrinsic_attribute(
+                    "stem",
+                    "",
+                    ModificationContext::Anywhere,
+                );
+                assert_content(p, input, expected);
+            }
+        }
+
+        #[test]
+        fn should_not_recognize_stem_macro_with_invalid_substitution_list() {
+            for subs in [",", "42", "a,"] {
+                let p = Parser::default().with_intrinsic_attribute(
+                    "stem",
+                    "asciimath",
+                    ModificationContext::Anywhere,
+                );
+                let input = format!("stem:{subs}[x^2]");
+                assert_content(p, &input, &input);
+            }
+        }
+
+        #[test]
+        fn should_warn_if_substitutions_on_stem_macro_are_invalid() {
+            let mut p = Parser::default().with_intrinsic_attribute(
+                "stem",
+                "asciimath",
+                ModificationContext::Anywhere,
+            );
+            let doc = p.parse("stem:bogus[x^2]");
+            assert_eq!(
+                doc.nested_blocks().next().unwrap().rendered_content(),
+                Some(r"\$x^2\$")
+            );
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::InvalidSubstitutionTypeForStemMacro("bogus".to_string())
+            );
+        }
+
+        #[test]
+        fn should_not_process_escaped_stem_macro() {
+            // A leading backslash escapes the entire macro: the backslash is
+            // dropped and the macro text is emitted verbatim.
+            assert_content(
+                Parser::default(),
+                r"The \stem:[x^2] macro is escaped.",
+                "The stem:[x^2] macro is escaped.",
+            );
         }
     }
 }
