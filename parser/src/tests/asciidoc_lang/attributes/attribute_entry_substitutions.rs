@@ -151,6 +151,8 @@ You can inspect the value stored in an attribute using this trick:
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
@@ -234,6 +236,8 @@ If the macro is absent, the value is processed with the header substitution grou
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {

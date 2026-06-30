@@ -295,4 +295,157 @@ mod tests {
         let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![None, Some(1)]);
     }
+
+    #[test]
+    fn listing_caption_is_unset_by_default() {
+        // Unlike the other captionable contexts, `listing-caption` is not set by
+        // default, so a titled listing keeps only its title.
+        assert_eq!(
+            first_block_caption(".Title\n----\ncode\n----"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn listing_block_uses_listing_caption_when_set() {
+        assert_eq!(
+            first_block_caption(":listing-caption: Listing\n\n.Title\n----\ncode\n----"),
+            (Some("Listing 1. ".to_string()), Some(1))
+        );
+    }
+
+    #[test]
+    fn source_block_uses_listing_caption() {
+        // A source block resolves to the `listing` context, so it is captioned
+        // via `listing-caption` too.
+        assert_eq!(
+            first_block_caption(
+                ":listing-caption: Listing\n\n.Title\n[source,ruby]\n----\nx\n----"
+            ),
+            (Some("Listing 1. ".to_string()), Some(1))
+        );
+    }
+
+    #[test]
+    fn literal_block_is_never_captioned() {
+        // The `literal` context is not captionable even when titled.
+        assert_eq!(
+            first_block_caption(".Title\n....\ntext\n...."),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn image_uses_figure_caption_and_number() {
+        // An image is captioned under the `figure` context: its label comes from
+        // `figure-caption` and its number from the `figure-number` counter (both
+        // set by default).
+        assert_eq!(
+            first_block_caption(".Sunset\nimage::sunset.jpg[]"),
+            (Some("Figure 1. ".to_string()), Some(1))
+        );
+    }
+
+    #[test]
+    fn image_caption_override_on_macro_wins() {
+        // A `caption` attribute on the macro itself is a verbatim, unnumbered
+        // override, and it takes precedence over one on the block attribute list.
+        assert_eq!(
+            first_block_caption(
+                "[caption=\"Block. \"]\n.Sunset\nimage::sunset.jpg[caption=\"Photo. \"]"
+            ),
+            (Some("Photo. ".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn image_caption_override_on_block_attrlist() {
+        assert_eq!(
+            first_block_caption("[caption=\"Photo. \"]\n.Sunset\nimage::sunset.jpg[]"),
+            (Some("Photo. ".to_string()), None)
+        );
+    }
+
+    #[test]
+    fn image_caption_suppressed_when_figure_caption_unset() {
+        assert_eq!(
+            first_block_caption(":!figure-caption:\n\n.Sunset\nimage::sunset.jpg[]"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn untitled_image_is_not_captioned() {
+        assert_eq!(first_block_caption("image::sunset.jpg[]"), (None, None));
+    }
+
+    #[test]
+    fn video_and_audio_are_not_captioned() {
+        // Only images are captionable media; video and audio never are, even
+        // when titled.
+        assert_eq!(
+            first_block_caption(".Clip\nvideo::movie.mp4[]"),
+            (None, None)
+        );
+        assert_eq!(
+            first_block_caption(".Track\naudio::sound.mp3[]"),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn image_numbering_is_sequential() {
+        let doc = Parser::default().parse(".First\nimage::a.jpg[]\n\n.Second\nimage::b.jpg[]");
+        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        assert_eq!(numbers, vec![Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn image_number_is_stored_in_figure_number_attribute() {
+        // The number is stored in the `figure-number` counter attribute, so a
+        // later reference to it resolves to the assigned value.
+        assert_eq!(
+            rendered_paragraphs(
+                &Parser::default().parse(".Sunset\nimage::sunset.jpg[]\n\n{figure-number}")
+            ),
+            vec!["1".to_string()]
+        );
+    }
+
+    #[test]
+    fn listing_numbering_is_sequential_when_captioned() {
+        let doc = Parser::default()
+            .parse(":listing-caption: Listing\n\n.First\n----\na\n----\n\n.Second\n----\nb\n----");
+        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        assert_eq!(numbers, vec![Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn listing_number_is_stored_in_listing_number_attribute() {
+        // The number is stored in the `listing-number` counter attribute.
+        assert_eq!(
+            rendered_paragraphs(
+                &Parser::default().parse(
+                    ":listing-caption: Listing\n\n.Out\n----\ncode\n----\n\n{listing-number}"
+                )
+            ),
+            vec!["1".to_string()]
+        );
+    }
+
+    #[test]
+    fn dropped_image_does_not_consume_figure_number() {
+        // Under `attribute-missing=drop-line`, an image whose target references a
+        // missing attribute is dropped *before* its caption is assigned, so it
+        // does not consume the `figure-number` counter: the next titled image is
+        // still "Figure 1.".
+        let doc = Parser::default().parse(
+            ":attribute-missing: drop-line\n\n.Gone\nimage::{undefined}.jpg[]\n\n.Kept\nimage::ok.jpg[]",
+        );
+        let captions: Vec<_> = doc
+            .nested_blocks()
+            .map(|b| b.caption().map(str::to_string))
+            .collect();
+        assert_eq!(captions, vec![Some("Figure 1. ".to_string())]);
+    }
 }

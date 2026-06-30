@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
-    blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
+    blocks::{ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata},
     content::{Content, SubstitutionGroup},
     span::MatchedItem,
     strings::CowStr,
@@ -33,6 +33,8 @@ pub struct RawDelimitedBlock<'src> {
     source: Span<'src>,
     title_source: Option<Span<'src>>,
     title: Option<String>,
+    caption: Option<String>,
+    number: Option<usize>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -115,6 +117,21 @@ impl<'src> RawDelimitedBlock<'src> {
             block_type
         };
 
+        // Assign the caption (and its number) from the block's context. Among
+        // the raw delimited contexts only `listing` is captionable (a `source`
+        // block resolves to the `listing` context); for every other context
+        // `assign_block_caption` returns `None`. The caption is computed once,
+        // here, so the context counter is consumed exactly once regardless of
+        // which return path the block takes below.
+        let caption = assign_block_caption(
+            parser,
+            context,
+            metadata.attrlist.as_ref(),
+            metadata.title.is_some(),
+        );
+        let number = caption.as_ref().and_then(|c| c.number);
+        let caption = caption.map(|c| c.prefix);
+
         let content_start = delimiter.after;
         let mut next = content_start;
 
@@ -142,6 +159,8 @@ impl<'src> RawDelimitedBlock<'src> {
                                 .trim_trailing_line_end(),
                             title_source: metadata.title_source,
                             title: metadata.title.clone(),
+                            caption: caption.clone(),
+                            number,
                             anchor: metadata.anchor,
                             anchor_reftext: metadata.anchor_reftext,
                             attrlist: metadata.attrlist.clone(),
@@ -170,6 +189,8 @@ impl<'src> RawDelimitedBlock<'src> {
                         .trim_trailing_line_end(),
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
+                    caption,
+                    number,
                     anchor: metadata.anchor,
                     anchor_reftext: metadata.anchor_reftext,
                     attrlist: metadata.attrlist.clone(),
@@ -266,6 +287,14 @@ impl<'src> IsBlock<'src> for RawDelimitedBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    fn caption(&self) -> Option<&str> {
+        self.caption.as_deref()
+    }
+
+    fn number(&self) -> Option<usize> {
+        self.number
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {
@@ -570,6 +599,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -628,6 +659,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -698,6 +731,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -812,6 +847,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -869,6 +906,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -938,6 +977,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: Some(Attrlist {
@@ -1041,6 +1082,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -1239,6 +1282,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -1296,6 +1341,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -1365,6 +1412,8 @@ mod tests {
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,

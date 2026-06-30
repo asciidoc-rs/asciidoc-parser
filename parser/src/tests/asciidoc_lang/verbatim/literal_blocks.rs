@@ -258,6 +258,8 @@ Notice in the output that the bold text formatting is not applied to the text no
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,

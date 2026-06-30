@@ -126,6 +126,8 @@ include::example$image.adoc[tag=float]
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: None,
@@ -314,6 +316,8 @@ include::example$image.adoc[tag=role]
                     },
                     title_source: None,
                     title: None,
+                    caption: None,
+                    number: None,
                     anchor: None,
                     anchor_reftext: None,
                     attrlist: Some(Attrlist {

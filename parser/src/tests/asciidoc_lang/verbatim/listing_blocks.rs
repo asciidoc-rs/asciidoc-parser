@@ -186,6 +186,8 @@ See xref:source-blocks.adoc[] to learn more about `source` and `source-highlight
                 },
                 title_source: None,
                 title: None,
+                caption: None,
+                number: None,
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: None,
@@ -281,6 +283,8 @@ See xref:subs:apply-subs-to-blocks.adoc[] to learn more about the `subs` attribu
         },
         title_source: None,
         title: None,
+        caption: None,
+        number: None,
         anchor: None,
         anchor_reftext: None,
         attrlist: Some(Attrlist {
