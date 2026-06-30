@@ -35,6 +35,7 @@ The result of <<ex-paragraph>> is displayed below.
 ====
 include::example$paragraph.adoc[tag=para]
 ====
+
 "#
     );
 
@@ -149,7 +150,6 @@ Another way to solve the problem is to write the paragraph as a literal paragrap
  [.rolename]*main text*footnote:[The footnote.]
 ----
 
-The normal style often comes in handy when you want to prevent the parser from matching beginning-of-line syntax.
 "#
     );
 
@@ -360,3 +360,9 @@ The normal style often comes in handy when you want to prevent the parser from m
         }
     );
 }
+
+non_normative!(
+    r#"
+The normal style often comes in handy when you want to prevent the parser from matching beginning-of-line syntax.
+"#
+);
