@@ -21,6 +21,7 @@ pub use inline_substitution_renderer::{
 };
 
 mod parser;
+pub(crate) use parser::DeferredWarning;
 pub use parser::Parser;
 
 mod path_resolver;

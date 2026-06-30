@@ -499,6 +499,16 @@ The following message will also be inserted into the output:
             "Unresolved directive in my-document.adoc - include::content.adoc[]"
         ]
     );
+
+    // A warning is also emitted via the crate's warning mechanism, pointing at
+    // the inserted message.
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].warning, WarningType::IncludeFileNotFound);
+    assert_eq!(
+        warnings[0].source.data(),
+        "Unresolved directive in my-document.adoc - include::content.adoc[]"
+    );
 }
 
 non_normative!(

@@ -159,17 +159,19 @@ pub struct Parser {
     /// [`Span`](crate::Span), which the lifetime-free `Parser` cannot
     /// hold), so the warnings can be turned into
     /// spanned [`Warning`]s once the document's owned source is available.
-    substitution_warnings: RefCell<Vec<SubstitutionWarning>>,
+    substitution_warnings: RefCell<Vec<DeferredWarning>>,
 }
 
-/// A warning recorded while replacing attribute references, stored in a form
-/// that does not borrow the source so it can live on the [`Parser`].
+/// A warning recorded in a form that does not borrow the source so it can live
+/// on the [`Parser`] (or be returned from preprocessing), to be reconstituted
+/// into a spanned [`Warning`] once the document's owned source is available.
 ///
-/// The `offset`/`len` pair locates the relevant text within the (preprocessed)
-/// document source; [`Parser::take_substitution_warnings`] reconstitutes a
-/// spanned [`Warning`] from it.
+/// This is used both for warnings raised while replacing attribute references
+/// and for warnings raised during preprocessing (e.g. an unresolved include
+/// directive). The `offset`/`len` pair locates the relevant text within the
+/// (preprocessed) document source.
 #[derive(Clone, Debug)]
-pub(crate) struct SubstitutionWarning {
+pub(crate) struct DeferredWarning {
     /// Byte offset into the document source of the span this warning refers to.
     pub(crate) offset: usize,
 
@@ -284,7 +286,7 @@ impl Parser {
     /// [`parse()`]: Self::parse
     /// [`catalog()`]: Document::catalog
     pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
-        let (preprocessed_source, source_map) = preprocess(source, self);
+        let (preprocessed_source, source_map, preprocessor_warnings) = preprocess(source, self);
 
         // NOTE: `Document::parse` will transfer the catalog to itself at the end of the
         // parsing operation. Start each parse with a fresh catalog.
@@ -302,7 +304,12 @@ impl Parser {
         // Reset counter (and captioned-block) numbering for each new document.
         self.counter_values.borrow_mut().clear();
 
-        Document::parse(&preprocessed_source, source_map, self)
+        Document::parse(
+            &preprocessed_source,
+            source_map,
+            preprocessor_warnings,
+            self,
+        )
     }
 
     /// Retrieves the current interpreted value of a [document attribute].
@@ -522,7 +529,7 @@ impl Parser {
     ) {
         self.substitution_warnings
             .borrow_mut()
-            .push(SubstitutionWarning {
+            .push(DeferredWarning {
                 offset: source.byte_offset(),
                 len: source.len(),
                 warning,
@@ -548,7 +555,7 @@ impl Parser {
 
     /// Takes the substitution warnings recorded during parsing, leaving the
     /// buffer empty.
-    pub(crate) fn take_substitution_warnings(&self) -> Vec<SubstitutionWarning> {
+    pub(crate) fn take_substitution_warnings(&self) -> Vec<DeferredWarning> {
         std::mem::take(&mut *self.substitution_warnings.borrow_mut())
     }
 

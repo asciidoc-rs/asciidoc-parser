@@ -327,7 +327,15 @@ include::example$source.adoc[tag=src-inc]
                 col: 1,
                 offset: 0,
             },
-            warnings: &[],
+            warnings: &[Warning {
+                source: Span {
+                    data: "Unresolved directive in (root file) - include::app.rb[]",
+                    line: 3,
+                    col: 1,
+                    offset: 13,
+                },
+                warning: WarningType::IncludeFileNotFound,
+            }],
             source_map: SourceMap(&[]),
             catalog: Catalog {
                 refs: HashMap::from([]),
