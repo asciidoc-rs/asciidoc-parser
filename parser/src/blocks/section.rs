@@ -115,6 +115,7 @@ impl<'src> SectionBlock<'src> {
                 .as_ref()
                 .and_then(|attrlist| attrlist.block_style())
                 == Some("bibliography");
+
         let previously_in_bibliography_section = parser.parsing_bibliography_section_body;
         parser.parsing_bibliography_section_body = is_bibliography_section;
 
