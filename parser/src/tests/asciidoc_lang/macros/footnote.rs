@@ -274,6 +274,17 @@ non_normative!(
 The `c,q` target on the pass macro instructs the processor to apply the special characters substitution followed by the quotes substitution.
 That means the text formatting in the footnote text will already be applied when the footnote is inserted using an attribute reference.
 
+"#
+);
+
+// The "Footnotes in headings" section is left non-normative rather than
+// verified: the crate does not yet implement the workaround it describes.
+// Section titles are not converted eagerly/out of document order, so a footnote
+// placed in a heading still reappears in the reference text of an xref to that
+// heading (Asciidoctor's workaround suppresses it). Tracked by
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/594.
+non_normative!(
+    r#"
 == Footnotes in headings
 
 Footnotes are *not officially supported in headings* (section titles and discrete headings) in pre-spec AsciiDoc.
