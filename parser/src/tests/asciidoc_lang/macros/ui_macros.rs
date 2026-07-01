@@ -119,8 +119,9 @@ include::example$ui.adoc[tag=menu]
     // The material below describes the *shorthand* menu syntax (`"File > Save"`).
     // This crate does not implement it and does not plan to: per the AsciiDoc
     // language documentation the shorthand is not on a standards track (see the
-    // "No planned support" section of the crate README. These lines are therefore
-    // kept non-normative — covered for completeness, but no behavior is asserted.
+    // "No planned support" section of the crate README). These lines are
+    // therefore kept non-normative — covered for completeness, but no behavior is
+    // asserted.
     non_normative!(
         r#"
 If the menu has more than one item, it can be expressed using a shorthand.
