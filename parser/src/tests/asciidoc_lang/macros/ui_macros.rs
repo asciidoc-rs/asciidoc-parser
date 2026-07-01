@@ -23,6 +23,13 @@ They can't tell if you are saying "`OK`" or they are supposed to look for a butt
 It's all about getting the semantics right.
 The `btn` macro to the rescue!
 
+"#
+    );
+
+    #[test]
+    fn example() {
+        verifies!(
+            r#"
 .Using the button macro syntax
 [#ex-btn]
 ----
@@ -36,7 +43,23 @@ include::example$ui.adoc[tag=button]
 ====
 
 "#
-    );
+        );
+
+        // The example above pulls in `example$ui.adoc[tag=button]`. The
+        // spec-coverage tool can't follow includes, so the included content is
+        // reproduced here and parsed directly (with `experimental` set, as the
+        // UI macros require).
+        let doc = Parser::default().parse(
+            ":experimental:\n\nPress the btn:[OK] button when you are finished.\n\nSelect a file in the file navigator and click btn:[Open].",
+        );
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            &[
+                r#"Press the <b class="button">OK</b> button when you are finished."#,
+                r#"Select a file in the file navigator and click <b class="button">Open</b>."#,
+            ]
+        );
+    }
 }
 
 mod menu_macro_syntax {

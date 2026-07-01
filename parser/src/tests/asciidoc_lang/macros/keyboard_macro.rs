@@ -22,6 +22,26 @@ mod keyboard_macro_syntax {
         rendered_paragraphs(&doc).join("")
     }
 
+    /// Returns the rendered content of the first ("Shortcut") column of every
+    /// body row of the first table in `doc`.
+    fn shortcut_cells(doc: &crate::Document<'_>) -> Vec<String> {
+        use crate::blocks::{Block, TableCellContent};
+
+        let mut out = vec![];
+        for block in doc.nested_blocks() {
+            if let Block::Table(table) = block {
+                for row in table.body_rows() {
+                    if let Some(cell) = row.cells().first()
+                        && let TableCellContent::Simple(content) = cell.content()
+                    {
+                        out.push(content.rendered().to_string());
+                    }
+                }
+            }
+        }
+        out
+    }
+
     non_normative!(
         r#"
 == Keyboard macro syntax
@@ -88,8 +108,10 @@ You can find example of these cases in the example below.
         );
     }
 
-    non_normative!(
-        r#"
+    #[test]
+    fn example_table() {
+        verifies!(
+            r#"
 .Using the keyboard macro syntax
 [#ex-kbd]
 ----
@@ -101,5 +123,49 @@ The result of <<ex-kbd>> is displayed below.
 [%autowidth]
 include::example$ui.adoc[tag=key]
 "#
-    );
+        );
+
+        // The example above pulls in `example$ui.adoc[tag=key]`. The spec-coverage
+        // tool can't follow includes, so the included table is reproduced here and
+        // parsed directly (with `experimental` set, as the UI macros require). Each
+        // `Shortcut` cell exercises a documented case: a lone key, key sequences,
+        // the backslash-plus-space escape, and the escaped closing bracket.
+        let input = format!(
+            ":experimental:\n\n{}",
+            r#"|===
+|Shortcut |Purpose
+
+|kbd:[F11]
+|Toggle fullscreen
+
+|kbd:[Ctrl+T]
+|Open a new tab
+
+|kbd:[Ctrl+Shift+N]
+|New incognito window
+
+|kbd:[\ ]
+|Used to escape characters
+
+|kbd:[Ctrl+\]]
+|Jump to keyword
+
+|kbd:[Ctrl + +]
+|Increase zoom
+|==="#
+        );
+        let doc = Parser::default().parse(&input);
+
+        assert_eq!(
+            shortcut_cells(&doc),
+            &[
+                "<kbd>F11</kbd>",
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>T</kbd></span>"#,
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></span>"#,
+                r#"<kbd>\</kbd>"#,
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>]</kbd></span>"#,
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>+</kbd></span>"#,
+            ]
+        );
+    }
 }
