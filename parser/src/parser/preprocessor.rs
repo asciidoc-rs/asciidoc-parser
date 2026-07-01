@@ -743,6 +743,24 @@ mod tests {
     }
 
     #[test]
+    fn non_asciidoc_include_in_body_tracks_header_state() {
+        // A non-AsciiDoc include placed in the document body (so the preprocessor
+        // is past the header) whose content includes a blank line exercises the
+        // verbatim path's header-state updates for both blank and non-blank lines.
+        let source = "Body.\n\ninclude::data.csv[]";
+
+        let handler = InlineFileHandler::from_pairs([("data.csv", "row one\n\nrow two")]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Body.\n\nrow one\n\nrow two\n");
+    }
+
+    #[test]
     fn optional_include_dropped_silently() {
         // `opts=optional` drops an unresolved include with no output text and no
         // warning, while keeping the source map aligned for the lines that follow.
