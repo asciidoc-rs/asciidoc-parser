@@ -186,12 +186,45 @@ The name of the attribute can be as verbose (`fn-disclaimer`) or concise (`fn-1`
 
 Here's the previous example with the footnotes defined in document attributes and inserted using attribute references.
 
+"#
+);
+
+#[test]
+fn externalized_footnote() {
+    verifies!(
+        r#"
 .Externalized footnote
 [source]
 ----
 include::example$footnote.adoc[tag=externalized]
 ----
 
+"#
+    );
+
+    // The `externalized` example. Attribute references are expanded before
+    // footnotes are parsed, so a document attribute whose value is a footnote
+    // macro can be inserted with a plain attribute reference and still produces
+    // a footnote.
+    let doc = Parser::default().parse(
+        ":fn-hail-and-rainbow: footnote:[The double hail-and-rainbow level makes my toes tingle.]\n:fn-disclaimer: footnote:disclaimer[Opinions are my own.]\n\nThe hail-and-rainbow protocol can be initiated at five levels:\n\n. double{fn-hail-and-rainbow}\n. tertiary\n. supernumerary\n. supermassive\n. apocalyptic\n\nA bold statement!{fn-disclaimer}\n\nAnother outrageous statement.{fn-disclaimer}",
+    );
+
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(footnotes.len(), 2);
+    assert_eq!(footnotes[0].id, None);
+    assert_eq!(
+        footnotes[0].text,
+        "The double hail-and-rainbow level makes my toes tingle."
+    );
+    assert_eq!(footnotes[1].id.as_deref(), Some("disclaimer"));
+    assert_eq!(footnotes[1].text, "Opinions are my own.");
+    assert_css(&doc, "sup.footnote", 2);
+    assert_css(&doc, "sup.footnoteref", 1);
+}
+
+non_normative!(
+    r#"
 Notice you still get the benefit of seeing where the footnote is placed without all the noise.
 And since the footnotes are now defined in the document header, they could be further externalized to an include file.
 
@@ -203,12 +236,41 @@ In order to use text formatting markup in the text of the footnote, you need to 
 
 The following example demonstrates how to configure the substitutions applied to the text of an externalized footnote so that text formatting markup is honored.
 
+"#
+);
+
+#[test]
+fn externalized_footnote_with_text_formatting() {
+    verifies!(
+        r#"
 .Externalized footnote with text formatting
 [source]
 ----
 include::example$footnote.adoc[tag=externalized-format]
 ----
 
+"#
+    );
+
+    // The `externalized-format` example. Wrapping the attribute value in
+    // `pass:c,q[…]` applies the special characters and quotes substitutions to
+    // the footnote text up front, so text formatting markup is honored even
+    // though the value is inserted via an attribute reference.
+    let doc = Parser::default().parse(
+        ":fn-disclaimer: pass:c,q[footnote:disclaimer[Opinions are _mine_, and mine *alone*.]]\n\nA bold statement!{fn-disclaimer}\n\nAnother outrageous statement.{fn-disclaimer}",
+    );
+
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(footnotes[0].id.as_deref(), Some("disclaimer"));
+    assert_eq!(
+        footnotes[0].text,
+        "Opinions are <em>mine</em>, and mine <strong>alone</strong>."
+    );
+}
+
+non_normative!(
+    r#"
 The `c,q` target on the pass macro instructs the processor to apply the special characters substitution followed by the quotes substitution.
 That means the text formatting in the footnote text will already be applied when the footnote is inserted using an attribute reference.
 

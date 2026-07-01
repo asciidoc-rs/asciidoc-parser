@@ -4402,12 +4402,18 @@ mod macros {
         fn footnote_macro_may_contain_an_xref() {}
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/593):
-        // Honor passthrough (`pass:[]` / `pass:q[]`) substitutions in the value
-        // of an externalized footnote attribute (e.g.
-        // `:fn-disclaimer: pass:q[footnote:[…_italic_…]]`).
-        fn externalized_footnote_macro_may_contain_text_formatting() {}
+        fn externalized_footnote_macro_may_contain_text_formatting() {
+            let doc = Parser::default().parse(
+                ":fn-disclaimer: pass:q[footnote:[Only available with an _active_ subscription.]]\n\nYou can download patches from the production page.{fn-disclaimer}",
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(
+                footnotes[0].text,
+                "Only available with an <em>active</em> subscription."
+            );
+        }
 
         // Backend-specific test omitted: "subsequent footnote macros with
         // escaped URLs should be restored in DocBook" asserts only against
