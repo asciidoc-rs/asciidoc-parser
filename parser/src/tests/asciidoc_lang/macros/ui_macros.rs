@@ -170,8 +170,10 @@ For example, to make a menu item that starts with vertical ellipsis, you must us
         assert_eq!(render("menu:.hidden[Item]"), "menu:.hidden[Item]");
     }
 
-    non_normative!(
-        r#"
+    #[test]
+    fn subsequent_menu_items_may_start_with_any_character() {
+        verifies!(
+            r#"
 .Using a character reference at the start of the menu
 [#ex-menu-short-charref]
 ----
@@ -180,5 +182,24 @@ include::example$ui.adoc[tag=menu-charref]
 
 Subsequent menu items don't have this requirement and thus can start with any character.
 "#
-    );
+        );
+
+        // The example above (`example$ui.adoc[tag=menu-charref]`) uses the
+        // *shorthand* menu syntax, which this crate does not implement (see the
+        // note on the shorthand block above), so it is left as literal text
+        // rather than converted to a menu. Starting the menu with a character
+        // reference is verified for the macro form in
+        // `first_menu_item_must_start_with_word_char_or_ampersand` above.
+        assert_eq!(
+            render(r#"Select "&#8942; > More Tools > Extensions" to find and enable extensions."#),
+            r#"Select "&#8942; &gt; More Tools &gt; Extensions" to find and enable extensions."#
+        );
+
+        // Unlike the first menu item, subsequent items (submenus and the final
+        // item) may start with any character, including a non-word character.
+        assert_eq!(
+            render("menu:View[.zoom > .reset]"),
+            r#"<span class="menuseq"><b class="menu">View</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">.zoom</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">.reset</b></span>"#
+        );
+    }
 }
