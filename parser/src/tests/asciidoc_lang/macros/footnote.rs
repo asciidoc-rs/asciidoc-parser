@@ -176,6 +176,13 @@ Just like normal paragraph text, you can use text formatting markup in the text 
 
 == Externalizing a footnote
 
+"#
+);
+
+#[test]
+fn externalized_footnote() {
+    verifies!(
+        r#"
 Since footnotes are defined using an inline macro, the footnote content must be inserted alongside the text it's annotating.
 This requirement can make the text harder to read.
 You can solve this problem by externalizing your footnotes using document attributes.
@@ -186,13 +193,6 @@ The name of the attribute can be as verbose (`fn-disclaimer`) or concise (`fn-1`
 
 Here's the previous example with the footnotes defined in document attributes and inserted using attribute references.
 
-"#
-);
-
-#[test]
-fn externalized_footnote() {
-    verifies!(
-        r#"
 .Externalized footnote
 [source]
 ----
@@ -228,6 +228,13 @@ non_normative!(
 Notice you still get the benefit of seeing where the footnote is placed without all the noise.
 And since the footnotes are now defined in the document header, they could be further externalized to an include file.
 
+"#
+);
+
+#[test]
+fn externalized_footnote_with_text_formatting() {
+    verifies!(
+        r#"
 This approach works since attribute references are expanded before footnotes are parsed.
 However, this technique does not work if you have text formatting markup in the text of the footnote (e.g., `+*bold*+`).
 That markup will not be interpreted.
@@ -236,18 +243,14 @@ In order to use text formatting markup in the text of the footnote, you need to 
 
 The following example demonstrates how to configure the substitutions applied to the text of an externalized footnote so that text formatting markup is honored.
 
-"#
-);
-
-#[test]
-fn externalized_footnote_with_text_formatting() {
-    verifies!(
-        r#"
 .Externalized footnote with text formatting
 [source]
 ----
 include::example$footnote.adoc[tag=externalized-format]
 ----
+
+The `c,q` target on the pass macro instructs the processor to apply the special characters substitution followed by the quotes substitution.
+That means the text formatting in the footnote text will already be applied when the footnote is inserted using an attribute reference.
 
 "#
     );
@@ -268,14 +271,6 @@ include::example$footnote.adoc[tag=externalized-format]
         "Opinions are <em>mine</em>, and mine <strong>alone</strong>."
     );
 }
-
-non_normative!(
-    r#"
-The `c,q` target on the pass macro instructs the processor to apply the special characters substitution followed by the quotes substitution.
-That means the text formatting in the footnote text will already be applied when the footnote is inserted using an attribute reference.
-
-"#
-);
 
 // The "Footnotes in headings" section is left non-normative rather than
 // verified: the crate does not yet implement the workaround it describes.
