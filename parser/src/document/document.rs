@@ -11,7 +11,8 @@ use crate::{
     document::{Catalog, Docinfo, DocinfoLocation, Header, TocConfig, TocMode},
     internal::debug::DebugSliceReference,
     parser::{
-        CatalogResolver, InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning, SourceMap,
+        CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, ReferenceResolver,
+        ReferenceWarning, SourceMap,
     },
     strings::CowStr,
     warnings::Warning,
@@ -61,7 +62,12 @@ self_cell! {
 }
 
 impl<'src> Document<'src> {
-    pub(crate) fn parse(source: &str, source_map: SourceMap, parser: &mut Parser) -> Self {
+    pub(crate) fn parse(
+        source: &str,
+        source_map: SourceMap,
+        preprocessor_warnings: Vec<DeferredWarning>,
+        parser: &mut Parser,
+    ) -> Self {
         let owned_source = source.to_string();
 
         let internal = Internal::new(owned_source, |owned_src| {
@@ -91,6 +97,16 @@ impl<'src> Document<'src> {
             // borrowed spans — can live. Now that the document's owned source is
             // available, turn each one back into a spanned `Warning`.
             let root = Span::new(owned_src);
+
+            // Warnings raised during preprocessing (e.g. an unresolved include
+            // directive) are carried the same way and reconstituted here.
+            for pw in preprocessor_warnings {
+                warnings.push(Warning {
+                    source: root.slice(pw.offset..pw.offset + pw.len),
+                    warning: pw.warning,
+                });
+            }
+
             for sw in parser.take_substitution_warnings() {
                 warnings.push(Warning {
                     source: root.slice(sw.offset..sw.offset + sw.len),

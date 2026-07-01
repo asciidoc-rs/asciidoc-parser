@@ -1656,7 +1656,12 @@ fn process_content<'src>(
         // cell is parsed in place from the parent document's source, which keeps
         // its spans (and line numbers) and avoids a copy.
         let cell = if content_has_directive(trimmed.data()) {
-            let (expanded, _source_map) = preprocess(trimmed.data(), parser);
+            // The preprocessor may report warnings (e.g. an unresolved include
+            // target) located by offset into the expanded source. As with the
+            // owned parse warnings below, that source cannot escape this cell, so
+            // these warnings are dropped on this rare path.
+            let (expanded, _source_map, _preprocessor_warnings) =
+                preprocess(trimmed.data(), parser);
             let owned = OwnedCell::new(expanded, |source| {
                 // Warnings from the owned parse borrow the owned source and so
                 // cannot escape it; the include path is rare and currently

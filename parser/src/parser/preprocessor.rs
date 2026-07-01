@@ -6,9 +6,9 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     document::{Attribute, InterpretedValue},
-    parser::{SourceLine, SourceMap},
+    parser::{DeferredWarning, SourceLine, SourceMap},
     span::MatchedItem,
-    warnings::Warning,
+    warnings::{Warning, WarningType},
 };
 
 /// Given a root file (initial input to `Parser::parse`), convert this into a
@@ -18,18 +18,28 @@ use crate::{
 ///
 /// This function handles [include file] and [conditional] processing.
 ///
+/// Any warnings raised during preprocessing (e.g. an include directive whose
+/// target could not be resolved) are returned as [`DeferredWarning`]s, located
+/// by byte offset within the returned (preprocessed) source. `Document::parse`
+/// reconstitutes them into spanned [`Warning`]s once it owns that source.
+///
 /// [include file]: https://docs.asciidoctor.org/asciidoc/latest/directives/include/
 /// [conditional]: https://docs.asciidoctor.org/asciidoc/latest/directives/conditionals/
-pub(crate) fn preprocess(source: &str, parser: &Parser) -> (String, SourceMap) {
+pub(crate) fn preprocess(
+    source: &str,
+    parser: &Parser,
+) -> (String, SourceMap, Vec<DeferredWarning>) {
     // Short-circuit if the original source document has no pre-processor
     // directives.
     if !source.starts_with("include::")
         && !source.starts_with("if")
         && !source.contains("\ninclude::")
         && !source.contains("\nif")
+        && !source.starts_with("\\include::")
+        && !source.contains("\n\\include::")
         && parser.primary_file_name.is_none()
     {
-        return (source.to_owned(), SourceMap::default());
+        return (source.to_owned(), SourceMap::default(), vec![]);
     }
 
     // We use a temporary clone of the parser to track document attribute values
@@ -39,7 +49,7 @@ pub(crate) fn preprocess(source: &str, parser: &Parser) -> (String, SourceMap) {
     let mut state = PreprocessorState::new(&mut temp_parser);
     state.process_adoc_include(source, parser.primary_file_name.as_deref());
 
-    (state.output, state.source_map)
+    (state.output, state.source_map, state.warnings)
 }
 
 #[derive(Debug)]
@@ -51,6 +61,7 @@ struct PreprocessorState<'p> {
     output_line_number: usize,
     output: String,
     source_map: SourceMap,
+    warnings: Vec<DeferredWarning>,
 }
 
 impl<'p> PreprocessorState<'p> {
@@ -63,6 +74,7 @@ impl<'p> PreprocessorState<'p> {
             output_line_number: 1,
             output: String::new(),
             source_map: SourceMap::default(),
+            warnings: vec![],
         }
     }
 
@@ -135,19 +147,49 @@ impl<'p> PreprocessorState<'p> {
                         ifh.resolve_target(file_name, &target, &attrlist, self.parser)
                     })
                 {
-                    // TODO: Use process_adoc_include or (TBD) depending on
-                    // whether it's an Asciidoc file type.
-                    self.process_adoc_include(&include_text, Some(&target));
+                    if is_asciidoc_file(&target) {
+                        // AsciiDoc files are run through the preprocessor, so the
+                        // include (and other) directives they contain are
+                        // interpreted.
+                        self.process_adoc_include(&include_text, Some(&target));
+                    } else {
+                        // Non-AsciiDoc files are merged verbatim; the preprocessor
+                        // does not interpret any AsciiDoc directives within them
+                        // (matching Asciidoctor).
+                        self.process_nonadoc_include(&include_text, Some(&target));
+                    }
 
                     // Re-report the including file if there's more content.
                     has_reported_file = false;
+                } else if attrlist.has_option("optional") {
+                    // `opts=optional`: a target that can't be resolved is dropped
+                    // silently — neither the "Unresolved directive" text nor a
+                    // warning is produced (matching Asciidoctor). Nothing is
+                    // emitted for this line; re-anchor the source map so the lines
+                    // that follow map back to their correct original line numbers.
+                    has_reported_file = false;
                 } else {
-                    self.output_line_number += 1;
-                    self.output.push_str(&format!(
-                        "Unresolved directive in {file_name} - {line}\n",
+                    // The target could not be resolved. Replace the directive with
+                    // an "Unresolved directive" message in the output (as
+                    // Asciidoctor does) and record a warning pointing at that
+                    // message. The warning is located by byte offset because the
+                    // output it refers to is not yet owned; `Document::parse`
+                    // reconstitutes it into a spanned `Warning`.
+                    let replacement = format!(
+                        "Unresolved directive in {file_name} - {line}",
                         file_name = file_name.unwrap_or("(root file)",),
                         line = line.data(),
-                    ));
+                    );
+
+                    self.warnings.push(DeferredWarning {
+                        offset: self.output.len(),
+                        len: replacement.len(),
+                        warning: WarningType::IncludeFileNotFound(target),
+                    });
+
+                    self.output_line_number += 1;
+                    self.output.push_str(&replacement);
+                    self.output.push('\n');
                 }
             } else {
                 // If none of the above apply, add the line to output.
@@ -166,13 +208,64 @@ impl<'p> PreprocessorState<'p> {
                     self.can_have_attribute = false;
                 }
 
+                // An escaped include directive (e.g. `\include::foo[]`) is not
+                // processed. The leading backslash is removed and the remainder is
+                // emitted literally, matching Asciidoctor. The backslash is only
+                // removed when what follows is actually an include directive; a
+                // backslash followed by anything else is left untouched.
+                let line_text = if line.starts_with("\\include::")
+                    && INCLUDE_DIRECTIVE.is_match(&line.data()[1..])
+                {
+                    &line.data()[1..]
+                } else {
+                    line.data()
+                };
+
                 self.output_line_number += 1;
-                self.output.push_str(line.data());
+                self.output.push_str(line_text);
                 self.output.push('\n');
             }
         }
 
         self.include_depth -= 1;
+    }
+
+    /// Merge the content of a non-AsciiDoc include verbatim.
+    ///
+    /// Unlike [`process_adoc_include`], the content is not scanned for
+    /// preprocessor directives (nested includes, attribute entries, etc.); it
+    /// is inserted as-is, subject only to the line-ending normalization
+    /// that [`Span::take_line`] already performs. This mirrors how
+    /// Asciidoctor treats files that are not recognized as AsciiDoc.
+    ///
+    /// [`process_adoc_include`]: Self::process_adoc_include
+    fn process_nonadoc_include(&mut self, source: &str, file_name: Option<&str>) {
+        let mut source_span = Span::new(source);
+        let mut has_reported_file = false;
+
+        while !source_span.is_empty() {
+            let MatchedItem { item: line, after } = source_span.take_line();
+            source_span = after;
+
+            if !has_reported_file {
+                has_reported_file = true;
+                self.source_map.append(
+                    self.output_line_number,
+                    SourceLine(to_owned(file_name), line.line()),
+                );
+            }
+
+            if line.is_empty() {
+                self.in_document_header = false;
+                self.can_have_attribute = true;
+            } else if !self.in_document_header {
+                self.can_have_attribute = false;
+            }
+
+            self.output_line_number += 1;
+            self.output.push_str(line.data());
+            self.output.push('\n');
+        }
     }
 
     /// Apply attribute substitution to a string, replacing {attribute-name}
@@ -221,6 +314,26 @@ fn to_owned(maybe_file_name: Option<&str>) -> Option<String> {
     maybe_file_name.map(|n| n.to_string())
 }
 
+/// Returns `true` if `target` names an AsciiDoc file, based on its extension.
+///
+/// Per the [include directive] spec, a file is treated as AsciiDoc if it has
+/// one of these extensions: `.asciidoc`, `.adoc`, `.ad`, `.asc`, or `.txt`. The
+/// comparison is case-sensitive, and a target with no extension is not
+/// considered AsciiDoc — both matching Asciidoctor.
+///
+/// [include directive]: https://docs.asciidoctor.org/asciidoc/latest/directives/include/#include-nonasciidoc
+fn is_asciidoc_file(target: &str) -> bool {
+    const ASCIIDOC_EXTENSIONS: [&str; 5] = ["asciidoc", "adoc", "ad", "asc", "txt"];
+
+    let file_name = target.rsplit('/').next().unwrap_or(target);
+
+    match file_name.rsplit_once('.') {
+        // A leading dot (e.g. `.adoc`) denotes a hidden file with no extension.
+        Some((stem, ext)) if !stem.is_empty() => ASCIIDOC_EXTENSIONS.contains(&ext),
+        _ => false,
+    }
+}
+
 static INCLUDE_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
@@ -254,6 +367,7 @@ static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing)]
     #![allow(clippy::unwrap_used)]
 
     use crate::{
@@ -267,7 +381,7 @@ mod tests {
             "= Document Title\n\nThis is a simple document with no includes or conditionals.";
         let parser = Parser::default().with_primary_file_name("test.adoc");
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -293,7 +407,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -341,7 +455,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -391,7 +505,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -451,11 +565,23 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
             "= Document Title\n\nUnresolved directive in main.adoc - include::missing.adoc[]\n\nMore content.\n"
+        );
+
+        // A warning is recorded for the unresolved include, pointing at the
+        // "Unresolved directive" text in the output.
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeFileNotFound("missing.adoc".to_owned())
+        );
+        assert_eq!(
+            &processed_source[warnings[0].offset..warnings[0].offset + warnings[0].len],
+            "Unresolved directive in main.adoc - include::missing.adoc[]"
         );
 
         assert_eq!(
@@ -489,7 +615,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -511,11 +637,18 @@ mod tests {
         // NOTE: No include file handler provided.
         let parser = Parser::default().with_primary_file_name("main.adoc");
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
             "= Document Title\n\nUnresolved directive in main.adoc - include::missing.adoc[]\n\nMore content.\n"
+        );
+
+        // With no handler at all, the include is likewise unresolved and warned.
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeFileNotFound("missing.adoc".to_owned())
         );
 
         assert_eq!(
@@ -537,6 +670,181 @@ mod tests {
     }
 
     #[test]
+    fn asciidoc_file_recognition() {
+        use super::is_asciidoc_file;
+
+        // Recognized AsciiDoc extensions.
+        assert!(is_asciidoc_file("foo.asciidoc"));
+        assert!(is_asciidoc_file("foo.adoc"));
+        assert!(is_asciidoc_file("foo.ad"));
+        assert!(is_asciidoc_file("foo.asc"));
+        assert!(is_asciidoc_file("foo.txt"));
+        assert!(is_asciidoc_file("path/to/foo.adoc"));
+        assert!(is_asciidoc_file("a.b.adoc"));
+
+        // Not AsciiDoc.
+        assert!(!is_asciidoc_file("foo.csv"));
+        assert!(!is_asciidoc_file("foo.rb"));
+        assert!(!is_asciidoc_file("path/to/data.csv"));
+        assert!(!is_asciidoc_file("foo")); // no extension
+        assert!(!is_asciidoc_file("foo.ADOC")); // case-sensitive
+        assert!(!is_asciidoc_file(".adoc")); // hidden file, no stem
+    }
+
+    #[test]
+    fn asciidoc_include_processes_nested_directives() {
+        // An included AsciiDoc file is run through the preprocessor, so a nested
+        // include within it is expanded.
+        let source = "include::outer.adoc[]";
+
+        let handler = InlineFileHandler::from_pairs([
+            ("outer.adoc", "Top.\ninclude::inner.adoc[]"),
+            ("inner.adoc", "Nested."),
+        ]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Top.\nNested.\n");
+    }
+
+    #[test]
+    fn non_asciidoc_include_merged_verbatim() {
+        // A non-AsciiDoc file (here `.csv`) is merged verbatim: a nested include
+        // directive within it is left as literal text, not expanded.
+        let source = "include::data.csv[]";
+
+        let handler = InlineFileHandler::from_pairs([
+            ("data.csv", "a,b\ninclude::inner.adoc[]"),
+            ("inner.adoc", "SHOULD NOT APPEAR"),
+        ]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "a,b\ninclude::inner.adoc[]\n");
+        assert!(warnings.is_empty());
+
+        // The verbatim content maps back to the non-AsciiDoc file's lines.
+        assert_eq!(
+            source_map.original_file_and_line(1),
+            Some(SourceLine(Some("data.csv".to_owned()), 1))
+        );
+        assert_eq!(
+            source_map.original_file_and_line(2),
+            Some(SourceLine(Some("data.csv".to_owned()), 2))
+        );
+    }
+
+    #[test]
+    fn non_asciidoc_include_in_body_tracks_header_state() {
+        // A non-AsciiDoc include placed in the document body (so the preprocessor
+        // is past the header) whose content includes a blank line exercises the
+        // verbatim path's header-state updates for both blank and non-blank lines.
+        let source = "Body.\n\ninclude::data.csv[]";
+
+        let handler = InlineFileHandler::from_pairs([("data.csv", "row one\n\nrow two")]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Body.\n\nrow one\n\nrow two\n");
+    }
+
+    #[test]
+    fn optional_include_dropped_silently() {
+        // `opts=optional` drops an unresolved include with no output text and no
+        // warning, while keeping the source map aligned for the lines that follow.
+        let source = "Before.\n\ninclude::missing.adoc[opts=optional]\n\nAfter.";
+
+        // Handler doesn't provide missing.adoc.
+        let handler = InlineFileHandler::from_pairs([("other.adoc", "Other content")]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, warnings) = preprocess(source, &parser);
+
+        // The directive line is gone; no "Unresolved directive" text is inserted.
+        assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
+        assert!(warnings.is_empty());
+
+        assert_eq!(
+            source_map.original_file_and_line(1),
+            Some(SourceLine(Some("main.adoc".to_owned()), 1)) // Before.
+        );
+        assert_eq!(
+            source_map.original_file_and_line(4),
+            Some(SourceLine(Some("main.adoc".to_owned()), 5)) // After.
+        );
+    }
+
+    #[test]
+    fn escaped_include_directive() {
+        // An escaped include directive is not processed. The leading backslash is
+        // stripped and the remainder is emitted literally (matching Asciidoctor).
+        let source = "Before.\n\n\\include::partial.adoc[]\n\nAfter.";
+
+        let handler = InlineFileHandler::from_pairs([("partial.adoc", "SHOULD NOT APPEAR")]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(
+            processed_source,
+            "Before.\n\ninclude::partial.adoc[]\n\nAfter.\n"
+        );
+
+        assert_eq!(
+            source_map.original_file_and_line(3),
+            Some(SourceLine(Some("main.adoc".to_owned()), 3))
+        );
+    }
+
+    #[test]
+    fn escaped_include_directive_without_primary_file() {
+        // The backslash is stripped even when there is no primary file name (and
+        // thus no include handler) so the escape behaves identically.
+        let source = "\\include::partial.adoc[]";
+        let parser = Parser::default();
+        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        assert_eq!(processed_source, "include::partial.adoc[]\n");
+    }
+
+    #[test]
+    fn escaped_non_directive_is_unchanged() {
+        // A backslash followed by something that is not a valid include directive
+        // (here, no attribute brackets) is left untouched.
+        let source = "\\include::partial.adoc";
+        let parser = Parser::default().with_primary_file_name("main.adoc");
+        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        assert_eq!(processed_source, "\\include::partial.adoc\n");
+    }
+
+    #[test]
+    fn double_backslash_include_is_unchanged() {
+        // Only a single leading backslash is treated as an escape; a double
+        // backslash is left as-is.
+        let source = "\\\\include::partial.adoc[]";
+        let parser = Parser::default().with_primary_file_name("main.adoc");
+        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        assert_eq!(processed_source, "\\\\include::partial.adoc[]\n");
+    }
+
+    #[test]
     fn multiple_includes_same_line() {
         let source = "include::part1.adoc[] include::part2.adoc[]";
 
@@ -549,7 +857,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -575,7 +883,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -613,7 +921,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -650,7 +958,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -690,7 +998,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -726,7 +1034,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -756,7 +1064,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,

@@ -113,6 +113,9 @@ pub enum WarningType {
     /// mode. The footnote macro with a target should be used instead.
     #[error("found deprecated footnoteref macro: {0}; use footnote macro with target instead")]
     DeprecatedFootnorefMacro(String),
+
+    #[error("include file not found: {0}")]
+    IncludeFileNotFound(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -232,6 +235,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::DeprecatedFootnorefMacro(macro_text) => f
                 .debug_tuple("WarningType::DeprecatedFootnorefMacro")
                 .field(macro_text)
+                .finish(),
+
+            WarningType::IncludeFileNotFound(target) => f
+                .debug_tuple("WarningType::IncludeFileNotFound")
+                .field(target)
                 .finish(),
         }
     }
@@ -550,6 +558,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::InvalidSubstitutionTypeForStemMacro(\"bogus\")"
+                );
+            }
+
+            #[test]
+            fn include_file_not_found() {
+                let warning = WarningType::IncludeFileNotFound("content.adoc".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeFileNotFound(\"content.adoc\")"
                 );
             }
         }

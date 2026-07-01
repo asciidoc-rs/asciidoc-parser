@@ -13,6 +13,7 @@ mod numbers;
 mod part_numbers_and_signifier;
 mod parts;
 mod preface;
+mod section_ref;
 mod special_section_numbers;
 mod special_section_titles;
 mod styles;
