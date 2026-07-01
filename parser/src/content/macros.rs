@@ -9,9 +9,10 @@ use crate::{
     content::{Content, content::XrefSegment},
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
-        IconRenderParams, ImageRenderParams, IndexTermRenderParams, LinkRenderParams,
-        LinkRenderType,
+        FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
+        LinkRenderParams, LinkRenderType,
     },
+    warnings::WarningType,
 };
 
 pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
@@ -105,6 +106,29 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
         }
     }
 
+    // Footnotes (`footnote:[text]`, `footnote:id[text]`, `footnote:id[]`, and
+    // the deprecated `footnoteref:[id,text]` / `footnoteref:[id]`).
+    //
+    // This runs before cross-references are processed because the footnote
+    // *text* is extracted out of the flow of text (only a superscript marker is
+    // left behind), so any macro inside the footnote that has already been
+    // substituted at this point (images, links, anchors, index terms) is
+    // captured as part of the footnote text. Cross-references, by contrast, are
+    // resolved in a later document-level pass, so an `<<id>>` inside a footnote
+    // is not yet resolved in the extracted footnote text (see issue #592).
+    if found_macroish && text.contains("tnote") {
+        let replacer = InlineFootnoteMacroReplacer {
+            parser,
+            source: content.original(),
+        };
+
+        if let Cow::Owned(new_result) =
+            replace_with_lookahead(&INLINE_FOOTNOTE_MACRO, content.rendered(), replacer)
+        {
+            content.rendered = new_result.into();
+        }
+    }
+
     // Cross-references (`<<id>>`, `<<id,text>>`, `xref:id[]`, `xref:id[text]`).
     //
     // By the time the macros step runs, the special-characters step has already
@@ -130,13 +154,6 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
 
         content.set_deferred_xrefs(xrefs);
     }
-
-    /*
-    if found_macroish && text.contains("tnote") {
-        todo!("Port footnote macro");
-        // Port Ruby Asciidoctor's implementation from lines 842..884.
-    }
-    */
 }
 
 static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
@@ -1157,6 +1174,180 @@ impl Replacer for InlineXrefReplacer<'_> {
 
         dest.push_str(&Content::xref_placeholder(index));
     }
+}
+
+/// Matches a [footnote] inline macro, in either the `footnote:` form or the
+/// deprecated `footnoteref:` form.
+///
+/// ## Examples
+///
+/// * `footnote:[text]` — an anonymous footnote
+/// * `footnote:id[text]` — a footnote with an ID, so it can be referenced again
+/// * `footnote:id[]` — a reference to a previously-defined footnote
+/// * `footnoteref:[id,text]` / `footnoteref:[id]` — the deprecated equivalents
+///
+/// Asciidoctor anchors the match with a `(?!</a>)` look-ahead after the closing
+/// bracket so a `footnote:[…]` that forms the text of an already-rendered link
+/// is not matched again; the `regex` crate has no look-ahead, so
+/// [`InlineFootnoteMacroReplacer`] re-creates that guard by inspecting the text
+/// that follows the match.
+///
+/// [footnote]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
+static INLINE_FOOTNOTE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                     # extended mode; dot matches newline
+        \\?                          # optional escaping backslash
+        footnote
+        (?:
+            (ref):                   # (1) the deprecated 'footnoteref:' form
+          |
+            : ([\w-]+)?              # (2) optional id for the 'footnote:id' form
+        )
+        \[
+            (?: | (.*?[^\\]) )       # (3) text: empty, or ends in a non-backslash
+        \]
+        "#,
+    )
+    .unwrap()
+});
+
+#[derive(Debug)]
+struct InlineFootnoteMacroReplacer<'p, 's> {
+    parser: &'p Parser,
+
+    /// The original (pre-substitution) span of the content being rendered, used
+    /// to locate any warning recorded while resolving a footnote.
+    source: Span<'s>,
+}
+
+impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_> {
+    fn replace_append(
+        &mut self,
+        caps: &Captures<'_>,
+        dest: &mut String,
+        after: &str,
+    ) -> LookaheadResult {
+        // Adapted from Asciidoctor#sub_macros (the `InlineFootnoteMacroRx`
+        // branch), found in
+        // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb.
+
+        // Honor the escape: emit the macro text without the leading backslash.
+        if caps[0].starts_with('\\') {
+            dest.push_str(&caps[0][1..]);
+            return LookaheadResult::Continue;
+        }
+
+        // Re-create Asciidoctor's `(?!</a>)` look-ahead: a closing bracket
+        // immediately followed by `</a>` is not a footnote (it closes an
+        // already-rendered link), so the macro is left untouched.
+        if after.starts_with("</a>") {
+            dest.push_str(&caps[0]);
+            return LookaheadResult::Continue;
+        }
+
+        let parser = self.parser;
+
+        // Resolve the macro into an (id, text) pair. The deprecated
+        // `footnoteref:` form packs both into the bracketed text (`id,text`),
+        // whereas the `footnote:` form takes the id from the macro target.
+        let (id, content): (Option<String>, Option<String>) = if caps.get(1).is_some() {
+            // `footnoteref:` form. With no bracketed text at all it is left
+            // untouched (matching Asciidoctor's `next $&`).
+            let Some(raw) = caps.get(3).map(|m| m.as_str()) else {
+                dest.push_str(&caps[0]);
+                return LookaheadResult::Continue;
+            };
+
+            // The `footnoteref:` macro is deprecated outside compatibility mode.
+            if !parser.is_attribute_set("compat-mode") {
+                parser.record_substitution_warning(
+                    self.source,
+                    WarningType::DeprecatedFootnorefMacro(caps[0].to_string()),
+                );
+            }
+
+            match raw.split_once(',') {
+                Some((id, content)) => (Some(id.to_string()), Some(content.to_string())),
+                None => (Some(raw.to_string()), None),
+            }
+        } else {
+            // `footnote:` form.
+            (
+                caps.get(2).map(|m| m.as_str().to_string()),
+                caps.get(3).map(|m| m.as_str().to_string()),
+            )
+        };
+
+        // `id` and `content` own their data, so each branch renders its marker
+        // before they are dropped (the params borrow them).
+        if let Some(id) = id {
+            if let Some(index) = parser.footnote_index_for_id(&id) {
+                // A reference to an already-defined footnote: reuse its number.
+                parser.renderer.render_footnote(
+                    &FootnoteRenderParams {
+                        index: Some(index.as_str()),
+                        id: None,
+                        is_reference: true,
+                        text: "",
+                    },
+                    dest,
+                );
+            } else if let Some(content) = content {
+                // A defining occurrence that also carries an ID.
+                let index = parser.define_footnote(Some(&id), normalize_footnote_text(&content));
+                parser.renderer.render_footnote(
+                    &FootnoteRenderParams {
+                        index: Some(index.as_str()),
+                        id: Some(&id),
+                        is_reference: false,
+                        text: "",
+                    },
+                    dest,
+                );
+            } else {
+                // A reference to an ID that was never defined.
+                parser.record_substitution_warning(
+                    self.source,
+                    WarningType::InvalidFootnoteReference(id.clone()),
+                );
+                parser.renderer.render_footnote(
+                    &FootnoteRenderParams {
+                        index: None,
+                        id: None,
+                        is_reference: true,
+                        text: &id,
+                    },
+                    dest,
+                );
+            }
+        } else if let Some(content) = content {
+            // An anonymous defining occurrence.
+            let index = parser.define_footnote(None, normalize_footnote_text(&content));
+            parser.renderer.render_footnote(
+                &FootnoteRenderParams {
+                    index: Some(index.as_str()),
+                    id: None,
+                    is_reference: false,
+                    text: "",
+                },
+                dest,
+            );
+        } else {
+            // `footnote:[]` with neither an ID nor text is not a footnote.
+            dest.push_str(&caps[0]);
+        }
+
+        LookaheadResult::Continue
+    }
+}
+
+/// Normalizes the text of a footnote: trims surrounding whitespace, collapses
+/// each embedded newline to a space (Asciidoctor compacts a multi-line footnote
+/// onto a single line), and unescapes an escaped closing square bracket
+/// (`\]` -> `]`). Mirrors Asciidoctor's `normalize_text text, true, true`.
+fn normalize_footnote_text(content: &str) -> String {
+    content.trim().replace('\n', " ").replace("\\]", "]")
 }
 
 static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {

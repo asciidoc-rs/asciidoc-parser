@@ -156,8 +156,11 @@ Another way to solve the problem is to write the paragraph as a literal paragrap
     // A line that starts with `[` and ends with `]` is consumed as a block
     // attribute line, not as paragraph text. Because no block follows it, the
     // attribute list is left dangling (`MissingBlockAfterTitleOrAttributeList`)
-    // and the intended inline formatting is never applied: the rendered content
-    // is identical to the raw source.
+    // and the intended block role and inline bold formatting are never applied;
+    // the `*main text*` and `.rolename` are left literal. (The trailing
+    // `footnote:[…]` macro is still resolved, as macros are substituted
+    // independently of the disrupted block-attribute match — matching
+    // Asciidoctor.)
     let mut parser = Parser::default();
     assert_eq!(
         parser.parse("[.rolename]*main text*footnote:[The footnote.]"),
@@ -184,7 +187,7 @@ Another way to solve the problem is to write the paragraph as a literal paragrap
                         col: 1,
                         offset: 0,
                     },
-                    rendered: "[.rolename]*main text*footnote:[The footnote.]",
+                    rendered: "[.rolename]*main text*<sup class=\"footnote\">[<a id=\"_footnoteref_1\" class=\"footnote\" href=\"#_footnotedef_1\" title=\"View footnote.\">1</a>]</sup>",
                 },
                 source: Span {
                     data: "[.rolename]*main text*footnote:[The footnote.]",
@@ -260,7 +263,7 @@ Another way to solve the problem is to write the paragraph as a literal paragrap
                         col: 1,
                         offset: 0,
                     },
-                    rendered: "[.rolename]*main text*footnote:[The footnote.]",
+                    rendered: "[.rolename]*main text*<sup class=\"footnote\">[<a id=\"_footnoteref_1\" class=\"footnote\" href=\"#_footnotedef_1\" title=\"View footnote.\">1</a>]</sup>",
                 },
                 source: Span {
                     data: "{empty}[.rolename]*main text*footnote:[The footnote.]",
@@ -318,7 +321,7 @@ Another way to solve the problem is to write the paragraph as a literal paragrap
                         col: 1,
                         offset: 9,
                     },
-                    rendered: "[.rolename]*main text*footnote:[The footnote.]",
+                    rendered: "[.rolename]*main text*<sup class=\"footnote\">[<a id=\"_footnoteref_1\" class=\"footnote\" href=\"#_footnotedef_1\" title=\"View footnote.\">1</a>]</sup>",
                 },
                 source: Span {
                     data: "[normal]\n [.rolename]*main text*footnote:[The footnote.]",

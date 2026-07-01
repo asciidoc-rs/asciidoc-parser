@@ -1,6 +1,7 @@
 mod audio_and_video;
 mod autolinks;
 mod complex_urls;
+mod footnote;
 mod icon_macro;
 mod icons;
 mod image_link;
