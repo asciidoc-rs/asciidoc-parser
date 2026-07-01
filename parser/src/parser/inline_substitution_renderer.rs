@@ -676,18 +676,20 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             .named_attribute("format")
             .map(|format| format.value());
 
-        let is_svg = format == Some("svg") || params.target.contains(".svg");
+        // The `inline` and `interactive` SVG options are security-sensitive
+        // (they embed file contents or a live `<object>`), so they only take
+        // effect below the `Secure` safe mode. In `Secure` mode an SVG image
+        // renders as an ordinary `<img>`, matching Ruby Asciidoctor.
+        let svg_active = (format == Some("svg") || params.target.contains(".svg"))
+            && params.parser.safe_mode() < SafeMode::Secure;
 
-        let img = if is_svg && params.attrlist.has_option("inline") {
+        let img = if svg_active && params.attrlist.has_option("inline") {
             // Embed the SVG contents directly. When the contents cannot be read
             // (no handler is registered, or it cannot find the file), fall back
             // to the alt text, mirroring Ruby Asciidoctor.
             read_svg_contents(&src, params.width, params.height, params.parser)
                 .unwrap_or_else(|| format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt))
-        } else if is_svg
-            && params.attrlist.has_option("interactive")
-            && params.parser.safe_mode() < SafeMode::Secure
-        {
+        } else if svg_active && params.attrlist.has_option("interactive") {
             // Render an interactive SVG as an `<object>` element so its embedded
             // scripting and links remain live. A `fallback` image (or, failing
             // that, the alt text) is nested inside for user agents that can't
@@ -706,7 +708,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             format!(r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#)
         };
 
-        render_icon_or_image(params.attrlist, &img, &src, "image", dest);
+        render_icon_or_image(params.attrlist, &img, "image", dest);
     }
 
     fn image_uri(
@@ -808,7 +810,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             format!("[{alt}&#93;", alt = params.alt)
         };
 
-        render_icon_or_image(params.attrlist, &img, &src, "icon", dest);
+        render_icon_or_image(params.attrlist, &img, "icon", dest);
     }
 
     fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
@@ -982,28 +984,16 @@ fn wrap_body_in_html_tag(
     dest.push('>');
 }
 
-fn render_icon_or_image(
-    attrlist: &Attrlist,
-    img: &str,
-    src: &str,
-    type_: &'static str,
-    dest: &mut String,
-) {
+fn render_icon_or_image(attrlist: &Attrlist, img: &str, type_: &'static str, dest: &mut String) {
     let mut img = img.to_string();
 
-    // An inline SVG (`opts=inline`) is embedded directly in the flow of text and
-    // cannot be wrapped in a link, so the `link` attribute is ignored for it
-    // (matching Ruby Asciidoctor).
-    if !img.starts_with("<svg")
-        && let Some(link) = attrlist.named_attribute("link")
-    {
-        let mut link = link.value();
-        if link == "self" {
-            link = src;
-        }
-
+    // The `link` attribute value is used verbatim as the `href` (matching Ruby
+    // Asciidoctor, which does not special-case `link=self`). This applies to
+    // every image, including an inline SVG embedded in the flow of text.
+    if let Some(link) = attrlist.named_attribute("link") {
         img = format!(
             r#"<a class="image" href="{link}"{link_constraint_attrs}>{img}</a>"#,
+            link = link.value(),
             link_constraint_attrs = link_constraint_attrs(attrlist, None)
         );
     }

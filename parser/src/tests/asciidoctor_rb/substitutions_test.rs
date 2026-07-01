@@ -2671,9 +2671,17 @@ mod macros {
                 )]))
                 .parse("image:circle.svg[Tiger,100,opts=inline,link=self]");
 
-            // An inline SVG cannot be wrapped in a link, so `link=self` is
-            // ignored and no anchor is emitted.
-            assert_eq!(rendered(&doc), CIRCLE_SVG_INLINE);
+            // The `link` value is used verbatim: `self` is not resolved to the
+            // image's own URI (which would be meaningless for an inline SVG), so
+            // the anchor's `href` is the literal string `self`.
+            assert_eq!(
+                rendered(&doc),
+                concat!(
+                    r#"<span class="image"><a class="image" href="self">"#,
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100">"#,
+                    r#"<circle cx="250" cy="250" r="200"/></svg></a></span>"#,
+                )
+            );
         }
 
         #[test]
@@ -2717,6 +2725,26 @@ mod macros {
             assert_eq!(
                 rendered(&doc),
                 r#"<span class="image"><span class="alt">Tiger</span></span>"#
+            );
+        }
+
+        #[test]
+        fn an_inline_svg_image_should_render_as_a_plain_img_when_safe_mode_is_secure() {
+            // Like `interactive`, the `inline` option is disabled in `Secure`
+            // mode (the default), so the SVG contents are never read and a plain
+            // `<img>` is emitted. The registered handler is intentionally
+            // ignored.
+            let doc = Parser::default()
+                .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
+                .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(
+                    "fixtures/circle.svg",
+                    CIRCLE_SVG,
+                )]))
+                .parse("image:circle.svg[Tiger,100,opts=inline]");
+
+            assert_eq!(
+                rendered(&doc),
+                r#"<span class="image"><img src="fixtures/circle.svg" alt="Tiger" width="100"></span>"#
             );
         }
     }
@@ -2924,7 +2952,7 @@ mod macros {
                         col: 1,
                         offset: 0,
                     },
-                    rendered: r#"<span class="image"><a class="image" href="img/tiger.png"><img src="img/tiger.png" alt="Tiger"></a></span>"#,
+                    rendered: r#"<span class="image"><a class="image" href="self"><img src="img/tiger.png" alt="Tiger"></a></span>"#,
                 },
                 source: Span {
                     data: r#"image:tiger.png[Tiger, link=self]"#,
