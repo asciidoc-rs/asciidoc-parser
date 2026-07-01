@@ -4037,7 +4037,7 @@ mod macros {
 
             let footnotes = doc.catalog().footnotes();
             assert_eq!(footnotes.len(), 1);
-            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].index, "1");
             assert_eq!(footnotes[0].id, None);
             assert_eq!(footnotes[0].text, "An example footnote.");
         }
@@ -4055,7 +4055,7 @@ mod macros {
 
             let footnotes = doc.catalog().footnotes();
             assert_eq!(footnotes.len(), 1);
-            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].index, "1");
             assert_eq!(footnotes[0].id, None);
             assert_eq!(footnotes[0].text, "An example footnote with wrapped text.");
         }
@@ -4198,10 +4198,10 @@ mod macros {
 
             let footnotes = doc.catalog().footnotes();
             assert_eq!(footnotes.len(), 2);
-            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].index, "1");
             assert_eq!(footnotes[0].id, None);
             assert_eq!(footnotes[0].text, "An example footnote.");
-            assert_eq!(footnotes[1].index, 2);
+            assert_eq!(footnotes[1].index, "2");
             assert_eq!(footnotes[1].id, None);
             assert_eq!(footnotes[1].text, "Another footnote.");
         }
@@ -4219,7 +4219,7 @@ mod macros {
 
             let footnotes = doc.catalog().footnotes();
             assert_eq!(footnotes.len(), 1);
-            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].index, "1");
             assert_eq!(footnotes[0].id.as_deref(), Some("ex1"));
             assert_eq!(footnotes[0].text, "An example footnote.");
         }
@@ -4256,7 +4256,7 @@ mod macros {
 
             let footnotes = doc.catalog().footnotes();
             assert_eq!(footnotes.len(), 1);
-            assert_eq!(footnotes[0].index, 1);
+            assert_eq!(footnotes[0].index, "1");
             assert_eq!(footnotes[0].id.as_deref(), Some("ex1"));
             assert_eq!(footnotes[0].text, "An example footnote.");
         }
@@ -4395,6 +4395,31 @@ mod macros {
                 &["A footnote:[not a footnote] here."]
             );
             assert!(doc.catalog().footnotes().is_empty());
+        }
+
+        #[test]
+        fn footnote_number_honors_a_non_integer_counter_seed() {
+            // The `footnote-number` counter honors whatever seed the document
+            // sets. A non-integer seed advances like Ruby's `String#succ`
+            // (`z` -> `aa` -> `ab`), and the footnote number is rendered
+            // verbatim, matching Asciidoctor rather than collapsing to `0`.
+            let doc = Parser::default()
+                .parse(":footnote-number: z\n\nOne.footnote:[first] two.footnote:[second]");
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 2);
+            assert_eq!(footnotes[0].index, "aa");
+            assert_eq!(footnotes[1].index, "ab");
+
+            let paras = rendered_paragraphs(&doc);
+            assert!(
+                paras[0].contains(
+                    r##"<a id="_footnoteref_aa" class="footnote" href="#_footnotedef_aa" title="View footnote.">aa</a>"##
+                ),
+                "{}",
+                paras[0]
+            );
+            assert!(paras[0].contains(r##"id="_footnoteref_ab""##));
         }
 
         #[test]

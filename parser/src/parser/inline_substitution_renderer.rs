@@ -456,8 +456,10 @@ pub struct IndexTermRenderParams<'a> {
 /// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
 #[derive(Clone, Debug)]
 pub struct FootnoteRenderParams<'a> {
-    /// The footnote's sequential number, or `None` for an unresolved reference.
-    pub index: Option<i64>,
+    /// The footnote's number, or `None` for an unresolved reference. Normally a
+    /// consecutive integer, but the `footnote-number` counter honors any seed
+    /// the document sets, so it is passed through as text.
+    pub index: Option<&'a str>,
 
     /// The footnote's own ID, used only on a defining occurrence to produce the
     /// `id="_footnote_<id>"` attribute on the marker.

@@ -1286,7 +1286,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_> {
                 // A reference to an already-defined footnote: reuse its number.
                 parser.renderer.render_footnote(
                     &FootnoteRenderParams {
-                        index: Some(index),
+                        index: Some(index.as_str()),
                         id: None,
                         is_reference: true,
                         text: "",
@@ -1298,7 +1298,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_> {
                 let index = parser.define_footnote(Some(&id), normalize_footnote_text(&content));
                 parser.renderer.render_footnote(
                     &FootnoteRenderParams {
-                        index: Some(index),
+                        index: Some(index.as_str()),
                         id: Some(&id),
                         is_reference: false,
                         text: "",
@@ -1326,7 +1326,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_> {
             let index = parser.define_footnote(None, normalize_footnote_text(&content));
             parser.renderer.render_footnote(
                 &FootnoteRenderParams {
-                    index: Some(index),
+                    index: Some(index.as_str()),
                     id: None,
                     is_reference: false,
                     text: "",

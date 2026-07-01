@@ -44,7 +44,7 @@ To make a reference to a previously defined footnote, you specify the ID in the 
     );
     let footnotes = doc.catalog().footnotes();
     assert_eq!(footnotes.len(), 1);
-    assert_eq!(footnotes[0].index, 1);
+    assert_eq!(footnotes[0].index, "1");
     assert_eq!(footnotes[0].id, None);
     assert_eq!(footnotes[0].text, "The text.");
 
@@ -103,13 +103,13 @@ If both the ID and text are specified, and the ID has already been defined by an
     // second, so it registers no new footnote.
     let footnotes = doc.catalog().footnotes();
     assert_eq!(footnotes.len(), 2);
-    assert_eq!(footnotes[0].index, 1);
+    assert_eq!(footnotes[0].index, "1");
     assert_eq!(footnotes[0].id, None);
     assert_eq!(
         footnotes[0].text,
         "The double hail-and-rainbow level makes my toes tingle."
     );
-    assert_eq!(footnotes[1].index, 2);
+    assert_eq!(footnotes[1].index, "2");
     assert_eq!(footnotes[1].id.as_deref(), Some("disclaimer"));
     assert_eq!(footnotes[1].text, "Opinions are my own.");
 
@@ -157,8 +157,11 @@ The footnotes are numbered consecutively throughout the article.
         .parse("One.footnote:[First.] Two.footnote:[Second.] Three.footnote:[Third.]");
     let footnotes = doc.catalog().footnotes();
     assert_eq!(
-        footnotes.iter().map(|f| f.index).collect::<Vec<_>>(),
-        vec![1, 2, 3]
+        footnotes
+            .iter()
+            .map(|f| f.index.as_str())
+            .collect::<Vec<_>>(),
+        vec!["1", "2", "3"]
     );
 }
 

@@ -205,10 +205,12 @@ impl Catalog {
 /// defining occurrence produces a `Footnote` entry.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Footnote {
-    /// The footnote's sequential number, assigned in document order. Footnotes
-    /// are numbered consecutively throughout the document via the
-    /// `footnote-number` counter.
-    pub index: i64,
+    /// The footnote's number, assigned in document order via the
+    /// `footnote-number` counter. Normally a consecutive integer (`1`, `2`, …),
+    /// but stored as a string because the counter honors any seed the document
+    /// sets (e.g. `:footnote-number: z` yields `aa`, `ab`, … as Asciidoctor
+    /// does).
+    pub index: String,
 
     /// The optional ID assigned to this footnote (the target of the macro, e.g.
     /// `disclaimer` in `footnote:disclaimer[…]`). `None` for an anonymous

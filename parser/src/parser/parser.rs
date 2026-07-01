@@ -515,13 +515,16 @@ impl Parser {
         self.callouts.borrow_mut().current.clear();
     }
 
-    /// Returns the sequential index of an already-defined footnote with the
-    /// given ID, if one exists in the current document's footnote registry.
+    /// Returns the number of an already-defined footnote with the given ID, if
+    /// one exists in the current document's footnote registry.
     ///
     /// Takes `&self` so it can be called from the macros substitution step,
     /// which only holds a shared reference to the parser.
-    pub(crate) fn footnote_index_for_id(&self, id: &str) -> Option<i64> {
-        self.catalog.borrow().footnote_with_id(id).map(|f| f.index)
+    pub(crate) fn footnote_index_for_id(&self, id: &str) -> Option<String> {
+        self.catalog
+            .borrow()
+            .footnote_with_id(id)
+            .map(|f| f.index.clone())
     }
 
     /// Defines a new footnote, advancing the `footnote-number` counter and
@@ -529,21 +532,20 @@ impl Parser {
     /// number assigned to the footnote.
     ///
     /// Takes `&self` so it can be called from the macros substitution step.
-    pub(crate) fn define_footnote(&self, id: Option<&str>, text: String) -> i64 {
+    pub(crate) fn define_footnote(&self, id: Option<&str>, text: String) -> String {
         // Footnotes are numbered consecutively throughout the document via the
         // `footnote-number` counter, which is seeded to `0` so the first
         // footnote is numbered `1`. The counter is a document-wide attribute, so
         // numbering continues across nested documents (AsciiDoc table cells)
-        // even though the footnote *list* does not.
-        let index = self
-            .counter("footnote-number", None)
-            .parse::<i64>()
-            .unwrap_or(0);
+        // even though the footnote *list* does not. The counter honors any seed
+        // the document sets, so a non-integer seed yields a non-integer number
+        // (matching Asciidoctor); the value is therefore kept as a string.
+        let index = self.counter("footnote-number", None);
 
         self.catalog
             .borrow_mut()
             .register_footnote(crate::document::Footnote {
-                index,
+                index: index.clone(),
                 id: id.map(|s| s.to_owned()),
                 text,
             });
