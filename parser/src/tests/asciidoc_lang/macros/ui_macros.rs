@@ -74,6 +74,13 @@ mod menu_macro_syntax {
         r#"
 == Menu macro syntax
 
+"#
+    );
+
+    #[test]
+    fn example() {
+        verifies!(
+            r#"
 Trying to explain how to select a menu item can be a pain.
 With the `menu` macro, the symbols do the work.
 
@@ -89,6 +96,35 @@ The instructions in <<ex-menu>> appear below.
 include::example$ui.adoc[tag=menu]
 ====
 
+"#
+        );
+
+        // The example above pulls in `example$ui.adoc[tag=menu]`. The
+        // spec-coverage tool can't follow includes, so the included content is
+        // reproduced here and parsed directly (with `experimental` set, as the
+        // UI macros require). The two paragraphs exercise a bare menu item
+        // (`menu:File[Save]`) and a submenu path (`menu:View[Zoom > Reset]`).
+        let doc = Parser::default().parse(
+            ":experimental:\n\nTo save the file, select menu:File[Save].\n\nSelect menu:View[Zoom > Reset] to reset the zoom level to the default setting.",
+        );
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            &[
+                r#"To save the file, select <span class="menuseq"><b class="menu">File</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Save</b></span>."#,
+                r#"Select <span class="menuseq"><b class="menu">View</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">Zoom</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Reset</b></span> to reset the zoom level to the default setting."#,
+            ]
+        );
+    }
+
+    // The material below describes the *shorthand* menu syntax (`"File > Save"`).
+    // This crate does not implement it and does not plan to: per the AsciiDoc
+    // language documentation the shorthand is not on a standards track (see the
+    // "No planned support" section of the crate README and issue
+    // https://github.com/asciidoc-rs/asciidoc-parser/issues/263). These lines are
+    // therefore kept non-normative — covered for completeness, but no behavior is
+    // asserted.
+    non_normative!(
+        r#"
 If the menu has more than one item, it can be expressed using a shorthand.
 
 IMPORTANT: The shorthand syntax for menu is not on a standards track.

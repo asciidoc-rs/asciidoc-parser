@@ -42,6 +42,7 @@ The following features are supported in the [Ruby implementation of Asciidoctor]
 * The parser has built-in support for HTML5 rendering similar to what is provided in Asciidoctor. Other back ends could be supported by other crates by implementing the `InlineSubstitutionRenderer` trait. They will not be directly supported in this crate.
 * Setting document attributes via the [inline attribute entry syntax](https://docs.asciidoctor.org/asciidoc/latest/attributes/inline-attribute-entries/) is not supported. (Note that this syntax is discouraged and may eventually be removed from the AsciiDoc language documentation.)
 * [Retrieving include file content via URL](https://docs.asciidoctor.org/asciidoc/latest/directives/include-uri/) is not directly supported. An implementation could implement the [`IncludeFileHandler`](https://docs.rs/asciidoc-parser/latest/asciidoc_parser/parser/trait.IncludeFileHandler.html) trait to provide that behavior.
+* The [shorthand menu syntax](https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/) (`"File > Save"`) is not supported. Per the AsciiDoc language documentation, it is not on a standards track, so only the `menu:` macro form is implemented. (The `kbd:`, `btn:`, and `menu:` UI macros themselves _are_ supported.)
 
 ## Licenses
 
