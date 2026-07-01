@@ -2581,51 +2581,144 @@ mod macros {
         );
     }
 
-    #[ignore]
-    #[test]
-    fn todo_issue_272_inline_interactive() {
-        // TO DO: Implement `inline` and `interactive` options for SVG images.
-        // https://github.com/asciidoc-rs/asciidoc-parser/issues/272
-        todo!(
-            "{}",
-            r###"
-        test 'an image macro with an interactive SVG image and alt text should be converted to an object element' do
-            para = block_from_string 'image:tiger.svg[Tiger,opts=interactive]', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'imagesdir' => 'images' }
-            assert_equal '<span class="image"><object type="image/svg+xml" data="images/tiger.svg"><span class="alt">Tiger</span></object></span>', para.sub_macros(para.source).gsub(/>\s+</, '><')
-        end
+    mod svg_image_options {
+        //! The `inline` and `interactive` options for SVG images (issue #272).
+        //!
+        //! Ported from Asciidoctor's `substitutions_test.rb`. In this crate the
+        //! SVG contents that Asciidoctor reads from disk are supplied instead
+        //! by a [`SvgFileHandler`](crate::parser::SvgFileHandler)
+        //! fixture, and the safe mode (which defaults to secure) is set
+        //! explicitly.
 
-        test 'an image macro with an interactive SVG image, fallback and alt text should be converted to an object element' do
-            para = block_from_string 'image:tiger.svg[Tiger,fallback=tiger.png,opts=interactive]', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'imagesdir' => 'images' }
-            assert_equal '<span class="image"><object type="image/svg+xml" data="images/tiger.svg"><img src="images/tiger.png" alt="Tiger"></object></span>', para.sub_macros(para.source).gsub(/>\s+</, '><')
-        end
+        use crate::{
+            SafeMode,
+            tests::{fixtures::svg_file_handler::SvgFileHandlerFixture, prelude::*},
+        };
 
-        test 'an image macro with an inline SVG image should be converted to an svg element' do
-            para = block_from_string 'image:circle.svg[Tiger,100,opts=inline]', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'imagesdir' => 'fixtures', 'docdir' => testdir }
-            result = para.sub_macros(para.source).gsub(/>\s+</, '><')
-            assert_match(/<svg\s[^>]*width="100"[^>]*>/, result)
-            refute_match(/<svg\s[^>]*width="500"[^>]*>/, result)
-            refute_match(/<svg\s[^>]*height="500"[^>]*>/, result)
-            refute_match(/<svg\s[^>]*style="[^>]*>/, result)
-        end
-
-        test 'should ignore link attribute if value is self and image target is inline SVG' do
-            para = block_from_string 'image:circle.svg[Tiger,100,opts=inline,link=self]', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'imagesdir' => 'fixtures', 'docdir' => testdir }
-            result = para.sub_macros(para.source).gsub(/>\s+</, '><')
-            assert_match(/<svg\s[^>]*width="100"[^>]*>/, result)
-            refute_match(/<a href=/, result)
-        end
-
-        test 'an image macro with an inline SVG image should be converted to an svg element even when data-uri is set' do
-            para = block_from_string 'image:circle.svg[Tiger,100,opts=inline]', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'data-uri' => '', 'imagesdir' => 'fixtures', 'docdir' => testdir }
-            assert_match(/<svg\s[^>]*width="100">/, para.sub_macros(para.source).gsub(/>\s+</, '><'))
-        end
-
-        test 'an image macro with an SVG image should not use an object element when safe mode is secure' do
-            para = block_from_string 'image:tiger.svg[Tiger,opts=interactive]', attributes: { 'imagesdir' => 'images' }
-            assert_equal '<span class="image"><img src="images/tiger.svg" alt="Tiger"></span>', para.sub_macros(para.source).gsub(/>\s+</, '><')
-        end
-        "###
+        /// The raw contents that the SVG file handler returns for `circle.svg`.
+        /// It carries `width`, `height`, and `style` attributes (which inline
+        /// rendering must strip when an explicit width is supplied) plus an XML
+        /// preamble (which must be dropped).
+        const CIRCLE_SVG: &str = concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"500\" height=\"500\" ",
+            "style=\"fill:red\" viewBox=\"0 0 500 500\">",
+            "<circle cx=\"250\" cy=\"250\" r=\"200\"/></svg>",
         );
+
+        /// The expected inline rendering of `circle.svg` at width 100: preamble
+        /// removed, original width/height/style removed, and `width="100"`
+        /// appended to the opening tag.
+        const CIRCLE_SVG_INLINE: &str = concat!(
+            r#"<span class="image">"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100">"#,
+            r#"<circle cx="250" cy="250" r="200"/></svg></span>"#,
+        );
+
+        fn rendered(doc: &crate::Document<'_>) -> String {
+            rendered_paragraphs(doc).join("\n")
+        }
+
+        #[test]
+        fn an_interactive_svg_image_with_alt_text_should_be_converted_to_an_object_element() {
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "images", ModificationContext::Anywhere)
+                .parse("image:tiger.svg[Tiger,opts=interactive]");
+
+            assert_eq!(
+                rendered(&doc),
+                r#"<span class="image"><object type="image/svg+xml" data="images/tiger.svg"><span class="alt">Tiger</span></object></span>"#
+            );
+        }
+
+        #[test]
+        fn an_interactive_svg_image_with_fallback_and_alt_text_should_be_converted_to_an_object_element()
+         {
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "images", ModificationContext::Anywhere)
+                .parse("image:tiger.svg[Tiger,fallback=tiger.png,opts=interactive]");
+
+            assert_eq!(
+                rendered(&doc),
+                r#"<span class="image"><object type="image/svg+xml" data="images/tiger.svg"><img src="images/tiger.png" alt="Tiger"></object></span>"#
+            );
+        }
+
+        #[test]
+        fn an_inline_svg_image_should_be_converted_to_an_svg_element() {
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
+                .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(
+                    "fixtures/circle.svg",
+                    CIRCLE_SVG,
+                )]))
+                .parse("image:circle.svg[Tiger,100,opts=inline]");
+
+            assert_eq!(rendered(&doc), CIRCLE_SVG_INLINE);
+        }
+
+        #[test]
+        fn should_ignore_link_attribute_if_value_is_self_and_image_target_is_inline_svg() {
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
+                .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(
+                    "fixtures/circle.svg",
+                    CIRCLE_SVG,
+                )]))
+                .parse("image:circle.svg[Tiger,100,opts=inline,link=self]");
+
+            // An inline SVG cannot be wrapped in a link, so `link=self` is
+            // ignored and no anchor is emitted.
+            assert_eq!(rendered(&doc), CIRCLE_SVG_INLINE);
+        }
+
+        #[test]
+        fn an_inline_svg_image_should_be_converted_to_an_svg_element_even_when_data_uri_is_set() {
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute_bool("data-uri", true, ModificationContext::Anywhere)
+                .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
+                .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(
+                    "fixtures/circle.svg",
+                    CIRCLE_SVG,
+                )]))
+                .parse("image:circle.svg[Tiger,100,opts=inline]");
+
+            assert_eq!(rendered(&doc), CIRCLE_SVG_INLINE);
+        }
+
+        #[test]
+        fn an_svg_image_should_not_use_an_object_element_when_safe_mode_is_secure() {
+            // `SafeMode::Secure` is the default; the `interactive` option is
+            // ignored and a plain `<img>` is emitted.
+            let doc = Parser::default()
+                .with_intrinsic_attribute("imagesdir", "images", ModificationContext::Anywhere)
+                .parse("image:tiger.svg[Tiger,opts=interactive]");
+
+            assert_eq!(
+                rendered(&doc),
+                r#"<span class="image"><img src="images/tiger.svg" alt="Tiger"></span>"#
+            );
+        }
+
+        #[test]
+        fn an_inline_svg_image_falls_back_to_alt_text_when_no_handler_is_registered() {
+            // With no `SvgFileHandler`, the SVG contents can't be read, so the
+            // inline image degrades to its alt text.
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
+                .parse("image:circle.svg[Tiger,100,opts=inline]");
+
+            assert_eq!(
+                rendered(&doc),
+                r#"<span class="image"><span class="alt">Tiger</span></span>"#
+            );
+        }
     }
 
     #[test]

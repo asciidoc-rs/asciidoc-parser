@@ -28,6 +28,12 @@ pub use parser::Parser;
 mod path_resolver;
 pub use path_resolver::PathResolver;
 
+mod safe_mode;
+pub use safe_mode::SafeMode;
+
+mod svg_file_handler;
+pub use svg_file_handler::SvgFileHandler;
+
 pub(crate) mod preprocessor;
 
 mod reference_resolver;

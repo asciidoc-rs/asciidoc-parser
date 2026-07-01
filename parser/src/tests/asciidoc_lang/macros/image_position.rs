@@ -418,8 +418,155 @@ include::example$image.adoc[tag=in-role]
             }
         );
     }
+
+    non_normative!(
+        r#"
+The following table lists all the roles available out of the box for positioning images.
+
+.Roles for positioning images
+[cols="1h,5*^"]
+|===
+|{empty} 2+|Float 3+|Align
+
+|Role
+|left
+|right
+|text-left
+|text-right
+|text-center
+
+|Block Image
+|{y}
+|{y}
+|{y}
+|{y}
+|{y}
+
+|Inline Image
+|{y}
+|{y}
+|{n}
+|{n}
+|{n}
+|===
+
+Merely setting the float direction on an image is not sufficient for proper positioning.
+That's because, by default, no space is left between the image and the text.
+To alleviate this problem, we've added sensible margins to images that use either the positioning named attributes or roles.
+
+If you want to customize the image styles, perhaps to customize the margins, you can provide your own additions to the stylesheet (either by using your own stylesheet that builds on the default stylesheet or by adding the styles to a docinfo file).
+
+WARNING: The shorthand syntax for a role (`.`) can not yet be used with image styles.
+
+"#
+    );
 }
 
-// TO DO: Test all of the roles for positioning images.
+mod framing_roles {
+    use crate::tests::prelude::*;
 
-// TO DO: Framing roles and float controls.
+    #[test]
+    fn thumb_role() {
+        verifies!(
+            r#"
+== Framing roles
+
+It's common to frame the image in a border to further offset it from the text.
+You can style any block or inline image to appear as a thumbnail using the `thumb` role (or `th` for short).
+
+NOTE: The `thumb` role doesn't alter the dimensions of the image.
+For that, you need to assign the image a height and width.
+
+Here's a common example for adding an image to a blog post.
+The image floats to the right and is framed to make it stand out more from the text.
+
+[source]
+----
+include::example$image.adoc[tag=frame]
+----
+
+////
+====
+image:logo.png[role="related thumb right"] Here's text that will wrap around the image to the left.
+====
+////
+
+Notice we added the `related` role to the image.
+This role isn't technically required, but it gives the image semantic meaning.
+
+"#
+        );
+
+        // The `thumb`/`related`/`right` roles become CSS classes on the inline
+        // image's wrapping `<span>` (in the order they were written, after the
+        // implicit `image` class).
+        let doc = Parser::default().parse(
+            r#"image:logo.png[role="related thumb right"] Here's text that will wrap around the image to the left."#,
+        );
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec![
+                r#"<span class="image related thumb right"><img src="logo.png" alt="logo"></span> Here&#8217;s text that will wrap around the image to the left."#
+                    .to_string()
+            ]
+        );
+    }
+}
+
+mod control_the_float {
+    // This section describes the browser layout behavior of the `float-group`
+    // role, which the parser records as an ordinary role on the enclosing block.
+    // No parser-specific behavior is normative here (block images are not
+    // rendered to HTML by this crate), so the section is covered as
+    // non-normative.
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+[#control-float]
+== Control the float
+
+When you start floating images, you may discover that too much content is floating around the image.
+What you need is a way to clear the float.
+That is provided using another role, `float-group`.
+
+Let's assume that we've floated two images so that they are positioned next to each other and we want the next paragraph to appear below them.
+
+[source]
+----
+[.left]
+.Image A
+image::a.png[A,240,180]
+
+[.left]
+.Image B
+image::b.png[B,240,180,title=Image B]
+
+Text below images.
+----
+
+When this example is converted, then viewed in a browser, the paragraph text appears to the right of the images.
+To fix this behavior, you just need to "`group`" the images together in a block with self-contained floats.
+Here's how it's done:
+
+[source]
+----
+[.float-group]
+--
+[.left]
+.Image A
+image::a.png[A,240,180]
+
+[.left]
+.Image B
+image::b.png[B,240,180]
+--
+
+Text below images.
+----
+
+This time, the text will appear below the images where we want it.
+"#
+    );
+}

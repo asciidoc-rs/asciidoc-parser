@@ -2,7 +2,11 @@ use std::{fmt::Debug, sync::LazyLock};
 
 use regex::Regex;
 
-use crate::{Parser, attributes::Attrlist, parser::ResolvedReference};
+use crate::{
+    Parser,
+    attributes::Attrlist,
+    parser::{ResolvedReference, SafeMode},
+};
 
 /// An implementation of `InlineSubstitutionRenderer` is used when converting
 /// the basic raw text of a simple block to the format which will ultimately be
@@ -644,26 +648,25 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
     fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
         let src = self.image_uri(params.target, params.parser, None);
+        let alt_encoded = encode_attribute_value(params.alt.clone());
 
-        let mut attrs: Vec<String> = vec![
-            format!(r#"src="{src}""#),
-            format!(
-                r#"alt="{alt}""#,
-                alt = encode_attribute_value(params.alt.to_string())
-            ),
-        ];
+        // The dimension attributes (width, height, and title) are shared by the
+        // plain `<img>`, the interactive `<object>`, and the `<object>`'s image
+        // fallback. Each fragment carries its own leading space so the pieces
+        // concatenate cleanly after `src`/`alt` (or the `data` attribute).
+        let mut dimension_attrs = String::new();
 
         if let Some(width) = params.width {
-            attrs.push(format!(r#"width="{width}""#));
+            dimension_attrs.push_str(&format!(r#" width="{width}""#));
         }
 
         if let Some(height) = params.height {
-            attrs.push(format!(r#"height="{height}""#));
+            dimension_attrs.push_str(&format!(r#" height="{height}""#));
         }
 
         if let Some(title) = params.attrlist.named_attribute("title") {
-            attrs.push(format!(
-                r#"title="{title}""#,
+            dimension_attrs.push_str(&format!(
+                r#" title="{title}""#,
                 title = encode_attribute_value(title.value().to_owned())
             ));
         }
@@ -673,44 +676,34 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             .named_attribute("format")
             .map(|format| format.value());
 
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/277):
-        // Enforce non-safe mode. Add this contraint to following `if` clause:
-        // `&& node.document.safe < SafeMode::SECURE`
+        let is_svg = format == Some("svg") || params.target.contains(".svg");
 
-        let img = if format == Some("svg") || params.target.contains(".svg") {
-            // NOTE: In the SVG case we may have to ignore the attrs list.
-            if params.attrlist.has_option("inline") {
-                todo!(
-                    "Port this: {}",
-                    r#"img = (read_svg_contents node, target) || %(<span class="alt">#{node.alt}</span>)
-                    NOTE: The attrs list calculated above may not be usable.
-                    "#
-                );
-            } else if params.attrlist.has_option("interactive") {
-                todo!(
-                    "Port this: {}",
-                    r##"
-                        fallback = (node.attr? 'fallback') ? %(<img src="#{node.image_uri node.attr 'fallback'}" alt="#{encode_attribute_value node.alt}"#{attrs}#{@void_element_slash}>) : %(<span class="alt">#{node.alt}</span>)
-                        img = %(<object type="image/svg+xml" data="#{src = node.image_uri target}"#{attrs}>#{fallback}</object>)
-                        NOTE: The attrs list calculated above may not be usable.
-                    "##
-                );
+        let img = if is_svg && params.attrlist.has_option("inline") {
+            // Embed the SVG contents directly. When the contents cannot be read
+            // (no handler is registered, or it cannot find the file), fall back
+            // to the alt text, mirroring Ruby Asciidoctor.
+            read_svg_contents(&src, params.width, params.height, params.parser)
+                .unwrap_or_else(|| format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt))
+        } else if is_svg
+            && params.attrlist.has_option("interactive")
+            && params.parser.safe_mode() < SafeMode::Secure
+        {
+            // Render an interactive SVG as an `<object>` element so its embedded
+            // scripting and links remain live. A `fallback` image (or, failing
+            // that, the alt text) is nested inside for user agents that can't
+            // display the object.
+            let fallback = if let Some(fallback) = params.attrlist.named_attribute("fallback") {
+                let fallback_src = self.image_uri(fallback.value(), params.parser, None);
+                format!(r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#)
             } else {
-                format!(
-                    r#"<img {attrs}{void_element_slash}>"#,
-                    attrs = attrs.join(" "),
-                    void_element_slash = "",
-                )
-            }
-        } else {
+                format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt)
+            };
+
             format!(
-                r#"<img {attrs}{void_element_slash}>"#,
-                attrs = attrs.join(" "),
-                void_element_slash = "",
-                // img = %(<img src="#{src = node.image_uri target}"
-                // alt="#{encode_attribute_value node.alt}"#{attrs}#{@
-                // void_element_slash}>)
+                r#"<object type="image/svg+xml" data="{src}"{dimension_attrs}>{fallback}</object>"#
             )
+        } else {
+            format!(r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#)
         };
 
         render_icon_or_image(params.attrlist, &img, &src, "image", dest);
@@ -998,7 +991,12 @@ fn render_icon_or_image(
 ) {
     let mut img = img.to_string();
 
-    if let Some(link) = attrlist.named_attribute("link") {
+    // An inline SVG (`opts=inline`) is embedded directly in the flow of text and
+    // cannot be wrapped in a link, so the `link` attribute is ignored for it
+    // (matching Ruby Asciidoctor).
+    if !img.starts_with("<svg")
+        && let Some(link) = attrlist.named_attribute("link")
+    {
         let mut link = link.value();
         if link == "self" {
             link = src;
@@ -1048,6 +1046,77 @@ fn is_uri_ish(path: &str) -> bool {
 
 fn encode_spaces_in_uri(s: &str) -> String {
     s.replace(' ', "%20")
+}
+
+/// Matches the opening `<svg …>` tag at the start of an SVG document.
+static SVG_START_TAG_RX: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"\A<svg[^>]*>").unwrap()
+});
+
+/// Matches a `width`, `height`, or `style` attribute (with its leading
+/// whitespace) so they can be stripped from an SVG's opening tag.
+static SVG_SNIFF_WIDTH_HEIGHT_RX: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r#"(?s)\s+(?:width|height|style)=(?:"[^"]*"|'[^']*')"#).unwrap()
+});
+
+/// Reads and prepares the raw contents of an SVG file for inline embedding
+/// (`image:target.svg[opts=inline]`).
+///
+/// The SVG contents are supplied by the parser's [`SvgFileHandler`]; when no
+/// handler is registered (or it can't find the file) this returns `None` and
+/// the caller falls back to rendering the alt text.
+///
+/// Before returning, the contents are prepared to match Ruby Asciidoctor:
+///
+/// * any XML preamble or doctype preceding the `<svg>` tag is removed, and
+/// * if an explicit `width` and/or `height` was supplied on the macro, the
+///   opening `<svg>` tag's own `width`, `height`, and `style` attributes are
+///   dropped and the requested dimensions are appended in their place.
+///
+/// [`SvgFileHandler`]: crate::parser::SvgFileHandler
+fn read_svg_contents(
+    src: &str,
+    width: Option<&str>,
+    height: Option<&str>,
+    parser: &Parser,
+) -> Option<String> {
+    let handler = parser.svg_file_handler.as_ref()?;
+    let mut svg = handler.resolve_svg(src, parser)?;
+
+    // Strip anything that precedes the opening `<svg>` tag (e.g. `<?xml … ?>`).
+    if svg.starts_with('<')
+        && let Some(start) = svg.find("<svg")
+        && start > 0
+    {
+        svg = svg[start..].to_string();
+    }
+
+    // Rewrite the opening tag's dimensions only when at least one was supplied.
+    if (width.is_some() || height.is_some())
+        && let Some(start_tag) = SVG_START_TAG_RX.find(&svg).map(|m| m.as_str().to_string())
+    {
+        let rest = svg[start_tag.len()..].to_string();
+
+        // Attributes between `<svg` and the closing `>`, with any existing
+        // width/height/style removed.
+        let inner = &start_tag[4..start_tag.len() - 1];
+        let mut new_tag = format!("<svg{}", SVG_SNIFF_WIDTH_HEIGHT_RX.replace_all(inner, ""));
+
+        if let Some(width) = width {
+            new_tag.push_str(&format!(r#" width="{width}""#));
+        }
+
+        if let Some(height) = height {
+            new_tag.push_str(&format!(r#" height="{height}""#));
+        }
+
+        new_tag.push('>');
+        svg = format!("{new_tag}{rest}");
+    }
+
+    Some(svg)
 }
 
 /// Detects strings that resemble URIs.
