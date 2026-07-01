@@ -1275,8 +1275,8 @@ mod tests {
     fn with_inline_substitution_renderer() {
         let mut parser = Parser::default().with_inline_substitution_renderer(TestRenderer);
 
-        // Parse a simple document with special characters.
-        let doc = parser.parse("Hello & goodbye < world > test");
+        // Parse a simple document with special characters and a footnote.
+        let doc = parser.parse("Hello & goodbye < world > test footnote:[a note]");
 
         // The document should parse successfully.
         assert_eq!(doc.warnings().count(), 0);
@@ -1289,11 +1289,28 @@ mod tests {
         };
 
         // Our custom renderer should show [AMP], [LT], and [GT] instead of HTML
-        // entities.
+        // entities, and a resolved footnote as [FOOTNOTE:<index>].
         assert_eq!(
             simple_block.content().rendered(),
-            "Hello [AMP] goodbye [LT] world [GT] test"
+            "Hello [AMP] goodbye [LT] world [GT] test [FOOTNOTE:1]"
         );
+    }
+
+    #[test]
+    fn custom_renderer_renders_unresolved_footnote() {
+        let mut parser = Parser::default().with_inline_substitution_renderer(TestRenderer);
+
+        // An unresolved footnote reference exercises the renderer's `None`
+        // (no index) branch, which our custom renderer shows as
+        // [FOOTNOTE:<text>].
+        let doc = parser.parse("test.footnote:missing[]");
+
+        let block = doc.nested_blocks().next().unwrap();
+        let Block::Simple(simple_block) = block else {
+            panic!("Expected simple block, got: {block:?}");
+        };
+
+        assert_eq!(simple_block.content().rendered(), "test.[FOOTNOTE:missing]");
     }
 
     mod resolve_show_title {

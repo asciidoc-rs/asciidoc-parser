@@ -4385,6 +4385,43 @@ mod macros {
             assert_eq!(footnotes[0].text, "un massif forestier");
         }
 
+        #[test]
+        fn an_escaped_footnote_macro_is_emitted_literally() {
+            // A leading backslash escapes the macro: the backslash is dropped
+            // and the macro text is emitted verbatim, defining no footnote.
+            let doc = Parser::default().parse("A \\footnote:[not a footnote] here.");
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                &["A footnote:[not a footnote] here."]
+            );
+            assert!(doc.catalog().footnotes().is_empty());
+        }
+
+        #[test]
+        fn text_matching_the_footnote_gate_but_not_the_macro_is_left_untouched() {
+            // The footnote pass is gated on the text merely containing `tnote`
+            // (a substring of `footnote`). A macro-like token that trips the
+            // gate without being a footnote macro produces no match and is
+            // emitted unchanged, defining no footnote.
+            let doc = Parser::default().parse("A tnote:[x] here.");
+            assert_eq!(rendered_paragraphs(&doc), &["A tnote:[x] here."]);
+            assert!(doc.catalog().footnotes().is_empty());
+        }
+
+        #[test]
+        fn a_footnote_macro_immediately_before_a_closing_anchor_tag_is_not_matched() {
+            // Re-creates Asciidoctor's `(?!</a>)` look-ahead: a footnote macro
+            // whose closing bracket is immediately followed by `</a>` (i.e. it
+            // sits at the end of an already-rendered link's text) is left
+            // untouched rather than being processed a second time.
+            let mut content =
+                crate::content::Content::from(crate::Span::new("x footnote:[note]</a>"));
+            let parser = Parser::default();
+            crate::content::SubstitutionStep::Macros.apply(&mut content, &parser, None);
+
+            assert_eq!(content.rendered(), "x footnote:[note]</a>");
+        }
+
         // ---------------------------------------------------------------------
         // Deferred: these depend on features the crate does not yet implement.
 
