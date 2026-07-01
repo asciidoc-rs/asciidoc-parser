@@ -208,6 +208,19 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
     fn render_menu(&self, params: &MenuRenderParams, dest: &mut String);
+
+    /// Renders the inline reference produced by a [`footnote`] macro.
+    ///
+    /// The footnote's *text* is not rendered here (it is extracted to the
+    /// document's footnote list); this method renders only the superscript
+    /// marker that appears in the flow of text and links to the footnote.
+    ///
+    /// See [`FootnoteRenderParams`] for the three cases the renderer must
+    /// handle (a defining occurrence, a reference to an earlier footnote, and
+    /// an unresolved reference).
+    ///
+    /// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
+    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String);
 }
 
 /// Specifies which special character is being replaced in a call to
@@ -471,6 +484,41 @@ pub struct MenuRenderParams<'a> {
     /// Parser, used to read the `icons` document attribute when choosing how to
     /// render the caret between menu levels.
     pub parser: &'a Parser,
+}
+
+/// Provides parameters for rendering the inline marker of a [`footnote`] macro.
+///
+/// There are three cases the renderer must distinguish:
+///
+/// * A *defining* occurrence (`index` is `Some`, `is_reference` is `false`):
+///   the footnote introduces new text. The marker carries the footnote number
+///   and, when the footnote was given an ID, an `id` of its own.
+/// * A *reference* to an earlier footnote (`index` is `Some`, `is_reference` is
+///   `true`): a later occurrence (`footnote:id[]`) that reuses an existing
+///   footnote's number.
+/// * An *unresolved* reference (`index` is `None`, `is_reference` is `true`): a
+///   reference whose ID was never defined; the renderer emits a visible error
+///   marker built from [`text`](Self::text).
+///
+/// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
+#[derive(Clone, Debug)]
+pub struct FootnoteRenderParams<'a> {
+    /// The footnote's number, or `None` for an unresolved reference. Normally a
+    /// consecutive integer, but the `footnote-number` counter honors any seed
+    /// the document sets, so it is passed through as text.
+    pub index: Option<&'a str>,
+
+    /// The footnote's own ID, used only on a defining occurrence to produce the
+    /// `id="_footnote_<id>"` attribute on the marker.
+    pub id: Option<&'a str>,
+
+    /// `true` when this occurrence references an existing footnote (or fails to
+    /// resolve one); `false` for the defining occurrence.
+    pub is_reference: bool,
+
+    /// For an unresolved reference, the text to show inside the error marker
+    /// (the unresolved ID). Ignored in the other cases.
+    pub text: &'a str,
 }
 
 /// Implementation of [`InlineSubstitutionRenderer`] that renders substitutions
@@ -962,6 +1010,39 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 submenus = params.submenus.join(&submenu_joiner),
                 menuitem = params.menuitem.unwrap_or_default(),
             ));
+        }
+    }
+
+    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String) {
+        match params.index {
+            Some(index) if params.is_reference => {
+                // A reference to an already-defined footnote reuses its number
+                // but gets no anchor of its own.
+                dest.push_str(&format!(
+                    r##"<sup class="footnoteref">[<a class="footnote" href="#_footnotedef_{index}" title="View footnote.">{index}</a>]</sup>"##
+                ));
+            }
+
+            Some(index) => {
+                // A defining occurrence. When the footnote carries an ID, the
+                // marker is given a matching anchor so it can be linked to.
+                let id_attr = params
+                    .id
+                    .map(|id| format!(r#" id="_footnote_{id}""#))
+                    .unwrap_or_default();
+
+                dest.push_str(&format!(
+                    r##"<sup class="footnote"{id_attr}>[<a id="_footnoteref_{index}" class="footnote" href="#_footnotedef_{index}" title="View footnote.">{index}</a>]</sup>"##
+                ));
+            }
+
+            None => {
+                // An unresolved reference: the ID was never defined.
+                dest.push_str(&format!(
+                    r#"<sup class="footnoteref red" title="Unresolved footnote reference.">[{text}]</sup>"#,
+                    text = params.text
+                ));
+            }
         }
     }
 }

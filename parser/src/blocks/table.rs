@@ -1749,6 +1749,15 @@ fn parse_asciidoc_cell_body<'src>(
         (None, content)
     };
 
+    // A nested document keeps its own footnote registry: footnotes defined
+    // inside this cell must not be shared with (or numbered into the list of)
+    // the enclosing document. We swap in a fresh, empty footnote list for the
+    // duration of the cell parse and restore the parent's afterward, discarding
+    // the cell's footnotes (see issue #544). The `footnote-number` counter is a
+    // document-wide attribute and is deliberately *not* reset, so footnote
+    // numbering continues across the cell as Asciidoctor does.
+    let saved_footnotes = parser.take_footnotes();
+
     // Mark that we are inside an AsciiDoc cell (a nested document) for the
     // duration of the parse, so a table found within defaults its cell separator
     // to `!` rather than `|` (matching Asciidoctor's `Document#nested?`).
@@ -1756,6 +1765,8 @@ fn parse_asciidoc_cell_body<'src>(
     let mut maw = parse_blocks_until(body, |_| false, parser);
     parser.nested_document_depth -= 1;
     warnings.append(&mut maw.warnings);
+
+    parser.restore_footnotes(saved_footnotes);
 
     let inline = matches!(
         parser.attribute_value("doctype"),
