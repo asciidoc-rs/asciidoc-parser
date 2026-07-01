@@ -4496,8 +4496,6 @@ mod macros {
         //! Ported from Asciidoctor's `substitutions_test.rb` Button, Keyboard,
         //! and Menu macro contexts.
         //!
-        //! These were previously stubbed (un-ported Ruby) because the `btn:`,
-        //! `kbd:`, and `menu:` UI macros weren't implemented (see issue #263).
         //! The crate targets HTML5 output, so the DocBook-backend cases are
         //! intentionally omitted, as is the shorthand menu syntax (`"File >
         //! Save"`), which per the spec is not on a standards track.
