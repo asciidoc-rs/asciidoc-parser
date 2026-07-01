@@ -69,8 +69,10 @@ To make a reference to a previously defined footnote, you specify the ID in the 
     assert_eq!(footnotes[0].text, "Original.");
 }
 
-non_normative!(
-    r#"
+#[test]
+fn footnote_syntax() {
+    verifies!(
+        r#"
 .Footnote syntax
 [source#ex-footnote]
 ----
@@ -85,6 +87,39 @@ The text may span several lines.
 The text between the square brackets should be empty.
 If both the ID and text are specified, and the ID has already been defined by an earlier footnote, the text is ignored.
 
+"#
+    );
+
+    // The `ex-footnote` example (the `base-c` tagged region), rendered without
+    // the source-block callout annotations. It exercises each numbered point
+    // above: an anonymous footnote placed directly after a word, a footnote
+    // that assigns a unique ID (`disclaimer`) so it can be reused, and a
+    // reference to that footnote via its ID with empty text.
+    let doc = Parser::default().parse(
+        "The hail-and-rainbow protocol can be initiated at five levels:\n\n. doublefootnote:[The double hail-and-rainbow level makes my toes tingle.]\n. tertiary\n. supernumerary\n. supermassive\n. apocalyptic\n\nA bold statement!footnote:disclaimer[Opinions are my own.]\n\nAnother outrageous statement.footnote:disclaimer[]",
+    );
+
+    // Two footnotes are defined; the third occurrence only references the
+    // second, so it registers no new footnote.
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(footnotes.len(), 2);
+    assert_eq!(footnotes[0].index, 1);
+    assert_eq!(footnotes[0].id, None);
+    assert_eq!(
+        footnotes[0].text,
+        "The double hail-and-rainbow level makes my toes tingle."
+    );
+    assert_eq!(footnotes[1].index, 2);
+    assert_eq!(footnotes[1].id.as_deref(), Some("disclaimer"));
+    assert_eq!(footnotes[1].text, "Opinions are my own.");
+
+    // Two defining markers and one reference marker are rendered in the flow.
+    assert_css(&doc, "sup.footnote", 2);
+    assert_css(&doc, "sup.footnoteref", 1);
+}
+
+non_normative!(
+    r#"
 TIP: If you find that having to put the footnote macro directly adjacent to a word makes it difficult to read, you can insert an attribute reference in between that resolves to an empty string (e.g., `+word{empty}footnote:[text]+`).
 
 "#
