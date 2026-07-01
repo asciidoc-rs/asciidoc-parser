@@ -118,12 +118,31 @@ If both the ID and text are specified, and the ID has already been defined by an
     assert_css(&doc, "sup.footnoteref", 1);
 }
 
-non_normative!(
-    r#"
+#[test]
+fn empty_attribute_reference_separates_word_from_macro() {
+    verifies!(
+        r#"
 TIP: If you find that having to put the footnote macro directly adjacent to a word makes it difficult to read, you can insert an attribute reference in between that resolves to an empty string (e.g., `+word{empty}footnote:[text]+`).
 
 "#
-);
+    );
+
+    // The `{empty}` reference resolves to an empty string, so it separates the
+    // macro from the preceding word in the source without inserting anything in
+    // the output: the footnote marker still renders directly adjacent to the
+    // word.
+    let doc = Parser::default().parse("A word{empty}footnote:[The footnote text.] follows.");
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[
+            r##"A word<sup class="footnote">[<a id="_footnoteref_1" class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]</sup> follows."##
+        ]
+    );
+
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(footnotes[0].text, "The footnote text.");
+}
 
 #[test]
 fn numbered_consecutively() {
