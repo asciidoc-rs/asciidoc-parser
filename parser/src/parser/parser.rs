@@ -1311,6 +1311,18 @@ mod tests {
             }
         }
 
+        fn render_button(&self, text: &str, dest: &mut String) {
+            dest.push_str(&format!("[BUTTON:{text}]"));
+        }
+
+        fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+            dest.push_str(&format!("[KBD:{}]", keys.join("+")));
+        }
+
+        fn render_menu(&self, params: &crate::parser::MenuRenderParams, dest: &mut String) {
+            dest.push_str(&format!("[MENU:{}]", params.menu));
+        }
+
         fn render_footnote(&self, params: &crate::parser::FootnoteRenderParams, dest: &mut String) {
             match params.index {
                 Some(index) => dest.push_str(&format!("[FOOTNOTE:{index}]")),
