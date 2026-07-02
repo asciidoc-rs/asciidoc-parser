@@ -2747,6 +2747,51 @@ mod macros {
                 r#"<span class="image"><img src="fixtures/circle.svg" alt="Tiger" width="100"></span>"#
             );
         }
+
+        #[test]
+        fn an_inline_svg_image_appends_both_width_and_height_to_the_opening_tag() {
+            // When both a width and a height are supplied, both are appended to
+            // the opening `<svg>` tag (after the original width/height/style are
+            // stripped).
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
+                .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(
+                    "fixtures/circle.svg",
+                    CIRCLE_SVG,
+                )]))
+                .parse("image:circle.svg[Tiger,100,200,opts=inline]");
+
+            assert_eq!(
+                rendered(&doc),
+                concat!(
+                    r#"<span class="image"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100" height="200">"#,
+                    r#"<circle cx="250" cy="250" r="200"/></svg></span>"#,
+                )
+            );
+        }
+
+        #[test]
+        fn an_inline_svg_image_without_dimensions_keeps_the_original_opening_tag() {
+            // With neither a width nor a height supplied, the opening `<svg>` tag
+            // is left untouched; only the XML preamble is stripped.
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
+                .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(
+                    "fixtures/circle.svg",
+                    CIRCLE_SVG,
+                )]))
+                .parse("image:circle.svg[Tiger,opts=inline]");
+
+            assert_eq!(
+                rendered(&doc),
+                concat!(
+                    r#"<span class="image"><svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" style="fill:red" viewBox="0 0 500 500">"#,
+                    r#"<circle cx="250" cy="250" r="200"/></svg></span>"#,
+                )
+            );
+        }
     }
 
     #[test]
