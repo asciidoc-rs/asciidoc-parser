@@ -17,8 +17,8 @@ mod inline_substitution_renderer;
 pub use inline_substitution_renderer::{
     CalloutGuard, CalloutRenderParams, CharacterReplacementType, FootnoteRenderParams,
     HtmlSubstitutionRenderer, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-    InlineSubstitutionRenderer, LinkRenderParams, LinkRenderType, QuoteScope, QuoteType,
-    SpecialCharacter, XrefRenderParams,
+    InlineSubstitutionRenderer, LinkRenderParams, LinkRenderType, MenuRenderParams, QuoteScope,
+    QuoteType, SpecialCharacter, XrefRenderParams,
 };
 
 mod parser;

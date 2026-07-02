@@ -183,6 +183,32 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// [`visible_term`]: IndexTermRenderParams::visible_term
     fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String);
 
+    /// Renders a [button] UI macro (`btn:[label]`).
+    ///
+    /// `text` is the already-normalized button label. The renderer should write
+    /// an appropriate rendering (e.g. `<b class="button">label</b>`) to `dest`.
+    ///
+    /// [button]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
+    fn render_button(&self, text: &str, dest: &mut String);
+
+    /// Renders a [keyboard] UI macro (`kbd:[keys]`).
+    ///
+    /// `keys` holds one entry per key in the shortcut. A single-element slice
+    /// is a lone key; multiple entries form a key sequence. The renderer
+    /// should write an appropriate rendering (e.g. a lone `<kbd>` element,
+    /// or a `<span class="keyseq">` wrapping several `<kbd>` elements) to
+    /// `dest`.
+    ///
+    /// [keyboard]: https://docs.asciidoctor.org/asciidoc/latest/macros/keyboard-macro/
+    fn render_keyboard(&self, keys: &[String], dest: &mut String);
+
+    /// Renders a [menu] UI macro (`menu:menu[submenu > … > item]`).
+    ///
+    /// The renderer should write an appropriate rendering to `dest`.
+    ///
+    /// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
+    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String);
+
     /// Renders the inline reference produced by a [`footnote`] macro.
     ///
     /// The footnote's *text* is not rendered here (it is extracted to the
@@ -437,6 +463,27 @@ pub struct IndexTermRenderParams<'a> {
     /// text. `None` for a *concealed* index term (`(((p, s, t)))` or
     /// `indexterm:[p, s, t]`), which produces no visible output.
     pub visible_term: Option<&'a str>,
+}
+
+/// Provides parameters for rendering a [menu] UI macro.
+///
+/// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
+#[derive(Clone, Debug)]
+pub struct MenuRenderParams<'a> {
+    /// The top-level menu name.
+    pub menu: &'a str,
+
+    /// Zero or more intermediate submenu names, in order from outermost to
+    /// innermost.
+    pub submenus: &'a [String],
+
+    /// The final menu item, if any. `None` renders a bare menu reference (a
+    /// `menu:File[]` with no items).
+    pub menuitem: Option<&'a str>,
+
+    /// Parser, used to read the `icons` document attribute when choosing how to
+    /// render the caret between menu levels.
+    pub parser: &'a Parser,
 }
 
 /// Provides parameters for rendering the inline marker of a [`footnote`] macro.
@@ -921,6 +968,52 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // (already-substituted) visible term text.
         if let Some(term) = params.visible_term {
             dest.push_str(term);
+        }
+    }
+
+    fn render_button(&self, text: &str, dest: &mut String) {
+        dest.push_str(&format!(r#"<b class="button">{text}</b>"#));
+    }
+
+    fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+        if let [key] = keys {
+            dest.push_str(&format!("<kbd>{key}</kbd>"));
+        } else {
+            // The visual separator is always `+`, even when the source used a
+            // comma delimiter (e.g. `kbd:[Ctrl,T]`). This matches Asciidoctor's
+            // HTML5 output, where the delimiter only selects how keys are split,
+            // not how the sequence is displayed.
+            dest.push_str(&format!(
+                r#"<span class="keyseq"><kbd>{keys}</kbd></span>"#,
+                keys = keys.join("</kbd>+<kbd>")
+            ));
+        }
+    }
+
+    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
+        let caret = if params.parser.attribute_value("icons").as_maybe_str() == Some("font") {
+            r#"&#160;<i class="fa fa-angle-right caret"></i> "#
+        } else {
+            r#"&#160;<b class="caret">&#8250;</b> "#
+        };
+
+        let menu = params.menu;
+
+        if params.submenus.is_empty() {
+            if let Some(menuitem) = params.menuitem {
+                dest.push_str(&format!(
+                    r#"<span class="menuseq"><b class="menu">{menu}</b>{caret}<b class="menuitem">{menuitem}</b></span>"#
+                ));
+            } else {
+                dest.push_str(&format!(r#"<b class="menuref">{menu}</b>"#));
+            }
+        } else {
+            let submenu_joiner = format!(r#"</b>{caret}<b class="submenu">"#);
+            dest.push_str(&format!(
+                r#"<span class="menuseq"><b class="menu">{menu}</b>{caret}<b class="submenu">{submenus}</b>{caret}<b class="menuitem">{menuitem}</b></span>"#,
+                submenus = params.submenus.join(&submenu_joiner),
+                menuitem = params.menuitem.unwrap_or_default(),
+            ));
         }
     }
 

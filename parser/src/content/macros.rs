@@ -10,7 +10,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, LinkRenderType,
+        LinkRenderParams, LinkRenderType, MenuRenderParams,
     },
     warnings::WarningType,
 };
@@ -20,7 +20,7 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
     let found_square_bracket = text.contains('[');
     let found_colon = text.contains(':');
     let found_macroish = found_square_bracket && found_colon;
-    // let found_macroish_short = found_macroish && text.contains(":[");
+    let found_macroish_short = found_macroish && text.contains(":[");
 
     // A bibliography anchor (`[[[id]]]` / `[[[id,xreftext]]]`) is recognized only
     // when it prefixes the principal text of a bibliography list item; the parser
@@ -46,9 +46,38 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
     // Port Ruby Asciidoctor's implementation from
     // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb#L306-L347.
 
-    // TO DO (#263): Implement `kbd:` and `btn:` macros.
-    // Port Ruby Asciidoctor's implementation from
-    // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb#L349-L377.
+    // The UI macros (`kbd:`, `btn:`, and `menu:`) are recognized only when the
+    // `experimental` document attribute is set. Although the UI macros are a
+    // stable part of the AsciiDoc language, requiring the attribute is an
+    // optimization that lets the processor skip this work in the common case.
+    //
+    // Adapted from Asciidoctor's #sub_macros, found in
+    // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb#L349-L411.
+    //
+    // NOTE: The shorthand menu syntax (`"File > Save"`, handled by Asciidoctor's
+    // `InlineMenuRx`) is intentionally not implemented; per the spec it is not
+    // on a standards track.
+    if parser.is_attribute_set("experimental") {
+        if found_macroish_short && (text.contains("kbd:") || text.contains("btn:")) {
+            let replacer = InlineKbdBtnMacroReplacer(parser);
+
+            if let Cow::Owned(new_result) =
+                INLINE_KBD_BTN_MACRO.replace_all(content.rendered(), replacer)
+            {
+                content.rendered = new_result.into();
+            }
+        }
+
+        if found_macroish && text.contains("menu:") {
+            let replacer = InlineMenuMacroReplacer(parser);
+
+            if let Cow::Owned(new_result) =
+                INLINE_MENU_MACRO.replace_all(content.rendered(), replacer)
+            {
+                content.rendered = new_result.into();
+            }
+        }
+    }
 
     if found_macroish && (text.contains("image:") || text.contains("icon:")) {
         let replacer = InlineImageMacroReplacer(parser);
@@ -58,8 +87,6 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
             content.rendered = new_result.into();
         }
     }
-
-    let found_macroish_short = found_macroish && text.contains(":[");
 
     if (text.contains("((") && text.contains("))"))
         || (found_macroish_short && text.contains("dexterm"))
@@ -254,6 +281,191 @@ fn basename(path: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or_default()
         .to_string()
+}
+
+/// Matches a keyboard (`kbd:[…]`) or button (`btn:[…]`) UI macro.
+///
+/// ## Examples
+///
+/// * `kbd:[F3]`
+/// * `kbd:[Ctrl+Shift+T]`
+/// * `kbd:[Ctrl+\]]`
+/// * `btn:[Save]`
+static INLINE_KBD_BTN_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                    # extended mode; dot matches newline
+        (\\)?                       # (1) optional escape backslash
+        (kbd|btn):                  # (2) macro name
+        \[
+            ( .*?[^\\] )            # (3) bracketed content, ending in a non-backslash
+        \]
+        "#,
+    )
+    .unwrap()
+});
+
+#[derive(Debug)]
+struct InlineKbdBtnMacroReplacer<'p>(&'p Parser);
+
+impl Replacer for InlineKbdBtnMacroReplacer<'_> {
+    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
+        // Honor the escape: emit the macro text without the leading backslash.
+        if caps.get(1).is_some() {
+            dest.push_str(&caps[0][1..]);
+            return;
+        }
+
+        if &caps[2] == "kbd" {
+            let keys = split_kbd_keys(&caps[3]);
+            self.0.renderer.render_keyboard(&keys, dest);
+        } else {
+            // A button label is normalized like other bracketed macro text:
+            // surrounding whitespace and newlines are folded, and any escaped
+            // closing bracket is unescaped.
+            let text = normalize_index_text(&caps[3], true);
+            self.0.renderer.render_button(&text, dest);
+        }
+    }
+}
+
+/// Splits the raw argument of a `kbd:[…]` macro into individual keys, mirroring
+/// Asciidoctor's delimiter handling.
+///
+/// A single key produces a one-element vector; a key sequence is split on the
+/// first delimiter found — a comma (`,`) or a plus (`+`) — searching from the
+/// *second* character so that a leading delimiter is treated as a literal key
+/// (e.g. `kbd:[,te]` is the single key `,te`). If the argument ends with the
+/// delimiter, that trailing delimiter is preserved as the value of the final
+/// key (e.g. `kbd:[Ctrl + +]` yields `Ctrl` and `+`).
+fn split_kbd_keys(raw: &str) -> Vec<String> {
+    let mut keys = raw.trim().to_string();
+    if keys.contains(']') {
+        keys = keys.replace("\\]", "]");
+    }
+
+    // The delimiter is the earliest comma or plus that is not the first
+    // character. Scanning from the second character and taking the first match
+    // yields the same choice as Asciidoctor's `min` of the two candidate
+    // indexes. Because the scan starts at the second character, a single-key
+    // argument (or one whose only delimiter is a leading literal) yields `None`
+    // here, so no separate length check is needed.
+    let delim = keys.chars().skip(1).find(|c| *c == ',' || *c == '+');
+
+    if let Some(delim) = delim {
+        let ends_with_delim = keys.ends_with(delim);
+
+        // Drop the trailing delimiter before splitting; it is restored on the
+        // last key below. (Rust's `split` keeps trailing empty segments, which
+        // matches Asciidoctor's `split delim, -1`.)
+        let split_source = if ends_with_delim {
+            &keys[..keys.len() - delim.len_utf8()]
+        } else {
+            keys.as_str()
+        };
+
+        let mut parts: Vec<String> = split_source
+            .split(delim)
+            .map(|k| k.trim().to_string())
+            .collect();
+
+        if ends_with_delim && let Some(last) = parts.last_mut() {
+            last.push(delim);
+        }
+
+        parts
+    } else {
+        vec![keys]
+    }
+}
+
+/// Matches a menu (`menu:…[…]`) UI macro.
+///
+/// The shorthand form (`"File > Save"`) is intentionally not matched here; per
+/// the spec it is not on a standards track.
+///
+/// ## Examples
+///
+/// * `menu:File[]`
+/// * `menu:File[Save]`
+/// * `menu:View[Zoom > Reset]`
+/// * `menu:Tools[Project, Build]`
+static INLINE_MENU_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                        # extended mode; dot matches newline
+        \\?                             # optional escape backslash (not captured)
+        menu:
+        (                               # (1) menu name
+            \w                              # a single word character
+          |                                 # or
+            [\w&] [^\n\[]* [^\s\[]           # first word/ampersand char, then any run
+                                            # not containing a newline or '[', ending
+                                            # in a non-space, non-'[' character
+        )
+        \[ \x20*                        # opening '[' then optional spaces
+        (?:                             # menu items (optional)
+            |                               # empty
+            ( .*?[^\\] )                    # (2) items, ending in a non-backslash
+        )
+        \]
+        "#,
+    )
+    .unwrap()
+});
+
+#[derive(Debug)]
+struct InlineMenuMacroReplacer<'p>(&'p Parser);
+
+impl Replacer for InlineMenuMacroReplacer<'_> {
+    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
+        // Honor the escape: emit the macro text without the leading backslash.
+        if caps[0].starts_with('\\') {
+            dest.push_str(&caps[0][1..]);
+            return;
+        }
+
+        let menu = &caps[1];
+
+        // The items list, if present, is split into zero or more submenus and a
+        // trailing menu item. The `&gt;` delimiter (already substituted from
+        // `>`) takes precedence over a comma; without either, the whole list is
+        // a single menu item.
+        let (submenus, menuitem): (Vec<String>, Option<String>) = if let Some(items) = caps.get(2) {
+            let mut items = items.as_str().to_string();
+            if items.contains(']') {
+                items = items.replace("\\]", "]");
+            }
+
+            let delim = if items.contains("&gt;") {
+                Some("&gt;")
+            } else if items.contains(',') {
+                Some(",")
+            } else {
+                None
+            };
+
+            if let Some(delim) = delim {
+                let mut parts: Vec<String> =
+                    items.split(delim).map(|i| i.trim().to_string()).collect();
+                let menuitem = parts.pop();
+                (parts, menuitem)
+            } else {
+                (vec![], Some(items.trim_end().to_string()))
+            }
+        } else {
+            (vec![], None)
+        };
+
+        let params = MenuRenderParams {
+            menu,
+            submenus: &submenus,
+            menuitem: menuitem.as_deref(),
+            parser: self.0,
+        };
+
+        self.0.renderer.render_menu(&params, dest);
+    }
 }
 
 fn normalize_text_lf_escaped_bracket(text: &str) -> String {

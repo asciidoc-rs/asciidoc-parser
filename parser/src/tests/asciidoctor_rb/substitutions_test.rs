@@ -4492,174 +4492,309 @@ mod macros {
         fn footnotes_in_headings_are_numbered_out_of_sequence() {}
     }
 
+    mod ui_macros {
+        //! Ported from Asciidoctor's `substitutions_test.rb` Button, Keyboard,
+        //! and Menu macro contexts.
+        //!
+        //! The crate targets HTML5 output, so the DocBook-backend cases are
+        //! intentionally omitted, as is the shorthand menu syntax (`"File >
+        //! Save"`), which per the spec is not on a standards track.
+        //!
+        //! Each UI macro is recognized only when the `experimental` document
+        //! attribute is set, so every input is parsed with `:experimental:`.
+
+        use crate::tests::prelude::*;
+
+        /// Renders `input` as the body of a document that sets `experimental`,
+        /// returning the rendered (post-substitution) inline text.
+        fn render(input: &str) -> String {
+            render_with_attributes(&[], input)
+        }
+
+        /// As [`render`], but sets additional document attributes, each
+        /// supplied as a header line (e.g. `":icons: font"`).
+        fn render_with_attributes(attribute_lines: &[&str], input: &str) -> String {
+            let mut header = String::from(":experimental:\n");
+            for line in attribute_lines {
+                header.push_str(line);
+                header.push('\n');
+            }
+
+            let doc = Parser::default().parse(&format!("{header}\n{input}"));
+            rendered_paragraphs(&doc).join("")
+        }
+
+        // -- Button macro ----------------------------------------------------
+
+        #[test]
+        fn button_single_word() {
+            // 'btn macro'
+            assert_eq!(render("btn:[Save]"), r#"<b class="button">Save</b>"#);
+        }
+
+        #[test]
+        fn button_spans_multiple_lines() {
+            // 'btn macro that spans multiple lines'
+            assert_eq!(
+                render("btn:[Rebase and\nmerge]"),
+                r#"<b class="button">Rebase and merge</b>"#
+            );
+        }
+
+        // -- Keyboard macro --------------------------------------------------
+
+        #[test]
+        fn kbd_single_key() {
+            // 'kbd macro with single key'
+            assert_eq!(render("kbd:[F3]"), "<kbd>F3</kbd>");
+        }
+
+        #[test]
+        fn kbd_single_backslash_key() {
+            // 'kbd macro with single backslash key'
+            assert_eq!(render("kbd:[\\ ]"), "<kbd>\\</kbd>");
+        }
+
+        #[test]
+        fn kbd_key_combination() {
+            // 'kbd macro with key combination'
+            assert_eq!(
+                render("kbd:[Ctrl+Shift+T]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_key_combination_spans_multiple_lines() {
+            // 'kbd macro with key combination that spans multiple lines'
+            assert_eq!(
+                render("kbd:[Ctrl +\nT]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>T</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_key_combination_pluses_with_spaces() {
+            // 'kbd macro with key combination delimited by pluses with spaces'
+            assert_eq!(
+                render("kbd:[Ctrl + Shift + T]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_key_combination_commas() {
+            // 'kbd macro with key combination delimited by commas'
+            assert_eq!(
+                render("kbd:[Ctrl,Shift,T]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_key_combination_commas_with_spaces() {
+            // 'kbd macro with key combination delimited by commas with spaces'
+            assert_eq!(
+                render("kbd:[Ctrl, Shift, T]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_pluses_containing_comma_key() {
+            // 'kbd macro with key combination delimited by plus containing a comma key'
+            assert_eq!(
+                render("kbd:[Ctrl+,]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>,</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_commas_containing_plus_key() {
+            // 'kbd macro with key combination delimited by commas containing a plus key'
+            assert_eq!(
+                render("kbd:[Ctrl, +, Shift]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>+</kbd>+<kbd>Shift</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_last_key_matches_plus_delimiter() {
+            // 'kbd macro with key combination where last key matches plus delimiter'
+            assert_eq!(
+                render("kbd:[Ctrl + +]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>+</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_last_key_matches_comma_delimiter() {
+            // 'kbd macro with key combination where last key matches comma delimiter'
+            assert_eq!(
+                render("kbd:[Ctrl, ,]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>,</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_combination_containing_escaped_bracket() {
+            // 'kbd macro with key combination containing escaped bracket'
+            assert_eq!(
+                render("kbd:[Ctrl + \\]]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>]</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_combination_ending_in_backslash() {
+            // 'kbd macro with key combination ending in backslash'
+            assert_eq!(
+                render("kbd:[Ctrl + \\ ]"),
+                r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>\</kbd></span>"#
+            );
+        }
+
+        #[test]
+        fn kbd_looks_for_delimiter_beyond_first_character() {
+            // 'kbd macro looks for delimiter beyond first character'
+            assert_eq!(render("kbd:[,te]"), "<kbd>,te</kbd>");
+        }
+
+        #[test]
+        fn kbd_restores_trailing_delimiter_as_key_value() {
+            // 'kbd macro restores trailing delimiter as key value'
+            assert_eq!(render("kbd:[te,]"), "<kbd>te,</kbd>");
+        }
+
+        // -- Menu macro ------------------------------------------------------
+
+        #[test]
+        fn menu_macro_syntax() {
+            // 'should process menu using macro sytnax'
+            assert_eq!(render("menu:File[]"), r#"<b class="menuref">File</b>"#);
+        }
+
+        #[test]
+        fn menu_multiple_macros_same_line() {
+            // 'should process multiple menu macros in same line'
+            assert_eq!(
+                render("menu:File[] and menu:Edit[]"),
+                r#"<b class="menuref">File</b> and <b class="menuref">Edit</b>"#
+            );
+        }
+
+        #[test]
+        fn menu_with_menu_item_macro_syntax() {
+            // 'should process menu with menu item using macro syntax'
+            assert_eq!(
+                render("menu:File[Save As&#8230;]"),
+                r#"<span class="menuseq"><b class="menu">File</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Save As&#8230;</b></span>"#
+            );
+        }
+
+        #[test]
+        fn menu_macro_spans_multiple_lines() {
+            // 'should process menu macro that spans multiple lines'
+            assert_eq!(
+                render("menu:Preferences[Compile\non\nSave]"),
+                "<span class=\"menuseq\"><b class=\"menu\">Preferences</b>&#160;<b class=\"caret\">&#8250;</b> <b class=\"menuitem\">Compile\non\nSave</b></span>"
+            );
+        }
+
+        #[test]
+        fn menu_unescape_escaped_closing_bracket() {
+            // 'should unescape escaped closing bracket in menu macro'
+            assert_eq!(
+                render("menu:Preferences[Compile [on\\] Save]"),
+                r#"<span class="menuseq"><b class="menu">Preferences</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Compile [on] Save</b></span>"#
+            );
+        }
+
+        #[test]
+        fn menu_with_menu_item_when_font_icons_enabled() {
+            // 'should process menu with menu item using macro syntax when fonts icons are
+            // enabled'
+            assert_eq!(
+                render_with_attributes(&[":icons: font"], "menu:Tools[More Tools &gt; Extensions]"),
+                r#"<span class="menuseq"><b class="menu">Tools</b>&#160;<i class="fa fa-angle-right caret"></i> <b class="submenu">More Tools</b>&#160;<i class="fa fa-angle-right caret"></i> <b class="menuitem">Extensions</b></span>"#
+            );
+        }
+
+        #[test]
+        fn menu_with_menu_item_in_submenu_macro_syntax() {
+            // 'should process menu with menu item in submenu using macro syntax'
+            assert_eq!(
+                render("menu:Tools[Project &gt; Build]"),
+                r#"<span class="menuseq"><b class="menu">Tools</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">Project</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Build</b></span>"#
+            );
+        }
+
+        #[test]
+        fn menu_with_menu_item_in_submenu_comma_delimiter() {
+            // 'should process menu with menu item in submenu using macro syntax and comma
+            // delimiter'
+            assert_eq!(
+                render("menu:Tools[Project, Build]"),
+                r#"<span class="menuseq"><b class="menu">Tools</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">Project</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Build</b></span>"#
+            );
+        }
+
+        #[test]
+        fn menu_macro_with_multibyte_characters() {
+            // 'should process menu macro with items containing multibyte characters'
+            assert_eq!(
+                render("menu:视图[放大, 重置]"),
+                r#"<span class="menuseq"><b class="menu">视图</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">放大</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">重置</b></span>"#
+            );
+        }
+
+        #[test]
+        fn menu_macro_target_begins_with_character_reference() {
+            // 'should process a menu macro with a target that begins with a character
+            // reference'
+            assert_eq!(
+                render("menu:&#8942;[More Tools, Extensions]"),
+                r#"<span class="menuseq"><b class="menu">&#8942;</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">More Tools</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Extensions</b></span>"#
+            );
+        }
+
+        #[test]
+        fn menu_macro_target_ends_with_space_not_processed() {
+            // 'should not process a menu macro with a target that ends with a space'
+            // Only the second (well-formed) macro is processed; the first is
+            // left as literal text.
+            assert_eq!(
+                render("menu:foo [bar] menu:File[Save]"),
+                r#"menu:foo [bar] <span class="menuseq"><b class="menu">File</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Save</b></span>"#
+            );
+        }
+
+        // -- Escaping --------------------------------------------------------
+
+        #[test]
+        fn escaped_macros_are_emitted_verbatim() {
+            // A leading backslash escapes each UI macro, emitting the macro text
+            // without the backslash.
+            assert_eq!(render("\\kbd:[F3]"), "kbd:[F3]");
+            assert_eq!(render("\\btn:[Save]"), "btn:[Save]");
+            assert_eq!(render("\\menu:File[Save]"), "menu:File[Save]");
+        }
+    }
+
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby_2() {
         todo!(
             "{}",
             r###"
-        context 'Button macro' do
-            test 'btn macro' do
-            para = block_from_string 'btn:[Save]', attributes: { 'experimental' => '' }
-            assert_equal '<b class="button">Save</b>', para.sub_macros(para.source)
-            end
-
-            test 'btn macro that spans multiple lines' do
-            para = block_from_string %(btn:[Rebase and\nmerge]), attributes: { 'experimental' => '' }
-            assert_equal '<b class="button">Rebase and merge</b>', para.sub_macros(para.source)
-            end
-
-            test 'btn macro for docbook backend' do
-            para = block_from_string 'btn:[Save]', backend: 'docbook', attributes: { 'experimental' => '' }
-            assert_equal '<guibutton>Save</guibutton>', para.sub_macros(para.source)
-            end
-        end
-
-        context 'Keyboard macro' do
-            test 'kbd macro with single key' do
-            para = block_from_string 'kbd:[F3]', attributes: { 'experimental' => '' }
-            assert_equal '<kbd>F3</kbd>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with single backslash key' do
-            para = block_from_string "kbd:[#{BACKSLASH} ]", attributes: { 'experimental' => '' }
-            assert_equal '<kbd>\</kbd>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with single key, docbook backend' do
-            para = block_from_string 'kbd:[F3]', backend: 'docbook', attributes: { 'experimental' => '' }
-            assert_equal '<keycap>F3</keycap>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination' do
-            para = block_from_string 'kbd:[Ctrl+Shift+T]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination that spans multiple lines' do
-            para = block_from_string %(kbd:[Ctrl +\nT]), attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>T</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination, docbook backend' do
-            para = block_from_string 'kbd:[Ctrl+Shift+T]', backend: 'docbook', attributes: { 'experimental' => '' }
-            assert_equal '<keycombo><keycap>Ctrl</keycap><keycap>Shift</keycap><keycap>T</keycap></keycombo>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination delimited by pluses with spaces' do
-            para = block_from_string 'kbd:[Ctrl + Shift + T]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination delimited by commas' do
-            para = block_from_string 'kbd:[Ctrl,Shift,T]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination delimited by commas with spaces' do
-            para = block_from_string 'kbd:[Ctrl, Shift, T]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination delimited by plus containing a comma key' do
-            para = block_from_string 'kbd:[Ctrl+,]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>,</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination delimited by commas containing a plus key' do
-            para = block_from_string 'kbd:[Ctrl, +, Shift]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>+</kbd>+<kbd>Shift</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination where last key matches plus delimiter' do
-            para = block_from_string 'kbd:[Ctrl + +]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>+</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination where last key matches comma delimiter' do
-            para = block_from_string 'kbd:[Ctrl, ,]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>,</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination containing escaped bracket' do
-            para = block_from_string 'kbd:[Ctrl + \]]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>]</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro with key combination ending in backslash' do
-            para = block_from_string "kbd:[Ctrl + #{BACKSLASH} ]", attributes: { 'experimental' => '' }
-            assert_equal '<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>\\</kbd></span>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro looks for delimiter beyond first character' do
-            para = block_from_string 'kbd:[,te]', attributes: { 'experimental' => '' }
-            assert_equal '<kbd>,te</kbd>', para.sub_macros(para.source)
-            end
-
-            test 'kbd macro restores trailing delimiter as key value' do
-            para = block_from_string 'kbd:[te,]', attributes: { 'experimental' => '' }
-            assert_equal '<kbd>te,</kbd>', para.sub_macros(para.source)
-            end
-        end
-
-        context 'Menu macro' do
-            test 'should process menu using macro sytnax' do
-            para = block_from_string 'menu:File[]', attributes: { 'experimental' => '' }
-            assert_equal '<b class="menuref">File</b>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu for docbook backend' do
-            para = block_from_string 'menu:File[]', backend: 'docbook', attributes: { 'experimental' => '' }
-            assert_equal '<guimenu>File</guimenu>', para.sub_macros(para.source)
-            end
-
-            test 'should process multiple menu macros in same line' do
-            para = block_from_string 'menu:File[] and menu:Edit[]', attributes: { 'experimental' => '' }
-            assert_equal '<b class="menuref">File</b> and <b class="menuref">Edit</b>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu with menu item using macro syntax' do
-            para = block_from_string 'menu:File[Save As&#8230;]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">File</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Save As&#8230;</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu macro that spans multiple lines' do
-            input = %(menu:Preferences[Compile\non\nSave])
-            para = block_from_string input, attributes: { 'experimental' => '' }
-            assert_equal %(<span class="menuseq"><b class="menu">Preferences</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Compile\non\nSave</b></span>), para.sub_macros(para.source)
-            end
-
-            test 'should unescape escaped closing bracket in menu macro' do
-            input = 'menu:Preferences[Compile [on\\] Save]'
-            para = block_from_string input, attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">Preferences</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Compile [on] Save</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu with menu item using macro syntax when fonts icons are enabled' do
-            para = block_from_string 'menu:Tools[More Tools &gt; Extensions]', attributes: { 'experimental' => '', 'icons' => 'font' }
-            assert_equal '<span class="menuseq"><b class="menu">Tools</b>&#160;<i class="fa fa-angle-right caret"></i> <b class="submenu">More Tools</b>&#160;<i class="fa fa-angle-right caret"></i> <b class="menuitem">Extensions</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu with menu item for docbook backend' do
-            para = block_from_string 'menu:File[Save As&#8230;]', backend: 'docbook', attributes: { 'experimental' => '' }
-            assert_equal '<menuchoice><guimenu>File</guimenu> <guimenuitem>Save As&#8230;</guimenuitem></menuchoice>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu with menu item in submenu using macro syntax' do
-            para = block_from_string 'menu:Tools[Project &gt; Build]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">Tools</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">Project</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Build</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu with menu item in submenu for docbook backend' do
-            para = block_from_string 'menu:Tools[Project &gt; Build]', backend: 'docbook', attributes: { 'experimental' => '' }
-            assert_equal '<menuchoice><guimenu>Tools</guimenu> <guisubmenu>Project</guisubmenu> <guimenuitem>Build</guimenuitem></menuchoice>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu with menu item in submenu using macro syntax and comma delimiter' do
-            para = block_from_string 'menu:Tools[Project, Build]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">Tools</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">Project</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Build</b></span>', para.sub_macros(para.source)
-            end
-
+        // NOTE: The `btn:`, `kbd:`, and `menu:` (macro-syntax) UI-macro tests
+        // from this Asciidoctor context are ported as executable tests in
+        // `mod ui_macros` above.
+        //
+        // The cases that remain below exercise the *shorthand* menu syntax
+        // (`"File &gt; Save"`), which is intentionally not implemented: per the
+        // spec it is not on a standards track. See issue #263.
+        context 'Menu shorthand syntax (deferred)' do
             test 'should process menu with menu item using inline syntax' do
             para = block_from_string '"File &gt; Save As&#8230;"', attributes: { 'experimental' => '' }
             assert_equal '<span class="menuseq"><b class="menu">File</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Save As&#8230;</b></span>', para.sub_macros(para.source)
@@ -4675,27 +4810,9 @@ mod macros {
             assert_equal '<span class="xmltag">&lt;node&gt;</span><span class="classname">r</span>', para.sub_macros(para.source)
             end
 
-            test 'should process menu macro with items containing multibyte characters' do
-            para = block_from_string 'menu:视图[放大, 重置]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">视图</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">放大</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">重置</b></span>', para.sub_macros(para.source)
-            end
-
             test 'should process inline menu with items containing multibyte characters' do
             para = block_from_string '"视图 &gt; 放大 &gt; 重置"', attributes: { 'experimental' => '' }
             assert_equal '<span class="menuseq"><b class="menu">视图</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">放大</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">重置</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'should process a menu macro with a target that begins with a character reference' do
-            para = block_from_string 'menu:&#8942;[More Tools, Extensions]', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">&#8942;</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">More Tools</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Extensions</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'should not process a menu macro with a target that ends with a space' do
-            input = 'menu:foo [bar] menu:File[Save]'
-            para = block_from_string input, attributes: { 'experimental' => '' }
-            result = para.sub_macros para.source
-            assert_xpath '/span[@class="menuseq"]', result, 1
-            assert_xpath '//b[@class="menu"][text()="File"]', result, 1
             end
 
             test 'should process an inline menu that begins with a character reference' do
