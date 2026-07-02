@@ -1785,6 +1785,7 @@ The only limitation of this technique is that the content itself may not contain
         )]);
 
         let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_include_file_handler(handler)
             .parse(source);
 

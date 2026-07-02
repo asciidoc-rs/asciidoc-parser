@@ -4,12 +4,7 @@
 //!
 //! [docinfo]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
 
-// TODO(#277): Docinfo should be disabled or restricted under Asciidoctor's safe
-// modes (e.g. SECURE disables it entirely). This crate has no safe-mode concept
-// yet, so docinfo is always resolved when a handler is present. Track this at
-// https://github.com/asciidoc-rs/asciidoc-parser/issues/277.
-
-use crate::{Parser, content::substitute_attributes_in_text, document::InterpretedValue};
+use crate::{Parser, SafeMode, content::substitute_attributes_in_text, document::InterpretedValue};
 
 /// Where a [docinfo] file's content is injected into the converted output.
 ///
@@ -88,6 +83,14 @@ impl Docinfo {
     /// Returns empty content when no handler is configured or the `docinfo`
     /// attribute is unset.
     pub(crate) fn resolve(parser: &Parser) -> Self {
+        // Docinfo injects the contents of external files directly into the
+        // output, so Asciidoctor disables it entirely at `SafeMode::Secure` and
+        // above (the default). A caller who wants docinfo must relax the safe
+        // mode via [`Parser::with_safe_mode`].
+        if parser.safe_mode() >= SafeMode::Secure {
+            return Self::default();
+        }
+
         let Some(handler) = parser.docinfo_file_handler.as_ref() else {
             return Self::default();
         };
@@ -206,7 +209,7 @@ fn docinfosubs_includes_attributes(parser: &Parser) -> bool {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{Parser, document::DocinfoLocation, parser::DocinfoFileHandler};
+    use crate::{Parser, SafeMode, document::DocinfoLocation, parser::DocinfoFileHandler};
 
     /// A minimal handler that resolves docinfo from a fixed file-name map.
     #[derive(Debug)]
@@ -235,7 +238,10 @@ mod tests {
     }
 
     fn head_for(src: &str, files: &[(&str, &str)]) -> String {
+        // Docinfo is disabled at `SafeMode::Secure` (the default), so these
+        // tests run in `Server` mode, where docinfo is resolved.
         Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("mydoc.adoc")
             .with_docinfo_file_handler(MapHandler::new(files))
             .parse(src)

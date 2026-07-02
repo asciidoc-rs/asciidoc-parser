@@ -3,7 +3,7 @@ use std::{borrow::Cow, sync::LazyLock};
 use regex::{Regex, Replacer};
 
 use crate::{
-    HasSpan, Parser, Span,
+    HasSpan, Parser, SafeMode, Span,
     attributes::{Attrlist, AttrlistContext},
     document::{Attribute, InterpretedValue},
     parser::{DeferredWarning, SourceLine, SourceMap},
@@ -131,6 +131,28 @@ impl<'p> PreprocessorState<'p> {
                 && let Some(caps) = INCLUDE_DIRECTIVE.captures(line.data())
             {
                 let target = self.substitute_attributes(&caps[1]);
+
+                if self.parser.safe >= SafeMode::Secure {
+                    // The include directive is disabled at `SafeMode::Secure`
+                    // and above (the default): rather than embed the contents of
+                    // an arbitrary file, the directive is converted to a link to
+                    // its target, matching Asciidoctor. The include file handler
+                    // is never consulted in this case.
+                    if !has_reported_file {
+                        has_reported_file = true;
+                        self.source_map.append(
+                            self.output_line_number,
+                            SourceLine(to_owned(file_name), source_line_number),
+                        );
+                    }
+
+                    let replacement = format!("link:{target}[role=include]");
+                    self.output_line_number += 1;
+                    self.output.push_str(&replacement);
+                    self.output.push('\n');
+
+                    continue;
+                }
 
                 let attrlist = caps
                     .get(2)
@@ -371,6 +393,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
+        SafeMode,
         parser::{SourceLine, preprocessor::preprocess},
         tests::{fixtures::inline_file_handler::InlineFileHandler, prelude::*},
     };
@@ -404,6 +427,7 @@ mod tests {
         )]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -452,6 +476,7 @@ mod tests {
             InlineFileHandler::from_pairs([("header.adoc", ":author: John Doe\n:version: 1.0")]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -502,6 +527,7 @@ mod tests {
         ]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -562,6 +588,7 @@ mod tests {
         let handler = InlineFileHandler::from_pairs([("other.adoc", "Other content")]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -612,6 +639,7 @@ mod tests {
         )]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -635,7 +663,9 @@ mod tests {
         let source = "= Document Title\n\ninclude::missing.adoc[]\n\nMore content.";
 
         // NOTE: No include file handler provided.
-        let parser = Parser::default().with_primary_file_name("main.adoc");
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc");
 
         let (processed_source, source_map, warnings) = preprocess(source, &parser);
 
@@ -703,6 +733,7 @@ mod tests {
         ]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -723,6 +754,7 @@ mod tests {
         ]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -752,6 +784,7 @@ mod tests {
         let handler = InlineFileHandler::from_pairs([("data.csv", "row one\n\nrow two")]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -770,6 +803,7 @@ mod tests {
         let handler = InlineFileHandler::from_pairs([("other.adoc", "Other content")]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -798,6 +832,7 @@ mod tests {
         let handler = InlineFileHandler::from_pairs([("partial.adoc", "SHOULD NOT APPEAR")]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -854,6 +889,7 @@ mod tests {
         ]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -880,6 +916,7 @@ mod tests {
         )]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -918,6 +955,7 @@ mod tests {
         )]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -955,6 +993,7 @@ mod tests {
         ]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -995,6 +1034,7 @@ mod tests {
         ]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -1031,6 +1071,7 @@ mod tests {
         )]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
@@ -1061,6 +1102,7 @@ mod tests {
         )]);
 
         let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 

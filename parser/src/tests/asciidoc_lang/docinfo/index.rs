@@ -66,6 +66,7 @@ fn all_six() -> TestDocinfo {
 fn parse_docinfo(header_line: &str) -> crate::Document<'static> {
     let src = format!("= Doc\n{header_line}\n\nBody.");
     Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(all_six())
         .parse(&src)
@@ -252,6 +253,7 @@ The file extension of the docinfo file must match the file extension of the outp
         ("mydoc-docinfo-footer.html", "PRIVATE-FOOTER"),
     ]);
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(handler)
         .parse("= Doc\n:docinfo: shared,private\n\nBody.");
@@ -274,6 +276,7 @@ The file extension of the docinfo file must match the file extension of the outp
     // The docinfo file extension follows `outfilesuffix`.
     let xml = TestDocinfo::new(&[("docinfo.xml", "XML-HEAD")]);
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(xml)
         .parse("= Doc\n:docinfo: shared-head\n:outfilesuffix: .xml\n\nBody.");
@@ -283,6 +286,7 @@ The file extension of the docinfo file must match the file extension of the outp
     // different document is not used.
     let other = TestDocinfo::new(&[("otherdoc-docinfo.html", "NOPE")]);
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(other)
         .parse("= Doc\n:docinfo: private-head\n\nBody.");
@@ -378,6 +382,7 @@ If other AsciiDoc files are added to the same folder, and `docinfo` is set to `s
 
     // With no `docinfo` attribute, no docinfo is applied.
     let d = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(all_six())
         .parse("= Doc\n\nBody.");
@@ -416,6 +421,7 @@ Note that if you use this attribute, only the specified folder will be searched;
     // (it resolves relative to the document directory).
     let handler = TestDocinfo::new(&[("docinfo.html", "HEAD")]);
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(handler.clone())
         .parse("= Doc\n:docinfo: shared-head\n\nBody.");
@@ -429,6 +435,7 @@ Note that if you use this attribute, only the specified folder will be searched;
     // is then responsible for searching only that folder.
     let handler = TestDocinfo::new(&[("docinfo.html", "HEAD")]);
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(handler.clone())
         .parse("= Doc\n:docinfo: shared-head\n:docinfodir: common/meta\n\nBody.");
@@ -534,6 +541,7 @@ Then the `<head>` tag in the converted HTML would include:
     // (`docinfosubs` defaults to `attributes`).
     let handler = TestDocinfo::new(&[("docinfo.html", "<edition>{revnumber}</edition>")]);
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(handler)
         .parse("= Doc\n:revnumber: 1.0\n:docinfo: shared-head\n\nBody.");
@@ -544,7 +552,7 @@ Then the `<head>` tag in the converted HTML would include:
         "docinfo.html",
         "<link rel=\"license\" href=\"{license-url}\" title=\"{license-title}\">",
     )]);
-    let doc = Parser::default()
+    let doc = Parser::default().with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(handler)
         .parse(
@@ -558,7 +566,7 @@ Then the `<head>` tag in the converted HTML would include:
     // `docinfosubs` controls which substitutions apply: a list that omits
     // `attributes` leaves attribute references untouched.
     let handler = TestDocinfo::new(&[("docinfo.html", "{license-url}")]);
-    let doc = Parser::default()
+    let doc = Parser::default().with_safe_mode(SafeMode::Server)
         .with_primary_file_name("mydoc.adoc")
         .with_docinfo_file_handler(handler)
         .parse(

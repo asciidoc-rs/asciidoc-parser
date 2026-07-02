@@ -25,6 +25,7 @@ Where that content is included in the document determines how it will be process
     let handler = InlineFileHandler::from_pairs([("partial.adoc", "Included paragraph.")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("Before include.\n\ninclude::partial.adoc[]\n\nAfter include.");
 
@@ -57,6 +58,7 @@ The include directive is a <<include-processing,preprocessor directive>>, which 
     let handler = InlineFileHandler::from_pairs([("expander.adoc", "EXPANDED")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("----\ninclude::expander.adoc[]\n----");
 
@@ -98,6 +100,7 @@ An include directive must be placed on a line by itself with the following synta
         InlineFileHandler::from_pairs([("part1.adoc", "First"), ("part2.adoc", "Second")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("include::part1.adoc[] include::part2.adoc[]");
 
@@ -131,6 +134,7 @@ The target is required.
     let handler = InlineFileHandler::from_pairs([("", "SHOULD NOT APPEAR")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("main.adoc")
         .with_include_file_handler(handler)
         .parse("Before.\n\ninclude::[]\n\nAfter.");
@@ -160,6 +164,7 @@ However, the target must not start with a space character (since that would turn
     let handler = InlineFileHandler::from_pairs([("my file.adoc", "Spaced target.")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("include::my file.adoc[]");
 
@@ -172,6 +177,7 @@ However, the target must not start with a space character (since that would turn
     let handler2 = InlineFileHandler::from_pairs([(" spaced.adoc", "SHOULD NOT APPEAR")]);
 
     let doc2 = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler2)
         .parse("include:: spaced.adoc[]");
 
@@ -207,6 +213,7 @@ fn simplest_case() {
     let handler = InlineFileHandler::from_pairs([("partial.adoc", "Simplest form.")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("include::partial.adoc[]");
 
@@ -253,9 +260,12 @@ That separation should be encoded in the parent document instead.
         ("chapter03.adoc", "Chapter three."),
     ]);
 
-    let doc = Parser::default().with_include_file_handler(handler).parse(
-        "include::chapter01.adoc[]\n\ninclude::chapter02.adoc[]\n\ninclude::chapter03.adoc[]",
-    );
+    let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler)
+        .parse(
+            "include::chapter01.adoc[]\n\ninclude::chapter02.adoc[]\n\ninclude::chapter03.adoc[]",
+        );
 
     let paras = rendered_paragraphs(&doc);
     let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
@@ -292,7 +302,7 @@ Document body.
         ("attributes-urls.adoc", ":url-attr: https://example.com"),
     ]);
 
-    let doc = Parser::default().with_include_file_handler(handler).parse(
+    let doc = Parser::default().with_safe_mode(SafeMode::Server).with_include_file_handler(handler).parse(
         "= Document Title\nAuthor Name\ninclude::attributes-settings.adoc[]\ninclude::attributes-urls.adoc[]\n:url-example: https://example.org\n\nDocument body.",
     );
 
@@ -334,6 +344,7 @@ Only after the lines from the target of the include directive are added to the c
         InlineFileHandler::from_pairs([("sec.adoc", "== Included Section\n\nSection body.")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("= Doc Title\n\ninclude::sec.adoc[]");
 
@@ -341,16 +352,31 @@ Only after the lines from the target of the include directive are added to the c
     assert!(matches!(block, crate::blocks::Block::Section(_)));
 }
 
-// TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/277):
-// Implement secure mode handling for the include directive.
-non_normative!(
-    r#"
+#[test]
+fn disabled_in_secure_mode() {
+    verifies!(
+        r#"
 IMPORTANT: The include directive is disabled when Asciidoctor is run in secure mode.
 In secure mode, the include directive is converted to a link in the output document.
 See xref:asciidoctor::safe-modes.adoc[] to learn more.
 
 "#
-);
+    );
+
+    // At `SafeMode::Secure` (the default), the include directive is not
+    // processed. Even though a handler is configured that would resolve the
+    // target, the directive is converted to a link (carrying the `include`
+    // role) so the file's contents are never embedded.
+    let handler = InlineFileHandler::from_pairs([("inc.adoc", "SHOULD NOT APPEAR")]);
+    let doc = Parser::default()
+        .with_include_file_handler(handler)
+        .parse("= Doc Title\n\ninclude::inc.adoc[]");
+
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        vec![r#"<a href="inc.adoc" class="bare include">inc.adoc</a>"#.to_string()]
+    );
+}
 
 #[test]
 fn escaping_an_include_directive() {
@@ -369,6 +395,7 @@ If you don't want the include directive to be processed, you must escape it usin
     let handler = InlineFileHandler::from_pairs([("just-an-example.ext", "SHOULD NOT APPEAR")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("\\include::just-an-example.ext[]");
 
@@ -394,6 +421,7 @@ fn indentation_prevents_processing() {
     // The indented directive from the spec example does not cause an inclusion:
     // the listing block retains the directive text verbatim.
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(InlineFileHandler::from_pairs([(
             "just-an-example.ext",
             "SHOULD NOT APPEAR",
@@ -410,6 +438,7 @@ fn indentation_prevents_processing() {
     // prevents processing: an indented directive without a backslash is left
     // untouched too.
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(InlineFileHandler::from_pairs([(
             "just-an-example.ext",
             "SHOULD NOT APPEAR",
@@ -437,6 +466,7 @@ Escaping the directive is necessary _even if it appears in a verbatim block_ sin
     let handler = InlineFileHandler::from_pairs([("ex.adoc", "IMPORTED")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("----\ninclude::ex.adoc[]\n----");
 
@@ -485,6 +515,7 @@ The following message will also be inserted into the output:
     let handler = InlineFileHandler::from_pairs([("other.adoc", "unused")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("my-document.adoc")
         .with_include_file_handler(handler)
         .parse("Before.\n\ninclude::content.adoc[]");
@@ -535,6 +566,7 @@ If you don't want the AsciiDoc processor to emit a warning, but rather drop the 
     let handler = InlineFileHandler::from_pairs([("other.adoc", "unused")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_primary_file_name("my-document.adoc")
         .with_include_file_handler(handler)
         .parse("Before.\n\ninclude::content.adoc[opts=optional]\n\nAfter.");
@@ -573,6 +605,7 @@ A common pattern to help here is to define the paths in attributes defined in th
     let handler = InlineFileHandler::from_pairs([("_includes/fragment1.adoc", "Fragment one.")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse(":includedir: _includes\n\ninclude::{includedir}/fragment1.adoc[]");
 
@@ -610,6 +643,7 @@ The content of all included content goes through some form of normalization.
     let handler = InlineFileHandler::from_pairs([("results.csv", "Year,Total\r\n2016,1234")]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("include::results.csv[]");
 
@@ -648,6 +682,7 @@ If the file is recognized as an AsciiDoc file (i.e., it has one of the following
     ]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("include::chapter.adoc[]");
 
@@ -691,6 +726,7 @@ Running the preprocessor on the included content allows includes to be nested, t
     ]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("include::outer.adoc[]");
 
@@ -732,6 +768,7 @@ The content is inserted as is (after being normalized).
     ]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse("include::results.csv[]");
 

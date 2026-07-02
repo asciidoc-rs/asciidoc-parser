@@ -616,7 +616,9 @@ include::example$subs.adoc[tag=subs-sub]
             "[source,xml,subs=\"-callouts\"]\n.An illegal XML tag\n----\n<1>\n  content inside \"1\" tag\n</1>\n----",
         )]);
 
-        let mut parser = Parser::default().with_include_file_handler(handler);
+        let mut parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler);
         let doc = parser.parse("include::example$subs.adoc[tag=subs-sub]\n");
 
         let block = doc.nested_blocks().next().unwrap();
@@ -659,6 +661,7 @@ In the above example, the `attributes` substitution step is added to the beginni
         )]);
 
         let mut parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
             .with_intrinsic_attribute("version", "1.0", ModificationContext::Anywhere)
             .with_include_file_handler(handler);
         let doc = parser.parse("include::example$subs.adoc[tag=subs-multi]\n");

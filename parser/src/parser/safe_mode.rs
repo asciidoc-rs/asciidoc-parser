@@ -45,3 +45,29 @@ pub enum SafeMode {
     #[default]
     Secure = 20,
 }
+
+impl SafeMode {
+    /// The lowercase name of this safe mode (`unsafe`, `safe`, `server`,
+    /// `secure`).
+    ///
+    /// This is the value exposed through the `safe-mode-name` intrinsic
+    /// attribute and is also used to build the `safe-mode-<name>` flag
+    /// attribute. It matches the (lowercased) name reported by Ruby
+    /// Asciidoctor.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Unsafe => "unsafe",
+            Self::Safe => "safe",
+            Self::Server => "server",
+            Self::Secure => "secure",
+        }
+    }
+
+    /// The numeric level of this safe mode (`0`, `1`, `10`, or `20`).
+    ///
+    /// This is the value exposed through the `safe-mode-level` intrinsic
+    /// attribute. Higher numbers indicate a more restrictive (safer) mode.
+    pub(crate) fn level(self) -> u8 {
+        self as u8
+    }
+}

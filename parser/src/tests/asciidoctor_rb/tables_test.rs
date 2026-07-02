@@ -1331,7 +1331,9 @@ mod psv {
     fn preprocessor_directive_on_first_line_of_an_asciidoc_table_cell_should_be_processed() {
         let handler =
             InlineFileHandler::from_pairs([("fixtures/include-file.adoc", "included content")]);
-        let mut parser = Parser::default().with_include_file_handler(handler);
+        let mut parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler);
         let doc = parser.parse("|===\na|include::fixtures/include-file.adoc[]\n|===");
 
         // The `include::` on the cell's first line is expanded, so the cell holds
@@ -1712,7 +1714,9 @@ mod csv {
             "fixtures/data.tsv",
             "First\tSecond\tThird\na\tb\tc\n1\t2\t\nx\ty\tz\n",
         )]);
-        let mut parser = Parser::default().with_include_file_handler(handler);
+        let mut parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler);
         let doc = parser.parse("[%header,format=tsv]\n|===\ninclude::fixtures/data.tsv[]\n|===");
 
         assert_css(&doc, "table > tbody > tr", 3);
