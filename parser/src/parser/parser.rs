@@ -12,6 +12,7 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
+        SafeMode, SvgFileHandler,
         built_in_attrs::{built_in_attrs, built_in_default_values},
         preprocessor::preprocess,
     },
@@ -53,6 +54,17 @@ pub struct Parser {
     /// Handler for resolving docinfo files. If absent, no docinfo content is
     /// resolved.
     pub(crate) docinfo_file_handler: Option<Rc<dyn DocinfoFileHandler>>,
+
+    /// Handler for reading the contents of an SVG file requested by an inline
+    /// image with the `inline` option. If absent, inline SVG images fall back
+    /// to rendering their alt text.
+    pub(crate) svg_file_handler: Option<Rc<dyn SvgFileHandler>>,
+
+    /// The safe mode under which the document is parsed and rendered. Controls
+    /// security-sensitive rendering behavior (such as whether an interactive
+    /// SVG image is rendered as an `<object>` element). Defaults to
+    /// [`SafeMode::Secure`].
+    pub(crate) safe: SafeMode,
 
     /// Document catalog for tracking referenceable elements during parsing.
     /// This is created during parsing and transferred to the Document when
@@ -207,6 +219,8 @@ impl Default for Parser {
             path_resolver: PathResolver::default(),
             include_file_handler: None,
             docinfo_file_handler: None,
+            svg_file_handler: None,
+            safe: SafeMode::default(),
             catalog: RefCell::new(Catalog::new()),
             last_section_number: SectionNumber::default(),
             last_appendix_section_number: SectionNumber {
@@ -766,6 +780,38 @@ impl Parser {
     ) -> Self {
         self.docinfo_file_handler = Some(Rc::new(handler));
         self
+    }
+
+    /// Sets the [`SvgFileHandler`] for this parser.
+    ///
+    /// The SVG file handler is responsible for providing the raw contents of an
+    /// SVG file requested by an inline image with the `inline` option (e.g.
+    /// `image:diagram.svg[opts=inline]`). If no handler is provided, inline SVG
+    /// images fall back to rendering their alt text.
+    ///
+    /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
+    pub fn with_svg_file_handler<SFH: SvgFileHandler + 'static>(mut self, handler: SFH) -> Self {
+        self.svg_file_handler = Some(Rc::new(handler));
+        self
+    }
+
+    /// Sets the [`SafeMode`] under which the document is parsed and rendered.
+    ///
+    /// The default is [`SafeMode::Secure`], the most conservative setting.
+    /// Relaxing the safe mode enables security-sensitive rendering behavior,
+    /// such as rendering an interactive SVG image as an `<object>` element.
+    ///
+    /// [`SafeMode`]: crate::SafeMode
+    pub fn with_safe_mode(mut self, safe: SafeMode) -> Self {
+        self.safe = safe;
+        self
+    }
+
+    /// Returns the [`SafeMode`] under which this parser operates.
+    ///
+    /// [`SafeMode`]: crate::SafeMode
+    pub fn safe_mode(&self) -> SafeMode {
+        self.safe
     }
 
     /// Returns the document name (`docname`): the base name of the primary
