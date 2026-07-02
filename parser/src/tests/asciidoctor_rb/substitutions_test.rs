@@ -2661,7 +2661,8 @@ mod macros {
         }
 
         #[test]
-        fn should_ignore_link_attribute_if_value_is_self_and_image_target_is_inline_svg() {
+        fn should_render_link_attribute_verbatim_when_value_is_self_and_image_target_is_inline_svg()
+        {
             let doc = Parser::default()
                 .with_safe_mode(SafeMode::Server)
                 .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
@@ -2790,6 +2791,40 @@ mod macros {
                     r#"<span class="image"><svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" style="fill:red" viewBox="0 0 500 500">"#,
                     r#"<circle cx="250" cy="250" r="200"/></svg></span>"#,
                 )
+            );
+        }
+
+        #[test]
+        fn special_characters_in_alt_text_are_encoded_in_the_span_fallback() {
+            // The alt text used in a `<span class="alt">` fallback is already
+            // HTML-encoded by the time the image macro is substituted: the
+            // special-characters step (which runs before macros) has turned
+            // `<`, `>`, and `&` into entities. A literal double quote is left
+            // as-is in element-body content (it is only encoded in attribute
+            // context, such as an `alt="…"` attribute), matching Ruby
+            // Asciidoctor. This holds for both the interactive `<object>`
+            // fallback and the inline no-handler fallback.
+            let interactive = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "images", ModificationContext::Anywhere)
+                .parse(r#"image:tiger.svg[A <b> & "c",opts=interactive]"#);
+
+            assert_eq!(
+                rendered(&interactive),
+                concat!(
+                    r#"<span class="image"><object type="image/svg+xml" data="images/tiger.svg">"#,
+                    r#"<span class="alt">A &lt;b&gt; &amp; "c"</span></object></span>"#,
+                )
+            );
+
+            let inline = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("imagesdir", "images", ModificationContext::Anywhere)
+                .parse(r#"image:missing.svg[A <b> & "c",opts=inline]"#);
+
+            assert_eq!(
+                rendered(&inline),
+                r#"<span class="image"><span class="alt">A &lt;b&gt; &amp; "c"</span></span>"#
             );
         }
     }

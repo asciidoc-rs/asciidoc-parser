@@ -1039,6 +1039,12 @@ fn encode_spaces_in_uri(s: &str) -> String {
 }
 
 /// Matches the opening `<svg …>` tag at the start of an SVG document.
+///
+/// Like Ruby Asciidoctor's equivalent (`/\A<svg[^>]*>/`), the `[^>]*` stops at
+/// the first `>`, so a `>` appearing unencoded inside an attribute value would
+/// truncate the match. That cannot happen in well-formed XML (where `>` must be
+/// written as `&gt;`), so this only affects malformed input, and then only by
+/// leaving the opening tag's dimensions unrewritten.
 static SVG_START_TAG_RX: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(r"\A<svg[^>]*>").unwrap()
