@@ -347,12 +347,12 @@ fn split_kbd_keys(raw: &str) -> Vec<String> {
     // The delimiter is the earliest comma or plus that is not the first
     // character. Scanning from the second character and taking the first match
     // yields the same choice as Asciidoctor's `min` of the two candidate
-    // indexes.
+    // indexes. Because the scan starts at the second character, a single-key
+    // argument (or one whose only delimiter is a leading literal) yields `None`
+    // here, so no separate length check is needed.
     let delim = keys.chars().skip(1).find(|c| *c == ',' || *c == '+');
 
-    if keys.chars().count() > 1
-        && let Some(delim) = delim
-    {
+    if let Some(delim) = delim {
         let ends_with_delim = keys.ends_with(delim);
 
         // Drop the trailing delimiter before splitting; it is restored on the

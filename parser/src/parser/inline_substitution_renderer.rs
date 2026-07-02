@@ -979,6 +979,10 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         if let [key] = keys {
             dest.push_str(&format!("<kbd>{key}</kbd>"));
         } else {
+            // The visual separator is always `+`, even when the source used a
+            // comma delimiter (e.g. `kbd:[Ctrl,T]`). This matches Asciidoctor's
+            // HTML5 output, where the delimiter only selects how keys are split,
+            // not how the sequence is displayed.
             dest.push_str(&format!(
                 r#"<span class="keyseq"><kbd>{keys}</kbd></span>"#,
                 keys = keys.join("</kbd>+<kbd>")
