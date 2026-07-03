@@ -42,3 +42,20 @@ pub(crate) fn rendered_paragraphs(doc: &crate::Document<'_>) -> Vec<String> {
     }
     out
 }
+
+/// Returns the document's first top-level block as a [`Break`], panicking if it
+/// is absent or not a break.
+///
+/// [`Break`]: crate::blocks::Break
+pub(crate) fn first_break<'src>(doc: &'src crate::Document) -> &'src crate::blocks::Break<'src> {
+    let block = doc
+        .nested_blocks()
+        .next()
+        .expect("expected at least one block");
+
+    let crate::blocks::Block::Break(brk) = block else {
+        panic!("Wrong block type: {block:#?}");
+    };
+
+    brk
+}

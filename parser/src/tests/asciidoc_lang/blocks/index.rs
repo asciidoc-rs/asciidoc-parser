@@ -580,85 +580,309 @@ The context of the block is still the same, but it has additional metadata to in
         assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Verbatim);
     }
 
-    // TO DO: Cover the remainder ...
+    non_normative!(
+        r#"
+We also see the block style used for other purposes.
+"#
+    );
 
-    // We also see the block style used for other purposes.
-    // The `appendix` block style (e.g., `[appendix]`) above the section title
-    // specializes the section as an appendix (a special section) and thus has
-    // special semantics and behavior. In the model, the section's style is
-    // dually stored as the `sectname`. One of the five admonition styles
-    // (e.g., `[TIP]`) above an example block transforms the example block
-    // into an admonition block with that name (i.e., label). In the model,
-    // the admonition style in lowercase is stored in the `name` attribute.
-    // A block style (e.g., `[circle]` or `[loweralpha]`) above an unordered
-    // or ordered list, respectively, alters the marker used in front of
-    // list items when displayed. A block style (e.g., `[qanda]` and
-    // `[horizontal]`) above a description list can either change its
-    // semantics or layout.
-    //
-    // The declared block style can be used to change the context of a block,
-    // referred to as xref:masquerading.adoc[block masquerading]. Consider the
-    // case of this alternate syntax for a listing block using the literal
-    // block delimiters.
-    //
-    // [source]
-    // ----
-    // [listing]
-    // ....
-    // a > b
-    // ....
-    // ----
-    //
-    // Since the declared block style matches the name of a context, the context
-    // of the block becomes `listing` and the resolved block style remains
-    // unset. That means the resolved block style differs from the declared
-    // block style. To learn more about how to change the context of a block
-    // using the declared block style, see xref:masquerading.adoc[].
-    //
-    // To get a complete picture of a block's identity, you must consider both
-    // the context and the style. The resolved style specializes the context
-    // to give it special behavior or semantics.
+    #[test]
+    fn appendix_style_specializes_a_section() {
+        verifies!(
+            r#"
+The `appendix` block style (e.g., `[appendix]`) above the section title specializes the section as an appendix (a special section) and thus has special semantics and behavior.
+"#
+        );
+
+        // The `[appendix]` block style above a section title declares the
+        // `appendix` style and specializes the section as an appendix (a
+        // special section).
+        let doc = Parser::default().parse("[appendix]\n== My Appendix\n\nContent.");
+        let block = doc.nested_blocks().next().expect("expected a block");
+
+        assert_eq!(block.declared_style(), Some("appendix"));
+        assert_eq!(block.raw_context().as_ref(), "section");
+
+        let crate::blocks::Block::Section(section) = block else {
+            panic!("expected a section block, got {block:?}");
+        };
+
+        assert_eq!(section.section_type(), SectionType::Appendix);
+
+        non_normative!(
+            r#"
+In the model, the section's style is dually stored as the `sectname`.
+"#
+        );
+
+        // Asciidoctor's Ruby model stores the special-section style both as the
+        // block style and as the `sectname`. This crate models the same
+        // distinction with the strongly typed `SectionType` (asserted above)
+        // alongside the declared block style.
+    }
+
+    #[test]
+    fn admonition_style_transforms_an_example_block() {
+        verifies!(
+            r#"
+One of the five admonition styles (e.g., `[TIP]`) above an example block transforms the example block into an admonition block with that name (i.e., label).
+"#
+        );
+
+        // A `[TIP]` block style above an example structural container transforms
+        // the example block into an admonition block whose label is `Tip`.
+        let doc = Parser::default().parse("[TIP]\n====\nPay attention.\n====");
+        let block = doc.nested_blocks().next().expect("expected a block");
+
+        assert_eq!(block.raw_context().as_ref(), "admonition");
+
+        let crate::blocks::Block::Admonition(admonition) = block else {
+            panic!("expected an admonition block, got {block:?}");
+        };
+
+        assert_eq!(admonition.label(), "Tip");
+
+        non_normative!(
+            r#"
+In the model, the admonition style in lowercase is stored in the `name` attribute.
+"#
+        );
+
+        // The admonition style in lowercase (`tip`) is exposed via `name()`.
+        assert_eq!(admonition.name(), "tip");
+    }
+
+    #[test]
+    fn list_style_alters_the_marker() {
+        verifies!(
+            r#"
+A block style (e.g., `[circle]` or `[loweralpha]`) above an unordered or ordered list, respectively, alters the marker used in front of list items when displayed.
+"#
+        );
+
+        // A `[circle]` block style above an unordered list declares the `circle`
+        // style on the list.
+        let doc = Parser::default().parse("[circle]\n* one\n* two");
+        let block = doc.nested_blocks().next().expect("expected a block");
+        assert_eq!(block.raw_context().as_ref(), "list");
+        assert_eq!(block.declared_style(), Some("circle"));
+
+        // A `[loweralpha]` block style above an ordered list declares the
+        // `loweralpha` style on the list.
+        let doc = Parser::default().parse("[loweralpha]\n. one\n. two");
+        let block = doc.nested_blocks().next().expect("expected a block");
+        assert_eq!(block.raw_context().as_ref(), "list");
+        assert_eq!(block.declared_style(), Some("loweralpha"));
+
+        // The parser captures the declared block style; how it "alters the
+        // marker used in front of list items when displayed" is a converter
+        // concern.
+    }
+
+    #[test]
+    fn description_list_style() {
+        verifies!(
+            r#"
+A block style (e.g., `[qanda]` and `[horizontal]`) above a description list can either change its semantics or layout.
+
+"#
+        );
+
+        // A `[qanda]` block style above a description list declares the `qanda`
+        // style on the list.
+        let doc = Parser::default().parse("[qanda]\nQuestion::\n  Answer.");
+        let block = doc.nested_blocks().next().expect("expected a block");
+        assert_eq!(block.raw_context().as_ref(), "list");
+        assert_eq!(block.declared_style(), Some("qanda"));
+
+        // A `[horizontal]` block style above a description list declares the
+        // `horizontal` style on the list.
+        let doc =
+            Parser::default().parse("[horizontal]\nCPU:: The brain.\nRAM:: The short-term memory.");
+        let block = doc.nested_blocks().next().expect("expected a block");
+        assert_eq!(block.raw_context().as_ref(), "list");
+        assert_eq!(block.declared_style(), Some("horizontal"));
+
+        // The parser captures the declared block style; whether it changes the
+        // description list's semantics or layout is a converter concern.
+    }
+
+    #[test]
+    fn block_masquerading() {
+        verifies!(
+            r#"
+The declared block style can be used to change the context of a block, referred to as xref:masquerading.adoc[block masquerading].
+Consider the case of this alternate syntax for a listing block using the literal block delimiters.
+
+[source]
+----
+[listing]
+....
+a > b
+....
+----
+
+Since the declared block style matches the name of a context, the context of the block becomes `listing` and the resolved block style remains unset.
+That means the resolved block style differs from the declared block style.
+To learn more about how to change the context of a block using the declared block style, see xref:masquerading.adoc[].
+
+"#
+        );
+
+        // The `[listing]` block style above the literal (`....`) delimiters
+        // changes the context of the block: the raw (default) context is
+        // `literal`, but the declared block style matches the `listing` context,
+        // so the resolved context becomes `listing` and the resolved block style
+        // is left unset.
+        let doc = Parser::default().parse("[listing]\n....\na > b\n....");
+        let block = doc.nested_blocks().next().expect("expected a block");
+
+        assert_eq!(block.raw_context().as_ref(), "literal");
+        assert_eq!(block.resolved_context().as_ref(), "listing");
+        assert_eq!(block.declared_style(), Some("listing"));
+    }
+
+    non_normative!(
+        r#"
+To get a complete picture of a block's identity, you must consider both the context and the style.
+The resolved style specializes the context to give it special behavior or semantics.
+"#
+    );
 }
 
-#[test]
-#[ignore]
-fn block_commonalities() {
-    // == Block commonalities
-    //
-    // Blocks are defined using some form of line-oriented syntax.
-    // Section blocks begin with a section title line.
-    // Delimited blocks are enclosed in a matching pair of delimiter lines.
-    // Paragraph blocks must be contiguous lines.
-    //
-    // All blocks accommodate zero or more lines of metadata stacked linewise
-    // directly on top of the block. These lines populate the properties of the
-    // block, such as the ID, title, and options. These metadata lines are as
-    // follows:
-    //
-    // * Zero or more block attribute lines (which populate the block's attributes)
-    // * An optional block anchor line
-    // * An optional block title line (many blocks also support a corresponding
-    //   caption)
-    // * An optional ID
-    // * An optional set of roles
-    // * An optional set of options
-    //
-    // For example, consider a sidebar block with a title and ID:
-    //
-    // ----
-    // .Styles of music
-    // [#music-styles]
-    // ****
-    // Go off on a tangent to describe what a style of music is.
-    // ****
-    // ----
-    //
-    // When it comes to processing content, blocks split off into different groups.
-    // These groups are primarily associated with the block's content model.
-    //
-    // Paragraph blocks and verbatim blocks have an implicit and modifiable set of
-    // xref:subs:index.adoc[substitutions]. Substitutions do not apply to compound
-    // blocks (i.e., blocks that may contain nested blocks).
+mod block_commonalities {
+    use crate::{blocks::ContentModel, tests::prelude::*};
 
-    todo!("Add support for block metadata");
+    non_normative!(
+        r#"
+== Block commonalities
+
+Blocks are defined using some form of line-oriented syntax.
+Section blocks begin with a section title line.
+Delimited blocks are enclosed in a matching pair of delimiter lines.
+Paragraph blocks must be contiguous lines.
+
+"#
+    );
+
+    #[test]
+    fn metadata_lines() {
+        verifies!(
+            r#"
+All blocks accommodate zero or more lines of metadata stacked linewise directly on top of the block.
+These lines populate the properties of the block, such as the ID, title, and options.
+These metadata lines are as follows:
+
+* Zero or more block attribute lines (which populate the block's attributes)
+* An optional block anchor line
+* An optional block title line (many blocks also support a corresponding caption)
+* An optional ID
+* An optional set of roles
+* An optional set of options
+
+"#
+        );
+
+        // A sidebar block stacked with a title line and a block attribute line
+        // (declaring an ID, a role, and an option via attribute shorthand)
+        // populates the corresponding block properties.
+        let doc = Parser::default()
+            .parse(".Styles of music\n[#music-styles.feature%collapsible]\n****\nAn aside.\n****");
+        let block = doc.nested_blocks().next().expect("expected a block");
+
+        assert!(block.attrlist().is_some());
+        assert_eq!(block.title(), Some("Styles of music"));
+        assert_eq!(block.id(), Some("music-styles"));
+        assert_eq!(block.roles(), vec!["feature"]);
+        assert_eq!(block.options(), vec!["collapsible"]);
+    }
+
+    #[test]
+    fn first_bracketed_line_is_a_block_attribute_line() {
+        verifies!(
+            r#"
+CAUTION: If the first line of a block begins with `[` and ends with `]`, that line will be interpretted as a block attribute line.
+It does not matter what text is contained between those brackets.
+For example, if the first description list term starts with `[` and definition on the same line ends with `]`, it will not appear to the parser as a description list entry, but rather as a block attribute line.
+To workaround this interpretation of the source, you need to move the trailing `]` (and whatever goes with it) to the next line.
+
+"#
+        );
+
+        // A first line that begins with `[` and ends with `]` is consumed as a
+        // block attribute line rather than as content, regardless of the text
+        // between the brackets. Here it is interpreted as the block's attribute
+        // list (declaring the `sidebar` style) rather than as a description list
+        // term/definition.
+        let doc = Parser::default().parse("[sidebar]\nAn aside.");
+        let block = doc.nested_blocks().next().expect("expected a block");
+
+        assert_eq!(block.resolved_context().as_ref(), "sidebar");
+        assert_eq!(block.declared_style(), Some("sidebar"));
+    }
+
+    #[test]
+    fn sidebar_with_a_title_and_id() {
+        verifies!(
+            r#"
+For example, consider a sidebar block with a title and ID:
+
+----
+.Styles of music
+[#music-styles]
+****
+Go off on a tangent to describe what a style of music is.
+****
+----
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ".Styles of music\n[#music-styles]\n****\nGo off on a tangent to describe what a style of music is.\n****",
+        );
+        let block = doc.nested_blocks().next().expect("expected a block");
+
+        assert_eq!(block.resolved_context().as_ref(), "sidebar");
+        assert_eq!(block.title(), Some("Styles of music"));
+        assert_eq!(block.id(), Some("music-styles"));
+    }
+
+    #[test]
+    fn content_processing_groups() {
+        non_normative!(
+            r#"
+When it comes to processing content, blocks split off into different groups.
+These groups are primarily associated with the block's content model.
+
+"#
+        );
+
+        verifies!(
+            r#"
+Paragraph blocks and verbatim blocks have an implicit and modifiable set of xref:subs:index.adoc[substitutions].
+Substitutions do not apply to compound blocks (i.e., blocks that may contain nested blocks).
+
+"#
+        );
+
+        // A paragraph block (simple content model) has the normal substitution
+        // group.
+        let doc = Parser::default().parse("A normal paragraph.");
+        let paragraph = doc.nested_blocks().next().expect("expected a block");
+        assert_eq!(paragraph.content_model(), ContentModel::Simple);
+        assert_eq!(paragraph.substitution_group(), SubstitutionGroup::Normal);
+
+        // A verbatim block has the verbatim substitution group.
+        let doc = Parser::default().parse("....\nliteral text\n....");
+        let verbatim = doc.nested_blocks().next().expect("expected a block");
+        assert_eq!(verbatim.content_model(), ContentModel::Verbatim);
+        assert_eq!(verbatim.substitution_group(), SubstitutionGroup::Verbatim);
+
+        // A compound block (a section) contains nested blocks; substitutions do
+        // not apply to it.
+        let doc = Parser::default().parse("== Section Title\n\nContent of section.");
+        let compound = doc.nested_blocks().next().expect("expected a block");
+        assert_eq!(compound.content_model(), ContentModel::Compound);
+    }
 }
