@@ -892,6 +892,22 @@ impl<'src> IsBlock<'src> for Block<'src> {
         }
     }
 
+    fn id(&'src self) -> Option<&'src str> {
+        // A `MediaBlock` additionally recognizes a named `id=` _inside_ its
+        // macro attribute list (e.g. `image::sunset.jpg[id=sunset-img]`), which
+        // its own `id()` override handles. Every other variant keeps the trait
+        // default (explicit anchor or block attribute list only); notably, this
+        // does not surface a section's auto-generated ID at the `Block` level,
+        // matching the prior behavior (sections register their IDs separately).
+        match self {
+            Self::Media(b) => b.id(),
+            _ => self
+                .anchor()
+                .map(|a| a.data())
+                .or_else(|| self.attrlist().and_then(|attrlist| attrlist.id())),
+        }
+    }
+
     fn anchor(&'src self) -> Option<Span<'src>> {
         match self {
             Self::Simple(b) => b.anchor(),

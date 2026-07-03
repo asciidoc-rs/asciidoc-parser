@@ -200,10 +200,9 @@ include::example$image.adoc[tag=in-url]
         );
     }
 
-    #[ignore]
     #[test]
     fn using_a_url_as_the_base_url_for_images() {
-        to_do_verifies!(
+        verifies!(
             r#"
 NOTE: The value of `imagesdir` is ignored when the image target is a URL.
 
@@ -219,6 +218,38 @@ This time, `imagesdir` is used since the image target is not a URL (the value of
 "#
         );
 
-        let _doc = Parser::default().parse(":imagesdir-old: {imagesdir}\n:imagesdir: https://upload.wikimedia.org/wikipedia/commons\n\nimage::3/35/Tux.svg[Tux,250,350]\n\n:imagesdir: {imagesdir-old}");
+        // When `imagesdir` is set to a URL and the image target is *relative*,
+        // the target is joined onto the base URL. (The `example$image.adoc`
+        // `base-url` tag sets `imagesdir` to the Wikimedia Commons URL and then
+        // references `3/35/Tux.svg`.) Because this crate renders inline images
+        // but only stubs whole-block rendering, the URL-base join is exercised
+        // here through the inline form.
+        let doc = Parser::default()
+            .with_intrinsic_attribute(
+                "imagesdir",
+                "https://upload.wikimedia.org/wikipedia/commons",
+                ModificationContext::Anywhere,
+            )
+            .parse("image:3/35/Tux.svg[Tux,250,350]");
+
+        assert_eq!(
+            rendered_paragraphs(&doc).join("\n"),
+            r#"<span class="image"><img src="https://upload.wikimedia.org/wikipedia/commons/3/35/Tux.svg" alt="Tux" width="250" height="350"></span>"#
+        );
+
+        // Per the NOTE above, the `imagesdir` base is ignored when the target is
+        // itself a URL: the absolute target is used verbatim.
+        let doc = Parser::default()
+            .with_intrinsic_attribute(
+                "imagesdir",
+                "https://upload.wikimedia.org/wikipedia/commons",
+                ModificationContext::Anywhere,
+            )
+            .parse("image:https://example.org/3/35/Tux.svg[Tux,250,350]");
+
+        assert_eq!(
+            rendered_paragraphs(&doc).join("\n"),
+            r#"<span class="image"><img src="https://example.org/3/35/Tux.svg" alt="Tux" width="250" height="350"></span>"#
+        );
     }
 }

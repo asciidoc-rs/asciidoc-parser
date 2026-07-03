@@ -530,6 +530,25 @@ pub struct FootnoteRenderParams<'a> {
 #[derive(Debug)]
 pub struct HtmlSubstitutionRenderer {}
 
+impl HtmlSubstitutionRenderer {
+    /// Resolve an image target to a `src`/`data` reference, honoring a
+    /// macro-level `imagesdir` attribute.
+    ///
+    /// A named `imagesdir` attribute _on the image macro itself_ overrides the
+    /// document `imagesdir` for this one image (Asciidoctor 2.1+). When it is
+    /// absent, resolution falls back to [`image_uri`], which uses the document
+    /// `imagesdir`. As with the document attribute, an absolute-URL target
+    /// ignores the base entirely.
+    ///
+    /// [`image_uri`]: InlineSubstitutionRenderer::image_uri
+    fn image_src(&self, target: &str, attrlist: &Attrlist, parser: &Parser) -> String {
+        match attrlist.named_attribute("imagesdir") {
+            Some(imagesdir) => normalize_web_path(target, parser, Some(imagesdir.value()), true),
+            None => self.image_uri(target, parser, None),
+        }
+    }
+}
+
 impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
         match type_ {
@@ -694,7 +713,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     }
 
     fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
-        let src = self.image_uri(params.target, params.parser, None);
+        let src = self.image_src(params.target, params.attrlist, params.parser);
         let alt_encoded = encode_attribute_value(params.alt.clone());
 
         // The dimension attributes (width, height, and title) are shared by the
@@ -742,7 +761,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // that, the alt text) is nested inside for user agents that can't
             // display the object.
             let fallback = if let Some(fallback) = params.attrlist.named_attribute("fallback") {
-                let fallback_src = self.image_uri(fallback.value(), params.parser, None);
+                let fallback_src = self.image_src(fallback.value(), params.attrlist, params.parser);
                 format!(r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#)
             } else {
                 format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt)
