@@ -82,12 +82,3 @@ As with Markdown, spaces between the characters is optional.
     let block = doc.nested_blocks().next().expect("expected a block");
     assert_eq!(block.resolved_context().as_ref(), "listing");
 }
-
-fn first_break<'src>(doc: &'src crate::Document) -> &'src crate::blocks::Break<'src> {
-    let block = doc.nested_blocks().next().unwrap();
-    let crate::blocks::Block::Break(brk) = block else {
-        panic!("Wrong block type: {block:#?}");
-    };
-
-    brk
-}

@@ -19,23 +19,23 @@ include::partial$thematic-breaks.adoc[]
     );
 
     let doc = Parser::default().parse("'''");
-    let brk = first_block_from(&doc);
+    let brk = first_break(&doc);
     assert_eq!(brk.type_(), BreakType::Thematic);
 
     let doc = Parser::default().parse("---");
-    let brk = first_block_from(&doc);
+    let brk = first_break(&doc);
     assert_eq!(brk.type_(), BreakType::Thematic);
 
     let doc = Parser::default().parse("- - -");
-    let brk = first_block_from(&doc);
+    let brk = first_break(&doc);
     assert_eq!(brk.type_(), BreakType::Thematic);
 
     let doc = Parser::default().parse("***");
-    let brk = first_block_from(&doc);
+    let brk = first_break(&doc);
     assert_eq!(brk.type_(), BreakType::Thematic);
 
     let doc = Parser::default().parse("* * *");
-    let brk = first_block_from(&doc);
+    let brk = first_break(&doc);
     assert_eq!(brk.type_(), BreakType::Thematic);
 }
 
@@ -48,7 +48,7 @@ include::partial$page-breaks.adoc[]
     );
 
     let doc = Parser::default().parse("<<<");
-    let brk = first_block_from(&doc);
+    let brk = first_break(&doc);
     assert_eq!(brk.type_(), BreakType::Page);
 
     // Forced page break.
@@ -285,13 +285,4 @@ include::partial$page-breaks.adoc[]
             },
         }
     );
-}
-
-fn first_block_from<'src>(doc: &'src crate::Document) -> &'src crate::blocks::Break<'src> {
-    let block = doc.nested_blocks().next().unwrap();
-    let crate::blocks::Block::Break(brk) = block else {
-        panic!("Wrong block type: {block:#?}");
-    };
-
-    brk
 }

@@ -88,12 +88,3 @@ When columns are not enabled or supported, the column break is expected to act a
     // attribute list for a downstream converter to act on (exercised in
     // `breaks.rs`).
 }
-
-fn first_break<'src>(doc: &'src crate::Document) -> &'src crate::blocks::Break<'src> {
-    let block = doc.nested_blocks().next().unwrap();
-    let crate::blocks::Block::Break(brk) = block else {
-        panic!("Wrong block type: {block:#?}");
-    };
-
-    brk
-}
