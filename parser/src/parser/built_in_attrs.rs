@@ -8,6 +8,13 @@ use crate::{
     parser::{AllowableValue, AttributeValue, ModificationContext},
 };
 
+/// The built-in default value of the `iconsdir` attribute, used when neither
+/// `iconsdir` nor `imagesdir` has been configured. When `imagesdir` is set to a
+/// non-empty value and `iconsdir` is left at this default, the icons directory
+/// is instead derived as `{imagesdir}/icons` (see
+/// [`Document::parse`](crate::document::Document)).
+pub(crate) const DEFAULT_ICONSDIR: &str = "./images/icons";
+
 /// The built-in attribute table is identical for every parser, so build it
 /// once and share it behind an [`Arc`]. A [`Parser`] holds this shared table
 /// and copies it (via `Arc::make_mut`) only when it first modifies an
@@ -195,8 +202,11 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ### Image and icon attributes
     attrs.insert("iconfont-remote".to_owned(), empty(ApiOrHeader, Set));
 
-    // TO DO: Replace ./images/icons with value of imagesdir if that is non-default.
-    attrs.insert("iconsdir".to_owned(), set(Anywhere, "./images/icons"));
+    // The default is `{imagesdir}/icons`; when `imagesdir` is left empty this
+    // resolves to `./images/icons`. The `imagesdir`-relative derivation for a
+    // non-empty `imagesdir` is applied after the header is parsed (see
+    // `Document::parse`).
+    attrs.insert("iconsdir".to_owned(), set(Anywhere, DEFAULT_ICONSDIR));
     attrs.insert("imagesdir".to_owned(), any(Anywhere, Set));
 
     // ### Source highlighting and formatting attributes

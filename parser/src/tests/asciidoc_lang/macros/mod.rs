@@ -4,6 +4,8 @@ mod complex_urls;
 mod footnote;
 mod icon_macro;
 mod icons;
+mod icons_font;
+mod icons_image;
 mod image_format;
 mod image_link;
 mod image_position;

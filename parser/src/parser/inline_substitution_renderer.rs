@@ -100,11 +100,13 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// Construct a reference or data URI to an icon image for the specified
     /// icon name.
     ///
-    /// If the `icon` attribute is set on this block, the name is ignored and
-    /// the value of this attribute is used as the target image path. Otherwise,
-    /// construct a target image path by concatenating the value of the
-    /// `iconsdir` attribute, the icon name, and the value of the `icontype`
-    /// attribute (defaulting to `png`).
+    /// The target image path is derived from the icon name. If the name already
+    /// carries a file extension, it is used verbatim; otherwise the value of
+    /// the `icontype` attribute (defaulting to `png`) is appended. In both
+    /// cases the path is resolved relative to the `iconsdir` attribute.
+    /// This mirrors the icon macro's image mode, where `icontype` is only
+    /// consulted when the icon type must be inferred (i.e. the target has
+    /// no file extension).
     ///
     /// The target image path is then passed through the `image_uri()` method.
     /// If the `data-uri` attribute is set on the document, the image will be
@@ -112,32 +114,17 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// The return value of this method can be safely used in an image tag.
     fn icon_uri(&self, name: &str, _attrlist: &Attrlist, parser: &Parser) -> String {
-        let icontype = parser
-            .attribute_value("icontype")
-            .as_maybe_str()
-            .unwrap_or("png")
-            .to_owned();
+        let icon = if has_extname(name) {
+            name.to_owned()
+        } else {
+            let icontype = parser
+                .attribute_value("icontype")
+                .as_maybe_str()
+                .unwrap_or("png")
+                .to_owned();
 
-        if false {
-            todo!(
-                "Enable this when doing block-related icon attributes: {}",
-                r#"
-                let icon = if let Some(icon) = attrlist.named_attribute("icon") {
-                    let icon_str = icon.value();
-                    if has_extname(icon_str) {
-                        icon_str.to_string()
-                    } else {
-                        format!("{icon_str}.{icontype}")
-                    }
-                } else {
-                    // This part is defaulted for now.
-                    format!("{name}.{icontype}")
-                };
-            "#
-            );
-        }
-
-        let icon = format!("{name}.{icontype}");
+            format!("{name}.{icontype}")
+        };
 
         self.image_uri(&icon, parser, Some("iconsdir"))
     }
@@ -1131,6 +1118,18 @@ fn normalize_web_path(
 
 fn is_uri_ish(path: &str) -> bool {
     path.contains(':') && URI_SNIFF.is_match(path)
+}
+
+/// Reports whether the final path segment of `path` carries a file extension,
+/// i.e. it contains a `.` that is neither the first nor the last character of
+/// the segment. Mirrors Asciidoctor's `Helpers.extname?`, used by the icon
+/// macro to decide whether the `icontype` attribute should be appended.
+fn has_extname(path: &str) -> bool {
+    let segment = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    match segment.rfind('.') {
+        Some(i) => i > 0 && i < segment.len() - 1,
+        None => false,
+    }
 }
 
 fn encode_spaces_in_uri(s: &str) -> String {
