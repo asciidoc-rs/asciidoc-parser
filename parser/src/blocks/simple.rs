@@ -459,14 +459,7 @@ fn parse_lines<'src>(
     let filtered_lines = filtered_lines.join("\n");
     let mut content: Content<'src> = Content::from_filtered(source, filtered_lines);
 
-    let sub_group = match style {
-        // Only apply Verbatim substitutions to literal blocks detected by indentation.
-        // Listing and Source styles declared via attribute list still use Normal subs.
-        SimpleBlockStyle::Literal => SubstitutionGroup::Verbatim,
-        SimpleBlockStyle::Listing | SimpleBlockStyle::Source | SimpleBlockStyle::Paragraph => {
-            SubstitutionGroup::Normal
-        }
-    };
+    let sub_group = base_substitution_group(style);
 
     sub_group.override_via_attrlist(attrlist.as_ref()).apply(
         &mut content,
@@ -478,6 +471,21 @@ fn parse_lines<'src>(
         item: (content, style),
         after: next,
     })
+}
+
+/// The base substitution group for a simple block of the given style, before
+/// any `subs` override from the attribute list is applied.
+///
+/// Only literal paragraphs (detected by indentation) use verbatim
+/// substitutions; the listing and source styles declared via an attribute list
+/// still use normal substitutions.
+fn base_substitution_group(style: SimpleBlockStyle) -> SubstitutionGroup {
+    match style {
+        SimpleBlockStyle::Literal => SubstitutionGroup::Verbatim,
+        SimpleBlockStyle::Listing | SimpleBlockStyle::Source | SimpleBlockStyle::Paragraph => {
+            SubstitutionGroup::Normal
+        }
+    }
 }
 
 impl<'src> IsBlock<'src> for SimpleBlock<'src> {
@@ -523,6 +531,13 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
 
     fn attrlist(&'src self) -> Option<&'src Attrlist<'src>> {
         self.attrlist.as_ref()
+    }
+
+    fn substitution_group(&'src self) -> SubstitutionGroup {
+        // Mirror the group actually applied to this block's content in
+        // `parse_lines`: the base group derived from the style, then any `subs`
+        // override from the attribute list.
+        base_substitution_group(self.style).override_via_attrlist(self.attrlist.as_ref())
     }
 }
 
