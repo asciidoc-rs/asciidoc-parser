@@ -496,10 +496,9 @@ include::example$image.adoc[tag=attr]
         );
     }
 
-    #[ignore]
     #[test]
     fn figure_caption_label() {
-        to_do_verifies!(
+        verifies!(
             r#"
 === Figure caption label
 
@@ -514,6 +513,23 @@ To turn off figure caption labels and numbers, unset the `figure-caption` attrib
 
 "#
         );
+
+        // By default a titled block image is captioned "Figure N." and numbered.
+        let doc = Parser::default().parse(".A mountain sunset\nimage::sunset.jpg[Sunset]");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.title(), Some("A mountain sunset"));
+        assert_eq!(block.caption(), Some("Figure 1. "));
+        assert_eq!(block.number(), Some(1));
+
+        // Unsetting `figure-caption` in the header turns off the caption label
+        // and the automatic number; the image title itself is unaffected.
+        let doc = Parser::default().parse(
+            "= Document Title\n:figure-caption!:\n\n.A mountain sunset\nimage::sunset.jpg[Sunset]",
+        );
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.title(), Some("A mountain sunset"));
+        assert_eq!(block.caption(), None);
+        assert_eq!(block.number(), None);
     }
 }
 

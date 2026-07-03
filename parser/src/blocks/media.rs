@@ -298,6 +298,18 @@ impl<'src> IsBlock<'src> for MediaBlock<'src> {
         self.number
     }
 
+    fn id(&'src self) -> Option<&'src str> {
+        // In addition to a block anchor (`[[id]]`/`[#id]`) or the block
+        // attribute list above the macro, a media block may carry its ID as a
+        // named `id=` attribute _inside_ the macro attribute list (e.g.
+        // `image::sunset.jpg[id=sunset-img]`), which the trait default does not
+        // consider. Fall back to that last, so the block-level forms win.
+        self.anchor()
+            .map(|a| a.data())
+            .or_else(|| self.attrlist().and_then(|attrlist| attrlist.id()))
+            .or_else(|| self.macro_attrlist.id())
+    }
+
     fn anchor(&'src self) -> Option<Span<'src>> {
         self.anchor
     }
