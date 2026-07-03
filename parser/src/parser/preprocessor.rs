@@ -514,6 +514,83 @@ mod tests {
     }
 
     #[test]
+    fn include_directive_at_start_secure_mode() {
+        // In secure mode (the default) the include directive on the very first
+        // line of a named primary file is converted to a link. Because no
+        // earlier line has been emitted yet, this is where the source map is
+        // first anchored to the including file, so output line 1 must map back
+        // to `main.adoc` line 1 (not an anonymous `None` file).
+        let source = "include::header.adoc[]\n\n= Document Title\n\nContent here.";
+
+        let handler = InlineFileHandler::from_pairs([("header.adoc", "SHOULD NOT APPEAR")]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+
+        // The include is converted to a link; the handler is never consulted.
+        assert_eq!(
+            processed_source,
+            "link:header.adoc[role=include]\n\n= Document Title\n\nContent here.\n"
+        );
+
+        assert_eq!(
+            source_map.original_file_and_line(1),
+            Some(SourceLine(Some("main.adoc".to_owned()), 1))
+        );
+        assert_eq!(
+            source_map.original_file_and_line(2),
+            Some(SourceLine(Some("main.adoc".to_owned()), 2))
+        );
+        assert_eq!(
+            source_map.original_file_and_line(3),
+            Some(SourceLine(Some("main.adoc".to_owned()), 3))
+        );
+    }
+
+    #[test]
+    fn include_directive_after_content_secure_mode() {
+        // Companion to `include_directive_at_start_secure_mode`: here the
+        // include directive is preceded by ordinary content, so the source map
+        // has already been anchored to the including file by the time the
+        // directive is reached. The secure-mode branch must therefore *not*
+        // re-anchor it; the include is still converted to a link and the 1:1
+        // mapping back to `main.adoc` is preserved across the directive.
+        let source = "= Document Title\n\nSome content.\n\ninclude::header.adoc[]\n\nMore content.";
+
+        let handler = InlineFileHandler::from_pairs([("header.adoc", "SHOULD NOT APPEAR")]);
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+
+        // The include is converted to a link; the handler is never consulted.
+        assert_eq!(
+            processed_source,
+            "= Document Title\n\nSome content.\n\nlink:header.adoc[role=include]\n\nMore content.\n"
+        );
+
+        // The include-turned-link maps back to its own line in `main.adoc`, and
+        // the surrounding content keeps its 1:1 mapping.
+        assert_eq!(
+            source_map.original_file_and_line(4),
+            Some(SourceLine(Some("main.adoc".to_owned()), 4))
+        );
+        assert_eq!(
+            source_map.original_file_and_line(5),
+            Some(SourceLine(Some("main.adoc".to_owned()), 5))
+        );
+        assert_eq!(
+            source_map.original_file_and_line(6),
+            Some(SourceLine(Some("main.adoc".to_owned()), 6))
+        );
+    }
+
+    #[test]
     fn nested_includes() {
         let source =
             "= Document Title\n\ninclude::chapter1.adoc[]\n\n(a little more of root document)";
