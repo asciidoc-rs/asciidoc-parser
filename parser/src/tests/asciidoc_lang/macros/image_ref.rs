@@ -77,6 +77,17 @@ fn id() {
     let doc = Parser::default().parse("image::sunset.jpg[Sunset,id=sunset-img]");
     let block = doc.nested_blocks().next().unwrap();
     assert_eq!(block.id(), Some("sunset-img"));
+
+    // The registration is real end-to-end: a later `<<sunset-img>>` cross
+    // reference resolves against the catalog and links to the image's ID (with
+    // the bracketed ID as the fallback link text, since the image has no
+    // reftext).
+    let doc =
+        Parser::default().parse("image::sunset.jpg[Sunset,id=sunset-img]\n\nSee <<sunset-img>>.");
+    assert_eq!(
+        rendered_paragraphs(&doc).join("\n"),
+        r##"See <a href="#sunset-img">[sunset-img]</a>."##
+    );
 }
 
 #[test]
