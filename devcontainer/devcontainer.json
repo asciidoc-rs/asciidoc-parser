@@ -1,4 +1,0 @@
-"features": {
-    "ghcr.io/devcontainers/features/node:1": {}
-  },
-  "postCreateCommand": "rustup component add clippy rustfmt && cargo fetch && npm i -g @anthropic-ai/claude-code"
