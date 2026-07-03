@@ -766,32 +766,19 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     ) -> String {
         let asset_dir_key = asset_dir_key.unwrap_or("imagesdir");
 
-        if false {
-            todo!(
-                // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/277):
-                "Port this when implementing safe modes: {}",
-                r#"
-				if (doc = @document).safe < SafeMode::SECURE && (doc.attr? 'data-uri')
-				  if ((Helpers.uriish? target_image) && (target_image = Helpers.encode_spaces_in_uri target_image)) ||
-					  (asset_dir_key && (images_base = doc.attr asset_dir_key) && (Helpers.uriish? images_base) &&
-					  (target_image = normalize_web_path target_image, images_base, false))
-					(doc.attr? 'allow-uri-read') ? (generate_data_uri_from_uri target_image, (doc.attr? 'cache-uri')) : target_image
-				  else
-					generate_data_uri target_image, asset_dir_key
-				  end
-				else
-				  normalize_web_path target_image, (asset_dir_key ? (doc.attr asset_dir_key) : nil)
-				end
-            "#
-            );
-        } else {
-            let asset_dir = parser
-                .attribute_value(asset_dir_key)
-                .as_maybe_str()
-                .map(|s| s.to_string());
+        // Asciidoctor embeds the image as a data URI when the `data-uri`
+        // attribute is set and the safe mode is below `SafeMode::Secure`. That
+        // requires reading the image's bytes, which this crate leaves to the
+        // caller rather than performing file/network access itself; the
+        // `data-uri` attribute is therefore not implemented and the image is
+        // always emitted as a normalized web path. Because data-uri embedding is
+        // absent, there is no safe-mode-sensitive behavior to gate here.
+        let asset_dir = parser
+            .attribute_value(asset_dir_key)
+            .as_maybe_str()
+            .map(|s| s.to_string());
 
-            normalize_web_path(target_image_path, parser, asset_dir.as_deref(), true)
-        }
+        normalize_web_path(target_image_path, parser, asset_dir.as_deref(), true)
     }
 
     fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {

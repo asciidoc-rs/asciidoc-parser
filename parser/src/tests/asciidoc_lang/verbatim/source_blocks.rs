@@ -255,7 +255,12 @@ include::example$source.adoc[tag=src-inc]
 "##
     );
 
-    let doc = Parser::default().parse("[,ruby]\n----\ninclude::app.rb[]\n----");
+    // Run below `Secure` so the include directive is processed (and, with no
+    // handler configured, reported as unresolved) rather than converted to a
+    // link as it would be in the default `Secure` mode.
+    let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .parse("[,ruby]\n----\ninclude::app.rb[]\n----");
 
     // The structure is asserted at the block level (rather than via a full
     // `Document` fixture) because the unresolved-include warning below carries an

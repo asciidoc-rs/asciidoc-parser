@@ -210,6 +210,22 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ### Security attributes
     attrs.insert("max-include-depth".to_owned(), set(ApiOnly, "64"));
 
+    // ### Safe-mode intrinsic attributes
+    //
+    // These describe the default safe mode (`SafeMode::Secure`).
+    // `Parser::with_safe_mode` rewrites this family (via
+    // `apply_safe_mode_attributes`) when the caller chooses a different mode;
+    // exactly one `safe-mode-<name>` flag is set at a time.
+    attrs.insert(
+        "safe-mode-level".to_owned(),
+        any(ApiOnly, Value("20".into())),
+    );
+    attrs.insert(
+        "safe-mode-name".to_owned(),
+        any(ApiOnly, Value("secure".into())),
+    );
+    attrs.insert("safe-mode-secure".to_owned(), any(ApiOnly, Set));
+
     // Derived doctype attribute (see `doctype` above): defined (empty) only for
     // the active doctype.
     attrs.insert(

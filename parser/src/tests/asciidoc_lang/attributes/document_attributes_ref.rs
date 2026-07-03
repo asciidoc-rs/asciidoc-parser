@@ -359,6 +359,84 @@ To force the use of UTC, set the `TZ=UTC` environment variable when invoking Asc
 "#
 );
 
+/// The `safe-mode-*` intrinsic attributes are recorded as non-normative in the
+/// intrinsic-attributes table above (alongside the environment-derived
+/// attributes), but unlike those they are a pure function of the parser's
+/// configured [`SafeMode`], so their values are asserted directly here.
+#[test]
+fn safe_mode_attributes() {
+    // (safe mode, `safe-mode-level`, `safe-mode-name`, active `safe-mode-<name>`
+    // flag)
+    let cases = [
+        (SafeMode::Unsafe, "0", "unsafe", "safe-mode-unsafe"),
+        (SafeMode::Safe, "1", "safe", "safe-mode-safe"),
+        (SafeMode::Server, "10", "server", "safe-mode-server"),
+        (SafeMode::Secure, "20", "secure", "safe-mode-secure"),
+    ];
+
+    let all_flags = [
+        "safe-mode-unsafe",
+        "safe-mode-safe",
+        "safe-mode-server",
+        "safe-mode-secure",
+    ];
+
+    for (mode, level, name, active_flag) in cases {
+        let parser = Parser::default().with_safe_mode(mode);
+
+        assert_eq!(
+            parser.attribute_value("safe-mode-level").as_maybe_str(),
+            Some(level),
+            "`safe-mode-level` in {name} mode"
+        );
+        assert_eq!(
+            parser.attribute_value("safe-mode-name").as_maybe_str(),
+            Some(name),
+            "`safe-mode-name` in {name} mode"
+        );
+
+        // Exactly one `safe-mode-<name>` flag is set (to an empty value); the
+        // others are absent so that a reference to them resolves literally.
+        for flag in all_flags {
+            if flag == active_flag {
+                assert!(
+                    parser.is_attribute_set(flag),
+                    "`{flag}` should be set in {name} mode"
+                );
+                assert_eq!(
+                    parser.attribute_value(flag).as_maybe_str(),
+                    None,
+                    "`{flag}` should be set to an empty value in {name} mode"
+                );
+            } else {
+                assert!(
+                    !parser.has_attribute(flag),
+                    "`{flag}` should be absent in {name} mode"
+                );
+            }
+        }
+    }
+
+    // `Secure` is the default safe mode.
+    let default = Parser::default();
+    assert_eq!(
+        default.attribute_value("safe-mode-name").as_maybe_str(),
+        Some("secure")
+    );
+    assert!(default.is_attribute_set("safe-mode-secure"));
+
+    // When rendered in content, a reference to the active flag resolves to an
+    // empty string, while a reference to an inactive flag is left literal
+    // (default `attribute-missing=skip`), matching Ruby Asciidoctor.
+    let doc = Parser::default().with_safe_mode(SafeMode::Server).parse(
+        "= T\n\nlevel={safe-mode-level} name={safe-mode-name} server=[{safe-mode-server}] secure=[{safe-mode-secure}]",
+    );
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        vec!["level=10 name=server server=[] secure=[{safe-mode-secure}]".to_string()]
+    );
+}
+
 #[test]
 fn compliance_attributes() {
     verifies!(
@@ -1703,7 +1781,8 @@ Since attributes can reference attributes, it's possible to create an output doc
     assert_default("max-include-depth", "64");
 
     // `max-attribute-value-size` is only assigned its `4096` default in SECURE
-    // mode, which is not yet implemented, so it is unset here.
+    // mode. Although `SafeMode::Secure` is the default, the enforcement of (and
+    // SECURE default for) this limit is not yet implemented, so it is unset here.
     for name in ["allow-uri-read", "max-attribute-value-size"] {
         assert_not_set_by_default(name);
     }

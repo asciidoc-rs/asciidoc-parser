@@ -804,7 +804,60 @@ impl Parser {
     /// [`SafeMode`]: crate::SafeMode
     pub fn with_safe_mode(mut self, safe: SafeMode) -> Self {
         self.safe = safe;
+        self.apply_safe_mode_attributes();
         self
+    }
+
+    /// Refreshes the `safe-mode-*` family of [intrinsic attributes] from the
+    /// current safe mode.
+    ///
+    /// These attributes let a document (or a downstream converter) inspect the
+    /// security mode under which it is being processed:
+    ///
+    /// * `safe-mode-level` — the numeric level (`0`, `1`, `10`, or `20`).
+    /// * `safe-mode-name` — the lowercase mode name (`unsafe`, `safe`,
+    ///   `server`, or `secure`).
+    /// * `safe-mode-<name>` — a single flag attribute (set to an empty value)
+    ///   naming the active mode; the flags for the other modes are left unset
+    ///   so that a reference to them resolves literally.
+    ///
+    /// All of these are read-only from the document's perspective (they can
+    /// only be established via the API), matching Ruby Asciidoctor.
+    ///
+    /// [intrinsic attributes]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes-ref/#intrinsic-attributes
+    fn apply_safe_mode_attributes(&mut self) {
+        let attrs = Arc::make_mut(&mut self.attribute_values);
+
+        let intrinsic = |value: InterpretedValue| AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::ApiOnly,
+            value,
+        };
+
+        attrs.insert(
+            "safe-mode-level".to_string(),
+            intrinsic(InterpretedValue::Value(self.safe.level().to_string())),
+        );
+        attrs.insert(
+            "safe-mode-name".to_string(),
+            intrinsic(InterpretedValue::Value(self.safe.name().to_string())),
+        );
+
+        // Exactly one `safe-mode-<name>` flag is set (to an empty value); the
+        // rest are removed so that referencing them resolves literally.
+        for mode in [
+            SafeMode::Unsafe,
+            SafeMode::Safe,
+            SafeMode::Server,
+            SafeMode::Secure,
+        ] {
+            let name = format!("safe-mode-{}", mode.name());
+            if mode == self.safe {
+                attrs.insert(name, intrinsic(InterpretedValue::Set));
+            } else {
+                attrs.remove(&name);
+            }
+        }
     }
 
     /// Returns the [`SafeMode`] under which this parser operates.

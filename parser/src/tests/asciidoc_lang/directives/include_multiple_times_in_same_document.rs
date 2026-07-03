@@ -66,6 +66,7 @@ The single quotes around the variable name in the assignment are required to for
     )]);
 
     let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse(source);
 
