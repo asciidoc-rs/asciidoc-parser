@@ -393,13 +393,16 @@ Thus, the delimited block form is preferred, especially when creating a verbatim
 "#
 );
 
-/* TO DO ...
-
+non_normative!(
+    r#"
 == Summary of built-in blocks
 // This section is just hanging here for the moment, it's not its final destination, I just didn't want to comment it out.
 
 The following table identifies the built-in block styles, their delimiter syntax, purposes, and the substitutions performed on their contents.
 
 include::partial$block-name-table.adoc[]
-}
-*/
+"#
+);
+
+// The included `block-name-table.adoc` partial is covered separately by
+// `block_name_table.rs`.
