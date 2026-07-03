@@ -966,6 +966,55 @@ impl Parser {
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
     }
 
+    /// Applies the `imagesdir`-relative default for the `iconsdir` attribute.
+    ///
+    /// The `iconsdir` attribute defaults to `{imagesdir}/icons`; when
+    /// `imagesdir` is left empty this resolves to the built-in
+    /// [`DEFAULT_ICONSDIR`] (`./images/icons`). When `imagesdir` is set to a
+    /// non-empty value and `iconsdir` was left at its built-in default, the
+    /// icons directory is derived as `{imagesdir}/icons`.
+    ///
+    /// The derivation is skipped — so an explicit `iconsdir` wins — when either
+    /// the attribute was set in the header (`iconsdir_set_in_header`) or its
+    /// resolved value differs from [`DEFAULT_ICONSDIR`] (which is how an
+    /// override applied any other way, e.g. via the API, is detected). The one
+    /// case this cannot detect is a non-header override whose value happens to
+    /// equal the built-in default (e.g. an API caller setting `iconsdir` to
+    /// exactly `./images/icons`): it is indistinguishable from the default and
+    /// so is re-derived. That combination is contradictory in practice (it
+    /// pins `iconsdir` to the value it would take were `imagesdir` unset) and
+    /// is not worth a dedicated provenance flag.
+    ///
+    /// This is called once, after the document header is parsed, mirroring
+    /// Asciidoctor's document-initialization timing (a later `imagesdir` change
+    /// in the document body does not retroactively re-derive `iconsdir`). See
+    /// icons-image.adoc.
+    ///
+    /// [`DEFAULT_ICONSDIR`]: super::built_in_attrs::DEFAULT_ICONSDIR
+    pub(crate) fn apply_iconsdir_default(&mut self, iconsdir_set_in_header: bool) {
+        if iconsdir_set_in_header {
+            return;
+        }
+
+        // Preserve any override whose value differs from the built-in default
+        // (e.g. one applied via the API); only the built-in default itself is
+        // eligible for `imagesdir`-relative derivation. See the doc comment for
+        // the one indistinguishable corner case.
+        if self.attribute_value("iconsdir").as_maybe_str()
+            != Some(super::built_in_attrs::DEFAULT_ICONSDIR)
+        {
+            return;
+        }
+
+        let imagesdir = self.attribute_value("imagesdir");
+        let derived = match imagesdir.as_maybe_str().filter(|d| !d.is_empty()) {
+            Some(dir) => format!("{}/icons", dir.trim_end_matches('/')),
+            None => return,
+        };
+
+        self.set_attribute_by_value_from_header("iconsdir", derived);
+    }
+
     /// Called while parsing a block (see [`Block::parse_with_outcome()`]) to
     /// accept or reject an attribute value from a document (body) attribute.
     ///

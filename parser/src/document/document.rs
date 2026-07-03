@@ -85,6 +85,12 @@ impl<'src> Document<'src> {
             let header = mi.item.item;
             let mut warnings = mi.warnings;
 
+            // Derive the `iconsdir` default from `imagesdir` (`{imagesdir}/icons`)
+            // now that the header is fully parsed, unless the author set
+            // `iconsdir` explicitly in the header (in which case it wins).
+            let iconsdir_set_in_header = header.attributes().any(|a| a.name().data() == "iconsdir");
+            parser.apply_iconsdir_default(iconsdir_set_in_header);
+
             let mut maw_blocks = parse_blocks_until(after_header, |_| false, parser);
 
             if !maw_blocks.warnings.is_empty() {
