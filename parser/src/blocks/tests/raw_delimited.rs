@@ -745,6 +745,209 @@ mod listing {
     }
 }
 
+mod fenced {
+    use crate::{
+        blocks::{ContentModel, IsBlock},
+        tests::prelude::*,
+    };
+
+    #[test]
+    fn empty() {
+        let mut parser = Parser::default();
+
+        let mi = crate::blocks::Block::parse(crate::Span::new("```\n```"), &mut parser)
+            .unwrap_if_no_warnings()
+            .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Block::RawDelimited(RawDelimitedBlock {
+                content: Content {
+                    original: Span {
+                        data: "",
+                        line: 2,
+                        col: 1,
+                        offset: 4,
+                    },
+                    rendered: "",
+                },
+                content_model: ContentModel::Verbatim,
+                context: "listing",
+                source: Span {
+                    data: "```\n```",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+                substitution_group: SubstitutionGroup::Verbatim,
+            })
+        );
+
+        // A fenced code block resolves to the same context and content model as
+        // a `----` listing block.
+        assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
+        assert_eq!(mi.item.rendered_content(), Some(""));
+        assert_eq!(mi.item.raw_context().as_ref(), "listing");
+        assert_eq!(mi.item.resolved_context().as_ref(), "listing");
+        assert!(mi.item.declared_style().is_none());
+        assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Verbatim);
+    }
+
+    #[test]
+    fn multiple_lines() {
+        let mut parser = Parser::default();
+
+        let mi =
+            crate::blocks::Block::parse(crate::Span::new("```\nline1  \nline2\n```"), &mut parser)
+                .unwrap_if_no_warnings()
+                .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Block::RawDelimited(RawDelimitedBlock {
+                content: Content {
+                    original: Span {
+                        data: "line1  \nline2",
+                        line: 2,
+                        col: 1,
+                        offset: 4,
+                    },
+                    rendered: "line1  \nline2",
+                },
+                content_model: ContentModel::Verbatim,
+                context: "listing",
+                source: Span {
+                    data: "```\nline1  \nline2\n```",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+                substitution_group: SubstitutionGroup::Verbatim,
+            })
+        );
+
+        assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
+        assert_eq!(mi.item.rendered_content(), Some("line1  \nline2"));
+        assert_eq!(mi.item.raw_context().as_ref(), "listing");
+        assert_eq!(mi.item.resolved_context().as_ref(), "listing");
+        assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Verbatim);
+
+        assert_eq!(
+            mi.item.span(),
+            Span {
+                data: "```\nline1  \nline2\n```",
+                line: 1,
+                col: 1,
+                offset: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn source_style_sets_language() {
+        // A `[source,ruby]` attrlist above the opening fence specializes the
+        // listing block with the `source` style (the mechanism by which a
+        // language is set for syntax highlighting).
+        let mut parser = Parser::default();
+
+        let mi = crate::blocks::Block::parse(
+            crate::Span::new("[source,ruby]\n```\nputs 'hi'\n```"),
+            &mut parser,
+        )
+        .unwrap_if_no_warnings()
+        .unwrap();
+
+        assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
+        assert_eq!(mi.item.raw_context().as_ref(), "listing");
+        assert_eq!(mi.item.resolved_context().as_ref(), "listing");
+        assert_eq!(mi.item.declared_style(), Some("source"));
+        assert_eq!(mi.item.rendered_content(), Some("puts 'hi'"));
+    }
+
+    #[test]
+    fn unterminated() {
+        let mut parser = Parser::default();
+
+        let maw = crate::blocks::Block::parse(crate::Span::new("```\nsource code"), &mut parser);
+
+        let mi = maw.item.unwrap().clone();
+
+        assert_eq!(mi.item.raw_context().as_ref(), "listing");
+        assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
+        assert_eq!(mi.item.rendered_content(), Some("source code"));
+
+        assert_eq!(
+            maw.warnings,
+            vec![Warning {
+                source: Span {
+                    data: "```",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warning: WarningType::UnterminatedDelimitedBlock,
+            }]
+        );
+    }
+
+    #[test]
+    fn four_backticks_is_not_a_fence() {
+        // A run of four (or more) backticks is not a fenced code block; it is
+        // ordinary paragraph text.
+        let mut parser = Parser::default();
+
+        let mi =
+            crate::blocks::Block::parse(crate::Span::new("````\nnot a fence\n````"), &mut parser)
+                .unwrap_if_no_warnings()
+                .unwrap();
+
+        // A paragraph (simple) block, not a raw delimited block.
+        assert_eq!(mi.item.resolved_context().as_ref(), "paragraph");
+        assert_eq!(mi.item.content_model(), ContentModel::Simple);
+    }
+
+    #[test]
+    fn closing_fence_must_match_exactly() {
+        // A line of four backticks does not close a three-backtick fence, so the
+        // block runs to the end of the input and is reported as unterminated.
+        let mut parser = Parser::default();
+
+        let maw =
+            crate::blocks::Block::parse(crate::Span::new("```\nsource code\n````"), &mut parser);
+
+        let mi = maw.item.unwrap().clone();
+
+        assert_eq!(mi.item.raw_context().as_ref(), "listing");
+        assert_eq!(mi.item.rendered_content(), Some("source code\n````"));
+        assert_eq!(
+            maw.warnings,
+            vec![Warning {
+                source: Span {
+                    data: "```",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warning: WarningType::UnterminatedDelimitedBlock,
+            }]
+        );
+    }
+}
+
 mod pass {
     use crate::{blocks::ContentModel, tests::prelude::*};
 

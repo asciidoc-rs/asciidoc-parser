@@ -426,7 +426,8 @@ fn parse_lines<'src>(
                 || line.starts_with('+')
                 || line.starts_with('=')
                 || line.starts_with('*')
-                || line.starts_with('_'))
+                || line.starts_with('_')
+                || line.starts_with('`'))
                 && (RawDelimitedBlock::is_valid_delimiter(&line)
                     || CompoundDelimitedBlock::is_valid_delimiter(&line))
             {

@@ -17,8 +17,13 @@ use crate::{
 /// |-----------|--------------|
 /// | `////`    | Comment      |
 /// | `----`    | Listing      |
+/// | `` ``` `` | Listing (fenced) |
 /// | `....`    | Literal      |
 /// | `++++`    | Passthrough  |
+///
+/// The fenced code block delimiter (three backticks) is a shorthand for a
+/// listing block. Like the open-block delimiter, it has a fixed length; four
+/// or more backticks are not a fence.
 ///
 /// In addition, an open-block delimiter (`--`) is recognized here when it
 /// carries a verbatim masquerade style: `source` or `listing` (parsed as a
@@ -44,6 +49,14 @@ pub struct RawDelimitedBlock<'src> {
 impl<'src> RawDelimitedBlock<'src> {
     pub(crate) fn is_valid_delimiter(line: &Span<'src>) -> bool {
         let data = line.data();
+
+        // The fenced code block delimiter is exactly three backticks. Unlike the
+        // four-character verbatim/raw delimiters, its length is fixed (as with
+        // the two-character open-block delimiter): a run of four or more
+        // backticks is not a fence.
+        if data == "```" {
+            return true;
+        }
 
         // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/145):
         // Seek spec clarity: Do the characters after the fourth char
@@ -81,6 +94,16 @@ impl<'src> RawDelimitedBlock<'src> {
             // A plain or compound-styled open block returns `None` here and is
             // handled by `CompoundDelimitedBlock` instead.
             open_block_verbatim_masquerade(metadata.attrlist.as_ref())?
+        } else if delimiter_data == "```" {
+            // A fenced code block (three backticks) is a verbatim listing block.
+            // Its delimiter has a fixed length, so no trailing-character
+            // validity check is required. The closing fence must match the
+            // opening delimiter exactly, which the scan loop below enforces.
+            (
+                ContentModel::Verbatim,
+                "listing",
+                SubstitutionGroup::Verbatim,
+            )
         } else {
             if delimiter.item.len() < 4 {
                 return None;
@@ -401,6 +424,26 @@ mod tests {
             )));
             assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
                 "----------x"
+            )));
+        }
+
+        #[test]
+        fn fenced() {
+            // The fenced code block delimiter is exactly three backticks.
+            assert!(RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
+                "```"
+            )));
+
+            // A run of four or more backticks is not a fence (the delimiter has
+            // a fixed length, unlike the four-character delimiters).
+            assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
+                "````"
+            )));
+            assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
+                "``"
+            )));
+            assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
+                "```java"
             )));
         }
 
