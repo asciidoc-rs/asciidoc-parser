@@ -14,13 +14,13 @@ You’re welcome to follow along and contribute.
 
 Most of all this is a fun project that exercises different architectural and project design skills from my [day job](https://opensource.contentauthenticity.org). As part of that work, I write [technical standards for the Creator Assertions Working Group](https://cawg.io/specs/) in Asciidoc and [Antora](https://antora.org).
 
-There are a few projects I’d like to build that depend on the parser:
+There are a few projects that I’m now starting to build that depend on the parser:
 
 * A version of Antora that highlights differences between versions of a spec/document, as in version to version or proposed updates in a pull request.
 * A version of Antora or similar that shows what portions of a spec are tested/completed/known good. (See the following section on “spec-driven development.”)
 * A version of [Zola](https://getzola.org), the static site generator that I use for most of my web sites, that accepts Asciidoc formatted text as input. (See [Project proposal: Asciidoc support in Zola](https://zola.discourse.group/t/project-proposal-asciidoc-support-in-zola/2867).)
 
-With the parser now complete enough to build on, these are the projects I plan to start next.
+The parser is now complete enough to build these on.
 
 ## Spec-driven coverage
 
