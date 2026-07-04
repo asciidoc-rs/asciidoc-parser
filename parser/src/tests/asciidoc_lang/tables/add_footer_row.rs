@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/add-footer-row.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/add-footer-row.adoc");
 
 /// Parse `source` as a single block and return the [`TableBlock`] it produced.
 ///

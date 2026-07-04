@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/document/pages/header-ref.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/document/pages/header-ref.adoc");
 
 // Treating the entire file as non-normative because asciidoc-parser doesn't
 // _consume_ the document header attributes anywhere. For those that have

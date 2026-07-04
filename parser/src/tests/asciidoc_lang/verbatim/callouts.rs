@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/verbatim/pages/callouts.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/verbatim/pages/callouts.adoc");
 
 non_normative!(
     r#"

@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/verbatim/pages/highlight-php.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/verbatim/pages/highlight-php.adoc");
 
 // Marked non-normative since asciidoc-parser doesn't involve itself in content
 // rendering.

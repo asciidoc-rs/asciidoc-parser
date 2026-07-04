@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/sections/pages/section-ref.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/sections/pages/section-ref.adoc");
 
 // This page is a reference summary of the section-related document attributes
 // and the special-section styles. Each row links to a dedicated page where the

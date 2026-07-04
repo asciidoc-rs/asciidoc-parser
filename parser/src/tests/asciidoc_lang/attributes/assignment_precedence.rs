@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/attributes/pages/assignment-precedence.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/assignment-precedence.adoc");
 
 // Since asciidoc-parser has its own API for specifying assignment precedence
 // and no intrinsic command-line interface, we treat this entire page as

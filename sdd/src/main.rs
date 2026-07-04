@@ -47,7 +47,7 @@ fn main() {
 
     println!("{{\n    \"coverage\": {{");
 
-    let adoc_files: Vec<DirEntry> = WalkDir::new("../docs/modules")
+    let adoc_files: Vec<DirEntry> = WalkDir::new("../ref/asciidoc-lang/docs/modules")
         .into_iter()
         .filter_entry(|e| {
             if let Some(file_name) = e.file_name().to_str() {
@@ -107,10 +107,12 @@ fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
     let mut lines: Vec<(String, bool)> = vec![];
     let mut in_non_normative_block = false;
     let mut in_verifies_block = false;
+    let mut expect_track_file_path = false;
 
     for line in rs_file.lines() {
         let line = line.unwrap();
 
+        // Single-line form: `track_file!("path");`.
         if let Some(tf) = line.strip_prefix("track_file!(\"")
             && let Some(tf) = tf.strip_suffix("\");")
         {
@@ -118,6 +120,30 @@ fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
                 panic!("ERROR: {path:?} contains multiple track_file! macros");
             }
             tracked_file = Some(tf.to_string());
+            continue;
+        }
+
+        // Multi-line form (produced by rustfmt when the path is too long to fit
+        // on one line):
+        //
+        //     track_file!(
+        //         "path"
+        //     );
+        if line.trim_end() == "track_file!(" {
+            expect_track_file_path = true;
+            continue;
+        }
+
+        if expect_track_file_path {
+            expect_track_file_path = false;
+            if let Some(tf) = line.trim().strip_prefix('"')
+                && let Some(tf) = tf.strip_suffix('"')
+            {
+                if tracked_file.is_some() {
+                    panic!("ERROR: {path:?} contains multiple track_file! macros");
+                }
+                tracked_file = Some(tf.to_string());
+            }
             continue;
         }
 

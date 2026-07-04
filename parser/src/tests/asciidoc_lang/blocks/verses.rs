@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/blocks/pages/verses.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/pages/verses.adoc");
 
 fn as_quote<'a>(block: &'a crate::blocks::Block<'a>) -> &'a crate::blocks::QuoteBlock<'a> {
     match block {

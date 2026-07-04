@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/blocks/pages/collapsible.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/pages/collapsible.adoc");
 
 non_normative!(
     r#"

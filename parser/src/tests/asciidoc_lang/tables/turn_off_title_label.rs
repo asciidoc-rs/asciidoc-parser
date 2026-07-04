@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/turn-off-title-label.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/turn-off-title-label.adoc");
 
 non_normative!(
     r#"

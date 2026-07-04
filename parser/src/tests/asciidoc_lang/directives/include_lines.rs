@@ -1,6 +1,6 @@
 use crate::tests::prelude::{inline_file_handler::InlineFileHandler, *};
 
-track_file!("docs/modules/directives/pages/include-lines.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/directives/pages/include-lines.adoc");
 
 /// A target whose paragraphs sit on known line numbers, used to demonstrate
 /// line-range selection:

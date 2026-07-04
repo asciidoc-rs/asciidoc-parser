@@ -1,6 +1,6 @@
 use crate::{blocks::Block, tests::prelude::*};
 
-track_file!("docs/modules/lists/pages/checklist.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/lists/pages/checklist.adoc");
 
 non_normative!(
     r#"

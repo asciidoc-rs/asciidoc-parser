@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/attributes/pages/document-attributes-ref.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/document-attributes-ref.adoc");
 
 // This page is the reference catalog of built-in document attributes. The
 // `verifies!` blocks below pair each attribute table with assertions that a

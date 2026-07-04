@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/subs/pages/special-characters.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/subs/pages/special-characters.adoc");
 
 non_normative!(
     r#"

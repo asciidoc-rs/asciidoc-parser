@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/sections/pages/abstract-block.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/sections/pages/abstract-block.adoc");
 
 // Treating the entire file as non-normative because we don't support `doctype`.
 

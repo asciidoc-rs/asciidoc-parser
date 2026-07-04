@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/data-format.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/data-format.adoc");
 
 use crate::blocks::{DataFormat, TableCellContent};
 

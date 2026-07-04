@@ -1,6 +1,6 @@
 use crate::{document::RefType, tests::prelude::*};
 
-track_file!("docs/modules/document/pages/reference-author-attributes.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/document/pages/reference-author-attributes.adoc");
 
 non_normative!(
     r#"

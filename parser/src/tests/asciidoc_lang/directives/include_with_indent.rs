@@ -1,6 +1,6 @@
 use crate::tests::prelude::{inline_file_handler::InlineFileHandler, *};
 
-track_file!("docs/modules/directives/pages/include-with-indent.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/directives/pages/include-with-indent.adoc");
 
 /// Include `content` into a listing block with the given include `attrs` and
 /// return the resulting listing block source (with the `----` delimiters),

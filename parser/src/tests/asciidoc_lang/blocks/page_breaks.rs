@@ -1,6 +1,6 @@
 use crate::{blocks::BreakType, tests::prelude::*};
 
-track_file!("docs/modules/blocks/partials/page-breaks.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/partials/page-breaks.adoc");
 
 // This partial is included by `blocks/pages/breaks.adoc` (see `breaks.rs`). The
 // parsing behavior is also exercised there; here we track the partial's own

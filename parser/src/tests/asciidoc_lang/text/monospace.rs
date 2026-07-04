@@ -1,6 +1,6 @@
 use crate::{blocks::Block, tests::prelude::*};
 
-track_file!("docs/modules/text/pages/monospace.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/text/pages/monospace.adoc");
 
 non_normative!(
     r#"

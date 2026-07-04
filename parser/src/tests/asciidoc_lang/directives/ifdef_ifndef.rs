@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/directives/pages/ifdef-ifndef.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/directives/pages/ifdef-ifndef.adoc");
 
 non_normative!(
     r#"

@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/attributes/pages/counters.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/counters.adoc");
 
 /// Renders `input` and returns the rendered content of each of its top-level
 /// blocks, in document order. A counter example is self-contained (it resets

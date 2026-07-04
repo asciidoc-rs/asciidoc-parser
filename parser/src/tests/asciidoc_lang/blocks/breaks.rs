@@ -1,6 +1,6 @@
 use crate::{blocks::BreakType, tests::prelude::*};
 
-track_file!("docs/modules/blocks/pages/breaks.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/pages/breaks.adoc");
 
 non_normative!(
     r#"

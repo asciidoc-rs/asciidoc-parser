@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/span-cells.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/span-cells.adoc");
 
 non_normative!(
     r#"

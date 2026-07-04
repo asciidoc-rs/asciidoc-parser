@@ -1,6 +1,6 @@
 use crate::{blocks::ContentModel, tests::prelude::*};
 
-track_file!("docs/modules/verbatim/pages/literal-blocks.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/verbatim/pages/literal-blocks.adoc");
 
 non_normative!(
     r##"

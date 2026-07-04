@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/directives/pages/include-with-leveloffset.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/directives/pages/include-with-leveloffset.adoc");
 
 // The preprocessor emits the `:leveloffset:` attribute entries that wrap an
 // included file (verified in the preprocessor's own unit tests), but the parser

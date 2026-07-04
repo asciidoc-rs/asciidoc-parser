@@ -7,7 +7,7 @@
 
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/macros/pages/inter-document-xref.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/macros/pages/inter-document-xref.adoc");
 
 non_normative!(
     r##"

@@ -1,6 +1,6 @@
 use crate::{blocks::Block, tests::prelude::*};
 
-track_file!("docs/modules/subs/pages/post-replacements.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/subs/pages/post-replacements.adoc");
 
 non_normative!(
     r#"

@@ -1,6 +1,6 @@
 use crate::{document::RefType, tests::prelude::*};
 
-track_file!("docs/modules/blocks/pages/preamble-and-lead.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/pages/preamble-and-lead.adoc");
 
 non_normative!(
     r#"

@@ -6,7 +6,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{document::DocinfoLocation, parser::DocinfoFileHandler, tests::prelude::*};
 
-track_file!("docs/modules/docinfo/pages/index.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/docinfo/pages/index.adoc");
 
 /// A log of the docinfo files the parser requested: each entry is the
 /// `docinfodir` (if any) and the requested file name.

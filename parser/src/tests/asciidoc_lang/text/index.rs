@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/text/pages/index.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/text/pages/index.adoc");
 
 non_normative!(
     r#"

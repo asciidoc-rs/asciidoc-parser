@@ -1,6 +1,6 @@
 use crate::{document::RefType, tests::prelude::*};
 
-track_file!("docs/modules/sections/pages/appendix.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/sections/pages/appendix.adoc");
 
 non_normative!(
     r#"

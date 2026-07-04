@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/sections/pages/bibliography.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/sections/pages/bibliography.adoc");
 
 non_normative!(
     r#"

@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/document/pages/revision-information.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/document/pages/revision-information.adoc");
 
 // Treating this entire page as non-normative because the content is repeated in
 // subsequent pages.

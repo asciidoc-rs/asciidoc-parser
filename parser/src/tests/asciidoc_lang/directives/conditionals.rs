@@ -1,6 +1,6 @@
 use crate::{HasSpan, tests::prelude::*};
 
-track_file!("docs/modules/directives/pages/conditionals.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/directives/pages/conditionals.adoc");
 
 non_normative!(
     r#"

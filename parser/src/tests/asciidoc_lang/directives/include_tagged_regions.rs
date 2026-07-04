@@ -1,6 +1,6 @@
 use crate::tests::prelude::{inline_file_handler::InlineFileHandler, *};
 
-track_file!("docs/modules/directives/pages/include-tagged-regions.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/directives/pages/include-tagged-regions.adoc");
 
 /// Include `file` into a listing block selecting tags with `spec`, returning
 /// the selected lines (joined by `\n`, without the surrounding `----`

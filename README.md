@@ -26,7 +26,7 @@ The parser is now complete enough to build these on.
 
 If you know me from other projects, you know that I value high code coverage. Code coverage on this crate is now extremely high (99.5%).
 
-With this project, I’m doing an experiment in what I call **“spec-driven development.”** Since I started, that phrase has taken on a different and now more widely used meaning — [writing a structured specification up front so that an AI coding agent can implement it](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/), as popularized by tooling such as [GitHub’s Spec Kit](https://github.com/github/spec-kit). That is _not_ what I mean here. In my sense the specification already exists — it’s the AsciiDoc language description — and I’m driving the implementation _toward_ it: not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/docs%2Fmodules).
+With this project, I’m doing an experiment in what I call **“spec-driven development.”** Since I started, that phrase has taken on a different and now more widely used meaning — [writing a structured specification up front so that an AI coding agent can implement it](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/), as popularized by tooling such as [GitHub’s Spec Kit](https://github.com/github/spec-kit). That is _not_ what I mean here. In my sense the specification already exists — it’s the AsciiDoc language description — and I’m driving the implementation _toward_ it: not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/ref%2Fasciidoc-lang%2Fdocs%2Fmodules).
 
 I’m reading page-by-page, line-by-line, and writing tests to verify that the implementation matches the specification(*). This slowed progress considerably, but I believe it has resulted in an implementation that is very solid.
 
@@ -58,10 +58,10 @@ IMPORTANT: This project is a personal project; it is known to my team at Adobe, 
 
 IMPORTANT: This repository contains a snapshot of the AsciiDoc language description which comes with its own license terms. It is not the purpose of _this_ repository to supplant or replace that description; these documents are here as part of tooling to ensure that this crate follows the language description as closely as possible. Please consult [AsciiDoc Language @ Eclipse GitLab](https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang) for the official language description.
 
-The following applies to content in the `asg` and `spec` folders:
+The snapshot lives in [`ref/asciidoc-lang`](./ref/asciidoc-lang); see [`ref/asciidoc-lang/README.md`](./ref/asciidoc-lang/README.md) for the exact upstream commit it was taken from and how to refresh it.
 
-> The AsciiDoc Language and the accompanying materials are made available under the terms of the Eclipse Public License v 2.0 (EPL-2.0). See [LICENSE](https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/LICENSE) to find the full license text.
-
-The following applies to content in the `docs` folder:
+The following applies to content in the `ref/asciidoc-lang/docs` folder:
 
 > The user documentation for the AsciiDoc Language, located in the docs/ folder, is made available under the terms of a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/) (CC-BY-4.0).
+
+The AsciiDoc Language project as a whole is made available under the terms of the Eclipse Public License v 2.0 (EPL-2.0). See the [project LICENSE](https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/LICENSE) for the full license text.

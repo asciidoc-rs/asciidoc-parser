@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/attributes/pages/names-and-values.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/names-and-values.adoc");
 
 non_normative!(
     r#"

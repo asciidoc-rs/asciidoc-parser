@@ -1,6 +1,6 @@
 use crate::{blocks::ListType, tests::prelude::*};
 
-track_file!("docs/modules/lists/pages/separating.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/lists/pages/separating.adoc");
 
 non_normative!(
     r#"

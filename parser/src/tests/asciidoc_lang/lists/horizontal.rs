@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/lists/pages/horizontal.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/lists/pages/horizontal.adoc");
 
 // This entire page is considered non-normative because the horizontal style
 // only affects rendering and this crate doesn't do rendering.

@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/build-a-basic-table.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/build-a-basic-table.adoc");
 
 non_normative!(
     r#"

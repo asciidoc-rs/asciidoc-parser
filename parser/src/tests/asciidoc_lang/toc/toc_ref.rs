@@ -1,6 +1,6 @@
 use crate::{document::TocMode, tests::prelude::*};
 
-track_file!("docs/modules/toc/pages/toc-ref.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/toc/pages/toc-ref.adoc");
 
 // This page is a per-converter (backend) reference table for the `toc` family
 // of attributes. This crate is a parser with no converter backends, so the

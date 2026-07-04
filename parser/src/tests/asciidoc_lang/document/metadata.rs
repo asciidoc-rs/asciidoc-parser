@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/document/pages/metadata.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/document/pages/metadata.adoc");
 
 // Treating the entire file as non-normative because asciidoc-parser doesn't
 // _consume_ the document metadata entries anywhere. There's nothing special

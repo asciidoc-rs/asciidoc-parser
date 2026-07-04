@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/macros/pages/complex-urls.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/macros/pages/complex-urls.adoc");
 
 non_normative!(
     r#"
