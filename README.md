@@ -26,11 +26,11 @@ The parser is now complete enough to build these on.
 
 If you know me from other projects, you know that I value high code coverage. Code coverage on this crate is now extremely high (99.5%).
 
-With this project, I’m doing an experiment in what I call **“spec-driven development.”** That means not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/docs%2Fmodules).
+With this project, I’m doing an experiment in what I call **“spec-driven development.”** Since I started, that phrase has taken on a different and now more widely used meaning — [writing a structured specification up front so that an AI coding agent can implement it](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/), as popularized by tooling such as [GitHub’s Spec Kit](https://github.com/github/spec-kit). That is _not_ what I mean here. In my sense the specification already exists — it’s the AsciiDoc language description — and I’m driving the implementation _toward_ it: not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/docs%2Fmodules).
 
 I’m reading page-by-page, line-by-line, and writing tests to verify that the implementation matches the specification(*). This slowed progress considerably, but I expect it has resulted in an implementation that is very solid.
 
-(*) Yes, I’m aware that the Asciidoc language authors consider this a “language description,” not a specification. Since I’m experimenting with and potentially introducing the term spec-driven development as a broader term, I’m splitting the difference here.
+(*) Yes, I’m aware that the Asciidoc language authors consider this a “language description,” not a specification. I’m splitting the difference here.
 
 ## No planned support for some AsciiDoc features
 
