@@ -1,4 +1,5 @@
 mod asciidoc_vs_markdown;
+mod comments;
 mod document_processing;
 mod document_structure;
 mod faq;
