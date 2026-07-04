@@ -7,3 +7,4 @@ mod glossary;
 mod index;
 mod key_concepts;
 mod normalization;
+mod syntax_quick_reference;
