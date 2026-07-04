@@ -1518,14 +1518,12 @@ mod psv {
         assert_css(&doc, "table > tbody > tr > td .paragraph", 1);
     }
 
-    #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/547):
-    // per-cell background colors depend on the `{set:cellbgcolor:...}` /
-    // `{set:cellbgcolor!}` attribute-assignment reference, which the
-    // substitution layer does not implement. `{set:...}` is of uncertain status
-    // in the AsciiDoc language, so this is deferred pending that decision.
-    fn cell_background_color() {}
+    // Not implemented (by design): the Asciidoctor `cell_background_color` test
+    // is intentionally omitted. Per-cell background colors depend on the
+    // `{set:cellbgcolor:...}` / `{set:cellbgcolor!}` inline attribute-entry
+    // reference. That syntax is discouraged and likely to be removed from the
+    // AsciiDoc language, so this crate has decided not to implement it. See the
+    // "No planned support for some AsciiDoc features" section of the README.
 
     #[test]
     fn should_warn_if_table_block_is_not_terminated() {
