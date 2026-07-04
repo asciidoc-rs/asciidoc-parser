@@ -610,10 +610,11 @@ include::example$subs.adoc[tag=subs-sub]
         use inline_file_handler::InlineFileHandler;
 
         // Preload the `subs-sub` example (an illegal XML tag) via the debug-only
-        // include handler.
+        // include handler. The tagged region is selected by the `tag=subs-sub`
+        // attribute on the include directive.
         let handler = InlineFileHandler::from_pairs([(
             "example$subs.adoc",
-            "[source,xml,subs=\"-callouts\"]\n.An illegal XML tag\n----\n<1>\n  content inside \"1\" tag\n</1>\n----",
+            "// tag::subs-sub[]\n[source,xml,subs=\"-callouts\"]\n.An illegal XML tag\n----\n<1>\n  content inside \"1\" tag\n</1>\n----\n// end::subs-sub[]",
         )]);
 
         let mut parser = Parser::default()
@@ -655,9 +656,11 @@ In the above example, the `attributes` substitution step is added to the beginni
         use inline_file_handler::InlineFileHandler;
 
         // Preload the `subs-multi` example via the debug-only include handler.
+        // The tagged region is selected by the `tag=subs-multi` attribute on the
+        // include directive.
         let handler = InlineFileHandler::from_pairs([(
             "example$subs.adoc",
-            "[source,xml,subs=\"attributes+,+replacements,-callouts\"]\n----\n<version>{version}</version>\n<copyright>(C) ACME</copyright>\n<1>\n  content inside \"1\" tag\n</1>\n----",
+            "// tag::subs-multi[]\n[source,xml,subs=\"attributes+,+replacements,-callouts\"]\n----\n<version>{version}</version>\n<copyright>(C) ACME</copyright>\n<1>\n  content inside \"1\" tag\n</1>\n----\n// end::subs-multi[]",
         )]);
 
         let mut parser = Parser::default()
