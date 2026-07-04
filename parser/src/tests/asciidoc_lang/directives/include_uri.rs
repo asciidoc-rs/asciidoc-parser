@@ -41,6 +41,10 @@ fn recognizes_uri_target() {
 The include directive recognizes when the target is a URI and can include the content referenced by that URI.
 This example demonstrates how to include an AsciiDoc file from a GitHub repository directly into your document.
 
+----
+include::example$include.adoc[tag=uri]
+----
+
 "#
     );
 
@@ -50,15 +54,6 @@ This example demonstrates how to include an AsciiDoc file from a GitHub reposito
     let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
     assert_eq!(paras, vec!["Remote paragraph."]);
 }
-
-non_normative!(
-    r#"
-----
-include::example$include.adoc[tag=uri]
-----
-
-"#
-);
 
 #[test]
 fn not_enabled_by_default() {

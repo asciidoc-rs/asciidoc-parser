@@ -21,6 +21,11 @@ We can solve this by using the built-in `empty` attribute to initiate the list i
 
 Here's an example of how to use the `empty` attribute and the include directive to define a list item, then include the primary text from another file:
 
+----
+* {empty}
+\include::item-text.adoc[]
+----
+
 "#
     );
 
@@ -39,16 +44,6 @@ Here's an example of how to use the `empty` attribute and the include directive 
     assert!(paras[0].contains("The item text."), "was: {paras:?}");
 }
 
-non_normative!(
-    r#"
-----
-* {empty}
-\include::item-text.adoc[]
-----
-
-"#
-);
-
 #[test]
 fn open_block_technique() {
     verifies!(
@@ -62,6 +57,14 @@ This keeps all the include lines together, enclosed inside the boundaries of the
 You then attach this block to the list item using a list continuation (i.e., `+`).
 
 Here's an example of how to include compound content from another file into a list item:
+
+----
+* {empty}
++
+--
+\include::complex-list-item.adoc[]
+--
+----
 
 "#
     );
@@ -85,14 +88,6 @@ Here's an example of how to include compound content from another file into a li
 
 non_normative!(
     r#"
-----
-* {empty}
-+
---
-\include::complex-list-item.adoc[]
---
-----
-
 See xref:lists:continuation.adoc#drop-principal-text[dropping the principal text of a list item] for another example of this technique.
 "#
 );

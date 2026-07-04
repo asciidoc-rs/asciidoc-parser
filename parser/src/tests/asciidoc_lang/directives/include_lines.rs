@@ -65,6 +65,10 @@ fn single_range() {
         r#"
 To include content by line range, assign a starting line number and an ending line number separated by a pair of dots (e.g., `lines=1..5`) to the `lines` attribute.
 
+----
+include::example$include.adoc[tag=line]
+----
+
 "#
     );
 
@@ -73,21 +77,16 @@ To include content by line range, assign a starting line number and an ending li
     assert_eq!(paras, vec!["banana", "cherry"]);
 }
 
-non_normative!(
-    r#"
-----
-include::example$include.adoc[tag=line]
-----
-
-"#
-);
-
 #[test]
 fn multiple_ranges_comma() {
     verifies!(
         r#"
 You can specify multiple ranges by separating each range by a comma.
 Since commas are normally used to separate individual attributes, you must quote the comma-separated list of ranges.
+
+----
+include::example$include.adoc[tag=m-line-comma]
+----
 
 "#
     );
@@ -98,20 +97,15 @@ Since commas are normally used to separate individual attributes, you must quote
     assert_eq!(paras, vec!["apple", "cherry"]);
 }
 
-non_normative!(
-    r#"
-----
-include::example$include.adoc[tag=m-line-comma]
-----
-
-"#
-);
-
 #[test]
 fn multiple_ranges_semicolon() {
     verifies!(
         r#"
 To avoid having to quote the list of ranges, you can instead separate them using semicolons.
+
+----
+include::example$include.adoc[tag=m-line]
+----
 
 "#
     );
@@ -122,20 +116,15 @@ To avoid having to quote the list of ranges, you can instead separate them using
     assert_eq!(paras, vec!["apple", "cherry"]);
 }
 
-non_normative!(
-    r#"
-----
-include::example$include.adoc[tag=m-line]
-----
-
-"#
-);
-
 #[test]
 fn last_line_negative_one() {
     verifies!(
         r#"
 If you don't know the number of lines in the document, or you don't want to couple the range to the length of the file, you can refer to the last line of the document using the value -1.
+
+----
+include::example$include.adoc[tag=last]
+----
 
 "#
     );
@@ -145,21 +134,15 @@ If you don't know the number of lines in the document, or you don't want to coup
     assert_eq!(paras, vec!["banana", "cherry"]);
 }
 
-non_normative!(
-    r#"
-----
-include::example$include.adoc[tag=last]
-----
-
-"#
-);
-
 #[test]
 fn endless_range() {
     verifies!(
         r#"
 Alternately, you can leave the end range unspecified and it will default to -1.
 
+----
+include::example$include.adoc[tag=endless]
+----
 "#
     );
 
@@ -167,11 +150,3 @@ Alternately, you can leave the end range unspecified and it will default to -1.
     let paras: Vec<&str> = paras.iter().map(|s| s.as_str()).collect();
     assert_eq!(paras, vec!["banana", "cherry"]);
 }
-
-non_normative!(
-    r#"
-----
-include::example$include.adoc[tag=endless]
-----
-"#
-);

@@ -273,7 +273,9 @@ impl<'p> PreprocessorState<'p> {
                     // The parser only handles UTF-8 content, so an `encoding`
                     // attribute requesting any other encoding cannot be honored;
                     // record a warning (emitted below, once the offset of the
-                    // included content is known). See `include.adoc`.
+                    // included content is known). See `include.adoc`. Letting a
+                    // handler transcode instead is tracked in
+                    // https://github.com/asciidoc-rs/asciidoc-parser/issues/611.
                     let non_utf8_encoding = attrlist
                         .named_attribute("encoding")
                         .map(|a| a.value())
