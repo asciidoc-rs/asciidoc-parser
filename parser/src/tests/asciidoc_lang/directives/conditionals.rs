@@ -1,0 +1,89 @@
+use crate::{HasSpan, tests::prelude::*};
+
+track_file!("docs/modules/directives/pages/conditionals.adoc");
+
+non_normative!(
+    r#"
+= Conditionals
+
+You can include or exclude lines of text in your document using the following conditional preprocessor directives:
+
+* xref:ifdef-ifndef.adoc#ifdef[ifdef]
+* xref:ifdef-ifndef.adoc#ifndef[ifndef]
+* xref:ifeval.adoc[ifeval]
+
+"#
+);
+
+#[test]
+fn condition_determines_inclusion() {
+    verifies!(
+        r#"
+When the processor encounters one of these conditionals, it evaluates the specified condition.
+The condition is based on the presence or value of one or more document attributes.
+If the condition evaluates to true, the lines the conditional encloses are included.
+Otherwise, the lines are skipped.
+
+"#
+    );
+
+    // When the condition evaluates to true, the enclosed lines are included.
+    let doc = Parser::default().parse(":flag:\n\nifdef::flag[]\nShown.\nendif::[]");
+    assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
+
+    // Otherwise, the enclosed lines are skipped.
+    let doc = Parser::default().parse("ifdef::flag[]\nHidden.\nendif::[]\n\nAfter.");
+    assert_eq!(rendered_paragraphs(&doc), vec!["After."]);
+}
+
+non_normative!(
+    r#"
+////
+For example, say you want to include a certain section of content only when converting to HTML.
+Conditional preprocessor directives make this possible.
+You simply check for the presence of the `basebackend-html` attribute using an `ifdef` directive.
+Details of this example and more `ifdef` and `ifndef` examples, are described in the following sections.
+See xref:ifeval.adoc[] for `ifeval` examples.
+////
+
+== Conditional processing
+
+Although a conditional preprocessor directive looks like a block macro, *it's not a macro and therefore isn't processed like one*.
+It's a preprocessor directive; it's important to understand the distinction.
+
+include::partial$preprocessor.adoc[]
+The conditional preprocessor directives determine which lines to add and which ones to take away based on the condition.
+
+"#
+);
+
+#[test]
+fn escape_a_conditional_directive() {
+    verifies!(
+        r#"
+== Escape a conditional directive
+
+If you don't want a conditional preprocessor directive to be processed, you must escape it using a backslash.
+
+"#
+    );
+
+    // The escaped directive is not processed: the leading backslash is removed
+    // and the remainder is emitted literally. This holds even inside a verbatim
+    // block because the preprocessor is not aware of the surrounding structure.
+    let doc = Parser::default().parse("----\n\\ifdef::just-an-example[]\n----");
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.span().data(), "----\nifdef::just-an-example[]\n----");
+}
+
+non_normative!(
+    r#"
+// NOTE: the following listing uses indentation to prevent the directive from being processed
+[source,indent=0]
+----
+ \ifdef::just-an-example[]
+----
+
+Escaping the directive is necessary _even if it appears in a verbatim block_ since it's not aware of the surrounding document structure.
+"#
+);

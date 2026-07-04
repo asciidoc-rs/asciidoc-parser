@@ -33,8 +33,10 @@ pub(crate) fn preprocess(
     // directives.
     if !source.starts_with("include::")
         && !source.starts_with("if")
+        && !source.starts_with("\\if")
         && !source.contains("\ninclude::")
         && !source.contains("\nif")
+        && !source.contains("\n\\if")
         && !source.starts_with("\\include::")
         && !source.contains("\n\\include::")
         && parser.primary_file_name.is_none()
@@ -62,6 +64,27 @@ struct PreprocessorState<'p> {
     output: String,
     source_map: SourceMap,
     warnings: Vec<DeferredWarning>,
+
+    /// Stack of open conditional preprocessor directives (`ifdef`, `ifndef`,
+    /// `ifeval`). Each entry records whether the lines it encloses are
+    /// currently being skipped. See [`process_conditional_directive`].
+    ///
+    /// [`process_conditional_directive`]: Self::process_conditional_directive
+    conditional_stack: Vec<Conditional>,
+}
+
+/// A single open block-form conditional preprocessor directive.
+#[derive(Debug)]
+struct Conditional {
+    /// The directive target used to match a named `endif`. `ifdef`/`ifndef`
+    /// store their attribute expression here; `ifeval` stores `None` (it can
+    /// only be closed by an anonymous `endif::[]`).
+    target: Option<String>,
+
+    /// `true` if the lines enclosed by this directive are being discarded. This
+    /// is cumulative: a conditional nested inside a skipped region is itself
+    /// skipping, regardless of its own condition.
+    skipping: bool,
 }
 
 impl<'p> PreprocessorState<'p> {
@@ -75,7 +98,14 @@ impl<'p> PreprocessorState<'p> {
             output: String::new(),
             source_map: SourceMap::default(),
             warnings: vec![],
+            conditional_stack: vec![],
         }
+    }
+
+    /// Returns `true` if the preprocessor is currently discarding lines because
+    /// it is inside a conditional directive whose condition evaluated to false.
+    fn skipping(&self) -> bool {
+        self.conditional_stack.last().is_some_and(|c| c.skipping)
     }
 
     fn process_adoc_include(&mut self, source: &str, file_name: Option<&str>) {
@@ -91,6 +121,52 @@ impl<'p> PreprocessorState<'p> {
             source_span = after;
 
             let source_line_number = line.line();
+
+            // Conditional preprocessor directives (`ifdef`, `ifndef`, `ifeval`,
+            // `endif`) are handled before anything else so they take effect even
+            // while a surrounding conditional is skipping (the nesting still has
+            // to be tracked to balance the stack).
+            if has_conditional_prefix(line.data())
+                && let Some(caps) = CONDITIONAL_DIRECTIVE.captures(line.data())
+            {
+                // A directive line produces no output of its own, so the next
+                // emitted line must re-anchor the source map (its original line
+                // number no longer matches the output line number).
+                has_reported_file = false;
+
+                if caps.get(1).is_some() {
+                    // Escaped directive (e.g. `\ifdef::foo[]`): not processed.
+                    // The leading backslash is stripped and the remainder is
+                    // emitted literally, matching Asciidoctor — unless we're
+                    // skipping, in which case it's discarded like any other line.
+                    if !self.skipping() {
+                        self.emit_line(
+                            &line.data()[1..],
+                            file_name,
+                            source_line_number,
+                            &mut has_reported_file,
+                        );
+                    }
+                } else {
+                    self.process_conditional_directive(
+                        &caps[2],
+                        caps.get(3).map_or("", |m| m.as_str()),
+                        caps.get(4).map_or("", |m| m.as_str()),
+                        file_name,
+                        source_line_number,
+                        &mut has_reported_file,
+                    );
+                }
+
+                continue;
+            }
+
+            // While skipping (inside a conditional whose condition was false),
+            // discard every non-directive line.
+            if self.skipping() {
+                has_reported_file = false;
+                continue;
+            }
 
             if self.can_have_attribute
                 && line.starts_with(':')
@@ -330,6 +406,332 @@ impl<'p> PreprocessorState<'p> {
             input.to_string()
         }
     }
+
+    /// Emit a single line of text to the output, updating the source map and
+    /// document-header tracking state exactly as the plain-line branch of
+    /// [`process_adoc_include`] does.
+    ///
+    /// [`process_adoc_include`]: Self::process_adoc_include
+    fn emit_line(
+        &mut self,
+        text: &str,
+        file_name: Option<&str>,
+        source_line_number: usize,
+        has_reported_file: &mut bool,
+    ) {
+        if !*has_reported_file {
+            *has_reported_file = true;
+            self.source_map.append(
+                self.output_line_number,
+                SourceLine(to_owned(file_name), source_line_number),
+            );
+        }
+
+        if text.is_empty() {
+            self.in_document_header = false;
+            self.can_have_attribute = true;
+        } else if !self.in_document_header {
+            self.can_have_attribute = false;
+        }
+
+        self.output_line_number += 1;
+        self.output.push_str(text);
+        self.output.push('\n');
+    }
+
+    /// Process a conditional preprocessor directive (`ifdef`, `ifndef`,
+    /// `ifeval`, or `endif`).
+    ///
+    /// `keyword` is the directive name, `target` is the text before the `[`
+    /// (attribute expression for `ifdef`/`ifndef`, empty for `ifeval`), and
+    /// `content` is the text inside the brackets (single-line content for
+    /// `ifdef`/`ifndef`, the expression for `ifeval`).
+    ///
+    /// See the [conditionals] documentation.
+    ///
+    /// [conditionals]: https://docs.asciidoctor.org/asciidoc/latest/directives/conditionals/
+    fn process_conditional_directive(
+        &mut self,
+        keyword: &str,
+        target: &str,
+        content: &str,
+        file_name: Option<&str>,
+        source_line_number: usize,
+        has_reported_file: &mut bool,
+    ) {
+        if keyword == "endif" {
+            // `endif::[]` closes the most recently opened conditional;
+            // `endif::name[]` must match that conditional's target. An `endif`
+            // with non-empty brackets (e.g. `endif::[<condition>]`) is malformed
+            // and closes nothing, and a mismatched or unmatched `endif` is
+            // ignored (Asciidoctor logs an error in each case).
+            if content.is_empty()
+                && let Some(top) = self.conditional_stack.last()
+                && (target.is_empty() || top.target.as_deref() == Some(target))
+            {
+                self.conditional_stack.pop();
+            }
+            return;
+        }
+
+        let already_skipping = self.skipping();
+
+        if keyword == "ifeval" {
+            // `ifeval` has no single-line or long-form variant and its target
+            // must be empty; it is always closed by an anonymous `endif::[]`.
+            if !target.is_empty() {
+                return;
+            }
+
+            let include = !already_skipping && self.eval_ifeval(content);
+            self.conditional_stack.push(Conditional {
+                target: None,
+                skipping: already_skipping || !include,
+            });
+            return;
+        }
+
+        // `ifdef` / `ifndef`.
+        if target.is_empty() {
+            // Malformed: a target (attribute name) is required.
+            return;
+        }
+
+        if content.is_empty() {
+            // Block form: include the enclosed lines when the condition holds.
+            let include = already_skipping || self.eval_ifdef(keyword, target);
+            self.conditional_stack.push(Conditional {
+                target: Some(target.to_owned()),
+                skipping: already_skipping || !include,
+            });
+        } else if !already_skipping && self.eval_ifdef(keyword, target) {
+            // Single-line form: the bracketed content is included in place (with
+            // no `endif`) when the condition holds.
+            self.process_single_line_content(
+                content,
+                file_name,
+                source_line_number,
+                has_reported_file,
+            );
+        }
+    }
+
+    /// Emit the bracketed content of a single-line `ifdef`/`ifndef` directive.
+    ///
+    /// The content is a single line. When it is an attribute entry (e.g.
+    /// `ifdef::x[:foo: bar]`) it is applied to the running attribute state so
+    /// that later directives and include targets observe it, matching how the
+    /// main loop treats attribute entries; otherwise it is emitted verbatim and
+    /// left for normal parsing (any `{attr}` references are resolved then).
+    fn process_single_line_content(
+        &mut self,
+        content: &str,
+        file_name: Option<&str>,
+        source_line_number: usize,
+        has_reported_file: &mut bool,
+    ) {
+        if self.can_have_attribute
+            && content.starts_with(':')
+            && (content.ends_with(':') || content.contains(": "))
+            && let Some(attr) = Attribute::parse(Span::new(content), self.parser)
+        {
+            let mut warnings: Vec<Warning> = vec![];
+            self.parser
+                .set_attribute_from_body(&attr.item, &mut warnings);
+        }
+
+        self.emit_line(content, file_name, source_line_number, has_reported_file);
+    }
+
+    /// Evaluate an `ifdef`/`ifndef` condition, returning `true` if the enclosed
+    /// content should be included.
+    ///
+    /// Multiple attribute names may be combined with `,` (any is set — logical
+    /// OR) or `+` (all are set — logical AND); the two combinators cannot be
+    /// mixed. `ifndef` is the logical negation of `ifdef`.
+    fn eval_ifdef(&self, keyword: &str, target: &str) -> bool {
+        let defined = if target.contains(',') {
+            target
+                .split(',')
+                .any(|name| self.parser.is_attribute_set(name))
+        } else if target.contains('+') {
+            target
+                .split('+')
+                .all(|name| self.parser.is_attribute_set(name))
+        } else {
+            self.parser.is_attribute_set(target)
+        };
+
+        if keyword == "ifndef" {
+            !defined
+        } else {
+            defined
+        }
+    }
+
+    /// Evaluate an `ifeval` expression, returning `true` if the enclosed
+    /// content should be included. A malformed expression (or one whose two
+    /// sides cannot be compared) evaluates to false.
+    fn eval_ifeval(&self, expr: &str) -> bool {
+        let Some(caps) = IFEVAL_EXPRESSION.captures(expr.trim()) else {
+            return false;
+        };
+
+        let lhs = self.resolve_expr_val(&caps[1]);
+        let rhs = self.resolve_expr_val(&caps[3]);
+        compare_values(&lhs, &caps[2], &rhs)
+    }
+
+    /// Resolve one side of an `ifeval` expression to a typed [`Value`].
+    ///
+    /// Attribute references are substituted first. A value enclosed in single
+    /// or double quotes is always a string; otherwise it is coerced per the
+    /// documented rules (empty → nil, `true`/`false` → boolean, a value with a
+    /// period → float, anything else → integer).
+    fn resolve_expr_val(&self, raw: &str) -> Value {
+        let raw = raw.trim();
+
+        // A value wrapped in matching single or double quotes is always a string.
+        let quoted_inner = raw
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .or_else(|| raw.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')));
+
+        match quoted_inner {
+            Some(inner) => Value::Str(self.substitute_attributes(inner)),
+            None => coerce_unquoted(&self.substitute_attributes(raw)),
+        }
+    }
+}
+
+/// A value that one side of an `ifeval` expression has been coerced to.
+#[derive(Debug, PartialEq)]
+enum Value {
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bool(bool),
+    Nil,
+}
+
+/// Coerce an unquoted `ifeval` operand to a typed [`Value`] per the documented
+/// rules.
+fn coerce_unquoted(s: &str) -> Value {
+    if s.is_empty() {
+        return Value::Nil;
+    }
+
+    match s {
+        "true" => return Value::Bool(true),
+        "false" => return Value::Bool(false),
+        _ => {}
+    }
+
+    if s.chars().all(char::is_whitespace) {
+        return Value::Str(" ".to_owned());
+    }
+
+    if s.contains('.') {
+        Value::Float(ruby_to_f(s))
+    } else {
+        Value::Int(ruby_to_i(s))
+    }
+}
+
+/// Parse the leading integer of a string, Ruby `String#to_i` style (a string
+/// with no leading numeric portion yields `0`).
+fn ruby_to_i(s: &str) -> i64 {
+    let mut digits = String::new();
+
+    for (idx, ch) in s.trim().char_indices() {
+        if (idx == 0 && (ch == '+' || ch == '-')) || ch.is_ascii_digit() {
+            digits.push(ch);
+        } else {
+            break;
+        }
+    }
+
+    digits.parse().unwrap_or(0)
+}
+
+/// Parse the leading float of a string, Ruby `String#to_f` style (a string with
+/// no leading numeric portion yields `0.0`).
+fn ruby_to_f(s: &str) -> f64 {
+    let s = s.trim();
+    if let Ok(f) = s.parse::<f64>() {
+        return f;
+    }
+
+    let mut digits = String::new();
+    let mut seen_dot = false;
+
+    for (idx, ch) in s.char_indices() {
+        if (idx == 0 && (ch == '+' || ch == '-')) || ch.is_ascii_digit() {
+            digits.push(ch);
+        } else if ch == '.' && !seen_dot {
+            seen_dot = true;
+            digits.push(ch);
+        } else {
+            break;
+        }
+    }
+
+    digits.parse().unwrap_or(0.0)
+}
+
+/// Compare two `ifeval` values with the given operator, following Ruby's
+/// comparison semantics. Equality across value types is simply `false`; an
+/// ordering comparison (`<`, `<=`, `>`, `>=`) between values that cannot be
+/// ordered (e.g. a number and a string) fails and yields `false`.
+fn compare_values(lhs: &Value, op: &str, rhs: &Value) -> bool {
+    match op {
+        "==" => values_equal(lhs, rhs),
+        "!=" => !values_equal(lhs, rhs),
+        _ => match ordering_of(lhs, rhs) {
+            Some(ordering) => match op {
+                "<" => ordering.is_lt(),
+                "<=" => ordering.is_le(),
+                ">" => ordering.is_gt(),
+                ">=" => ordering.is_ge(),
+                _ => false,
+            },
+            None => false,
+        },
+    }
+}
+
+fn values_equal(lhs: &Value, rhs: &Value) -> bool {
+    match (lhs, rhs) {
+        (Value::Int(a), Value::Int(b)) => a == b,
+        (Value::Float(a), Value::Float(b)) => a == b,
+        (Value::Int(a), Value::Float(b)) | (Value::Float(b), Value::Int(a)) => (*a as f64) == *b,
+        (Value::Str(a), Value::Str(b)) => a == b,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Nil, Value::Nil) => true,
+        _ => false,
+    }
+}
+
+fn ordering_of(lhs: &Value, rhs: &Value) -> Option<std::cmp::Ordering> {
+    match (lhs, rhs) {
+        (Value::Int(a), Value::Int(b)) => Some(a.cmp(b)),
+        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
+        (Value::Int(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
+        (Value::Float(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)),
+        (Value::Str(a), Value::Str(b)) => Some(a.cmp(b)),
+        _ => None,
+    }
+}
+
+/// Returns `true` if `line` could be a conditional preprocessor directive,
+/// gating the (more expensive) regex match. An optional leading backslash marks
+/// an escaped directive.
+fn has_conditional_prefix(line: &str) -> bool {
+    let line = line.strip_prefix('\\').unwrap_or(line);
+    line.starts_with("ifdef::")
+        || line.starts_with("ifndef::")
+        || line.starts_with("ifeval::")
+        || line.starts_with("endif::")
 }
 
 fn to_owned(maybe_file_name: Option<&str>) -> Option<String> {
@@ -385,6 +787,38 @@ static INCLUDE_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
 static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(r#"\\?\{([A-Za-z0-9_][A-Za-z0-9_-]*)\}"#).unwrap()
+});
+
+static CONDITIONAL_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?x)                          # Extended (verbose) mode
+
+        ^                               # Start of line
+
+        (\\)?                           # (1) Optional escaping backslash
+
+        (ifdef|ifndef|ifeval|endif)     # (2) Directive keyword
+
+        ::                              # Literal '::' separator
+
+        ([^\[]*)                        # (3) Target (attribute expression), may be empty
+
+        \[                             # Literal '[' opening the brackets
+
+        (.*)                            # (4) Bracketed content, may be empty
+
+        \]                             # Literal closing ']'
+
+        $                               # End of line
+        "#,
+    )
+    .unwrap()
+});
+
+static IFEVAL_EXPRESSION: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r#"(?s)^(.+?)\s*(==|!=|<=|>=|<|>)\s*(.+)$"#).unwrap()
 });
 
 #[cfg(test)]
@@ -1212,6 +1646,210 @@ mod tests {
                 Some("very/long/path/to/some/ subdirectory/file.adoc".to_owned()),
                 1
             ))
+        );
+    }
+
+    /// Preprocess `source` with a default (secure) parser and return only the
+    /// resulting text, for the conditional-directive tests below.
+    fn conditional_output(source: &str) -> String {
+        let parser = Parser::default();
+        let (output, _source_map, _warnings) = preprocess(source, &parser);
+        output
+    }
+
+    #[test]
+    fn ifdef_set_includes_content() {
+        assert_eq!(
+            conditional_output(":foo:\n\nifdef::foo[]\nkept\nendif::[]\n\ntail"),
+            ":foo:\n\nkept\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_unset_excludes_content() {
+        assert_eq!(
+            conditional_output("head\n\nifdef::foo[]\ndropped\nendif::[]\n\ntail"),
+            "head\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifndef_unset_includes_content() {
+        assert_eq!(
+            conditional_output("head\n\nifndef::foo[]\nkept\nendif::[]"),
+            "head\n\nkept\n"
+        );
+    }
+
+    #[test]
+    fn ifndef_set_excludes_content() {
+        assert_eq!(
+            conditional_output(":foo:\n\nifndef::foo[]\ndropped\nendif::[]\n\ntail"),
+            ":foo:\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_single_line_included() {
+        assert_eq!(
+            conditional_output(":foo:\n\nifdef::foo[kept on one line]"),
+            ":foo:\n\nkept on one line\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_single_line_excluded() {
+        assert_eq!(
+            conditional_output("head\n\nifdef::foo[dropped]\n\ntail"),
+            "head\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_single_line_attribute_entry_is_applied() {
+        // The attribute set inside the single-line directive is observed by the
+        // following directive.
+        assert_eq!(
+            conditional_output(":foo:\n\nifdef::foo[:bar: yes]\nifdef::bar[bar is set]"),
+            ":foo:\n\n:bar: yes\nbar is set\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_or_combinator() {
+        // Comma means "any set": one of the two attributes is enough.
+        assert_eq!(
+            conditional_output(":b:\n\nifdef::a,b[]\nkept\nendif::[]"),
+            ":b:\n\nkept\n"
+        );
+        assert_eq!(
+            conditional_output("head\n\nifdef::a,b[]\ndropped\nendif::[]"),
+            "head\n\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_and_combinator() {
+        // Plus means "all set": both attributes are required.
+        assert_eq!(
+            conditional_output(":a:\n:b:\n\nifdef::a+b[]\nkept\nendif::[]"),
+            ":a:\n:b:\n\nkept\n"
+        );
+        assert_eq!(
+            conditional_output(":a:\n\nifdef::a+b[]\ndropped\nendif::[]"),
+            ":a:\n\n"
+        );
+    }
+
+    #[test]
+    fn nested_conditionals() {
+        // The inner directive is only evaluated when the outer one includes.
+        assert_eq!(
+            conditional_output(
+                ":outer:\n:inner:\n\nifdef::outer[]\nA\nifdef::inner[]\nB\nendif::[]\nC\nendif::[]"
+            ),
+            ":outer:\n:inner:\n\nA\nB\nC\n"
+        );
+    }
+
+    #[test]
+    fn nested_conditional_inside_skipped_region_stays_skipped() {
+        // When the outer condition is false the whole region is dropped even
+        // though the inner condition would be true on its own.
+        assert_eq!(
+            conditional_output(
+                ":inner:\n\nifdef::outer[]\nA\nifdef::inner[]\nB\nendif::[]\nC\nendif::[]\n\ntail"
+            ),
+            ":inner:\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn named_endif_matches_target() {
+        assert_eq!(
+            conditional_output(":foo:\n\nifdef::foo[]\nkept\nendif::foo[]"),
+            ":foo:\n\nkept\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_numeric_true() {
+        assert_eq!(
+            conditional_output("head\n\nifeval::[2 > 1]\nkept\nendif::[]"),
+            "head\n\nkept\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_numeric_false() {
+        assert_eq!(
+            conditional_output("head\n\nifeval::[1 > 2]\ndropped\nendif::[]\n\ntail"),
+            "head\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_attribute_reference() {
+        // `sectnumlevels` defaults to 3.
+        assert_eq!(
+            conditional_output("head\n\nifeval::[{sectnumlevels} == 3]\nkept\nendif::[]"),
+            "head\n\nkept\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_string_comparison() {
+        assert_eq!(
+            conditional_output(
+                ":backend: html5\n\nifeval::[\"{backend}\" == \"html5\"]\nkept\nendif::[]"
+            ),
+            ":backend: html5\n\nkept\n"
+        );
+        assert_eq!(
+            conditional_output(
+                ":backend: docbook5\n\nifeval::[\"{backend}\" == \"html5\"]\ndropped\nendif::[]"
+            ),
+            ":backend: docbook5\n\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_type_mismatch_is_false() {
+        // Comparing a number and a string with an ordering operator fails, so
+        // the content is skipped.
+        assert_eq!(
+            conditional_output("head\n\nifeval::[1 < \"a\"]\ndropped\nendif::[]\n\ntail"),
+            "head\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn escaped_conditional_directive_emitted_literally() {
+        assert_eq!(
+            conditional_output("head\n\n\\ifdef::foo[]\n\ntail"),
+            "head\n\nifdef::foo[]\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn source_map_realigns_after_skipped_region() {
+        // Lines dropped by a false conditional must not corrupt the mapping of
+        // the lines that follow back to their original line numbers.
+        let source = "l1\n\nifdef::foo[]\ndropped\ndropped\nendif::[]\n\nl8";
+        let parser = Parser::default();
+        let (output, source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(output, "l1\n\n\nl8\n");
+
+        // Output line 1 -> source line 1.
+        assert_eq!(
+            source_map.original_file_and_line(1),
+            Some(SourceLine(None, 1))
+        );
+        // Output line 4 ("l8") -> source line 8.
+        assert_eq!(
+            source_map.original_file_and_line(4),
+            Some(SourceLine(None, 8))
         );
     }
 }
