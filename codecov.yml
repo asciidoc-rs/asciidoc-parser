@@ -26,4 +26,4 @@ component_management:
     - component_id: spec
       name: AsciiDoc spec coverage
       paths:
-        - ref/asciidoc-lang/docs/modules/**
+        - "ref/**/*.adoc"
