@@ -692,10 +692,11 @@ If the file is recognized as an AsciiDoc file (i.e., it has one of the following
     assert_eq!(paras, vec!["Chapter intro.", "Fragment body."]);
 }
 
-// Trailing-whitespace stripping and preprocessor conditionals (e.g. `ifdef`)
-// are not implemented, so the normalization detail and the conditionals bullet
-// below remain non-normative. (The `includes` bullet is covered by the
-// nested-include test that follows.)
+// Trailing-whitespace stripping is not implemented, so the normalization detail
+// below remains non-normative. (The `includes` bullet is covered by the
+// nested-include test that follows; the conditionals bullet is verified below,
+// with full coverage in the dedicated `conditionals`/`ifdef_ifndef`/`ifeval`
+// spec files.)
 non_normative!(
     r#"
 First, all trailing whitespace and endlines are removed from each line and replaced with a Unix line feed.
@@ -703,7 +704,25 @@ This normalization is important to how an AsciiDoc processor works.
 Next, the AsciiDoc processor runs the preprocessor on the lines, looking for and interpreting the following directives:
 
 * includes
+"#
+);
+
+#[test]
+fn preprocessor_interprets_conditionals() {
+    verifies!(
+        r#"
 * preprocessor conditionals (e.g., `ifdef`)
+"#
+    );
+
+    // The preprocessor interprets conditional directives: an `ifdef` whose
+    // attribute is set includes its enclosed content.
+    let doc = Parser::default().parse(":flag:\n\nifdef::flag[]\nShown.\nendif::[]");
+    assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
+}
+
+non_normative!(
+    r#"
 //* front matter (if enabled)
 
 "#

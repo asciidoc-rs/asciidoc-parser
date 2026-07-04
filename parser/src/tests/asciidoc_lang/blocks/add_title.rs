@@ -566,17 +566,14 @@ The block title will be displayed with a caption label and number, as shown here
     assert_eq!(block.number(), Some(1));
 }
 
-// This block is documentation scaffolding that saves and restores the
-// `example-number` counter (via `ifdef::` conditional directives) so the
-// rendered example below always displays as `Example 1.`. It is kept
-// non-normative because conditional preprocessor directives
-// (`ifdef`/`ifndef`/`ifeval`) are not yet implemented; once they are, this can
-// be promoted to verified coverage asserting the counter save/restore.
-//
-// TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/589): implement
-// conditional preprocessor directives and verify this block.
-non_normative!(
-    r#"
+#[test]
+fn example_number_counter_save_and_restore() {
+    // This block is documentation scaffolding that saves and restores the
+    // `example-number` counter (via `ifdef::` conditional directives) so the
+    // rendered example below always displays as `Example 1.`, regardless of the
+    // counter's value in the surrounding document.
+    verifies!(
+        r#"
 :example-caption: Example
 ifdef::example-number[:prev-example-number: {example-number}]
 :example-number: 0
@@ -591,7 +588,35 @@ ifdef::prev-example-number[:example-number: {prev-example-number}]
 :!prev-example-number:
 
 "#
-);
+    );
+
+    // On a pristine parser `example-number` is unset, so both conditionals are
+    // false: the save and restore are no-ops, the counter is reset to 0, and the
+    // example is numbered 1 and displayed with its caption.
+    let doc = Parser::default().parse(
+        ":example-caption: Example\nifdef::example-number[:prev-example-number: {example-number}]\n:example-number: 0\n\n.Block that supports captioned title\n====\nBlock content\n====\n\n:!example-caption:\nifdef::prev-example-number[:example-number: {prev-example-number}]\n:!prev-example-number:",
+    );
+    let block = doc.nested_blocks().next().unwrap();
+    assert_eq!(block.title(), Some("Block that supports captioned title"));
+    assert_eq!(block.caption(), Some("Example 1. "));
+    assert_eq!(block.number(), Some(1));
+
+    // When `example-number` is already set, the idiom saves it, resets the
+    // counter so the scaffolded example is numbered 1, then restores it so a
+    // later example continues the original sequence (7 -> restored -> 8).
+    let doc = Parser::default().parse(
+        ":example-number: 7\n\n:example-caption: Example\nifdef::example-number[:prev-example-number: {example-number}]\n:example-number: 0\n\n.Saved\n====\nx\n====\n\nifdef::prev-example-number[:example-number: {prev-example-number}]\n\n.Restored\n====\ny\n====",
+    );
+    let mut examples = doc.nested_blocks().filter(|b| b.title().is_some());
+    // The first conditional fired (`example-number` was set), saving 7 into
+    // `prev-example-number`; the counter was then reset to 0, so this example is 1.
+    let saved = examples.next().unwrap();
+    assert_eq!(saved.number(), Some(1));
+    // The second conditional fired (`prev-example-number` was set), restoring
+    // `example-number` to 7, so the following example continues at 8.
+    let restored = examples.next().unwrap();
+    assert_eq!(restored.number(), Some(8));
+}
 
 #[test]
 fn unset_example_caption_drops_caption() {

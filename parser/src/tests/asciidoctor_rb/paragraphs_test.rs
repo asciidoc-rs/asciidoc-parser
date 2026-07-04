@@ -2419,6 +2419,34 @@ mod quote {
     }
 }
 
+mod special {
+    use crate::tests::prelude::*;
+
+    // Ported from Ruby Asciidoctor's paragraphs_test.rb
+    // ('should process preprocessor conditional in paragraph content').
+    #[test]
+    fn should_process_preprocessor_conditional_in_paragraph_content() {
+        // `asciidoctor-version` and `backend` are not set by default in this
+        // crate, so they are supplied explicitly to mirror the Ruby environment.
+        let doc = Parser::default()
+            .with_intrinsic_attribute(
+                "asciidoctor-version",
+                "2.0",
+                ModificationContext::Anywhere,
+            )
+            .with_intrinsic_attribute("backend", "html5", ModificationContext::Anywhere)
+            .parse(
+                "ifdef::asciidoctor-version[]\n[sidebar]\nFirst line of sidebar.\nifdef::backend[The backend is {backend}.]\nLast line of sidebar.\nendif::[]",
+            );
+
+        // The outer `ifdef` includes the sidebar; the inner single-line `ifdef`
+        // resolves to the backend value.
+        assert_output_contains(&doc, "First line of sidebar.");
+        assert_output_contains(&doc, "The backend is html5.");
+        assert_output_contains(&doc, "Last line of sidebar.");
+    }
+}
+
 #[ignore]
 #[test]
 fn port_from_ruby() {
@@ -2444,29 +2472,9 @@ fn port_from_ruby() {
       end
     end
 
-    test 'should process preprocessor conditional in paragraph content' do
-      input = <<~'EOS'
-      ifdef::asciidoctor-version[]
-      [sidebar]
-      First line of sidebar.
-      ifdef::backend[The backend is {backend}.]
-      Last line of sidebar.
-      endif::[]
-      EOS
-
-      expected = <<~'EOS'.chop
-      <div class="sidebarblock">
-      <div class="content">
-      First line of sidebar.
-      The backend is html5.
-      Last line of sidebar.
-      </div>
-      </div>
-      EOS
-
-      result = convert_string_to_embedded input
-      assert_equal expected, result
-    end
+    # NOTE: 'should process preprocessor conditional in paragraph content' has
+    # been ported to `mod special` below now that conditional preprocessor
+    # directives are implemented.
 
     context 'Styled Paragraphs' do
       test 'should wrap text in simpara for styled paragraphs when converted to DocBook' do
