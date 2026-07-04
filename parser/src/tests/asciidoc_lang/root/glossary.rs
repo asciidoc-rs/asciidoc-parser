@@ -1,0 +1,69 @@
+use crate::tests::prelude::*;
+
+track_file!("docs/modules/ROOT/pages/glossary.adoc");
+
+non_normative!(
+    r#"
+= Glossary of Terms
+
+[caption="Work in Progress"]
+CAUTION: This glossary is a work in progress.
+It does not include all the terms in AsciiDoc.
+
+attribute reference:: an expression for dereferencing the value of a document attribute.
+
+attrlist:: the source text that defines attributes for an element (i.e., block, block macro, inline macro) or an include directive.
+
+admonition:: a callout paragraph or block that has a label or icon indicating its priority.
+
+backend:: a moniker for the expected output format; used as a key to select which converter to use; often used interchangeably with the name of a converter (i.e., the "html5" backend").
+
+block element:: a line-oriented chunk of content in an AsciiDoc document.
+
+block attribute:: an attribute associated with a delimited block or paragraph; these attributes can affect processing of the block, and are available to block processors, but cannot be referenced using an attribute reference.
+
+block name:: used to refer to custom blocks, which can map an arbitrary name to one or more contexts; has a similar role as the style for a built-in block, such as an admonition block
+
+block style:: a modifier that specializes the context of a block
+
+built-in attribute:: a document attribute that controls processing, integrations, styling, and localization.
+
+content model:: determines how the content of a block is parsed and processed (e.g., simple, compound, verbatim, raw, etc.)
+
+context:: the element's type; describes the primary function of an element (e.g., sidebar, listing, example)
+
+converter:: a software component that an AsciiDoc processor calls to convert a parsed AsciiDoc document to a given output format;
+the converter and output format are correlated using a backend identifier.
+
+cross reference:: a link from one location in the document to another location marked by an anchor.
+
+document attribute:: an attribute associated with the document (node); in other words, an attribute in the global document attributes dictionary; the value of these attributes can be referenced using an attribute reference; if defined in the header, the document attribute is known as a header attribute.
+
+element:: discrete content in the source or output document.
+May be a branch (contains child elements) or a leaf (does not contain child elements).
+
+element attribute:: an attribute associated with a block, macro, formatted text, or the include directive; these attributes can affect processing of the element (or include directive) and are available in the document model; however, the value of these attributes cannot be resolved using an attribute reference.
+
+environment attribute:: a dynamic document attribute that pertains to, or gives information about, the runtime environment.
+
+header attribute:: a document attribute defined in the document header; visible from all nodes in the document; often required for global settings such as the source highlighter or icons mode.
+
+inline element:: a phrase (i.e., span of content) within a block element or one of its attributes in an AsciiDoc document.
+
+list continuation:: a plus sign (`+`) on a line by itself that connects adjacent lines of text to a list item.
+
+macro:: a syntax for representing non-text elements or that expands into text using the provided metadata.
+
+macro attribute:: an attribute associated with a block or inline macro; these attributes can affect processing of the macro, and are available to macro processors, but cannot be referenced using an attribute reference.
+
+node:: an in-memory representation of a block or inline element in the parsed document model.
+
+predefined attribute:: a document attribute defined for convenience; often used for inserting special content characters.
+
+structural container:: the fixed set of reusable block enclosures (delimited regions) defined by the AsciiDoc language; implies the block's content model; characterized by a pair of matching delimited lines defining the boundaries of the block's content
+
+quoted text:: text which is enclosed in special punctuation to give it emphasis or special meaning.
+
+user-defined attribute:: a document attribute defined by the content author; used for storing reusable content, and controlling conditional inclusion.
+"#
+);
