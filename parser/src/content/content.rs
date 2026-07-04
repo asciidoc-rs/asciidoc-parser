@@ -212,13 +212,11 @@ impl<'src> Content<'src> {
 
             // A `deferred` block always holds at least one xref placeholder, so
             // its finalized template is never empty. An empty template here
-            // means `finalize_deferred` was skipped; the `template.contains`
-            // guard below would then silently suppress every unresolved-ref
-            // warning, so catch that invariant break in debug builds.
-            debug_assert!(
-                !template.is_empty(),
-                "resolve_references called before finalize_deferred"
-            );
+            // means `finalize_deferred` was skipped (a future-refactor hazard);
+            // the `template.contains` guard below would then silently suppress
+            // every unresolved-ref warning, so catch that invariant break in
+            // debug builds.
+            debug_assert!(!template.is_empty());
 
             for (index, xref) in xrefs.iter_mut().enumerate() {
                 xref.resolved = resolver.resolve(&ResolutionContext {

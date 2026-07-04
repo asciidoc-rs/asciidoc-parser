@@ -1341,3 +1341,20 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) 
         "".to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::encode_html_attribute;
+
+    #[test]
+    fn encode_html_attribute_escapes_special_characters() {
+        // Each of the four characters that could break out of or corrupt an
+        // HTML attribute value is replaced with its entity; ordinary characters
+        // pass through untouched.
+        assert_eq!(
+            encode_html_attribute(r#"a&b"c<d>e"#),
+            "a&amp;b&quot;c&lt;d&gt;e"
+        );
+        assert_eq!(encode_html_attribute("plain"), "plain");
+    }
+}
