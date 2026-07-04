@@ -459,13 +459,17 @@ fn parse_lines<'src>(
     let filtered_lines = filtered_lines.join("\n");
     let mut content: Content<'src> = Content::from_filtered(source, filtered_lines);
 
-    let sub_group = base_substitution_group(style);
+    // A `[comment]`-styled paragraph is the single-paragraph form of a comment
+    // block. Its content is retained in the parsed model (this parser does not
+    // discard comments) but is not interpreted: no substitutions are applied,
+    // matching the raw content model of a `////` comment block.
+    let sub_group = if is_comment_style(attrlist.as_ref()) {
+        SubstitutionGroup::None
+    } else {
+        base_substitution_group(style).override_via_attrlist(attrlist.as_ref())
+    };
 
-    sub_group.override_via_attrlist(attrlist.as_ref()).apply(
-        &mut content,
-        parser,
-        attrlist.as_ref(),
-    );
+    sub_group.apply(&mut content, parser, attrlist.as_ref());
 
     Some(MatchedItem {
         item: (content, style),
@@ -486,6 +490,13 @@ fn base_substitution_group(style: SimpleBlockStyle) -> SubstitutionGroup {
             SubstitutionGroup::Normal
         }
     }
+}
+
+/// Returns `true` if this paragraph carries the `comment` block style (i.e.
+/// `[comment]`), making it a comment paragraph whose content is retained but
+/// not interpreted.
+fn is_comment_style(attrlist: Option<&Attrlist<'_>>) -> bool {
+    attrlist.and_then(|attrlist| attrlist.block_style()) == Some("comment")
 }
 
 impl<'src> IsBlock<'src> for SimpleBlock<'src> {
@@ -535,9 +546,14 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
 
     fn substitution_group(&'src self) -> SubstitutionGroup {
         // Mirror the group actually applied to this block's content in
-        // `parse_lines`: the base group derived from the style, then any `subs`
+        // `parse_lines`: a `[comment]` paragraph is raw (no substitutions),
+        // otherwise the base group derived from the style, then any `subs`
         // override from the attribute list.
-        base_substitution_group(self.style).override_via_attrlist(self.attrlist.as_ref())
+        if is_comment_style(self.attrlist.as_ref()) {
+            SubstitutionGroup::None
+        } else {
+            base_substitution_group(self.style).override_via_attrlist(self.attrlist.as_ref())
+        }
     }
 }
 

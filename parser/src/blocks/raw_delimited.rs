@@ -218,9 +218,14 @@ impl<'src> RawDelimitedBlock<'src> {
 /// block whose style turns it into a raw delimited block:
 ///
 /// * the verbatim contexts — `source` and `listing` (both rendered as a listing
-///   block), or `literal` — make the open block a verbatim raw block; and
+///   block), or `literal` — make the open block a verbatim raw block;
 /// * the `pass` context makes the open block a passthrough (raw) block, whose
-///   content is emitted with no substitutions and no block parsing.
+///   content is emitted with no substitutions and no block parsing; and
+/// * the `comment` context makes the open block a comment block — the alternate
+///   open-block form of a `////` comment block. Its content is retained in the
+///   parsed model (this parser deliberately does not discard comments) but is
+///   raw: no substitutions are applied and no AsciiDoc syntax within it,
+///   including preprocessor directives, is interpreted.
 ///
 /// Returns the resulting content model, context, and substitution group, or
 /// `None` when the style is absent or names a context that keeps the compound
@@ -241,6 +246,7 @@ fn open_block_verbatim_masquerade(
             SubstitutionGroup::Verbatim,
         )),
         "pass" => Some((ContentModel::Raw, "pass", SubstitutionGroup::Pass)),
+        "comment" => Some((ContentModel::Raw, "comment", SubstitutionGroup::None)),
         _ => None,
     }
 }
