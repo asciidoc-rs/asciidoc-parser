@@ -6,7 +6,7 @@ track_file!("docs/modules/directives/pages/include-with-leveloffset.adoc");
 // included file (verified in the preprocessor's own unit tests), but the parser
 // does not yet apply the `leveloffset` document attribute to section levels.
 // The normative claims about heading levels being shifted are therefore tracked
-// as to-dos here.
+// as to-dos here. See https://github.com/asciidoc-rs/asciidoc-parser/issues/609.
 
 non_normative!(
     r#"
