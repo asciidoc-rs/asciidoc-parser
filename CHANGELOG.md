@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.18.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.17.0...v0.18.0)
+_04 July 2026_
+
+### Added
+
+* Update README to reflect feature-complete status ([#616](https://github.com/asciidoc-rs/asciidoc-parser/pull/616))
+* Support fenced code blocks (``` delimiter) ([#599](https://github.com/asciidoc-rs/asciidoc-parser/pull/599)) ([#613](https://github.com/asciidoc-rs/asciidoc-parser/pull/613))
+* Retain comments in the data model; implement [comment] block styles ([#612](https://github.com/asciidoc-rs/asciidoc-parser/pull/612))
+* Implement include directive lines/tags/indent/leveloffset and URI gating ([#608](https://github.com/asciidoc-rs/asciidoc-parser/pull/608))
+* Implement conditional preprocessor directives (ifdef/ifndef/ifeval) ([#606](https://github.com/asciidoc-rs/asciidoc-parser/pull/606))
+* Implement cross-reference features and add SDD coverage for xref pages ([#604](https://github.com/asciidoc-rs/asciidoc-parser/pull/604))
+* Implement icon macro features and add SDD coverage for icon pages ([#603](https://github.com/asciidoc-rs/asciidoc-parser/pull/603))
+* Implement image id= and macro imagesdir= attributes; add SDD coverage for image-format and image-ref ([#602](https://github.com/asciidoc-rs/asciidoc-parser/pull/602))
+* Implement safe mode handling and safe-mode-* attributes ([#277](https://github.com/asciidoc-rs/asciidoc-parser/pull/277)) ([#598](https://github.com/asciidoc-rs/asciidoc-parser/pull/598))
+* Implement inline and interactive SVG image options ([#272](https://github.com/asciidoc-rs/asciidoc-parser/pull/272)) ([#596](https://github.com/asciidoc-rs/asciidoc-parser/pull/596))
+* Implement keyboard, button, and menu UI macros ([#263](https://github.com/asciidoc-rs/asciidoc-parser/pull/263)) ([#595](https://github.com/asciidoc-rs/asciidoc-parser/pull/595))
+* Implement footnote inline macro ([#591](https://github.com/asciidoc-rs/asciidoc-parser/pull/591))
+* Add include directive spec coverage; match Asciidoctor escaping ([#588](https://github.com/asciidoc-rs/asciidoc-parser/pull/588))
+* Implement captioned titles for listing/source and image blocks ([#587](https://github.com/asciidoc-rs/asciidoc-parser/pull/587))
+* Implement index terms (user-index) ([#586](https://github.com/asciidoc-rs/asciidoc-parser/pull/586))
+* Implement block masquerading ([#584](https://github.com/asciidoc-rs/asciidoc-parser/pull/584))
+
+### Documented
+
+* Formally decline inline attribute entries / cellbgcolor ([#547](https://github.com/asciidoc-rs/asciidoc-parser/pull/547)) ([#607](https://github.com/asciidoc-rs/asciidoc-parser/pull/607))
+
+### Other
+
+* Add SDD coverage for faq and glossary pages ([#610](https://github.com/asciidoc-rs/asciidoc-parser/pull/610))
+
 ## [0.17.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.16.0...v0.17.0)
 _30 June 2026_
 
