@@ -4,33 +4,33 @@
 
 This is an effort to write a semantic parser for the [AsciiDoc language](https://docs.asciidoctor.org/asciidoc/latest/) in the [Rust](https://rust-lang.org) language.
 
-As of October 2025 this crate is ready for experimental projects, but still has significant gaps in language coverage that render it not yet suitable for production applications. I don’t list work items that I’ve not yet started; work items that are _partially_ implemented are documented with the [**to do** tag](https://github.com/asciidoc-rs/asciidoc-parser/issues?q=is%3Aissue%20state%3Aopen%20label%3Ato-do) in GitHub. Follow that for the most current status for planned development.
+As of version 0.18.0 (July 2026) this crate is effectively feature-complete and is ready to be used for experimental development projects. What few incomplete features remain are tagged with the [**to do** tag](https://github.com/asciidoc-rs/asciidoc-parser/issues?q=is%3Aissue%20state%3Aopen%20label%3Ato-do) in GitHub. Follow that for the most current status for planned development.
 
-You’re welcome to follow along and contribute with the understanding that I may or may not drive this project to a mature (1.0) release.
+Now that the core is in place, I’ll be actively evolving the crate — including introducing possibly breaking changes — as I start to build the downstream projects described below. Expect the API to move in the coming months. I do expect to publish a mature (1.0) release within the year.
+
+You’re welcome to follow along and contribute.
 
 ## Why do this?
 
 Most of all this is a fun project that exercises different architectural and project design skills from my [day job](https://opensource.contentauthenticity.org). As part of that work, I write [technical standards for the Creator Assertions Working Group](https://cawg.io/specs/) in Asciidoc and [Antora](https://antora.org).
 
-Once the parser is sufficiently built out, I have a few projects I’d like to build out that depend on it:
+There are a few projects that I’m now starting to build that depend on the parser:
 
 * A version of Antora that highlights differences between versions of a spec/document, as in version to version or proposed updates in a pull request.
 * A version of Antora or similar that shows what portions of a spec are tested/completed/known good. (See the following section on “spec-driven development.”)
 * A version of [Zola](https://getzola.org), the static site generator that I use for most of my web sites, that accepts Asciidoc formatted text as input. (See [Project proposal: Asciidoc support in Zola](https://zola.discourse.group/t/project-proposal-asciidoc-support-in-zola/2867).)
 
-For now I’m still driving the parser to being complete enough for those projects to start.
+The parser is now complete enough to build these on.
 
 ## Spec-driven coverage
 
-_(aka Why is the code coverage so low?)_
+If you know me from other projects, you know that I value high code coverage. Code coverage on this crate is now extremely high (99.5%).
 
-If you know me from other projects, you know that I value high code coverage and that isn’t changed here, despite what the Codecov badge above might say.
+With this project, I’m doing an experiment in what I call **“spec-driven development.”** Since I started, that phrase has taken on a different and now more widely used meaning — [writing a structured specification up front so that an AI coding agent can implement it](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/), as popularized by tooling such as [GitHub’s Spec Kit](https://github.com/github/spec-kit). That is _not_ what I mean here. In my sense the specification already exists — it’s the AsciiDoc language description — and I’m driving the implementation _toward_ it: not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/docs%2Fmodules).
 
-With this project, I’m doing an experiment in what I call **“spec-driven development.”** That means not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) (which is typically above 99%) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/docs%2Fmodules).
+I’m reading page-by-page, line-by-line, and writing tests to verify that the implementation matches the specification(*). This slowed progress considerably, but I believe it has resulted in an implementation that is very solid.
 
-I’m reading page-by-page, line-by-line, and writing tests to verify that the implementation matches the specification(*). This slows progress considerably, but I expect it to result in an implementation that is very solid once complete. I’ve started tracking bugs found via this approach with the tag [#sddbugfind](https://github.com/asciidoc-rs/asciidoc-parser/pulls?q=is%3Apr+label%3Asddbugfind+is%3Aclosed). There are many already since I started tracking in August 2025.
-
-(*) Yes, I’m aware that the Asciidoc language authors consider this a “language description,” not a specification. Since I’m experimenting with and potentially introducing the term spec-driven development as a broader term, I’m splitting the difference here.
+(*) Yes, I’m aware that the Asciidoc language authors consider this a “language description,” not a specification. I’m splitting the difference here.
 
 ## No planned support for some AsciiDoc features
 
