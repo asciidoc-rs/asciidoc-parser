@@ -4,7 +4,7 @@
 
 This is an effort to write a semantic parser for the [AsciiDoc language](https://docs.asciidoctor.org/asciidoc/latest/) in the [Rust](https://rust-lang.org) language.
 
-As of version 0.18.0 (July 2026) this crate is effectively feature-complete and is ready to be used for experimental development projects. I don’t list work items that I’ve not yet started; work items that are _partially_ implemented are documented with the [**to do** tag](https://github.com/asciidoc-rs/asciidoc-parser/issues?q=is%3Aissue%20state%3Aopen%20label%3Ato-do) in GitHub. Follow that for the most current status for planned development.
+As of version 0.18.0 (July 2026) this crate is effectively feature-complete and is ready to be used for experimental development projects. What few incomplete features remain are tagged with the [**to do** tag](https://github.com/asciidoc-rs/asciidoc-parser/issues?q=is%3Aissue%20state%3Aopen%20label%3Ato-do) in GitHub. Follow that for the most current status for planned development.
 
 Now that the core is in place, I’ll be actively evolving the crate — including introducing possibly breaking changes — as I start to build the downstream projects described below. Expect the API to move in the coming months. I do expect to publish a mature (1.0) release within the year.
 
