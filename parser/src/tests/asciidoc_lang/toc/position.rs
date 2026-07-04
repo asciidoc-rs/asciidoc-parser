@@ -1,6 +1,6 @@
 use crate::{document::TocMode, tests::prelude::*};
 
-track_file!("docs/modules/toc/pages/position.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/toc/pages/position.adoc");
 
 non_normative!(
     r#"

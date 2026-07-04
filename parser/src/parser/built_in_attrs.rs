@@ -46,7 +46,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // These provide portable replacements for common typographical marks,
     // non-visible characters, escapes for characters with special meaning in
     // AsciiDoc, and passthroughs for characters that get encoded by default.
-    // See `docs/modules/attributes/pages/character-replacement-ref.adoc`.
+    // See `ref/asciidoc-lang/docs/modules/attributes/pages/character-replacement-ref.adoc`.
     //
     // The entries below are listed in the same order they appear on that
     // reference page. The replacement values match Ruby Asciidoctor's
@@ -97,7 +97,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ## Other predefined document attributes
     //
     // The groups below mirror the catalog in
-    // `docs/modules/attributes/pages/document-attributes-ref.adoc`. Order is not
+    // `ref/asciidoc-lang/docs/modules/attributes/pages/document-attributes-ref.adoc`. Order is not
     // significant. Default values match Ruby Asciidoctor.
     //
     // Only attributes that are *set by default* are registered here, so they

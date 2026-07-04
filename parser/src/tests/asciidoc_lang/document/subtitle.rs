@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/document/pages/subtitle.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/document/pages/subtitle.adoc");
 
 // TO DO: Consider adding support for subtitle parsing?
 // (https://github.com/asciidoc-rs/asciidoc-parser/issues/382)

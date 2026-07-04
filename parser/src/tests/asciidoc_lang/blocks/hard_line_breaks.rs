@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/blocks/pages/hard-line-breaks.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/pages/hard-line-breaks.adoc");
 
 non_normative!(
     r#"

@@ -1,6 +1,6 @@
 use crate::{blocks::ContentModel, tests::prelude::*};
 
-track_file!("docs/modules/blocks/partials/block-name-table.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/partials/block-name-table.adoc");
 
 non_normative!(
     r#"

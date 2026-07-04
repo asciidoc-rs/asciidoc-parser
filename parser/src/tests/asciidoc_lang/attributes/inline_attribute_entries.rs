@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/attributes/pages/inline-attribute-entries.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/inline-attribute-entries.adoc");
 
 // IMPORTANT: It is unlikely that the asciidoc-parser crate will ever support
 // inline attribute entries given the "CAUTION" paragraph included here and

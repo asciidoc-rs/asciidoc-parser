@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/blocks/pages/paragraph-alignment.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/pages/paragraph-alignment.adoc");
 
 // Treating this entire file as non-normative because we don't specify rendering
 // in this crate.

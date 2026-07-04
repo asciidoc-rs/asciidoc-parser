@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/ROOT/pages/normalization.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/ROOT/pages/normalization.adoc");
 
 // See additional test cases with more edge-case coverage in
 // `tests/primitives/line.rs`.

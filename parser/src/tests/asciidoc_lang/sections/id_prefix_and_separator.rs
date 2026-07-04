@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/sections/pages/id-prefix-and-separator.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/sections/pages/id-prefix-and-separator.adoc");
 
 non_normative!(
     r#"

@@ -1,6 +1,6 @@
 use crate::{blocks::ContentModel, content::SubstitutionStep, tests::prelude::*};
 
-track_file!("docs/modules/verbatim/pages/listing-blocks.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/verbatim/pages/listing-blocks.adoc");
 
 non_normative!(
     r##"

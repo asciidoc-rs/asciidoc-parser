@@ -1,5 +1,5 @@
 //! Tests for the basic PSV table block, covering the examples in
-//! `docs/modules/tables/pages/build-a-basic-table.adoc`.
+//! `ref/asciidoc-lang/docs/modules/tables/pages/build-a-basic-table.adoc`.
 
 use crate::{
     HasSpan, Parser, Span,

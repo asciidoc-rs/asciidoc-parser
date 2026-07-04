@@ -3,7 +3,7 @@ use crate::{
     tests::prelude::*,
 };
 
-track_file!("docs/modules/blocks/pages/build-basic-block.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/pages/build-basic-block.adoc");
 
 non_normative!(
     r#"

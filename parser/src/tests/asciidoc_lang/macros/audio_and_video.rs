@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/macros/pages/audio-and-video.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/macros/pages/audio-and-video.adoc");
 
 non_normative!(
     r#"

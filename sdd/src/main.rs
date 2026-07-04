@@ -47,7 +47,7 @@ fn main() {
 
     println!("{{\n    \"coverage\": {{");
 
-    let adoc_files: Vec<DirEntry> = WalkDir::new("../docs/modules")
+    let adoc_files: Vec<DirEntry> = WalkDir::new("../ref/asciidoc-lang/docs/modules")
         .into_iter()
         .filter_entry(|e| {
             if let Some(file_name) = e.file_name().to_str() {

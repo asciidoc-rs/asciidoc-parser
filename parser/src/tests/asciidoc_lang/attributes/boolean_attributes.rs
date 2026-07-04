@@ -1,6 +1,6 @@
 use crate::{document::InterpretedValue, tests::prelude::*};
 
-track_file!("docs/modules/attributes/pages/boolean-attributes.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/boolean-attributes.adoc");
 
 non_normative!(
     r#"

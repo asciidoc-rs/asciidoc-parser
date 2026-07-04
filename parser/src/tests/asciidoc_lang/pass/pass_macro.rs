@@ -1,5 +1,5 @@
 use crate::{blocks::Block, tests::prelude::*};
-track_file!("docs/modules/pass/pages/pass-macro.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/pass/pages/pass-macro.adoc");
 
 non_normative!(
     r#"

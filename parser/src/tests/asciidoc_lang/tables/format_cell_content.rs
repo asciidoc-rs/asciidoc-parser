@@ -1,6 +1,6 @@
 use crate::{document::InterpretedValue, tests::prelude::*};
 
-track_file!("docs/modules/tables/pages/format-cell-content.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/format-cell-content.adoc");
 
 /// Parse `source` as a single block and return the [`TableBlock`] it produced.
 ///

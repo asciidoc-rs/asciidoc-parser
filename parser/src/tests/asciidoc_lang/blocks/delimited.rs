@@ -1,6 +1,6 @@
 use crate::{blocks::ContentModel, tests::prelude::*};
 
-track_file!("docs/modules/blocks/pages/delimited.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/blocks/pages/delimited.adoc");
 
 non_normative!(
     r#"

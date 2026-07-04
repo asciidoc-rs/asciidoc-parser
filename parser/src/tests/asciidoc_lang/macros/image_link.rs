@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/macros/pages/image-link.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/macros/pages/image-link.adoc");
 
 non_normative!(
     r#"

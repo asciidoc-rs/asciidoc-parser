@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/attributes/pages/document-attributes.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/document-attributes.adoc");
 
 // Non-normative: Introductory text.
 non_normative!(

@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/add-cells-and-rows.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/add-cells-and-rows.adoc");
 
 non_normative!(
     r#"

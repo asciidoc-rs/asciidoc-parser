@@ -1,6 +1,6 @@
 use crate::{blocks::Block, tests::prelude::*};
 
-track_file!("docs/modules/ROOT/pages/comments.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/ROOT/pages/comments.adoc");
 
 // NOTE ON DATA-MODEL DEVIATION: The AsciiDoc language specifies that comments
 // are dropped from the parsed document. This parser deliberately deviates: it

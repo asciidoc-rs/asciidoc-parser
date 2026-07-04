@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/macros/pages/link-macro-attribute-parsing.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/macros/pages/link-macro-attribute-parsing.adoc");
 
 non_normative!(
     r#"

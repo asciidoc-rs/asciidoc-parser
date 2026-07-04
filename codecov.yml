@@ -7,9 +7,9 @@ comment:
   layout: "header, diff, flags, components"
 
 ignore:
-  - "docs/modules/*/nav*.adoc"
-  - "docs/modules/*/examples/**"
-  - "docs/modules/*/partials/**"
+  - "ref/asciidoc-lang/docs/modules/*/nav*.adoc"
+  - "ref/asciidoc-lang/docs/modules/*/examples/**"
+  - "ref/asciidoc-lang/docs/modules/*/partials/**"
   - "sdd/**"
 
 component_management:
@@ -26,4 +26,4 @@ component_management:
     - component_id: spec
       name: AsciiDoc spec coverage
       paths:
-        - docs/modules/**
+        - ref/asciidoc-lang/docs/modules/**

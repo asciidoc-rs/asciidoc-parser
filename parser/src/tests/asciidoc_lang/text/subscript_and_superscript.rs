@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/text/pages/subscript-and-superscript.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/text/pages/subscript-and-superscript.adoc");
 
 non_normative!(
     r#"

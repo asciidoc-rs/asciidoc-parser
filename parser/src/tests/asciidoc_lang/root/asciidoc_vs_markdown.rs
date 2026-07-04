@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/ROOT/pages/asciidoc-vs-markdown.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/ROOT/pages/asciidoc-vs-markdown.adoc");
 
 non_normative!(
     r#"

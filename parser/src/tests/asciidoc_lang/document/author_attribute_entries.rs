@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/document/pages/author-attribute-entries.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/document/pages/author-attribute-entries.adoc");
 
 // Treating the entire file as non-normative because asciidoc-parser doesn't
 // _consume_ the author attribute entries anywhere. There's nothing special

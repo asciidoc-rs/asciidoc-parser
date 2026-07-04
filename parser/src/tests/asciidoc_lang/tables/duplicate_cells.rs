@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/duplicate-cells.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/duplicate-cells.adoc");
 
 non_normative!(
     r#"

@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/lists/pages/description-with-marker.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/lists/pages/description-with-marker.adoc");
 
 // This entire page is marked non-normative because (1) the syntax described here is marked as experimental, and (2) it could be handled entirely by a renderer.
 non_normative!(

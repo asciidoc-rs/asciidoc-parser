@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/align-by-column.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/align-by-column.adoc");
 
 non_normative!(
     r#"

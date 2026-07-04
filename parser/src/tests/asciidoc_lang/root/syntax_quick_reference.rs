@@ -3,7 +3,7 @@ use crate::{
     tests::prelude::{inline_file_handler::InlineFileHandler, *},
 };
 
-track_file!("docs/modules/ROOT/pages/syntax-quick-reference.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/ROOT/pages/syntax-quick-reference.adoc");
 
 // SDD coverage for the AsciiDoc Syntax Quick Reference page. Every line of the
 // page is tiled into a coverage block. The page's examples and the behavior it

@@ -1,6 +1,6 @@
 use crate::tests::prelude::*;
 
-track_file!("docs/modules/tables/pages/orientation.adoc");
+track_file!("ref/asciidoc-lang/docs/modules/tables/pages/orientation.adoc");
 
 // This entire page is considered non-normative because table orientation
 // (the `rotate` option and `orientation` attribute) only affects rendering, and
