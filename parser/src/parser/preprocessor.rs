@@ -240,21 +240,83 @@ impl<'p> PreprocessorState<'p> {
                     })
                     .unwrap_or_default();
 
+                // A URI target is only honored when the URI read permission has
+                // been granted (`allow-uri-read`). This is disabled by default,
+                // so a URI include that is not permitted is treated as an
+                // unresolved directive. (At `SafeMode::Secure` and above the
+                // include was already converted to a link above; `allow-uri-read`
+                // is meaningful only below that level.) See `include-uri.adoc`.
+                if is_uri(&target) && !self.parser.is_attribute_set("allow-uri-read") {
+                    self.emit_unresolved_directive(
+                        line.data(),
+                        target,
+                        file_name,
+                        source_line_number,
+                        &mut has_reported_file,
+                    );
+                    continue;
+                }
+
                 if let Some(include_text) =
                     self.parser.include_file_handler.as_ref().and_then(|ifh| {
                         ifh.resolve_target(file_name, &target, &attrlist, self.parser)
                     })
                 {
+                    // Apply `lines`/`tag(s)` selection and `indent` normalization
+                    // to the raw included content before it is merged, matching
+                    // Asciidoctor. Any nested include/conditional directives in an
+                    // AsciiDoc include are therefore interpreted only on the
+                    // selected, re-indented lines.
+                    let selected = select_included_lines(&include_text, &attrlist);
+                    let selected = reindent_included_lines(selected, &attrlist, self.parser);
+
+                    // `leveloffset` wraps the included content in `:leveloffset:`
+                    // attribute entries: the offset is applied to the included
+                    // content and reset afterward (see
+                    // `include-with-leveloffset.adoc`).
+                    let leveloffset = attrlist
+                        .named_attribute("leveloffset")
+                        .map(|a| a.value())
+                        .filter(|v| !v.is_empty());
+
+                    if let Some(offset) = leveloffset {
+                        self.emit_line(
+                            &format!(":leveloffset: {offset}"),
+                            file_name,
+                            source_line_number,
+                            &mut has_reported_file,
+                        );
+                        self.emit_line("", file_name, source_line_number, &mut has_reported_file);
+                    }
+
                     if is_asciidoc_file(&target) {
                         // AsciiDoc files are run through the preprocessor, so the
                         // include (and other) directives they contain are
                         // interpreted.
-                        self.process_adoc_include(&include_text, Some(&target));
+                        self.process_adoc_include(&selected, Some(&target));
                     } else {
                         // Non-AsciiDoc files are merged verbatim; the preprocessor
                         // does not interpret any AsciiDoc directives within them
                         // (matching Asciidoctor).
-                        self.process_nonadoc_include(&include_text, Some(&target));
+                        self.process_nonadoc_include(&selected, Some(&target));
+                    }
+
+                    if leveloffset.is_some() {
+                        // Reset the level offset to whatever was in effect before
+                        // the include (unset unless a `:leveloffset:` was active).
+                        let restore = match self.parser.attribute_value("leveloffset") {
+                            InterpretedValue::Value(v) if !v.is_empty() => {
+                                format!(":leveloffset: {v}")
+                            }
+                            _ => ":leveloffset!:".to_string(),
+                        };
+                        self.emit_line("", file_name, source_line_number, &mut has_reported_file);
+                        self.emit_line(
+                            &restore,
+                            file_name,
+                            source_line_number,
+                            &mut has_reported_file,
+                        );
                     }
 
                     // Re-report the including file if there's more content.
@@ -268,26 +330,14 @@ impl<'p> PreprocessorState<'p> {
                     has_reported_file = false;
                 } else {
                     // The target could not be resolved. Replace the directive with
-                    // an "Unresolved directive" message in the output (as
-                    // Asciidoctor does) and record a warning pointing at that
-                    // message. The warning is located by byte offset because the
-                    // output it refers to is not yet owned; `Document::parse`
-                    // reconstitutes it into a spanned `Warning`.
-                    let replacement = format!(
-                        "Unresolved directive in {file_name} - {line}",
-                        file_name = file_name.unwrap_or("(root file)",),
-                        line = line.data(),
+                    // an "Unresolved directive" message and record a warning.
+                    self.emit_unresolved_directive(
+                        line.data(),
+                        target,
+                        file_name,
+                        source_line_number,
+                        &mut has_reported_file,
                     );
-
-                    self.warnings.push(DeferredWarning {
-                        offset: self.output.len(),
-                        len: replacement.len(),
-                        warning: WarningType::IncludeFileNotFound(target),
-                    });
-
-                    self.output_line_number += 1;
-                    self.output.push_str(&replacement);
-                    self.output.push('\n');
                 }
             } else {
                 // If none of the above apply, add the line to output.
@@ -425,6 +475,45 @@ impl<'p> PreprocessorState<'p> {
 
         self.output_line_number += 1;
         self.output.push_str(text);
+        self.output.push('\n');
+    }
+
+    /// Replace an include directive that could not be resolved with an
+    /// "Unresolved directive" message (as Asciidoctor does) and record a
+    /// warning pointing at that message. The warning is located by byte
+    /// offset because the output it refers to is not yet owned;
+    /// `Document::parse` reconstitutes it into a spanned [`Warning`].
+    ///
+    /// [`Warning`]: crate::warnings::Warning
+    fn emit_unresolved_directive(
+        &mut self,
+        directive_line: &str,
+        target: String,
+        file_name: Option<&str>,
+        source_line_number: usize,
+        has_reported_file: &mut bool,
+    ) {
+        if !*has_reported_file {
+            *has_reported_file = true;
+            self.source_map.append(
+                self.output_line_number,
+                SourceLine(to_owned(file_name), source_line_number),
+            );
+        }
+
+        let replacement = format!(
+            "Unresolved directive in {file_name} - {directive_line}",
+            file_name = file_name.unwrap_or("(root file)"),
+        );
+
+        self.warnings.push(DeferredWarning {
+            offset: self.output.len(),
+            len: replacement.len(),
+            warning: WarningType::IncludeFileNotFound(target),
+        });
+
+        self.output_line_number += 1;
+        self.output.push_str(&replacement);
         self.output.push('\n');
     }
 
@@ -761,6 +850,346 @@ fn is_asciidoc_file(target: &str) -> bool {
         _ => false,
     }
 }
+
+/// Returns `true` if `target` is a URI (i.e. it begins with a scheme followed
+/// by `://`, such as `https://`, `http://`, or `ftp://`).
+fn is_uri(target: &str) -> bool {
+    URI_PREFIX.is_match(target)
+}
+
+/// Split a delimited attribute value (`lines`/`tags`) into its entries. Per the
+/// spec, a comma is used as the separator if one is present; otherwise a
+/// semicolon is used (which is why a comma-separated list must be quoted while
+/// a semicolon-separated list need not be). Empty entries are dropped.
+fn split_delimited_value(value: &str) -> impl Iterator<Item = &str> {
+    let delimiter = if value.contains(',') { ',' } else { ';' };
+    value
+        .split(delimiter)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+/// Apply the `lines` or `tag(s)` selection of an include directive to the raw
+/// included text, returning the selected lines (each terminated by a line
+/// feed).
+///
+/// If neither attribute is present the text is returned unchanged. The `lines`
+/// attribute takes precedence over `tag(s)` when both are given, matching
+/// Asciidoctor.
+///
+/// See `include-lines.adoc` and `include-tagged-regions.adoc`.
+fn select_included_lines(text: &str, attrlist: &Attrlist<'_>) -> String {
+    if let Some(lines) = attrlist
+        .named_attribute("lines")
+        .map(|a| a.value())
+        .filter(|v| !v.is_empty())
+    {
+        return select_by_line_ranges(text, lines);
+    }
+
+    // `tag` (singular) and `tags` (plural) are equivalent; the singular form is
+    // conventionally used for a single tag but accepts the same syntax.
+    if let Some(tags) = attrlist
+        .named_attribute("tags")
+        .or_else(|| attrlist.named_attribute("tag"))
+        .map(|a| a.value())
+        .filter(|v| !v.is_empty())
+    {
+        return select_by_tags(text, tags);
+    }
+
+    text.to_string()
+}
+
+/// Select the lines of `text` that fall within any of the ranges named in the
+/// `lines` attribute value (`spec`). A single line number is a range of one
+/// line; `from..to` is inclusive; an empty or negative end (`from..` or
+/// `from..-1`) extends to the end of the file.
+fn select_by_line_ranges(text: &str, spec: &str) -> String {
+    // Each range is `(from, Some(to))` or `(from, None)` for an open-ended range.
+    let ranges: Vec<(usize, Option<usize>)> = split_delimited_value(spec)
+        .map(|entry| {
+            if let Some((from, to)) = entry.split_once("..") {
+                let from = from.trim().parse().unwrap_or(0);
+                let to = to.trim();
+                let to = match to.parse::<i64>() {
+                    Ok(to) if to >= 0 => Some(to as usize),
+                    // Empty, `-1`, or any negative value extends to the last line.
+                    _ => None,
+                };
+                (from, to)
+            } else {
+                let n = entry.parse().unwrap_or(0);
+                (n, Some(n))
+            }
+        })
+        .collect();
+
+    let mut output = String::new();
+    for (index, line) in text.lines().enumerate() {
+        let line_number = index + 1;
+        if ranges
+            .iter()
+            .any(|&(from, to)| line_number >= from && to.is_none_or(|to| line_number <= to))
+        {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+    output
+}
+
+/// Select the lines of `text` enclosed by the tagged regions named in the
+/// `tag(s)` attribute value (`spec`), following the tag-filtering rules in
+/// `include-tagged-regions.adoc`. Lines that contain a tag directive are always
+/// discarded.
+fn select_by_tags(text: &str, spec: &str) -> String {
+    // Build the ordered set of tag directives, mapping each name to whether it
+    // is included (`true`) or excluded (`!name` -> `false`).
+    let mut inc_tags: Vec<(String, bool)> = vec![];
+    for entry in split_delimited_value(spec) {
+        if entry == "!" {
+            continue;
+        }
+        let (name, include) = match entry.strip_prefix('!') {
+            Some(name) => (name, false),
+            None => (entry, true),
+        };
+        if name.is_empty() {
+            continue;
+        }
+        match inc_tags.iter_mut().find(|(n, _)| n == name) {
+            Some(existing) => existing.1 = include,
+            None => inc_tags.push((name.to_string(), include)),
+        }
+    }
+
+    // Resolve the base selection (whether lines outside any tag are kept) and
+    // the wildcard (the default selection for an unnamed tagged region), then
+    // remove the wildcard entries from the named set. This mirrors Asciidoctor.
+    let take = |tags: &mut Vec<(String, bool)>, name: &str| -> Option<bool> {
+        tags.iter()
+            .position(|(n, _)| n == name)
+            .map(|i| tags.remove(i).1)
+    };
+
+    let mut wildcard: Option<bool> = None;
+    let base_select: bool;
+
+    if let Some(double) = take(&mut inc_tags, "**") {
+        base_select = double;
+        if let Some(single) = take(&mut inc_tags, "*") {
+            wildcard = Some(single);
+        } else if !double && inc_tags.first().map(|(_, v)| *v) == Some(false) {
+            wildcard = Some(true);
+        }
+    } else if inc_tags.iter().any(|(n, _)| n == "*") {
+        if inc_tags.first().map(|(n, _)| n.as_str()) == Some("*") {
+            let single = take(&mut inc_tags, "*").unwrap_or(false);
+            wildcard = Some(single);
+            base_select = !single;
+        } else {
+            wildcard = take(&mut inc_tags, "*");
+            base_select = false;
+        }
+    } else {
+        // With only named inclusions/exclusions, non-tagged lines are kept only
+        // when every named tag is an exclusion.
+        base_select = !inc_tags.iter().any(|(_, v)| *v);
+    }
+
+    let lookup = |name: &str| inc_tags.iter().find(|(n, _)| n == name).map(|(_, v)| *v);
+
+    let mut output = String::new();
+    let mut select = base_select;
+    let mut active_tag: Option<String> = None;
+    // Each entry records the tag name and the `select` state to restore when the
+    // region is closed.
+    let mut tag_stack: Vec<(String, bool)> = vec![];
+
+    for line in text.lines() {
+        if let Some((is_end, name)) = find_tag_directive(line) {
+            if is_end {
+                if active_tag.as_deref() == Some(name) {
+                    tag_stack.pop();
+                    match tag_stack.last() {
+                        Some((tag, sel)) => {
+                            active_tag = Some(tag.clone());
+                            select = *sel;
+                        }
+                        None => {
+                            active_tag = None;
+                            select = base_select;
+                        }
+                    }
+                }
+                // A mismatched or unknown end tag is ignored.
+            } else if let Some(named) = lookup(name) {
+                select = named;
+                tag_stack.push((name.to_string(), select));
+                active_tag = Some(name.to_string());
+            } else if let Some(wildcard) = wildcard {
+                // An unnamed region uses the wildcard default, unless we are
+                // already inside an unselected region (then it stays excluded).
+                select = if active_tag.is_some() && !select {
+                    false
+                } else {
+                    wildcard
+                };
+                tag_stack.push((name.to_string(), select));
+                active_tag = Some(name.to_string());
+            }
+            // Directive lines are never emitted.
+        } else if select {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+
+    output
+}
+
+/// Locate a tag directive (`tag::NAME[]` or `end::NAME[]`) within `line`.
+///
+/// Returns `(is_end, name)` when found. The directive must follow a word
+/// boundary and be followed by a space, a carriage return, or the end of the
+/// line, matching Asciidoctor's `TagDirectiveRx`.
+fn find_tag_directive(line: &str) -> Option<(bool, &str)> {
+    if !line.contains("::") || !line.contains("[]") {
+        return None;
+    }
+
+    for caps in TAG_DIRECTIVE.captures_iter(line) {
+        // The `regex` crate has no look-ahead, so verify the trailing context
+        // (end of line, space, or carriage return) manually.
+        let whole = caps.get(0)?;
+        let trailing_ok = match line[whole.end()..].chars().next() {
+            None => true,
+            Some(c) => c == ' ' || c == '\r',
+        };
+        if trailing_ok {
+            let is_end = &caps[1] == "end";
+            return Some((is_end, caps.get(2)?.as_str()));
+        }
+    }
+
+    None
+}
+
+/// Normalize the block indentation of included content per the `indent`
+/// attribute, returning the adjusted text. If `indent` is absent (or negative)
+/// the text is returned unchanged. See `include-with-indent.adoc`.
+fn reindent_included_lines(text: String, attrlist: &Attrlist<'_>, parser: &Parser) -> String {
+    let Some(indent) = attrlist.named_attribute("indent").map(|a| a.value()) else {
+        return text;
+    };
+
+    // Asciidoctor coerces the value with `String#to_i` (a non-numeric value
+    // yields 0). A negative value disables normalization.
+    let indent: i64 = indent.trim().parse().unwrap_or(0);
+    if indent < 0 {
+        return text;
+    }
+
+    let tab_size = match parser.attribute_value("tabsize") {
+        InterpretedValue::Value(v) => v.trim().parse().unwrap_or(0),
+        _ => 0,
+    };
+
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    adjust_indentation(&mut lines, indent as usize, tab_size);
+
+    let mut output = lines.join("\n");
+    if !output.is_empty() || !text.is_empty() {
+        output.push('\n');
+    }
+    output
+}
+
+/// Strip the common leading block indent from `lines` and, when `indent` is
+/// greater than zero, re-indent each non-empty line by that many spaces. When
+/// `tab_size` is greater than zero, leading tabs are first expanded to spaces.
+///
+/// Per the spec, if any line in the content is not indented (the common indent
+/// is zero) the `indent` normalization is skipped entirely.
+fn adjust_indentation(lines: &mut [String], indent: usize, tab_size: usize) {
+    if lines.is_empty() {
+        return;
+    }
+
+    if tab_size > 0 && lines.iter().any(|l| l.contains('\t')) {
+        for line in lines.iter_mut() {
+            *line = expand_tabs(line, tab_size);
+        }
+    }
+
+    // The common indent is the minimum count of leading spaces across the
+    // non-empty lines.
+    let Some(offset) = lines
+        .iter()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.len() - l.trim_start_matches(' ').len())
+        .min()
+    else {
+        return;
+    };
+
+    if offset == 0 {
+        // At least one line is flush left, so the `indent` attribute is ignored.
+        return;
+    }
+
+    let padding = " ".repeat(indent);
+    for line in lines.iter_mut() {
+        if line.is_empty() {
+            continue;
+        }
+        // Leading spaces are ASCII, so slicing by byte offset is safe.
+        let stripped = &line[offset..];
+        *line = if indent > 0 {
+            format!("{padding}{stripped}")
+        } else {
+            stripped.to_string()
+        };
+    }
+}
+
+/// Expand tabs in `line` to spaces, advancing to the next multiple of
+/// `tab_size` (a proper tab stop, not a fixed number of spaces).
+fn expand_tabs(line: &str, tab_size: usize) -> String {
+    if !line.contains('\t') {
+        return line.to_string();
+    }
+
+    let mut output = String::new();
+    let mut column = 0;
+    for ch in line.chars() {
+        if ch == '\t' {
+            let spaces = tab_size - (column % tab_size);
+            output.extend(std::iter::repeat_n(' ', spaces));
+            column += spaces;
+        } else {
+            output.push(ch);
+            column += 1;
+        }
+    }
+    output
+}
+
+static TAG_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    // Matches `tag::NAME[]` / `end::NAME[]` following a word boundary. The
+    // trailing context (end of line, space, or carriage return) is checked
+    // separately in `find_tag_directive` because the `regex` crate lacks
+    // look-ahead. Group 1 captures the keyword; group 2 the (non-space) name.
+    Regex::new(r#"\b(tag|end)::(\S+?)\[\]"#).unwrap()
+});
+
+static URI_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    // A scheme (letter followed by letters/digits/`.`/`+`/`-`) plus `://`.
+    Regex::new(r#"^[A-Za-z][A-Za-z0-9.+-]*://"#).unwrap()
+});
 
 static INCLUDE_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
@@ -1575,14 +2004,15 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn attribute_substitution_in_target_with_attrlist() {
-        // TODO: Implement tag handling.
+        // The target is resolved via attribute substitution and a `tag`
+        // attribute selects only the tagged region (the tag directive lines
+        // themselves are discarded).
         let source = ":srcdir: examples\n:lang: java\n\ninclude::{srcdir}/hello.{lang}[tag=main]";
 
         let handler = InlineFileHandler::from_pairs([(
             "examples/hello.java",
-            "// tag::main\npublic class Hello {}\n// end::main",
+            "// tag::main[]\npublic class Hello {}\n// end::main[]",
         )]);
 
         let parser = Parser::default()
@@ -1594,7 +2024,7 @@ mod tests {
 
         assert_eq!(
             processed_source,
-            ":srcdir: examples\n:lang: java\n\n// tag::main\npublic class Hello {}\n// end::main\n"
+            ":srcdir: examples\n:lang: java\n\npublic class Hello {}\n"
         );
 
         assert_eq!(
@@ -1964,5 +2394,174 @@ mod tests {
             conditional_output("ifeval::[3 >= 3]\nkept\nendif::[]"),
             "kept\n"
         );
+    }
+
+    /// Preprocess an `include::sample.adoc[<attrs>]` directive whose target
+    /// resolves to `content`, returning the resulting output text.
+    fn include_output(attrs: &str, content: &'static str) -> String {
+        let source = format!("include::sample.adoc[{attrs}]");
+        let handler = InlineFileHandler::from_pairs([("sample.adoc", content)]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+        preprocess(&source, &parser).0
+    }
+
+    const NUMBERED: &str = "one\ntwo\nthree\nfour\nfive";
+
+    #[test]
+    fn lines_single_range() {
+        assert_eq!(include_output("lines=2..4", NUMBERED), "two\nthree\nfour\n");
+    }
+
+    #[test]
+    fn lines_single_line() {
+        assert_eq!(include_output("lines=3", NUMBERED), "three\n");
+    }
+
+    #[test]
+    fn lines_multiple_ranges_semicolon() {
+        assert_eq!(
+            include_output("lines=1..2;4..5", NUMBERED),
+            "one\ntwo\nfour\nfive\n"
+        );
+    }
+
+    #[test]
+    fn lines_multiple_ranges_comma() {
+        // A comma-separated list arrives already unquoted from the attrlist.
+        assert_eq!(
+            include_output("lines=\"1,3,5\"", NUMBERED),
+            "one\nthree\nfive\n"
+        );
+    }
+
+    #[test]
+    fn lines_open_ended_range() {
+        assert_eq!(
+            include_output("lines=3..-1", NUMBERED),
+            "three\nfour\nfive\n"
+        );
+        assert_eq!(include_output("lines=3..", NUMBERED), "three\nfour\nfive\n");
+    }
+
+    const TAGGED: &str =
+        "// tag::a[]\nalpha\n// tag::b[]\nbeta\n// end::b[]\ngamma\n// end::a[]\ndelta";
+
+    #[test]
+    fn tag_selects_region_and_drops_directives() {
+        // The nested `b` region is inside `a`, so `tag=a` includes it too.
+        assert_eq!(include_output("tag=a", TAGGED), "alpha\nbeta\ngamma\n");
+    }
+
+    #[test]
+    fn tag_selects_nested_region_only() {
+        assert_eq!(include_output("tag=b", TAGGED), "beta\n");
+    }
+
+    #[test]
+    fn tags_exclude_nested_region() {
+        assert_eq!(include_output("tags=a;!b", TAGGED), "alpha\ngamma\n");
+    }
+
+    #[test]
+    fn tags_double_wildcard_drops_directive_lines() {
+        // `**` keeps every line except the tag-directive lines.
+        assert_eq!(
+            include_output("tags=**", TAGGED),
+            "alpha\nbeta\ngamma\ndelta\n"
+        );
+    }
+
+    #[test]
+    fn tags_negated_wildcard_selects_untagged_only() {
+        // `!*` keeps only lines outside any tagged region.
+        assert_eq!(include_output("tags=!*", TAGGED), "delta\n");
+    }
+
+    #[test]
+    fn tags_single_wildcard_selects_all_regions() {
+        // `*` keeps all tagged regions but not untagged lines.
+        assert_eq!(include_output("tags=*", TAGGED), "alpha\nbeta\ngamma\n");
+    }
+
+    #[test]
+    fn indent_zero_strips_block_indent() {
+        let content = "    def names\n      @name.split ' '\n    end";
+        assert_eq!(
+            include_output("indent=0", content),
+            "def names\n  @name.split ' '\nend\n"
+        );
+    }
+
+    #[test]
+    fn indent_positive_reindents_block() {
+        let content = "    def names\n      @name.split ' '\n    end";
+        assert_eq!(
+            include_output("indent=2", content),
+            "  def names\n    @name.split ' '\n  end\n"
+        );
+    }
+
+    #[test]
+    fn indent_ignored_when_a_line_is_flush_left() {
+        // A line with no indentation makes the common indent zero, so `indent`
+        // is effectively ignored.
+        let content = "def names\n  @name.split ' '\nend";
+        assert_eq!(
+            include_output("indent=4", content),
+            "def names\n  @name.split ' '\nend\n"
+        );
+    }
+
+    #[test]
+    fn leveloffset_wraps_included_content() {
+        // The included content is surrounded by `:leveloffset:` attribute entries
+        // that apply and then reset the offset.
+        assert_eq!(
+            include_output("leveloffset=+1", "== Chapter\n\nBody."),
+            ":leveloffset: +1\n\n== Chapter\n\nBody.\n\n:leveloffset!:\n"
+        );
+    }
+
+    #[test]
+    fn uri_include_disabled_without_allow_uri_read() {
+        // A URI target is not resolved unless `allow-uri-read` is set; it is
+        // reported as an unresolved directive.
+        let source = "include::https://example.org/frag.adoc[]";
+        let handler =
+            InlineFileHandler::from_pairs([("https://example.org/frag.adoc", "SHOULD NOT APPEAR")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(
+            output,
+            "Unresolved directive in main.adoc - include::https://example.org/frag.adoc[]\n"
+        );
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn uri_include_resolved_with_allow_uri_read() {
+        // With `allow-uri-read` set (and safe mode below secure), the handler is
+        // consulted for the URI target.
+        let source = "include::https://example.org/frag.adoc[]";
+        let handler =
+            InlineFileHandler::from_pairs([("https://example.org/frag.adoc", "Remote content.")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute("allow-uri-read", "", ModificationContext::Anywhere)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(output, "Remote content.\n");
+        assert!(warnings.is_empty());
     }
 }
