@@ -989,13 +989,11 @@ fn select_by_tags(text: &str, spec: &str) -> String {
     // is included (`true`) or excluded (`!name` -> `false`).
     let mut inc_tags: Vec<(String, bool)> = vec![];
     for entry in split_delimited_value(spec) {
-        if entry == "!" {
-            continue;
-        }
         let (name, include) = match entry.strip_prefix('!') {
             Some(name) => (name, false),
             None => (entry, true),
         };
+        // Skip an empty entry or a lone `!` (which has no tag name).
         if name.is_empty() {
             continue;
         }
@@ -2648,5 +2646,106 @@ mod tests {
             &output[warnings[0].offset..warnings[0].offset + warnings[0].len],
             "Résumé."
         );
+    }
+
+    #[test]
+    fn leveloffset_restores_previous_offset() {
+        // When a `:leveloffset:` is already in effect, the include restores it to
+        // that value (rather than unsetting it) afterward.
+        let source = ":leveloffset: 1\n\ninclude::sample.adoc[leveloffset=+1]";
+        let handler = InlineFileHandler::from_pairs([("sample.adoc", "== Chapter")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(
+            output,
+            ":leveloffset: 1\n\n:leveloffset: +1\n\n== Chapter\n\n:leveloffset: 1\n"
+        );
+    }
+
+    #[test]
+    fn tag_filtering_edge_cases() {
+        // A lone `!` entry (no tag name) is ignored.
+        assert_eq!(
+            include_output("tags=foo;!", "// tag::foo[]\nx\n// end::foo[]"),
+            "x\n"
+        );
+
+        // A repeated tag name updates the existing entry (last one wins).
+        assert_eq!(
+            include_output("tags=!foo;foo", "// tag::foo[]\nx\n// end::foo[]"),
+            "x\n"
+        );
+
+        // `**` combined with `*` keeps every non-directive line.
+        assert_eq!(
+            include_output("tags=**;*", "// tag::a[]\nx\n// end::a[]\ny"),
+            "x\ny\n"
+        );
+
+        // A negated double wildcard combined with an exclusion selects no lines.
+        assert_eq!(
+            include_output(
+                "tags=!**;!foo",
+                "before\n// tag::foo[]\nf\n// end::foo[]\nafter"
+            ),
+            ""
+        );
+
+        // A tag directive inside a circumfix comment (followed by a space) is
+        // recognized and discarded.
+        assert_eq!(
+            include_output("tag=x", "<!-- tag::x[] -->\nc\n<!-- end::x[] -->"),
+            "c\n"
+        );
+
+        // A `tag::` that is not immediately followed by a space or end of line is
+        // not a directive, so the line is kept as content.
+        assert_eq!(
+            include_output("tag=x", "// tag::x[]\ntag::x[]y\n// end::x[]"),
+            "tag::x[]y\n"
+        );
+    }
+
+    #[test]
+    fn indent_edge_cases() {
+        // A negative `indent` disables normalization; the content is unchanged.
+        assert_eq!(
+            include_output("indent=-1", "    a\n    b"),
+            "    a\n    b\n"
+        );
+
+        // Empty content with `indent` is handled without panicking.
+        assert_eq!(include_output("indent=0", ""), "");
+
+        // Content that is only blank lines with `indent` is left unchanged.
+        assert_eq!(include_output("indent=0", "\n\n"), "\n\n");
+
+        // A blank line interspersed with indented lines is left untouched while
+        // the indented lines are re-indented.
+        assert_eq!(include_output("indent=2", "    a\n\n    b"), "  a\n\n  b\n");
+    }
+
+    #[test]
+    fn indent_with_tabsize_and_untabbed_line() {
+        // With `tabsize` set, leading tabs are expanded even on a block that also
+        // contains a line with no tabs (which is passed through unchanged).
+        let source = "----\ninclude::code.rb[indent=0]\n----";
+        let handler = InlineFileHandler::from_pairs([("code.rb", "\ta\nno-tab\n\tb")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute("tabsize", "4", ModificationContext::Anywhere)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, _warnings) = preprocess(source, &parser);
+
+        // Tabs expand to the tab stop; the common indent is zero (the middle line
+        // is flush left), so no further indentation change is made.
+        assert_eq!(output, "----\n    a\nno-tab\n    b\n----\n");
     }
 }
