@@ -140,9 +140,8 @@ fn example() {
 }
 
 #[test]
-#[ignore]
 fn fenced() {
-    to_do_verifies!(
+    verifies!(
         r#"
 |Fenced
 d|n/a
@@ -154,15 +153,14 @@ Will be colorized by the source highlighter if enabled on the document and a lan
 "#
     );
 
-    // NOT YET IMPLEMENTED: the fenced code block delimiter (three backticks) is
-    // not recognized. Such a line is currently parsed as an ordinary paragraph
-    // rather than a verbatim listing block. The recognized verbatim/raw
-    // delimiters are `----`, `....`, `++++`, and `////` (see `raw_delimited.rs`).
-    //
-    // Tracked by https://github.com/asciidoc-rs/asciidoc-parser/issues/599.
-    // When implemented, un-ignore this test and switch `to_do_verifies!` above
-    // to `verifies!` with real assertions.
-    todo!("Add support for fenced (```) code blocks: see issue #599");
+    // A fenced code block (three backticks) is a shorthand for a listing block:
+    // it resolves to the `listing` context with the verbatim content model. The
+    // block has no declared style unless a `[source,<lang>]` attrlist is placed
+    // above the opening fence.
+    let (resolved, model, style) = facts("```\nsource code\n```");
+    assert_eq!(resolved, "listing");
+    assert_eq!(model, ContentModel::Verbatim);
+    assert_eq!(style, None);
 }
 
 #[test]
