@@ -133,29 +133,6 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
         }
     }
 
-    // Footnotes (`footnote:[text]`, `footnote:id[text]`, `footnote:id[]`, and
-    // the deprecated `footnoteref:[id,text]` / `footnoteref:[id]`).
-    //
-    // This runs before cross-references are processed because the footnote
-    // *text* is extracted out of the flow of text (only a superscript marker is
-    // left behind), so any macro inside the footnote that has already been
-    // substituted at this point (images, links, anchors, index terms) is
-    // captured as part of the footnote text. Cross-references, by contrast, are
-    // resolved in a later document-level pass, so an `<<id>>` inside a footnote
-    // is not yet resolved in the extracted footnote text (see issue #592).
-    if found_macroish && text.contains("tnote") {
-        let replacer = InlineFootnoteMacroReplacer {
-            parser,
-            source: content.original(),
-        };
-
-        if let Cow::Owned(new_result) =
-            replace_with_lookahead(&INLINE_FOOTNOTE_MACRO, content.rendered(), replacer)
-        {
-            content.rendered = new_result.into();
-        }
-    }
-
     // Cross-references (`<<id>>`, `<<id,text>>`, `xref:id[]`, `xref:id[text]`).
     //
     // By the time the macros step runs, the special-characters step has already
@@ -165,22 +142,51 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
     // cross-reference is recorded as a deferred `XrefSegment` and a placeholder
     // is left in the rendered text; resolution happens later via
     // `Document::resolve_references`.
-    if text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:")) {
-        let mut xrefs: Vec<XrefSegment> = vec![];
+    //
+    // This runs *before* footnotes so that a cross-reference inside a footnote
+    // becomes a (bracket-free) placeholder before the footnote text is
+    // extracted. That lets the footnote text — including the `xref:id[…]` macro
+    // form, whose literal `]` would otherwise truncate the footnote — be
+    // captured intact, and lets the footnote re-home the placeholder so it is
+    // resolved in the document-level pass too.
+    let mut xrefs: Vec<XrefSegment> = vec![];
 
-        let replaced = match INLINE_XREF
-            .replace_all(content.rendered(), InlineXrefReplacer { xrefs: &mut xrefs })
-        {
-            Cow::Owned(new_result) => Some(new_result),
-            Cow::Borrowed(_) => None,
+    if (text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:")))
+        && let Cow::Owned(new_result) = INLINE_XREF.replace_all(
+            content.rendered(),
+            InlineXrefReplacer {
+                parser,
+                xrefs: &mut xrefs,
+            },
+        )
+    {
+        content.rendered = new_result.into();
+    }
+
+    // Footnotes (`footnote:[text]`, `footnote:id[text]`, `footnote:id[]`, and
+    // the deprecated `footnoteref:[id,text]` / `footnoteref:[id]`).
+    //
+    // The footnote *text* is extracted out of the flow of text (only a
+    // superscript marker is left behind), so any macro inside the footnote that
+    // has already been substituted at this point (images, links, anchors, index
+    // terms, and now cross-references) is captured as part of the footnote text.
+    // Any cross-reference placeholders captured this way are re-homed onto the
+    // footnote so they resolve in the document-level pass.
+    if found_macroish && text.contains("tnote") {
+        let replacer = InlineFootnoteMacroReplacer {
+            parser,
+            source: content.original(),
+            all_xrefs: &xrefs,
         };
 
-        if let Some(new_result) = replaced {
+        if let Cow::Owned(new_result) =
+            replace_with_lookahead(&INLINE_FOOTNOTE_MACRO, content.rendered(), replacer)
+        {
             content.rendered = new_result.into();
         }
-
-        content.set_deferred_xrefs(xrefs);
     }
+
+    content.set_deferred_xrefs(xrefs);
 }
 
 static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
@@ -1348,13 +1354,15 @@ static INLINE_XREF: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineXrefReplacer<'x> {
+struct InlineXrefReplacer<'p, 'x> {
+    parser: &'p Parser,
+
     /// Accumulates the cross-references discovered during replacement, in the
     /// same order as the placeholders emitted into the output.
     xrefs: &'x mut Vec<XrefSegment>,
 }
 
-impl Replacer for InlineXrefReplacer<'_> {
+impl Replacer for InlineXrefReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps.get(1).is_some() {
             // Honor the escape: emit the reference literally (sans backslash).
@@ -1362,25 +1370,65 @@ impl Replacer for InlineXrefReplacer<'_> {
             return;
         }
 
+        let mut window: Option<String> = None;
+        let mut roles: Vec<String> = vec![];
+
         let (target, provided_text) = if let Some(inner) = caps.get(2) {
-            // Shorthand form: split an optional ", reftext" off the id.
+            // Shorthand form: split an optional ", reftext" off the id. The id
+            // is always treated as a same-document reference, even when it
+            // contains a dot.
             match inner.as_str().split_once(',') {
                 Some((id, text)) => (id.trim().to_string(), Some(text.trim().to_string())),
                 None => (inner.as_str().trim().to_string(), None),
             }
         } else {
-            let target = caps[3].to_string();
-            let text = caps
-                .get(4)
-                .map(|m| m.as_str().to_string())
-                .filter(|s| !s.is_empty());
-            (target, text)
+            // `xref:` macro form. A target that begins with `#` is an explicit
+            // same-document reference (the hash is dropped); any other target
+            // that contains a dot is treated as an inter-document reference and
+            // left for a host-supplied resolver to interpret.
+            let raw_target = &caps[3];
+            let target = raw_target
+                .strip_prefix('#')
+                .unwrap_or(raw_target)
+                .to_string();
+
+            // The bracketed text is parsed as an attribute list when it contains
+            // an `=` (mirroring the link macro): the first positional attribute
+            // is the link text, and named attributes such as `window` and `role`
+            // are honored. Otherwise the whole text is the link text.
+            let raw_text = caps.get(4).map(|m| m.as_str()).unwrap_or_default();
+
+            let provided_text = if raw_text.is_empty() {
+                None
+            } else if raw_text.contains('=') {
+                let normalized = raw_text.replace('\n', " ");
+                let attrlist =
+                    Attrlist::parse(Span::new(&normalized), self.parser, AttrlistContext::Inline)
+                        .item
+                        .item;
+
+                window = attrlist
+                    .named_attribute("window")
+                    .map(|a| a.value().to_string());
+                roles = attrlist.roles().iter().map(|r| r.to_string()).collect();
+
+                attrlist
+                    .nth_attribute(1)
+                    .map(|a| a.value().to_string())
+                    .filter(|s| !s.is_empty())
+            } else {
+                Some(raw_text.replace("\\]", "]"))
+            };
+
+            (target, provided_text)
         };
 
         let index = self.xrefs.len();
         self.xrefs.push(XrefSegment {
             target,
             provided_text,
+            window,
+            roles,
             resolved: None,
         });
 
@@ -1425,15 +1473,21 @@ static INLINE_FOOTNOTE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineFootnoteMacroReplacer<'p, 's> {
+struct InlineFootnoteMacroReplacer<'p, 's, 'x> {
     parser: &'p Parser,
 
     /// The original (pre-substitution) span of the content being rendered, used
     /// to locate any warning recorded while resolving a footnote.
     source: Span<'s>,
+
+    /// The enclosing block's cross-references, produced by the (earlier)
+    /// cross-reference pass. A footnote whose text contains a cross-reference
+    /// placeholder re-homes the referenced segments out of this list onto
+    /// itself.
+    all_xrefs: &'x [XrefSegment],
 }
 
-impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_> {
+impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
     fn replace_append(
         &mut self,
         caps: &Captures<'_>,
@@ -1507,7 +1561,11 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_> {
                 );
             } else if let Some(content) = content {
                 // A defining occurrence that also carries an ID.
-                let index = parser.define_footnote(Some(&id), normalize_footnote_text(&content));
+                let (template, xrefs) = crate::content::rehome_xref_placeholders(
+                    &normalize_footnote_text(&content),
+                    self.all_xrefs,
+                );
+                let index = parser.define_footnote(Some(&id), template, xrefs);
                 parser.renderer.render_footnote(
                     &FootnoteRenderParams {
                         index: Some(index.as_str()),
@@ -1535,7 +1593,11 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_> {
             }
         } else if let Some(content) = content {
             // An anonymous defining occurrence.
-            let index = parser.define_footnote(None, normalize_footnote_text(&content));
+            let (template, xrefs) = crate::content::rehome_xref_placeholders(
+                &normalize_footnote_text(&content),
+                self.all_xrefs,
+            );
+            let index = parser.define_footnote(None, template, xrefs);
             parser.renderer.render_footnote(
                 &FootnoteRenderParams {
                     index: Some(index.as_str()),

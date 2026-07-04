@@ -440,6 +440,15 @@ pub struct XrefRenderParams<'a> {
     /// Explicit link text supplied in the cross-reference, if any.
     pub provided_text: Option<&'a str>,
 
+    /// Target window selection from a `window` attribute on the `xref:` macro
+    /// (e.g. `_blank`), or `None`. When `_blank`, the renderer also emits
+    /// `rel="noopener"`, mirroring the link macro.
+    pub window: Option<&'a str>,
+
+    /// Roles supplied via a `role` attribute on the `xref:` macro. Empty when
+    /// none were given.
+    pub roles: &'a [String],
+
     /// The resolved destination, or `None` if the reference is unresolved.
     pub resolved: Option<&'a ResolvedReference>,
 }
@@ -887,6 +896,23 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     }
 
     fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
+        let class = if params.roles.is_empty() {
+            String::new()
+        } else {
+            // Roles are author-supplied, so each is escaped before it is joined
+            // into the `class` attribute (a stray `"` would otherwise break out
+            // of the attribute).
+            let roles = params
+                .roles
+                .iter()
+                .map(|role| encode_html_attribute(role))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!(r#" class="{roles}""#)
+        };
+
+        let constraint_attrs = xref_constraint_attrs(params.window);
+
         match params.resolved {
             Some(resolved) => {
                 let text = params
@@ -896,7 +922,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     .unwrap_or_else(|| format!("[{target}]", target = params.target));
 
                 dest.push_str(&format!(
-                    r#"<a href="{href}">{text}</a>"#,
+                    r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
                     href = resolved.href
                 ));
             }
@@ -910,7 +936,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     .unwrap_or_else(|| format!("[{target}]", target = params.target));
 
                 dest.push_str(&format!(
-                    r##"<a href="#{target}">{text}</a>"##,
+                    r##"<a href="#{target}"{class}{constraint_attrs}>{text}</a>"##,
                     target = params.target
                 ));
             }
@@ -1103,6 +1129,28 @@ fn encode_attribute_value(value: String) -> String {
     value.replace('"', "&quot;")
 }
 
+/// Escapes a value for safe interpolation into an HTML attribute.
+///
+/// Unlike [`encode_attribute_value`] (which only guards the quote delimiter to
+/// mirror Asciidoctor's image-alt handling), this escapes the full set of
+/// characters that could break out of, or corrupt, an attribute value. It is
+/// used for author-supplied `xref` `window`/`role` values, which — unlike the
+/// hard-coded `window` strings the link macro passes — can contain arbitrary
+/// text.
+fn encode_html_attribute(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 fn normalize_web_path(
     target: &str,
     parser: &Parser,
@@ -1240,6 +1288,30 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// Builds the `target`/`rel` attributes for a cross-reference whose `xref:`
+/// macro carried a `window` attribute. Mirrors the link macro: a `_blank`
+/// window automatically adds `rel="noopener"`.
+fn xref_constraint_attrs(window: Option<&str>) -> String {
+    let Some(window) = window else {
+        return String::new();
+    };
+
+    let rel_noopener = if window == "_blank" {
+        r#" rel="noopener""#
+    } else {
+        ""
+    };
+
+    // The `window` value is author-supplied, so it is escaped before being
+    // interpolated into the `target` attribute. The `_blank` comparison above
+    // runs on the raw value, which is correct for the well-formed inputs that
+    // trigger `rel="noopener"`.
+    format!(
+        r#" target="{window}"{rel_noopener}"#,
+        window = encode_html_attribute(window)
+    )
+}
+
 fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) -> String {
     let rel = if attrlist.has_option("nofollow") {
         Some("nofollow")
@@ -1267,5 +1339,22 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) 
         format!(r#" rel="{rel}""#)
     } else {
         "".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_html_attribute;
+
+    #[test]
+    fn encode_html_attribute_escapes_special_characters() {
+        // Each of the four characters that could break out of or corrupt an
+        // HTML attribute value is replaced with its entity; ordinary characters
+        // pass through untouched.
+        assert_eq!(
+            encode_html_attribute(r#"a&b"c<d>e"#),
+            "a&amp;b&quot;c&lt;d&gt;e"
+        );
+        assert_eq!(encode_html_attribute("plain"), "plain");
     }
 }

@@ -546,7 +546,27 @@ impl Parser {
     /// number assigned to the footnote.
     ///
     /// Takes `&self` so it can be called from the macros substitution step.
-    pub(crate) fn define_footnote(&self, id: Option<&str>, text: String) -> String {
+    pub(crate) fn define_footnote(
+        &self,
+        id: Option<&str>,
+        text: String,
+        xrefs: Vec<crate::content::XrefSegment>,
+    ) -> String {
+        // A footnote's text is extracted out of the block during macro
+        // substitution, so any cross-reference inside it never reaches the
+        // document-level resolution pass over block content. Those
+        // cross-references are captured (as placeholders in `text` plus the
+        // `xrefs` segments) so they can be resolved alongside the block
+        // references. The stored `text` is the unresolved fallback rendering
+        // until then, so it is always clean.
+        let (text, deferred) = if xrefs.is_empty() {
+            (text, None)
+        } else {
+            let deferred = crate::content::FootnoteDeferred::new(text, xrefs);
+            let rendered = deferred.render(&*self.renderer);
+            (rendered, Some(Box::new(deferred)))
+        };
+
         // Footnotes are numbered consecutively throughout the document via the
         // `footnote-number` counter, which is seeded to `0` so the first
         // footnote is numbered `1`. The counter is a document-wide attribute, so
@@ -562,6 +582,7 @@ impl Parser {
                 index: index.clone(),
                 id: id.map(|s| s.to_owned()),
                 text,
+                deferred,
             });
 
         index

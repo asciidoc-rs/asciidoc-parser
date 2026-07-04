@@ -239,3 +239,70 @@ fn re_resolution_is_a_full_independent_sweep() {
     assert_eq!(warnings[0].target, "topic");
     assert_eq!(first_paragraph(&doc), "See <a href=\"#topic\">[topic]</a>.");
 }
+
+#[test]
+fn footnote_cross_references_resolve_via_host_resolver() {
+    // Cross-references inside a footnote are resolved through a host-supplied
+    // resolver too (the multi-document path), and an unresolved one falls back
+    // and is reported.
+    let mut doc =
+        Parser::default().parse_deferred("Text.footnote:[See <<topic>> and <<missing>>.]\n");
+
+    let resolver = CrossDocResolver {
+        index: HashMap::from([(
+            "topic".to_string(),
+            ResolvedReference {
+                href: "other.html#topic".to_string(),
+                text: Some("Topic".to_string()),
+            },
+        )]),
+    };
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+
+    assert_eq!(
+        doc.catalog().footnotes()[0].text,
+        r##"See <a href="other.html#topic">Topic</a> and <a href="#missing">[missing]</a>."##
+    );
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].target, "missing");
+}
+
+#[test]
+fn footnote_debug_includes_deferred_cross_references() {
+    let doc = Parser::default().parse("Text.footnote:[See <<sec>>.]\n\n[#sec]\n== Section\n");
+    let footnote = &doc.catalog().footnotes()[0];
+    let debug = format!("{footnote:?}");
+    assert!(debug.contains("deferred"), "debug was: {debug}");
+}
+
+#[test]
+fn xref_macro_honors_role_and_non_blank_window() {
+    // A `role` attribute becomes a class, and a non-`_blank` window is emitted
+    // as `target` without the automatic `rel="noopener"`.
+    let doc = Parser::default().parse("xref:sec[Go,role=hint,window=_top]\n\n[#sec]\n== Section\n");
+
+    assert_eq!(
+        first_paragraph(&doc),
+        r##"<a href="#sec" class="hint" target="_top">Go</a>"##
+    );
+}
+
+#[test]
+fn xref_escapes_author_supplied_window_and_role() {
+    // Author-supplied `window` and `role` values are escaped before they are
+    // interpolated into HTML attributes, so a stray quote cannot break out of
+    // the attribute and inject additional markup.
+    let doc = Parser::default().parse(
+        "xref:sec[Go,role=\"a\\\"b\",window=\"_top\\\" onclick=\\\"evil()\"]\n\n[#sec]\n== Section\n",
+    );
+
+    let rendered = first_paragraph(&doc);
+    assert!(
+        !rendered.contains("onclick=\"evil"),
+        "attribute injection was not escaped: {rendered}"
+    );
+    assert!(
+        rendered.contains("&quot;"),
+        "expected escaped quotes in: {rendered}"
+    );
+}

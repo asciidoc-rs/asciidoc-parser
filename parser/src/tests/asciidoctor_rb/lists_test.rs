@@ -2595,17 +2595,12 @@ mod description_lists_dlist {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/476):
-        // Enable this test when << >> xrefs are implemented.
         fn should_discover_anchor_at_start_of_description_term_text_and_register_it_as_a_reference()
         {
             let doc = Parser::default().parse("The highest peak in the Front Range is <<grays-peak>>, which tops <<mount-evans>> by just a few feet.\n\n[[mount-evans,Mount Evans]]Mount Evans:: 14,271 feet\n[[grays-peak]]Grays Peak:: 14,278 feet\n");
 
-            dbg!(&doc);
-            // refs = doc.catalog[:refs]
-            // assert refs.key?('mount-evans')
-            // assert refs.key?('grays-peak')
+            assert!(doc.catalog().contains_id("mount-evans"));
+            assert!(doc.catalog().contains_id("grays-peak"));
 
             assert_xpath(
                 &doc,

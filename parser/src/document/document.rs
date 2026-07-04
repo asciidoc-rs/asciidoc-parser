@@ -314,6 +314,14 @@ impl<'src> Document<'src> {
             for block in dependent.blocks.iter_mut() {
                 block.resolve_references(resolver, renderer, &mut warnings);
             }
+
+            // Footnote text is extracted out of block content, so its
+            // cross-references are resolved here rather than by the block pass
+            // above. The host resolver does not alias the catalog, so the
+            // footnotes can be borrowed mutably in place.
+            for footnote in dependent.catalog.footnotes.iter_mut() {
+                footnote.resolve_references(resolver, renderer, &mut warnings);
+            }
         });
 
         warnings
@@ -330,10 +338,25 @@ impl<'src> Document<'src> {
         let mut warnings = Vec::new();
 
         self.internal.with_dependent_mut(|_owner, dependent| {
+            // The footnotes are moved out of the catalog so they can be resolved
+            // mutably while the `CatalogResolver` borrows the (footnote-free)
+            // catalog. Footnotes are never cross-reference *targets*, so their
+            // absence does not affect resolution.
+            let mut footnotes = dependent.catalog.take_footnotes();
+
             let resolver = CatalogResolver::new(&dependent.catalog);
             for block in dependent.blocks.iter_mut() {
                 block.resolve_references(&resolver, renderer, &mut warnings);
             }
+
+            // Footnote text is extracted out of block content, so its
+            // cross-references are resolved here rather than by the block pass
+            // above.
+            for footnote in footnotes.iter_mut() {
+                footnote.resolve_references(&resolver, renderer, &mut warnings);
+            }
+
+            dependent.catalog.restore_footnotes(footnotes);
         });
 
         warnings
