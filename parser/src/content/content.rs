@@ -470,4 +470,76 @@ mod tests {
             assert!(!content.is_empty());
         }
     }
+
+    mod footnote_deferred {
+        use super::super::{
+            FootnoteDeferred, XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment,
+            rehome_xref_placeholders,
+        };
+
+        fn segment(target: &str) -> XrefSegment {
+            XrefSegment {
+                target: target.to_string(),
+                provided_text: None,
+                window: None,
+                roles: vec![],
+                resolved: None,
+            }
+        }
+
+        #[test]
+        fn rehomes_a_placeholder_into_a_local_segment() {
+            let all = vec![segment("a"), segment("b")];
+            // Reference only the second segment; it becomes local index 0.
+            let text = format!("see {XREF_PLACEHOLDER_START}1{XREF_PLACEHOLDER_END} here");
+
+            let (template, local) = rehome_xref_placeholders(&text, &all);
+
+            assert_eq!(local.len(), 1);
+            assert_eq!(local.first().unwrap().target, "b");
+            assert_eq!(
+                template,
+                format!("see {XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END} here")
+            );
+        }
+
+        #[test]
+        fn text_without_placeholders_is_returned_unchanged() {
+            let (template, local) = rehome_xref_placeholders("plain text", &[segment("a")]);
+            assert_eq!(template, "plain text");
+            assert!(local.is_empty());
+        }
+
+        #[test]
+        fn malformed_placeholders_are_passed_through_literally() {
+            // A non-numeric index and an unterminated placeholder are both left
+            // as-is (these cannot arise in practice, but the fallback is exercised).
+            let bad_index = format!("a{XREF_PLACEHOLDER_START}xyz{XREF_PLACEHOLDER_END}b");
+            let (template, local) = rehome_xref_placeholders(&bad_index, &[]);
+            assert_eq!(template, bad_index);
+            assert!(local.is_empty());
+
+            let unterminated = format!("a{XREF_PLACEHOLDER_START}0 no end");
+            let (template, local) = rehome_xref_placeholders(&unterminated, &[]);
+            assert_eq!(template, unterminated);
+            assert!(local.is_empty());
+        }
+
+        #[test]
+        fn out_of_range_placeholder_index_is_passed_through() {
+            // An index with no matching segment in `all` is left literal.
+            let text = format!("x{XREF_PLACEHOLDER_START}9{XREF_PLACEHOLDER_END}y");
+            let (template, local) = rehome_xref_placeholders(&text, &[segment("a")]);
+            assert_eq!(template, text);
+            assert!(local.is_empty());
+        }
+
+        #[test]
+        fn debug_includes_template_and_xrefs() {
+            let deferred = FootnoteDeferred::new("t".to_string(), vec![segment("a")]);
+            let rendered = format!("{deferred:?}");
+            assert!(rendered.contains("FootnoteDeferred"));
+            assert!(rendered.contains("template"));
+        }
+    }
 }

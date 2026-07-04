@@ -219,8 +219,8 @@ pub struct Footnote {
 
     /// The already-substituted text of the footnote. When the footnote contains
     /// cross-references, this reflects the unresolved fallback rendering until
-    /// [`resolve_references`](Self::resolve_references) is called, after which
-    /// it reflects the resolved links; it is always clean, user-facing text.
+    /// the document's references are resolved, after which it reflects the
+    /// resolved links; it is always clean, user-facing text.
     pub text: String,
 
     /// Deferred cross-references discovered in the footnote text, awaiting
