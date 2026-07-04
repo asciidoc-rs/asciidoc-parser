@@ -195,14 +195,21 @@ Additionally, no AsciiDoc syntax within the delimited lines is interpreted, not 
     );
 
     // The content of a comment block is raw: neither inline markup nor an
-    // attribute reference is interpreted.
-    let doc = Parser::default().parse("////\n*bold* {attr}\n////");
+    // attribute reference is interpreted, and an inner `//` line (a preprocessor
+    // line comment) is retained verbatim rather than stripped.
+    let doc = Parser::default().parse("////\n*bold* {attr}\n// inner\n////");
     let block = doc.nested_blocks().next().expect("expected a block");
     assert_eq!(
         block.rendered_content(),
-        Some("*bold* {attr}"),
+        Some("*bold* {attr}\n// inner"),
         "comment block content must be raw"
     );
+
+    // Even an explicit `subs` attribute does not cause a comment block to be
+    // interpreted.
+    let doc = Parser::default().parse("[subs=quotes]\n////\n*bold*\n////");
+    let block = doc.nested_blocks().next().expect("expected a block");
+    assert_eq!(block.rendered_content(), Some("*bold*"));
 
     non_normative!(
         r#"
@@ -226,11 +233,17 @@ A comment block can also be written as an open block with the comment style:
     );
 
     // An open block (`--`) carrying the `comment` style is the alternate form of
-    // a comment block: same `comment` context, raw (uninterpreted) content.
-    let doc = Parser::default().parse("[comment]\n--\n*bold* {attr}\n--");
+    // a comment block: same `comment` context, raw (uninterpreted) content —
+    // inner `//` lines retained, and a `subs` override ignored — matching the
+    // `////` form exactly.
+    let doc = Parser::default().parse("[comment]\n--\n*bold* {attr}\n// inner\n--");
     let block = doc.nested_blocks().next().expect("expected a block");
     assert_eq!(block.resolved_context().as_ref(), "comment");
-    assert_eq!(block.rendered_content(), Some("*bold* {attr}"));
+    assert_eq!(block.rendered_content(), Some("*bold* {attr}\n// inner"));
+
+    let doc = Parser::default().parse("[comment,subs=quotes]\n--\n*bold*\n--");
+    let block = doc.nested_blocks().next().expect("expected a block");
+    assert_eq!(block.rendered_content(), Some("*bold*"));
 
     non_normative!(
         r#"
@@ -265,6 +278,21 @@ A comment block that can consists of a single paragraph can be written as a para
     let second = doc.nested_blocks().nth(1).expect("expected a second block");
     assert_eq!(second.declared_style(), None);
     assert_eq!(second.rendered_content(), Some("Not a comment."));
+
+    // Like the `////` and open-block forms, a `[comment]` paragraph retains its
+    // content verbatim: an inner `//` line is preserved (not stripped as a line
+    // comment), inline markup is not interpreted, and a `subs` override is
+    // ignored.
+    let doc = Parser::default().parse("[comment]\nfirst line\n// inner\n*bold*");
+    let first = doc.nested_blocks().next().expect("expected a block");
+    assert_eq!(
+        first.rendered_content(),
+        Some("first line\n// inner\n*bold*")
+    );
+
+    let doc = Parser::default().parse("[comment,subs=quotes]\n*bold*");
+    let first = doc.nested_blocks().next().expect("expected a block");
+    assert_eq!(first.rendered_content(), Some("*bold*"));
 
     non_normative!(
         r#"

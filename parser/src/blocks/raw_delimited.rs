@@ -142,8 +142,14 @@ impl<'src> RawDelimitedBlock<'src> {
 
                 let mut content: Content<'src> = content.into();
 
-                substitution_group =
-                    substitution_group.override_via_attrlist(metadata.attrlist.as_ref());
+                // A comment block (`////` or a `[comment]` open block) is never
+                // interpreted, so a `subs` attribute must not override its
+                // (empty) substitution group; every other raw context honors a
+                // `subs` override.
+                if context != "comment" {
+                    substitution_group =
+                        substitution_group.override_via_attrlist(metadata.attrlist.as_ref());
+                }
 
                 substitution_group.apply(&mut content, parser, metadata.attrlist.as_ref());
 

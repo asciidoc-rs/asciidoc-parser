@@ -326,6 +326,11 @@ fn parse_lines<'src>(
         }
     }
 
+    // A `[comment]` paragraph is raw: its content is retained verbatim and not
+    // interpreted, so (like the `////` and `[comment]` open-block forms) inner
+    // `//` lines must be preserved rather than stripped as line comments.
+    let comment_style = is_comment_style(attrlist.as_ref());
+
     let mut next = source;
     let mut filtered_lines: Vec<&'src str> = vec![];
     let mut skipped_comment_line = false;
@@ -432,8 +437,10 @@ fn parse_lines<'src>(
         next = line_mi.after;
 
         // Only strip comment lines in paragraph style. In literal/listing/source
-        // blocks, "//" lines are preserved as content.
-        if style == SimpleBlockStyle::Paragraph
+        // blocks, "//" lines are preserved as content; likewise a `[comment]`
+        // paragraph retains its content verbatim (raw).
+        if !comment_style
+            && style == SimpleBlockStyle::Paragraph
             && line.starts_with("//")
             && !line.starts_with("///")
         {
