@@ -5,6 +5,7 @@
 
 mod content;
 pub use content::Content;
+pub(crate) use content::{FootnoteDeferred, XrefSegment, rehome_xref_placeholders};
 
 mod macros;
 

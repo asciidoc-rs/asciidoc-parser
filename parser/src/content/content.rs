@@ -77,6 +77,14 @@ pub(crate) struct XrefSegment {
     /// Explicit link text supplied in the cross-reference, if any.
     pub(crate) provided_text: Option<String>,
 
+    /// Target window selection, from a `window` attribute on the `xref:` macro
+    /// (e.g. `_blank`). `None` for the shorthand form, which has no attribute
+    /// list.
+    pub(crate) window: Option<String>,
+
+    /// Roles supplied via a `role` attribute on the `xref:` macro, if any.
+    pub(crate) roles: Vec<String>,
+
     /// The resolved destination, filled in by resolution; `None` until then.
     pub(crate) resolved: Option<crate::parser::ResolvedReference>,
 }
@@ -200,13 +208,18 @@ impl<'src> Content<'src> {
         warnings: &mut Vec<ReferenceWarning>,
     ) {
         if let Some(deferred) = self.deferred.as_mut() {
-            for xref in deferred.xrefs.iter_mut() {
+            let DeferredContent { template, xrefs } = deferred.as_mut();
+
+            for (index, xref) in xrefs.iter_mut().enumerate() {
                 xref.resolved = resolver.resolve(&ResolutionContext {
                     target: &xref.target,
                     provided_text: xref.provided_text.as_deref(),
                 });
 
-                if xref.resolved.is_none() {
+                // A reference whose placeholder is no longer in the template was
+                // re-homed into a footnote (see `rehome_xref_placeholders`); the
+                // footnote resolves and reports it, so it is not reported here.
+                if xref.resolved.is_none() && template.contains(&Content::xref_placeholder(index)) {
                     warnings.push(ReferenceWarning {
                         target: xref.target.clone(),
                         kind: ReferenceWarningKind::Unresolved,
@@ -227,6 +240,63 @@ impl<'src> Content<'src> {
 
         self.rendered = render_template(&deferred.template, &deferred.xrefs, renderer).into();
     }
+}
+
+/// Re-homes the cross-reference placeholders found in `text` into a
+/// self-contained (template, xrefs) pair.
+///
+/// When the cross-reference substitution runs before footnotes, a footnote's
+/// text may carry placeholder tokens whose [`XrefSegment`]s live in the
+/// enclosing block's cross-reference list (`all`). Because a footnote's text is
+/// extracted out of the block, it needs its own copy of just those segments,
+/// renumbered so its template is independent. This scans `text` for placeholder
+/// tokens, clones the referenced segments into a fresh vector (in first-seen
+/// order), and rewrites the tokens to the new local indices.
+///
+/// Text with no placeholders returns unchanged alongside an empty vector.
+pub(crate) fn rehome_xref_placeholders(
+    text: &str,
+    all: &[XrefSegment],
+) -> (String, Vec<XrefSegment>) {
+    let mut local: Vec<XrefSegment> = vec![];
+
+    if !text.contains(XREF_PLACEHOLDER_START) {
+        return (text.to_string(), local);
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find(XREF_PLACEHOLDER_START) {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + XREF_PLACEHOLDER_START.len_utf8()..];
+
+        let Some(end) = after.find(XREF_PLACEHOLDER_END) else {
+            out.push(XREF_PLACEHOLDER_START);
+            rest = after;
+            continue;
+        };
+
+        let body = &after[..end];
+        rest = &after[end + XREF_PLACEHOLDER_END.len_utf8()..];
+
+        match body.parse::<usize>().ok().and_then(|index| all.get(index)) {
+            Some(segment) => {
+                let local_index = local.len();
+                local.push(segment.clone());
+                out.push_str(&Content::xref_placeholder(local_index));
+            }
+
+            None => {
+                out.push(XREF_PLACEHOLDER_START);
+                out.push_str(body);
+                out.push(XREF_PLACEHOLDER_END);
+            }
+        }
+    }
+
+    out.push_str(rest);
+    (out, local)
 }
 
 /// Splices resolved (or fallback) cross-reference renderings into a placeholder
@@ -263,6 +333,8 @@ fn render_template(
                     &XrefRenderParams {
                         target: &xref.target,
                         provided_text: xref.provided_text.as_deref(),
+                        window: xref.window.as_deref(),
+                        roles: &xref.roles,
                         resolved: xref.resolved.as_ref(),
                     },
                     &mut out,
@@ -284,6 +356,73 @@ fn render_template(
 
     out.push_str(rest);
     out
+}
+
+/// The deferred cross-references carried by a footnote's text.
+///
+/// A footnote's text is extracted out of the flow of the block during the
+/// macros substitution step, so any cross-reference (`<<id>>`, `xref:id[…]`)
+/// inside it cannot be resolved by the document-level pass that resolves
+/// references in block content. Instead, the footnote captures its
+/// cross-references here — as a placeholder template plus the references in
+/// placeholder order — and they are resolved alongside the block references
+/// (see [`Footnote::resolve_references`]).
+///
+/// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct FootnoteDeferred {
+    /// The footnote text with opaque placeholder tokens marking where each
+    /// cross-reference will be spliced in.
+    template: String,
+
+    /// The cross-references, in placeholder order.
+    xrefs: Vec<XrefSegment>,
+}
+
+impl FootnoteDeferred {
+    /// Constructs a footnote's deferred cross-reference state from the
+    /// placeholder-bearing `template` and its `xrefs` (in placeholder order).
+    pub(crate) fn new(template: String, xrefs: Vec<XrefSegment>) -> Self {
+        Self { template, xrefs }
+    }
+
+    /// Renders the footnote text from the template and the current (resolved or
+    /// unresolved) state of its cross-references.
+    pub(crate) fn render(&self, renderer: &dyn InlineSubstitutionRenderer) -> String {
+        render_template(&self.template, &self.xrefs, renderer)
+    }
+
+    /// Resolves the footnote's cross-references using `resolver`, reporting any
+    /// unresolved target in `warnings`. Rendering the resolved text is left to
+    /// the caller (via [`render`](Self::render)).
+    pub(crate) fn resolve(
+        &mut self,
+        resolver: &dyn ReferenceResolver,
+        warnings: &mut Vec<ReferenceWarning>,
+    ) {
+        for xref in self.xrefs.iter_mut() {
+            xref.resolved = resolver.resolve(&ResolutionContext {
+                target: &xref.target,
+                provided_text: xref.provided_text.as_deref(),
+            });
+
+            if xref.resolved.is_none() {
+                warnings.push(ReferenceWarning {
+                    target: xref.target.clone(),
+                    kind: ReferenceWarningKind::Unresolved,
+                });
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for FootnoteDeferred {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FootnoteDeferred")
+            .field("template", &self.template)
+            .field("xrefs", &self.xrefs)
+            .finish()
+    }
 }
 
 impl<'src> From<Span<'src>> for Content<'src> {

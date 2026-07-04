@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::internal::debug::DebugHashMapFrom;
+use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom};
 
 /// Document catalog for tracking referenceable elements.
 ///
@@ -203,7 +203,7 @@ impl Catalog {
 /// be referenced from multiple locations by assigning it an ID at the first
 /// occurrence and repeating that ID (with empty text) afterward; only the
 /// defining occurrence produces a `Footnote` entry.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Footnote {
     /// The footnote's number, assigned in document order via the
     /// `footnote-number` counter. Normally a consecutive integer (`1`, `2`, …),
@@ -217,8 +217,53 @@ pub struct Footnote {
     /// footnote.
     pub id: Option<String>,
 
-    /// The already-substituted text of the footnote.
+    /// The already-substituted text of the footnote. When the footnote contains
+    /// cross-references, this reflects the unresolved fallback rendering until
+    /// [`resolve_references`](Self::resolve_references) is called, after which
+    /// it reflects the resolved links; it is always clean, user-facing text.
     pub text: String,
+
+    /// Deferred cross-references discovered in the footnote text, awaiting
+    /// resolution. `None` for the common case of a footnote with no
+    /// cross-references.
+    pub(crate) deferred: Option<Box<FootnoteDeferred>>,
+}
+
+impl Footnote {
+    /// Resolves any cross-references embedded in this footnote's text using
+    /// `resolver`, then rebuilds [`text`](Self::text) from the resolved state.
+    /// Any unresolved target is reported in `warnings`.
+    ///
+    /// A footnote with no cross-references is left untouched.
+    pub(crate) fn resolve_references(
+        &mut self,
+        resolver: &dyn crate::parser::ReferenceResolver,
+        renderer: &dyn crate::parser::InlineSubstitutionRenderer,
+        warnings: &mut Vec<crate::parser::ReferenceWarning>,
+    ) {
+        if let Some(deferred) = self.deferred.as_mut() {
+            deferred.resolve(resolver, warnings);
+            self.text = deferred.render(renderer);
+        }
+    }
+}
+
+impl std::fmt::Debug for Footnote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The deferred cross-reference state is an internal implementation
+        // detail, omitted unless present so that the (very common)
+        // cross-reference-free footnote debugs as a plain field set.
+        let mut s = f.debug_struct("Footnote");
+        s.field("index", &self.index);
+        s.field("id", &self.id);
+        s.field("text", &self.text);
+
+        if let Some(deferred) = self.deferred.as_ref() {
+            s.field("deferred", deferred);
+        }
+
+        s.finish()
+    }
 }
 
 impl std::fmt::Debug for Catalog {

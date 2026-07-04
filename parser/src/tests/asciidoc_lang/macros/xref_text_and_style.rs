@@ -1,0 +1,205 @@
+use crate::tests::prelude::*;
+
+track_file!("docs/modules/macros/pages/xref-text-and-style.adoc");
+
+non_normative!(
+    r##"
+= Cross Reference Text and Styles
+
+You can customize the style of the automatic cross reference text using the `xrefstyle` document attribute.
+This customization brings the cross reference text formatting from the DocBook toolchain to AsciiDoc processing, specifically during conversion.
+
+CAUTION: Since this is a newer feature of the AsciiDoc language, it may not be supported by all converters.
+Where you can find support for it is in Asciidoctor's HTML, PDF, and EPUB 3 converters.
+It's not supported by the DocBook converter since it's a feature the DocBook toolchain already provides.
+
+"##
+);
+
+#[test]
+fn default_styling_uses_title_or_reftext() {
+    verifies!(
+        r##"
+== Default styling
+
+By default, the cross reference text matches the title of the referenced element.
+For example, if you're linking to a section titled “Installation”, the text of the cross reference link appears as:
+
+====
+Installation
+====
+
+If the reftext attribute is specified on the referenced element, that value is preferred over its title.
+For example, let's assume the section from the previous example was written as:
+
+[source]
+----
+[reftext="Installation Procedure"]
+=== Installation
+----
+
+In this case, the text of the cross reference link appears as:
+
+====
+Installation Procedure
+====
+
+Attribute references are substituted in the reftext during parsing and reftext substitutions (specialchars, quotes, and replacements) are applied to the value when it's used during conversion.
+
+If the reftext is not specified, the text of the cross reference is automatically generated.
+By default, this text is the title of the reference.
+
+"##
+    );
+
+    // By default the cross-reference text is the target's title.
+    let doc = Parser::default().parse("See <<Installation>>.\n\n== Installation\n");
+
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[r##"See <a href="#_installation">Installation</a>."##]
+    );
+
+    // An explicit reftext on the target is preferred over its title.
+    let doc = Parser::default().parse(
+        "See <<install>>.\n\n[reftext=\"Installation Procedure\",id=install]\n== Installation\n",
+    );
+
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[r##"See <a href="#install">Installation Procedure</a>."##]
+    );
+}
+
+non_normative!(
+    r##"
+== Cross reference styles
+
+The generated text of a cross reference is controlled by the xrefstyle.
+It will also vary for different element types (section, figure, etc).
+Let's consider the following document to learn how the xrefstyle value affects the generated text of a cross reference.
+
+[,asciidoc]
+----
+== Installation
+
+.Big Cats
+image::big-cats.png[]
+----
+
+"##
+);
+
+#[ignore]
+#[test]
+fn cross_reference_styles() {
+    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/605):
+    // The full/short xrefstyle formatting builds the reference text from the
+    // target's signifier and number (e.g. "Section 2.3"), which requires
+    // section/figure numbering and the corresponding `<context>-caption`
+    // attributes. The crate does not yet compute those numbers, so the
+    // xrefstyle value is parsed (including the `xrefstyle=` attribute on the
+    // xref macro) but does not yet change the generated reference text.
+    to_do_verifies!(
+        r##"
+There are three built-in styles supported by the xrefstyle document attribute that you can choose from to customize the generated text of a cross reference.
+
+ :xrefstyle: full:: Uses the signifier for the reference followed by the reference number and emphasized (chapter or appendix) or title enclosed in quotes (e.g., Section 2.3, “Installation”) (e.g., Figure 1, “Big Cats”).
+
+ :xrefstyle: short:: Uses the signifier for the reference followed by the reference number (e.g., Section 2.3) (e.g., Figure 1).
+
+ :xrefstyle: basic:: Uses the title only, only applying emphasis if the reference is a chapter or appendix (e.g., Installation) (e.g., Big Cats).
+
+The `xrefstyle` attribute can also be specified directly on the xref:xref.adoc[xref macro] to override the xrefstyle value for a single reference (e.g., `+xref:installation[xrefstyle=short]+`).
+The element attribute supports the same three styles.
+
+The xrefstyle formatting only applies to references that have both a title and number (or explicit caption), but no explicit reftext.
+If the reference is a chapter or an appendix, the title is displayed in italics instead of quotes (even when the xrefstyle is basic).
+
+Let's assume you want to reference a section titled “Installation” that has the number 2.3.
+The *full* style is displayed as:
+
+====
+Section 2.3, “Installation”
+====
+
+The *short* style is displayed as:
+
+====
+Section 2.3
+====
+
+The *basic* style is displayed as:
+
+====
+Installation
+====
+
+The *full* and *short* styles only apply for references that have a caption.
+Specifically, the corresponding `<context>-caption` attribute must be set for the target's block type (e.g., `listing-caption` for listing blocks, `example-caption` for example blocks, `table-caption` for tables, etc.).
+Otherwise, the *basic* style is used.
+
+"##
+    );
+}
+
+non_normative!(
+    r##"
+== Reference signifiers
+
+You can use document attributes to customize the signifier that is placed in front of the reference's number.
+This [.term]*reference signifier* indicates the reference's type (e.g., Chapter or Section).
+
+* `chapter-refsig` -- defines the signifier to use for a cross reference to a chapter (default: Chapter)
+* `section-refsig` -- defines the signifier to use for a cross reference to a section (default: Section)
+* `appendix-refsig` -- defines the signifier to use for a cross reference to an appendix (default: Appendix)
+
+(The signifier attribute for a part cross reference will be introduced once numeration is supported for parts).
+
+For example, to customize the word “Section”, define the `section-refsig` attribute in the document header:
+
+[source]
+----
+:section-refsig: Sect.
+----
+
+The *full* xrefstyle would then be displayed as:
+
+====
+Sect. 2.3, “Installation”
+====
+
+The *short* xrefstyle would be displayed as:
+
+====
+Sect. 2.3
+====
+
+If you unset the attribute, the signifier is dropped from the cross reference text.
+For example:
+
+[source]
+----
+:!section-refsig:
+----
+
+In this case, the *full* xrefstyle will display only the number and title:
+
+====
+2.3, “Installation”
+====
+
+The *short* xrefstyle will fall back to the number only:
+
+====
+2.3
+====
+
+The *basic* xrefstyle is unaffected by the value of the signifier.
+
+Only the aforementioned styles are provided out of the box.
+Support for a custom formatting string is planned.
+Refer to https://github.com/asciidoctor/asciidoctor/issues/2212[#2212^] for details.
+Until then, you can implement custom formatting in a custom converter or overriding the xreftext method on the node.
+"##
+);

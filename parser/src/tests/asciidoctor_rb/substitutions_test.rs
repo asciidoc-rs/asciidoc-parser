@@ -4648,21 +4648,44 @@ mod macros {
             assert_eq!(content.rendered(), "x footnote:[note]</a>");
         }
 
-        // ---------------------------------------------------------------------
-        // Deferred: these depend on features the crate does not yet implement.
+        #[test]
+        fn footnote_macro_may_contain_a_shorthand_xref() {
+            // A cross-reference inside a footnote is captured as a placeholder
+            // before the footnote text is extracted, then resolved in the
+            // document-level pass so the stored footnote text holds the link.
+            let doc = Parser::default()
+                .parse("Sentence text.footnote:[See <<usage>>.]\n\n[#usage]\n== Usage\n");
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].text, r##"See <a href="#usage">Usage</a>."##);
+        }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/592):
-        // Resolve deferred cross-references (and bibliography references) inside
-        // footnote text. The crate defers cross-reference resolution to a
-        // document-level pass over block content; because a footnote's text is
-        // extracted out of the block, an `<<id>>` / `xref:id[]` inside a footnote
-        // is not yet reached by that pass and stays unresolved in the stored
-        // footnote text. (Covers the Ruby tests "a footnote macro may contain a
-        // shorthand xref" / "an xref macro" and "should be able to reference a
-        // bibliography entry in a footnote".)
-        fn footnote_macro_may_contain_an_xref() {}
+        fn footnote_macro_may_contain_an_xref_macro() {
+            // The `xref:id[]` macro form works too, even though its literal `]`
+            // would otherwise truncate the footnote: the cross-reference pass
+            // turns it into a bracket-free placeholder before the footnote text
+            // is captured.
+            let doc = Parser::default()
+                .parse("Sentence text.footnote:[See xref:usage[].]\n\n[#usage]\n== Usage\n");
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            assert_eq!(footnotes[0].text, r##"See <a href="#usage">Usage</a>."##);
+        }
+
+        #[test]
+        fn should_be_able_to_reference_a_bibliography_entry_in_a_footnote() {
+            let doc = Parser::default().parse(
+                "Sentence text.footnote:[See <<taoup>>.]\n\n[bibliography]\n== References\n\n* [[[taoup]]] Eric Steven Raymond. _The Art of Unix Programming_. Addison-Wesley. ISBN 0-13-142901-9.\n",
+            );
+
+            let footnotes = doc.catalog().footnotes();
+            assert_eq!(footnotes.len(), 1);
+            // The bibliography anchor's reference text is its bracketed label.
+            assert_eq!(footnotes[0].text, r##"See <a href="#taoup">[taoup]</a>."##);
+        }
 
         #[test]
         fn externalized_footnote_macro_may_contain_text_formatting() {

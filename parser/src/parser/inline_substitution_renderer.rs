@@ -440,6 +440,15 @@ pub struct XrefRenderParams<'a> {
     /// Explicit link text supplied in the cross-reference, if any.
     pub provided_text: Option<&'a str>,
 
+    /// Target window selection from a `window` attribute on the `xref:` macro
+    /// (e.g. `_blank`), or `None`. When `_blank`, the renderer also emits
+    /// `rel="noopener"`, mirroring the link macro.
+    pub window: Option<&'a str>,
+
+    /// Roles supplied via a `role` attribute on the `xref:` macro. Empty when
+    /// none were given.
+    pub roles: &'a [String],
+
     /// The resolved destination, or `None` if the reference is unresolved.
     pub resolved: Option<&'a ResolvedReference>,
 }
@@ -887,6 +896,14 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     }
 
     fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
+        let class = if params.roles.is_empty() {
+            String::new()
+        } else {
+            format!(r#" class="{roles}""#, roles = params.roles.join(" "))
+        };
+
+        let constraint_attrs = xref_constraint_attrs(params.window);
+
         match params.resolved {
             Some(resolved) => {
                 let text = params
@@ -896,7 +913,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     .unwrap_or_else(|| format!("[{target}]", target = params.target));
 
                 dest.push_str(&format!(
-                    r#"<a href="{href}">{text}</a>"#,
+                    r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
                     href = resolved.href
                 ));
             }
@@ -910,7 +927,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     .unwrap_or_else(|| format!("[{target}]", target = params.target));
 
                 dest.push_str(&format!(
-                    r##"<a href="#{target}">{text}</a>"##,
+                    r##"<a href="#{target}"{class}{constraint_attrs}>{text}</a>"##,
                     target = params.target
                 ));
             }
@@ -1239,6 +1256,23 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+
+/// Builds the `target`/`rel` attributes for a cross-reference whose `xref:`
+/// macro carried a `window` attribute. Mirrors the link macro: a `_blank`
+/// window automatically adds `rel="noopener"`.
+fn xref_constraint_attrs(window: Option<&str>) -> String {
+    let Some(window) = window else {
+        return String::new();
+    };
+
+    let rel_noopener = if window == "_blank" {
+        r#" rel="noopener""#
+    } else {
+        ""
+    };
+
+    format!(r#" target="{window}"{rel_noopener}"#)
+}
 
 fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) -> String {
     let rel = if attrlist.has_option("nofollow") {
