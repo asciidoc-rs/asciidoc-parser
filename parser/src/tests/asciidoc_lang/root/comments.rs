@@ -261,6 +261,7 @@ A comment block that can consists of a single paragraph can be written as a para
         .parse("[comment]\nA paragraph comment.\nLike all paragraphs, the lines must be contiguous.\n\nNot a comment.");
     let first = doc.nested_blocks().next().expect("expected a block");
     assert_eq!(first.declared_style(), Some("comment"));
+    assert_eq!(first.substitution_group(), SubstitutionGroup::None);
     let second = doc.nested_blocks().nth(1).expect("expected a second block");
     assert_eq!(second.declared_style(), None);
     assert_eq!(second.rendered_content(), Some("Not a comment."));
