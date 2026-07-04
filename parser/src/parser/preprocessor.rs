@@ -293,7 +293,18 @@ impl<'p> PreprocessorState<'p> {
                         .map(|a| a.value())
                         .filter(|v| !v.is_empty());
 
-                    if let Some(offset) = leveloffset {
+                    // Capture the restore value *before* processing the include:
+                    // an included AsciiDoc file may itself set `:leveloffset:`,
+                    // which would mutate the running attribute state, so reading it
+                    // afterward would restore the included file's value rather than
+                    // the one in effect before the include.
+                    let restore_leveloffset = leveloffset.map(|offset| {
+                        let restore = match self.parser.attribute_value("leveloffset") {
+                            InterpretedValue::Value(v) if !v.is_empty() => {
+                                format!(":leveloffset: {v}")
+                            }
+                            _ => ":leveloffset!:".to_string(),
+                        };
                         self.emit_line(
                             &format!(":leveloffset: {offset}"),
                             file_name,
@@ -301,7 +312,8 @@ impl<'p> PreprocessorState<'p> {
                             &mut has_reported_file,
                         );
                         self.emit_line("", file_name, source_line_number, &mut has_reported_file);
-                    }
+                        restore
+                    });
 
                     let content_start = self.output.len();
 
@@ -331,15 +343,9 @@ impl<'p> PreprocessorState<'p> {
                         });
                     }
 
-                    if leveloffset.is_some() {
+                    if let Some(restore) = restore_leveloffset {
                         // Reset the level offset to whatever was in effect before
                         // the include (unset unless a `:leveloffset:` was active).
-                        let restore = match self.parser.attribute_value("leveloffset") {
-                            InterpretedValue::Value(v) if !v.is_empty() => {
-                                format!(":leveloffset: {v}")
-                            }
-                            _ => ":leveloffset!:".to_string(),
-                        };
                         self.emit_line("", file_name, source_line_number, &mut has_reported_file);
                         self.emit_line(
                             &restore,
@@ -953,6 +959,9 @@ fn select_by_line_ranges(text: &str, spec: &str) -> String {
     let ranges: Vec<(usize, Option<usize>)> = split_delimited_value(spec)
         .map(|entry| {
             if let Some((from, to)) = entry.split_once("..") {
+                // A non-numeric start coerces to 0, matching Ruby `String#to_i`.
+                // Since line numbers are 1-based this behaves the same as a start
+                // of 1 (the range still begins at the first line).
                 let from = from.trim().parse().unwrap_or(0);
                 let to = to.trim();
                 let to = match to.parse::<i64>() {
@@ -2666,6 +2675,27 @@ mod tests {
         assert_eq!(
             output,
             ":leveloffset: 1\n\n:leveloffset: +1\n\n== Chapter\n\n:leveloffset: 1\n"
+        );
+    }
+
+    #[test]
+    fn leveloffset_restore_ignores_offset_set_within_include() {
+        // A `:leveloffset:` set inside the included file must not affect the value
+        // restored after the include: the restore reflects the offset in effect
+        // *before* the include (here, unset).
+        let source = "include::sample.adoc[leveloffset=+1]";
+        let handler =
+            InlineFileHandler::from_pairs([("sample.adoc", ":leveloffset: 2\n\n== Chapter")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(
+            output,
+            ":leveloffset: +1\n\n:leveloffset: 2\n\n== Chapter\n\n:leveloffset!:\n"
         );
     }
 
