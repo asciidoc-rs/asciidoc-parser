@@ -470,7 +470,7 @@ fn parse_lines<'src>(
     // block. Its content is retained in the parsed model (this parser does not
     // discard comments) but is not interpreted: no substitutions are applied,
     // matching the raw content model of a `////` comment block.
-    let sub_group = if is_comment_style(attrlist.as_ref()) {
+    let sub_group = if comment_style {
         SubstitutionGroup::None
     } else {
         base_substitution_group(style).override_via_attrlist(attrlist.as_ref())
