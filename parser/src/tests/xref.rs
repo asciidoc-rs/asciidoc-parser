@@ -286,3 +286,23 @@ fn xref_macro_honors_role_and_non_blank_window() {
         r##"<a href="#sec" class="hint" target="_top">Go</a>"##
     );
 }
+
+#[test]
+fn xref_escapes_author_supplied_window_and_role() {
+    // Author-supplied `window` and `role` values are escaped before they are
+    // interpolated into HTML attributes, so a stray quote cannot break out of
+    // the attribute and inject additional markup.
+    let doc = Parser::default().parse(
+        "xref:sec[Go,role=\"a\\\"b\",window=\"_top\\\" onclick=\\\"evil()\"]\n\n[#sec]\n== Section\n",
+    );
+
+    let rendered = first_paragraph(&doc);
+    assert!(
+        !rendered.contains("onclick=\"evil"),
+        "attribute injection was not escaped: {rendered}"
+    );
+    assert!(
+        rendered.contains("&quot;"),
+        "expected escaped quotes in: {rendered}"
+    );
+}

@@ -899,7 +899,16 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         let class = if params.roles.is_empty() {
             String::new()
         } else {
-            format!(r#" class="{roles}""#, roles = params.roles.join(" "))
+            // Roles are author-supplied, so each is escaped before it is joined
+            // into the `class` attribute (a stray `"` would otherwise break out
+            // of the attribute).
+            let roles = params
+                .roles
+                .iter()
+                .map(|role| encode_html_attribute(role))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!(r#" class="{roles}""#)
         };
 
         let constraint_attrs = xref_constraint_attrs(params.window);
@@ -1120,6 +1129,28 @@ fn encode_attribute_value(value: String) -> String {
     value.replace('"', "&quot;")
 }
 
+/// Escapes a value for safe interpolation into an HTML attribute.
+///
+/// Unlike [`encode_attribute_value`] (which only guards the quote delimiter to
+/// mirror Asciidoctor's image-alt handling), this escapes the full set of
+/// characters that could break out of, or corrupt, an attribute value. It is
+/// used for author-supplied `xref` `window`/`role` values, which — unlike the
+/// hard-coded `window` strings the link macro passes — can contain arbitrary
+/// text.
+fn encode_html_attribute(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 fn normalize_web_path(
     target: &str,
     parser: &Parser,
@@ -1271,7 +1302,14 @@ fn xref_constraint_attrs(window: Option<&str>) -> String {
         ""
     };
 
-    format!(r#" target="{window}"{rel_noopener}"#)
+    // The `window` value is author-supplied, so it is escaped before being
+    // interpolated into the `target` attribute. The `_blank` comparison above
+    // runs on the raw value, which is correct for the well-formed inputs that
+    // trigger `rel="noopener"`.
+    format!(
+        r#" target="{window}"{rel_noopener}"#,
+        window = encode_html_attribute(window)
+    )
 }
 
 fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) -> String {
