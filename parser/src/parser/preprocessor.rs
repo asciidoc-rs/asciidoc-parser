@@ -487,11 +487,12 @@ impl<'p> PreprocessorState<'p> {
         }
 
         if content.is_empty() {
-            // Block form: include the enclosed lines when the condition holds.
-            let include = already_skipping || self.eval_ifdef(keyword, target);
+            // Block form: skip the enclosed lines unless the condition holds
+            // (and never include them while already skipping).
+            let skipping = already_skipping || !self.eval_ifdef(keyword, target);
             self.conditional_stack.push(Conditional {
                 target: Some(target.to_owned()),
-                skipping: already_skipping || !include,
+                skipping,
             });
         } else if !already_skipping && self.eval_ifdef(keyword, target) {
             // Single-line form: the bracketed content is included in place (with
@@ -519,7 +520,10 @@ impl<'p> PreprocessorState<'p> {
         source_line_number: usize,
         has_reported_file: &mut bool,
     ) {
-        if self.can_have_attribute
+        let can_have_attribute = self.can_have_attribute;
+        let mut applied_attribute = false;
+
+        if can_have_attribute
             && content.starts_with(':')
             && (content.ends_with(':') || content.contains(": "))
             && let Some(attr) = Attribute::parse(Span::new(content), self.parser)
@@ -527,9 +531,19 @@ impl<'p> PreprocessorState<'p> {
             let mut warnings: Vec<Warning> = vec![];
             self.parser
                 .set_attribute_from_body(&attr.item, &mut warnings);
+            applied_attribute = true;
         }
 
         self.emit_line(content, file_name, source_line_number, has_reported_file);
+
+        // The main attribute-entry handler leaves `can_have_attribute` unchanged
+        // so that consecutive attribute entries are all applied by the
+        // preprocessor (and thus observed by later include targets); `emit_line`
+        // would instead clear it for this non-empty line. Restore the invariant
+        // when the single-line content was itself an attribute entry.
+        if applied_attribute {
+            self.can_have_attribute = can_have_attribute;
+        }
     }
 
     /// Evaluate an `ifdef`/`ifndef` condition, returning `true` if the enclosed
@@ -1703,6 +1717,28 @@ mod tests {
             conditional_output(":foo:\n\nifdef::foo[:bar: yes]\nifdef::bar[bar is set]"),
             ":foo:\n\n:bar: yes\nbar is set\n"
         );
+    }
+
+    #[test]
+    fn single_line_attribute_entry_preserves_attribute_context() {
+        // Emitting an attribute-entry line via a single-line conditional must not
+        // disable preprocessor attribute handling for the immediately following
+        // line (as the main attribute-entry handler leaves it enabled). Here the
+        // entry after the directive must still be applied so the include target
+        // that references it resolves.
+        let source = ":flag:\n\nifdef::flag[:dir: sub]\n:file: {dir}/f\ninclude::{file}.adoc[]";
+
+        let handler = InlineFileHandler::from_pairs([("sub/f.adoc", "Included.")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess(source, &parser);
+
+        assert!(output.contains("Included."), "output was: {output:?}");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
     }
 
     #[test]
