@@ -202,7 +202,7 @@ jobs:
       - name: Install Taplo CLI
         uses: taiki-e/install-action@v2
         with:
-          tool: taplo-cli
+          tool: taplo-cli@0.9.3
 
       - name: Check TOML format
         run: taplo fmt --check
