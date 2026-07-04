@@ -291,21 +291,7 @@ impl<'p> PreprocessorState<'p> {
                 }
             } else {
                 // If none of the above apply, add the line to output.
-                if !has_reported_file {
-                    has_reported_file = true;
-                    self.source_map.append(
-                        self.output_line_number,
-                        SourceLine(to_owned(file_name), source_line_number),
-                    );
-                }
-
-                if line.is_empty() {
-                    self.in_document_header = false;
-                    self.can_have_attribute = true;
-                } else if !self.in_document_header {
-                    self.can_have_attribute = false;
-                }
-
+                //
                 // An escaped include directive (e.g. `\include::foo[]`) is not
                 // processed. The leading backslash is removed and the remainder is
                 // emitted literally, matching Asciidoctor. The backslash is only
@@ -319,9 +305,12 @@ impl<'p> PreprocessorState<'p> {
                     line.data()
                 };
 
-                self.output_line_number += 1;
-                self.output.push_str(line_text);
-                self.output.push('\n');
+                self.emit_line(
+                    line_text,
+                    file_name,
+                    source_line_number,
+                    &mut has_reported_file,
+                );
             }
         }
 
@@ -684,6 +673,7 @@ fn ruby_to_f(s: &str) -> f64 {
 /// ordering comparison (`<`, `<=`, `>`, `>=`) between values that cannot be
 /// ordered (e.g. a number and a string) fails and yields `false`.
 fn compare_values(lhs: &Value, op: &str, rhs: &Value) -> bool {
+    // `op` is always one of the six operators matched by `IFEVAL_EXPRESSION`.
     match op {
         "==" => values_equal(lhs, rhs),
         "!=" => !values_equal(lhs, rhs),
@@ -692,8 +682,8 @@ fn compare_values(lhs: &Value, op: &str, rhs: &Value) -> bool {
                 "<" => ordering.is_lt(),
                 "<=" => ordering.is_le(),
                 ">" => ordering.is_gt(),
-                ">=" => ordering.is_ge(),
-                _ => false,
+                // The remaining ordering operator is `>=`.
+                _ => ordering.is_ge(),
             },
             None => false,
         },
@@ -1850,6 +1840,93 @@ mod tests {
         assert_eq!(
             source_map.original_file_and_line(4),
             Some(SourceLine(None, 8))
+        );
+    }
+
+    #[test]
+    fn ifeval_with_nonempty_target_is_malformed() {
+        // `ifeval` requires an empty target; a non-empty one is malformed and
+        // opens no conditional, so the following lines are emitted unchanged.
+        assert_eq!(
+            conditional_output("ifeval::foo[1 == 1]\nkept\nendif::[]"),
+            "kept\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_with_empty_target_is_malformed() {
+        // `ifdef`/`ifndef` require a target; an empty one is malformed and opens
+        // no conditional.
+        assert_eq!(conditional_output("ifdef::[]\nkept\nendif::[]"), "kept\n");
+    }
+
+    #[test]
+    fn ifeval_malformed_expression_is_false() {
+        // An expression with no operator cannot be parsed, so the condition is
+        // false and the enclosed content is skipped.
+        assert_eq!(
+            conditional_output("ifeval::[nonsense]\ndropped\nendif::[]\n\ntail"),
+            "\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_coerces_trailing_text_to_integer() {
+        // An unquoted value with no period coerces to its leading integer
+        // (Ruby `String#to_i`), so `3x` becomes `3`.
+        assert_eq!(
+            conditional_output("ifeval::[3x == 3]\nkept\nendif::[]"),
+            "kept\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_coerces_trailing_text_to_float() {
+        // An unquoted value containing a period coerces to its leading float
+        // (Ruby `String#to_f`), so `1.5x` becomes `1.5`.
+        assert_eq!(
+            conditional_output("ifeval::[1.5x < 2]\nkept\nendif::[]"),
+            "kept\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_float_and_mixed_equality() {
+        // Float/float and int/float equality.
+        assert_eq!(
+            conditional_output("ifeval::[1.5 == 1.5]\nkept\nendif::[]"),
+            "kept\n"
+        );
+        assert_eq!(
+            conditional_output("ifeval::[2 == 2.0]\nkept\nendif::[]"),
+            "kept\n"
+        );
+        // Equality across incompatible value types is false.
+        assert_eq!(
+            conditional_output("ifeval::[1 == \"a\"]\ndropped\nendif::[]\n\ntail"),
+            "\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifeval_float_and_string_ordering() {
+        // Float/float, int/float, and string/string ordering.
+        assert_eq!(
+            conditional_output("ifeval::[1.5 < 2.5]\nkept\nendif::[]"),
+            "kept\n"
+        );
+        assert_eq!(
+            conditional_output("ifeval::[1 < 2.5]\nkept\nendif::[]"),
+            "kept\n"
+        );
+        assert_eq!(
+            conditional_output("ifeval::[\"a\" < \"b\"]\nkept\nendif::[]"),
+            "kept\n"
+        );
+        // `>=` between two comparable values.
+        assert_eq!(
+            conditional_output("ifeval::[3 >= 3]\nkept\nendif::[]"),
+            "kept\n"
         );
     }
 }
