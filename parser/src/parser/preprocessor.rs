@@ -270,6 +270,15 @@ impl<'p> PreprocessorState<'p> {
                     let selected = select_included_lines(&include_text, &attrlist);
                     let selected = reindent_included_lines(selected, &attrlist, self.parser);
 
+                    // The parser only handles UTF-8 content, so an `encoding`
+                    // attribute requesting any other encoding cannot be honored;
+                    // record a warning (emitted below, once the offset of the
+                    // included content is known). See `include.adoc`.
+                    let non_utf8_encoding = attrlist
+                        .named_attribute("encoding")
+                        .map(|a| a.value())
+                        .filter(|v| !is_utf8_encoding(v));
+
                     // `leveloffset` wraps the included content in `:leveloffset:`
                     // attribute entries: the offset is applied to the included
                     // content and reset afterward (see
@@ -292,6 +301,8 @@ impl<'p> PreprocessorState<'p> {
                         self.emit_line("", file_name, source_line_number, &mut has_reported_file);
                     }
 
+                    let content_start = self.output.len();
+
                     if is_asciidoc_file(&target) {
                         // AsciiDoc files are run through the preprocessor, so the
                         // include (and other) directives they contain are
@@ -302,6 +313,20 @@ impl<'p> PreprocessorState<'p> {
                         // does not interpret any AsciiDoc directives within them
                         // (matching Asciidoctor).
                         self.process_nonadoc_include(&selected, Some(&target));
+                    }
+
+                    if let Some(encoding) = non_utf8_encoding {
+                        // Point the warning at the first line of the included
+                        // content (the directive line itself is not present in the
+                        // output once it has been expanded).
+                        let len = self.output[content_start..]
+                            .find('\n')
+                            .unwrap_or(self.output.len() - content_start);
+                        self.warnings.push(DeferredWarning {
+                            offset: content_start,
+                            len,
+                            warning: WarningType::NonUtf8IncludeEncoding(encoding.to_string()),
+                        });
                     }
 
                     if leveloffset.is_some() {
@@ -858,6 +883,19 @@ fn is_asciidoc_file(target: &str) -> bool {
 /// by `://`, such as `https://`, `http://`, or `ftp://`).
 fn is_uri(target: &str) -> bool {
     URI_PREFIX.is_match(target)
+}
+
+/// Returns `true` if `value` names the UTF-8 encoding. The comparison is
+/// case-insensitive and ignores a hyphen, so `utf-8`, `UTF-8`, `utf8`, and
+/// `UTF8` are all recognized.
+fn is_utf8_encoding(value: &str) -> bool {
+    let normalized: String = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|&c| c != '-')
+        .collect();
+    normalized == "utf8"
 }
 
 /// Split a delimited attribute value (`lines`/`tags`) into its entries. Per the
@@ -2566,5 +2604,49 @@ mod tests {
 
         assert_eq!(output, "Remote content.\n");
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn encoding_utf8_produces_no_warning() {
+        // A UTF-8 `encoding` (in any accepted spelling) is honored silently.
+        for encoding in ["utf-8", "UTF-8", "utf8", "UTF8"] {
+            let output = include_output(&format!("encoding={encoding}"), "Content.");
+            assert_eq!(output, "Content.\n");
+        }
+
+        let source = "include::sample.adoc[encoding=utf-8]";
+        let handler = InlineFileHandler::from_pairs([("sample.adoc", "Content.")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+        let (_output, _source_map, warnings) = preprocess(source, &parser);
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn non_utf8_encoding_warns_but_still_includes() {
+        // A non-UTF-8 `encoding` cannot be honored, so a warning is recorded; the
+        // content (as provided by the handler) is still merged.
+        let source = "include::sample.adoc[encoding=iso-8859-1]";
+        let handler = InlineFileHandler::from_pairs([("sample.adoc", "Résumé.")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(output, "Résumé.\n");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::NonUtf8IncludeEncoding("iso-8859-1".to_owned())
+        );
+        // The warning points at the first line of the included content.
+        assert_eq!(
+            &output[warnings[0].offset..warnings[0].offset + warnings[0].len],
+            "Résumé."
+        );
     }
 }

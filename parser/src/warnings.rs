@@ -116,6 +116,12 @@ pub enum WarningType {
 
     #[error("include file not found: {0}")]
     IncludeFileNotFound(String),
+
+    /// An include directive specified an `encoding` attribute whose value is
+    /// not UTF-8. The parser only handles UTF-8 content, so the requested
+    /// encoding cannot be honored.
+    #[error("include encoding is not supported (only UTF-8 is supported): {0}")]
+    NonUtf8IncludeEncoding(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -240,6 +246,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::IncludeFileNotFound(target) => f
                 .debug_tuple("WarningType::IncludeFileNotFound")
                 .field(target)
+                .finish(),
+
+            WarningType::NonUtf8IncludeEncoding(encoding) => f
+                .debug_tuple("WarningType::NonUtf8IncludeEncoding")
+                .field(encoding)
                 .finish(),
         }
     }
@@ -568,6 +579,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::IncludeFileNotFound(\"content.adoc\")"
+                );
+            }
+
+            #[test]
+            fn non_utf8_include_encoding() {
+                let warning = WarningType::NonUtf8IncludeEncoding("iso-8859-1".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::NonUtf8IncludeEncoding(\"iso-8859-1\")"
                 );
             }
         }
