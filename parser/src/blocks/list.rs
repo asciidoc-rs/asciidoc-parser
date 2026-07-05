@@ -324,42 +324,46 @@ impl<'src> ListBlock<'src> {
         }
     }
 
-    /// Returns the resolved starting ordinal for an ordered list, if one is
-    /// explicitly set.
+    /// Returns the starting ordinal a converter should emit as the `start`
+    /// attribute of an HTML `<ol>`, if any.
     ///
     /// An ordered list can begin at a value other than 1 in two ways (matching
     /// Asciidoctor):
     ///
     /// * an explicit `[start=N]` attribute, which takes precedence; or
-    /// * an explicit first-item marker whose ordinal is not the default — for
-    ///   example `7.` (arabic), `c.` (loweralpha, ⇒ 3), or `iv)` (lowerroman, ⇒
-    ///   4).
+    /// * the ordinal of an explicit first-item marker — for example `7.`
+    ///   (arabic), `c.` (loweralpha, ⇒ 3), or `iv)` (lowerroman, ⇒ 4).
     ///
-    /// The value is the number a converter would emit as the `start` attribute
-    /// of an HTML `<ol>`. It is `None` when the list is not ordered, or when
-    /// the list uses implicit markers (e.g. `.`) with no `[start]`
-    /// attribute — i.e. when the start defaults to 1.
+    /// The result is `None` whenever the start resolves to the default of 1 —
+    /// whether from implicit markers (e.g. `.`), an explicit ordinal-1 marker
+    /// (`1.`, `a.`, `i)`), or `[start=1]` — because a converter emits a bare
+    /// `<ol>` in that case. It is likewise `None` for a list that is not
+    /// ordered. So `start()` is `Some(n)` exactly when a converter must emit a
+    /// non-default `start="n"`, mirroring the `ordinal != 1` guard in this
+    /// crate's own reference renderer.
     pub fn start(&self) -> Option<i64> {
         if self.type_ != ListType::Ordered {
             return None;
         }
 
-        // An explicit `[start=N]` attribute takes precedence.
-        if let Some(start) = self
+        // An explicit `[start=N]` attribute takes precedence; otherwise derive
+        // the start from an explicit first-item marker.
+        let resolved = self
             .attrlist
             .as_ref()
             .and_then(|attrlist| attrlist.named_attribute("start"))
             .and_then(|attr| attr.value().trim().parse::<i64>().ok())
-        {
-            return Some(start);
-        }
+            .or_else(|| {
+                self.items
+                    .first()
+                    .and_then(|item| item.as_list_item())
+                    .and_then(|li| li.list_item_marker().ordinal_value())
+                    .map(i64::from)
+            });
 
-        // Otherwise derive the start from an explicit first-item marker.
-        self.items
-            .first()
-            .and_then(|item| item.as_list_item())
-            .and_then(|li| li.list_item_marker().ordinal_value())
-            .map(i64::from)
+        // A start of 1 is the default, which a converter renders as a bare
+        // `<ol>`, so it is reported as `None` rather than `Some(1)`.
+        resolved.filter(|&n| n != 1)
     }
 }
 
@@ -1387,10 +1391,26 @@ mod tests {
         }
 
         #[test]
+        fn explicit_ordinal_one_marker_defaults_to_none() {
+            // An explicit ordinal-1 marker resolves to the default start of 1,
+            // which a converter renders as a bare `<ol>`, so `start()` is
+            // `None` rather than `Some(1)`.
+            assert_eq!(list_parse("1. one\n2. two").unwrap().item.start(), None);
+            assert_eq!(list_parse("a. one\nb. two").unwrap().item.start(), None);
+        }
+
+        #[test]
         fn start_attribute_takes_precedence() {
             let mi = list_parse("[start=5]\n. one\n. two").unwrap();
             assert_eq!(mi.item.type_(), ListType::Ordered);
             assert_eq!(mi.item.start(), Some(5));
+        }
+
+        #[test]
+        fn start_attribute_of_one_is_none() {
+            // `[start=1]` is the default too, so it is also reported as `None`.
+            let mi = list_parse("[start=1]\n. one\n. two").unwrap();
+            assert_eq!(mi.item.start(), None);
         }
 
         #[test]
