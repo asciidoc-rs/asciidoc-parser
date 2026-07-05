@@ -98,3 +98,117 @@ impl ResolvedAttributes {
             .unwrap_or(false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use crate::{
+        document::InterpretedValue,
+        parser::{AllowableValue, AttributeValue, ModificationContext, ResolvedAttributes},
+    };
+
+    fn attr(value: InterpretedValue) -> AttributeValue {
+        AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::Anywhere,
+            value,
+        }
+    }
+
+    /// Builds a snapshot exercising each attribute shape — an explicit value, a
+    /// `Set` with a registered default, a `Set` with no default, and an
+    /// explicitly unset attribute — plus a counter that shadows a like-named
+    /// attribute.
+    fn sample() -> ResolvedAttributes {
+        let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+        attribute_values.insert(
+            "value".to_string(),
+            attr(InterpretedValue::Value("v".to_string())),
+        );
+        attribute_values.insert("set-with-default".to_string(), attr(InterpretedValue::Set));
+        attribute_values.insert("set-no-default".to_string(), attr(InterpretedValue::Set));
+        attribute_values.insert("unset".to_string(), attr(InterpretedValue::Unset));
+        attribute_values.insert(
+            "shadowed".to_string(),
+            attr(InterpretedValue::Value("attr".to_string())),
+        );
+
+        let mut default_attribute_values: HashMap<String, String> = HashMap::new();
+        default_attribute_values.insert("set-with-default".to_string(), "d".to_string());
+
+        let mut counter_values: HashMap<String, String> = HashMap::new();
+        counter_values.insert("count".to_string(), "3".to_string());
+        counter_values.insert("shadowed".to_string(), "counter".to_string());
+
+        ResolvedAttributes::new(
+            Arc::new(attribute_values),
+            Arc::new(default_attribute_values),
+            counter_values,
+        )
+    }
+
+    #[test]
+    fn attribute_value_resolves_each_shape() {
+        let attrs = sample();
+
+        // Explicit value.
+        assert_eq!(
+            attrs.attribute_value("value"),
+            InterpretedValue::Value("v".to_string())
+        );
+
+        // `Set` with a default resolves to that default.
+        assert_eq!(
+            attrs.attribute_value("set-with-default"),
+            InterpretedValue::Value("d".to_string())
+        );
+
+        // `Set` with no default stays `Set`.
+        assert_eq!(
+            attrs.attribute_value("set-no-default"),
+            InterpretedValue::Set
+        );
+
+        // Explicitly unset resolves to `Unset`.
+        assert_eq!(attrs.attribute_value("unset"), InterpretedValue::Unset);
+
+        // Absent resolves to `Unset`.
+        assert_eq!(attrs.attribute_value("absent"), InterpretedValue::Unset);
+
+        // A counter reads back its current value.
+        assert_eq!(
+            attrs.attribute_value("count"),
+            InterpretedValue::Value("3".to_string())
+        );
+
+        // A counter supersedes a like-named attribute.
+        assert_eq!(
+            attrs.attribute_value("shadowed"),
+            InterpretedValue::Value("counter".to_string())
+        );
+    }
+
+    #[test]
+    fn has_attribute_reports_presence() {
+        let attrs = sample();
+
+        assert!(attrs.has_attribute("value"));
+        assert!(attrs.has_attribute("unset"));
+        assert!(attrs.has_attribute("count"));
+        assert!(!attrs.has_attribute("absent"));
+    }
+
+    #[test]
+    fn is_attribute_set_reports_set_state() {
+        let attrs = sample();
+
+        assert!(attrs.is_attribute_set("value"));
+        assert!(attrs.is_attribute_set("set-no-default"));
+        assert!(!attrs.is_attribute_set("unset"));
+        assert!(!attrs.is_attribute_set("absent"));
+
+        // A counter always holds a concrete (set) value.
+        assert!(attrs.is_attribute_set("count"));
+    }
+}
