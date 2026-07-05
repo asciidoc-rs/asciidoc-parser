@@ -1,6 +1,6 @@
 //! Describes the top-level document structure.
 
-use std::{collections::HashMap, marker::PhantomData, slice::Iter};
+use std::{marker::PhantomData, slice::Iter};
 
 use self_cell::self_cell;
 
@@ -12,7 +12,7 @@ use crate::{
     internal::debug::DebugSliceReference,
     parser::{
         CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, ReferenceResolver,
-        ReferenceWarning, SourceMap,
+        ReferenceWarning, ResolvedAttributes, SourceMap,
     },
     strings::CowStr,
     warnings::Warning,
@@ -46,7 +46,7 @@ struct InternalDependent<'src> {
     warnings: Vec<Warning<'src>>,
     source_map: SourceMap,
     catalog: Catalog,
-    attributes: HashMap<String, InterpretedValue>,
+    attributes: ResolvedAttributes,
     toc: TocConfig,
     docinfo: Docinfo,
 }
@@ -197,8 +197,8 @@ impl<'src> Document<'src> {
         self.header().title()
     }
 
-    /// Returns the resolved interpreted value of the named [document attribute],
-    /// as of the end of parsing.
+    /// Returns the resolved interpreted value of the named [document
+    /// attribute], as of the end of parsing.
     ///
     /// This mirrors [`Parser::attribute_value`] and is the accessor to use on
     /// the *embed* path — rendering a [`Document`] you already hold, without a
@@ -215,9 +215,7 @@ impl<'src> Document<'src> {
         self.internal
             .borrow_dependent()
             .attributes
-            .get(name.as_ref())
-            .cloned()
-            .unwrap_or(InterpretedValue::Unset)
+            .attribute_value(name)
     }
 
     /// Returns `true` if the document has a [document attribute] by this name
@@ -231,7 +229,7 @@ impl<'src> Document<'src> {
         self.internal
             .borrow_dependent()
             .attributes
-            .contains_key(name.as_ref())
+            .has_attribute(name)
     }
 
     /// Returns `true` if the document has a [document attribute] by this name
@@ -247,9 +245,7 @@ impl<'src> Document<'src> {
         self.internal
             .borrow_dependent()
             .attributes
-            .get(name.as_ref())
-            .map(|value| *value != InterpretedValue::Unset)
-            .unwrap_or(false)
+            .is_attribute_set(name)
     }
 
     /// Return where (and whether) this document's table of contents is

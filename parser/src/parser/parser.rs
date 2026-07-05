@@ -12,7 +12,7 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
-        SafeMode, SvgFileHandler,
+        ResolvedAttributes, SafeMode, SvgFileHandler,
         built_in_attrs::{built_in_attrs, built_in_default_values},
         preprocessor::preprocess,
     },
@@ -398,45 +398,25 @@ impl Parser {
             .unwrap_or(false)
     }
 
-    /// Captures the parser's fully-resolved document-attribute state as a flat
-    /// map, so it can outlive the parser (for example, retained on a
-    /// [`Document`] to answer [`attribute_value`]/[`has_attribute`]/
-    /// [`is_attribute_set`] without a parser in hand).
+    /// Captures the parser's fully-resolved document-attribute state so it can
+    /// outlive the parser — for example, retained on a [`Document`] to answer
+    /// [`attribute_value`]/[`has_attribute`]/[`is_attribute_set`] without a
+    /// parser in hand (the embed path a renderer uses for `convert_document`).
     ///
-    /// Each entry mirrors exactly what [`attribute_value`] would return for that
-    /// name at this point in parsing: an [`InterpretedValue::Set`] with a
-    /// built-in default resolves to that default, counter values supersede any
-    /// like-named attribute, and only *present* attributes appear (a missing key
-    /// therefore means [`has_attribute`] is `false`). A present key whose value
-    /// is [`InterpretedValue::Unset`] is present-but-unset.
+    /// This shares the parser's attribute tables by [`Arc`] rather than copying
+    /// them, so it is cheap to take on every parse (the large built-in table is
+    /// never deep-cloned). See [`ResolvedAttributes`].
     ///
     /// [`Document`]: crate::Document
     /// [`attribute_value`]: Self::attribute_value
     /// [`has_attribute`]: Self::has_attribute
     /// [`is_attribute_set`]: Self::is_attribute_set
-    pub(crate) fn snapshot_attributes(&self) -> HashMap<String, InterpretedValue> {
-        let counters = self.counter_values.borrow();
-        let mut snapshot: HashMap<String, InterpretedValue> =
-            HashMap::with_capacity(self.attribute_values.len() + counters.len());
-
-        for (name, av) in self.attribute_values.iter() {
-            let resolved = if let InterpretedValue::Set = av.value
-                && let Some(default) = self.default_attribute_values.get(name)
-            {
-                InterpretedValue::Value(default.clone())
-            } else {
-                av.value.clone()
-            };
-            snapshot.insert(name.clone(), resolved);
-        }
-
-        // A counter's current value supersedes any like-named attribute (see
-        // [`attribute_value`](Self::attribute_value)).
-        for (name, value) in counters.iter() {
-            snapshot.insert(name.clone(), InterpretedValue::Value(value.clone()));
-        }
-
-        snapshot
+    pub(crate) fn snapshot_attributes(&self) -> ResolvedAttributes {
+        ResolvedAttributes::new(
+            Arc::clone(&self.attribute_values),
+            Arc::clone(&self.default_attribute_values),
+            self.counter_values.borrow().clone(),
+        )
     }
 
     /// Resolves whether a document title should be displayed, from the
