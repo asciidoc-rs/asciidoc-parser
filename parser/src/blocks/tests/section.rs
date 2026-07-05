@@ -91,7 +91,7 @@ fn simplest_section_block() {
     assert_eq!(mi.item.raw_context().deref(), "section");
     assert_eq!(mi.item.resolved_context().deref(), "section");
     assert!(mi.item.declared_style().is_none());
-    assert!(mi.item.id().is_none());
+    assert_eq!(mi.item.id().unwrap(), "_section_title");
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
     assert!(mi.item.title_source().is_none());
@@ -159,7 +159,7 @@ fn has_child_block() {
     assert_eq!(mi.item.raw_context().deref(), "section");
     assert_eq!(mi.item.resolved_context().deref(), "section");
     assert!(mi.item.declared_style().is_none());
-    assert!(mi.item.id().is_none());
+    assert_eq!(mi.item.id().unwrap(), "_section_title");
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
     assert!(mi.item.title_source().is_none());
@@ -358,7 +358,7 @@ fn title() {
         })
     );
 
-    assert!(mi.item.id().is_none());
+    assert_eq!(mi.item.id().unwrap(), "_section_title");
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
 
