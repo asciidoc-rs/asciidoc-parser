@@ -36,6 +36,9 @@ pub use svg_file_handler::SvgFileHandler;
 
 pub(crate) mod preprocessor;
 
+mod resolved_attributes;
+pub(crate) use resolved_attributes::ResolvedAttributes;
+
 mod reference_resolver;
 pub use reference_resolver::{
     CatalogResolver, ReferenceResolver, ReferenceWarning, ReferenceWarningKind, ResolutionContext,

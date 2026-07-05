@@ -555,11 +555,19 @@ impl ToVirtualDom for Document<'_> {
             node = node.with_id(id);
         }
 
-        // The document title renders as an `<h1>` when it is shown (the
-        // effective `showtitle`/`notitle` state).
-        if self.show_doctitle()
-            && let Some(title) = self.doctitle()
-        {
+        // The document title renders as an `<h1>` when it is shown. This
+        // virtual DOM models the *embedded* output, whose default is
+        // title-hidden: the title shows only when `showtitle` is set, or (absent
+        // `showtitle`) when `notitle` is present and cleared.
+        let show_doctitle = if self.has_attribute("showtitle") {
+            self.is_attribute_set("showtitle")
+        } else if self.has_attribute("notitle") {
+            !self.is_attribute_set("notitle")
+        } else {
+            false
+        };
+
+        if show_doctitle && let Some(title) = self.doctitle() {
             node.children.push(VirtualNode::new("h1").with_text(title));
         }
 

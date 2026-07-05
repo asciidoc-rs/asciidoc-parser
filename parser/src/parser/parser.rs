@@ -12,7 +12,7 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
-        SafeMode, SvgFileHandler,
+        ResolvedAttributes, SafeMode, SvgFileHandler,
         built_in_attrs::{built_in_attrs, built_in_default_values},
         preprocessor::preprocess,
     },
@@ -396,6 +396,27 @@ impl Parser {
             .get(name.as_ref())
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or(false)
+    }
+
+    /// Captures the parser's fully-resolved document-attribute state so it can
+    /// outlive the parser — for example, retained on a [`Document`] to answer
+    /// [`attribute_value`]/[`has_attribute`]/[`is_attribute_set`] without a
+    /// parser in hand (the embed path a renderer uses for `convert_document`).
+    ///
+    /// This shares the parser's attribute tables by [`Arc`] rather than copying
+    /// them, so it is cheap to take on every parse (the large built-in table is
+    /// never deep-cloned). See [`ResolvedAttributes`].
+    ///
+    /// [`Document`]: crate::Document
+    /// [`attribute_value`]: Self::attribute_value
+    /// [`has_attribute`]: Self::has_attribute
+    /// [`is_attribute_set`]: Self::is_attribute_set
+    pub(crate) fn snapshot_attributes(&self) -> ResolvedAttributes {
+        ResolvedAttributes::new(
+            Arc::clone(&self.attribute_values),
+            Arc::clone(&self.default_attribute_values),
+            self.counter_values.borrow().clone(),
+        )
     }
 
     /// Resolves whether a document title should be displayed, from the
