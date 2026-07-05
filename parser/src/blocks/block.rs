@@ -894,14 +894,22 @@ impl<'src> IsBlock<'src> for Block<'src> {
     }
 
     fn id(&'src self) -> Option<&'src str> {
-        // A `MediaBlock` additionally recognizes a named `id=` _inside_ its
-        // macro attribute list (e.g. `image::sunset.jpg[id=sunset-img]`), which
-        // its own `id()` override handles. Every other variant keeps the trait
-        // default (explicit anchor or block attribute list only); notably, this
-        // does not surface a section's auto-generated ID at the `Block` level,
-        // matching the prior behavior (sections register their IDs separately).
+        // Two variants override the trait default:
+        //
+        // * A `MediaBlock` additionally recognizes a named `id=` _inside_ its macro
+        //   attribute list (e.g. `image::sunset.jpg[id=sunset-img]`).
+        //
+        // * A `SectionBlock` falls back to its auto-generated (`_slug`) ID when no
+        //   explicit ID was supplied, so `block.id()` yields the same ID the section is
+        //   registered and cross-referenced under. Delegating here (rather than
+        //   applying the trait default) avoids the footgun of `block.id()` silently
+        //   returning `None` for a section that plainly has an ID.
+        //
+        // Every other variant keeps the trait default (explicit anchor or block
+        // attribute list only).
         match self {
             Self::Media(b) => b.id(),
+            Self::Section(b) => b.id(),
             _ => self
                 .anchor()
                 .map(|a| a.data())

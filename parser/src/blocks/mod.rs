@@ -35,11 +35,11 @@ pub use r#break::{Break, BreakType};
 pub(crate) mod caption;
 
 mod compound_delimited;
-pub use compound_delimited::CompoundDelimitedBlock;
+pub use compound_delimited::{CompoundDelimitedBlock, CompoundDelimitedContext};
 
 mod context;
-pub use context::AdmonitionVariant;
 pub(crate) use context::is_built_in_context;
+pub use context::{AdmonitionVariant, BuiltInContext};
 
 mod is_block;
 pub use is_block::{ContentModel, IsBlock};

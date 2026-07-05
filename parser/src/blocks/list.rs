@@ -323,6 +323,44 @@ impl<'src> ListBlock<'src> {
             _ => None,
         }
     }
+
+    /// Returns the resolved starting ordinal for an ordered list, if one is
+    /// explicitly set.
+    ///
+    /// An ordered list can begin at a value other than 1 in two ways (matching
+    /// Asciidoctor):
+    ///
+    /// * an explicit `[start=N]` attribute, which takes precedence; or
+    /// * an explicit first-item marker whose ordinal is not the default — for
+    ///   example `7.` (arabic), `c.` (loweralpha, ⇒ 3), or `iv)` (lowerroman, ⇒
+    ///   4).
+    ///
+    /// The value is the number a converter would emit as the `start` attribute
+    /// of an HTML `<ol>`. It is `None` when the list is not ordered, or when
+    /// the list uses implicit markers (e.g. `.`) with no `[start]`
+    /// attribute — i.e. when the start defaults to 1.
+    pub fn start(&self) -> Option<i64> {
+        if self.type_ != ListType::Ordered {
+            return None;
+        }
+
+        // An explicit `[start=N]` attribute takes precedence.
+        if let Some(start) = self
+            .attrlist
+            .as_ref()
+            .and_then(|attrlist| attrlist.named_attribute("start"))
+            .and_then(|attr| attr.value().trim().parse::<i64>().ok())
+        {
+            return Some(start);
+        }
+
+        // Otherwise derive the start from an explicit first-item marker.
+        self.items
+            .first()
+            .and_then(|item| item.as_list_item())
+            .and_then(|li| li.list_item_marker().ordinal_value())
+            .map(i64::from)
+    }
 }
 
 impl<'src> IsBlock<'src> for ListBlock<'src> {
@@ -1312,5 +1350,59 @@ mod tests {
 
         let debug_str = format!("{:?}", mi.item);
         assert!(debug_str.starts_with("Block::List("));
+    }
+
+    mod start {
+        use super::list_parse;
+        use crate::blocks::ListType;
+
+        #[test]
+        fn unordered_list_has_no_start() {
+            let mi = list_parse("* one\n* two").unwrap();
+            assert_eq!(mi.item.type_(), ListType::Unordered);
+            assert_eq!(mi.item.start(), None);
+        }
+
+        #[test]
+        fn implicit_ordered_marker_has_no_start() {
+            // Implicit `.` markers with no `[start]` attribute default to 1,
+            // reported as `None`.
+            let mi = list_parse(". one\n. two").unwrap();
+            assert_eq!(mi.item.type_(), ListType::Ordered);
+            assert_eq!(mi.item.start(), None);
+        }
+
+        #[test]
+        fn explicit_arabic_first_marker_sets_start() {
+            let mi = list_parse("7. one\n8. two").unwrap();
+            assert_eq!(mi.item.type_(), ListType::Ordered);
+            assert_eq!(mi.item.start(), Some(7));
+        }
+
+        #[test]
+        fn explicit_alpha_first_marker_sets_start() {
+            // `c.` is the third letter, so the list starts at 3.
+            let mi = list_parse("c. one\nd. two").unwrap();
+            assert_eq!(mi.item.start(), Some(3));
+        }
+
+        #[test]
+        fn start_attribute_takes_precedence() {
+            let mi = list_parse("[start=5]\n. one\n. two").unwrap();
+            assert_eq!(mi.item.type_(), ListType::Ordered);
+            assert_eq!(mi.item.start(), Some(5));
+        }
+
+        #[test]
+        fn start_attribute_overrides_first_marker() {
+            let mi = list_parse("[start=5]\n7. one\n8. two").unwrap();
+            assert_eq!(mi.item.start(), Some(5));
+        }
+
+        #[test]
+        fn non_numeric_start_attribute_falls_back_to_marker() {
+            let mi = list_parse("[start=abc]\n7. one\n8. two").unwrap();
+            assert_eq!(mi.item.start(), Some(7));
+        }
     }
 }

@@ -143,18 +143,24 @@ impl Catalog {
         self.reftext_to_id.get(reftext).cloned()
     }
 
-    /* Disabling for now until I know if we'll need these.
-
-    /// Returns an iterator over all registered reference IDs.
-    pub fn ids(&self) -> impl Iterator<Item = &String> {
-        self.refs.keys()
+    /// Returns an iterator over all registered reference IDs, in an
+    /// unspecified order.
+    ///
+    /// This lets a multi-document pipeline enumerate a document's anchors and
+    /// section IDs (for example, to build a global cross-reference index)
+    /// without re-walking the block tree.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.refs.keys().map(String::as_str)
     }
 
-    /// Returns an iterator over all reference entries.
-    pub fn entries(&self) -> impl Iterator<Item = (&String, &RefEntry)> {
-        self.refs.iter()
+    /// Returns an iterator over all registered reference entries, in an
+    /// unspecified order.
+    ///
+    /// Each item pairs an ID with its [`RefEntry`] (which also carries the
+    /// entry's reftext and [`RefType`]).
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &RefEntry)> {
+        self.refs.iter().map(|(id, entry)| (id.as_str(), entry))
     }
-    */
 
     /// Returns the number of registered references.
     pub fn len(&self) -> usize {
@@ -407,6 +413,37 @@ mod tests {
         assert_eq!(entry.ref_type, RefType::Bibliography);
 
         assert!(catalog.get_ref("nonexistent").is_none());
+    }
+
+    #[test]
+    fn enumerate_ids_and_entries() {
+        let mut catalog = Catalog::new();
+
+        catalog
+            .register_ref("intro", Some("Introduction"), RefType::Section)
+            .unwrap();
+        catalog
+            .register_ref("fig-1", None, RefType::Anchor)
+            .unwrap();
+
+        // `ids()` enumerates every registered ID (order is unspecified).
+        let mut ids: Vec<&str> = catalog.ids().collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["fig-1", "intro"]);
+
+        // `entries()` pairs each ID with its full entry.
+        let entries: Vec<(&str, &RefEntry)> = catalog.entries().collect();
+        assert_eq!(entries.len(), 2);
+
+        let (fig_id, fig_entry) = entries.iter().find(|(id, _)| *id == "fig-1").unwrap();
+        assert_eq!(*fig_id, "fig-1");
+        assert_eq!(fig_entry.id, "fig-1");
+        assert_eq!(fig_entry.reftext, None);
+        assert_eq!(fig_entry.ref_type, RefType::Anchor);
+
+        let (_, intro_entry) = entries.iter().find(|(id, _)| *id == "intro").unwrap();
+        assert_eq!(intro_entry.reftext, Some("Introduction".to_string()));
+        assert_eq!(intro_entry.ref_type, RefType::Section);
     }
 
     #[test]

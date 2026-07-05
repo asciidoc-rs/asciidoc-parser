@@ -73,6 +73,23 @@ impl<'src> CompoundDelimitedBlock<'src> {
         self.blocks
     }
 
+    /// Returns the typed context of this compound delimited block.
+    ///
+    /// A compound delimited block is always one of a small, fixed set of
+    /// contexts (example, open, or sidebar). This accessor lets a converter
+    /// dispatch on that set directly, rather than string-matching the value of
+    /// [`resolved_context`](crate::blocks::IsBlock::resolved_context).
+    pub fn context_kind(&self) -> CompoundDelimitedContext {
+        // `parse` only ever assigns one of these three contexts, so matching
+        // the two most specific and treating the remainder as `Sidebar` keeps
+        // the mapping total without an unreachable arm.
+        match self.context.as_ref() {
+            "example" => CompoundDelimitedContext::Example,
+            "open" => CompoundDelimitedContext::Open,
+            _ => CompoundDelimitedContext::Sidebar,
+        }
+    }
+
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,
@@ -238,11 +255,115 @@ impl std::fmt::Debug for CompoundDelimitedBlock<'_> {
     }
 }
 
+/// The context of a [`CompoundDelimitedBlock`]: the closed set of compound
+/// delimited block types the parser recognizes.
+///
+/// Unlike the stringly-typed
+/// [`resolved_context`](crate::blocks::IsBlock::resolved_context),
+/// this enumerates exactly the contexts a `CompoundDelimitedBlock` can have,
+/// making dispatch over them exhaustive and self-documenting. Use
+/// [`CompoundDelimitedBlock::context_kind`] to obtain it.
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub enum CompoundDelimitedContext {
+    /// An example block (`====`).
+    Example,
+
+    /// An open block (`--`).
+    Open,
+
+    /// A sidebar block (`****`).
+    Sidebar,
+}
+
+impl CompoundDelimitedContext {
+    /// Returns the canonical context string for this variant (e.g.,
+    /// `"example"`), matching [`resolved_context`].
+    ///
+    /// [`resolved_context`]: crate::blocks::IsBlock::resolved_context
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Example => "example",
+            Self::Open => "open",
+            Self::Sidebar => "sidebar",
+        }
+    }
+}
+
+impl std::fmt::Debug for CompoundDelimitedContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Example => write!(f, "CompoundDelimitedContext::Example"),
+            Self::Open => write!(f, "CompoundDelimitedContext::Open"),
+            Self::Sidebar => write!(f, "CompoundDelimitedContext::Sidebar"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{blocks::metadata::BlockMetadata, tests::prelude::*};
+
+    mod context_kind {
+        use std::ops::Deref;
+
+        use crate::blocks::{
+            CompoundDelimitedBlock, CompoundDelimitedContext, IsBlock, metadata::BlockMetadata,
+        };
+
+        fn kind_of(source: &str) -> CompoundDelimitedContext {
+            let mut parser = crate::Parser::default();
+            let maw =
+                CompoundDelimitedBlock::parse(&BlockMetadata::new(source), &mut parser).unwrap();
+            let block = maw.item.unwrap().item;
+
+            // The typed kind must agree with the stringly-typed context.
+            assert_eq!(
+                block.context_kind().as_str(),
+                block.resolved_context().deref()
+            );
+
+            block.context_kind()
+        }
+
+        #[test]
+        fn example() {
+            assert_eq!(
+                kind_of("====\nblah\n===="),
+                CompoundDelimitedContext::Example
+            );
+        }
+
+        #[test]
+        fn open() {
+            assert_eq!(kind_of("--\nblah\n--"), CompoundDelimitedContext::Open);
+        }
+
+        #[test]
+        fn sidebar() {
+            assert_eq!(
+                kind_of("****\nblah\n****"),
+                CompoundDelimitedContext::Sidebar
+            );
+        }
+
+        #[test]
+        fn impl_debug() {
+            assert_eq!(
+                format!("{:?}", CompoundDelimitedContext::Example),
+                "CompoundDelimitedContext::Example"
+            );
+            assert_eq!(
+                format!("{:?}", CompoundDelimitedContext::Open),
+                "CompoundDelimitedContext::Open"
+            );
+            assert_eq!(
+                format!("{:?}", CompoundDelimitedContext::Sidebar),
+                "CompoundDelimitedContext::Sidebar"
+            );
+        }
+    }
 
     mod is_valid_delimiter {
         use crate::blocks::CompoundDelimitedBlock;
