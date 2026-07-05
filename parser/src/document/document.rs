@@ -1,6 +1,6 @@
 //! Describes the top-level document structure.
 
-use std::{marker::PhantomData, slice::Iter};
+use std::{collections::HashMap, marker::PhantomData, slice::Iter};
 
 use self_cell::self_cell;
 
@@ -8,7 +8,7 @@ use crate::{
     Parser, Span,
     attributes::Attrlist,
     blocks::{Block, ContentModel, IsBlock, Preamble, parse_utils::parse_blocks_until},
-    document::{Catalog, Docinfo, DocinfoLocation, Header, TocConfig, TocMode},
+    document::{Catalog, Docinfo, DocinfoLocation, Header, InterpretedValue, TocConfig, TocMode},
     internal::debug::DebugSliceReference,
     parser::{
         CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, ReferenceResolver,
@@ -46,7 +46,7 @@ struct InternalDependent<'src> {
     warnings: Vec<Warning<'src>>,
     source_map: SourceMap,
     catalog: Catalog,
-    show_doctitle: bool,
+    attributes: HashMap<String, InterpretedValue>,
     toc: TocConfig,
     docinfo: Docinfo,
 }
@@ -152,10 +152,11 @@ impl<'src> Document<'src> {
                 blocks = section_blocks;
             }
 
-            // Whether the document title renders as an `<h1>`. An embedded
-            // document shows its title only when `showtitle` is set (the
-            // default is hidden), so resolve it from the final attribute state.
-            let show_doctitle = parser.resolve_show_title(false);
+            // Capture the parser's fully-resolved attribute state so it can be
+            // read back through the `Document` (via `attribute_value`,
+            // `has_attribute`, and `is_attribute_set`) without a `Parser` in
+            // hand — the embed path a renderer uses for `convert_document`.
+            let attributes = parser.snapshot_attributes();
 
             // The `toc` family of attributes is header-only, so the resolved
             // placement, depth, title, and class are fixed once the header (and
@@ -174,7 +175,7 @@ impl<'src> Document<'src> {
                 warnings,
                 source_map,
                 catalog: parser.take_catalog(),
-                show_doctitle,
+                attributes,
                 toc,
                 docinfo,
             }
@@ -196,12 +197,59 @@ impl<'src> Document<'src> {
         self.header().title()
     }
 
-    /// Return whether the document title should be displayed (as an `<h1>`).
+    /// Returns the resolved interpreted value of the named [document attribute],
+    /// as of the end of parsing.
     ///
-    /// This reflects the effective `showtitle`/`notitle` attribute state: an
-    /// embedded document shows its title only when `showtitle` is set.
-    pub fn show_doctitle(&self) -> bool {
-        self.internal.borrow_dependent().show_doctitle
+    /// This mirrors [`Parser::attribute_value`] and is the accessor to use on
+    /// the *embed* path — rendering a [`Document`] you already hold, without a
+    /// [`Parser`] in hand. The value reflects the document's final attribute
+    /// state: built-in defaults, values set in the header or body, and the
+    /// current value of any counter of the same name. An attribute that is not
+    /// present, or is present but explicitly [unset], resolves to
+    /// [`InterpretedValue::Unset`].
+    ///
+    /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
+    /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
+    /// [`Parser::attribute_value`]: crate::Parser::attribute_value
+    pub fn attribute_value<N: AsRef<str>>(&self, name: N) -> InterpretedValue {
+        self.internal
+            .borrow_dependent()
+            .attributes
+            .get(name.as_ref())
+            .cloned()
+            .unwrap_or(InterpretedValue::Unset)
+    }
+
+    /// Returns `true` if the document has a [document attribute] by this name
+    /// (whether or not it is set), as of the end of parsing.
+    ///
+    /// This mirrors [`Parser::has_attribute`].
+    ///
+    /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
+    /// [`Parser::has_attribute`]: crate::Parser::has_attribute
+    pub fn has_attribute<N: AsRef<str>>(&self, name: N) -> bool {
+        self.internal
+            .borrow_dependent()
+            .attributes
+            .contains_key(name.as_ref())
+    }
+
+    /// Returns `true` if the document has a [document attribute] by this name
+    /// which has been set (i.e. is present and not [unset]), as of the end of
+    /// parsing.
+    ///
+    /// This mirrors [`Parser::is_attribute_set`].
+    ///
+    /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
+    /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
+    /// [`Parser::is_attribute_set`]: crate::Parser::is_attribute_set
+    pub fn is_attribute_set<N: AsRef<str>>(&self, name: N) -> bool {
+        self.internal
+            .borrow_dependent()
+            .attributes
+            .get(name.as_ref())
+            .map(|value| *value != InterpretedValue::Unset)
+            .unwrap_or(false)
     }
 
     /// Return where (and whether) this document's table of contents is
@@ -1390,5 +1438,131 @@ mod tests {
     },
 }"#
         );
+    }
+
+    mod attribute_access {
+        use crate::{document::InterpretedValue, tests::prelude::*};
+
+        #[test]
+        fn built_in_default() {
+            // `doctype` is a built-in attribute with a default of `article`; it
+            // should read back through the `Document` even though the source
+            // never sets it.
+            let doc = Parser::default().parse("Hello.");
+
+            assert!(doc.has_attribute("doctype"));
+            assert!(doc.is_attribute_set("doctype"));
+            assert_eq!(
+                doc.attribute_value("doctype"),
+                InterpretedValue::Value("article".to_string())
+            );
+        }
+
+        #[test]
+        fn header_set_attribute() {
+            let doc = Parser::default().parse("= Title\n:lang: fr\n\nBonjour.");
+
+            assert!(doc.has_attribute("lang"));
+            assert!(doc.is_attribute_set("lang"));
+            assert_eq!(
+                doc.attribute_value("lang"),
+                InterpretedValue::Value("fr".to_string())
+            );
+        }
+
+        #[test]
+        fn body_set_attribute() {
+            // An attribute set in the document body (not the header) is part of
+            // the final resolved state and must be visible on the `Document`.
+            let doc = Parser::default().parse("First paragraph.\n\n:foo: bar\n\nSecond paragraph.");
+
+            assert!(doc.has_attribute("foo"));
+            assert!(doc.is_attribute_set("foo"));
+            assert_eq!(
+                doc.attribute_value("foo"),
+                InterpretedValue::Value("bar".to_string())
+            );
+        }
+
+        #[test]
+        fn set_flag_attribute() {
+            // A bare `:sectnums:` turns the attribute on; its resolved value is
+            // the built-in default `all`.
+            let doc = Parser::default().parse("= Title\n:sectnums:\n\nBody.");
+
+            assert!(doc.has_attribute("sectnums"));
+            assert!(doc.is_attribute_set("sectnums"));
+            assert_eq!(
+                doc.attribute_value("sectnums"),
+                InterpretedValue::Value("all".to_string())
+            );
+        }
+
+        #[test]
+        fn unset_attribute() {
+            // `sectnums` exists in the built-in table but is unset by default.
+            let doc = Parser::default().parse("Hello.");
+
+            assert!(doc.has_attribute("sectnums"));
+            assert!(!doc.is_attribute_set("sectnums"));
+            assert_eq!(doc.attribute_value("sectnums"), InterpretedValue::Unset);
+        }
+
+        #[test]
+        fn explicitly_unset_attribute() {
+            // `:!sectnums:` explicitly unsets an otherwise-set attribute: it is
+            // present but not set.
+            let doc = Parser::default().parse("= Title\n:sectnums:\n:!sectnums:\n\nBody.");
+
+            assert!(doc.has_attribute("sectnums"));
+            assert!(!doc.is_attribute_set("sectnums"));
+            assert_eq!(doc.attribute_value("sectnums"), InterpretedValue::Unset);
+        }
+
+        #[test]
+        fn absent_attribute() {
+            let doc = Parser::default().parse("Hello.");
+
+            assert!(!doc.has_attribute("no-such-attribute"));
+            assert!(!doc.is_attribute_set("no-such-attribute"));
+            assert_eq!(
+                doc.attribute_value("no-such-attribute"),
+                InterpretedValue::Unset
+            );
+        }
+
+        #[test]
+        fn matches_parser_state() {
+            // The values read back through the `Document` must equal what the
+            // `Parser` itself reports after `parse`.
+            let mut parser = Parser::default();
+            let doc = parser.parse("= Title\n:lang: de\n:sectnums:\n\nBody.");
+
+            for name in [
+                "lang",
+                "sectnums",
+                "doctype",
+                "notitle",
+                "no-such-attribute",
+            ] {
+                assert_eq!(doc.attribute_value(name), parser.attribute_value(name));
+                assert_eq!(doc.has_attribute(name), parser.has_attribute(name));
+                assert_eq!(doc.is_attribute_set(name), parser.is_attribute_set(name));
+            }
+        }
+
+        #[test]
+        fn counter_value() {
+            // A counter's current value is part of the resolved attribute state
+            // and supersedes any like-named attribute.
+            let doc = Parser::default().parse("{counter:my-counter}\n\n{counter:my-counter}");
+
+            assert!(doc.has_attribute("my-counter"));
+            assert!(doc.is_attribute_set("my-counter"));
+            assert_eq!(
+                doc.attribute_value("my-counter"),
+                InterpretedValue::Value("2".to_string())
+            );
+        }
     }
 }
