@@ -17,6 +17,20 @@ pub(crate) struct AttributeValue {
     /// Allowable contexts for modifying the attribute value.
     pub(crate) modification_context: ModificationContext,
 
+    /// Whether a rejected write (a document header or body assignment that
+    /// [`modification_context`](Self::modification_context) does not permit) is
+    /// silently ignored instead of recording an
+    /// [`AttributeValueIsLocked`](crate::warnings::WarningType::AttributeValueIsLocked)
+    /// warning.
+    ///
+    /// This is orthogonal to the scope axis: it does not change *where* the
+    /// attribute may be set, only whether a rejected write warns. It exists so
+    /// a caller can reproduce Asciidoctor's *silent* safe-mode attribute
+    /// restrictions — under `SERVER`/`SECURE`, a document assignment of a
+    /// restricted conversion attribute (`backend`, `doctype`, `docinfo`,
+    /// `source-highlighter`) is simply dropped, with no diagnostic.
+    pub(crate) silent_when_locked: bool,
+
     /// Current value of the attribute.
     pub(crate) value: InterpretedValue,
 }

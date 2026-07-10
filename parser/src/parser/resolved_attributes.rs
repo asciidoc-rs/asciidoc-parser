@@ -112,6 +112,7 @@ mod tests {
         AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::Anywhere,
+            silent_when_locked: false,
             value,
         }
     }
