@@ -522,9 +522,9 @@ impl Parser {
     /// This behaves exactly like [`with_intrinsic_attribute()`] except that a
     /// document header or body assignment that the
     /// [`modification_context`](ModificationContext) does not permit is dropped
-    /// with **no** [`AttributeValueIsLocked`] warning, instead of recording
-    /// one. The rejected write is otherwise handled identically (the value
-    /// is left unchanged).
+    /// with **no** `AttributeValueIsLocked` warning, instead of recording one.
+    /// The rejected write is otherwise handled identically (the value is left
+    /// unchanged).
     ///
     /// This reproduces Asciidoctor's *silent* safe-mode attribute restrictions:
     /// under `SERVER`/`SECURE`, a document assignment of a restricted
@@ -541,7 +541,6 @@ impl Parser {
     /// [intrinsic attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes-ref/#intrinsic-attributes
     ///
     /// [`with_intrinsic_attribute()`]: Self::with_intrinsic_attribute
-    /// [`AttributeValueIsLocked`]: crate::warnings::WarningType::AttributeValueIsLocked
     pub fn with_intrinsic_attribute_silent<N: AsRef<str>, V: AsRef<str>>(
         mut self,
         name: N,
@@ -816,9 +815,9 @@ impl Parser {
     /// This behaves exactly like [`with_intrinsic_attribute_bool()`] except
     /// that a document header or body assignment that the
     /// [`modification_context`](ModificationContext) does not permit is dropped
-    /// with **no** [`AttributeValueIsLocked`] warning, instead of recording
-    /// one. See [`with_intrinsic_attribute_silent()`] for the motivating
-    /// use case (Asciidoctor's silent safe-mode attribute restrictions).
+    /// with **no** `AttributeValueIsLocked` warning, instead of recording one.
+    /// See [`with_intrinsic_attribute_silent()`] for the motivating use case
+    /// (Asciidoctor's silent safe-mode attribute restrictions).
     ///
     /// A boolean `true` is interpreted as "set." A boolean `false` is
     /// interpreted as "unset."
@@ -831,7 +830,6 @@ impl Parser {
     ///
     /// [`with_intrinsic_attribute_bool()`]: Self::with_intrinsic_attribute_bool
     /// [`with_intrinsic_attribute_silent()`]: Self::with_intrinsic_attribute_silent
-    /// [`AttributeValueIsLocked`]: crate::warnings::WarningType::AttributeValueIsLocked
     pub fn with_intrinsic_attribute_bool_silent<N: AsRef<str>>(
         mut self,
         name: N,
