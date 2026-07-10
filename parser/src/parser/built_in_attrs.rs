@@ -57,6 +57,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     let char_replacement = |value: &str| AttributeValue {
         allowable_value: AllowableValue::Any,
         modification_context: ModificationContext::ApiOnly,
+        silent_when_locked: false,
         value: InterpretedValue::Value(value.into()),
     };
 
@@ -117,6 +118,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     let any = |ctx, value| AttributeValue {
         allowable_value: AllowableValue::Any,
         modification_context: ctx,
+        silent_when_locked: false,
         value,
     };
 
@@ -127,6 +129,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     let set = |ctx, default: &str| AttributeValue {
         allowable_value: AllowableValue::Any,
         modification_context: ctx,
+        silent_when_locked: false,
         value: Value(default.to_owned()),
     };
 
@@ -134,6 +137,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     let empty = |ctx, value| AttributeValue {
         allowable_value: AllowableValue::Empty,
         modification_context: ctx,
+        silent_when_locked: false,
         value,
     };
 

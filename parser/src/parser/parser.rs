@@ -450,6 +450,7 @@ impl Parser {
             AttributeValue {
                 allowable_value: AllowableValue::Any,
                 modification_context: ModificationContext::ApiOrDocumentBody,
+                silent_when_locked: false,
                 value: InterpretedValue::Value(value.to_string()),
             },
         );
@@ -470,6 +471,7 @@ impl Parser {
                 AttributeValue {
                     allowable_value: AllowableValue::Any,
                     modification_context: ModificationContext::Anywhere,
+                    silent_when_locked: false,
                     value: InterpretedValue::Value(String::new()),
                 },
             );
@@ -504,6 +506,51 @@ impl Parser {
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context,
+            silent_when_locked: false,
+            value: InterpretedValue::Value(value.as_ref().to_string()),
+        };
+
+        Arc::make_mut(&mut self.attribute_values)
+            .insert(name.as_ref().to_lowercase(), attribute_value);
+
+        self
+    }
+
+    /// Sets the value of an [intrinsic attribute], rejecting any disallowed
+    /// subsequent write *silently*.
+    ///
+    /// This behaves exactly like [`with_intrinsic_attribute()`] except that a
+    /// document header or body assignment that the
+    /// [`modification_context`](ModificationContext) does not permit is dropped
+    /// with **no** `AttributeValueIsLocked` warning, instead of recording one.
+    /// The rejected write is otherwise handled identically (the value is left
+    /// unchanged).
+    ///
+    /// This reproduces Asciidoctor's *silent* safe-mode attribute restrictions:
+    /// under `SERVER`/`SECURE`, a document assignment of a restricted
+    /// conversion attribute (`backend`, `doctype`, `docinfo`,
+    /// `source-highlighter`) is simply dropped, with no diagnostic. Seed
+    /// such an attribute as an [`ApiOnly`](ModificationContext::ApiOnly)
+    /// silent intrinsic to lock it against document assignment without
+    /// warning.
+    ///
+    /// Subsequent calls to this function or the other
+    /// `with_intrinsic_attribute` variants are always permitted. The last
+    /// such call for any given attribute name takes precedence.
+    ///
+    /// [intrinsic attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes-ref/#intrinsic-attributes
+    ///
+    /// [`with_intrinsic_attribute()`]: Self::with_intrinsic_attribute
+    pub fn with_intrinsic_attribute_silent<N: AsRef<str>, V: AsRef<str>>(
+        mut self,
+        name: N,
+        value: V,
+        modification_context: ModificationContext,
+    ) -> Self {
+        let attribute_value = AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context,
+            silent_when_locked: true,
             value: InterpretedValue::Value(value.as_ref().to_string()),
         };
 
@@ -748,6 +795,51 @@ impl Parser {
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context,
+            silent_when_locked: false,
+            value: if value {
+                InterpretedValue::Set
+            } else {
+                InterpretedValue::Unset
+            },
+        };
+
+        Arc::make_mut(&mut self.attribute_values)
+            .insert(name.as_ref().to_lowercase(), attribute_value);
+
+        self
+    }
+
+    /// Sets the value of an [intrinsic attribute] from a boolean flag,
+    /// rejecting any disallowed subsequent write *silently*.
+    ///
+    /// This behaves exactly like [`with_intrinsic_attribute_bool()`] except
+    /// that a document header or body assignment that the
+    /// [`modification_context`](ModificationContext) does not permit is dropped
+    /// with **no** `AttributeValueIsLocked` warning, instead of recording one.
+    /// See [`with_intrinsic_attribute_silent()`] for the motivating use case
+    /// (Asciidoctor's silent safe-mode attribute restrictions).
+    ///
+    /// A boolean `true` is interpreted as "set." A boolean `false` is
+    /// interpreted as "unset."
+    ///
+    /// Subsequent calls to this function or the other
+    /// `with_intrinsic_attribute` variants are always permitted. The last
+    /// such call for any given attribute name takes precedence.
+    ///
+    /// [intrinsic attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes-ref/#intrinsic-attributes
+    ///
+    /// [`with_intrinsic_attribute_bool()`]: Self::with_intrinsic_attribute_bool
+    /// [`with_intrinsic_attribute_silent()`]: Self::with_intrinsic_attribute_silent
+    pub fn with_intrinsic_attribute_bool_silent<N: AsRef<str>>(
+        mut self,
+        name: N,
+        value: bool,
+        modification_context: ModificationContext,
+    ) -> Self {
+        let attribute_value = AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context,
+            silent_when_locked: true,
             value: if value {
                 InterpretedValue::Set
             } else {
@@ -873,6 +965,7 @@ impl Parser {
         let intrinsic = |value: InterpretedValue| AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::ApiOnly,
+            silent_when_locked: false,
             value,
         };
 
@@ -955,10 +1048,14 @@ impl Parser {
             && (existing_attr.modification_context == ModificationContext::ApiOnly
                 || existing_attr.modification_context == ModificationContext::ApiOrDocumentBody)
         {
-            warnings.push(Warning {
-                source: attr.span(),
-                warning: WarningType::AttributeValueIsLocked(attr_name),
-            });
+            // A silently-locked intrinsic rejects the write without recording a
+            // warning (see `AttributeValue::silent_when_locked`).
+            if !existing_attr.silent_when_locked {
+                warnings.push(Warning {
+                    source: attr.span(),
+                    warning: WarningType::AttributeValueIsLocked(attr_name),
+                });
+            }
             return;
         }
 
@@ -973,6 +1070,7 @@ impl Parser {
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::Anywhere,
+            silent_when_locked: false,
             value,
         };
 
@@ -1001,6 +1099,7 @@ impl Parser {
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::Anywhere,
+            silent_when_locked: false,
             value: InterpretedValue::Value(value.as_ref().to_owned()),
         };
 
@@ -1080,16 +1179,21 @@ impl Parser {
             && (existing_attr.modification_context != ModificationContext::Anywhere
                 && existing_attr.modification_context != ModificationContext::ApiOrDocumentBody)
         {
-            warnings.push(Warning {
-                source: attr.span(),
-                warning: WarningType::AttributeValueIsLocked(attr_name),
-            });
+            // A silently-locked intrinsic rejects the write without recording a
+            // warning (see `AttributeValue::silent_when_locked`).
+            if !existing_attr.silent_when_locked {
+                warnings.push(Warning {
+                    source: attr.span(),
+                    warning: WarningType::AttributeValueIsLocked(attr_name),
+                });
+            }
             return;
         }
 
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::Anywhere,
+            silent_when_locked: false,
             value: attr.value().clone(),
         };
 
@@ -1343,6 +1447,70 @@ mod tests {
         );
 
         assert_eq!(parser.attribute_value("sp"), InterpretedValue::Value(" "));
+    }
+
+    #[test]
+    fn silently_locked_intrinsic_rejects_header_and_body_without_warning() {
+        // A silently-locked `ApiOnly` intrinsic (as a converter would seed a
+        // safe-mode-restricted attribute) rejects both a header assignment and a
+        // body assignment of the same name, leaving the value unchanged and
+        // recording no warning.
+        let mut parser = Parser::default().with_intrinsic_attribute_silent(
+            "backend",
+            "html5",
+            ModificationContext::ApiOnly,
+        );
+
+        let doc = parser.parse(concat!(
+            "= Title\n",
+            ":backend: docbook5\n",
+            "\n",
+            "Body paragraph.\n",
+            "\n",
+            ":backend: manpage\n",
+        ));
+
+        assert_eq!(doc.warnings().count(), 0);
+        assert_eq!(
+            parser.attribute_value("backend"),
+            InterpretedValue::Value("html5")
+        );
+    }
+
+    #[test]
+    fn silently_locked_bool_intrinsic_rejects_without_warning() {
+        let mut parser = Parser::default().with_intrinsic_attribute_bool_silent(
+            "sectids",
+            true,
+            ModificationContext::ApiOnly,
+        );
+
+        let doc = parser.parse(concat!("= Title\n", ":!sectids:\n"));
+
+        assert_eq!(doc.warnings().count(), 0);
+        assert_eq!(parser.attribute_value("sectids"), InterpretedValue::Set);
+    }
+
+    #[test]
+    fn normally_locked_intrinsic_still_warns() {
+        // Regression: a non-silent `ApiOnly` intrinsic still records
+        // `AttributeValueIsLocked` when the document tries to reassign it.
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "backend",
+            "html5",
+            ModificationContext::ApiOnly,
+        );
+
+        let doc = parser.parse(concat!("= Title\n", ":backend: docbook5\n"));
+
+        assert_eq!(
+            doc.warnings().next().unwrap().warning,
+            WarningType::AttributeValueIsLocked("backend".to_owned())
+        );
+        assert_eq!(
+            parser.attribute_value("backend"),
+            InterpretedValue::Value("html5")
+        );
     }
 
     #[test]
