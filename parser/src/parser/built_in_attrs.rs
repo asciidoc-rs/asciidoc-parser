@@ -16,22 +16,113 @@ use crate::{
 pub(crate) const DEFAULT_ICONSDIR: &str = "./images/icons";
 
 /// The built-in attribute table is identical for every parser, so build it
-/// once and share it behind an [`Arc`]. A [`Parser`] holds this shared table
-/// and copies it (via `Arc::make_mut`) only when it first modifies an
-/// attribute, so the (large) built-in table is never deep-cloned just to create
-/// or clone a parser. This matters because [`Parser::default`] (and parser
-/// cloning, e.g. for nested AsciiDoc table cells) happens frequently.
+/// once and keep it in a shared `static`. A [`Parser`] does **not** copy these
+/// defaults into its own [`attribute_values`] map; instead it falls back to
+/// this table on a lookup miss (see [`Parser::attribute_value`]), so creating
+/// or cloning a parser allocates nothing per built-in attribute. This matters
+/// because [`Parser::default`] (and parser cloning, e.g. for nested AsciiDoc
+/// table cells) happens frequently. A parser only materializes an entry in its
+/// own map when it *overrides* or *unsets* a built-in (the per-parser entry
+/// then shadows this default).
 ///
 /// [`Parser`]: crate::Parser
 /// [`Parser::default`]: crate::Parser::default
-static BUILT_IN_ATTRS: LazyLock<Arc<HashMap<String, AttributeValue>>> =
-    LazyLock::new(|| Arc::new(build_built_in_attrs()));
+/// [`Parser::attribute_value`]: crate::Parser::attribute_value
+/// [`attribute_values`]: crate::Parser
+static BUILT_IN_ATTRS: LazyLock<HashMap<String, AttributeValue>> =
+    LazyLock::new(build_built_in_attrs);
+
+/// The synthesized `backend-html5-doctype-{doctype}` attribute, which is
+/// defined (with an empty value) only for the document's active doctype. It is
+/// resolved on the fly from the current `doctype` rather than materialized, so
+/// it lives here as a single shared value that lookups can hand out by
+/// reference. See [`synthesized_attr`].
+///
+/// It is a read-only intrinsic: it tracks `doctype` automatically, so a
+/// document header or body assignment to it (e.g.
+/// `:backend-html5-doctype-article: x`) is silently ignored ([`ApiOnly`] +
+/// [`silent_when_locked`]) rather than being allowed to shadow the intrinsic
+/// empty value. This self-protection replaces the previous scheme
+/// (materialize-and-lock inside an AsciiDoc table cell), which could not follow
+/// the cell's dynamically-changing doctype.
+///
+/// [`ApiOnly`]: ModificationContext::ApiOnly
+/// [`silent_when_locked`]: AttributeValue::silent_when_locked
+static DERIVED_DOCTYPE_ATTR: LazyLock<AttributeValue> = LazyLock::new(|| AttributeValue {
+    allowable_value: AllowableValue::Any,
+    modification_context: ModificationContext::ApiOnly,
+    silent_when_locked: true,
+    value: InterpretedValue::Value(String::new()),
+});
+
+/// The synthesized `safe-mode-{name}` flag, which is defined (with an empty
+/// value) only for the active safe mode. Like the derived doctype attribute it
+/// is resolved on the fly (from `safe-mode-name`) rather than materialized, so
+/// the flags of the inactive modes stay genuinely absent. See
+/// [`synthesized_attr`].
+///
+/// It is likewise a read-only intrinsic (`ApiOnly` + `silent_when_locked`): a
+/// document assignment to it is silently ignored rather than shadowing the
+/// intrinsic value.
+static SAFE_MODE_ACTIVE_FLAG: LazyLock<AttributeValue> = LazyLock::new(|| AttributeValue {
+    allowable_value: AllowableValue::Any,
+    modification_context: ModificationContext::ApiOnly,
+    silent_when_locked: true,
+    value: InterpretedValue::Set,
+});
 
 static BUILT_IN_DEFAULT_VALUES: LazyLock<Arc<HashMap<String, String>>> =
     LazyLock::new(|| Arc::new(build_built_in_default_values()));
 
-pub(super) fn built_in_attrs() -> Arc<HashMap<String, AttributeValue>> {
-    BUILT_IN_ATTRS.clone()
+/// Returns the shared built-in default for `name`, if one is defined.
+pub(crate) fn built_in_attr(name: &str) -> Option<&'static AttributeValue> {
+    BUILT_IN_ATTRS.get(name)
+}
+
+/// Iterates the shared built-in attribute defaults.
+pub(crate) fn built_in_attrs_iter()
+-> impl Iterator<Item = (&'static String, &'static AttributeValue)> {
+    BUILT_IN_ATTRS.iter()
+}
+
+/// Resolves a *synthesized* attribute — one computed from other state rather
+/// than stored in either attribute table — for the active document state:
+///
+/// * `backend-html5-doctype-{doctype}` is defined (empty) only for the active
+///   `doctype`.
+/// * `safe-mode-{name}` is defined (empty) only for the active safe mode (as
+///   reported by `safe-mode-name`).
+///
+/// `overrides` is the caller's per-parser attribute map; its entries (layered
+/// over the shared built-in defaults) determine the active doctype / safe mode.
+/// Returns `None` for any name that is not a currently-active synthesized
+/// attribute (so the inactive doctype/safe-mode flags stay absent, matching
+/// Asciidoctor).
+pub(crate) fn synthesized_attr(
+    name: &str,
+    overrides: &HashMap<String, AttributeValue>,
+) -> Option<&'static AttributeValue> {
+    // Reports whether the *stored* attribute `key` (never itself a synthesized
+    // one) currently resolves to the plain value `expected`, letting a per-parser
+    // entry shadow the built-in default.
+    let has_value = |key: &str, expected: &str| -> bool {
+        overrides
+            .get(key)
+            .or_else(|| BUILT_IN_ATTRS.get(key))
+            .is_some_and(|av| matches!(&av.value, InterpretedValue::Value(v) if v == expected))
+    };
+
+    if let Some(suffix) = name.strip_prefix("backend-html5-doctype-") {
+        return has_value("doctype", suffix).then(|| &*DERIVED_DOCTYPE_ATTR);
+    }
+
+    if let Some(suffix) = name.strip_prefix("safe-mode-")
+        && matches!(suffix, "unsafe" | "safe" | "server" | "secure")
+    {
+        return has_value("safe-mode-name", suffix).then(|| &*SAFE_MODE_ACTIVE_FLAG);
+    }
+
+    None
 }
 
 pub(super) fn built_in_default_values() -> Arc<HashMap<String, String>> {
@@ -229,9 +320,11 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ### Safe-mode intrinsic attributes
     //
     // These describe the default safe mode (`SafeMode::Secure`).
-    // `Parser::with_safe_mode` rewrites this family (via
-    // `apply_safe_mode_attributes`) when the caller chooses a different mode;
-    // exactly one `safe-mode-<name>` flag is set at a time.
+    // `Parser::with_safe_mode` overrides `safe-mode-level` and `safe-mode-name`
+    // (via `apply_safe_mode_attributes`) when the caller chooses a different
+    // mode. The active `safe-mode-<name>` flag is *not* stored here: it is
+    // synthesized on the fly from `safe-mode-name` (see [`synthesized_attr`]), so
+    // exactly one flag is ever defined and the inactive flags stay absent.
     attrs.insert(
         "safe-mode-level".to_owned(),
         any(ApiOnly, Value("20".into())),
@@ -240,14 +333,12 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         "safe-mode-name".to_owned(),
         any(ApiOnly, Value("secure".into())),
     );
-    attrs.insert("safe-mode-secure".to_owned(), any(ApiOnly, Set));
 
-    // Derived doctype attribute (see `doctype` above): defined (empty) only for
-    // the active doctype.
-    attrs.insert(
-        "backend-html5-doctype-article".to_owned(),
-        any(Anywhere, Value(String::new())),
-    );
+    // NOTE: The derived `backend-html5-doctype-{doctype}` attribute (see
+    // `doctype` above) is *not* registered here. It is synthesized on the fly
+    // for the active doctype by `Parser::attribute_value` (via
+    // [`derived_doctype_attr`]), so it never needs to be materialized or kept in
+    // sync when `doctype` changes.
 
     attrs
 }
