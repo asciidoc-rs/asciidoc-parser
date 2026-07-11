@@ -47,6 +47,22 @@ pub struct Content<'src> {
     /// resolution it holds the resolved rendering.
     pub(crate) rendered: CowStr<'src>,
 
+    /// Source [`Span`] of each line that survived construction filtering, in
+    /// the same order as the lines of [`rendered`](Self::rendered) at
+    /// construction time.
+    ///
+    /// This is retained only so the attribute-references substitution can
+    /// locate an `attribute-missing=warn` warning at the precise source
+    /// offset of the offending `{name}` reference, rather than at the
+    /// whole-content span. See
+    /// [`apply_attributes`](crate::content::substitution_step) for the
+    /// rationale and the correlation it performs.
+    ///
+    /// `None` when the content was not built line-by-line from document source
+    /// (e.g. [`From<Span>`] or a table cell's pre-filtered value), in which
+    /// case such warnings fall back to the whole-content span.
+    source_lines: Option<Box<[Span<'src>]>>,
+
     /// Deferred cross-references discovered during substitution, awaiting
     /// resolution against a (possibly cross-document) catalog.
     ///
@@ -102,6 +118,34 @@ impl<'src> Content<'src> {
         Self {
             original: span,
             rendered: filtered.as_ref().to_string().into(),
+            source_lines: None,
+            deferred: None,
+        }
+    }
+
+    /// Constructs a `Content` from a source `Span` and the per-line filtered
+    /// view of that source, retaining the source `Span` of each surviving line.
+    ///
+    /// `line_spans` must contain one entry per line of `filtered_lines`, in the
+    /// same order; each entry is the source span whose text is that filtered
+    /// line (i.e. after any leading-indent stripping and trailing-whitespace
+    /// trimming the caller applied). The retained spans let the
+    /// attribute-references substitution report an `attribute-missing=warn`
+    /// warning at the precise source offset of the offending reference; see
+    /// [`apply_attributes`](crate::content::substitution_step).
+    pub(crate) fn from_filtered_lines(
+        span: Span<'src>,
+        filtered_lines: &[&str],
+        line_spans: Vec<Span<'src>>,
+    ) -> Self {
+        // One source span is required per filtered line; the default
+        // `debug_assert_eq!` message reports both counts if this is ever broken.
+        debug_assert_eq!(filtered_lines.len(), line_spans.len());
+
+        Self {
+            original: span,
+            rendered: filtered_lines.join("\n").into(),
+            source_lines: Some(line_spans.into_boxed_slice()),
             deferred: None,
         }
     }
@@ -111,6 +155,16 @@ impl<'src> Content<'src> {
     /// This is the source text before any substitions have been applied.
     pub fn original(&self) -> Span<'src> {
         self.original
+    }
+
+    /// Returns the source `Span` of each line that survived construction
+    /// filtering, in rendered-line order, when they were retained (see
+    /// [`from_filtered_lines`](Self::from_filtered_lines)).
+    ///
+    /// Used only by the attribute-references substitution to locate
+    /// `attribute-missing=warn` warnings precisely.
+    pub(crate) fn source_lines(&self) -> Option<&[Span<'src>]> {
+        self.source_lines.as_deref()
     }
 
     /// Returns the final text after all substitutions have been applied.
@@ -438,6 +492,7 @@ impl<'src> From<Span<'src>> for Content<'src> {
         Self {
             original: span,
             rendered: CowStr::from(span.data()),
+            source_lines: None,
             deferred: None,
         }
     }

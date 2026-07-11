@@ -333,6 +333,11 @@ fn parse_lines<'src>(
 
     let mut next = source;
     let mut filtered_lines: Vec<&'src str> = vec![];
+    // Source span of each surviving line, kept in lockstep with `filtered_lines`
+    // so the attribute-references substitution can locate an
+    // `attribute-missing=warn` warning at the precise source offset of the
+    // offending reference (see `Content::from_filtered_lines`).
+    let mut filtered_line_spans: Vec<Span<'src>> = vec![];
     let mut skipped_comment_line = false;
 
     // Determine how much indentation to strip from literal paragraphs.
@@ -456,7 +461,9 @@ fn parse_lines<'src>(
             line = line.into_parse_result(n.min(strip_indent)).after;
         };
 
-        filtered_lines.push(line.trim_trailing_whitespace().data());
+        let line = line.trim_trailing_whitespace();
+        filtered_line_spans.push(line);
+        filtered_lines.push(line.data());
     }
 
     let source = source.trim_remainder(next).trim_trailing_whitespace();
@@ -464,8 +471,8 @@ fn parse_lines<'src>(
         return None;
     }
 
-    let filtered_lines = filtered_lines.join("\n");
-    let mut content: Content<'src> = Content::from_filtered(source, filtered_lines);
+    let mut content: Content<'src> =
+        Content::from_filtered_lines(source, &filtered_lines, filtered_line_spans);
 
     // A `[comment]`-styled paragraph is the single-paragraph form of a comment
     // block. Its content is retained in the parsed model (this parser does not

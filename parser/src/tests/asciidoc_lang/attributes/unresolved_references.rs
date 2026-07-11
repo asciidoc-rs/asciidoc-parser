@@ -104,7 +104,51 @@ fn warn_records_a_warning_but_leaves_the_line_alone() {
         warnings[0].warning,
         WarningType::SkippingReferenceToMissingAttribute("name".to_string())
     );
-    assert_eq!(warnings[0].source.data(), "Hello, {name}!");
+
+    // The warning is located at the offending reference itself, not the whole
+    // block span (see issue #564).
+    assert_eq!(warnings[0].source.data(), "{name}");
+}
+
+#[test]
+fn warn_locates_each_reference_across_multiple_lines() {
+    // Acceptance case from issue #564: several distinct missing references on
+    // different lines of one block. Each warning must point at its own
+    // reference, not the shared whole-block span.
+    let doc = Parser::default().parse(
+        ":attribute-missing: warn\n\nfirst {alpha} line\nsecond {beta} line\nthird {gamma} here",
+    );
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 3);
+
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::SkippingReferenceToMissingAttribute("alpha".to_string())
+    );
+    assert_eq!(warnings[0].source.data(), "{alpha}");
+
+    assert_eq!(
+        warnings[1].warning,
+        WarningType::SkippingReferenceToMissingAttribute("beta".to_string())
+    );
+    assert_eq!(warnings[1].source.data(), "{beta}");
+
+    assert_eq!(
+        warnings[2].warning,
+        WarningType::SkippingReferenceToMissingAttribute("gamma".to_string())
+    );
+    assert_eq!(warnings[2].source.data(), "{gamma}");
+
+    // The three references occupy three distinct source locations.
+    assert_ne!(
+        warnings[0].source.byte_offset(),
+        warnings[1].source.byte_offset()
+    );
+    assert_ne!(
+        warnings[1].source.byte_offset(),
+        warnings[2].source.byte_offset()
+    );
 }
 
 #[test]
