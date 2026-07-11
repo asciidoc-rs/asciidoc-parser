@@ -12,8 +12,8 @@ use crate::{
     content::{Content, SubstitutionGroup},
     document::{InterpretedValue, TocConfig, TocMode},
     parser::{
-        InlineSubstitutionRenderer, ModificationContext, ReferenceResolver, ReferenceWarning,
-        preprocessor::preprocess,
+        AttributeValue, InlineSubstitutionRenderer, ModificationContext, ReferenceResolver,
+        ReferenceWarning, built_in_attr, built_in_attrs_iter, preprocessor::preprocess,
     },
     span::MatchedItem,
     strings::CowStr,
@@ -1618,23 +1618,41 @@ fn process_content<'src>(
         // is unset — matching Asciidoctor, where an API-controlled attribute can
         // never be overridden in a cell. An attribute merely unset in the parent
         // document is not locked, so the cell may assign it.
+        // The inherited attribute set is the shared built-in defaults with the
+        // parent's per-parser entries (`saved_attributes`) layered on top, so
+        // walk both, letting a per-parser entry shadow a like-named built-in.
         let saved_locks = parser.locked_attribute_names.clone();
-        for (name, value) in saved_attributes.iter() {
-            let api_locked = value.modification_context == ModificationContext::ApiOnly;
-            if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
-                && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name.as_str())
-            {
-                parser.locked_attribute_names.insert(name.clone());
+        {
+            let locks = &mut parser.locked_attribute_names;
+            let mut maybe_lock = |name: &str, value: &AttributeValue| {
+                let api_locked = value.modification_context == ModificationContext::ApiOnly;
+                if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
+                    && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name)
+                {
+                    locks.insert(name.to_owned());
+                }
+            };
+            for (name, value) in built_in_attrs_iter() {
+                if !saved_attributes.contains_key(name) {
+                    maybe_lock(name, value);
+                }
+            }
+            for (name, value) in saved_attributes.iter() {
+                maybe_lock(name, value);
             }
         }
 
         // The modifiable attributes may always be changed inside a cell, even
         // when the parent or the API set them with a restrictive modification
-        // context. Relax their context for the duration of the cell so a body
-        // assignment is honored; the snapshot restore reverts it afterward.
+        // context. Materialize each into the per-parser map (a built-in such as
+        // `toc` otherwise lives only in the shared table) with a relaxed context
+        // for the duration of the cell so a body assignment is honored; the
+        // snapshot restore reverts it afterward.
         for name in ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES {
-            if let Some(attr) = Arc::make_mut(&mut parser.attribute_values).get_mut(*name) {
+            let attrs = Arc::make_mut(&mut parser.attribute_values);
+            if let Some(mut attr) = attrs.get(*name).or_else(|| built_in_attr(name)).cloned() {
                 attr.modification_context = ModificationContext::Anywhere;
+                attrs.insert((*name).to_owned(), attr);
             }
         }
 

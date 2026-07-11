@@ -6,6 +6,7 @@ pub(crate) use attribute_value::AttributeValue;
 pub use attribute_value::{AllowableValue, ModificationContext};
 
 mod built_in_attrs;
+pub(crate) use built_in_attrs::{built_in_attr, built_in_attrs_iter};
 
 mod docinfo_file_handler;
 pub use docinfo_file_handler::DocinfoFileHandler;
