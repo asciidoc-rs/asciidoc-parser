@@ -1044,6 +1044,13 @@ impl Parser {
     ) {
         let attr_name = remap_attr_name(attr.name().data());
 
+        // The `backend-html5-doctype-*` namespace is a read-only synthesized
+        // intrinsic; a document must not write any of it (see
+        // [`is_reserved_doctype_derived_attr`]).
+        if is_reserved_doctype_derived_attr(&attr_name) {
+            return;
+        }
+
         // Verify that we have permission to overwrite any existing attribute
         // value, considering both a per-parser entry and the shared built-in
         // default it would shadow (a built-in such as `sp` is `ApiOnly`).
@@ -1167,6 +1174,13 @@ impl Parser {
         warnings: &mut Vec<Warning<'src>>,
     ) {
         let attr_name = remap_attr_name(attr.name().data());
+
+        // The `backend-html5-doctype-*` namespace is a read-only synthesized
+        // intrinsic; a document must not write any of it (see
+        // [`is_reserved_doctype_derived_attr`]).
+        if is_reserved_doctype_derived_attr(&attr_name) {
+            return;
+        }
 
         // An attribute inherited from the parent document of an AsciiDoc table
         // cell is locked for the duration of that cell: a body assignment to it
@@ -1355,6 +1369,21 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
         "hardbreaks" => "hardbreaks-option".to_string(),
         _ => attr_name,
     }
+}
+
+/// Returns `true` if `name` belongs to the reserved `backend-html5-doctype-*`
+/// namespace, which is a read-only synthesized intrinsic keyed on the active
+/// `doctype` (see [`synthesized_attr`]).
+///
+/// A document header or body assignment to any such name is rejected — not only
+/// the flag that is active when the assignment is parsed. Otherwise a name that
+/// is inactive at assignment time (e.g. `backend-html5-doctype-article` while
+/// the doctype is `book`) would resolve to no synthesized attribute, pass the
+/// permission check, and be stored as a per-parser override that then shadows
+/// the intrinsic once the doctype switches to that value (e.g. in an AsciiDoc
+/// table cell that resets, then changes, its doctype).
+fn is_reserved_doctype_derived_attr(name: &str) -> bool {
+    name.starts_with("backend-html5-doctype-")
 }
 
 #[cfg(test)]
@@ -1778,6 +1807,21 @@ mod tests {
             assert_eq!(parser.attribute_value("doctype"), InterpretedValue::Unset);
             assert_eq!(
                 parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Unset
+            );
+        }
+
+        #[test]
+        fn document_header_cannot_assign_a_derived_doctype_flag() {
+            // The `backend-html5-doctype-*` namespace is a read-only intrinsic,
+            // so a document header assignment to it is ignored: the flag for the
+            // (inactive) `book` doctype stays undefined rather than taking the
+            // assigned value, so it cannot later shadow the intrinsic.
+            let mut parser = Parser::default();
+            let _doc = parser.parse("= Title\n:backend-html5-doctype-book: custom\n\nbody");
+
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-book"),
                 InterpretedValue::Unset
             );
         }

@@ -1151,6 +1151,23 @@ mod psv {
     }
 
     #[test]
+    fn asciidoc_table_cell_cannot_stash_a_derived_doctype_flag_while_it_is_inactive() {
+        // Assigning `:backend-html5-doctype-article:` while the cell's doctype is
+        // `book` (so that flag is not the active synthesized intrinsic) must not
+        // stash a per-parser override that later shadows the intrinsic once the
+        // cell switches its doctype back to `article`. The whole
+        // `backend-html5-doctype-*` namespace is read-only, so the assignment is
+        // ignored and `{backend-html5-doctype-article}` still resolves to the
+        // empty intrinsic value.
+        let doc = Parser::default().parse(
+            "= Doc Title\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:doctype: book\n:backend-html5-doctype-article: custom\n:doctype: article\n\nflag=[{backend-html5-doctype-article}]\n|===",
+        );
+
+        assert_rendered_contains(&doc, "flag=[]");
+        refute_rendered_contains(&doc, "custom");
+    }
+
+    #[test]
     fn should_update_doctype_related_attributes_in_asciidoc_table_cell_when_doctype_is_set() {
         // Setting `:doctype: book` in the cell updates `{doctype}` and the
         // derived `backend-html5-doctype-*` attribute accordingly.
