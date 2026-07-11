@@ -161,6 +161,15 @@ Will be colorized by the source highlighter if enabled on the document and a lan
     assert_eq!(resolved, "listing");
     assert_eq!(model, ContentModel::Verbatim);
     assert_eq!(style, None);
+
+    // "... a language is set": a language on the opening fence (```ruby) sets
+    // the `source` style, promoting the listing to a source block so the
+    // highlighter can colorize it. It still resolves to the `listing` context
+    // with the verbatim content model.
+    let (resolved, model, style) = facts("```ruby\nsource code\n```");
+    assert_eq!(resolved, "listing");
+    assert_eq!(model, ContentModel::Verbatim);
+    assert_eq!(style, Some("source".to_string()));
 }
 
 #[test]
