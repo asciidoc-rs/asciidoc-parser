@@ -2335,6 +2335,7 @@ mod description_lists_dlist {
 
             assert_xpath(&doc, "//dl", 2);
             assert_xpath(&doc, "//dl/dt", 2);
+            assert_xpath(&doc, "//hr", 1);
             assert_xpath(&doc, "//dl//hr", 0);
             assert_xpath(&doc, "(//dl)[1]/dt", 1);
             assert_xpath(&doc, "(//dl)[2]/dt", 1);
