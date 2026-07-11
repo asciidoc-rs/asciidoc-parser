@@ -117,6 +117,42 @@ impl<'src> ElementAttribute<'src> {
         )
     }
 
+    /// Synthesize the `source` block-style attribute implied by a
+    /// language-aware fenced code block (`` ```lang ``). This is the first
+    /// positional attribute of the equivalent `[source,<lang>]` attribute list;
+    /// its shorthand items resolve the block style to `source`.
+    pub(crate) fn synthesized_source_style() -> Self {
+        const SOURCE: &str = "source";
+        let mut warnings: Vec<WarningType> = vec![];
+        let shorthand_item_indices = parse_shorthand_items(SOURCE, &mut warnings);
+
+        // `source` is a single shorthand item with no delimiters, so parsing it
+        // can never warn. Guard that invariant rather than plumb an always-empty
+        // list back to the caller.
+        debug_assert!(
+            warnings.is_empty(),
+            "synthesizing the `source` block style should not produce warnings, got: {warnings:?}"
+        );
+
+        Self {
+            name: None,
+            value: CowStr::from(SOURCE),
+            shorthand_item_indices,
+        }
+    }
+
+    /// Construct a bare positional attribute whose value is drawn directly from
+    /// `span`, carrying no shorthand items. Used for the language on a
+    /// language-aware fenced code block (the second positional attribute of the
+    /// equivalent `[source,<lang>]` attribute list).
+    pub(crate) fn positional_from_span(span: Span<'src>) -> Self {
+        Self {
+            name: None,
+            value: CowStr::from(span.data()),
+            shorthand_item_indices: vec![],
+        }
+    }
+
     /// Return the attribute name, if one was found.
     pub fn name(&'src self) -> Option<&'src str> {
         self.name_str()

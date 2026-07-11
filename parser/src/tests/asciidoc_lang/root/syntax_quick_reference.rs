@@ -12,12 +12,13 @@ track_file!("ref/asciidoc-lang/docs/modules/ROOT/pages/syntax-quick-reference.ad
 // headings, page metadata, authoring comments, and rendering/output-only notes
 // (which this parser does not implement) are `non_normative!`.
 //
-// Two features described on the page are not yet implemented; they are marked
+// One feature described on the page is not yet implemented; it is marked
 // `to_do_verifies!` with assertions documenting current behavior:
 //   * `book` doctype parts / multi-part books (issue #380).
-//   * fenced code blocks with a language on the fence line, ```lang (issue
-//     #615). (The bare ``` fence IS supported and is verified in
-//     `markdown_compatibility`.)
+//
+// Language-aware fenced code blocks (```lang, issue #615) are now recognized;
+// both the bare ``` fence and the language-on-fence form are verified in
+// `markdown_compatibility`.
 
 #[test]
 fn preamble() {
@@ -2194,7 +2195,7 @@ include::sections:example$section.adoc[tag=b-md]
 "#
     );
 
-    to_do_verifies!(
+    verifies!(
         r#"
 .Fenced code block with syntax highlighting
 [#ex-fenced]
@@ -2210,16 +2211,25 @@ include::verbatim:example$source.adoc[tag=fence]
 "#
     );
 
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/615): a
-    // language on the opening fence line (```ruby) is not yet recognized, so
-    // this example's fenced source block currently parses as a paragraph rather
-    // than a listing. (The bare ``` fence is supported; see the bare-fence
-    // assertion at the end of this function.)
+    // A language on the opening fence line (```ruby) is recognized as a source
+    // listing block: equivalent to `[source,ruby]` over a listing block
+    // (issue #615). The language is recorded as the second positional attribute
+    // so a downstream renderer can highlight it; this parser performs no
+    // highlighting itself. (The bare ``` fence is also supported; see the
+    // bare-fence assertion at the end of this function.)
     let doc = Parser::default().parse("```ruby\nputs 'hi'\n```");
-    assert!(!matches!(
-        doc.nested_blocks().next(),
-        Some(Block::RawDelimited(_))
-    ));
+    let Some(Block::RawDelimited(b)) = doc.nested_blocks().next() else {
+        panic!("expected a raw delimited (source listing) block");
+    };
+    assert_eq!(b.resolved_context().as_ref(), "listing");
+    assert_eq!(b.declared_style(), Some("source"));
+    assert_eq!(
+        b.attrlist()
+            .and_then(|a| a.nth_attribute(2))
+            .map(|a| a.value()),
+        Some("ruby")
+    );
+    assert!(b.content().rendered().contains("puts 'hi'"));
 
     verifies!(
         r#"

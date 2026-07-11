@@ -879,6 +879,185 @@ mod fenced {
     }
 
     #[test]
+    fn language_on_fence_sets_source_style() {
+        // A language on the opening fence (```ruby) is shorthand for a source
+        // block: the block resolves like `[source,ruby]` over a listing block.
+        // The synthesized attribute list carries the `source` block style in the
+        // first position and the language in the second, so a downstream renderer
+        // can read the source language without this parser highlighting it.
+        let mut parser = Parser::default();
+
+        let mi =
+            crate::blocks::Block::parse(crate::Span::new("```ruby\nputs 'hi'\n```"), &mut parser)
+                .unwrap_if_no_warnings()
+                .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Block::RawDelimited(RawDelimitedBlock {
+                content: Content {
+                    original: Span {
+                        data: "puts 'hi'",
+                        line: 2,
+                        col: 1,
+                        offset: 8,
+                    },
+                    rendered: "puts 'hi'",
+                },
+                content_model: ContentModel::Verbatim,
+                context: "listing",
+                source: Span {
+                    data: "```ruby\nputs 'hi'\n```",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: Some(Attrlist {
+                    attributes: &[
+                        ElementAttribute {
+                            name: None,
+                            value: "source",
+                            shorthand_items: &["source"],
+                        },
+                        ElementAttribute {
+                            name: None,
+                            value: "ruby",
+                            shorthand_items: &[],
+                        },
+                    ],
+                    anchor: None,
+                    source: Span {
+                        data: "ruby",
+                        line: 1,
+                        col: 4,
+                        offset: 3,
+                    },
+                }),
+                substitution_group: SubstitutionGroup::Verbatim,
+            })
+        );
+
+        // The block resolves to a source (highlighted listing) block, and the
+        // language is exposed as the second positional attribute.
+        assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
+        assert_eq!(mi.item.raw_context().as_ref(), "listing");
+        assert_eq!(mi.item.resolved_context().as_ref(), "listing");
+        assert_eq!(mi.item.declared_style(), Some("source"));
+        assert_eq!(mi.item.rendered_content(), Some("puts 'hi'"));
+
+        assert_eq!(
+            mi.item
+                .attrlist()
+                .and_then(|a| a.nth_attribute(2))
+                .map(|a| a.value()),
+            Some("ruby")
+        );
+    }
+
+    #[test]
+    fn language_on_fence_closes_on_bare_fence() {
+        // The closing fence of a language-aware fenced block is a bare ``` — the
+        // language appears only on the opening fence, so the closing fence never
+        // repeats it.
+        let mut parser = Parser::default();
+
+        let mi =
+            crate::blocks::Block::parse(crate::Span::new("```rust\nlet x = 1;\n```"), &mut parser)
+                .unwrap_if_no_warnings()
+                .unwrap();
+
+        assert_eq!(mi.item.resolved_context().as_ref(), "listing");
+        assert_eq!(mi.item.declared_style(), Some("source"));
+        assert_eq!(mi.item.rendered_content(), Some("let x = 1;"));
+
+        assert_eq!(
+            mi.item
+                .attrlist()
+                .and_then(|a| a.nth_attribute(2))
+                .map(|a| a.value()),
+            Some("rust")
+        );
+    }
+
+    #[test]
+    fn explicit_attrlist_takes_precedence_over_fence_language() {
+        // When the author supplies their own attribute list above the fence, it
+        // wins over the language shorthand on the fence line: the explicit
+        // `[source,python]` style is used and the fence's `ruby` is ignored.
+        let mut parser = Parser::default();
+
+        let mi = crate::blocks::Block::parse(
+            crate::Span::new("[source,python]\n```ruby\nprint('hi')\n```"),
+            &mut parser,
+        )
+        .unwrap_if_no_warnings()
+        .unwrap();
+
+        assert_eq!(mi.item.resolved_context().as_ref(), "listing");
+        assert_eq!(mi.item.declared_style(), Some("source"));
+        assert_eq!(mi.item.rendered_content(), Some("print('hi')"));
+
+        assert_eq!(
+            mi.item
+                .attrlist()
+                .and_then(|a| a.nth_attribute(2))
+                .map(|a| a.value()),
+            Some("python")
+        );
+    }
+
+    #[test]
+    fn language_on_fence_unterminated() {
+        // An unterminated language-aware fence still opens a listing block; the
+        // warning points at the full opening fence line.
+        let mut parser = Parser::default();
+
+        let maw = crate::blocks::Block::parse(crate::Span::new("```ruby\nputs 'hi'"), &mut parser);
+
+        let mi = maw.item.unwrap().clone();
+
+        assert_eq!(mi.item.raw_context().as_ref(), "listing");
+        assert_eq!(mi.item.declared_style(), Some("source"));
+        assert_eq!(mi.item.rendered_content(), Some("puts 'hi'"));
+
+        assert_eq!(
+            maw.warnings,
+            vec![Warning {
+                source: Span {
+                    data: "```ruby",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warning: WarningType::UnterminatedDelimitedBlock,
+            }]
+        );
+    }
+
+    #[test]
+    fn four_backticks_with_language_is_not_a_fence() {
+        // A run of four (or more) backticks is not a fence, even when followed by
+        // a language token; it is ordinary paragraph text.
+        let mut parser = Parser::default();
+
+        let mi = crate::blocks::Block::parse(
+            crate::Span::new("````ruby\nnot a fence\n````"),
+            &mut parser,
+        )
+        .unwrap_if_no_warnings()
+        .unwrap();
+
+        assert_eq!(mi.item.resolved_context().as_ref(), "paragraph");
+        assert_eq!(mi.item.content_model(), ContentModel::Simple);
+    }
+
+    #[test]
     fn unterminated() {
         let mut parser = Parser::default();
 

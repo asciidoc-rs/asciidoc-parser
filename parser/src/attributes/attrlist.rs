@@ -151,6 +151,31 @@ impl<'src> Attrlist<'src> {
         }
     }
 
+    /// Build the attribute list implied by a language-aware fenced code block
+    /// (`` ```lang ``).
+    ///
+    /// A fenced code block whose opening fence carries a language is shorthand
+    /// for a source block: it is equivalent to a `[source,<language>]`
+    /// attribute list applied to a listing block. The synthesized list
+    /// therefore carries the `source` block style in the first position and
+    /// the language in the second, so that downstream consumers resolve the
+    /// block to a source (highlighted listing) block and can read the
+    /// language via [`nth_attribute(2)`](Self::nth_attribute) — without
+    /// this parser performing any syntax highlighting itself.
+    ///
+    /// The `source` span is set to the language span, since that is the only
+    /// portion of the synthesized list that appears in the document source.
+    pub(crate) fn source_with_language(language: Span<'src>) -> Self {
+        Self {
+            attributes: vec![
+                ElementAttribute::synthesized_source_style(),
+                ElementAttribute::positional_from_span(language),
+            ],
+            anchor: None,
+            source: language,
+        }
+    }
+
     /// Merge a subsequent block attribute line into this one.
     ///
     /// A block can be preceded by more than one attribute list line (optionally

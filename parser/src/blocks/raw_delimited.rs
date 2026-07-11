@@ -25,6 +25,13 @@ use crate::{
 /// listing block. Like the open-block delimiter, it has a fixed length; four
 /// or more backticks are not a fence.
 ///
+/// A language may be declared on the opening fence (`` ```ruby ``). This is a
+/// shorthand for a source block — equivalent to `[source,ruby]` over a listing
+/// block — so the synthesized attribute list carries the `source` block style
+/// and the language, and the closing fence is a bare `` ``` ``. This parser
+/// records the language for a downstream renderer but performs no syntax
+/// highlighting itself.
+///
 /// In addition, an open-block delimiter (`--`) is recognized here when it
 /// carries a verbatim masquerade style: `source` or `listing` (parsed as a
 /// listing block) or `literal` (parsed as a literal block). Every other open
@@ -50,11 +57,12 @@ impl<'src> RawDelimitedBlock<'src> {
     pub(crate) fn is_valid_delimiter(line: &Span<'src>) -> bool {
         let data = line.data();
 
-        // The fenced code block delimiter is exactly three backticks. Unlike the
-        // four-character verbatim/raw delimiters, its length is fixed (as with
-        // the two-character open-block delimiter): a run of four or more
-        // backticks is not a fence.
-        if data == "```" {
+        // The fenced code block delimiter is exactly three backticks, optionally
+        // followed by a language on the opening fence (```ruby). Unlike the
+        // four-character verbatim/raw delimiters, its backtick run has a fixed
+        // length (as with the two-character open-block delimiter): a run of four
+        // or more backticks is not a fence.
+        if data == "```" || fenced_code_language(line).is_some() {
             return true;
         }
 
@@ -86,6 +94,15 @@ impl<'src> RawDelimitedBlock<'src> {
         let delimiter = metadata.block_start.take_normalized_line();
         let delimiter_data = delimiter.item.data();
 
+        // The line that closes the block. Every delimiter closes on a line that
+        // matches it exactly, except a language-aware fenced code block
+        // (```ruby), whose closing fence is a bare ``` — set below.
+        let mut close_delimiter = delimiter_data;
+
+        // The attribute list synthesized for a language-aware fenced code block.
+        // For every other block the author's own attribute list (if any) is used.
+        let mut fenced_attrlist: Option<Attrlist<'src>> = None;
+
         // A `--` open-block delimiter normally forms a compound (open) block, but
         // a verbatim masquerade style (`source`, `listing`, or `literal`) set on
         // it turns the block into a verbatim raw block. Every other delimiter
@@ -99,6 +116,23 @@ impl<'src> RawDelimitedBlock<'src> {
             // Its delimiter has a fixed length, so no trailing-character
             // validity check is required. The closing fence must match the
             // opening delimiter exactly, which the scan loop below enforces.
+            (
+                ContentModel::Verbatim,
+                "listing",
+                SubstitutionGroup::Verbatim,
+            )
+        } else if let Some(language) = fenced_code_language(&delimiter.item) {
+            // A fenced code block whose opening fence carries a language
+            // (```ruby) is shorthand for a source block: `[source,<language>]`
+            // over a listing block. The closing fence is a bare ``` (the
+            // language appears only on the opening fence). When the author has
+            // not supplied their own attribute list, synthesize the equivalent
+            // `[source,<language>]` so a downstream renderer can resolve the
+            // source language; an explicit attribute list takes precedence.
+            close_delimiter = "```";
+            if metadata.attrlist.is_none() {
+                fenced_attrlist = Some(Attrlist::source_with_language(language));
+            }
             (
                 ContentModel::Verbatim,
                 "listing",
@@ -140,18 +174,18 @@ impl<'src> RawDelimitedBlock<'src> {
             block_type
         };
 
+        // The block's effective attribute list: the one synthesized for a
+        // language-aware fenced code block, or otherwise the author's own list.
+        let attrlist = fenced_attrlist.or_else(|| metadata.attrlist.clone());
+
         // Assign the caption (and its number) from the block's context. Among
         // the raw delimited contexts only `listing` is captionable (a `source`
         // block resolves to the `listing` context); for every other context
         // `assign_block_caption` returns `None`. The caption is computed once,
         // here, so the context counter is consumed exactly once regardless of
         // which return path the block takes below.
-        let caption = assign_block_caption(
-            parser,
-            context,
-            metadata.attrlist.as_ref(),
-            metadata.title.is_some(),
-        );
+        let caption =
+            assign_block_caption(parser, context, attrlist.as_ref(), metadata.title.is_some());
         let number = caption.as_ref().and_then(|c| c.number);
         let caption = caption.map(|c| c.prefix);
 
@@ -160,7 +194,7 @@ impl<'src> RawDelimitedBlock<'src> {
 
         while !next.is_empty() {
             let line = next.take_normalized_line();
-            if line.item.data() == delimiter.item.data() {
+            if line.item.data() == close_delimiter {
                 let content = content_start.trim_remainder(next).trim_trailing_line_end();
 
                 let mut content: Content<'src> = content.into();
@@ -171,10 +205,10 @@ impl<'src> RawDelimitedBlock<'src> {
                 // `subs` override.
                 if context != "comment" {
                     substitution_group =
-                        substitution_group.override_via_attrlist(metadata.attrlist.as_ref());
+                        substitution_group.override_via_attrlist(attrlist.as_ref());
                 }
 
-                substitution_group.apply(&mut content, parser, metadata.attrlist.as_ref());
+                substitution_group.apply(&mut content, parser, attrlist.as_ref());
 
                 return Some(MatchAndWarnings {
                     item: Some(MatchedItem {
@@ -192,7 +226,7 @@ impl<'src> RawDelimitedBlock<'src> {
                             number,
                             anchor: metadata.anchor,
                             anchor_reftext: metadata.anchor_reftext,
-                            attrlist: metadata.attrlist.clone(),
+                            attrlist: attrlist.clone(),
                             substitution_group,
                         },
                         after: line.after,
@@ -222,7 +256,7 @@ impl<'src> RawDelimitedBlock<'src> {
                     number,
                     anchor: metadata.anchor,
                     anchor_reftext: metadata.anchor_reftext,
-                    attrlist: metadata.attrlist.clone(),
+                    attrlist,
                     substitution_group,
                 },
                 after: next,
@@ -237,6 +271,34 @@ impl<'src> RawDelimitedBlock<'src> {
     /// Return the interpreted content of this block.
     pub fn content(&self) -> &Content<'src> {
         &self.content
+    }
+}
+
+/// If `line` opens a language-aware fenced code block, return the language
+/// declared on the opening fence.
+///
+/// A language-aware fence is exactly three backticks immediately followed by an
+/// info string (`` ```ruby ``). The language is the first whitespace-delimited
+/// token of that info string. A bare `` ``` `` fence, a run of four or more
+/// backticks, and any non-fence line all return `None`.
+fn fenced_code_language<'src>(line: &Span<'src>) -> Option<Span<'src>> {
+    let rest = line.data().strip_prefix("```")?;
+
+    // A bare fence carries no language; a fourth backtick makes this a longer
+    // run, which is not a fence.
+    if rest.is_empty() || rest.starts_with('`') {
+        return None;
+    }
+
+    // The language is the first whitespace-delimited token of the info string
+    // (any leading whitespace is skipped; trailing content is ignored).
+    let info = line.discard(3).take_whitespace().after;
+    let language = info.take_while(|c| c != ' ' && c != '\t').item;
+
+    if language.is_empty() {
+        None
+    } else {
+        Some(language)
     }
 }
 
@@ -429,21 +491,26 @@ mod tests {
 
         #[test]
         fn fenced() {
-            // The fenced code block delimiter is exactly three backticks.
+            // The fenced code block delimiter is exactly three backticks ...
             assert!(RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
                 "```"
             )));
 
-            // A run of four or more backticks is not a fence (the delimiter has
-            // a fixed length, unlike the four-character delimiters).
+            // ... optionally followed by a language on the opening fence.
+            assert!(RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
+                "```java"
+            )));
+            assert!(RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
+                "```ruby"
+            )));
+
+            // A run of four or more backticks is not a fence (the backtick run
+            // has a fixed length, unlike the four-character delimiters).
             assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
                 "````"
             )));
             assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
                 "``"
-            )));
-            assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
-                "```java"
             )));
         }
 
