@@ -14,10 +14,6 @@ _11 July 2026_
 
 * Recognize language-aware fenced code blocks ([#630](https://github.com/asciidoc-rs/asciidoc-parser/pull/630))
 
-### Other
-
-* Cover language-fence info-string edge cases ([#632](https://github.com/asciidoc-rs/asciidoc-parser/pull/632))
-
 ## [0.19.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.19.0...v0.19.1)
 _10 July 2026_
 
