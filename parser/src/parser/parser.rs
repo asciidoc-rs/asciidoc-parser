@@ -972,9 +972,8 @@ impl Parser {
     /// Only `safe-mode-level` and `safe-mode-name` are stored here (shadowing
     /// their built-in Secure-mode defaults). The active `safe-mode-<name>` flag
     /// is synthesized on the fly from `safe-mode-name` (see
-    /// [`synthesized_attr`](super::built_in_attrs::synthesized_attr)), so
-    /// exactly one flag is ever defined and the inactive flags stay absent
-    /// without any per-mode bookkeeping here.
+    /// [`synthesized_attr`]), so exactly one flag is ever defined and the
+    /// inactive flags stay absent without any per-mode bookkeeping here.
     ///
     /// All of these are read-only from the document's perspective (they can
     /// only be established via the API), matching Ruby Asciidoctor.

@@ -91,14 +91,10 @@ pub(crate) fn synthesized_attr(
     // one) currently resolves to the plain value `expected`, letting a per-parser
     // entry shadow the built-in default.
     let has_value = |key: &str, expected: &str| -> bool {
-        let value = match overrides.get(key) {
-            Some(av) => &av.value,
-            None => match BUILT_IN_ATTRS.get(key) {
-                Some(av) => &av.value,
-                None => return false,
-            },
-        };
-        matches!(value, InterpretedValue::Value(v) if v == expected)
+        overrides
+            .get(key)
+            .or_else(|| BUILT_IN_ATTRS.get(key))
+            .is_some_and(|av| matches!(&av.value, InterpretedValue::Value(v) if v == expected))
     };
 
     if let Some(suffix) = name.strip_prefix("backend-html5-doctype-") {
