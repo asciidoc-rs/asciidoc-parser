@@ -512,6 +512,21 @@ mod tests {
             assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
                 "``"
             )));
+
+            // Backticks followed only by whitespace declare no language, so the
+            // line is not a language-aware fence.
+            assert!(!RawDelimitedBlock::is_valid_delimiter(&crate::Span::new(
+                "```\t"
+            )));
+            assert!(super::super::fenced_code_language(&crate::Span::new("```  ")).is_none());
+
+            // A language token is extracted from the info string, skipping any
+            // leading whitespace and ignoring anything after the first token.
+            assert_eq!(
+                super::super::fenced_code_language(&crate::Span::new("``` ruby extra"))
+                    .map(|s| s.data()),
+                Some("ruby")
+            );
         }
 
         #[test]
