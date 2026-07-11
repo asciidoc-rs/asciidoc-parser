@@ -1624,21 +1624,46 @@ fn process_content<'src>(
         let saved_locks = parser.locked_attribute_names.clone();
         {
             let locks = &mut parser.locked_attribute_names;
-            let mut maybe_lock = |name: &str, value: &AttributeValue| {
-                let api_locked = value.modification_context == ModificationContext::ApiOnly;
-                if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
-                    && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name)
-                {
-                    locks.insert(name.to_owned());
+            {
+                let mut maybe_lock = |name: &str, value: &AttributeValue| {
+                    let api_locked = value.modification_context == ModificationContext::ApiOnly;
+                    if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
+                        && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name)
+                    {
+                        locks.insert(name.to_owned());
+                    }
+                };
+                for (name, value) in built_in_attrs_iter() {
+                    if !saved_attributes.contains_key(name) {
+                        maybe_lock(name, value);
+                    }
                 }
-            };
-            for (name, value) in built_in_attrs_iter() {
-                if !saved_attributes.contains_key(name) {
+                for (name, value) in saved_attributes.iter() {
                     maybe_lock(name, value);
                 }
             }
-            for (name, value) in saved_attributes.iter() {
-                maybe_lock(name, value);
+
+            // The active `backend-html5-doctype-{doctype}` and `safe-mode-{name}`
+            // flags are synthesized (present in neither table), so the loops
+            // above miss them. They are inherited-and-set intrinsics, so lock
+            // them too — matching the behavior before they were synthesized,
+            // when the parent's active flag was materialized in the inherited map
+            // and thus locked. Without this, a cell body assignment such as
+            // `:backend-html5-doctype-article: x` (the derived flag is
+            // `Anywhere`-modifiable) would shadow the intrinsic empty value for
+            // the rest of the cell. The active flag's name follows the parent's
+            // resolved `doctype` / `safe-mode-name` value.
+            for (source, prefix) in [
+                ("doctype", "backend-html5-doctype-"),
+                ("safe-mode-name", "safe-mode-"),
+            ] {
+                if let Some(attr) = saved_attributes
+                    .get(source)
+                    .or_else(|| built_in_attr(source))
+                    && let InterpretedValue::Value(value) = &attr.value
+                {
+                    locks.insert(format!("{prefix}{value}"));
+                }
             }
         }
 

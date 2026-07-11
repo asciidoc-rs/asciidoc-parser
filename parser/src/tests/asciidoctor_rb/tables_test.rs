@@ -1135,6 +1135,20 @@ mod psv {
     }
 
     #[test]
+    fn asciidoc_table_cell_cannot_override_the_derived_doctype_flag() {
+        // The active `backend-html5-doctype-*` flag is an inherited intrinsic
+        // (empty value), so a cell-body assignment to it is locked and silently
+        // ignored: `{backend-html5-doctype-article}` still resolves to the empty
+        // intrinsic value rather than the cell's attempted override.
+        let doc = Parser::default().parse(
+            "= Document Title\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:backend-html5-doctype-article: custom\n\nflag=[{backend-html5-doctype-article}]\n|===",
+        );
+
+        assert_rendered_contains(&doc, "flag=[]");
+        refute_rendered_contains(&doc, "custom");
+    }
+
+    #[test]
     fn should_update_doctype_related_attributes_in_asciidoc_table_cell_when_doctype_is_set() {
         // Setting `:doctype: book` in the cell updates `{doctype}` and the
         // derived `backend-html5-doctype-*` attribute accordingly.
