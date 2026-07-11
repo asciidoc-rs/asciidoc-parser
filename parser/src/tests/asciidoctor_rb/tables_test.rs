@@ -962,12 +962,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/548): The crate
-    // mis-groups cells into rows when a leading row's colspans overflow the
-    // column count: for this input it produces seven single-cell rows instead of
-    // dropping the overflowing first row and forming one row of seven cells.
-    // Enable once row grouping accounts for the dropped colspan row.
     fn should_take_colspan_into_account_when_taking_cells_for_row() {
         let doc = Parser::default()
             .parse("[cols=7]\n|===\n2+|a 2+|b 2+|c 2+|d\n|e |f |g |h |i |j |k\n|===");
@@ -982,6 +976,9 @@ mod psv {
             warnings[0].warning,
             WarningType::TableCellExceedsColumnCount
         );
+
+        // The warning is logged against the overrunning first row (line 3).
+        assert_eq!(warnings[0].source.line(), 3);
     }
 
     #[test]
