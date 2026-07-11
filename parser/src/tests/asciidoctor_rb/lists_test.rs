@@ -2330,16 +2330,14 @@ mod description_lists_dlist {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/601):
-        // Enable this test when rulers are implemented.
         fn a_ruler_between_elements_should_divide_them_into_separate_lists() {
-            let _doc = Parser::default().parse("term1:: def1\n\n'''\n\nterm2:: def2\n");
-            todo!("assert_xpath: '//dl', output, 2");
-            todo!("assert_xpath: '//dl/dt', output, 2");
-            todo!("assert_xpath: '//dl//hr', output, 0");
-            todo!("assert_xpath: '(//dl)[1]/dt', output, 1");
-            todo!("assert_xpath: '(//dl)[2]/dt', output, 1");
+            let doc = Parser::default().parse("term1:: def1\n\n'''\n\nterm2:: def2\n");
+
+            assert_xpath(&doc, "//dl", 2);
+            assert_xpath(&doc, "//dl/dt", 2);
+            assert_xpath(&doc, "//dl//hr", 0);
+            assert_xpath(&doc, "(//dl)[1]/dt", 1);
+            assert_xpath(&doc, "(//dl)[2]/dt", 1);
         }
 
         #[test]
@@ -3725,9 +3723,6 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/601):
-        // Enable this test when rulers are implemented.
         fn folds_text_that_looks_like_ruler_offset_by_blank_line_and_line_comment() {
             let doc = Parser::default().parse("== Lists\n\nterm1::\n\n// comment\n'''\n");
 
@@ -3891,9 +3886,6 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/601):
-        // Enable this test when rulers are implemented.
         fn appends_line_attached_by_continuation_as_block_if_item_has_no_inline_description_followed_by_ruler()
          {
             let doc = Parser::default().parse("== Lists\n\nterm1::\n+\npara\n\n'''\n");
@@ -4573,22 +4565,27 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/601):
-        // Enable this test when rulers are implemented.
         fn appends_literal_line_attached_by_continuation_as_block_if_item_has_inline_description_followed_by_ruler()
          {
-            let _doc = Parser::default().parse("== Lists\n\nterm1:: def1\n+\n  literal\n\n'''\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd', output, 1");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]//dd/p[text()=\"def1\"]', output, 1");
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"literalblock\"]', output, 1"
+            let doc = Parser::default().parse("== Lists\n\nterm1:: def1\n+\n  literal\n\n'''\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd", 1);
+            assert_xpath(&doc, "//*[@class=\"dlist\"]//dd/p[text()=\"def1\"]", 1);
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"literalblock\"]",
+                1,
             );
-            todo!(
-                "assert_xpath: '//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"literalblock\"]//pre[text()=\"literal\"]', output, 1"
+
+            assert_xpath(
+                &doc,
+                "//*[@class=\"dlist\"]//dd/p/following-sibling::*[@class=\"literalblock\"]//pre[text()=\"literal\"]",
+                1,
             );
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/following-sibling::hr', output, 1");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/following-sibling::hr", 1);
         }
 
         #[test]
@@ -4774,12 +4771,10 @@ mod description_lists_redux {
         }
 
         #[test]
-        #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/601):
-        // Enable this test when rulers are implemented.
         fn ruler_offset_by_blank_line_divides_lists_because_item_has_text() {
-            let _doc = Parser::default().parse("== Lists\n\nterm1:: def1\n\n'''\n\nterm2:: def2\n");
-            todo!("assert_xpath: '//*[@class=\"dlist\"]/dl', output, 2");
+            let doc = Parser::default().parse("== Lists\n\nterm1:: def1\n\n'''\n\nterm2:: def2\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 2);
         }
 
         #[test]
