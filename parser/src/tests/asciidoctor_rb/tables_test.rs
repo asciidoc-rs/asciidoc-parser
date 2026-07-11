@@ -976,6 +976,9 @@ mod psv {
             warnings[0].warning,
             WarningType::TableCellExceedsColumnCount
         );
+
+        // The warning is logged against the overrunning first row (line 3).
+        assert_eq!(warnings[0].source.line(), 3);
     }
 
     #[test]
