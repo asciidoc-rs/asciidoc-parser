@@ -526,32 +526,32 @@ impl AttributeMissing {
 ///    `content.original()`. Simple, but the raw source still contains `{name}`
 ///    tokens that never reach substitution — inside removed comment lines and
 ///    inside passthroughs — so the pairing drifts out of alignment.
-/// 3. **Per-line positional correlation (chosen).** Anchor each rendered line to
-///    the source `Span` of the line it came from (retained at construction, see
-///    [`Content::from_filtered_lines`]), then pair the *k*-th reference on the
-///    rendered line with the *k*-th `{name}` in that source line.
+/// 3. **Per-line positional correlation (chosen).** Anchor each rendered line
+///    to the source `Span` of the line it came from (retained at construction,
+///    see [`Content::from_filtered_lines`]), then pair the *k*-th reference on
+///    the rendered line with the *k*-th `{name}` in that source line.
 ///
 /// Approach 3 works because the two length-changing steps that run before
 /// attributes (special characters, quotes) neither add, remove, nor reorder
 /// `{…}`-shaped tokens and never introduce or remove a newline, so a rendered
 /// line and its source line carry the same reference tokens in the same order.
-/// Anchoring per line (rather than per block) sidesteps the removed-comment-line
-/// drift of approach 2 for free.
+/// Anchoring per line (rather than per block) sidesteps the
+/// removed-comment-line drift of approach 2 for free.
 ///
 /// # Graceful degradation
 ///
-/// The correlation is best-effort. When a precise span can't be trusted it falls
-/// back to [`fallback_source`](Self::fallback_source) (the whole-content span,
-/// i.e. the pre-#564 behavior):
+/// The correlation is best-effort. When a precise span can't be trusted it
+/// falls back to [`fallback_source`](Self::fallback_source) (the whole-content
+/// span, i.e. the pre-#564 behavior):
 ///
-/// - No source line is available ([`source_line`](Self::source_line) is `None`),
-///   e.g. for content not built line-by-line from source.
+/// - No source line is available ([`source_line`](Self::source_line) is
+///   `None`), e.g. for content not built line-by-line from source.
 /// - The retained line count no longer matches the rendered line count, e.g. a
 ///   multi-line passthrough collapsed lines during extraction. The caller
 ///   detects this and withholds the source line.
-/// - The *k*-th source-line match's text does not equal the rendered match, e.g.
-///   an inline passthrough on the same line masked an earlier reference and
-///   shifted the count. The [text check](Self::warning_source) catches the
+/// - The *k*-th source-line match's text does not equal the rendered match,
+///   e.g. an inline passthrough on the same line masked an earlier reference
+///   and shifted the count. The [text check](Self::warning_source) catches the
 ///   mismatch and degrades to the fallback rather than pointing at the wrong
 ///   token.
 #[derive(Debug)]
@@ -567,8 +567,8 @@ struct AttributeReplacer<'p> {
     fallback_source: Span<'p>,
 
     /// Source `Span` of the line currently being processed, when known. Every
-    /// attribute reference on this line is located by slicing a subrange of this
-    /// span. `None` disables precise location (the warning uses
+    /// attribute reference on this line is located by slicing a subrange of
+    /// this span. `None` disables precise location (the warning uses
     /// [`fallback_source`](Self::fallback_source)).
     source_line: Option<Span<'p>>,
 
@@ -594,8 +594,8 @@ impl<'p> AttributeReplacer<'p> {
     /// used to locate `warn` warnings precisely.
     ///
     /// `source_line` is the source span the line was rendered from, or `None`
-    /// when no precise mapping is available. `fallback_source` is the coarse span
-    /// used when a precise location cannot be recovered.
+    /// when no precise mapping is available. `fallback_source` is the coarse
+    /// span used when a precise location cannot be recovered.
     fn new(
         parser: &'p Parser,
         mode: AttributeMissing,
@@ -627,10 +627,10 @@ impl<'p> AttributeReplacer<'p> {
     /// reference at `index` on this line, whose matched text (including any
     /// leading escape backslash) is `matched`.
     ///
-    /// Falls back to [`fallback_source`](Self::fallback_source) unless a retained
-    /// source-line match at `index` exists *and* its text equals `matched` — the
-    /// text check guards against a correlation that has drifted (see the
-    /// type-level docs).
+    /// Falls back to [`fallback_source`](Self::fallback_source) unless a
+    /// retained source-line match at `index` exists *and* its text equals
+    /// `matched` — the text check guards against a correlation that has
+    /// drifted (see the type-level docs).
     fn warning_source(&self, index: usize, matched: &str) -> Span<'p> {
         if let Some(line) = self.source_line
             && let Some(range) = self.source_matches.get(index)
@@ -1636,8 +1636,8 @@ mod tests {
             }
 
             /// Asserts that `warning`'s recorded offset/length select exactly
-            /// `expected` out of `text`, i.e. the warning points at that precise
-            /// reference in the original source.
+            /// `expected` out of `text`, i.e. the warning points at that
+            /// precise reference in the original source.
             fn assert_spans(warning: &crate::parser::DeferredWarning, text: &str, expected: &str) {
                 assert_eq!(
                     &text[warning.offset..warning.offset + warning.len],

@@ -47,19 +47,20 @@ pub struct Content<'src> {
     /// resolution it holds the resolved rendering.
     pub(crate) rendered: CowStr<'src>,
 
-    /// Source [`Span`] of each line that survived construction filtering, in the
-    /// same order as the lines of [`rendered`](Self::rendered) at construction
-    /// time.
+    /// Source [`Span`] of each line that survived construction filtering, in
+    /// the same order as the lines of [`rendered`](Self::rendered) at
+    /// construction time.
     ///
-    /// This is retained only so the attribute-references substitution can locate
-    /// an `attribute-missing=warn` warning at the precise source offset of the
-    /// offending `{name}` reference, rather than at the whole-content span. See
-    /// [`apply_attributes`](crate::content::substitution_step) for the rationale
-    /// and the correlation it performs.
+    /// This is retained only so the attribute-references substitution can
+    /// locate an `attribute-missing=warn` warning at the precise source
+    /// offset of the offending `{name}` reference, rather than at the
+    /// whole-content span. See
+    /// [`apply_attributes`](crate::content::substitution_step) for the
+    /// rationale and the correlation it performs.
     ///
     /// `None` when the content was not built line-by-line from document source
-    /// (e.g. [`From<Span>`] or a table cell's pre-filtered value), in which case
-    /// such warnings fall back to the whole-content span.
+    /// (e.g. [`From<Span>`] or a table cell's pre-filtered value), in which
+    /// case such warnings fall back to the whole-content span.
     source_lines: Option<Box<[Span<'src>]>>,
 
     /// Deferred cross-references discovered during substitution, awaiting
