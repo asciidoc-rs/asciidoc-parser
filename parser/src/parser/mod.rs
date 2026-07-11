@@ -11,7 +11,7 @@ mod docinfo_file_handler;
 pub use docinfo_file_handler::DocinfoFileHandler;
 
 mod include_file_handler;
-pub use include_file_handler::IncludeFileHandler;
+pub use include_file_handler::{IncludeContent, IncludeFileHandler};
 
 mod inline_substitution_renderer;
 pub use inline_substitution_renderer::{
