@@ -138,11 +138,9 @@ impl<'src> Content<'src> {
         filtered_lines: &[&str],
         line_spans: Vec<Span<'src>>,
     ) -> Self {
-        debug_assert_eq!(
-            filtered_lines.len(),
-            line_spans.len(),
-            "from_filtered_lines: one source span is required per filtered line"
-        );
+        // One source span is required per filtered line; the default
+        // `debug_assert_eq!` message reports both counts if this is ever broken.
+        debug_assert_eq!(filtered_lines.len(), line_spans.len());
 
         Self {
             original: span,
