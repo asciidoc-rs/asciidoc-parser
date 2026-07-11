@@ -13,7 +13,7 @@ use crate::{
         AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
         ResolvedAttributes, SafeMode, SvgFileHandler,
-        built_in_attrs::{built_in_attrs, built_in_default_values},
+        built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
         preprocessor::preprocess,
     },
     warnings::{Warning, WarningType},
@@ -23,11 +23,21 @@ use crate::{
 /// how AsciiDoc parsing occurs and then to initiate the parsing process.
 #[derive(Clone, Debug)]
 pub struct Parser {
-    /// Attribute values at current state of parsing.
+    /// Per-parser attribute values: **only** the attributes this parser has
+    /// defined, overridden, or explicitly unset. The large set of built-in
+    /// defaults is *not* copied in here; [`attribute_value`] falls back to the
+    /// shared built-in table (see [`built_in_attrs`]) on a lookup miss, so
+    /// creating or cloning a parser allocates nothing per built-in attribute.
     ///
-    /// Shared (copy-on-write via [`Arc`]) with the immutable built-in attribute
-    /// table, so creating or cloning a parser does not deep-copy the table; the
-    /// map is only copied the first time this parser modifies an attribute.
+    /// A per-parser entry always shadows the built-in default of the same name,
+    /// including an [`Unset`](InterpretedValue::Unset) tombstone that records a
+    /// built-in having been unset. The map is wrapped in an [`Arc`] so a parser
+    /// clone (e.g. for a nested AsciiDoc table cell) shares it copy-on-write
+    /// and only copies these (few) entries when it next modifies an
+    /// attribute.
+    ///
+    /// [`attribute_value`]: Self::attribute_value
+    /// [`built_in_attrs`]: super::built_in_attrs
     pub(crate) attribute_values: Arc<HashMap<String, AttributeValue>>,
 
     /// Default values for attributes if "set." Immutable after construction and
@@ -212,7 +222,9 @@ struct CalloutCatalog {
 impl Default for Parser {
     fn default() -> Self {
         Self {
-            attribute_values: built_in_attrs(),
+            // Starts empty: built-in defaults are resolved on the fly via the
+            // shared table (see `attribute_value`), not copied in per parser.
+            attribute_values: Arc::new(HashMap::new()),
             default_attribute_values: built_in_default_values(),
             renderer: Rc::new(HtmlSubstitutionRenderer {}),
             primary_file_name: None,
@@ -351,34 +363,53 @@ impl Parser {
     ///
     /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     pub fn attribute_value<N: AsRef<str>>(&self, name: N) -> InterpretedValue {
+        let name = name.as_ref();
+
         // A counter's current value lives in the overlay and supersedes any
         // earlier value of the attribute of the same name (see
         // [`counter_values`](Self::counter_values)).
-        if let Some(value) = self.counter_values.borrow().get(name.as_ref()) {
+        if let Some(value) = self.counter_values.borrow().get(name) {
             return InterpretedValue::Value(value.clone());
         }
 
-        self.attribute_values
-            .get(name.as_ref())
-            .map(|av| av.value.clone())
-            .map(|av| {
-                if let InterpretedValue::Set = av
-                    && let Some(default) = self.default_attribute_values.get(name.as_ref())
+        match self.effective_attribute(name) {
+            Some(av) => {
+                if let InterpretedValue::Set = av.value
+                    && let Some(default) = self.default_attribute_values.get(name)
                 {
                     InterpretedValue::Value(default.clone())
                 } else {
-                    av
+                    av.value.clone()
                 }
-            })
-            .unwrap_or(InterpretedValue::Unset)
+            }
+            None => InterpretedValue::Unset,
+        }
+    }
+
+    /// Returns the effective attribute definition for `name`: a per-parser
+    /// entry (an override or an explicit [unset] tombstone) shadows the
+    /// shared built-in default, which in turn shadows an on-the-fly
+    /// synthesized attribute (the active `backend-html5-doctype-*` and
+    /// `safe-mode-*` flags). The synthesized attributes are never
+    /// materialized in either table.
+    ///
+    /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
+    pub(crate) fn effective_attribute(&self, name: &str) -> Option<&AttributeValue> {
+        if let Some(av) = self.attribute_values.get(name) {
+            return Some(av);
+        }
+        if let Some(av) = built_in_attr(name) {
+            return Some(av);
+        }
+        synthesized_attr(name, &self.attribute_values)
     }
 
     /// Returns `true` if the parser has a [document attribute] by this name.
     ///
     /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     pub fn has_attribute<N: AsRef<str>>(&self, name: N) -> bool {
-        self.counter_values.borrow().contains_key(name.as_ref())
-            || self.attribute_values.contains_key(name.as_ref())
+        let name = name.as_ref();
+        self.counter_values.borrow().contains_key(name) || self.effective_attribute(name).is_some()
     }
 
     /// Returns `true` if the parser has a [document attribute] by this name
@@ -387,13 +418,14 @@ impl Parser {
     /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     pub fn is_attribute_set<N: AsRef<str>>(&self, name: N) -> bool {
+        let name = name.as_ref();
+
         // A counter always holds a concrete (set) value.
-        if self.counter_values.borrow().contains_key(name.as_ref()) {
+        if self.counter_values.borrow().contains_key(name) {
             return true;
         }
 
-        self.attribute_values
-            .get(name.as_ref())
+        self.effective_attribute(name)
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or(false)
     }
@@ -437,13 +469,17 @@ impl Parser {
         }
     }
 
-    /// Forces the `doctype` attribute to `value`, refreshing the derived
-    /// `backend-html5-doctype-*` attribute.
+    /// Forces the `doctype` attribute to `value`.
     ///
     /// Used when a nested AsciiDoc table cell resets its doctype to the default
     /// (a cell does not inherit the parent's doctype). The value stays
     /// modifiable from the document body so the cell may still set its own
     /// doctype.
+    ///
+    /// The derived `backend-html5-doctype-{doctype}` attribute needs no
+    /// explicit refresh: it is synthesized on the fly for whatever
+    /// `doctype` currently resolves to (see
+    /// [`attribute_value`](Self::attribute_value)).
     pub(crate) fn force_doctype(&mut self, value: &str) {
         Arc::make_mut(&mut self.attribute_values).insert(
             "doctype".to_string(),
@@ -454,28 +490,6 @@ impl Parser {
                 value: InterpretedValue::Value(value.to_string()),
             },
         );
-        self.refresh_doctype_derived_attr();
-    }
-
-    /// Recomputes the `backend-html5-doctype-{doctype}` intrinsic attribute so
-    /// exactly one exists — for the active doctype — resolving to an empty
-    /// (defined) value. References to any other doctype stay undefined and so
-    /// render literally.
-    pub(crate) fn refresh_doctype_derived_attr(&mut self) {
-        Arc::make_mut(&mut self.attribute_values)
-            .retain(|name, _| !name.starts_with("backend-html5-doctype-"));
-
-        if let InterpretedValue::Value(doctype) = self.attribute_value("doctype") {
-            Arc::make_mut(&mut self.attribute_values).insert(
-                format!("backend-html5-doctype-{doctype}"),
-                AttributeValue {
-                    allowable_value: AllowableValue::Any,
-                    modification_context: ModificationContext::Anywhere,
-                    silent_when_locked: false,
-                    value: InterpretedValue::Value(String::new()),
-                },
-            );
-        }
     }
 
     /// Sets the value of an [intrinsic attribute].
@@ -942,7 +956,7 @@ impl Parser {
         self
     }
 
-    /// Refreshes the `safe-mode-*` family of [intrinsic attributes] from the
+    /// Overrides the `safe-mode-*` family of [intrinsic attributes] from the
     /// current safe mode.
     ///
     /// These attributes let a document (or a downstream converter) inspect the
@@ -952,16 +966,20 @@ impl Parser {
     /// * `safe-mode-name` — the lowercase mode name (`unsafe`, `safe`,
     ///   `server`, or `secure`).
     /// * `safe-mode-<name>` — a single flag attribute (set to an empty value)
-    ///   naming the active mode; the flags for the other modes are left unset
-    ///   so that a reference to them resolves literally.
+    ///   naming the active mode; the flags for the other modes are absent so
+    ///   that a reference to them resolves literally.
+    ///
+    /// Only `safe-mode-level` and `safe-mode-name` are stored here (shadowing
+    /// their built-in Secure-mode defaults). The active `safe-mode-<name>` flag
+    /// is synthesized on the fly from `safe-mode-name` (see
+    /// [`synthesized_attr`]), so exactly one flag is ever defined and the
+    /// inactive flags stay absent without any per-mode bookkeeping here.
     ///
     /// All of these are read-only from the document's perspective (they can
     /// only be established via the API), matching Ruby Asciidoctor.
     ///
     /// [intrinsic attributes]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes-ref/#intrinsic-attributes
     fn apply_safe_mode_attributes(&mut self) {
-        let attrs = Arc::make_mut(&mut self.attribute_values);
-
         let intrinsic = |value: InterpretedValue| AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::ApiOnly,
@@ -969,6 +987,7 @@ impl Parser {
             value,
         };
 
+        let attrs = Arc::make_mut(&mut self.attribute_values);
         attrs.insert(
             "safe-mode-level".to_string(),
             intrinsic(InterpretedValue::Value(self.safe.level().to_string())),
@@ -977,22 +996,6 @@ impl Parser {
             "safe-mode-name".to_string(),
             intrinsic(InterpretedValue::Value(self.safe.name().to_string())),
         );
-
-        // Exactly one `safe-mode-<name>` flag is set (to an empty value); the
-        // rest are removed so that referencing them resolves literally.
-        for mode in [
-            SafeMode::Unsafe,
-            SafeMode::Safe,
-            SafeMode::Server,
-            SafeMode::Secure,
-        ] {
-            let name = format!("safe-mode-{}", mode.name());
-            if mode == self.safe {
-                attrs.insert(name, intrinsic(InterpretedValue::Set));
-            } else {
-                attrs.remove(&name);
-            }
-        }
     }
 
     /// Returns the [`SafeMode`] under which this parser operates.
@@ -1041,10 +1044,17 @@ impl Parser {
     ) {
         let attr_name = remap_attr_name(attr.name().data());
 
-        let existing_attr = self.attribute_values.get(&attr_name);
+        // The `backend-html5-doctype-*` namespace is a read-only synthesized
+        // intrinsic; a document must not write any of it (see
+        // [`is_reserved_doctype_derived_attr`]).
+        if is_reserved_doctype_derived_attr(&attr_name) {
+            return;
+        }
 
-        // Verify that we have permission to overwrite any existing attribute value.
-        if let Some(existing_attr) = existing_attr
+        // Verify that we have permission to overwrite any existing attribute
+        // value, considering both a per-parser entry and the shared built-in
+        // default it would shadow (a built-in such as `sp` is `ApiOnly`).
+        if let Some(existing_attr) = self.effective_attribute(&attr_name)
             && (existing_attr.modification_context == ModificationContext::ApiOnly
                 || existing_attr.modification_context == ModificationContext::ApiOrDocumentBody)
         {
@@ -1078,11 +1088,9 @@ impl Parser {
         // name.
         self.counter_values.borrow_mut().remove(&attr_name);
 
-        let is_doctype = attr_name == "doctype";
+        // The derived `backend-html5-doctype-*` attribute tracks `doctype`
+        // automatically (it is synthesized on lookup), so no refresh is needed.
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
-        if is_doctype {
-            self.refresh_doctype_derived_attr();
-        }
     }
 
     /// Called from [`Header::parse()`] for a value that is derived from parsing
@@ -1167,6 +1175,13 @@ impl Parser {
     ) {
         let attr_name = remap_attr_name(attr.name().data());
 
+        // The `backend-html5-doctype-*` namespace is a read-only synthesized
+        // intrinsic; a document must not write any of it (see
+        // [`is_reserved_doctype_derived_attr`]).
+        if is_reserved_doctype_derived_attr(&attr_name) {
+            return;
+        }
+
         // An attribute inherited from the parent document of an AsciiDoc table
         // cell is locked for the duration of that cell: a body assignment to it
         // is silently ignored (no warning), matching Asciidoctor.
@@ -1174,8 +1189,10 @@ impl Parser {
             return;
         }
 
-        // Verify that we have permission to overwrite any existing attribute value.
-        if let Some(existing_attr) = self.attribute_values.get(&attr_name)
+        // Verify that we have permission to overwrite any existing attribute
+        // value, considering both a per-parser entry and the shared built-in
+        // default it would shadow.
+        if let Some(existing_attr) = self.effective_attribute(&attr_name)
             && (existing_attr.modification_context != ModificationContext::Anywhere
                 && existing_attr.modification_context != ModificationContext::ApiOrDocumentBody)
         {
@@ -1201,11 +1218,9 @@ impl Parser {
         // name. This is what lets `:!name:` reset a counter.
         self.counter_values.borrow_mut().remove(&attr_name);
 
-        let is_doctype = attr_name == "doctype";
+        // The derived `backend-html5-doctype-*` attribute tracks `doctype`
+        // automatically (it is synthesized on lookup), so no refresh is needed.
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
-        if is_doctype {
-            self.refresh_doctype_derived_attr();
-        }
     }
 
     /// Assign the next section number for a given level.
@@ -1354,6 +1369,21 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
         "hardbreaks" => "hardbreaks-option".to_string(),
         _ => attr_name,
     }
+}
+
+/// Returns `true` if `name` belongs to the reserved `backend-html5-doctype-*`
+/// namespace, which is a read-only synthesized intrinsic keyed on the active
+/// `doctype` (see [`synthesized_attr`]).
+///
+/// A document header or body assignment to any such name is rejected — not only
+/// the flag that is active when the assignment is parsed. Otherwise a name that
+/// is inactive at assignment time (e.g. `backend-html5-doctype-article` while
+/// the doctype is `book`) would resolve to no synthesized attribute, pass the
+/// permission check, and be stored as a per-parser override that then shadows
+/// the intrinsic once the doctype switches to that value (e.g. in an AsciiDoc
+/// table cell that resets, then changes, its doctype).
+fn is_reserved_doctype_derived_attr(name: &str) -> bool {
+    name.starts_with("backend-html5-doctype-")
 }
 
 #[cfg(test)]
@@ -1718,8 +1748,11 @@ mod tests {
         }
     }
 
-    mod refresh_doctype_derived_attr {
-        use crate::{document::InterpretedValue, parser::Parser};
+    mod derived_doctype_attr {
+        use crate::{
+            document::InterpretedValue,
+            parser::{AllowableValue, AttributeValue, ModificationContext, Parser},
+        };
 
         #[test]
         fn tracks_the_active_doctype() {
@@ -1758,14 +1791,37 @@ mod tests {
                 InterpretedValue::Value(String::new())
             );
 
-            // With `doctype` unset (no `Value`), a refresh clears any existing
-            // derived attribute and defines none.
-            std::sync::Arc::make_mut(&mut parser.attribute_values).remove("doctype");
-            parser.refresh_doctype_derived_attr();
+            // Shadow the built-in `doctype` default with an explicit unset
+            // tombstone. With `doctype` no longer resolving to a `Value`, no
+            // derived attribute is synthesized for any doctype.
+            std::sync::Arc::make_mut(&mut parser.attribute_values).insert(
+                "doctype".to_string(),
+                AttributeValue {
+                    allowable_value: AllowableValue::Any,
+                    modification_context: ModificationContext::Anywhere,
+                    silent_when_locked: false,
+                    value: InterpretedValue::Unset,
+                },
+            );
 
             assert_eq!(parser.attribute_value("doctype"), InterpretedValue::Unset);
             assert_eq!(
                 parser.attribute_value("backend-html5-doctype-article"),
+                InterpretedValue::Unset
+            );
+        }
+
+        #[test]
+        fn document_header_cannot_assign_a_derived_doctype_flag() {
+            // The `backend-html5-doctype-*` namespace is a read-only intrinsic,
+            // so a document header assignment to it is ignored: the flag for the
+            // (inactive) `book` doctype stays undefined rather than taking the
+            // assigned value, so it cannot later shadow the intrinsic.
+            let mut parser = Parser::default();
+            let _doc = parser.parse("= Title\n:backend-html5-doctype-book: custom\n\nbody");
+
+            assert_eq!(
+                parser.attribute_value("backend-html5-doctype-book"),
                 InterpretedValue::Unset
             );
         }

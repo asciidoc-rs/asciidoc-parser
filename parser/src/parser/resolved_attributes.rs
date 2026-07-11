@@ -1,6 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{document::InterpretedValue, parser::AttributeValue};
+use crate::{
+    document::InterpretedValue,
+    parser::{
+        AttributeValue,
+        built_in_attrs::{built_in_attr, synthesized_attr},
+    },
+};
 
 /// A snapshot of a [`Parser`]'s fully-resolved document-attribute state, taken
 /// at the end of parsing so it can be retained on a [`Document`] and queried
@@ -50,25 +56,41 @@ impl ResolvedAttributes {
     ///
     /// Mirrors [`Parser::attribute_value`](crate::Parser::attribute_value).
     pub(crate) fn attribute_value<N: AsRef<str>>(&self, name: N) -> InterpretedValue {
+        let name = name.as_ref();
+
         // A counter's current value supersedes any earlier value of the
         // attribute of the same name.
-        if let Some(value) = self.counter_values.get(name.as_ref()) {
+        if let Some(value) = self.counter_values.get(name) {
             return InterpretedValue::Value(value.clone());
         }
 
-        self.attribute_values
-            .get(name.as_ref())
-            .map(|av| av.value.clone())
-            .map(|av| {
-                if let InterpretedValue::Set = av
-                    && let Some(default) = self.default_attribute_values.get(name.as_ref())
+        match self.effective_attribute(name) {
+            Some(av) => {
+                if let InterpretedValue::Set = av.value
+                    && let Some(default) = self.default_attribute_values.get(name)
                 {
                     InterpretedValue::Value(default.clone())
                 } else {
-                    av
+                    av.value.clone()
                 }
-            })
-            .unwrap_or(InterpretedValue::Unset)
+            }
+            None => InterpretedValue::Unset,
+        }
+    }
+
+    /// Returns the effective attribute definition for `name`, falling back to
+    /// the shared built-in defaults (and the synthesized derived doctype
+    /// attribute) exactly as [`Parser::effective_attribute`] does.
+    ///
+    /// [`Parser::effective_attribute`]: crate::Parser::effective_attribute
+    fn effective_attribute(&self, name: &str) -> Option<&AttributeValue> {
+        if let Some(av) = self.attribute_values.get(name) {
+            return Some(av);
+        }
+        if let Some(av) = built_in_attr(name) {
+            return Some(av);
+        }
+        synthesized_attr(name, &self.attribute_values)
     }
 
     /// Returns `true` if the named document attribute is present (whether or
@@ -76,8 +98,8 @@ impl ResolvedAttributes {
     ///
     /// Mirrors [`Parser::has_attribute`](crate::Parser::has_attribute).
     pub(crate) fn has_attribute<N: AsRef<str>>(&self, name: N) -> bool {
-        self.counter_values.contains_key(name.as_ref())
-            || self.attribute_values.contains_key(name.as_ref())
+        let name = name.as_ref();
+        self.counter_values.contains_key(name) || self.effective_attribute(name).is_some()
     }
 
     /// Returns `true` if the named document attribute is present and set (i.e.
@@ -87,13 +109,14 @@ impl ResolvedAttributes {
     ///
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     pub(crate) fn is_attribute_set<N: AsRef<str>>(&self, name: N) -> bool {
+        let name = name.as_ref();
+
         // A counter always holds a concrete (set) value.
-        if self.counter_values.contains_key(name.as_ref()) {
+        if self.counter_values.contains_key(name) {
             return true;
         }
 
-        self.attribute_values
-            .get(name.as_ref())
+        self.effective_attribute(name)
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or(false)
     }

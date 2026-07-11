@@ -962,12 +962,6 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/548): The crate
-    // mis-groups cells into rows when a leading row's colspans overflow the
-    // column count: for this input it produces seven single-cell rows instead of
-    // dropping the overflowing first row and forming one row of seven cells.
-    // Enable once row grouping accounts for the dropped colspan row.
     fn should_take_colspan_into_account_when_taking_cells_for_row() {
         let doc = Parser::default()
             .parse("[cols=7]\n|===\n2+|a 2+|b 2+|c 2+|d\n|e |f |g |h |i |j |k\n|===");
@@ -982,6 +976,9 @@ mod psv {
             warnings[0].warning,
             WarningType::TableCellExceedsColumnCount
         );
+
+        // The warning is logged against the overrunning first row (line 3).
+        assert_eq!(warnings[0].source.line(), 3);
     }
 
     #[test]
@@ -1132,6 +1129,42 @@ mod psv {
         assert_rendered_contains(&doc, "doctype=article");
         refute_rendered_contains(&doc, "{backend-html5-doctype-article}");
         assert_rendered_contains(&doc, "{backend-html5-doctype-book}");
+    }
+
+    #[test]
+    fn asciidoc_table_cell_cannot_override_the_derived_doctype_flag() {
+        // The active `backend-html5-doctype-*` flag is a read-only intrinsic
+        // (empty value), so a cell-body assignment to it is silently ignored:
+        // `{backend-html5-doctype-article}` still resolves to the empty intrinsic
+        // value rather than the cell's attempted override.
+        //
+        // The parent is a `book`, so the cell's active flag
+        // (`backend-html5-doctype-article`, after the cell resets to the default
+        // doctype) differs from the parent's — the case a lock computed from the
+        // parent's doctype would miss.
+        let doc = Parser::default().parse(
+            "= Book Title\n:doctype: book\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:backend-html5-doctype-article: custom\n\nflag=[{backend-html5-doctype-article}]\n|===",
+        );
+
+        assert_rendered_contains(&doc, "flag=[]");
+        refute_rendered_contains(&doc, "custom");
+    }
+
+    #[test]
+    fn asciidoc_table_cell_cannot_stash_a_derived_doctype_flag_while_it_is_inactive() {
+        // Assigning `:backend-html5-doctype-article:` while the cell's doctype is
+        // `book` (so that flag is not the active synthesized intrinsic) must not
+        // stash a per-parser override that later shadows the intrinsic once the
+        // cell switches its doctype back to `article`. The whole
+        // `backend-html5-doctype-*` namespace is read-only, so the assignment is
+        // ignored and `{backend-html5-doctype-article}` still resolves to the
+        // empty intrinsic value.
+        let doc = Parser::default().parse(
+            "= Doc Title\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:doctype: book\n:backend-html5-doctype-article: custom\n:doctype: article\n\nflag=[{backend-html5-doctype-article}]\n|===",
+        );
+
+        assert_rendered_contains(&doc, "flag=[]");
+        refute_rendered_contains(&doc, "custom");
     }
 
     #[test]
