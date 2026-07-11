@@ -257,7 +257,7 @@ impl<'p> PreprocessorState<'p> {
                     continue;
                 }
 
-                if let Some(include_text) =
+                if let Some(include_content) =
                     self.parser.include_file_handler.as_ref().and_then(|ifh| {
                         ifh.resolve_target(file_name, &target, &attrlist, self.parser)
                     })
@@ -267,19 +267,26 @@ impl<'p> PreprocessorState<'p> {
                     // Asciidoctor. Any nested include/conditional directives in an
                     // AsciiDoc include are therefore interpreted only on the
                     // selected, re-indented lines.
-                    let selected = select_included_lines(&include_text, &attrlist);
+                    let selected = select_included_lines(include_content.content(), &attrlist);
                     let selected = reindent_included_lines(selected, &attrlist, self.parser);
 
                     // The parser only handles UTF-8 content, so an `encoding`
-                    // attribute requesting any other encoding cannot be honored;
-                    // record a warning (emitted below, once the offset of the
-                    // included content is known). See `include.adoc`. Letting a
-                    // handler transcode instead is tracked in
+                    // attribute requesting any other encoding cannot be honored
+                    // by the parser itself; record a warning (emitted below, once
+                    // the offset of the included content is known). See
+                    // `include.adoc`. A handler that transcodes the content to
+                    // UTF-8 itself signals this via `IncludeContent::transcoded`,
+                    // in which case the encoding has been honored and no warning
+                    // is recorded. See
                     // https://github.com/asciidoc-rs/asciidoc-parser/issues/611.
-                    let non_utf8_encoding = attrlist
-                        .named_attribute("encoding")
-                        .map(|a| a.value())
-                        .filter(|v| !is_utf8_encoding(v));
+                    let non_utf8_encoding = (!include_content.encoding_handled())
+                        .then(|| {
+                            attrlist
+                                .named_attribute("encoding")
+                                .map(|a| a.value())
+                                .filter(|v| !is_utf8_encoding(v))
+                        })
+                        .flatten();
 
                     // `leveloffset` wraps the included content in `:leveloffset:`
                     // attribute entries: the offset is applied to the included
@@ -1311,7 +1318,8 @@ mod tests {
 
     use crate::{
         SafeMode,
-        parser::{SourceLine, preprocessor::preprocess},
+        attributes::Attrlist,
+        parser::{IncludeContent, IncludeFileHandler, SourceLine, preprocessor::preprocess},
         tests::{fixtures::inline_file_handler::InlineFileHandler, prelude::*},
     };
 
@@ -2657,6 +2665,41 @@ mod tests {
             &output[warnings[0].offset..warnings[0].offset + warnings[0].len],
             "Résumé."
         );
+    }
+
+    #[test]
+    fn transcoded_include_suppresses_encoding_warning() {
+        // A handler that transcodes non-UTF-8 content to UTF-8 itself returns
+        // `IncludeContent::transcoded`, which honors the requested `encoding`
+        // and suppresses the `NonUtf8IncludeEncoding` warning. See
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/611.
+        #[derive(Debug)]
+        struct TranscodingFileHandler;
+
+        impl IncludeFileHandler for TranscodingFileHandler {
+            fn resolve_target<'src>(
+                &self,
+                _source: Option<&str>,
+                _target: &str,
+                _attrlist: &Attrlist<'src>,
+                _parser: &Parser,
+            ) -> Option<IncludeContent> {
+                // Pretend the bytes on disk were `iso-8859-1` and we decoded
+                // them; the returned content is valid UTF-8.
+                Some(IncludeContent::transcoded("Résumé."))
+            }
+        }
+
+        let source = "include::sample.adoc[encoding=iso-8859-1]";
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(TranscodingFileHandler);
+
+        let (output, _source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(output, "Résumé.\n");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
     }
 
     #[test]

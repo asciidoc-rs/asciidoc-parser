@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use crate::{attributes::Attrlist, parser::IncludeFileHandler, tests::prelude::*};
+use crate::{
+    attributes::Attrlist,
+    parser::{IncludeContent, IncludeFileHandler},
+    tests::prelude::*,
+};
 
 #[derive(Debug)]
 pub(crate) struct InlineFileHandler(HashMap<&'static str, &'static str>);
@@ -18,7 +22,7 @@ impl IncludeFileHandler for InlineFileHandler {
         target: &str,
         _attrlist: &Attrlist<'src>,
         _parser: &Parser,
-    ) -> Option<String> {
-        self.0.get(target).map(|v| v.to_string())
+    ) -> Option<IncludeContent> {
+        self.0.get(target).map(|v| IncludeContent::new(*v))
     }
 }
