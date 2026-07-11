@@ -1133,12 +1133,17 @@ mod psv {
 
     #[test]
     fn asciidoc_table_cell_cannot_override_the_derived_doctype_flag() {
-        // The active `backend-html5-doctype-*` flag is an inherited intrinsic
-        // (empty value), so a cell-body assignment to it is locked and silently
-        // ignored: `{backend-html5-doctype-article}` still resolves to the empty
-        // intrinsic value rather than the cell's attempted override.
+        // The active `backend-html5-doctype-*` flag is a read-only intrinsic
+        // (empty value), so a cell-body assignment to it is silently ignored:
+        // `{backend-html5-doctype-article}` still resolves to the empty intrinsic
+        // value rather than the cell's attempted override.
+        //
+        // The parent is a `book`, so the cell's active flag
+        // (`backend-html5-doctype-article`, after the cell resets to the default
+        // doctype) differs from the parent's — the case a lock computed from the
+        // parent's doctype would miss.
         let doc = Parser::default().parse(
-            "= Document Title\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:backend-html5-doctype-article: custom\n\nflag=[{backend-html5-doctype-article}]\n|===",
+            "= Book Title\n:doctype: book\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:backend-html5-doctype-article: custom\n\nflag=[{backend-html5-doctype-article}]\n|===",
         );
 
         assert_rendered_contains(&doc, "flag=[]");

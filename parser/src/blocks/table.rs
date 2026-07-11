@@ -1618,52 +1618,33 @@ fn process_content<'src>(
         // is unset — matching Asciidoctor, where an API-controlled attribute can
         // never be overridden in a cell. An attribute merely unset in the parent
         // document is not locked, so the cell may assign it.
+        //
         // The inherited attribute set is the shared built-in defaults with the
         // parent's per-parser entries (`saved_attributes`) layered on top, so
         // walk both, letting a per-parser entry shadow a like-named built-in.
+        // The synthesized `backend-html5-doctype-*` and `safe-mode-*` flags need
+        // no lock here: they are read-only intrinsics that reject a cell-body
+        // assignment on their own (see `DERIVED_DOCTYPE_ATTR` /
+        // `SAFE_MODE_ACTIVE_FLAG`), which a static lock could not do anyway once
+        // the cell changes its own doctype.
         let saved_locks = parser.locked_attribute_names.clone();
         {
             let locks = &mut parser.locked_attribute_names;
-            {
-                let mut maybe_lock = |name: &str, value: &AttributeValue| {
-                    let api_locked = value.modification_context == ModificationContext::ApiOnly;
-                    if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
-                        && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name)
-                    {
-                        locks.insert(name.to_owned());
-                    }
-                };
-                for (name, value) in built_in_attrs_iter() {
-                    if !saved_attributes.contains_key(name) {
-                        maybe_lock(name, value);
-                    }
+            let mut maybe_lock = |name: &str, value: &AttributeValue| {
+                let api_locked = value.modification_context == ModificationContext::ApiOnly;
+                if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
+                    && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name)
+                {
+                    locks.insert(name.to_owned());
                 }
-                for (name, value) in saved_attributes.iter() {
+            };
+            for (name, value) in built_in_attrs_iter() {
+                if !saved_attributes.contains_key(name) {
                     maybe_lock(name, value);
                 }
             }
-
-            // The active `backend-html5-doctype-{doctype}` and `safe-mode-{name}`
-            // flags are synthesized (present in neither table), so the loops
-            // above miss them. They are inherited-and-set intrinsics, so lock
-            // them too — matching the behavior before they were synthesized,
-            // when the parent's active flag was materialized in the inherited map
-            // and thus locked. Without this, a cell body assignment such as
-            // `:backend-html5-doctype-article: x` (the derived flag is
-            // `Anywhere`-modifiable) would shadow the intrinsic empty value for
-            // the rest of the cell. The active flag's name follows the parent's
-            // resolved `doctype` / `safe-mode-name` value.
-            for (source, prefix) in [
-                ("doctype", "backend-html5-doctype-"),
-                ("safe-mode-name", "safe-mode-"),
-            ] {
-                if let Some(attr) = saved_attributes
-                    .get(source)
-                    .or_else(|| built_in_attr(source))
-                    && let InterpretedValue::Value(value) = &attr.value
-                {
-                    locks.insert(format!("{prefix}{value}"));
-                }
+            for (name, value) in saved_attributes.iter() {
+                maybe_lock(name, value);
             }
         }
 

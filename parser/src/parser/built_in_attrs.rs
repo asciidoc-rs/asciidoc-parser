@@ -37,10 +37,21 @@ static BUILT_IN_ATTRS: LazyLock<HashMap<String, AttributeValue>> =
 /// resolved on the fly from the current `doctype` rather than materialized, so
 /// it lives here as a single shared value that lookups can hand out by
 /// reference. See [`synthesized_attr`].
+///
+/// It is a read-only intrinsic: it tracks `doctype` automatically, so a
+/// document header or body assignment to it (e.g.
+/// `:backend-html5-doctype-article: x`) is silently ignored ([`ApiOnly`] +
+/// [`silent_when_locked`]) rather than being allowed to shadow the intrinsic
+/// empty value. This self-protection replaces the previous scheme
+/// (materialize-and-lock inside an AsciiDoc table cell), which could not follow
+/// the cell's dynamically-changing doctype.
+///
+/// [`ApiOnly`]: ModificationContext::ApiOnly
+/// [`silent_when_locked`]: AttributeValue::silent_when_locked
 static DERIVED_DOCTYPE_ATTR: LazyLock<AttributeValue> = LazyLock::new(|| AttributeValue {
     allowable_value: AllowableValue::Any,
-    modification_context: ModificationContext::Anywhere,
-    silent_when_locked: false,
+    modification_context: ModificationContext::ApiOnly,
+    silent_when_locked: true,
     value: InterpretedValue::Value(String::new()),
 });
 
@@ -49,10 +60,14 @@ static DERIVED_DOCTYPE_ATTR: LazyLock<AttributeValue> = LazyLock::new(|| Attribu
 /// is resolved on the fly (from `safe-mode-name`) rather than materialized, so
 /// the flags of the inactive modes stay genuinely absent. See
 /// [`synthesized_attr`].
+///
+/// It is likewise a read-only intrinsic (`ApiOnly` + `silent_when_locked`): a
+/// document assignment to it is silently ignored rather than shadowing the
+/// intrinsic value.
 static SAFE_MODE_ACTIVE_FLAG: LazyLock<AttributeValue> = LazyLock::new(|| AttributeValue {
     allowable_value: AllowableValue::Any,
     modification_context: ModificationContext::ApiOnly,
-    silent_when_locked: false,
+    silent_when_locked: true,
     value: InterpretedValue::Set,
 });
 
