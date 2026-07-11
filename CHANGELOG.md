@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.19.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.19.1...v0.19.2)
+_11 July 2026_
+
+### Added
+
+* Recognize language-aware fenced code blocks ([#630](https://github.com/asciidoc-rs/asciidoc-parser/pull/630))
+
 ## [0.19.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.19.0...v0.19.1)
 _10 July 2026_
 
