@@ -242,3 +242,53 @@ Only place include directives on consecutive lines if the intent is for the incl
 ////
 "#
 );
+
+// The remaining tests exercise behaviors the spec page only describes
+// non-normatively (an absolute `leveloffset`, and a header-scoped offset) plus
+// the parser's graceful handling of a malformed relative value. They are not
+// tied to a normative claim, so they use plain `#[test]` rather than
+// `verifies!`.
+
+#[test]
+fn absolute_offset_set_in_header_shifts_body_headings() {
+    // The spec's "Alternatively, you could use absolute levels" note applies an
+    // absolute `:leveloffset:` (here in the document header) rather than a
+    // relative one. An absolute offset is stored verbatim and applied to every
+    // following heading: `= Chapter One` (level 0) becomes a level-1 section and
+    // its `== A Section` (level 1) becomes level 2.
+    let doc = Parser::default().parse(concat!(
+        "= My Book\n",
+        ":leveloffset: 1\n",
+        "\n",
+        "= Chapter One\n",
+        "\n",
+        "== A Section",
+    ));
+
+    assert_eq!(
+        section_levels(&doc),
+        vec![
+            (1, "Chapter One".to_string()),
+            (2, "A Section".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn malformed_relative_offset_is_ignored() {
+    // A `leveloffset` whose relative form has no valid integer (`+x`) cannot be
+    // resolved, so it is left as-is and read back as a zero offset: headings are
+    // not shifted. `== Real Section` (level 1) therefore stays at level 1.
+    let doc = Parser::default().parse(concat!(
+        "= My Book\n",
+        "\n",
+        ":leveloffset: +x\n",
+        "\n",
+        "== Real Section",
+    ));
+
+    assert_eq!(
+        section_levels(&doc),
+        vec![(1, "Real Section".to_string())]
+    );
+}
