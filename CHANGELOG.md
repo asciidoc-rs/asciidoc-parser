@@ -28,10 +28,6 @@ The `full`/`short` `xrefstyle` support ([#640](https://github.com/asciidoc-rs/as
 * `ResolvedReference` (`parser::reference_resolver`) gains `signifier: Option<XrefSignifier>`. Prefer the `ResolvedReference::new`, `from_entry`, or `with_signifier` constructors over a struct literal to remain source-compatible across future field additions.
 * `XrefRenderParams` (`parser::inline_substitution_renderer`) gains `xrefstyle: Option<XrefStyle>`.
 
-### Other
-
-* Close two line-coverage gaps in parser.rs ([#645](https://github.com/asciidoc-rs/asciidoc-parser/pull/645))
-
 ## [0.20.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.19.2...v0.20.0)
 _12 July 2026_
 
