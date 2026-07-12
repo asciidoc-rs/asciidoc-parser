@@ -29,6 +29,21 @@ pub(crate) fn preprocess(
     source: &str,
     parser: &Parser,
 ) -> (String, SourceMap, Vec<DeferredWarning>) {
+    preprocess_with_initial_file_name(source, parser, parser.primary_file_name.as_deref())
+}
+
+/// Like [`preprocess`], but treats `initial_file_name` (rather than the
+/// parser's `primary_file_name`) as the file the top-level `source` came from.
+///
+/// This is used to preprocess the content of an AsciiDoc table cell, which the
+/// cell reached from some enclosing file: naming that file lets an unresolved
+/// `include::` directive inside the cell report the correct originating file in
+/// its "Unresolved directive in …" replacement, matching Asciidoctor.
+pub(crate) fn preprocess_with_initial_file_name(
+    source: &str,
+    parser: &Parser,
+    initial_file_name: Option<&str>,
+) -> (String, SourceMap, Vec<DeferredWarning>) {
     // Short-circuit if the original source document has no pre-processor
     // directives.
     if !source.starts_with("include::")
@@ -39,7 +54,7 @@ pub(crate) fn preprocess(
         && !source.contains("\n\\if")
         && !source.starts_with("\\include::")
         && !source.contains("\n\\include::")
-        && parser.primary_file_name.is_none()
+        && initial_file_name.is_none()
     {
         return (source.to_owned(), SourceMap::default(), vec![]);
     }
@@ -49,7 +64,7 @@ pub(crate) fn preprocess(
     // document parsing.
     let mut temp_parser = parser.clone();
     let mut state = PreprocessorState::new(&mut temp_parser);
-    state.process_adoc_include(source, parser.primary_file_name.as_deref());
+    state.process_adoc_include(source, initial_file_name);
 
     (state.output, state.source_map, state.warnings)
 }
