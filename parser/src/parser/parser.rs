@@ -956,19 +956,27 @@ impl Parser {
             .and_then(|sm| sm.original_file_and_line(line))
     }
 
-    /// Records a pre-resolved warning raised by a directive buried inside an
-    /// owned cell source, to be surfaced once an enclosing document-level cell
-    /// can anchor it (see [`take_owned_cell_warnings`]).
+    /// Records a warning raised by a directive at `line` in the innermost owned
+    /// cell's source, resolving `line` to the file and line it originally came
+    /// from so the warning can be surfaced later with a real cursor (see
+    /// [`take_owned_cell_warnings`]).
+    ///
+    /// A no-op when not inside an owned cell source (the line does not resolve
+    /// to an owned origin) — the caller only reaches this from an owned-cell
+    /// parse, but the guard keeps a stray call from recording an unanchorable
+    /// warning.
     ///
     /// Takes `&self`: an owned-cell parse holds the parser mutably behind a
     /// `self_cell` construction closure, so recording goes through interior
     /// mutability.
     ///
     /// [`take_owned_cell_warnings`]: Self::take_owned_cell_warnings
-    pub(crate) fn record_owned_cell_warning(&self, origin: SourceLine, warning: WarningType) {
-        self.owned_cell_warnings
-            .borrow_mut()
-            .push(ResolvedWarning { origin, warning });
+    pub(crate) fn record_owned_cell_warning(&self, line: usize, warning: WarningType) {
+        if let Some(origin) = self.owned_cell_original_file_and_line(line) {
+            self.owned_cell_warnings
+                .borrow_mut()
+                .push(ResolvedWarning { origin, warning });
+        }
     }
 
     /// Takes the owned-cell warnings recorded during parsing, leaving the
@@ -1686,6 +1694,50 @@ mod tests {
     fn default_is_unset() {
         let p = Parser::default();
         assert_eq!(p.attribute_value("foo"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn owned_cell_warning_is_recorded_only_inside_an_owned_cell_source() {
+        use std::rc::Rc;
+
+        use crate::{
+            parser::{SourceLine, SourceMap},
+            warnings::WarningType,
+        };
+
+        let mut p = Parser::default();
+
+        // Outside an owned cell source there is no map to resolve against, so a
+        // recorded warning has no origin and is dropped rather than queued.
+        assert!(!p.is_in_owned_cell_source());
+        p.record_owned_cell_warning(1, WarningType::IncludeFileNotFound("x.adoc".to_owned()));
+        assert!(p.take_owned_cell_warnings().is_empty());
+
+        // Publish a cell source map (output line 1 came from `cell.adoc` line 2,
+        // the way the preprocessor would record an include-expanded cell).
+        let mut sm = SourceMap::default();
+        sm.append(1, SourceLine(Some("cell.adoc".to_owned()), 2));
+        p.push_owned_cell_source_map(Rc::new(sm));
+        assert!(p.is_in_owned_cell_source());
+
+        // Now the same call resolves the line to its origin and queues the
+        // warning with that pre-resolved (file, line).
+        p.record_owned_cell_warning(1, WarningType::IncludeFileNotFound("y.adoc".to_owned()));
+        let recorded = p.take_owned_cell_warnings();
+        let [recorded] = recorded.as_slice() else {
+            panic!("expected exactly one recorded warning, got {recorded:?}");
+        };
+        assert_eq!(recorded.origin, SourceLine(Some("cell.adoc".to_owned()), 2));
+        assert_eq!(
+            recorded.warning,
+            WarningType::IncludeFileNotFound("y.adoc".to_owned())
+        );
+
+        // Taking drains the buffer, and popping restores the not-in-owned-cell
+        // state.
+        assert!(p.take_owned_cell_warnings().is_empty());
+        p.pop_owned_cell_source_map();
+        assert!(!p.is_in_owned_cell_source());
     }
 
     #[test]

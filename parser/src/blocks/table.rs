@@ -1750,14 +1750,12 @@ fn process_content<'src>(
             } else {
                 // `directive_line` indexes an enclosing owned cell's private
                 // source, which no document span maps to. Record each warning
-                // with the pre-resolved originating (file, line) computed above
-                // instead; a document-level cell up the stack surfaces it (see
-                // below). If the origin could not be resolved there is no cursor
-                // to report, so the warning is dropped (as it was before).
-                if let Some(origin) = cell_origin.clone() {
-                    for pw in preprocessor_warnings {
-                        parser.record_owned_cell_warning(origin.clone(), pw.warning);
-                    }
+                // against the directive's line in that owned source instead;
+                // `record_owned_cell_warning` resolves it to the originating
+                // (file, line), and a document-level cell up the stack surfaces
+                // it with that pre-resolved origin (see below).
+                for pw in preprocessor_warnings {
+                    parser.record_owned_cell_warning(directive_line.line(), pw.warning);
                 }
             }
 
