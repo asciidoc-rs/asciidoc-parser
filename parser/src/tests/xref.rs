@@ -39,6 +39,24 @@ fn first_paragraph<'a>(doc: &'a Document<'a>) -> &'a str {
     first_simple(doc).content().rendered()
 }
 
+/// Returns the first `SectionBlock` found in document order (recursing into
+/// nested blocks).
+fn first_section<'a>(doc: &'a Document<'a>) -> &'a crate::blocks::SectionBlock<'a> {
+    fn walk<'a>(
+        mut blocks: impl Iterator<Item = &'a Block<'a>>,
+    ) -> Option<&'a crate::blocks::SectionBlock<'a>> {
+        blocks.find_map(|block| {
+            if let Block::Section(section) = block {
+                Some(section)
+            } else {
+                walk(block.nested_blocks())
+            }
+        })
+    }
+
+    walk(doc.nested_blocks()).expect("expected at least one section block")
+}
+
 #[test]
 fn forward_reference_resolves() {
     let doc = Parser::default().parse("See <<later>>.\n\n[#later]\n== Later\n");
@@ -171,6 +189,38 @@ fn footnote_reaching_a_heading_via_attribute_is_kept_out_of_xref_text() {
     assert_eq!(footnotes.len(), 1);
     assert_eq!(footnotes[0].index, "1");
     assert_eq!(footnotes[0].text, "Not legal advice.");
+}
+
+#[test]
+fn footnote_and_xref_in_the_same_heading_render_without_sentinels() {
+    // A title containing both a footnote and a cross-reference exercises the
+    // deferred-template path: the footnote marker's sentinels must be stripped
+    // from the deferred template too, so resolving the xref (which rebuilds the
+    // rendered text from that template) does not reintroduce them.
+    let doc = Parser::default().parse(concat!(
+        "== Title footnote:[a note] see <<other>>\n",
+        "\n",
+        "[#other]\n",
+        "== Other\n",
+    ));
+
+    let title = first_section(&doc).section_title();
+
+    // No Private-Use-Area marker sentinels survive into the rendered heading.
+    assert!(
+        !title.contains('\u{E002}') && !title.contains('\u{E003}'),
+        "heading still contains marker sentinels: {title:?}"
+    );
+
+    // The heading keeps its footnote marker and its resolved cross-reference.
+    assert!(title.contains(r#"class="footnote""#), "{title:?}");
+    assert!(
+        title.contains(r##"<a href="#other">Other</a>"##),
+        "{title:?}"
+    );
+
+    // The footnote is registered exactly once.
+    assert_eq!(doc.catalog().footnotes().len(), 1);
 }
 
 #[test]
