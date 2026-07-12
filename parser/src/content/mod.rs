@@ -5,7 +5,10 @@
 
 mod content;
 pub use content::Content;
-pub(crate) use content::{FootnoteDeferred, XrefSegment, rehome_xref_placeholders};
+pub(crate) use content::{
+    FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, FootnoteDeferred, XrefSegment,
+    rehome_xref_placeholders, strip_footnote_marker_spans,
+};
 
 mod macros;
 

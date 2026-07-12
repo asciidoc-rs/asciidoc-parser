@@ -1667,6 +1667,17 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
             )
         };
 
+        // While a section title is substituted, bracket a real footnote's marker
+        // with sentinels so it can later be excised from the section's reference
+        // text and auto-generated ID (see `Parser::mark_footnote_spans`). The
+        // footnote is still defined and numbered here, in document order; only
+        // the marker's *placement* is annotated. A bare `footnote:[]` (the
+        // literal-text branch below) is not a footnote and is left unmarked.
+        let mark_span = parser.mark_footnote_spans.get() && (id.is_some() || content.is_some());
+        if mark_span {
+            dest.push(crate::content::FOOTNOTE_MARKER_START);
+        }
+
         // `id` and `content` own their data, so each branch renders its marker
         // before they are dropped (the params borrow them).
         if let Some(id) = id {
@@ -1732,6 +1743,10 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
         } else {
             // `footnote:[]` with neither an ID nor text is not a footnote.
             dest.push_str(&caps[0]);
+        }
+
+        if mark_span {
+            dest.push(crate::content::FOOTNOTE_MARKER_END);
         }
 
         LookaheadResult::Continue

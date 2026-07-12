@@ -119,6 +119,20 @@ pub struct Parser {
     /// parser.
     pub(crate) in_bibliography_list_item: Cell<bool>,
 
+    /// True while a section title is being substituted, so each `footnote:[…]`
+    /// macro's rendered marker is bracketed with
+    /// [`FOOTNOTE_MARKER_START`](crate::content::FOOTNOTE_MARKER_START) /
+    /// [`FOOTNOTE_MARKER_END`](crate::content::FOOTNOTE_MARKER_END) sentinels.
+    /// The footnote is still defined and numbered in document order; the
+    /// sentinels merely let the marker be excised from the section's reference
+    /// text and auto-generated ID without a second substitution pass (see
+    /// `SectionBlock::parse`).
+    ///
+    /// Wrapped in a [`Cell`] for the same reason as
+    /// [`in_bibliography_list_item`](Self::in_bibliography_list_item): the
+    /// substitution code paths hold only a shared reference to the parser.
+    pub(crate) mark_footnote_spans: Cell<bool>,
+
     /// Live values of [counter] attributes, keyed by counter name (e.g.
     /// `index`, `example-number`, `table-number`).
     ///
@@ -275,6 +289,7 @@ impl Default for Parser {
             topmost_section_type: SectionType::Normal,
             parsing_bibliography_section_body: false,
             in_bibliography_list_item: Cell::new(false),
+            mark_footnote_spans: Cell::new(false),
             counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,

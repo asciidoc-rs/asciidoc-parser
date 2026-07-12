@@ -4708,11 +4708,15 @@ mod macros {
 
         #[test]
         #[ignore]
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/594):
-        // Footnotes used in section titles are converted out of document order
-        // (titles are converted eagerly to generate IDs), so their numbering
-        // differs from document order. The crate does not yet model the eager
-        // out-of-order conversion of section titles.
+        // Intentional divergence (https://github.com/asciidoc-rs/asciidoc-parser/issues/594):
+        // Asciidoctor converts section titles eagerly and out of document order
+        // (to generate IDs and cross-reference text), so footnotes in headings
+        // are numbered out of sequence — this test asserts that quirk. The crate
+        // instead applies a title's substitutions before parsing its section
+        // body, numbering heading footnotes in straightforward document order.
+        // That in-order behavior is covered by
+        // `asciidoc_lang::macros::footnote::footnotes_in_headings_are_numbered_in_document_order`,
+        // so this Asciidoctor-fidelity test stays ignored.
         fn footnotes_in_headings_are_numbered_out_of_sequence() {}
     }
 

@@ -39,6 +39,24 @@ fn first_paragraph<'a>(doc: &'a Document<'a>) -> &'a str {
     first_simple(doc).content().rendered()
 }
 
+/// Returns the first `SectionBlock` found in document order (recursing into
+/// nested blocks).
+fn first_section<'a>(doc: &'a Document<'a>) -> &'a crate::blocks::SectionBlock<'a> {
+    fn walk<'a>(
+        mut blocks: impl Iterator<Item = &'a Block<'a>>,
+    ) -> Option<&'a crate::blocks::SectionBlock<'a>> {
+        blocks.find_map(|block| {
+            if let Block::Section(section) = block {
+                Some(section)
+            } else {
+                walk(block.nested_blocks())
+            }
+        })
+    }
+
+    walk(doc.nested_blocks()).expect("expected at least one section block")
+}
+
 #[test]
 fn forward_reference_resolves() {
     let doc = Parser::default().parse("See <<later>>.\n\n[#later]\n== Later\n");
@@ -89,6 +107,158 @@ fn natural_reference_by_reftext() {
 fn xref_macro_form_resolves() {
     let doc = Parser::default().parse("See xref:later[].\n\n[#later]\n== Later\n");
     assert_eq!(first_paragraph(&doc), "See <a href=\"#later\">Later</a>.");
+}
+
+#[test]
+fn footnote_in_heading_does_not_leak_into_xref_text() {
+    // A footnote in a section title is still a real, document-order footnote,
+    // but its marker must not appear in the reference text of an xref to that
+    // heading. (Asciidoctor achieves this only via an explicit-ID-plus-reftext
+    // workaround; the crate does it unconditionally. See issue #594.)
+    let doc = Parser::default().parse(concat!(
+        "See <<sect2>>.\n",
+        "\n",
+        "== Section 1\n",
+        "\n",
+        "para.footnote:[first footnote]\n",
+        "\n",
+        "[#sect2]\n",
+        "== Section 2footnote:[second footnote]\n",
+        "\n",
+        "para.footnote:[third footnote]\n",
+    ));
+
+    // The xref link text is the bare title, with no footnote marker.
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#sect2\">Section 2</a>."
+    );
+
+    // The heading's footnote is nonetheless registered, numbered in document
+    // order (1: first, 2: second/heading, 3: third).
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(
+        footnotes
+            .iter()
+            .map(|f| (f.index.as_str(), f.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("1", "first footnote"),
+            ("2", "second footnote"),
+            ("3", "third footnote"),
+        ]
+    );
+}
+
+#[test]
+fn footnote_in_heading_does_not_leak_into_generated_id() {
+    // The auto-generated section ID is likewise derived from the footnote-free
+    // title, so the footnote's number does not pollute the ID. A natural
+    // reference (by the title's reference text) resolves to the clean ID.
+    let doc = Parser::default().parse(concat!(
+        "See <<Section 2>>.\n",
+        "\n",
+        "== Section 2footnote:[a note]\n",
+    ));
+
+    // Without the footnote-free derivation the ID would absorb the footnote
+    // number (e.g. `_section_21`); it is instead the clean `_section_2`.
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#_section_2\">Section 2</a>."
+    );
+}
+
+#[test]
+fn footnote_reaching_a_heading_via_attribute_is_kept_out_of_xref_text() {
+    // The footnote enters the title through an attribute reference, so it is not
+    // visible in the raw title source. Because markers are annotated during the
+    // single title render (not gated on the source text), the footnote is still
+    // kept out of the reference text — and remains a real, numbered footnote.
+    let doc = Parser::default().parse(concat!(
+        ":disclaimer: footnote:[Not legal advice.]\n",
+        "\n",
+        "See <<Terms>>.\n",
+        "\n",
+        "== Terms{disclaimer}\n",
+    ));
+
+    assert_eq!(first_paragraph(&doc), "See <a href=\"#_terms\">Terms</a>.");
+
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(footnotes[0].index, "1");
+    assert_eq!(footnotes[0].text, "Not legal advice.");
+}
+
+#[test]
+fn footnote_and_xref_in_the_same_heading_render_without_sentinels() {
+    // A title containing both a footnote and a cross-reference exercises the
+    // deferred-template path: the footnote marker's sentinels must be stripped
+    // from the deferred template too, so resolving the xref (which rebuilds the
+    // rendered text from that template) does not reintroduce them.
+    let doc = Parser::default().parse(concat!(
+        "== Title footnote:[a note] see <<other>>\n",
+        "\n",
+        "[#other]\n",
+        "== Other\n",
+    ));
+
+    let title = first_section(&doc).section_title();
+
+    // No Private-Use-Area marker sentinels survive into the rendered heading.
+    assert!(
+        !title.contains('\u{E002}') && !title.contains('\u{E003}'),
+        "heading still contains marker sentinels: {title:?}"
+    );
+
+    // The heading keeps its footnote marker and its resolved cross-reference.
+    assert!(title.contains(r#"class="footnote""#), "{title:?}");
+    assert!(
+        title.contains(r##"<a href="#other">Other</a>"##),
+        "{title:?}"
+    );
+
+    // The footnote is registered exactly once.
+    assert_eq!(doc.catalog().footnotes().len(), 1);
+}
+
+#[test]
+fn footnote_in_heading_does_not_advance_a_counter_twice() {
+    // Deriving the footnote-free reference text from the same single render
+    // means a stateful `{counter:…}` in the title advances exactly once: the
+    // heading, its reference text, and the following body all agree.
+    let doc = Parser::default().parse(concat!(
+        "See <<Chapter 1>>.\n",
+        "\n",
+        "== Chapter {counter:ch}footnote:[a note]\n",
+        "\n",
+        "Next is {counter:ch}.\n",
+    ));
+
+    // The reference text reflects the first (and only) counter value, `1`.
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#_chapter_1\">Chapter 1</a>."
+    );
+
+    // The body's counter is `2`, not `3`: the title render did not advance it a
+    // second time.
+    let mut paragraphs = vec![];
+    fn collect<'a>(blocks: impl Iterator<Item = &'a Block<'a>>, out: &mut Vec<String>) {
+        for block in blocks {
+            if let Block::Simple(simple) = block {
+                out.push(simple.content().rendered().to_string());
+            }
+            collect(block.nested_blocks(), out);
+        }
+    }
+    collect(doc.nested_blocks(), &mut paragraphs);
+
+    assert!(
+        paragraphs.iter().any(|p| p == "Next is 2."),
+        "paragraphs were {paragraphs:?}"
+    );
 }
 
 #[test]
