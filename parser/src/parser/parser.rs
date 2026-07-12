@@ -12,7 +12,7 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
-        ResolvedAttributes, SafeMode, SvgFileHandler,
+        ResolvedAttributes, SafeMode, SourceMap, SvgFileHandler,
         built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
         preprocessor::preprocess,
     },
@@ -164,6 +164,38 @@ pub struct Parser {
     /// each AsciiDoc cell, so it nests correctly.
     pub(crate) nested_document_depth: usize,
 
+    /// Source map of the document currently being parsed, populated by
+    /// [`Document::parse`] for the duration of the parse (and `None` outside
+    /// it).
+    ///
+    /// Block parsing works from the *preprocessed* source, so a span's line
+    /// number is relative to that flattened source rather than to the original
+    /// input file(s). An AsciiDoc table cell whose first line is an `include::`
+    /// directive re-runs the preprocessor over the cell's content: to report an
+    /// unresolved directive against the file and line where it *originally*
+    /// appeared (rather than "(root file)"), the cell must map its position in
+    /// the preprocessed source back through this map. It is only consulted
+    /// while parsing the top-level document (`nested_document_depth == 0`),
+    /// where a cell's span still refers to that source.
+    ///
+    /// [`Document::parse`]: crate::Document
+    pub(crate) source_map: Option<Rc<SourceMap>>,
+
+    /// Number of include-expanded (owned) AsciiDoc table cells currently being
+    /// parsed in the call stack.
+    ///
+    /// An AsciiDoc cell whose first line is an `include::` directive is parsed
+    /// from a private, preprocessor-expanded copy of its content rather than
+    /// from the document source. While that owned copy is being parsed this
+    /// counter is greater than zero, and a span's line number no longer indexes
+    /// the document [`source_map`](Self::source_map). A cell reached this way
+    /// therefore cannot map its position back to an originating `(file, line)`,
+    /// so it falls back to the root-file diagnostic. A cell nested inside a
+    /// *borrowed* cell keeps document spans and is unaffected (the counter
+    /// stays zero). The counter is incremented and decremented around each
+    /// owned-cell parse, so it nests correctly.
+    pub(crate) owned_cell_source_depth: usize,
+
     /// Catalog of callout numbers registered by verbatim blocks, used to
     /// validate the callout lists that annotate them.
     ///
@@ -246,6 +278,8 @@ impl Default for Parser {
             counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
+            source_map: None,
+            owned_cell_source_depth: 0,
             callouts: RefCell::new(CalloutCatalog::default()),
             substitution_warnings: RefCell::new(vec![]),
         }
