@@ -24,7 +24,7 @@ use crate::{
 ///
 /// [`Parser`]: crate::Parser
 /// [`Document`]: crate::Document
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ResolvedAttributes {
     /// Attribute values as of the end of parsing (shared with the parser via
     /// [`Arc`]).

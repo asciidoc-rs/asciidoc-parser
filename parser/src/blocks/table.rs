@@ -13,7 +13,7 @@ use crate::{
     document::{InterpretedValue, TocConfig, TocMode},
     parser::{
         AttributeValue, InlineSubstitutionRenderer, ModificationContext, ReferenceResolver,
-        ReferenceWarning, built_in_attr, built_in_attrs_iter,
+        ReferenceWarning, ResolvedAttributes, built_in_attr, built_in_attrs_iter,
         preprocessor::preprocess_with_initial_file_name,
     },
     span::MatchedItem,
@@ -1763,7 +1763,7 @@ fn process_content<'src>(
                 // (include-expanded) source, so a table nested within cannot
                 // mis-map its spans against the document source map.
                 parser.owned_cell_source_depth += 1;
-                let (title, inline, toc, blocks) =
+                let (title, inline, toc, blocks, attributes) =
                     parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
                 parser.owned_cell_source_depth -= 1;
 
@@ -1780,16 +1780,19 @@ fn process_content<'src>(
                     inline,
                     toc,
                     blocks,
+                    attributes,
                 }
             });
             AsciiDocCell::Owned(Arc::new(owned))
         } else {
-            let (title, inline, toc, blocks) = parse_asciidoc_cell_body(trimmed, parser, warnings);
+            let (title, inline, toc, blocks, attributes) =
+                parse_asciidoc_cell_body(trimmed, parser, warnings);
             AsciiDocCell::Borrowed(BorrowedCell {
                 title,
                 inline,
                 toc,
                 blocks,
+                attributes,
             })
         };
 
@@ -1814,8 +1817,9 @@ fn process_content<'src>(
 }
 
 /// Parses the body of an AsciiDoc table cell — a nested, standalone AsciiDoc
-/// document — returning its (shown) title, whether its doctype is `inline`, and
-/// its blocks.
+/// document — returning its (shown) title, whether its doctype is `inline`, its
+/// table-of-contents configuration, its blocks, and a snapshot of the cell's
+/// resolved attribute state.
 ///
 /// A leading level-0 title line (`= Title`) is the nested document's title
 /// rather than a section, so it is split off and rendered here (a level-0
@@ -1823,11 +1827,23 @@ fn process_content<'src>(
 /// (`inline`, and whether the title is shown) depend on the cell's now-mutated
 /// attribute state, so they are resolved before the caller restores the
 /// parent's attribute snapshot.
+///
+/// The attribute snapshot is likewise taken here, before that restore, so the
+/// cell can be introspected as the nested document it is: it captures the
+/// attributes the cell inherited from the parent (plus any the cell body set),
+/// mirroring how a top-level [`Document`](crate::Document) retains its own
+/// resolved attribute state.
 fn parse_asciidoc_cell_body<'src>(
     content: Span<'src>,
     parser: &mut Parser,
     warnings: &mut Vec<Warning<'src>>,
-) -> (Option<String>, bool, TocConfig, Vec<Block<'src>>) {
+) -> (
+    Option<String>,
+    bool,
+    TocConfig,
+    Vec<Block<'src>>,
+    ResolvedAttributes,
+) {
     let first_line = content.take_line();
     let (title_source, body) = if first_line.item.data().starts_with("= ") {
         (
@@ -1878,7 +1894,15 @@ fn parse_asciidoc_cell_body<'src>(
     // restores the parent's attribute snapshot.
     let toc = TocConfig::from_parser(parser);
 
-    (title, inline, toc, maw.item.item)
+    // Snapshot the cell's resolved attribute state while the parser still holds
+    // it (the caller restores the parent's snapshot immediately after this
+    // returns). The snapshot shares the parser's attribute tables by `Arc`, so
+    // it is cheap. It lets a caller introspect the nested cell document —
+    // including the attributes it inherited from the parent — the same way the
+    // top-level `Document` exposes its own.
+    let attributes = parser.snapshot_attributes();
+
+    (title, inline, toc, maw.item.item, attributes)
 }
 
 /// Returns `true` when the cell content holds an `include::` preprocessor
@@ -2219,6 +2243,56 @@ impl<'src> AsciiDocCell<'src> {
         }
     }
 
+    /// Returns `true` because an AsciiDoc table cell is always a nested,
+    /// standalone document.
+    ///
+    /// This mirrors Asciidoctor's `Document#nested?`, which is `true` for the
+    /// document parsed from an AsciiDoc (`a`) cell and `false` for a top-level
+    /// document. It is provided so a caller that has navigated to the cell can
+    /// confirm it is introspecting a nested document (see also
+    /// [`attribute_value`](Self::attribute_value) and its siblings, which
+    /// expose the attributes the cell inherited from its parent).
+    pub fn is_nested(&self) -> bool {
+        true
+    }
+
+    /// Returns the resolved interpreted value of the named document attribute
+    /// as the cell's nested document saw it.
+    ///
+    /// The cell inherits the parent document's attributes, so this reports an
+    /// inherited value (such as a directory option the parent was configured
+    /// with) as well as any attribute the cell body set for itself. It mirrors
+    /// [`Document::attribute_value`](crate::Document::attribute_value) exactly,
+    /// resolving the cell's introspectable attribute state the same way the
+    /// top-level document resolves its own.
+    pub fn attribute_value<N: AsRef<str>>(&self, name: N) -> InterpretedValue {
+        self.attributes().attribute_value(name)
+    }
+
+    /// Returns `true` if the cell's nested document has a document attribute by
+    /// this name (whether or not it is set).
+    ///
+    /// Mirrors [`Document::has_attribute`](crate::Document::has_attribute).
+    pub fn has_attribute<N: AsRef<str>>(&self, name: N) -> bool {
+        self.attributes().has_attribute(name)
+    }
+
+    /// Returns `true` if the cell's nested document has a document attribute by
+    /// this name and it is set (i.e. not unset).
+    ///
+    /// Mirrors [`Document::is_attribute_set`](crate::Document::is_attribute_set).
+    pub fn is_attribute_set<N: AsRef<str>>(&self, name: N) -> bool {
+        self.attributes().is_attribute_set(name)
+    }
+
+    /// Returns the snapshot of the cell's resolved attribute state.
+    fn attributes(&self) -> &ResolvedAttributes {
+        match self {
+            Self::Borrowed(cell) => &cell.attributes,
+            Self::Owned(cell) => &cell.borrow_dependent().attributes,
+        }
+    }
+
     /// Resolves any deferred cross-references in the cell's blocks.
     fn resolve_references(
         &mut self,
@@ -2257,6 +2331,7 @@ pub struct BorrowedCell<'src> {
     inline: bool,
     toc: TocConfig,
     blocks: Vec<Block<'src>>,
+    attributes: ResolvedAttributes,
 }
 
 self_cell! {
@@ -2279,6 +2354,7 @@ struct OwnedCellInner<'src> {
     inline: bool,
     toc: TocConfig,
     blocks: Vec<Block<'src>>,
+    attributes: ResolvedAttributes,
 }
 
 /// Parse the value of the `cols` attribute into a list of columns, mirroring
@@ -2924,7 +3000,7 @@ fn line_has_unclosed_quote(line: &str) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use super::{AsciiDocCell, OwnedCell, OwnedCellInner, TocConfig};
+    use super::{AsciiDocCell, OwnedCell, OwnedCellInner, ResolvedAttributes, TocConfig};
     use crate::parser::{
         HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
     };
@@ -2953,6 +3029,7 @@ mod tests {
                 inline: false,
                 toc: TocConfig::disabled(),
                 blocks: vec![],
+                attributes: ResolvedAttributes::default(),
             }
         })));
 
