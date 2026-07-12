@@ -2,8 +2,9 @@ use std::slice::Iter;
 
 use crate::{
     HasSpan, Parser, Span,
+    attributes::{Attrlist, AttrlistContext},
     content::{Content, SubstitutionGroup},
-    document::{Attribute, Author, AuthorLine, RevisionLine},
+    document::{Attribute, Author, AuthorLine, InterpretedValue, RevisionLine},
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -16,6 +17,8 @@ use crate::{
 pub struct Header<'src> {
     title_source: Option<Span<'src>>,
     title: Option<String>,
+    main_title: Option<String>,
+    subtitle: Option<String>,
     attributes: Vec<Attribute<'src>>,
     author_line: Option<AuthorLine<'src>>,
     revision_line: Option<RevisionLine<'src>>,
@@ -78,6 +81,25 @@ impl<'src> Header<'src> {
                 parser.set_attribute_from_header(&attr.item, &mut warnings);
                 attributes.push(attr.item);
                 source = attr.after;
+            } else if title.is_none()
+                && line.starts_with('[')
+                && line.ends_with(']')
+                && line_mi.after.take_normalized_line().item.starts_with("= ")
+                && let Some((separator, separator_warnings)) =
+                    parse_separator_attribute(line, parser)
+            {
+                warnings.extend(separator_warnings);
+                // A `separator` block attribute directly above the document title
+                // sets the subtitle separator. It behaves exactly like assigning
+                // the `title-separator` document attribute at this point in the
+                // header, so both mechanisms share the same partitioning logic
+                // and follow document order when both are present.
+                //
+                // The line is only intercepted when a document title immediately
+                // follows; otherwise it is block metadata for the body (e.g. a
+                // table's `separator`) and is left for the block parser.
+                parser.set_attribute_by_value_from_header("title-separator", separator);
+                source = line_mi.after;
             } else if title.is_none() && line.starts_with("= ") {
                 let title_span = line.discard(2).discard_whitespace();
                 let title_str = apply_header_subs(title_span.data(), parser);
@@ -108,11 +130,25 @@ impl<'src> Header<'src> {
         let after = source.discard_empty_lines();
         let source = original_source.trim_remainder(source);
 
+        // Partition the (fully substituted) document title into a main title and
+        // an optional subtitle. This happens after the header has been fully
+        // parsed so that a `title-separator` attribute takes effect even when it
+        // is defined below the document title line.
+        let (main_title, subtitle) = match &title {
+            Some(title) => {
+                let (main_title, subtitle) = partition_title(title, parser);
+                (Some(main_title), subtitle)
+            }
+            None => (None, None),
+        };
+
         MatchAndWarnings {
             item: MatchedItem {
                 item: Self {
                     title_source,
                     title,
+                    main_title,
+                    subtitle,
                     attributes,
                     author_line,
                     revision_line,
@@ -132,8 +168,38 @@ impl<'src> Header<'src> {
 
     /// Return the document's title, if there was one, having applied header
     /// substitutions.
+    ///
+    /// If the title contains a subtitle (see [`subtitle`]), this returns the
+    /// full, combined title. Use [`main_title`] to obtain only the portion
+    /// preceding the subtitle.
+    ///
+    /// [`subtitle`]: Self::subtitle
+    /// [`main_title`]: Self::main_title
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    /// Return the main portion of the document title, if there was a title.
+    ///
+    /// When the document title contains a subtitle separator (a colon followed
+    /// by a space, by default), the title is partitioned into a main title and
+    /// a [`subtitle`]. This returns the portion preceding the final separator.
+    /// When there is no subtitle, this is identical to [`title`].
+    ///
+    /// [`subtitle`]: Self::subtitle
+    /// [`title`]: Self::title
+    pub fn main_title(&self) -> Option<&str> {
+        self.main_title.as_deref()
+    }
+
+    /// Return the document's subtitle, if the title contained one.
+    ///
+    /// A subtitle is the text following the final subtitle separator in the
+    /// document title. The separator defaults to a colon followed by a space
+    /// (`:{sp}`) and can be overridden with the `title-separator` document
+    /// attribute. Returns `None` when the title has no subtitle.
+    pub fn subtitle(&self) -> Option<&str> {
+        self.subtitle.as_deref()
     }
 
     /// Return an iterator over the attributes in this header.
@@ -163,6 +229,82 @@ impl<'src> HasSpan<'src> for Header<'src> {
     }
 }
 
+/// Extract the value of a `separator` attribute from a block attribute line
+/// (e.g. `[separator=::]`) appearing above the document title.
+///
+/// The `line` is expected to begin with `[` and end with `]`. Returns the
+/// `separator` value together with any warnings raised while parsing the
+/// attribute list if the line is a well-formed block attribute list that
+/// contains a `separator`, and `None` otherwise (so the caller can fall through
+/// to its normal handling of the line). The warnings are only surfaced when the
+/// line is actually consumed as a separator; otherwise the line is left for the
+/// block parser, which reports them on its own path.
+fn parse_separator_attribute<'src>(
+    line: Span<'src>,
+    parser: &Parser,
+) -> Option<(String, Vec<Warning<'src>>)> {
+    // Drop the enclosing square brackets now that the caller has confirmed they
+    // are present.
+    let inner = line.slice(1..line.len() - 1);
+
+    // Reject forms that are not block attribute lists, mirroring the checks used
+    // when parsing block metadata elsewhere: a leading space or tab, an empty
+    // list, or a `[[anchor]]` block anchor.
+    if inner.is_empty()
+        || inner.starts_with(' ')
+        || inner.starts_with('\t')
+        || (inner.starts_with('[') && inner.ends_with(']'))
+    {
+        return None;
+    }
+
+    let MatchAndWarnings {
+        item: MatchedItem {
+            item: attrlist,
+            after: _,
+        },
+        warnings,
+    } = Attrlist::parse(inner, parser, AttrlistContext::Block);
+
+    let separator = attrlist
+        .named_attribute("separator")
+        .map(|attr| attr.value().to_string())?;
+
+    Some((separator, warnings))
+}
+
+/// Partition a document title into its main title and optional subtitle.
+///
+/// The separator is the value of the `title-separator` document attribute
+/// (defaulting to `:`) with a single space appended. The separator is searched
+/// for from the end of the title, so only the last occurrence partitions the
+/// title. When the separator is not present, the entire title is the main
+/// title and there is no subtitle.
+fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
+    // Read the configured `title-separator` document attribute directly. Unlike
+    // `Parser::attribute_value`, this bypasses the counter overlay: the title
+    // separator is a configuration attribute, never a counter, and Asciidoctor
+    // likewise resolves it with a plain attribute lookup.
+    let separator = match parser.effective_attribute("title-separator") {
+        Some(av) => match &av.value {
+            InterpretedValue::Value(value) if !value.is_empty() => value.clone(),
+            _ => ":".to_string(),
+        },
+        None => ":".to_string(),
+    };
+
+    let separator = format!("{separator} ");
+
+    match title.rfind(&separator) {
+        Some(index) => {
+            let main_title = title[..index].to_string();
+            let subtitle = title[index + separator.len()..].to_string();
+            (main_title, Some(subtitle))
+        }
+        None => (title.to_string(), None),
+    }
+}
+
 fn apply_header_subs(source: &str, parser: &Parser) -> String {
     let span = Span::new(source);
 
@@ -177,6 +319,8 @@ impl std::fmt::Debug for Header<'_> {
         f.debug_struct("Header")
             .field("title_source", &self.title_source)
             .field("title", &self.title)
+            .field("main_title", &self.main_title)
+            .field("subtitle", &self.subtitle)
             .field("attributes", &DebugSliceReference(&self.attributes))
             .field("author_line", &self.author_line)
             .field("revision_line", &self.revision_line)
@@ -643,6 +787,10 @@ mod tests {
     title: Some(
         "Example Title",
     ),
+    main_title: Some(
+        "Example Title",
+    ),
+    subtitle: None,
     attributes: &[],
     author_line: None,
     revision_line: None,
@@ -655,5 +803,136 @@ mod tests {
     },
 }"#
         );
+    }
+
+    #[test]
+    fn no_subtitle() {
+        // A title without a colon-space sequence has no subtitle, and its main
+        // title equals its full title.
+        let doc = Parser::default().parse("= Just the Title");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Just the Title"));
+        assert_eq!(header.main_title(), Some("Just the Title"));
+        assert_eq!(header.subtitle(), None);
+    }
+
+    #[test]
+    fn no_title() {
+        // With no document title at all, every title accessor returns `None`.
+        let doc = Parser::default().parse(":foo: bar\n\nbody");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.main_title(), None);
+        assert_eq!(header.subtitle(), None);
+    }
+
+    #[test]
+    fn colon_without_space_is_not_a_separator() {
+        // The separator is a colon *followed by a space*; a bare colon does not
+        // partition the title.
+        let doc = Parser::default().parse("= Ratio 3:1 Explained");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Ratio 3:1 Explained"));
+        assert_eq!(header.subtitle(), None);
+    }
+
+    #[test]
+    fn subtitle_available_on_document() {
+        // The subtitle is reachable directly from `Document` as well as from its
+        // `Header`.
+        let doc = Parser::default().parse("= Main Title: Subtitle");
+
+        assert_eq!(doc.doctitle(), Some("Main Title: Subtitle"));
+        assert_eq!(doc.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn separator_block_attribute_above_title() {
+        // A `[separator=::]` block attribute above the title changes the
+        // subtitle separator for that title.
+        let doc = Parser::default().parse("[separator=::]\n= Main Title:: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Main Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+
+        // The custom separator replaces the default: a plain colon-space no
+        // longer partitions the title.
+        let doc = Parser::default().parse("[separator=::]\n= Main: Title:: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Main: Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn separator_attribute_entry_overrides_block_attribute() {
+        // When both are present, the later assignment wins in document order.
+        // Here the `:title-separator:` entry follows the block attribute.
+        let doc = Parser::default()
+            .parse("[separator=::]\n= Main Title;; Subtitle\n:title-separator: ;;");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Main Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn non_separator_block_attribute_terminates_header() {
+        // A block attribute line above the title that isn't a `separator`
+        // terminates the header without a title, preserving prior behavior.
+        let doc = Parser::default().parse("[foo=bar]\n= Not A Header Title");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.subtitle(), None);
+    }
+
+    #[test]
+    fn bracketed_line_that_is_not_a_separator_attribute_list() {
+        // A `[...]` line above the title that isn't a well-formed block
+        // attribute list carrying `separator` is not consumed as a separator. A
+        // block anchor (`[[...]]`) and a leading-space form are both rejected,
+        // so the line terminates the header exactly as any other unrecognized
+        // line would.
+        let doc = Parser::default().parse("[[anchor]]\n= Some Title: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.subtitle(), None);
+
+        let doc = Parser::default().parse("[ separator=::]\n= Main Title:: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.subtitle(), None);
+    }
+
+    #[test]
+    fn empty_title_separator_falls_back_to_default() {
+        // An explicitly empty `title-separator` falls back to the default
+        // `:{sp}` separator rather than partitioning on an empty string.
+        let doc = Parser::default().parse("= Main Title: Subtitle\n:title-separator:");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Main Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn counter_does_not_shadow_title_separator() {
+        // A counter that happens to be named `title-separator` must not be
+        // mistaken for the configured separator: partitioning reads the document
+        // attribute directly, ignoring the counter overlay. Here the title
+        // creates such a counter, but the default `:{sp}` separator still
+        // applies.
+        let doc = Parser::default().parse("= Main Title: Subtitle {counter:title-separator}");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Main Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle 1"));
     }
 }
