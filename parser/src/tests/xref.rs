@@ -14,7 +14,7 @@ use crate::{
     blocks::{Block, IsBlock, SimpleBlock},
     parser::{
         CatalogResolver, HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext,
-        ResolvedReference,
+        ResolvedReference, XrefSignifier,
     },
 };
 
@@ -112,6 +112,72 @@ fn unresolved_reference_falls_back_and_warns() {
 }
 
 #[test]
+fn xrefstyle_survives_deferred_resolution() {
+    // `xrefstyle` formatting is compatible with the two-phase resolve mechanism
+    // used for forward (and cross-document) references. The two inputs it needs
+    // are resolved at their natural points: the effective *style* is a property
+    // of the reference site, captured during parsing (alongside `provided_text`,
+    // `window`, and `roles`), while the target's *signifier and number* live in
+    // the catalog and are read only when references are resolved (alongside the
+    // target's `reftext`). So a forward reference is an unresolved fallback
+    // until resolution, then picks up its full styled text — the same lifecycle
+    // as a plain reference.
+    let src = ":sectnums:\n:xrefstyle: full\n\nSee <<install>>.\n\n\
+              == One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n\
+              [#install]\n=== Installation\n";
+
+    // Parse without resolving: the target section is parsed *after* the
+    // reference, so it is still pending and renders the unresolved fallback.
+    let mut doc = Parser::default().parse_deferred(src);
+    assert!(first_simple(&doc).content().has_unresolved_refs());
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#install\">[install]</a>."
+    );
+
+    // Resolving against the now-complete catalog applies the full style, drawing
+    // the signifier and number from the catalog entry registered for the target.
+    let catalog = doc.catalog().clone();
+    let resolver = CatalogResolver::new(&catalog);
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    assert!(warnings.is_empty());
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#install\">Section 2.3, &#8220;Installation&#8221;</a>.",
+    );
+}
+
+#[test]
+fn host_resolver_can_attach_signifier() {
+    // A host resolver that builds its `href`/`text` from scratch (rather than
+    // from a catalog `RefEntry`) can still opt a target into `full`/`short`
+    // formatting by attaching a signifier with `with_signifier`. The style still
+    // comes from the referencing document.
+    let mut doc = Parser::default().parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
+
+    let resolver = CrossDocResolver {
+        index: HashMap::from([(
+            "install".to_string(),
+            ResolvedReference::new(
+                "guide.html#install".to_string(),
+                Some("Installation".to_string()),
+            )
+            .with_signifier(XrefSignifier {
+                label: "Section 2.3".to_string(),
+                emphasize: false,
+            }),
+        )]),
+    };
+
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    assert!(warnings.is_empty());
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"guide.html#install\">Section 2.3, &#8220;Installation&#8221;</a>.",
+    );
+}
+
+#[test]
 fn escaped_reference_is_not_a_cross_reference() {
     // A backslash-escaped shorthand is emitted literally and is not deferred.
     let doc = Parser::default().parse("See \\<<later>>.\n\n[#later]\n== Later\n");
@@ -140,16 +206,15 @@ fn cross_document_resolution() {
     let doc_b = parser.parse_deferred("[#b-topic]\n== B Topic\n\nContent.\n");
 
     // The host builds a combined index from each document's catalog, assigning
-    // its own cross-document hrefs.
+    // its own cross-document hrefs. Building each entry with `from_entry` carries
+    // the target's reftext and signifier, so cross-document `xrefstyle`
+    // formatting keeps working (see `xrefstyle_carries_across_documents`).
     let mut index = HashMap::new();
     for id in ["b-topic"] {
         if let Some(entry) = doc_b.catalog().get_ref(id) {
             index.insert(
                 entry.id.clone(),
-                ResolvedReference {
-                    href: format!("doc-b.html#{id}"),
-                    text: entry.reftext.clone(),
-                },
+                ResolvedReference::from_entry(format!("doc-b.html#{id}"), entry),
             );
         }
     }
@@ -169,6 +234,39 @@ fn cross_document_resolution() {
 }
 
 #[test]
+fn xrefstyle_carries_across_documents() {
+    // Cross-document `xrefstyle` formatting works when the host resolver carries
+    // the target's signifier. The two inputs come from different documents: the
+    // *style* (`full`) is a property of the referencing document (doc A), while
+    // the *signifier and number* ("Section 2.3") are computed in the target
+    // document (doc B) and travel on its catalog entry. A host that builds its
+    // result with `ResolvedReference::from_entry` carries the signifier through
+    // automatically.
+    let mut parser = Parser::default();
+
+    let mut doc_a = parser.parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
+    let doc_b = parser.parse_deferred(
+        ":sectnums:\n\n== One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n[#install]\n=== Installation\n",
+    );
+
+    let mut index = HashMap::new();
+    if let Some(entry) = doc_b.catalog().get_ref("install") {
+        index.insert(
+            "install".to_string(),
+            ResolvedReference::from_entry("doc-b.html#install".to_string(), entry),
+        );
+    }
+    let resolver = CrossDocResolver { index };
+
+    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    assert!(warnings.is_empty());
+    assert_eq!(
+        first_paragraph(&doc_a),
+        "See <a href=\"doc-b.html#install\">Section 2.3, &#8220;Installation&#8221;</a>.",
+    );
+}
+
+#[test]
 fn resolution_is_repeatable() {
     // Resolving twice against different resolvers yields the second result —
     // resolution is non-destructive.
@@ -177,10 +275,7 @@ fn resolution_is_repeatable() {
     let first = CrossDocResolver {
         index: HashMap::from([(
             "topic".to_string(),
-            ResolvedReference {
-                href: "first.html#topic".to_string(),
-                text: Some("First".to_string()),
-            },
+            ResolvedReference::new("first.html#topic".to_string(), Some("First".to_string())),
         )]),
     };
     doc.resolve_references(&first, &HtmlSubstitutionRenderer {});
@@ -192,10 +287,7 @@ fn resolution_is_repeatable() {
     let second = CrossDocResolver {
         index: HashMap::from([(
             "topic".to_string(),
-            ResolvedReference {
-                href: "second.html#topic".to_string(),
-                text: Some("Second".to_string()),
-            },
+            ResolvedReference::new("second.html#topic".to_string(), Some("Second".to_string())),
         )]),
     };
     doc.resolve_references(&second, &HtmlSubstitutionRenderer {});
@@ -216,10 +308,7 @@ fn re_resolution_is_a_full_independent_sweep() {
     let knows_topic = CrossDocResolver {
         index: HashMap::from([(
             "topic".to_string(),
-            ResolvedReference {
-                href: "first.html#topic".to_string(),
-                text: Some("Topic".to_string()),
-            },
+            ResolvedReference::new("first.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
     let warnings = doc.resolve_references(&knows_topic, &HtmlSubstitutionRenderer {});
@@ -251,10 +340,7 @@ fn footnote_cross_references_resolve_via_host_resolver() {
     let resolver = CrossDocResolver {
         index: HashMap::from([(
             "topic".to_string(),
-            ResolvedReference {
-                href: "other.html#topic".to_string(),
-                text: Some("Topic".to_string()),
-            },
+            ResolvedReference::new("other.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
     let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
@@ -284,6 +370,43 @@ fn xref_macro_honors_role_and_non_blank_window() {
     assert_eq!(
         first_paragraph(&doc),
         r##"<a href="#sec" class="hint" target="_top">Go</a>"##
+    );
+}
+
+#[test]
+fn xrefstyle_value_interpretation() {
+    // Whether `xrefstyle` is *set* matters, not just its value. An appendix
+    // title is emphasized under any set style (its title is italicized rather
+    // than shown verbatim), but when `xrefstyle` is unset the target's reftext
+    // is used verbatim — no emphasis. This mirrors Ruby Asciidoctor, whose
+    // default `xrefstyle` is nil (not `basic`).
+    let with_xrefstyle = |header: &str| {
+        Parser::default().parse(&format!(
+            "{header}See <<data>>.\n\n[appendix]\n[#data]\n== Data\n"
+        ))
+    };
+
+    // Unset: reftext verbatim, no emphasis.
+    assert_eq!(
+        first_paragraph(&with_xrefstyle("")),
+        r##"See <a href="#data">Data</a>."##
+    );
+
+    // Explicit `basic`: the appendix title is emphasized.
+    assert_eq!(
+        first_paragraph(&with_xrefstyle(":xrefstyle: basic\n\n")),
+        r##"See <a href="#data"><em>Data</em></a>."##
+    );
+
+    // Set but empty (`:xrefstyle:`) and any unrecognized value both behave as
+    // `basic`.
+    assert_eq!(
+        first_paragraph(&with_xrefstyle(":xrefstyle:\n\n")),
+        r##"See <a href="#data"><em>Data</em></a>."##
+    );
+    assert_eq!(
+        first_paragraph(&with_xrefstyle(":xrefstyle: bogus\n\n")),
+        r##"See <a href="#data"><em>Data</em></a>."##
     );
 }
 

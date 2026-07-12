@@ -5,7 +5,7 @@ use regex::Regex;
 use crate::{
     Parser,
     attributes::Attrlist,
-    parser::{ResolvedReference, SafeMode},
+    parser::{ResolvedReference, SafeMode, XrefSignifier, XrefStyle},
 };
 
 /// An implementation of `InlineSubstitutionRenderer` is used when converting
@@ -448,6 +448,12 @@ pub struct XrefRenderParams<'a> {
     /// Roles supplied via a `role` attribute on the `xref:` macro. Empty when
     /// none were given.
     pub roles: &'a [String],
+
+    /// The cross-reference text style in effect for this reference (from the
+    /// `xrefstyle=` macro attribute or the document-wide `xrefstyle`). `None`
+    /// when `xrefstyle` is unset, in which case the target's reference text is
+    /// used verbatim.
+    pub xrefstyle: Option<XrefStyle>,
 
     /// The resolved destination, or `None` if the reference is unresolved.
     pub resolved: Option<&'a ResolvedReference>,
@@ -915,11 +921,18 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         match params.resolved {
             Some(resolved) => {
-                let text = params
-                    .provided_text
-                    .map(str::to_string)
-                    .or_else(|| resolved.text.clone())
-                    .unwrap_or_else(|| format!("[{target}]", target = params.target));
+                // Explicit link text always wins; otherwise use the target's
+                // reference text, optionally reformatted by the `xrefstyle`.
+                let text = match params.provided_text {
+                    Some(provided) => provided.to_string(),
+                    None => {
+                        let base = resolved
+                            .text
+                            .clone()
+                            .unwrap_or_else(|| format!("[{target}]", target = params.target));
+                        apply_xrefstyle(params.xrefstyle, resolved.signifier.as_ref(), base)
+                    }
+                };
 
                 dest.push_str(&format!(
                     r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
@@ -1287,6 +1300,37 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+
+/// Builds the display text for a resolved cross-reference under the selected
+/// [`XrefStyle`].
+///
+/// `base` is the target's reference text (its title, when the target has no
+/// explicit reftext). Styling applies only when a style is selected *and* the
+/// target carries an [`XrefSignifier`] (a numbered section or captioned block);
+/// otherwise `base` is returned unchanged. The HTML conventions live here in
+/// the HTML renderer: a title is wrapped in typographic quotes, except a
+/// chapter or appendix title, which is emphasized with `<em>` (in every style).
+fn apply_xrefstyle(
+    style: Option<XrefStyle>,
+    signifier: Option<&XrefSignifier>,
+    base: String,
+) -> String {
+    let (Some(style), Some(signifier)) = (style, signifier) else {
+        return base;
+    };
+
+    match style {
+        XrefStyle::Full if signifier.emphasize => {
+            format!("{label}, <em>{base}</em>", label = signifier.label)
+        }
+        XrefStyle::Full => {
+            format!("{label}, &#8220;{base}&#8221;", label = signifier.label)
+        }
+        XrefStyle::Short => signifier.label.clone(),
+        XrefStyle::Basic if signifier.emphasize => format!("<em>{base}</em>"),
+        XrefStyle::Basic => base,
+    }
+}
 
 /// Builds the `target`/`rel` attributes for a cross-reference whose `xref:`
 /// macro carried a `window` attribute. Mirrors the link macro: a `_blank`

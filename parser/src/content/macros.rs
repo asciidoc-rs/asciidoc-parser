@@ -7,10 +7,11 @@ use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{Content, content::XrefSegment},
+    document::InterpretedValue,
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, LinkRenderType, MenuRenderParams,
+        LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle,
     },
     warnings::WarningType,
 };
@@ -1458,6 +1459,19 @@ struct InlineXrefReplacer<'p, 'x> {
     xrefs: &'x mut Vec<XrefSegment>,
 }
 
+/// Reads the document-wide `xrefstyle` attribute as an [`XrefStyle`].
+///
+/// An unset attribute yields `None` (the target's reftext is used verbatim). A
+/// set-but-empty value (`:xrefstyle:`) and any unrecognized value both resolve
+/// to [`XrefStyle::Basic`], mirroring Asciidoctor.
+fn document_xrefstyle(parser: &Parser) -> Option<XrefStyle> {
+    match parser.attribute_value("xrefstyle") {
+        InterpretedValue::Value(value) => Some(XrefStyle::parse(&value)),
+        InterpretedValue::Set => Some(XrefStyle::Basic),
+        InterpretedValue::Unset => None,
+    }
+}
+
 impl Replacer for InlineXrefReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps.get(1).is_some() {
@@ -1468,6 +1482,10 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
 
         let mut window: Option<String> = None;
         let mut roles: Vec<String> = vec![];
+
+        // A `xrefstyle=` attribute on the `xref:` macro overrides the
+        // document-wide `xrefstyle` for this one reference.
+        let mut xrefstyle_override: Option<XrefStyle> = None;
 
         let (target, provided_text) = if let Some(inner) = caps.get(2) {
             // Shorthand form: split an optional ", reftext" off the id. The id
@@ -1507,6 +1525,9 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
                     .named_attribute("window")
                     .map(|a| a.value().to_string());
                 roles = attrlist.roles().iter().map(|r| r.to_string()).collect();
+                xrefstyle_override = attrlist
+                    .named_attribute("xrefstyle")
+                    .map(|a| XrefStyle::parse(a.value()));
 
                 attrlist
                     .nth_attribute(1)
@@ -1519,12 +1540,17 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
             (target, provided_text)
         };
 
+        // The effective style is the macro-level override if present, otherwise
+        // the document-wide `xrefstyle` at this point in the document.
+        let xrefstyle = xrefstyle_override.or_else(|| document_xrefstyle(self.parser));
+
         let index = self.xrefs.len();
         self.xrefs.push(XrefSegment {
             target,
             provided_text,
             window,
             roles,
+            xrefstyle,
             resolved: None,
         });
 
