@@ -3,7 +3,7 @@ use std::slice::Iter;
 use crate::{
     HasSpan, Parser, Span,
     content::{Content, SubstitutionGroup},
-    document::{Attribute, Author, AuthorLine, RevisionLine},
+    document::{Attribute, Author, AuthorLine, InterpretedValue, RevisionLine},
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -16,6 +16,8 @@ use crate::{
 pub struct Header<'src> {
     title_source: Option<Span<'src>>,
     title: Option<String>,
+    main_title: Option<String>,
+    subtitle: Option<String>,
     attributes: Vec<Attribute<'src>>,
     author_line: Option<AuthorLine<'src>>,
     revision_line: Option<RevisionLine<'src>>,
@@ -107,11 +109,25 @@ impl<'src> Header<'src> {
         let after = source.discard_empty_lines();
         let source = original_source.trim_remainder(source);
 
+        // Partition the (fully substituted) document title into a main title and
+        // an optional subtitle. This happens after the header has been fully
+        // parsed so that a `title-separator` attribute takes effect even when it
+        // is defined below the document title line.
+        let (main_title, subtitle) = match &title {
+            Some(title) => {
+                let (main_title, subtitle) = partition_title(title, parser);
+                (Some(main_title), subtitle)
+            }
+            None => (None, None),
+        };
+
         MatchAndWarnings {
             item: MatchedItem {
                 item: Self {
                     title_source,
                     title,
+                    main_title,
+                    subtitle,
                     attributes,
                     author_line,
                     revision_line,
@@ -131,8 +147,38 @@ impl<'src> Header<'src> {
 
     /// Return the document's title, if there was one, having applied header
     /// substitutions.
+    ///
+    /// If the title contains a subtitle (see [`subtitle`]), this returns the
+    /// full, combined title. Use [`main_title`] to obtain only the portion
+    /// preceding the subtitle.
+    ///
+    /// [`subtitle`]: Self::subtitle
+    /// [`main_title`]: Self::main_title
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    /// Return the main portion of the document title, if there was a title.
+    ///
+    /// When the document title contains a subtitle separator (a colon followed
+    /// by a space, by default), the title is partitioned into a main title and
+    /// a [`subtitle`]. This returns the portion preceding the final separator.
+    /// When there is no subtitle, this is identical to [`title`].
+    ///
+    /// [`subtitle`]: Self::subtitle
+    /// [`title`]: Self::title
+    pub fn main_title(&self) -> Option<&str> {
+        self.main_title.as_deref()
+    }
+
+    /// Return the document's subtitle, if the title contained one.
+    ///
+    /// A subtitle is the text following the final subtitle separator in the
+    /// document title. The separator defaults to a colon followed by a space
+    /// (`:{sp}`) and can be overridden with the `title-separator` document
+    /// attribute. Returns `None` when the title has no subtitle.
+    pub fn subtitle(&self) -> Option<&str> {
+        self.subtitle.as_deref()
     }
 
     /// Return an iterator over the attributes in this header.
@@ -162,6 +208,31 @@ impl<'src> HasSpan<'src> for Header<'src> {
     }
 }
 
+/// Partition a document title into its main title and optional subtitle.
+///
+/// The separator is the value of the `title-separator` document attribute
+/// (defaulting to `:`) with a single space appended. The separator is searched
+/// for from the end of the title, so only the last occurrence partitions the
+/// title. When the separator is not present, the entire title is the main
+/// title and there is no subtitle.
+fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
+    let separator = match parser.attribute_value("title-separator") {
+        InterpretedValue::Value(value) if !value.is_empty() => value,
+        _ => ":".to_string(),
+    };
+
+    let separator = format!("{separator} ");
+
+    match title.rfind(&separator) {
+        Some(index) => {
+            let main_title = title[..index].to_string();
+            let subtitle = title[index + separator.len()..].to_string();
+            (main_title, Some(subtitle))
+        }
+        None => (title.to_string(), None),
+    }
+}
+
 fn apply_header_subs(source: &str, parser: &Parser) -> String {
     let span = Span::new(source);
 
@@ -176,6 +247,8 @@ impl std::fmt::Debug for Header<'_> {
         f.debug_struct("Header")
             .field("title_source", &self.title_source)
             .field("title", &self.title)
+            .field("main_title", &self.main_title)
+            .field("subtitle", &self.subtitle)
             .field("attributes", &DebugSliceReference(&self.attributes))
             .field("author_line", &self.author_line)
             .field("revision_line", &self.revision_line)
@@ -642,6 +715,10 @@ mod tests {
     title: Some(
         "Example Title",
     ),
+    main_title: Some(
+        "Example Title",
+    ),
+    subtitle: None,
     attributes: &[],
     author_line: None,
     revision_line: None,
@@ -654,5 +731,49 @@ mod tests {
     },
 }"#
         );
+    }
+
+    #[test]
+    fn no_subtitle() {
+        // A title without a colon-space sequence has no subtitle, and its main
+        // title equals its full title.
+        let doc = Parser::default().parse("= Just the Title");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Just the Title"));
+        assert_eq!(header.main_title(), Some("Just the Title"));
+        assert_eq!(header.subtitle(), None);
+    }
+
+    #[test]
+    fn no_title() {
+        // With no document title at all, every title accessor returns `None`.
+        let doc = Parser::default().parse(":foo: bar\n\nbody");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.main_title(), None);
+        assert_eq!(header.subtitle(), None);
+    }
+
+    #[test]
+    fn colon_without_space_is_not_a_separator() {
+        // The separator is a colon *followed by a space*; a bare colon does not
+        // partition the title.
+        let doc = Parser::default().parse("= Ratio 3:1 Explained");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Ratio 3:1 Explained"));
+        assert_eq!(header.subtitle(), None);
+    }
+
+    #[test]
+    fn subtitle_available_on_document() {
+        // The subtitle is reachable directly from `Document` as well as from its
+        // `Header`.
+        let doc = Parser::default().parse("= Main Title: Subtitle");
+
+        assert_eq!(doc.doctitle(), Some("Main Title: Subtitle"));
+        assert_eq!(doc.subtitle(), Some("Subtitle"));
     }
 }
