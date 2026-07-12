@@ -263,17 +263,22 @@ impl<'src> Attrlist<'src> {
         self.anchor.as_deref()
     }
 
-    /// Returns the value of the `title=` attribute, if present.
+    /// Returns the `title=` attribute's value and whether the normal
+    /// substitution group has already been applied to it, if the attribute is
+    /// present.
     ///
     /// Unlike [`named_attribute`](Self::named_attribute), this borrows for the
     /// duration of the call only, so it can be read from an `Attrlist` that is
     /// about to be moved (as when block metadata derives a block title from a
-    /// `title=` attribute before storing the attribute list on the block).
-    pub(crate) fn title_attribute_value(&self) -> Option<&str> {
+    /// `title=` attribute before storing the attribute list on the block). The
+    /// returned flag (see [`ElementAttribute::value_is_substituted`]) lets the
+    /// caller avoid substituting an already-substituted (single-quoted) value a
+    /// second time.
+    pub(crate) fn title_attribute(&self) -> Option<(&str, bool)> {
         self.attributes
             .iter()
             .find(|attr| attr.name_str() == Some("title"))
-            .map(ElementAttribute::value_str)
+            .map(|attr| (attr.value_str(), attr.value_is_substituted()))
     }
 
     /// Returns the first attribute with the given name.

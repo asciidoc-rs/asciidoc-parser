@@ -14,11 +14,32 @@ use crate::{
 /// element in a document (including macros). Although the include directive is
 /// not technically an element, element attributes can also be defined on an
 /// include directive.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ElementAttribute<'src> {
     name: Option<CowStr<'src>>,
     value: CowStr<'src>,
     shorthand_item_indices: Vec<usize>,
+
+    /// `true` when the normal substitution group was already applied to `value`
+    /// while parsing this attribute (a single-quoted value in a block attribute
+    /// list). Consumers that would otherwise substitute the value themselves —
+    /// such as deriving a block title from a `title=` attribute — use this to
+    /// avoid substituting it a second time (which would, e.g., double-escape
+    /// special characters).
+    value_is_substituted: bool,
+}
+
+impl std::fmt::Debug for ElementAttribute<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `value_is_substituted` is an internal parsing detail and is
+        // deliberately omitted so the debug representation stays focused on the
+        // attribute's observable content.
+        f.debug_struct("ElementAttribute")
+            .field("name", &self.name)
+            .field("value", &self.value)
+            .field("shorthand_item_indices", &self.shorthand_item_indices)
+            .finish()
+    }
 }
 
 impl<'src> ElementAttribute<'src> {
@@ -31,7 +52,7 @@ impl<'src> ElementAttribute<'src> {
     ) -> (Self, usize, Vec<WarningType>) {
         let mut warnings: Vec<WarningType> = vec![];
 
-        let (name, value, shorthand_item_indices, offset) = {
+        let (name, value, shorthand_item_indices, value_is_substituted, offset) = {
             let mut source = Span::new(source_text.as_ref());
             source = source.discard(start_index);
 
@@ -73,6 +94,7 @@ impl<'src> ElementAttribute<'src> {
 
             let after = value.after;
             let mut value = cowstr_from_source_and_span(source_text, &value.item);
+            let mut value_is_substituted = false;
 
             if let Some(first) = first_char
                 && (first == '\'' || first == '\"')
@@ -81,6 +103,10 @@ impl<'src> ElementAttribute<'src> {
                 let mut new_value = value.replace(&escaped_quote, &first.to_string());
 
                 if first == '\'' && attrlist_context == AttrlistContext::Block {
+                    // A single-quoted value in a block attribute list has the
+                    // normal substitution group applied at assignment time.
+                    value_is_substituted = true;
+
                     let span = Span::new(&new_value);
                     let mut content = Content::from(span);
                     SubstitutionGroup::Normal.apply(&mut content, parser, None);
@@ -103,7 +129,13 @@ impl<'src> ElementAttribute<'src> {
 
             let name = name.map(|name| cowstr_from_source_and_span(source_text, &name));
 
-            (name, value, shorthand_item_indices, after.byte_offset())
+            (
+                name,
+                value,
+                shorthand_item_indices,
+                value_is_substituted,
+                after.byte_offset(),
+            )
         };
 
         (
@@ -111,6 +143,7 @@ impl<'src> ElementAttribute<'src> {
                 name,
                 value,
                 shorthand_item_indices,
+                value_is_substituted,
             },
             offset,
             warnings,
@@ -138,6 +171,7 @@ impl<'src> ElementAttribute<'src> {
             name: None,
             value: CowStr::from(SOURCE),
             shorthand_item_indices,
+            value_is_substituted: false,
         }
     }
 
@@ -150,6 +184,7 @@ impl<'src> ElementAttribute<'src> {
             name: None,
             value: CowStr::from(span.data()),
             shorthand_item_indices: vec![],
+            value_is_substituted: false,
         }
     }
 
@@ -439,6 +474,7 @@ impl<'src> ElementAttribute<'src> {
             name: None,
             value: CowStr::from(value),
             shorthand_item_indices,
+            value_is_substituted: false,
         }
     }
 
@@ -457,6 +493,14 @@ impl<'src> ElementAttribute<'src> {
     /// example while an owned attribute list is still being assembled).
     pub(crate) fn value_str(&self) -> &str {
         self.value.as_ref()
+    }
+
+    /// Returns `true` when the normal substitution group has already been
+    /// applied to this attribute's [`value`](Self::value) (a single-quoted value
+    /// in a block attribute list). A consumer that would otherwise substitute
+    /// the value itself uses this to avoid substituting it a second time.
+    pub(crate) fn value_is_substituted(&self) -> bool {
+        self.value_is_substituted
     }
 }
 

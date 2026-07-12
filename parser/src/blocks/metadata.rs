@@ -158,25 +158,32 @@ impl<'src> BlockMetadata<'src> {
 
         // Determine the block title. A `.Title` line takes precedence; failing
         // that, a `title=` attribute in the block's attribute list supplies the
-        // title (Asciidoctor treats the two as equivalent). In both cases the
-        // value receives the normal title substitutions. Attribute references in
-        // a `title=` value were already resolved when the attribute list was
-        // parsed, so only the remaining substitutions (special characters,
-        // quotes, replacements, and macros) still apply here.
+        // title (Asciidoctor treats the two as equivalent).
         let title = match title_source.as_ref() {
             Some(span) => {
                 let mut content = Content::from(*span);
                 SubstitutionGroup::Normal.apply(&mut content, parser, None);
                 Some(content.rendered.into_string())
             }
-            None => attrlist
-                .as_ref()
-                .and_then(Attrlist::title_attribute_value)
-                .map(|value| {
-                    let mut content = Content::from(Span::new(value));
-                    SubstitutionGroup::Normal.apply(&mut content, parser, None);
-                    content.rendered.into_string()
-                }),
+            None => attrlist.as_ref().and_then(Attrlist::title_attribute).map(
+                |(value, value_is_substituted)| {
+                    // A single-quoted `title=` value already had the normal
+                    // substitution group applied when the attribute list was
+                    // parsed; substituting it again here would double-escape
+                    // special characters (and re-process inline markup), so it is
+                    // used verbatim. Any other form receives the title (normal)
+                    // substitutions now, matching a `.Title` line. (Attribute
+                    // references in the value were resolved when the attribute
+                    // list was parsed, so they are not re-evaluated here.)
+                    if value_is_substituted {
+                        value.to_string()
+                    } else {
+                        let mut content = Content::from(Span::new(value));
+                        SubstitutionGroup::Normal.apply(&mut content, parser, None);
+                        content.rendered.into_string()
+                    }
+                },
+            ),
         };
 
         MatchAndWarnings {
@@ -730,6 +737,29 @@ mod tests {
                 crate::blocks::metadata::BlockMetadata::new("[title=\"a > b\"]\ncontent\n");
 
             assert_eq!(metadata.title.as_deref(), Some("a &gt; b"));
+        }
+
+        #[test]
+        fn single_quoted_value_is_not_double_substituted() {
+            // A single-quoted value already had the normal substitutions applied
+            // when the attribute list was parsed. Substituting it again would
+            // double-escape the `>` to `&amp;gt;`; the title must instead render
+            // `a &gt; b`, matching the double-quoted form.
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[title='a > b']\ncontent\n");
+
+            assert_eq!(metadata.title.as_deref(), Some("a &gt; b"));
+        }
+
+        #[test]
+        fn single_quoted_value_preserves_inline_markup() {
+            // A single-quoted value's inline markup is rendered once (at
+            // attribute-list parse time) and must not be re-escaped when the
+            // title is formed.
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[title='*bold*']\ncontent\n");
+
+            assert_eq!(metadata.title.as_deref(), Some("<strong>bold</strong>"));
         }
 
         #[test]
