@@ -174,9 +174,9 @@ pub struct Parser {
     /// directive re-runs the preprocessor over the cell's content: to report an
     /// unresolved directive against the file and line where it *originally*
     /// appeared (rather than "(root file)"), the cell must map its position in
-    /// the preprocessed source back through this map. It is only consulted while
-    /// parsing the top-level document (`nested_document_depth == 0`), where a
-    /// cell's span still refers to that source.
+    /// the preprocessed source back through this map. It is only consulted
+    /// while parsing the top-level document (`nested_document_depth == 0`),
+    /// where a cell's span still refers to that source.
     ///
     /// [`Document::parse`]: crate::Document
     pub(crate) source_map: Option<Rc<SourceMap>>,
