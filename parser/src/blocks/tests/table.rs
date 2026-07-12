@@ -731,6 +731,45 @@ fn asciidoc_cell_exposes_inherited_attributes_for_introspection() {
     assert!(!cell.is_attribute_set("no-such-attr"));
 }
 
+#[test]
+fn include_expanded_asciidoc_cell_exposes_inherited_attributes_for_introspection() {
+    // A cell whose first line is an `include::` directive is parsed from an
+    // owned, include-expanded source (the `AsciiDocCell::Owned` variant) rather
+    // than borrowed from the document source. The introspection accessors reach
+    // through that owned store just the same, so the nested document still
+    // reports itself nested and exposes the attributes it inherited.
+    use crate::{SafeMode, tests::fixtures::inline_file_handler::InlineFileHandler};
+
+    let handler = InlineFileHandler::from_pairs([("fixtures/cell.adoc", "included cell content")]);
+    let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler)
+        .with_intrinsic_attribute("outdir", "/path/to/output", ModificationContext::ApiOnly)
+        .parse("|===\na|include::fixtures/cell.adoc[]\n|===");
+
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let TableCellContent::AsciiDoc(cell) = table.body_rows()[0].cells()[0].content() else {
+        panic!("expected AsciiDoc cell content");
+    };
+
+    // The cell is the include-expanded (owned) variant, so this exercises the
+    // owned-store branch of the introspection accessors.
+    assert!(cell.is_nested());
+    assert!(cell.is_attribute_set("outdir"));
+    assert_eq!(
+        cell.attribute_value("outdir"),
+        doc.attribute_value("outdir")
+    );
+    assert!(!cell.has_attribute("no-such-attr"));
+}
+
 /// Collect the rendered text of every block in an AsciiDoc cell.
 fn asciidoc_cell_text(table: &TableBlock<'_>, row: usize, col: usize) -> String {
     match table.body_rows()[row].cells()[col].content() {
