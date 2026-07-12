@@ -868,4 +868,24 @@ mod tests {
         assert_eq!(header.title(), None);
         assert_eq!(header.subtitle(), None);
     }
+
+    #[test]
+    fn bracketed_line_that_is_not_a_separator_attribute_list() {
+        // A `[...]` line above the title that isn't a well-formed block
+        // attribute list carrying `separator` is not consumed as a separator. A
+        // block anchor (`[[...]]`) and a leading-space form are both rejected,
+        // so the line terminates the header exactly as any other unrecognized
+        // line would.
+        let doc = Parser::default().parse("[[anchor]]\n= Some Title: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.subtitle(), None);
+
+        let doc = Parser::default().parse("[ separator=::]\n= Main Title:: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.subtitle(), None);
+    }
 }
