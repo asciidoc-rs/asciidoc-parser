@@ -3096,4 +3096,36 @@ mod tests {
             assert_eq!(doc.warnings().count(), 0);
         }
     }
+
+    // Cataloging a leading anchor found in a table cell (issue #543) is covered
+    // for header and default-style cells by the ported tests in
+    // `tests::asciidoctor_rb::tables_test`. Those styled-column fixtures place
+    // the anchor in the first (header) row, and a header cell is always parsed
+    // with the default column style — so `cols=1a` never actually parses the
+    // anchored value as an AsciiDoc-style cell there. This exercises that
+    // missing case directly: a leading anchor in an AsciiDoc-style *body* cell
+    // must still be cataloged in the main document.
+    mod anchor_in_asciidoc_body_cell {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn leading_anchor_in_asciidoc_body_cell_is_cataloged() {
+            // Two `|` rows with no blank line between them defeat the implicit-
+            // header heuristic (which requires a blank line after the first row),
+            // so both cells are AsciiDoc-style *body* cells rather than a header.
+            let doc = Parser::default()
+                .parse("[cols=1a]\n|===\n|[[foo,Foo]]body anchor\n|second cell\n|===");
+
+            // Guard the premise: the anchored cell is a genuine AsciiDoc-style
+            // body cell (each `a` cell renders its content as a nested document in
+            // `div.content`), not a header cell — no `th` is produced, and the
+            // anchor renders as a target inside the cell.
+            assert_css(&doc, "th", 0);
+            assert_css(&doc, "table.tableblock td.tableblock > div.content", 2);
+            assert_xpath(&doc, "//td//div[@class=\"content\"]//a[@id=\"foo\"]", 1);
+
+            // The leading anchor is cataloged in the main document's catalog.
+            assert!(doc.catalog().contains_id("foo"));
+        }
+    }
 }
