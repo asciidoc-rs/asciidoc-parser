@@ -669,6 +669,107 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
     assert!(parser.has_attribute("parent-attr"));
 }
 
+#[test]
+fn asciidoc_cell_is_always_nested() {
+    // An AsciiDoc cell is a nested, standalone document, so `is_nested()` is
+    // always true (mirroring Asciidoctor's `Document#nested?`).
+    let doc = Parser::default().parse("[cols=\"a\"]\n|===\n|nested content\n|===");
+
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    match table.body_rows()[0].cells()[0].content() {
+        TableCellContent::AsciiDoc(cell) => assert!(cell.is_nested()),
+        TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
+    }
+}
+
+#[test]
+fn asciidoc_cell_exposes_inherited_attributes_for_introspection() {
+    // The cell's attribute state is scoped to the cell and restored on the parser
+    // once the cell is parsed, so it can no longer be read from the parser. The
+    // cell nonetheless retains a snapshot of it, letting a caller introspect the
+    // nested document's attributes — both those inherited from the parent and any
+    // the cell set for itself — after parsing has finished.
+    let doc = Parser::default().parse(
+        ":parent-attr: inherited\n\n[cols=\"a\"]\n|===\n|\n:cell-attr: local\ncontent\n|===",
+    );
+
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let TableCellContent::AsciiDoc(cell) = table.body_rows()[0].cells()[0].content() else {
+        panic!("expected AsciiDoc cell content");
+    };
+
+    // The inherited parent attribute is visible on the nested document and equal
+    // to what the parent document sees.
+    assert!(cell.is_attribute_set("parent-attr"));
+    assert_eq!(
+        cell.attribute_value("parent-attr"),
+        doc.attribute_value("parent-attr")
+    );
+
+    // The attribute the cell set for itself is visible on the cell but did not
+    // leak into the parent document.
+    assert!(cell.is_attribute_set("cell-attr"));
+    assert!(cell.has_attribute("cell-attr"));
+    assert!(!doc.has_attribute("cell-attr"));
+
+    // An attribute that neither the parent nor the cell defines is absent.
+    assert!(!cell.has_attribute("no-such-attr"));
+    assert!(!cell.is_attribute_set("no-such-attr"));
+}
+
+#[test]
+fn include_expanded_asciidoc_cell_exposes_inherited_attributes_for_introspection() {
+    // A cell whose first line is an `include::` directive is parsed from an
+    // owned, include-expanded source (the `AsciiDocCell::Owned` variant) rather
+    // than borrowed from the document source. The introspection accessors reach
+    // through that owned store just the same, so the nested document still
+    // reports itself nested and exposes the attributes it inherited.
+    use crate::{SafeMode, tests::fixtures::inline_file_handler::InlineFileHandler};
+
+    let handler = InlineFileHandler::from_pairs([("fixtures/cell.adoc", "included cell content")]);
+    let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler)
+        .with_intrinsic_attribute("outdir", "/path/to/output", ModificationContext::ApiOnly)
+        .parse("|===\na|include::fixtures/cell.adoc[]\n|===");
+
+    let table = doc
+        .nested_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let TableCellContent::AsciiDoc(cell) = table.body_rows()[0].cells()[0].content() else {
+        panic!("expected AsciiDoc cell content");
+    };
+
+    // The cell is the include-expanded (owned) variant, so this exercises the
+    // owned-store branch of the introspection accessors.
+    assert!(cell.is_nested());
+    assert!(cell.is_attribute_set("outdir"));
+    assert_eq!(
+        cell.attribute_value("outdir"),
+        doc.attribute_value("outdir")
+    );
+    assert!(!cell.has_attribute("no-such-attr"));
+}
+
 /// Collect the rendered text of every block in an AsciiDoc cell.
 fn asciidoc_cell_text(table: &TableBlock<'_>, row: usize, col: usize) -> String {
     match table.body_rows()[row].cells()[col].content() {

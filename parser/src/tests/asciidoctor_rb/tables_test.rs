@@ -1530,17 +1530,50 @@ mod psv {
         assert_xpath(&doc, "/table/tbody/tr/td[2]//table/tbody/tr/td", 1);
     }
 
-    // Attribute/option inheritance into the nested AsciiDoc-cell document is
-    // implemented; the `to_dir` test below remains unported for a narrower
-    // reason: it needs the nested cell exposed as an introspectable document
-    // object carrying inherited options.
-
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/545): AsciiDoc
-    // table cell should expose the nested document for introspection of inherited
-    // options (here, `to_dir`).
-    fn asciidoc_table_cell_should_inherit_to_dir_option_from_parent_document() {}
+    fn asciidoc_table_cell_should_inherit_to_dir_option_from_parent_document() {
+        // Adapted from Asciidoctor's "AsciiDoc table cell should inherit to_dir
+        // option from parent document". Asciidoctor passes a `to_dir` *option*
+        // when building the document and, after locating the nested cell
+        // document, asserts it is `nested?` and that its `options[:to_dir]`
+        // matches the parent's.
+        //
+        // This crate has no options bag: a document's configuration is carried by
+        // its attributes, and Asciidoctor itself surfaces the `to_dir` option as
+        // the `outdir` document attribute. So the faithful analog is to configure
+        // the parent with an `outdir` attribute (as if from the API, the way an
+        // option is supplied) and confirm the nested AsciiDoc-cell document both
+        // reports itself as nested and has inherited that value.
+        let doc = Parser::default()
+            .with_intrinsic_attribute("outdir", "/path/to/output", ModificationContext::ApiOnly)
+            .parse("|===\na|\nAsciiDoc table cell\n|===");
+
+        // Locate the nested document: the single table's single cell, which is an
+        // AsciiDoc cell (`a|`) and therefore a nested, standalone document. This
+        // is the crate's equivalent of Ruby's
+        // `doc.blocks[0].find_by context: :document, traverse_documents: true`.
+        let table = match doc.nested_blocks().next() {
+            Some(crate::blocks::Block::Table(table)) => table,
+            other => panic!("expected a table block, got {other:?}"),
+        };
+        let crate::blocks::TableCellContent::AsciiDoc(nested_doc) =
+            table.body_rows()[0].cells()[0].content()
+        else {
+            panic!("expected an AsciiDoc cell");
+        };
+
+        // `assert nested_doc.nested?`
+        assert!(nested_doc.is_nested());
+
+        // `assert_equal doc.options[:to_dir], nested_doc.options[:to_dir]` — the
+        // inherited option (here the `outdir` attribute) is visible on the nested
+        // document and equals the parent's.
+        assert!(nested_doc.is_attribute_set("outdir"));
+        assert_eq!(
+            nested_doc.attribute_value("outdir"),
+            doc.attribute_value("outdir")
+        );
+    }
 
     #[test]
     fn asciidoc_table_cell_should_not_inherit_toc_setting_from_parent_document() {
