@@ -2,6 +2,7 @@ use std::slice::Iter;
 
 use crate::{
     HasSpan, Parser, Span,
+    attributes::{Attrlist, AttrlistContext},
     content::{Content, SubstitutionGroup},
     document::{Attribute, Author, AuthorLine, InterpretedValue, RevisionLine},
     internal::debug::DebugSliceReference,
@@ -80,6 +81,23 @@ impl<'src> Header<'src> {
                 parser.set_attribute_from_header(&attr.item, &mut warnings);
                 attributes.push(attr.item);
                 source = attr.after;
+            } else if title.is_none()
+                && line.starts_with('[')
+                && line.ends_with(']')
+                && line_mi.after.take_normalized_line().item.starts_with("= ")
+                && let Some(separator) = parse_separator_attribute(line, parser)
+            {
+                // A `separator` block attribute directly above the document title
+                // sets the subtitle separator. It behaves exactly like assigning
+                // the `title-separator` document attribute at this point in the
+                // header, so both mechanisms share the same partitioning logic
+                // and follow document order when both are present.
+                //
+                // The line is only intercepted when a document title immediately
+                // follows; otherwise it is block metadata for the body (e.g. a
+                // table's `separator`) and is left for the block parser.
+                parser.set_attribute_by_value_from_header("title-separator", separator);
+                source = line_mi.after;
             } else if title.is_none() && line.starts_with("= ") {
                 let title_span = line.discard(2).discard_whitespace();
                 let title_str = apply_header_subs(title_span.data(), parser);
@@ -206,6 +224,38 @@ impl<'src> HasSpan<'src> for Header<'src> {
     fn span(&self) -> Span<'src> {
         self.source
     }
+}
+
+/// Extract the value of a `separator` attribute from a block attribute line
+/// (e.g. `[separator=::]`) appearing above the document title.
+///
+/// The `line` is expected to begin with `[` and end with `]`. Returns the
+/// `separator` value if the line is a well-formed block attribute list that
+/// contains one, and `None` otherwise (so the caller can fall through to its
+/// normal handling of the line).
+fn parse_separator_attribute(line: Span<'_>, parser: &Parser) -> Option<String> {
+    // Drop the enclosing square brackets now that the caller has confirmed they
+    // are present.
+    let inner = line.slice(1..line.len() - 1);
+
+    // Reject forms that are not block attribute lists, mirroring the checks used
+    // when parsing block metadata elsewhere: a leading space or tab, an empty
+    // list, or a `[[anchor]]` block anchor.
+    if inner.is_empty()
+        || inner.starts_with(' ')
+        || inner.starts_with('\t')
+        || (inner.starts_with('[') && inner.ends_with(']'))
+    {
+        return None;
+    }
+
+    let attrlist = Attrlist::parse(inner, parser, AttrlistContext::Block)
+        .item
+        .item;
+
+    attrlist
+        .named_attribute("separator")
+        .map(|attr| attr.value().to_string())
 }
 
 /// Partition a document title into its main title and optional subtitle.
@@ -775,5 +825,47 @@ mod tests {
 
         assert_eq!(doc.doctitle(), Some("Main Title: Subtitle"));
         assert_eq!(doc.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn separator_block_attribute_above_title() {
+        // A `[separator=::]` block attribute above the title changes the
+        // subtitle separator for that title.
+        let doc = Parser::default().parse("[separator=::]\n= Main Title:: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Main Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+
+        // The custom separator replaces the default: a plain colon-space no
+        // longer partitions the title.
+        let doc = Parser::default().parse("[separator=::]\n= Main: Title:: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Main: Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn separator_attribute_entry_overrides_block_attribute() {
+        // When both are present, the later assignment wins in document order.
+        // Here the `:title-separator:` entry follows the block attribute.
+        let doc = Parser::default()
+            .parse("[separator=::]\n= Main Title;; Subtitle\n:title-separator: ;;");
+        let header = doc.header();
+
+        assert_eq!(header.main_title(), Some("Main Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn non_separator_block_attribute_terminates_header() {
+        // A block attribute line above the title that isn't a `separator`
+        // terminates the header without a title, preserving prior behavior.
+        let doc = Parser::default().parse("[foo=bar]\n= Not A Header Title");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.subtitle(), None);
     }
 }

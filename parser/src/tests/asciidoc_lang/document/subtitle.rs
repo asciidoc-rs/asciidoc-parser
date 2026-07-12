@@ -86,14 +86,10 @@ Therefore, only the last occurrence of the separator (i.e, `:{sp}`) is used for 
 "#
         );
 
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/382):
-        // The `separator` block attribute placed above the document title is not
-        // yet supported. Block attribute lines in the document header are not
-        // currently parsed, so the default separator is used for the example
-        // below. The `title-separator` document attribute (verified further
-        // down) provides the same capability.
-        to_do_verifies!(
-            r#"
+        #[test]
+        fn separator_block_attribute() {
+            verifies!(
+                r#"
 You can change the title separator by specifying the `separator` block attribute explicitly above the document title.
 A space will automatically be appended to the separator value.
 
@@ -105,7 +101,14 @@ A space will automatically be appended to the separator value.
 ----
 
 "#
-        );
+            );
+
+            let doc = Parser::default().parse("[separator=::]\n= Main Title:: Subtitle");
+            let header = doc.header();
+
+            assert_eq!(header.main_title(), Some("Main Title"));
+            assert_eq!(header.subtitle(), Some("Subtitle"));
+        }
 
         #[test]
         fn title_separator_attribute() {
