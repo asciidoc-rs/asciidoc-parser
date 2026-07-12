@@ -1410,53 +1410,6 @@ mod psv {
         );
     }
 
-    // Not a Ruby port: a companion regression test for the fix above, covering
-    // the simpler case where the table is in the primary document itself (so the
-    // unresolved directive is attributed to the root file, not an included one).
-    #[test]
-    fn unresolved_directive_in_root_document_asciidoc_cell_reports_root_cursor() {
-        // No include handler: `does-not-exist.adoc` cannot be resolved.
-        let doc = Parser::default()
-            .with_safe_mode(SafeMode::Server)
-            .parse("|===\na|include::does-not-exist.adoc[]\n|===");
-
-        assert_rendered_contains(&doc, "Unresolved directive in (root file)");
-
-        let warnings: Vec<_> = doc.warnings().collect();
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(
-            warnings[0].warning,
-            WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
-        );
-
-        // The directive is on line 2 of the primary document.
-        assert_eq!(
-            doc.source_map()
-                .original_file_and_line(warnings[0].source.line()),
-            Some(crate::parser::SourceLine(None, 2))
-        );
-    }
-
-    // Not a Ruby port: a table nested inside an AsciiDoc cell is parsed from that
-    // cell's nested source, so an unresolved directive in the *inner* cell is not
-    // mapped through the document source map (its file defaults to the root
-    // file). This guards the nested-depth branch of the fix.
-    #[test]
-    fn unresolved_directive_in_nested_table_cell_does_not_crash() {
-        let doc = Parser::default()
-            .with_safe_mode(SafeMode::Server)
-            .parse("|===\na|\n!===\na!include::does-not-exist.adoc[]\n!===\n|===");
-
-        assert_rendered_contains(&doc, "Unresolved directive in (root file)");
-
-        let warnings: Vec<_> = doc.warnings().collect();
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(
-            warnings[0].warning,
-            WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
-        );
-    }
-
     #[test]
     #[ignore]
     // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):

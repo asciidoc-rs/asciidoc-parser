@@ -2943,4 +2943,61 @@ mod tests {
         assert!(warnings.is_empty());
         assert_eq!(cell, shared);
     }
+
+    mod unresolved_directive_in_asciidoc_cell {
+        #![allow(clippy::indexing_slicing)]
+
+        use crate::{parser::SourceLine, tests::prelude::*};
+
+        // The faithful port of Ruby Asciidoctor `tables_test.rb` 1728 (an
+        // unresolved directive in a cell reached via an outer `include::`) lives
+        // in `tests::asciidoctor_rb::tables_test`. These are additional
+        // regression tests for the same fix, kept next to the code under test.
+
+        // The table is in the primary document itself, so the unresolved
+        // directive is attributed to the root file (not an included one).
+        #[test]
+        fn root_document_cell_reports_root_cursor() {
+            // No include handler: `does-not-exist.adoc` cannot be resolved.
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .parse("|===\na|include::does-not-exist.adoc[]\n|===");
+
+            assert_rendered_contains(&doc, "Unresolved directive in (root file)");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
+            );
+
+            // The directive is on line 2 of the primary document.
+            assert_eq!(
+                doc.source_map()
+                    .original_file_and_line(warnings[0].source.line()),
+                Some(SourceLine(None, 2))
+            );
+        }
+
+        // A table nested inside an AsciiDoc cell is parsed from that cell's
+        // nested source, so an unresolved directive in the *inner* cell is not
+        // mapped through the document source map (its file defaults to the root
+        // file). This guards the nested-depth branch of the fix.
+        #[test]
+        fn nested_table_cell_does_not_crash() {
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .parse("|===\na|\n!===\na!include::does-not-exist.adoc[]\n!===\n|===");
+
+            assert_rendered_contains(&doc, "Unresolved directive in (root file)");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
+            );
+        }
+    }
 }
