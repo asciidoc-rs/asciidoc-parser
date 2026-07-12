@@ -263,6 +263,19 @@ impl<'src> Attrlist<'src> {
         self.anchor.as_deref()
     }
 
+    /// Returns the value of the `title=` attribute, if present.
+    ///
+    /// Unlike [`named_attribute`](Self::named_attribute), this borrows for the
+    /// duration of the call only, so it can be read from an `Attrlist` that is
+    /// about to be moved (as when block metadata derives a block title from a
+    /// `title=` attribute before storing the attribute list on the block).
+    pub(crate) fn title_attribute_value(&self) -> Option<&str> {
+        self.attributes
+            .iter()
+            .find(|attr| attr.name_str() == Some("title"))
+            .map(ElementAttribute::value_str)
+    }
+
     /// Returns the first attribute with the given name.
     pub fn named_attribute(&'src self, name: &str) -> Option<&'src ElementAttribute<'src>> {
         self.attributes.iter().find(|attr| {

@@ -225,14 +225,7 @@ If you want the caption of the table to only consist of the caption label, use t
 "#
     );
 
-    // The `{counter:table-number}` counter reference is now supported, but this
-    // form additionally requires setting a block's title through a `title`
-    // attribute (`title=...` in the attribute list), which the parser does not
-    // yet support. The example is tracked here but not yet exercised.
-    //
-    // TODO: Promote to `verifies!` once the `title` block attribute lands.
-    // https://github.com/asciidoc-rs/asciidoc-parser/issues/578
-    to_do_verifies!(
+    verifies!(
         r#"
 [source]
 ----
@@ -243,9 +236,18 @@ include::example$table.adoc[tag=b-col-h]
 "#
     );
 
-    if false {
-        todo!("block title attribute support");
-    }
+    // This alternate form disables the caption *label* (`caption=` clears it) and
+    // instead supplies the whole caption line through the block's `title`
+    // attribute. The `title` value resolves `{table-caption}` to its default
+    // ("Table") and `{counter:table-number}` to the table's number, yielding
+    // "Table 1"; with the label suppressed, the rendered `<caption>` is just the
+    // title. (`example$table.adoc[tag=b-col-h]` is inlined here to avoid
+    // depending on include resolution.)
+    let doc = Parser::default().parse(
+        "[caption=,title=\"{table-caption} {counter:table-number}\"]\n[%header,cols=2*]\n|===\n|Name of Column 1\n|Name of Column 2\n\n|Cell in column 1, row 1\n|Cell in column 2, row 1\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|===",
+    );
+
+    assert_xpath(&doc, "//caption[text()=\"Table 1\"]", 1);
 }
 
 #[test]

@@ -449,6 +449,15 @@ impl<'src> ElementAttribute<'src> {
     pub fn value(&'src self) -> &'src str {
         self.value.as_ref()
     }
+
+    /// Return the attribute's value.
+    ///
+    /// Unlike [`value`](Self::value), this borrows for the duration of the call
+    /// only, so it can be used on temporary `ElementAttribute` values (for
+    /// example while an owned attribute list is still being assembled).
+    pub(crate) fn value_str(&self) -> &str {
+        self.value.as_ref()
+    }
 }
 
 fn parse_shorthand_items(source: &str, warnings: &mut Vec<WarningType>) -> Vec<usize> {

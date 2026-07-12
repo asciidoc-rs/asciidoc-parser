@@ -156,11 +156,28 @@ impl<'src> BlockMetadata<'src> {
             break;
         }
 
-        let title = title_source.as_ref().map(|span| {
-            let mut content = Content::from(*span);
-            SubstitutionGroup::Normal.apply(&mut content, parser, None);
-            content.rendered.into_string()
-        });
+        // Determine the block title. A `.Title` line takes precedence; failing
+        // that, a `title=` attribute in the block's attribute list supplies the
+        // title (Asciidoctor treats the two as equivalent). In both cases the
+        // value receives the normal title substitutions. Attribute references in
+        // a `title=` value were already resolved when the attribute list was
+        // parsed, so only the remaining substitutions (special characters,
+        // quotes, replacements, and macros) still apply here.
+        let title = match title_source.as_ref() {
+            Some(span) => {
+                let mut content = Content::from(*span);
+                SubstitutionGroup::Normal.apply(&mut content, parser, None);
+                Some(content.rendered.into_string())
+            }
+            None => attrlist
+                .as_ref()
+                .and_then(Attrlist::title_attribute_value)
+                .map(|value| {
+                    let mut content = Content::from(Span::new(value));
+                    SubstitutionGroup::Normal.apply(&mut content, parser, None);
+                    content.rendered.into_string()
+                }),
+        };
 
         MatchAndWarnings {
             item: Self {
@@ -673,6 +690,82 @@ mod tests {
             assert_eq!(attrlist.id().unwrap(), "id1");
             assert_eq!(attrlist.roles(), vec!["r1", "r2"]);
             assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "bar");
+        }
+    }
+
+    mod title_attribute {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn sets_title_from_attribute() {
+            // A `title=` entry in a block's attribute list sets the block title,
+            // equivalent to a `.Title` line.
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[title=\"My Title\"]\ncontent\n");
+
+            assert_eq!(metadata.title.as_deref(), Some("My Title"));
+
+            // A title supplied through an attribute has no `.Title` source line.
+            assert!(metadata.title_source.is_none());
+        }
+
+        #[test]
+        fn dot_title_line_wins_over_attribute() {
+            // When both a `.Title` line and a `title=` attribute are present, the
+            // `.Title` line takes precedence.
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                ".Line Title\n[title=\"Attr Title\"]\ncontent\n",
+            );
+
+            assert_eq!(metadata.title.as_deref(), Some("Line Title"));
+            assert!(metadata.title_source.is_some());
+        }
+
+        #[test]
+        fn applies_normal_substitutions() {
+            // A double-quoted `title=` value is not substituted while the
+            // attribute list is parsed, so the title (normal) substitutions run
+            // here: `>` becomes `&gt;`.
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[title=\"a > b\"]\ncontent\n");
+
+            assert_eq!(metadata.title.as_deref(), Some("a &gt; b"));
+        }
+
+        #[test]
+        fn empty_title_attribute_yields_empty_title() {
+            // An explicitly empty `title=` sets an empty (but present) title,
+            // mirroring `.{empty}`.
+            let metadata = crate::blocks::metadata::BlockMetadata::new("[title=]\ncontent\n");
+
+            assert_eq!(metadata.title.as_deref(), Some(""));
+        }
+
+        #[test]
+        fn resolves_attribute_references_in_value() {
+            // Attribute references in a `title=` value are resolved (when the
+            // attribute list is parsed), then the title substitutions render the
+            // result.
+            let doc =
+                Parser::default().parse(":who: World\n\n[title=\"Hello {who}\"]\n====\nbody\n====");
+
+            let block = doc.nested_blocks().next().unwrap();
+            assert_eq!(block.title(), Some("Hello World"));
+        }
+
+        #[test]
+        fn straddles_a_second_attribute_line() {
+            // A `title=` attribute merges across multiple attribute lines just
+            // like any other named attribute, so it still supplies the title when
+            // it sits on a separate line from the block style.
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[title=\"Merged Title\"]\n[sidebar]\ncontent\n",
+            );
+
+            assert_eq!(metadata.title.as_deref(), Some("Merged Title"));
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.block_style().unwrap(), "sidebar");
         }
     }
 }
