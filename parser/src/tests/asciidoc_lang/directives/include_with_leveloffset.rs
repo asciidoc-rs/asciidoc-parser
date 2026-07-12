@@ -286,3 +286,38 @@ fn malformed_relative_offset_is_ignored() {
 
     assert_eq!(section_levels(&doc), vec![(1, "Real Section".to_string())]);
 }
+
+#[test]
+fn absolute_offset_near_i32_max_does_not_overflow() {
+    // A hostile absolute `:leveloffset:` at `i32::MAX` must not overflow when it
+    // is folded into a heading's syntactic level (here 5, from `======`). The
+    // effective level saturates instead of panicking (debug) or wrapping
+    // (release); the heading is still a section, just at the saturated level.
+    let src = format!(
+        "= My Book\n:leveloffset: {}\n\n====== Deep Heading",
+        i32::MAX
+    );
+    let doc = Parser::default().parse(&src);
+
+    assert_eq!(
+        section_levels(&doc),
+        vec![(i32::MAX as usize, "Deep Heading".to_string())]
+    );
+}
+
+#[test]
+fn relative_offset_accumulation_near_i32_max_does_not_overflow() {
+    // Accumulating a relative `+1` on top of an offset already at `i32::MAX`
+    // must not overflow while resolving the assignment. The offset saturates at
+    // `i32::MAX`, so the following heading is still parsed as a section.
+    let src = format!(
+        "= My Book\n:leveloffset: {}\n\n:leveloffset: +1\n\n====== Deep Heading",
+        i32::MAX
+    );
+    let doc = Parser::default().parse(&src);
+
+    assert_eq!(
+        section_levels(&doc),
+        vec![(i32::MAX as usize, "Deep Heading".to_string())]
+    );
+}

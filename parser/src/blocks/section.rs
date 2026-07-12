@@ -390,7 +390,11 @@ fn parse_title_line<'src>(
         return None;
     }
 
-    let level = (count - 1) as i32 + offset;
+    // `saturating_add` guards against a pathologically large `offset` (e.g. an
+    // absolute `:leveloffset:` near `i32::MAX`): the syntactic level is at most
+    // 5 here, so this only matters for a hostile offset, which would otherwise
+    // panic in debug builds and wrap in release builds.
+    let level = ((count - 1) as i32).saturating_add(offset);
     if level < 1 {
         warnings.push(Warning {
             source: source.take_normalized_line().item,

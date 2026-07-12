@@ -506,7 +506,16 @@ impl Parser {
         };
 
         match digits.trim().parse::<i32>() {
-            Ok(delta) => InterpretedValue::Value((self.level_offset() + sign * delta).to_string()),
+            // `saturating_*` keeps a pathologically large offset (e.g. an
+            // absolute `:leveloffset:` near `i32::MAX` followed by a relative
+            // `+1`) from overflowing — which would panic in debug builds and
+            // wrap in release builds — rather than adding a real bound the
+            // syntax does not otherwise impose.
+            Ok(delta) => InterpretedValue::Value(
+                self.level_offset()
+                    .saturating_add(delta.saturating_mul(sign))
+                    .to_string(),
+            ),
             Err(_) => value,
         }
     }
