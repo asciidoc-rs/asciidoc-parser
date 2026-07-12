@@ -306,10 +306,11 @@ impl<'p> PreprocessorState<'p> {
                     // `leveloffset` wraps the included content in `:leveloffset:`
                     // attribute entries: the offset is applied to the included
                     // content and reset afterward (see
-                    // `include-with-leveloffset.adoc`). NOTE: the parser does not
-                    // yet apply the `leveloffset` attribute to section levels, so
-                    // this wrapping currently has no effect on rendering. Tracked
-                    // in https://github.com/asciidoc-rs/asciidoc-parser/issues/609.
+                    // `include-with-leveloffset.adoc`). The running `leveloffset`
+                    // document attribute is applied to section levels during
+                    // parsing (see `SectionBlock::parse` and
+                    // `Parser::level_offset`), so this wrapping shifts the
+                    // effective heading levels of the included content.
                     let leveloffset = attrlist
                         .named_attribute("leveloffset")
                         .map(|a| a.value())

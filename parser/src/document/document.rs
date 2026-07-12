@@ -100,7 +100,7 @@ impl<'src> Document<'src> {
             let iconsdir_set_in_header = header.attributes().any(|a| a.name().data() == "iconsdir");
             parser.apply_iconsdir_default(iconsdir_set_in_header);
 
-            let mut maw_blocks = parse_blocks_until(after_header, |_| false, parser);
+            let mut maw_blocks = parse_blocks_until(after_header, |_, _| false, parser);
 
             if !maw_blocks.warnings.is_empty() {
                 warnings.append(&mut maw_blocks.warnings);
