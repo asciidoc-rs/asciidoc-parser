@@ -121,8 +121,8 @@ pub struct Parser {
 
     /// True while a footnote-free variant of some content is being substituted,
     /// so a `footnote:[…]` macro is dropped entirely rather than numbered and
-    /// rendered as a marker. Used to derive a section title's reference text and
-    /// auto-generated ID without the footnote leaking into either (see
+    /// rendered as a marker. Used to derive a section title's reference text
+    /// and auto-generated ID without the footnote leaking into either (see
     /// `SectionBlock::parse`).
     ///
     /// Wrapped in a [`Cell`] for the same reason as
