@@ -1,6 +1,6 @@
 //! Describes the top-level document structure.
 
-use std::{marker::PhantomData, slice::Iter};
+use std::{marker::PhantomData, rc::Rc, slice::Iter};
 
 use self_cell::self_cell;
 
@@ -69,6 +69,15 @@ impl<'src> Document<'src> {
         parser: &mut Parser,
     ) -> Self {
         let owned_source = source.to_string();
+
+        // Publish the source map on the parser for the duration of the parse so
+        // an AsciiDoc table cell can map a position in this (preprocessed)
+        // source back to the file and line it originally came from — needed to
+        // report an unresolved `include::` directive inside such a cell against
+        // the correct cursor. The document keeps its own copy of the map, so
+        // clear the parser's reference once parsing completes.
+        let source_map = Rc::new(source_map);
+        parser.source_map = Some(Rc::clone(&source_map));
 
         let internal = Internal::new(owned_source, |owned_src| {
             let source = Span::new(owned_src);
@@ -173,13 +182,16 @@ impl<'src> Document<'src> {
                 blocks,
                 source: source.trim_trailing_whitespace(),
                 warnings,
-                source_map,
+                source_map: (*source_map).clone(),
                 catalog: parser.take_catalog(),
                 attributes,
                 toc,
                 docinfo,
             }
         });
+
+        // The parse is complete; the document now owns its source map.
+        parser.source_map = None;
 
         Self {
             internal,

@@ -13,7 +13,8 @@ use crate::{
     document::{InterpretedValue, TocConfig, TocMode},
     parser::{
         AttributeValue, InlineSubstitutionRenderer, ModificationContext, ReferenceResolver,
-        ReferenceWarning, built_in_attr, built_in_attrs_iter, preprocessor::preprocess,
+        ReferenceWarning, built_in_attr, built_in_attrs_iter,
+        preprocessor::preprocess_with_initial_file_name,
     },
     span::MatchedItem,
     strings::CowStr,
@@ -1680,12 +1681,52 @@ fn process_content<'src>(
         // cell is parsed in place from the parent document's source, which keeps
         // its spans (and line numbers) and avoids a copy.
         let cell = if content_has_directive(trimmed.data()) {
-            // The preprocessor may report warnings (e.g. an unresolved include
-            // target) located by offset into the expanded source. As with the
-            // owned parse warnings below, that source cannot escape this cell, so
-            // these warnings are dropped on this rare path.
-            let (expanded, _source_map, _preprocessor_warnings) =
-                preprocess(trimmed.data(), parser);
+            // The cell content is a contiguous slice of the (preprocessed)
+            // document source, so it may itself have originated from an
+            // `include::`d file. Look up the file and line the cell's first line
+            // came from, so a directive that fails to resolve reports the
+            // correct originating file (rather than "(root file)") and so its
+            // warning can be re-anchored to that original cursor below. This is
+            // only meaningful for a top-level table: a table nested inside
+            // another AsciiDoc cell is parsed from that cell's own owned source,
+            // whose spans do not index the document source map.
+            let cell_origin = if parser.nested_document_depth == 0 {
+                parser
+                    .source_map
+                    .clone()
+                    .and_then(|sm| sm.original_file_and_line(trimmed.line()))
+            } else {
+                None
+            };
+            let cell_origin_file = cell_origin.as_ref().and_then(|sl| sl.0.clone());
+
+            // Re-run the preprocessor over the cell content, naming the file it
+            // came from so an unresolved directive is attributed to it.
+            let (expanded, _cell_source_map, preprocessor_warnings) =
+                preprocess_with_initial_file_name(
+                    trimmed.data(),
+                    parser,
+                    cell_origin_file.as_deref(),
+                );
+
+            // The preprocessor locates each warning (e.g. an unresolved include
+            // target) by byte offset into the expanded cell source, which is
+            // owned by the cell and cannot escape it. Re-anchor each one to the
+            // cell's directive line in the document source so the warning's
+            // cursor maps back to the directive's true (file, line) through the
+            // document source map. Only a directive on the cell's *first* line
+            // reaches this inner preprocessor — a directive at the start of any
+            // later line sits at document column 0 and is already expanded by the
+            // document-level preprocessor — so every such warning belongs to that
+            // first line.
+            let directive_line = trimmed.take_line().item;
+            for pw in preprocessor_warnings {
+                warnings.push(Warning {
+                    source: directive_line,
+                    warning: pw.warning,
+                });
+            }
+
             let owned = OwnedCell::new(expanded, |source| {
                 // Warnings from the owned parse borrow the owned source and so
                 // cannot escape it; the include path is rare and currently

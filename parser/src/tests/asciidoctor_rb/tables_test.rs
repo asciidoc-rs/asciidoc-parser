@@ -1374,11 +1374,88 @@ mod psv {
         assert_rendered_contains(&doc, "included content");
     }
 
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/542): Deferred:
-    // "error about unresolved preprocessor directive on first line of an AsciiDoc
-    // table cell should have correct cursor" (Ruby 1728) asserts the file/line
-    // cursor of the unresolved-directive error, which needs the cell's nested
-    // source map threaded back to the parent — not yet implemented.
+    #[test]
+    fn error_about_unresolved_preprocessor_directive_on_first_line_of_an_asciidoc_table_cell_should_have_correct_cursor()
+     {
+        // The table (with a cell whose first line is an unresolvable `include::`)
+        // lives in `outer.adoc`, which the primary document reaches via its own
+        // `include::`. The error about the unresolved cell directive must be
+        // attributed to `outer.adoc` at the line the directive appears on there
+        // (line 5), not to the primary document or the synthesized cell content.
+        let handler = InlineFileHandler::from_pairs([(
+            "outer.adoc",
+            "|===\n|A |B\n\n|text\na|include::does-not-exist.adoc[]\n|===",
+        )]);
+        let mut parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler);
+        let doc = parser.parse("first\n\ninclude::outer.adoc[]\n\nlast");
+
+        // The unresolved directive is replaced (in the cell) with a message that
+        // names the file the directive came from.
+        assert_rendered_contains(&doc, "Unresolved directive in outer.adoc");
+
+        // A single warning is reported, and its cursor maps — through the
+        // document source map — back to `outer.adoc` line 5.
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
+        );
+        assert_eq!(
+            doc.source_map()
+                .original_file_and_line(warnings[0].source.line()),
+            Some(crate::parser::SourceLine(Some("outer.adoc".to_string()), 5))
+        );
+    }
+
+    // Not a Ruby port: a companion regression test for the fix above, covering
+    // the simpler case where the table is in the primary document itself (so the
+    // unresolved directive is attributed to the root file, not an included one).
+    #[test]
+    fn unresolved_directive_in_root_document_asciidoc_cell_reports_root_cursor() {
+        // No include handler: `does-not-exist.adoc` cannot be resolved.
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .parse("|===\na|include::does-not-exist.adoc[]\n|===");
+
+        assert_rendered_contains(&doc, "Unresolved directive in (root file)");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
+        );
+
+        // The directive is on line 2 of the primary document.
+        assert_eq!(
+            doc.source_map()
+                .original_file_and_line(warnings[0].source.line()),
+            Some(crate::parser::SourceLine(None, 2))
+        );
+    }
+
+    // Not a Ruby port: a table nested inside an AsciiDoc cell is parsed from that
+    // cell's nested source, so an unresolved directive in the *inner* cell is not
+    // mapped through the document source map (its file defaults to the root
+    // file). This guards the nested-depth branch of the fix.
+    #[test]
+    fn unresolved_directive_in_nested_table_cell_does_not_crash() {
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .parse("|===\na|\n!===\na!include::does-not-exist.adoc[]\n!===\n|===");
+
+        assert_rendered_contains(&doc, "Unresolved directive in (root file)");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
+        );
+    }
 
     #[test]
     #[ignore]

@@ -12,7 +12,7 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
-        ResolvedAttributes, SafeMode, SvgFileHandler,
+        ResolvedAttributes, SafeMode, SourceMap, SvgFileHandler,
         built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
         preprocessor::preprocess,
     },
@@ -164,6 +164,23 @@ pub struct Parser {
     /// each AsciiDoc cell, so it nests correctly.
     pub(crate) nested_document_depth: usize,
 
+    /// Source map of the document currently being parsed, populated by
+    /// [`Document::parse`] for the duration of the parse (and `None` outside
+    /// it).
+    ///
+    /// Block parsing works from the *preprocessed* source, so a span's line
+    /// number is relative to that flattened source rather than to the original
+    /// input file(s). An AsciiDoc table cell whose first line is an `include::`
+    /// directive re-runs the preprocessor over the cell's content: to report an
+    /// unresolved directive against the file and line where it *originally*
+    /// appeared (rather than "(root file)"), the cell must map its position in
+    /// the preprocessed source back through this map. It is only consulted while
+    /// parsing the top-level document (`nested_document_depth == 0`), where a
+    /// cell's span still refers to that source.
+    ///
+    /// [`Document::parse`]: crate::Document
+    pub(crate) source_map: Option<Rc<SourceMap>>,
+
     /// Catalog of callout numbers registered by verbatim blocks, used to
     /// validate the callout lists that annotate them.
     ///
@@ -246,6 +263,7 @@ impl Default for Parser {
             counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
+            source_map: None,
             callouts: RefCell::new(CalloutCatalog::default()),
             substitution_warnings: RefCell::new(vec![]),
         }
