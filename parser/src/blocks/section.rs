@@ -244,6 +244,7 @@ impl<'src> SectionBlock<'src> {
                         warnings.push(Warning {
                             source: metadata.source.trim_remainder(level_and_title.after),
                             warning: WarningType::DuplicateId(manual_id.to_string()),
+                            origin: None,
                         });
                     }
                 }
@@ -481,6 +482,7 @@ fn parse_title_line<'src>(
         warnings.push(Warning {
             source: source.take_normalized_line().item,
             warning: WarningType::SectionHeadingLevelExceedsMaximum(count - 1),
+            origin: None,
         });
 
         return None;
@@ -503,6 +505,7 @@ fn parse_title_line<'src>(
         warnings.push(Warning {
             source: source.take_normalized_line().item,
             warning: WarningType::Level0SectionHeadingNotSupported,
+            origin: None,
         });
 
         return None;
@@ -523,6 +526,7 @@ fn parse_title_line<'src>(
                 effective_level,
                 MIN_SECTION_LEVEL as usize,
             ),
+            origin: None,
         });
         MIN_SECTION_LEVEL as usize
     } else if effective_level > MAX_SECTION_LEVEL {
@@ -532,6 +536,7 @@ fn parse_title_line<'src>(
                 effective_level,
                 MAX_SECTION_LEVEL as usize,
             ),
+            origin: None,
         });
         MAX_SECTION_LEVEL as usize
     } else {
@@ -590,6 +595,7 @@ fn peer_or_ancestor_section<'src>(
             warnings.push(Warning {
                 source: source.take_normalized_line().item,
                 warning: WarningType::SectionHeadingLevelSkipped(*most_recent_level, found_level),
+                origin: None,
             });
         }
 

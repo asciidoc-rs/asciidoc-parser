@@ -100,6 +100,7 @@ impl<'src> MediaBlock<'src> {
                 warnings: vec![Warning {
                     source: name.after,
                     warning: WarningType::MacroMissingDoubleColon,
+                    origin: None,
                 }],
             };
         };
@@ -113,6 +114,7 @@ impl<'src> MediaBlock<'src> {
                 warnings: vec![Warning {
                     source: target.after,
                     warning: WarningType::MediaMacroMissingTarget,
+                    origin: None,
                 }],
             };
         }
@@ -123,6 +125,7 @@ impl<'src> MediaBlock<'src> {
                 warnings: vec![Warning {
                     source: target.after,
                     warning: WarningType::MacroMissingAttributeList,
+                    origin: None,
                 }],
             };
         };

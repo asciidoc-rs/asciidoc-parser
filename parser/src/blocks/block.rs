@@ -570,6 +570,7 @@ impl<'src> Block<'src> {
                 warnings.push(Warning {
                     source: metadata.source,
                     warning: WarningType::MissingBlockAfterTitleOrAttributeList,
+                    origin: None,
                 });
 
                 // Remove the metadata content so that SimpleBlock will read the title/attrlist
@@ -724,6 +725,7 @@ impl<'src> Block<'src> {
                     warnings.push(Warning {
                         source: span,
                         warning: WarningType::DuplicateId(id.to_string()),
+                        origin: None,
                     });
                 }
             }

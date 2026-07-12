@@ -98,6 +98,7 @@ impl<'src> Header<'src> {
                     warnings.push(Warning {
                         source: line,
                         warning: WarningType::DocumentHeaderNotTerminated,
+                        origin: None,
                     });
                 }
                 break;

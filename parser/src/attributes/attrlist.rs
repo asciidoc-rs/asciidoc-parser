@@ -82,6 +82,7 @@ impl<'src> Attrlist<'src> {
                 warnings.push(Warning {
                     source,
                     warning: warning_type,
+                    origin: None,
                 });
             }
 
@@ -117,6 +118,7 @@ impl<'src> Attrlist<'src> {
                         warnings.push(Warning {
                             source,
                             warning: WarningType::EmptyAttributeValue,
+                            origin: None,
                         });
                         after = after.discard(1);
                         index = after.byte_offset();
@@ -135,6 +137,7 @@ impl<'src> Attrlist<'src> {
             warnings.push(Warning {
                 source,
                 warning: WarningType::MissingCommaAfterQuotedAttributeValue,
+                origin: None,
             });
         }
 

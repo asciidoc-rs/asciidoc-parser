@@ -106,6 +106,7 @@ impl<'src> BlockMetadata<'src> {
                             warnings.push(Warning {
                                 source: anchor_span,
                                 warning: WarningType::InvalidBlockAnchorName,
+                                origin: None,
                             });
                         }
                     } else {
@@ -117,6 +118,7 @@ impl<'src> BlockMetadata<'src> {
                             warnings.push(Warning {
                                 source: mi.item,
                                 warning: WarningType::InvalidBlockAnchorName,
+                                origin: None,
                             });
                         }
                     }
@@ -251,6 +253,7 @@ fn parse_maybe_block_anchor(
             warnings: vec![Warning {
                 source: anchor_src,
                 warning: WarningType::EmptyBlockAnchorName,
+                origin: None,
             }],
         };
     }

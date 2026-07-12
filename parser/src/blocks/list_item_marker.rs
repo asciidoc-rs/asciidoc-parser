@@ -232,6 +232,7 @@ impl<'src> ListItemMarker<'src> {
                 warnings.push(Warning {
                     source: term.original(),
                     warning: WarningType::DuplicateId(id.to_string()),
+                    origin: None,
                 });
             }
         }
