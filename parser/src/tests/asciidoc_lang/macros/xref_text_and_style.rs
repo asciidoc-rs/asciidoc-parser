@@ -103,8 +103,8 @@ fn installation_and_figure(header: &str) -> String {
     )
 }
 
-/// Parses `input` and returns its first rendered paragraph (the one carrying the
-/// cross references in these tests).
+/// Parses `input` and returns its first rendered paragraph (the one carrying
+/// the cross references in these tests).
 fn first_paragraph(input: &str) -> String {
     rendered_paragraphs(&Parser::default().parse(input))
         .into_iter()

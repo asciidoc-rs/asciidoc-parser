@@ -1307,9 +1307,9 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
 /// `base` is the target's reference text (its title, when the target has no
 /// explicit reftext). Styling applies only when a style is selected *and* the
 /// target carries an [`XrefSignifier`] (a numbered section or captioned block);
-/// otherwise `base` is returned unchanged. The HTML conventions live here in the
-/// HTML renderer: a title is wrapped in typographic quotes, except a chapter or
-/// appendix title, which is emphasized with `<em>` (in every style).
+/// otherwise `base` is returned unchanged. The HTML conventions live here in
+/// the HTML renderer: a title is wrapped in typographic quotes, except a
+/// chapter or appendix title, which is emphasized with `<em>` (in every style).
 fn apply_xrefstyle(
     style: Option<XrefStyle>,
     signifier: Option<&XrefSignifier>,

@@ -290,10 +290,11 @@ fn appendix_caption(parser: &Parser, number: &SectionNumber) -> String {
     }
 }
 
-/// Combines a reference signifier with a reference number for the `full`/`short`
-/// xrefstyle label. When the signifier is set the label is `"<signifier>
-/// <number>"` (e.g. `"Section 2.3"`); when it is unset (or empty) — as after
-/// `:!section-refsig:` — the signifier is dropped and only the number remains.
+/// Combines a reference signifier with a reference number for the
+/// `full`/`short` xrefstyle label. When the signifier is set the label is
+/// `"<signifier> <number>"` (e.g. `"Section 2.3"`); when it is unset (or empty)
+/// — as after `:!section-refsig:` — the signifier is dropped and only the
+/// number remains.
 fn join_signifier(signifier: Option<&str>, number: &str) -> String {
     match signifier {
         Some(signifier) if !signifier.is_empty() => format!("{signifier} {number}"),

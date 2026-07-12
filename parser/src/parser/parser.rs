@@ -595,7 +595,8 @@ impl Parser {
     /// already-registered catalog element, so a cross-reference to it can build
     /// `full`/`short` [`xrefstyle`](crate::parser::XrefStyle) text.
     ///
-    /// Takes `&self` for the same reason as [`register_ref`](Self::register_ref).
+    /// Takes `&self` for the same reason as
+    /// [`register_ref`](Self::register_ref).
     pub(crate) fn set_ref_signifier(&self, id: &str, signifier: crate::parser::XrefSignifier) {
         self.catalog.borrow_mut().set_signifier(id, signifier);
     }

@@ -94,12 +94,12 @@ pub struct ResolvedReference {
 impl ResolvedReference {
     /// Constructs a resolved reference with no [`signifier`](Self::signifier).
     ///
-    /// Use this when the target is not a numbered/captioned element, or when the
-    /// resolver builds the display `text` from scratch. When the target came
-    /// from a [`Catalog`] (the usual case, including cross-document resolution),
-    /// prefer [`from_entry`](Self::from_entry) so `full`/`short` `xrefstyle`
-    /// formatting keeps working; or attach a signifier explicitly with
-    /// [`with_signifier`](Self::with_signifier).
+    /// Use this when the target is not a numbered/captioned element, or when
+    /// the resolver builds the display `text` from scratch. When the target
+    /// came from a [`Catalog`] (the usual case, including cross-document
+    /// resolution), prefer [`from_entry`](Self::from_entry) so
+    /// `full`/`short` `xrefstyle` formatting keeps working; or attach a
+    /// signifier explicitly with [`with_signifier`](Self::with_signifier).
     pub fn new(href: String, text: Option<String>) -> Self {
         Self {
             href,
@@ -118,8 +118,8 @@ impl ResolvedReference {
     /// the `href` it computed for that document, and the target's signifier and
     /// number — computed while *that* document was parsed — ride along. The
     /// style itself comes from the *referencing* document and is applied later,
-    /// so the resolver need not know it. The single-document [`CatalogResolver`]
-    /// is built on this same helper.
+    /// so the resolver need not know it. The single-document
+    /// [`CatalogResolver`] is built on this same helper.
     ///
     /// [`RefEntry`]: crate::document::RefEntry
     pub fn from_entry(href: String, entry: &crate::document::RefEntry) -> Self {
@@ -130,7 +130,8 @@ impl ResolvedReference {
         }
     }
 
-    /// Attaches a [`signifier`](Self::signifier), returning `self` for chaining.
+    /// Attaches a [`signifier`](Self::signifier), returning `self` for
+    /// chaining.
     ///
     /// For a host resolver that builds its `href`/`text` from scratch but still
     /// wants `full`/`short` `xrefstyle` formatting for a numbered or captioned

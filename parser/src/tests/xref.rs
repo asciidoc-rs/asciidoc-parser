@@ -14,7 +14,7 @@ use crate::{
     blocks::{Block, IsBlock, SimpleBlock},
     parser::{
         CatalogResolver, HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext,
-        ResolvedReference,
+        ResolvedReference, XrefSignifier,
     },
 };
 
@@ -144,6 +144,36 @@ fn xrefstyle_survives_deferred_resolution() {
     assert_eq!(
         first_paragraph(&doc),
         "See <a href=\"#install\">Section 2.3, &#8220;Installation&#8221;</a>.",
+    );
+}
+
+#[test]
+fn host_resolver_can_attach_signifier() {
+    // A host resolver that builds its `href`/`text` from scratch (rather than
+    // from a catalog `RefEntry`) can still opt a target into `full`/`short`
+    // formatting by attaching a signifier with `with_signifier`. The style still
+    // comes from the referencing document.
+    let mut doc = Parser::default().parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
+
+    let resolver = CrossDocResolver {
+        index: HashMap::from([(
+            "install".to_string(),
+            ResolvedReference::new(
+                "guide.html#install".to_string(),
+                Some("Installation".to_string()),
+            )
+            .with_signifier(XrefSignifier {
+                label: "Section 2.3".to_string(),
+                emphasize: false,
+            }),
+        )]),
+    };
+
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    assert!(warnings.is_empty());
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"guide.html#install\">Section 2.3, &#8220;Installation&#8221;</a>.",
     );
 }
 
