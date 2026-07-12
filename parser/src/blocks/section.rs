@@ -90,12 +90,15 @@ impl<'src> SectionBlock<'src> {
 
         // A cross-reference builds `full`/`short` xrefstyle text from a section's
         // signifier and number, but only when the section has a number *and* no
-        // explicit reftext (an explicit reftext is used verbatim instead).
+        // explicit reftext (an explicit reftext is used verbatim instead). An
+        // explicit reftext can come from a `reftext` attribute or the second
+        // field of a `[[id,reftext]]` block anchor.
         let has_explicit_reftext = metadata
             .attrlist
             .as_ref()
             .and_then(|a| a.named_attribute("reftext"))
-            .is_some();
+            .is_some()
+            || metadata.anchor_reftext.is_some();
 
         let (section_number, caption, xref_signifier) = if is_appendix_root {
             parser
@@ -170,10 +173,14 @@ impl<'src> SectionBlock<'src> {
             .and_then(|a| a.id())
             .or_else(|| metadata.anchor.as_ref().map(|anchor| anchor.data()));
 
+        // Reftext precedence mirrors `Block::block_reftext`: an explicit
+        // `reftext` attribute, then a `[[id,reftext]]` anchor reftext, then the
+        // section title.
         let reftext = metadata
             .attrlist
             .as_ref()
             .and_then(|a| a.named_attribute("reftext").map(|a| a.value()))
+            .or_else(|| metadata.anchor_reftext.as_ref().map(|span| span.data()))
             .unwrap_or_else(|| section_title.rendered());
 
         let section_id = if sectids && manual_id.is_none() {

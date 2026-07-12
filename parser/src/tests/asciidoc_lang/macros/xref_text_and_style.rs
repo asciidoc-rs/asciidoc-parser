@@ -337,6 +337,70 @@ The *basic* xrefstyle is unaffected by the value of the signifier.
     );
 }
 
+#[test]
+fn anchor_reftext_suppresses_signifier() {
+    // A `[[id,reftext]]` block anchor supplies an explicit reftext, which is
+    // used verbatim even under `full`/`short` — the section is *not* rendered
+    // as "Section 2.3". (Regression: the signifier gate previously checked only
+    // the `reftext` attribute, not the anchor reftext.)
+    let input = "\
+        :sectnums:\n:xrefstyle: full\n\n\
+        See <<install>>.\n\n\
+        == One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n\
+        [[install,Read the install guide]]\n=== Installation\n";
+
+    assert_eq!(
+        first_paragraph(input),
+        r##"See <a href="#install">Read the install guide</a>."##
+    );
+}
+
+#[test]
+fn non_integer_caption_counter_keeps_signifier() {
+    // A captioned block whose context counter holds a non-integer value (here
+    // `figure-number` seeded to render "Figure B") is genuinely auto-numbered
+    // even though it exposes no bare integer number. `full`/`short` must still
+    // build the signifier from its caption rather than falling back to the
+    // title. (Regression: the gate previously required an integer number.)
+    let numbered = "\
+        :xrefstyle: {style}\n:figure-number: A\n\n\
+        See <<big-cats>>.\n\n\
+        .Big Cats\n[#big-cats]\nimage::big-cats.png[]\n";
+
+    assert_eq!(
+        first_paragraph(&numbered.replace("{style}", "full")),
+        r##"See <a href="#big-cats">Figure B, &#8220;Big Cats&#8221;</a>."##
+    );
+    assert_eq!(
+        first_paragraph(&numbered.replace("{style}", "short")),
+        r##"See <a href="#big-cats">Figure B</a>."##
+    );
+
+    // An explicit caption override, by contrast, is not numbered and gets no
+    // signifier, so `full` falls back to the title. An override can come from
+    // the block attrlist, the image macro's own attrlist, or a document-wide
+    // `caption` attribute — each suppresses the signifier.
+    let expected = r##"See <a href="#big-cats">Big Cats</a>."##;
+
+    let block_attr_override = "\
+        :xrefstyle: full\n\n\
+        See <<big-cats>>.\n\n\
+        .Big Cats\n[#big-cats,caption=\"Plate \"]\nimage::big-cats.png[]\n";
+    assert_eq!(first_paragraph(block_attr_override), expected);
+
+    let macro_attr_override = "\
+        :xrefstyle: full\n\n\
+        See <<big-cats>>.\n\n\
+        .Big Cats\n[#big-cats]\nimage::big-cats.png[caption=\"Plate \"]\n";
+    assert_eq!(first_paragraph(macro_attr_override), expected);
+
+    let document_wide_override = "\
+        :xrefstyle: full\n:caption: Plate \n\n\
+        See <<big-cats>>.\n\n\
+        .Big Cats\n[#big-cats]\nimage::big-cats.png[]\n";
+    assert_eq!(first_paragraph(document_wide_override), expected);
+}
+
 non_normative!(
     r##"
 Only the aforementioned styles are provided out of the box.
