@@ -135,6 +135,20 @@ impl<'src> SectionBlock<'src> {
 
         let mut most_recent_level = level;
 
+        // Apply the title's substitutions BEFORE parsing the section body, so
+        // that a `footnote:[…]` macro in the title is numbered ahead of any
+        // footnotes in the body (document order: the title precedes its body).
+        // Substituting before the body also means the title only sees document
+        // attributes defined ahead of it, not ones its body sets later.
+        //
+        // Asciidoctor instead converts headings eagerly and out of document
+        // order (to build IDs and cross-reference text), which numbers heading
+        // footnotes out of sequence. The crate deliberately diverges toward
+        // straightforward document-order numbering; see
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/594.
+        let mut section_title = Content::from(level_and_title.item.1);
+        SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
+
         // A section carrying the `bibliography` style implicitly adds that style
         // to each top-level unordered list in its body (see the "Bibliography
         // section syntax" section of the spec). Record that we are parsing such a
@@ -161,9 +175,6 @@ impl<'src> SectionBlock<'src> {
 
         let blocks = maw_blocks.item;
         let source = metadata.source.trim_remainder(blocks.after);
-
-        let mut section_title = Content::from(level_and_title.item.1);
-        SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
 
         let proposed_base_id = generate_section_id(section_title.rendered(), parser);
 
