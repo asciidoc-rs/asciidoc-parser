@@ -101,6 +101,13 @@ pub(crate) struct XrefSegment {
     /// Roles supplied via a `role` attribute on the `xref:` macro, if any.
     pub(crate) roles: Vec<String>,
 
+    /// The cross-reference text style in effect for this reference: the
+    /// `xrefstyle=` attribute on the `xref:` macro if given, otherwise the
+    /// document-wide `xrefstyle` at the reference's location. `None` when
+    /// `xrefstyle` is unset, in which case the target's reftext is used
+    /// verbatim.
+    pub(crate) xrefstyle: Option<crate::parser::XrefStyle>,
+
     /// The resolved destination, filled in by resolution; `None` until then.
     pub(crate) resolved: Option<crate::parser::ResolvedReference>,
 }
@@ -397,6 +404,7 @@ fn render_template(
                         provided_text: xref.provided_text.as_deref(),
                         window: xref.window.as_deref(),
                         roles: &xref.roles,
+                        xrefstyle: xref.xrefstyle,
                         resolved: xref.resolved.as_ref(),
                     },
                     &mut out,
@@ -546,6 +554,7 @@ mod tests {
                 provided_text: None,
                 window: None,
                 roles: vec![],
+                xrefstyle: None,
                 resolved: None,
             }
         }

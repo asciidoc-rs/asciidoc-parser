@@ -711,6 +711,16 @@ impl Parser {
             .register_ref(id, reftext, ref_type)
     }
 
+    /// Attaches an [`XrefSignifier`](crate::parser::XrefSignifier) to an
+    /// already-registered catalog element, so a cross-reference to it can build
+    /// `full`/`short` [`xrefstyle`](crate::parser::XrefStyle) text.
+    ///
+    /// Takes `&self` for the same reason as
+    /// [`register_ref`](Self::register_ref).
+    pub(crate) fn set_ref_signifier(&self, id: &str, signifier: crate::parser::XrefSignifier) {
+        self.catalog.borrow_mut().set_signifier(id, signifier);
+    }
+
     /// Registers a callout number defined by a verbatim block.
     ///
     /// Takes `&self` so it can be called from the callouts substitution step,
@@ -1364,16 +1374,18 @@ impl Parser {
     /// Assign the next section number for a given level.
     pub(crate) fn assign_section_number(&mut self, level: usize) -> SectionNumber {
         match self.topmost_section_type {
-            SectionType::Normal => {
-                self.last_section_number.assign_next_number(level);
-                self.last_section_number.clone()
-            }
             SectionType::Appendix => {
                 self.last_appendix_section_number.assign_next_number(level);
                 self.last_appendix_section_number.clone()
             }
-            SectionType::Discrete => {
-                // Shouldn't happen, but ignore if it does.
+
+            // `topmost_section_type` is only ever `Normal` or `Appendix`: a
+            // discrete heading never becomes the topmost section type (see
+            // `SectionBlock::parse`). `Discrete` therefore cannot reach this
+            // point, so it is folded in with `Normal` rather than carried as a
+            // separate, untestable arm.
+            SectionType::Normal | SectionType::Discrete => {
+                self.last_section_number.assign_next_number(level);
                 self.last_section_number.clone()
             }
         }
@@ -1669,6 +1681,22 @@ mod tests {
 
         assert_eq!(doc.warnings().count(), 0);
         assert_eq!(parser.attribute_value("sectids"), InterpretedValue::Set);
+    }
+
+    #[test]
+    fn silently_locked_bool_intrinsic_false_is_unset() {
+        // A `false` flag records an `Unset` tombstone, and a locked (`ApiOnly`)
+        // attribute rejects a document body reassignment without warning.
+        let mut parser = Parser::default().with_intrinsic_attribute_bool_silent(
+            "sectids",
+            false,
+            ModificationContext::ApiOnly,
+        );
+
+        let doc = parser.parse(concat!("= Title\n", ":sectids:\n"));
+
+        assert_eq!(doc.warnings().count(), 0);
+        assert_eq!(parser.attribute_value("sectids"), InterpretedValue::Unset);
     }
 
     #[test]

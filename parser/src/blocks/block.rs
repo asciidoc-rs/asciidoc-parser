@@ -10,8 +10,8 @@ use crate::{
         starts_with_admonition_label,
     },
     content::{Content, SubstitutionGroup},
-    document::{Attribute, RefType},
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning},
+    document::{Attribute, InterpretedValue, RefType},
+    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning, XrefSignifier},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -252,6 +252,7 @@ impl<'src> Block<'src> {
             Self::register_block_id(
                 block.id(),
                 Self::block_reftext(&block),
+                Self::block_signifier(&block, parser),
                 block.span(),
                 parser,
                 &mut warnings,
@@ -323,6 +324,7 @@ impl<'src> Block<'src> {
                 Self::register_block_id(
                     block.id(),
                     Self::block_reftext(&block),
+                    Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -349,6 +351,7 @@ impl<'src> Block<'src> {
                 Self::register_block_id(
                     block.id(),
                     Self::block_reftext(&block),
+                    Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -375,6 +378,7 @@ impl<'src> Block<'src> {
                 Self::register_block_id(
                     block.id(),
                     Self::block_reftext(&block),
+                    Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -401,6 +405,7 @@ impl<'src> Block<'src> {
                 Self::register_block_id(
                     block.id(),
                     Self::block_reftext(&block),
+                    Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -427,6 +432,7 @@ impl<'src> Block<'src> {
                 Self::register_block_id(
                     block.id(),
                     Self::block_reftext(&block),
+                    Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
                     &mut warnings,
@@ -478,6 +484,7 @@ impl<'src> Block<'src> {
                     Self::register_block_id(
                         block.id(),
                         Self::block_reftext(&block),
+                        Self::block_signifier(&block, parser),
                         block.span(),
                         parser,
                         &mut warnings,
@@ -605,6 +612,7 @@ impl<'src> Block<'src> {
             Self::register_block_id(
                 matched_item.item.id(),
                 Self::block_reftext(&matched_item.item),
+                Self::block_signifier(&matched_item.item, parser),
                 matched_item.item.span(),
                 parser,
                 &mut result.warnings,
@@ -612,6 +620,71 @@ impl<'src> Block<'src> {
         }
 
         result
+    }
+
+    /// Determine the [`XrefSignifier`] a cross-reference uses to build
+    /// `full`/`short` [`xrefstyle`](crate::parser::XrefStyle) text when this
+    /// block is the target.
+    ///
+    /// A signifier is produced only for an auto-numbered captioned block (e.g.
+    /// an image → "Figure 1", a titled table → "Table 1") that has no explicit
+    /// reftext. A block with an explicit `reftext` attribute or a
+    /// `[[id,reftext]]` anchor reftext uses that text verbatim, so it gets no
+    /// signifier; neither does an uncaptioned block or one whose caption was
+    /// overridden with `[caption=...]` (which is not numbered).
+    fn block_signifier<'a>(block: &'a Block<'a>, parser: &Parser) -> Option<XrefSignifier> {
+        // Only captioned blocks are eligible.
+        let caption = block.caption()?;
+
+        let has_explicit_reftext = block
+            .attrlist()
+            .and_then(|attrlist| attrlist.named_attribute("reftext"))
+            .is_some()
+            || block.anchor_reftext().is_some();
+        if has_explicit_reftext {
+            return None;
+        }
+
+        // Exclude explicit caption overrides, which are not numbered. This is
+        // *not* the same as `block.number().is_none()`: an auto-numbered block
+        // whose context counter holds a non-integer value (e.g. `:figure-number:
+        // A`, rendering "Figure B") also has no bare integer number, yet it is
+        // genuinely numbered and must keep its signifier ("Figure B").
+        if Self::has_caption_override(block, parser) {
+            return None;
+        }
+
+        // The caption prefix is "<label> <n>. "; the xrefstyle label is that
+        // prefix without its trailing ". " separator (e.g. "Figure 1").
+        let label = caption.strip_suffix(". ").unwrap_or(caption).to_string();
+        Some(XrefSignifier {
+            label,
+            emphasize: false,
+        })
+    }
+
+    /// Whether a captioned block's caption comes from an explicit override
+    /// rather than automatic numbering.
+    ///
+    /// An override is a `caption` attribute on the block (or, for an image, on
+    /// the image macro), or a non-empty document-wide `caption` attribute. This
+    /// mirrors the override detection in
+    /// [`caption::assign_block_caption`](crate::blocks::caption) and
+    /// [`MediaBlock::assign_caption`], so the two agree on which blocks are
+    /// numbered.
+    fn has_caption_override<'a>(block: &'a Block<'a>, parser: &Parser) -> bool {
+        let attribute_override = block
+            .attrlist()
+            .and_then(|attrlist| attrlist.named_attribute("caption"))
+            .is_some()
+            || matches!(block, Block::Media(media)
+                if media.macro_attrlist().named_attribute("caption").is_some());
+
+        attribute_override
+            || matches!(
+                parser.attribute_value("caption"),
+                InterpretedValue::Value(value) if !value.is_empty(),
+            )
     }
 
     /// Determine the reftext (a.k.a. xreflabel) used as the link text when a
@@ -634,18 +707,26 @@ impl<'src> Block<'src> {
     fn register_block_id(
         id: Option<&str>,
         reftext: Option<&str>,
+        signifier: Option<XrefSignifier>,
         span: Span<'src>,
         parser: &mut Parser,
         warnings: &mut Vec<Warning<'src>>,
     ) {
-        if let Some(id) = id
-            && let Err(_duplicate_error) = parser.register_ref(id, reftext, RefType::Anchor)
-        {
-            // If registration fails due to duplicate ID, issue a warning.
-            warnings.push(Warning {
-                source: span,
-                warning: WarningType::DuplicateId(id.to_string()),
-            });
+        if let Some(id) = id {
+            match parser.register_ref(id, reftext, RefType::Anchor) {
+                Ok(()) => {
+                    if let Some(signifier) = signifier {
+                        parser.set_ref_signifier(id, signifier);
+                    }
+                }
+                Err(_duplicate_error) => {
+                    // If registration fails due to duplicate ID, issue a warning.
+                    warnings.push(Warning {
+                        source: span,
+                        warning: WarningType::DuplicateId(id.to_string()),
+                    });
+                }
+            }
         }
     }
 
