@@ -496,24 +496,29 @@ impl Parser {
             return value;
         };
 
+        // Only a leading `+`/`-` marks a relative assignment; anything else
+        // (an absolute value, or a non-numeric value) is stored unchanged.
         let trimmed = v.trim();
-        let (sign, digits) = match trimmed.strip_prefix('+') {
-            Some(rest) => (1, rest),
-            None => match trimmed.strip_prefix('-') {
-                Some(rest) => (-1, rest),
-                None => return value,
-            },
-        };
+        if !trimmed.starts_with(['+', '-']) {
+            return value;
+        }
 
-        match digits.trim().parse::<i32>() {
-            // `saturating_*` keeps a pathologically large offset (e.g. an
-            // absolute `:leveloffset:` near `i32::MAX` followed by a relative
-            // `+1`) from overflowing — which would panic in debug builds and
-            // wrap in release builds — rather than adding a real bound the
-            // syntax does not otherwise impose.
+        // Parse the whole signed value as `i64` so the extreme relative delta
+        // `-2147483648` (whose magnitude exceeds `i32::MAX`) is still read as
+        // itself rather than failing and being stored as an absolute value.
+        match trimmed.parse::<i64>() {
+            // The running offset is a valid `i32`, so widening it to `i64`
+            // makes the accumulation itself infallible; `saturating_add` then
+            // guards the (already absurd) case of a delta near `i64::MIN/MAX`,
+            // and the result is clamped back into the `i32` the attribute
+            // stores. This keeps a pathological offset from overflowing —
+            // which would panic in debug builds and wrap in release builds —
+            // rather than imposing a real bound the syntax does not otherwise
+            // impose.
             Ok(delta) => InterpretedValue::Value(
-                self.level_offset()
-                    .saturating_add(delta.saturating_mul(sign))
+                (self.level_offset() as i64)
+                    .saturating_add(delta)
+                    .clamp(i32::MIN as i64, i32::MAX as i64)
                     .to_string(),
             ),
             Err(_) => value,

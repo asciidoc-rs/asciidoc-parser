@@ -477,3 +477,28 @@ fn impossible_offset_set_in_header_warns() {
         ]
     );
 }
+
+#[test]
+fn extreme_negative_relative_offset_is_applied_not_stored_as_absolute() {
+    // `-2147483648` has a magnitude larger than `i32::MAX`, so stripping the
+    // sign and parsing the magnitude as `i32` would fail and store the value as
+    // an absolute offset (`i32::MIN`), clamping every later heading to level 1.
+    // Parsed as a signed delta it instead accumulates: on top of the preceding
+    // `2147483647` it resolves to `-1`, leaving `====== Deep` (syntactic level
+    // 5) at level 4.
+    let doc = Parser::default().parse(concat!(
+        "= My Book\n\n",
+        ":leveloffset: 2147483647\n\n",
+        ":leveloffset: -2147483648\n\n",
+        "====== Deep",
+    ));
+
+    assert_eq!(section_levels(&doc), vec![(4, "Deep".to_string())]);
+
+    // Only the first (absolute, out-of-range) offset warns; the resolved `-1`
+    // is usable, so no impossible-offset or clamp warning follows.
+    assert_eq!(
+        warning_types(&doc),
+        vec![WarningType::LeveloffsetExcludesAllHeadingLevels(i32::MAX)]
+    );
+}
