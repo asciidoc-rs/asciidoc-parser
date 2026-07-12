@@ -205,8 +205,23 @@ impl<'src> Document<'src> {
     }
 
     /// Return the document title (the level-0 `= Title`), if there was one.
+    ///
+    /// If the title contains a subtitle, this returns the full, combined title.
+    /// Use [`Header::main_title`] and [`Header::subtitle`] (via [`header`]) to
+    /// access the partitioned title.
+    ///
+    /// [`header`]: Self::header
     pub fn doctitle(&self) -> Option<&str> {
         self.header().title()
+    }
+
+    /// Return the document subtitle, if the document title contained one.
+    ///
+    /// A subtitle is the text following the final subtitle separator (a colon
+    /// followed by a space, by default) in the document title. See
+    /// [`Header::subtitle`].
+    pub fn subtitle(&self) -> Option<&str> {
+        self.header().subtitle()
     }
 
     /// Returns the resolved interpreted value of the named [document
@@ -1364,6 +1379,10 @@ mod tests {
         title: Some(
             "Example Title",
         ),
+        main_title: Some(
+            "Example Title",
+        ),
+        subtitle: None,
         attributes: &[],
         author_line: None,
         revision_line: None,

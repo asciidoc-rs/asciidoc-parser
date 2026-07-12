@@ -2,11 +2,6 @@ use crate::tests::prelude::*;
 
 track_file!("ref/asciidoc-lang/docs/modules/document/pages/subtitle.adoc");
 
-// TO DO: Consider adding support for subtitle parsing?
-// (https://github.com/asciidoc-rs/asciidoc-parser/issues/382)
-
-// Possible this will never be supported in this crate, so treating this page as
-// non-normative.
 non_normative!(
     r#"
 = Subtitle
@@ -18,8 +13,23 @@ NOTE: The HTML 5 converter does not currently split the subtitle out from the do
 The document title is only partitioned into a main and subtitle in the output of the DocBook, EPUB 3, and PDF converters.
 However, the subtitle is still available via the API, so you could add support for it by extending the HTML 5 converter.
 
+"#
+);
+
+mod subtitle_syntax {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
 == Subtitle syntax
 
+"#
+    );
+
+    #[test]
+    fn title_and_subtitle() {
+        verifies!(
+            r#"
 When the document title contains a colon followed by a space (i.e, `:{sp}`), the text after the final colon-space sequence is treated as a subtitle.
 
 .A document title and subtitle
@@ -28,6 +38,22 @@ When the document title contains a colon followed by a space (i.e, `:{sp}`), the
 = Main Title: Subtitle
 ----
 
+"#
+        );
+
+        let doc = Parser::default().parse("= Main Title: Subtitle");
+        let header = doc.header();
+
+        // `title` remains the full, combined title for backward compatibility.
+        assert_eq!(header.title(), Some("Main Title: Subtitle"));
+        assert_eq!(header.main_title(), Some("Main Title"));
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn separator_searched_from_end() {
+        verifies!(
+            r#"
 The separator is searched for from the end of the text.
 Therefore, only the last occurrence of the separator (i.e, `:{sp}`) is used for partitioning the title.
 
@@ -37,8 +63,33 @@ Therefore, only the last occurrence of the separator (i.e, `:{sp}`) is used for 
 = Main Title: Main Title Continued: Subtitle
 ----
 
+"#
+        );
+
+        let doc = Parser::default().parse("= Main Title: Main Title Continued: Subtitle");
+        let header = doc.header();
+
+        assert_eq!(
+            header.main_title(),
+            Some("Main Title: Main Title Continued")
+        );
+        assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    mod modify_the_title_separator {
+        use crate::tests::prelude::*;
+
+        non_normative!(
+            r#"
 === Modify the title separator
 
+"#
+        );
+
+        #[test]
+        fn separator_block_attribute() {
+            verifies!(
+                r#"
 You can change the title separator by specifying the `separator` block attribute explicitly above the document title.
 A space will automatically be appended to the separator value.
 
@@ -49,6 +100,20 @@ A space will automatically be appended to the separator value.
 = Main Title:: Subtitle
 ----
 
+"#
+            );
+
+            let doc = Parser::default().parse("[separator=::]\n= Main Title:: Subtitle");
+            let header = doc.header();
+
+            assert_eq!(header.main_title(), Some("Main Title"));
+            assert_eq!(header.subtitle(), Some("Subtitle"));
+        }
+
+        #[test]
+        fn title_separator_attribute() {
+            verifies!(
+                r#"
 You can also assign a separator using a document attribute `title-separator` in the header.
 
 .Assign title-separator to the document title
@@ -58,12 +123,38 @@ You can also assign a separator using a document attribute `title-separator` in 
 :title-separator: ::
 ----
 
+"#
+            );
+
+            // The `title-separator` attribute applies even though it is defined
+            // below the document title line, because the title is partitioned
+            // after the entire header has been parsed.
+            let doc = Parser::default().parse("= Main Title:: Subtitle\n:title-separator: ::");
+            let header = doc.header();
+
+            assert_eq!(header.main_title(), Some("Main Title"));
+            assert_eq!(header.subtitle(), Some("Subtitle"));
+        }
+
+        non_normative!(
+            r#"
 `title-separator` can also be assigned via the CLI.
 
 ....
 $ asciidoctor -a title-separator=:: document.adoc
 ....
 
+"#
+        );
+    }
+}
+
+// This crate always partitions the document title and exposes the result via
+// `Header::main_title` and `Header::subtitle` (and `Document::subtitle`). The
+// Ruby `doctitle partition:` API described below is therefore non-normative for
+// this crate.
+non_normative!(
+    r#"
 == Partition the title using the API
 
 You can partition the title from the API when calling the `doctitle` method on Document:
