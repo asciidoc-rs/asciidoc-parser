@@ -346,15 +346,26 @@ impl std::fmt::Debug for SectionBlock<'_> {
     }
 }
 
+/// The lowest and highest levels a section heading may occupy. A syntactic
+/// heading level (0 for `=`, up to 5 for `======`) shifted by `leveloffset`
+/// must land within this inclusive range; a result outside it is clamped.
+const MIN_SECTION_LEVEL: i32 = 1;
+const MAX_SECTION_LEVEL: i32 = 5;
+
 /// Parses a section title line, returning the section's *effective* level
 /// (with `offset`, the running `leveloffset`, already applied) and the span of
 /// the title text.
 ///
 /// The syntactic level is 0-based: a bare `=` is 0, `==` is 1, up to `======`
-/// at 5. `offset` shifts it to the effective level. A heading whose effective
-/// level is below 1 has no section representation; it is rejected as an
-/// unsupported level-0 heading (recording a warning) exactly as a bare `=`
-/// heading is when no offset applies.
+/// at 5. `offset` shifts it to the effective level, which is then constrained
+/// to the [`MIN_SECTION_LEVEL`]..=[`MAX_SECTION_LEVEL`] range:
+///
+/// * A bare `=` (syntactic level 0) that no positive offset lifts to level 1 or
+///   beyond has no section representation; it is rejected as an unsupported
+///   level-0 heading (recording a warning), preserving the single-document-
+///   title rule.
+/// * Any other heading whose effective level falls outside the supported range
+///   is clamped to the nearest valid level and a warning is recorded.
 fn parse_title_line<'src>(
     source: Span<'src>,
     offset: i32,
@@ -390,12 +401,20 @@ fn parse_title_line<'src>(
         return None;
     }
 
-    // `saturating_add` guards against a pathologically large `offset` (e.g. an
-    // absolute `:leveloffset:` near `i32::MAX`): the syntactic level is at most
-    // 5 here, so this only matters for a hostile offset, which would otherwise
-    // panic in debug builds and wrap in release builds.
-    let level = ((count - 1) as i32).saturating_add(offset);
-    if level < 1 {
+    // Fold in the running `leveloffset`. `saturating_add` keeps a hostile
+    // offset (e.g. an absolute `:leveloffset:` near `i32::MAX`) from
+    // overflowing — a panic in debug builds and a wrap in release builds — the
+    // syntactic level itself is at most 5.
+    let syntactic_level = (count - 1) as i32;
+    let effective_level = syntactic_level.saturating_add(offset);
+
+    // A bare `=` (syntactic level 0) that no positive offset lifts to level 1
+    // or beyond is a document title appearing in the body, which is not a
+    // section (the single-document-title rule). Decline it exactly as an
+    // un-offset level-0 heading is declined, rather than clamping it into a
+    // section. This is checked before the whitespace requirement below so a
+    // spaceless `=blah` is still reported, matching a bare level-0 heading.
+    if syntactic_level == 0 && effective_level < MIN_SECTION_LEVEL {
         warnings.push(Warning {
             source: source.take_normalized_line().item,
             warning: WarningType::Level0SectionHeadingNotSupported,
@@ -404,10 +423,38 @@ fn parse_title_line<'src>(
         return None;
     }
 
+    // The marker must be followed by whitespace to be a section title at all;
+    // validate that before clamping the level so a non-title line such as
+    // `==x` is declined quietly, without a spurious out-of-range warning.
     let title = line.take_required_whitespace()?;
 
+    // A real section heading whose offset-adjusted level lands outside the
+    // supported 1..=5 range is clamped into range and reported, rather than
+    // producing an out-of-range (or, under a hostile offset, absurd) level.
+    let level = if effective_level < MIN_SECTION_LEVEL {
+        warnings.push(Warning {
+            source: source.take_normalized_line().item,
+            warning: WarningType::SectionHeadingLevelOutOfRange(
+                effective_level,
+                MIN_SECTION_LEVEL as usize,
+            ),
+        });
+        MIN_SECTION_LEVEL as usize
+    } else if effective_level > MAX_SECTION_LEVEL {
+        warnings.push(Warning {
+            source: source.take_normalized_line().item,
+            warning: WarningType::SectionHeadingLevelOutOfRange(
+                effective_level,
+                MAX_SECTION_LEVEL as usize,
+            ),
+        });
+        MAX_SECTION_LEVEL as usize
+    } else {
+        effective_level as usize
+    };
+
     Some(MatchedItem {
-        item: (level as usize, title.after),
+        item: (level, title.after),
         after: mi.after,
     })
 }
@@ -440,7 +487,18 @@ fn peer_or_ancestor_section<'src>(
     // level is below 1 has no section representation, so `parse_title_line`
     // returns `None` and it is treated as ordinary content — exactly as an
     // un-offset level-0 heading would be.
-    if let Some(mi) = parse_title_line(source_after_metadata, parser.level_offset(), warnings) {
+    //
+    // Any warnings the heading would raise (a clamped level, an unsupported
+    // level-0 heading, ...) are discarded here: this is only a look-ahead to
+    // find the section boundary, and the heading is parsed again — recording
+    // those warnings once — either as a child block of this section or in the
+    // enclosing scope once this section ends.
+    let mut ignored_warnings = vec![];
+    if let Some(mi) = parse_title_line(
+        source_after_metadata,
+        parser.level_offset(),
+        &mut ignored_warnings,
+    ) {
         let found_level = mi.item.0;
 
         if found_level > *most_recent_level + 1 {

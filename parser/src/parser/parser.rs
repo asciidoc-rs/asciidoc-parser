@@ -520,6 +520,36 @@ impl Parser {
         }
     }
 
+    /// Resolves a `leveloffset` assignment (see
+    /// [`resolve_leveloffset_assignment`](Self::resolve_leveloffset_assignment))
+    /// and, if the resulting absolute offset is so large or small that *every*
+    /// heading would be shifted outside the supported 1..=5 section-level
+    /// range, records a [`LeveloffsetExcludesAllHeadingLevels`] warning
+    /// against `span`.
+    ///
+    /// [`LeveloffsetExcludesAllHeadingLevels`]:
+    /// crate::warnings::WarningType::LeveloffsetExcludesAllHeadingLevels
+    fn resolve_leveloffset_and_warn<'src>(
+        &self,
+        value: InterpretedValue,
+        span: crate::Span<'src>,
+        warnings: &mut Vec<Warning<'src>>,
+    ) -> InterpretedValue {
+        let value = self.resolve_leveloffset_assignment(value);
+
+        if let InterpretedValue::Value(ref v) = value
+            && let Ok(offset) = v.trim().parse::<i32>()
+            && !leveloffset_admits_any_heading(offset)
+        {
+            warnings.push(Warning {
+                source: span,
+                warning: WarningType::LeveloffsetExcludesAllHeadingLevels(offset),
+            });
+        }
+
+        value
+    }
+
     /// Captures the parser's fully-resolved document-attribute state so it can
     /// outlive the parser — for example, retained on a [`Document`] to answer
     /// [`attribute_value`]/[`has_attribute`]/[`is_attribute_set`] without a
@@ -1169,9 +1199,10 @@ impl Parser {
 
         // A relative `leveloffset` (`+N` / `-N`) accumulates on top of the
         // offset already in effect; resolve it to an absolute value so the
-        // stored attribute is always a plain integer.
+        // stored attribute is always a plain integer, and warn if the result is
+        // so extreme that no heading could ever land in the valid level range.
         if attr_name == "leveloffset" {
-            value = self.resolve_leveloffset_assignment(value);
+            value = self.resolve_leveloffset_and_warn(value, attr.span(), warnings);
         }
 
         let attribute_value = AttributeValue {
@@ -1308,9 +1339,10 @@ impl Parser {
 
         // A relative `leveloffset` (`+N` / `-N`) accumulates on top of the
         // offset already in effect; resolve it to an absolute value so the
-        // stored attribute is always a plain integer.
+        // stored attribute is always a plain integer, and warn if the result is
+        // so extreme that no heading could ever land in the valid level range.
         if attr_name == "leveloffset" {
-            value = self.resolve_leveloffset_assignment(value);
+            value = self.resolve_leveloffset_and_warn(value, attr.span(), warnings);
         }
 
         let attribute_value = AttributeValue {
@@ -1381,6 +1413,18 @@ impl Parser {
 
         next
     }
+}
+
+/// Whether a `leveloffset` of `offset` leaves at least one syntactic heading
+/// level able to land inside the supported section-level range.
+///
+/// Syntactic heading levels run 0 (`=`) through 5 (`======`) and valid section
+/// levels run 1 through 5, so an offset keeps some heading in range only while
+/// it stays within `1 - 5 ..= 5 - 0`, i.e. `-4..=5`. Outside that window every
+/// heading is clamped, so the offset can never place a heading at its intended
+/// level.
+fn leveloffset_admits_any_heading(offset: i32) -> bool {
+    (-4..=5).contains(&offset)
 }
 
 /// Advances a counter value to the next value in its sequence, mirroring

@@ -77,6 +77,12 @@ pub enum WarningType {
     #[error("Section heading level exceeds maximum (maximum 5, found {0})")]
     SectionHeadingLevelExceedsMaximum(usize),
 
+    #[error("Section heading level {0} is outside the supported range 1-5; clamped to {1}")]
+    SectionHeadingLevelOutOfRange(i32, usize),
+
+    #[error("leveloffset {0} places every section heading outside the supported range 1-5")]
+    LeveloffsetExcludesAllHeadingLevels(i32),
+
     #[error("List item index: expected {0}, got {1}")]
     ListItemOutOfSequence(String, String),
 
@@ -188,6 +194,17 @@ impl std::fmt::Debug for WarningType {
             WarningType::SectionHeadingLevelExceedsMaximum(found) => f
                 .debug_tuple("WarningType::SectionHeadingLevelExceedsMaximum")
                 .field(found)
+                .finish(),
+
+            WarningType::SectionHeadingLevelOutOfRange(computed, clamped) => f
+                .debug_tuple("WarningType::SectionHeadingLevelOutOfRange")
+                .field(computed)
+                .field(clamped)
+                .finish(),
+
+            WarningType::LeveloffsetExcludesAllHeadingLevels(offset) => f
+                .debug_tuple("WarningType::LeveloffsetExcludesAllHeadingLevels")
+                .field(offset)
                 .finish(),
 
             WarningType::ListItemOutOfSequence(expected, actual) => f
@@ -491,6 +508,26 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::SectionHeadingLevelExceedsMaximum(6)"
+                );
+            }
+
+            #[test]
+            fn section_heading_level_out_of_range() {
+                let warning = WarningType::SectionHeadingLevelOutOfRange(-3, 1);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::SectionHeadingLevelOutOfRange(-3, 1)"
+                );
+            }
+
+            #[test]
+            fn leveloffset_excludes_all_heading_levels() {
+                let warning = WarningType::LeveloffsetExcludesAllHeadingLevels(2147483647);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::LeveloffsetExcludesAllHeadingLevels(2147483647)"
                 );
             }
 

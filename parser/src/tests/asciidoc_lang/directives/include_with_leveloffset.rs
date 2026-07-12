@@ -292,16 +292,25 @@ fn absolute_offset_near_i32_max_does_not_overflow() {
     // A hostile absolute `:leveloffset:` at `i32::MAX` must not overflow when it
     // is folded into a heading's syntactic level (here 5, from `======`). The
     // effective level saturates instead of panicking (debug) or wrapping
-    // (release); the heading is still a section, just at the saturated level.
+    // (release), then clamps into the supported 1-5 range: the heading is still
+    // a section, at level 5.
     let src = format!(
         "= My Book\n:leveloffset: {}\n\n====== Deep Heading",
         i32::MAX
     );
     let doc = Parser::default().parse(&src);
 
+    assert_eq!(section_levels(&doc), vec![(5, "Deep Heading".to_string())]);
+
+    // The offset is far outside the usable range, so it is reported once when
+    // set, and the heading it clamps is reported once when parsed.
+    let warnings: Vec<_> = doc.warnings().map(|w| w.warning.clone()).collect();
     assert_eq!(
-        section_levels(&doc),
-        vec![(i32::MAX as usize, "Deep Heading".to_string())]
+        warnings,
+        vec![
+            WarningType::LeveloffsetExcludesAllHeadingLevels(i32::MAX),
+            WarningType::SectionHeadingLevelOutOfRange(i32::MAX, 5),
+        ]
     );
 }
 
@@ -309,15 +318,162 @@ fn absolute_offset_near_i32_max_does_not_overflow() {
 fn relative_offset_accumulation_near_i32_max_does_not_overflow() {
     // Accumulating a relative `+1` on top of an offset already at `i32::MAX`
     // must not overflow while resolving the assignment. The offset saturates at
-    // `i32::MAX`, so the following heading is still parsed as a section.
+    // `i32::MAX`, so the following heading is still parsed as a section, clamped
+    // to level 5.
     let src = format!(
         "= My Book\n:leveloffset: {}\n\n:leveloffset: +1\n\n====== Deep Heading",
         i32::MAX
     );
     let doc = Parser::default().parse(&src);
 
+    assert_eq!(section_levels(&doc), vec![(5, "Deep Heading".to_string())]);
+
+    // Both `:leveloffset:` entries are outside the usable range, so each is
+    // reported when set; the clamped heading is reported once when parsed.
+    let warnings: Vec<_> = doc.warnings().map(|w| w.warning.clone()).collect();
+    assert_eq!(
+        warnings,
+        vec![
+            WarningType::LeveloffsetExcludesAllHeadingLevels(i32::MAX),
+            WarningType::LeveloffsetExcludesAllHeadingLevels(i32::MAX),
+            WarningType::SectionHeadingLevelOutOfRange(i32::MAX, 5),
+        ]
+    );
+}
+
+// Collects the `WarningType` of every warning a parse produced, in order.
+fn warning_types(doc: &crate::Document<'_>) -> Vec<crate::warnings::WarningType> {
+    doc.warnings().map(|w| w.warning.clone()).collect()
+}
+
+#[test]
+fn positive_offset_clamps_overshooting_child_heading_once() {
+    // Offset `+3` is within the usable range, so setting it raises no warning,
+    // and `== Parent` (level 1 -> 4) stays in range. `===== Child` overshoots
+    // to 7 and is clamped to 5. Because Child sits one clamped level below
+    // Parent it nests as a child (no skipped-level warning), and the clamp is
+    // reported exactly once — not twice — even though the boundary look-ahead
+    // also inspects it.
+    let doc = Parser::default().parse(concat!(
+        "= My Book\n\n",
+        ":leveloffset: +3\n\n",
+        "== Parent\n\n",
+        "===== Child",
+    ));
+
     assert_eq!(
         section_levels(&doc),
-        vec![(i32::MAX as usize, "Deep Heading".to_string())]
+        vec![(4, "Parent".to_string()), (5, "Child".to_string())]
+    );
+
+    assert_eq!(
+        warning_types(&doc),
+        vec![WarningType::SectionHeadingLevelOutOfRange(7, 5)]
+    );
+}
+
+#[test]
+fn negative_offset_clamps_real_section_up_to_one() {
+    // A real section heading pulled below level 1 by a negative offset is
+    // clamped to 1 and reported. Offset `-2` is still usable (a deep heading
+    // could land in range), so setting it raises no warning.
+    let doc = Parser::default().parse(concat!(
+        "= My Book\n\n",
+        ":leveloffset: -2\n\n",
+        "== Pulled Up\n\n",
+        "body",
+    ));
+
+    assert_eq!(section_levels(&doc), vec![(1, "Pulled Up".to_string())]);
+    assert_eq!(
+        warning_types(&doc),
+        vec![WarningType::SectionHeadingLevelOutOfRange(-1, 1)]
+    );
+}
+
+#[test]
+fn document_title_with_nonpositive_offset_is_still_rejected() {
+    // The single-document-title rule is preserved: a bare `= Title` in the body
+    // that no positive offset lifts into range is declined (not clamped into a
+    // level-1 section). Offset `-1` is usable, so only the level-0 warning is
+    // raised and no section is produced.
+    let doc = Parser::default().parse(concat!(
+        "= My Book\n\n",
+        ":leveloffset: -1\n\n",
+        "= Orphan Title\n\n",
+        "body",
+    ));
+
+    assert!(section_levels(&doc).is_empty());
+    assert_eq!(
+        warning_types(&doc),
+        vec![WarningType::Level0SectionHeadingNotSupported]
+    );
+}
+
+#[test]
+fn offsets_at_the_usable_boundary_do_not_warn() {
+    // `+5` is the largest usable offset: a level-0 `= Chapter` still lands at
+    // level 5. `-4` is the smallest: a level-5 `====== Deep` still lands at
+    // level 1. Neither boundary offset is reported, and neither heading is
+    // clamped.
+    let high =
+        Parser::default().parse(concat!("= My Book\n\n", ":leveloffset: 5\n\n", "= Chapter",));
+    assert_eq!(section_levels(&high), vec![(5, "Chapter".to_string())]);
+    assert!(warning_types(&high).is_empty());
+
+    let low = Parser::default().parse(concat!(
+        "= My Book\n\n",
+        ":leveloffset: -4\n\n",
+        "====== Deep",
+    ));
+    assert_eq!(section_levels(&low), vec![(1, "Deep".to_string())]);
+    assert!(warning_types(&low).is_empty());
+}
+
+#[test]
+fn offset_outside_usable_range_warns_when_set() {
+    // Just past each usable boundary, no heading can land in range, so the
+    // offset is reported the moment it is set — once per assignment, ahead of
+    // any per-heading clamp warning.
+    let high =
+        Parser::default().parse(concat!("= My Book\n\n", ":leveloffset: 6\n\n", "= Chapter",));
+    assert_eq!(section_levels(&high), vec![(5, "Chapter".to_string())]);
+    assert_eq!(
+        warning_types(&high),
+        vec![
+            WarningType::LeveloffsetExcludesAllHeadingLevels(6),
+            WarningType::SectionHeadingLevelOutOfRange(6, 5),
+        ]
+    );
+
+    let low = Parser::default().parse(concat!(
+        "= My Book\n\n",
+        ":leveloffset: -5\n\n",
+        "====== Deep",
+    ));
+    assert_eq!(section_levels(&low), vec![(1, "Deep".to_string())]);
+    assert_eq!(
+        warning_types(&low),
+        vec![
+            WarningType::LeveloffsetExcludesAllHeadingLevels(-5),
+            WarningType::SectionHeadingLevelOutOfRange(0, 1),
+        ]
+    );
+}
+
+#[test]
+fn impossible_offset_set_in_header_warns() {
+    // An unusable `leveloffset` set in the document header is reported via the
+    // header attribute path, and the body heading it clamps is reported once.
+    let doc = Parser::default().parse(concat!("= My Book\n", ":leveloffset: 9\n\n", "== Section",));
+
+    assert_eq!(section_levels(&doc), vec![(5, "Section".to_string())]);
+    assert_eq!(
+        warning_types(&doc),
+        vec![
+            WarningType::LeveloffsetExcludesAllHeadingLevels(9),
+            WarningType::SectionHeadingLevelOutOfRange(10, 5),
+        ]
     );
 }
