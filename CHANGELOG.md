@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.21.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.20.0...v0.21.0)
+_12 July 2026_
+
+### Added
+
+* Apply leveloffset attribute to section levels ([#609](https://github.com/asciidoc-rs/asciidoc-parser/pull/609)) ([#642](https://github.com/asciidoc-rs/asciidoc-parser/pull/642))
+* Support the `title=` block attribute ([#578](https://github.com/asciidoc-rs/asciidoc-parser/pull/578)) ([#643](https://github.com/asciidoc-rs/asciidoc-parser/pull/643))
+* Support xrefstyle full/short cross-reference text formatting ([#640](https://github.com/asciidoc-rs/asciidoc-parser/pull/640))
+
+### Fixed
+
+* Number footnotes in section titles in document order ([#594](https://github.com/asciidoc-rs/asciidoc-parser/pull/594)) ([#646](https://github.com/asciidoc-rs/asciidoc-parser/pull/646))
+
+### Other
+
+* Close two line-coverage gaps in parser.rs ([#645](https://github.com/asciidoc-rs/asciidoc-parser/pull/645))
+
 ## [0.20.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.19.2...v0.20.0)
 _12 July 2026_
 
