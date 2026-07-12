@@ -92,6 +92,66 @@ fn xref_macro_form_resolves() {
 }
 
 #[test]
+fn footnote_in_heading_does_not_leak_into_xref_text() {
+    // A footnote in a section title is still a real, document-order footnote,
+    // but its marker must not appear in the reference text of an xref to that
+    // heading. (Asciidoctor achieves this only via an explicit-ID-plus-reftext
+    // workaround; the crate does it unconditionally. See issue #594.)
+    let doc = Parser::default().parse(concat!(
+        "See <<sect2>>.\n",
+        "\n",
+        "== Section 1\n",
+        "\n",
+        "para.footnote:[first footnote]\n",
+        "\n",
+        "[#sect2]\n",
+        "== Section 2footnote:[second footnote]\n",
+        "\n",
+        "para.footnote:[third footnote]\n",
+    ));
+
+    // The xref link text is the bare title, with no footnote marker.
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#sect2\">Section 2</a>."
+    );
+
+    // The heading's footnote is nonetheless registered, numbered in document
+    // order (1: first, 2: second/heading, 3: third).
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(
+        footnotes
+            .iter()
+            .map(|f| (f.index.as_str(), f.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("1", "first footnote"),
+            ("2", "second footnote"),
+            ("3", "third footnote"),
+        ]
+    );
+}
+
+#[test]
+fn footnote_in_heading_does_not_leak_into_generated_id() {
+    // The auto-generated section ID is likewise derived from the footnote-free
+    // title, so the footnote's number does not pollute the ID. A natural
+    // reference (by the title's reference text) resolves to the clean ID.
+    let doc = Parser::default().parse(concat!(
+        "See <<Section 2>>.\n",
+        "\n",
+        "== Section 2footnote:[a note]\n",
+    ));
+
+    // Without the footnote-free derivation the ID would absorb the footnote
+    // number (e.g. `_section_21`); it is instead the clean `_section_2`.
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#_section_2\">Section 2</a>."
+    );
+}
+
+#[test]
 fn unresolved_reference_falls_back_and_warns() {
     // Parse without resolving, then resolve against the document's own catalog
     // (cloned so it does not alias the `&mut doc` borrow).

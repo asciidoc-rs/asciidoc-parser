@@ -319,13 +319,15 @@ fn footnotes_in_headings_are_numbered_in_document_order() {
 // verified. The crate applies a heading's substitutions before parsing its
 // section body (see `SectionBlock::parse`), so a footnote in a heading is
 // numbered in document order — verified by
-// `footnotes_in_headings_are_numbered_in_document_order` above. The prose below
-// documents Asciidoctor's *out-of-order* default and its explicit-ID-plus-
-// reftext workaround, neither of which the crate models (it always numbers in
-// document order), so it is not verifiable against the crate's behavior. One
-// related divergence remains: a footnote placed in a heading still reappears in
-// the reference text of an xref to that heading, which Asciidoctor's workaround
-// suppresses. Tracked by
+// `footnotes_in_headings_are_numbered_in_document_order` above — and its marker
+// does not leak into the heading's reference text or auto-generated ID —
+// verified by `xref::footnote_in_heading_does_not_leak_into_xref_text` and
+// `xref::footnote_in_heading_does_not_leak_into_generated_id`. The crate thus
+// achieves unconditionally what the prose below says Asciidoctor achieves only
+// via an explicit-ID-plus-reftext workaround. The prose documents Asciidoctor's
+// *out-of-order* default and that workaround, neither of which the crate models
+// (it always numbers in document order), so it is not verifiable against the
+// crate's behavior. Tracked by
 // https://github.com/asciidoc-rs/asciidoc-parser/issues/594.
 non_normative!(
     r#"
