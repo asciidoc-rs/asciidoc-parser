@@ -14,11 +14,19 @@ _12 July 2026_
 
 * Apply leveloffset attribute to section levels ([#609](https://github.com/asciidoc-rs/asciidoc-parser/pull/609)) ([#642](https://github.com/asciidoc-rs/asciidoc-parser/pull/642))
 * Support the `title=` block attribute ([#578](https://github.com/asciidoc-rs/asciidoc-parser/pull/578)) ([#643](https://github.com/asciidoc-rs/asciidoc-parser/pull/643))
-* Support xrefstyle full/short cross-reference text formatting ([#640](https://github.com/asciidoc-rs/asciidoc-parser/pull/640))
+* [**breaking**] Support xrefstyle full/short cross-reference text formatting ([#640](https://github.com/asciidoc-rs/asciidoc-parser/pull/640))
 
 ### Fixed
 
 * Number footnotes in section titles in document order ([#594](https://github.com/asciidoc-rs/asciidoc-parser/pull/594)) ([#646](https://github.com/asciidoc-rs/asciidoc-parser/pull/646))
+
+### Breaking changes
+
+The `full`/`short` `xrefstyle` support ([#640](https://github.com/asciidoc-rs/asciidoc-parser/pull/640)) adds a new public field to three externally-constructible structs. Code that builds any of these with a struct literal must add the new field (all three accept `None` to preserve the previous behavior):
+
+* `RefEntry` (`document::catalog`) gains `signifier: Option<XrefSignifier>`.
+* `ResolvedReference` (`parser::reference_resolver`) gains `signifier: Option<XrefSignifier>`. Prefer the `ResolvedReference::new`, `from_entry`, or `with_signifier` constructors over a struct literal to remain source-compatible across future field additions.
+* `XrefRenderParams` (`parser::inline_substitution_renderer`) gains `xrefstyle: Option<XrefStyle>`.
 
 ### Other
 
