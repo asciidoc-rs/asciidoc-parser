@@ -103,6 +103,7 @@ impl<'src> SectionBlock<'src> {
                 .assign_next_number(level);
             let number = parser.last_appendix_section_number.clone();
             let caption = appendix_caption(parser, &number);
+
             // An appendix is always lettered and its title is emphasized, even
             // when `sectnums` is unset; its reference signifier is
             // `appendix-refsig`.
