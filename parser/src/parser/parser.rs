@@ -464,6 +464,53 @@ impl Parser {
             .unwrap_or(false)
     }
 
+    /// Returns the current `leveloffset` document attribute as a signed
+    /// integer.
+    ///
+    /// The `leveloffset` attribute shifts the effective level of every section
+    /// heading in scope (see the include directive's `leveloffset` option and
+    /// the `:leveloffset:` attribute entry). Relative assignments (`+N` / `-N`)
+    /// are resolved to an absolute value when the attribute is set (see
+    /// [`resolve_leveloffset_assignment`](Self::resolve_leveloffset_assignment)),
+    /// so the stored value is always a plain integer; a non-integer or unset
+    /// value yields an offset of `0`.
+    pub(crate) fn level_offset(&self) -> i32 {
+        match self.attribute_value("leveloffset") {
+            InterpretedValue::Value(v) => v.trim().parse::<i32>().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    /// Resolves a `leveloffset` assignment value, converting a relative form
+    /// (`+N` / `-N`) into the absolute value it produces given the
+    /// `leveloffset` currently in effect. Absolute values, and values that
+    /// aren't a signed integer, are returned unchanged.
+    ///
+    /// This mirrors Asciidoctor, where a relative `leveloffset` accumulates on
+    /// top of the offset already in effect. That accumulation is what lets the
+    /// offsets of nested includes compose: each `include::[leveloffset=+1]`
+    /// (and its `:leveloffset: +1` wrapper) shifts headings one level further
+    /// down relative to wherever the surrounding content already sits.
+    fn resolve_leveloffset_assignment(&self, value: InterpretedValue) -> InterpretedValue {
+        let InterpretedValue::Value(ref v) = value else {
+            return value;
+        };
+
+        let trimmed = v.trim();
+        let (sign, digits) = match trimmed.strip_prefix('+') {
+            Some(rest) => (1, rest),
+            None => match trimmed.strip_prefix('-') {
+                Some(rest) => (-1, rest),
+                None => return value,
+            },
+        };
+
+        match digits.trim().parse::<i32>() {
+            Ok(delta) => InterpretedValue::Value((self.level_offset() + sign * delta).to_string()),
+            Err(_) => value,
+        }
+    }
+
     /// Captures the parser's fully-resolved document-attribute state so it can
     /// outlive the parser — for example, retained on a [`Document`] to answer
     /// [`attribute_value`]/[`has_attribute`]/[`is_attribute_set`] without a
@@ -1111,6 +1158,13 @@ impl Parser {
             value = InterpretedValue::Value(default_value.clone());
         }
 
+        // A relative `leveloffset` (`+N` / `-N`) accumulates on top of the
+        // offset already in effect; resolve it to an absolute value so the
+        // stored attribute is always a plain integer.
+        if attr_name == "leveloffset" {
+            value = self.resolve_leveloffset_assignment(value);
+        }
+
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::Anywhere,
@@ -1241,11 +1295,20 @@ impl Parser {
             return;
         }
 
+        let mut value = attr.value().clone();
+
+        // A relative `leveloffset` (`+N` / `-N`) accumulates on top of the
+        // offset already in effect; resolve it to an absolute value so the
+        // stored attribute is always a plain integer.
+        if attr_name == "leveloffset" {
+            value = self.resolve_leveloffset_assignment(value);
+        }
+
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::Anywhere,
             silent_when_locked: false,
-            value: attr.value().clone(),
+            value,
         };
 
         // An explicit assignment supersedes (and resets) any counter of the same

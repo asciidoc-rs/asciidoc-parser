@@ -46,7 +46,15 @@ impl<'src> SectionBlock<'src> {
         let discrete = metadata.is_discrete();
 
         let source = metadata.block_start.discard_empty_lines();
-        let level_and_title = parse_title_line(source, warnings)?;
+
+        // The heading's effective level folds in the running `leveloffset`
+        // document attribute. A positive offset (the usual case, from
+        // `include::[leveloffset=+1]`) pushes headings down — notably promoting
+        // an included file's level-0 document title (`=`) into a real section —
+        // while a negative offset pulls them up. A heading whose effective level
+        // is below 1 is rejected as an unsupported level-0 heading (the warning
+        // is raised inside `parse_title_line`).
+        let level_and_title = parse_title_line(source, parser.level_offset(), warnings)?;
 
         // Take a snapshot of `sectids` value before reading child blocks because
         // the value might be altered while parsing.
@@ -121,7 +129,10 @@ impl<'src> SectionBlock<'src> {
 
         let mut maw_blocks = parse_blocks_until(
             level_and_title.after,
-            |i| discrete || peer_or_ancestor_section(*i, level, &mut most_recent_level, warnings),
+            |i, parser| {
+                discrete
+                    || peer_or_ancestor_section(*i, level, &mut most_recent_level, warnings, parser)
+            },
             parser,
         );
 
@@ -335,8 +346,18 @@ impl std::fmt::Debug for SectionBlock<'_> {
     }
 }
 
+/// Parses a section title line, returning the section's *effective* level
+/// (with `offset`, the running `leveloffset`, already applied) and the span of
+/// the title text.
+///
+/// The syntactic level is 0-based: a bare `=` is 0, `==` is 1, up to `======`
+/// at 5. `offset` shifts it to the effective level. A heading whose effective
+/// level is below 1 has no section representation; it is rejected as an
+/// unsupported level-0 heading (recording a warning) exactly as a bare `=`
+/// heading is when no offset applies.
 fn parse_title_line<'src>(
     source: Span<'src>,
+    offset: i32,
     warnings: &mut Vec<Warning<'src>>,
 ) -> Option<MatchedItem<'src, (usize, Span<'src>)>> {
     let mi = source.take_non_empty_line()?;
@@ -356,12 +377,7 @@ fn parse_title_line<'src>(
         }
     }
 
-    if count == 1 {
-        warnings.push(Warning {
-            source: source.take_normalized_line().item,
-            warning: WarningType::Level0SectionHeadingNotSupported,
-        });
-
+    if count == 0 {
         return None;
     }
 
@@ -374,10 +390,20 @@ fn parse_title_line<'src>(
         return None;
     }
 
+    let level = (count - 1) as i32 + offset;
+    if level < 1 {
+        warnings.push(Warning {
+            source: source.take_normalized_line().item,
+            warning: WarningType::Level0SectionHeadingNotSupported,
+        });
+
+        return None;
+    }
+
     let title = line.take_required_whitespace()?;
 
     Some(MatchedItem {
-        item: (count - 1, title.after),
+        item: (level as usize, title.after),
         after: mi.after,
     })
 }
@@ -387,6 +413,7 @@ fn peer_or_ancestor_section<'src>(
     level: usize,
     most_recent_level: &mut usize,
     warnings: &mut Vec<Warning<'src>>,
+    parser: &Parser,
 ) -> bool {
     // Skip over any block metadata (title, anchor, attrlist) to find the actual
     // section line. We create a temporary parser to avoid modifying the real
@@ -402,7 +429,14 @@ fn peer_or_ancestor_section<'src>(
 
     let source_after_metadata = block_metadata.block_start;
 
-    if let Some(mi) = parse_title_line(source_after_metadata, warnings) {
+    // Compare effective levels: the boundary heading's `leveloffset` is read
+    // from the *live* parser (every block up to this point, including any
+    // `:leveloffset:` attribute entry, has already been applied), while `level`
+    // is the current section's own effective level. A heading whose effective
+    // level is below 1 has no section representation, so `parse_title_line`
+    // returns `None` and it is treated as ordinary content — exactly as an
+    // un-offset level-0 heading would be.
+    if let Some(mi) = parse_title_line(source_after_metadata, parser.level_offset(), warnings) {
         let found_level = mi.item.0;
 
         if found_level > *most_recent_level + 1 {
@@ -414,7 +448,7 @@ fn peer_or_ancestor_section<'src>(
 
         *most_recent_level = found_level;
 
-        mi.item.0 <= level
+        found_level <= level
     } else {
         false
     }

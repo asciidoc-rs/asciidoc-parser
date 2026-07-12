@@ -133,7 +133,7 @@ impl<'src> CompoundDelimitedBlock<'src> {
 
         let inside_delimiters = delimiter.after.trim_remainder(closing_delimiter);
 
-        let maw_blocks = parse_blocks_until(inside_delimiters, |_| false, parser);
+        let maw_blocks = parse_blocks_until(inside_delimiters, |_, _| false, parser);
 
         let blocks = maw_blocks.item;
         let source = metadata
