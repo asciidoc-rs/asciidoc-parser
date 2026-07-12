@@ -496,9 +496,10 @@ impl<'src> ElementAttribute<'src> {
     }
 
     /// Returns `true` when the normal substitution group has already been
-    /// applied to this attribute's [`value`](Self::value) (a single-quoted value
-    /// in a block attribute list). A consumer that would otherwise substitute
-    /// the value itself uses this to avoid substituting it a second time.
+    /// applied to this attribute's [`value`](Self::value) (a single-quoted
+    /// value in a block attribute list). A consumer that would otherwise
+    /// substitute the value itself uses this to avoid substituting it a
+    /// second time.
     pub(crate) fn value_is_substituted(&self) -> bool {
         self.value_is_substituted
     }
