@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.20.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.19.2...v0.20.0)
+_12 July 2026_
+
+### Added
+
+* Report the originating cursor for an unresolved include in an AsciiDoc table cell ([#639](https://github.com/asciidoc-rs/asciidoc-parser/pull/639))
+* Point attribute-missing=warn at the precise reference ([#637](https://github.com/asciidoc-rs/asciidoc-parser/pull/637))
+* [**breaking**] Let IncludeFileHandler transcode non-UTF-8 include content ([#633](https://github.com/asciidoc-rs/asciidoc-parser/pull/633))
+
+### Fixed
+
+* Gate inline autolink `&gt;` alternative to the `&lt;` context ([#503](https://github.com/asciidoc-rs/asciidoc-parser/pull/503)) ([#638](https://github.com/asciidoc-rs/asciidoc-parser/pull/638))
+* Improve performance by falling back to shared built-in attributes instead of copying them ([#634](https://github.com/asciidoc-rs/asciidoc-parser/pull/634))
+
 ## [0.19.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.19.1...v0.19.2)
 _11 July 2026_
 
