@@ -176,13 +176,15 @@ fn cross_document_resolution() {
     let doc_b = parser.parse_deferred("[#b-topic]\n== B Topic\n\nContent.\n");
 
     // The host builds a combined index from each document's catalog, assigning
-    // its own cross-document hrefs.
+    // its own cross-document hrefs. Building each entry with `from_entry` carries
+    // the target's reftext and signifier, so cross-document `xrefstyle`
+    // formatting keeps working (see `xrefstyle_carries_across_documents`).
     let mut index = HashMap::new();
     for id in ["b-topic"] {
         if let Some(entry) = doc_b.catalog().get_ref(id) {
             index.insert(
                 entry.id.clone(),
-                ResolvedReference::new(format!("doc-b.html#{id}"), entry.reftext.clone()),
+                ResolvedReference::from_entry(format!("doc-b.html#{id}"), entry),
             );
         }
     }
@@ -199,6 +201,39 @@ fn cross_document_resolution() {
         "See <a href=\"doc-b.html#b-topic\">B Topic</a> for details."
     );
     assert!(!first_simple(&doc_a).content().has_unresolved_refs());
+}
+
+#[test]
+fn xrefstyle_carries_across_documents() {
+    // Cross-document `xrefstyle` formatting works when the host resolver carries
+    // the target's signifier. The two inputs come from different documents: the
+    // *style* (`full`) is a property of the referencing document (doc A), while
+    // the *signifier and number* ("Section 2.3") are computed in the target
+    // document (doc B) and travel on its catalog entry. A host that builds its
+    // result with `ResolvedReference::from_entry` carries the signifier through
+    // automatically.
+    let mut parser = Parser::default();
+
+    let mut doc_a = parser.parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
+    let doc_b = parser.parse_deferred(
+        ":sectnums:\n\n== One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n[#install]\n=== Installation\n",
+    );
+
+    let mut index = HashMap::new();
+    if let Some(entry) = doc_b.catalog().get_ref("install") {
+        index.insert(
+            "install".to_string(),
+            ResolvedReference::from_entry("doc-b.html#install".to_string(), entry),
+        );
+    }
+    let resolver = CrossDocResolver { index };
+
+    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    assert!(warnings.is_empty());
+    assert_eq!(
+        first_paragraph(&doc_a),
+        "See <a href=\"doc-b.html#install\">Section 2.3, &#8220;Installation&#8221;</a>.",
+    );
 }
 
 #[test]

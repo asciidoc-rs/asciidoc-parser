@@ -94,15 +94,50 @@ pub struct ResolvedReference {
 impl ResolvedReference {
     /// Constructs a resolved reference with no [`signifier`](Self::signifier).
     ///
-    /// This is the common case for a host-supplied (cross-document) resolver,
-    /// which resolves a target to an `href` and display `text` but does not
-    /// participate in `xrefstyle` number formatting.
+    /// Use this when the target is not a numbered/captioned element, or when the
+    /// resolver builds the display `text` from scratch. When the target came
+    /// from a [`Catalog`] (the usual case, including cross-document resolution),
+    /// prefer [`from_entry`](Self::from_entry) so `full`/`short` `xrefstyle`
+    /// formatting keeps working; or attach a signifier explicitly with
+    /// [`with_signifier`](Self::with_signifier).
     pub fn new(href: String, text: Option<String>) -> Self {
         Self {
             href,
             text,
             signifier: None,
         }
+    }
+
+    /// Constructs a resolved reference to a catalog element at `href`, carrying
+    /// the element's reference text **and** its
+    /// [`signifier`](Self::signifier).
+    ///
+    /// This is the seam that makes `full`/`short` `xrefstyle` formatting work
+    /// across documents: a multi-document (Antora-style) resolver that has
+    /// located the target's [`RefEntry`] in some document's [`Catalog`] passes
+    /// the `href` it computed for that document, and the target's signifier and
+    /// number — computed while *that* document was parsed — ride along. The
+    /// style itself comes from the *referencing* document and is applied later,
+    /// so the resolver need not know it. The single-document [`CatalogResolver`]
+    /// is built on this same helper.
+    ///
+    /// [`RefEntry`]: crate::document::RefEntry
+    pub fn from_entry(href: String, entry: &crate::document::RefEntry) -> Self {
+        Self {
+            href,
+            text: entry.reftext.clone(),
+            signifier: entry.signifier.clone(),
+        }
+    }
+
+    /// Attaches a [`signifier`](Self::signifier), returning `self` for chaining.
+    ///
+    /// For a host resolver that builds its `href`/`text` from scratch but still
+    /// wants `full`/`short` `xrefstyle` formatting for a numbered or captioned
+    /// target.
+    pub fn with_signifier(mut self, signifier: XrefSignifier) -> Self {
+        self.signifier = Some(signifier);
+        self
     }
 }
 
@@ -183,21 +218,15 @@ impl ReferenceResolver for CatalogResolver<'_> {
 
         // Direct ID match.
         if let Some(entry) = self.catalog.get_ref(target) {
-            return Some(ResolvedReference {
-                href: format!("#{target}"),
-                text: entry.reftext.clone(),
-                signifier: entry.signifier.clone(),
-            });
+            return Some(ResolvedReference::from_entry(format!("#{target}"), entry));
         }
 
         // Natural cross-reference: match on reference text.
         if let Some(id) = self.catalog.resolve_id(target) {
-            let entry = self.catalog.get_ref(&id);
-            return Some(ResolvedReference {
-                href: format!("#{id}"),
-                text: entry.and_then(|e| e.reftext.clone()),
-                signifier: entry.and_then(|e| e.signifier.clone()),
-            });
+            return self
+                .catalog
+                .get_ref(&id)
+                .map(|entry| ResolvedReference::from_entry(format!("#{id}"), entry));
         }
 
         None
