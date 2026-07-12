@@ -1681,16 +1681,20 @@ fn process_content<'src>(
         // cell is parsed in place from the parent document's source, which keeps
         // its spans (and line numbers) and avoids a copy.
         let cell = if content_has_directive(trimmed.data()) {
+            // `trimmed` indexes the document source only when this cell is not
+            // itself being parsed from some *other* cell's owned (include-
+            // expanded) source: an owned source is a private copy whose spans do
+            // not index the document source map. A cell nested inside a borrowed
+            // cell keeps document spans and so is still at "document level" here.
+            let at_document_level = parser.owned_cell_source_depth == 0;
+
             // The cell content is a contiguous slice of the (preprocessed)
             // document source, so it may itself have originated from an
             // `include::`d file. Look up the file and line the cell's first line
-            // came from, so a directive that fails to resolve reports the
-            // correct originating file (rather than "(root file)") and so its
-            // warning can be re-anchored to that original cursor below. This is
-            // only meaningful for a top-level table: a table nested inside
-            // another AsciiDoc cell is parsed from that cell's own owned source,
-            // whose spans do not index the document source map.
-            let cell_origin = if parser.nested_document_depth == 0 {
+            // came from, so a directive that fails to resolve reports the correct
+            // originating file (rather than "(root file)") and so its warning can
+            // be re-anchored to that original cursor below.
+            let cell_origin = if at_document_level {
                 parser
                     .source_map
                     .clone()
@@ -1711,20 +1715,25 @@ fn process_content<'src>(
 
             // The preprocessor locates each warning (e.g. an unresolved include
             // target) by byte offset into the expanded cell source, which is
-            // owned by the cell and cannot escape it. Re-anchor each one to the
-            // cell's directive line in the document source so the warning's
-            // cursor maps back to the directive's true (file, line) through the
-            // document source map. Only a directive on the cell's *first* line
-            // reaches this inner preprocessor — a directive at the start of any
-            // later line sits at document column 0 and is already expanded by the
-            // document-level preprocessor — so every such warning belongs to that
-            // first line.
-            let directive_line = trimmed.take_line().item;
-            for pw in preprocessor_warnings {
-                warnings.push(Warning {
-                    source: directive_line,
-                    warning: pw.warning,
-                });
+            // owned by the cell and cannot escape it. When `trimmed` indexes the
+            // document source, re-anchor each one to the cell's directive line
+            // there so the warning's cursor maps back to the directive's true
+            // (file, line) through the document source map. Only a directive on
+            // the cell's *first* line reaches this inner preprocessor — a
+            // directive at the start of any later line sits at document column 0
+            // and is already expanded by the document-level preprocessor — so
+            // every such warning belongs to that first line. When this cell is
+            // itself inside an owned source, `trimmed` does not index the document
+            // source, so the warnings cannot be re-anchored and are dropped (as
+            // they were before this attribution existed).
+            if at_document_level {
+                let directive_line = trimmed.take_line().item;
+                for pw in preprocessor_warnings {
+                    warnings.push(Warning {
+                        source: directive_line,
+                        warning: pw.warning,
+                    });
+                }
             }
 
             let owned = OwnedCell::new(expanded, |source| {
@@ -1740,8 +1749,13 @@ fn process_content<'src>(
                 // primary document source, so they too must be discarded.
                 let substitution_warnings_mark = parser.substitution_warnings_len();
 
+                // Mark that the blocks below are parsed from this cell's owned
+                // (include-expanded) source, so a table nested within cannot
+                // mis-map its spans against the document source map.
+                parser.owned_cell_source_depth += 1;
                 let (title, inline, toc, blocks) =
                     parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
+                parser.owned_cell_source_depth -= 1;
 
                 parser.truncate_substitution_warnings(substitution_warnings_mark);
 
@@ -2947,7 +2961,10 @@ mod tests {
     mod unresolved_directive_in_asciidoc_cell {
         #![allow(clippy::indexing_slicing)]
 
-        use crate::{parser::SourceLine, tests::prelude::*};
+        use crate::{
+            parser::SourceLine,
+            tests::prelude::{inline_file_handler::InlineFileHandler, *},
+        };
 
         // The faithful port of Ruby Asciidoctor `tables_test.rb` 1728 (an
         // unresolved directive in a cell reached via an outer `include::`) lives
@@ -2980,12 +2997,13 @@ mod tests {
             );
         }
 
-        // A table nested inside an AsciiDoc cell is parsed from that cell's
-        // nested source, so an unresolved directive in the *inner* cell is not
-        // mapped through the document source map (its file defaults to the root
-        // file). This guards the nested-depth branch of the fix.
+        // A table nested inside a *borrowed* AsciiDoc cell (one whose own content
+        // is not include-expanded) is still parsed in place from the document
+        // source, so an unresolved directive in the inner cell maps through the
+        // document source map like any other. Here the whole document is the root
+        // file, so the cursor is the root file at the inner directive's line.
         #[test]
-        fn nested_table_cell_does_not_crash() {
+        fn nested_table_cell_maps_through_document_source() {
             let doc = Parser::default()
                 .with_safe_mode(SafeMode::Server)
                 .parse("|===\na|\n!===\na!include::does-not-exist.adoc[]\n!===\n|===");
@@ -2998,6 +3016,72 @@ mod tests {
                 warnings[0].warning,
                 WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
             );
+
+            // The inner directive is on line 4 of the primary document.
+            assert_eq!(
+                doc.source_map()
+                    .original_file_and_line(warnings[0].source.line()),
+                Some(SourceLine(None, 4))
+            );
+        }
+
+        // Greptile #639: a table nested inside a (borrowed) cell of an *included*
+        // file must attribute an inner unresolved directive to that included
+        // file, not the root file.
+        #[test]
+        fn nested_table_cell_in_included_file_reports_include_cursor() {
+            let handler = InlineFileHandler::from_pairs([(
+                "outer.adoc",
+                "|===\na|\n!===\na!include::does-not-exist.adoc[]\n!===\n|===",
+            )]);
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_include_file_handler(handler)
+                .parse("include::outer.adoc[]");
+
+            assert_rendered_contains(&doc, "Unresolved directive in outer.adoc");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::IncludeFileNotFound("does-not-exist.adoc".to_string())
+            );
+
+            // The inner directive is on line 4 of `outer.adoc`.
+            assert_eq!(
+                doc.source_map()
+                    .original_file_and_line(warnings[0].source.line()),
+                Some(SourceLine(Some("outer.adoc".to_string()), 4))
+            );
+        }
+
+        // A table nested inside an *owned* (include-expanded) cell is parsed from
+        // that cell's private source, whose spans do not index the document
+        // source map. An unresolved directive in the inner cell therefore cannot
+        // be re-anchored: it is rendered (attributed to the root file) but its
+        // warning is dropped rather than mis-mapped.
+        #[test]
+        fn unresolved_directive_inside_owned_cell_source_is_dropped() {
+            // `cell.adoc` is pulled in as the top cell's owned source; it holds a
+            // nested table (so its cells use the `!` separator) whose own cell has
+            // an unresolvable include.
+            let handler = InlineFileHandler::from_pairs([(
+                "cell.adoc",
+                "!===\na!include::does-not-exist.adoc[]\n!===",
+            )]);
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_include_file_handler(handler)
+                .parse("|===\na|include::cell.adoc[]\n|===");
+
+            // The inner directive is still expanded into an "Unresolved
+            // directive" message, so the reader sees the problem in the output.
+            assert_rendered_contains(&doc, "Unresolved directive in (root file)");
+
+            // But its warning cannot be re-anchored to the document source, so it
+            // is dropped rather than reported against a bogus cursor.
+            assert_eq!(doc.warnings().count(), 0);
         }
     }
 }

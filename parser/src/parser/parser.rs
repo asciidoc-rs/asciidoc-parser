@@ -181,6 +181,21 @@ pub struct Parser {
     /// [`Document::parse`]: crate::Document
     pub(crate) source_map: Option<Rc<SourceMap>>,
 
+    /// Number of include-expanded (owned) AsciiDoc table cells currently being
+    /// parsed in the call stack.
+    ///
+    /// An AsciiDoc cell whose first line is an `include::` directive is parsed
+    /// from a private, preprocessor-expanded copy of its content rather than
+    /// from the document source. While that owned copy is being parsed this
+    /// counter is greater than zero, and a span's line number no longer indexes
+    /// the document [`source_map`](Self::source_map). A cell reached this way
+    /// therefore cannot map its position back to an originating `(file, line)`,
+    /// so it falls back to the root-file diagnostic. A cell nested inside a
+    /// *borrowed* cell keeps document spans and is unaffected (the counter
+    /// stays zero). The counter is incremented and decremented around each
+    /// owned-cell parse, so it nests correctly.
+    pub(crate) owned_cell_source_depth: usize,
+
     /// Catalog of callout numbers registered by verbatim blocks, used to
     /// validate the callout lists that annotate them.
     ///
@@ -264,6 +279,7 @@ impl Default for Parser {
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
             source_map: None,
+            owned_cell_source_depth: 0,
             callouts: RefCell::new(CalloutCatalog::default()),
             substitution_warnings: RefCell::new(vec![]),
         }
