@@ -11,6 +11,7 @@ use crate::{
     content::{Content, SubstitutionGroup},
     document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
+    parser::XrefSignifier,
     span::MatchedItem,
     strings::CowStr,
     warnings::{Warning, WarningType},
@@ -87,18 +88,45 @@ impl<'src> SectionBlock<'src> {
 
         let is_appendix_root = !discrete && level == 1 && section_type == SectionType::Appendix;
 
-        let (section_number, caption) = if is_appendix_root {
+        // A cross-reference builds `full`/`short` xrefstyle text from a section's
+        // signifier and number, but only when the section has a number *and* no
+        // explicit reftext (an explicit reftext is used verbatim instead).
+        let has_explicit_reftext = metadata
+            .attrlist
+            .as_ref()
+            .and_then(|a| a.named_attribute("reftext"))
+            .is_some();
+
+        let (section_number, caption, xref_signifier) = if is_appendix_root {
             parser
                 .last_appendix_section_number
                 .assign_next_number(level);
             let number = parser.last_appendix_section_number.clone();
             let caption = appendix_caption(parser, &number);
+            // An appendix is always lettered and its title is emphasized, even
+            // when `sectnums` is unset; its reference signifier is
+            // `appendix-refsig`.
+            let signifier = (!has_explicit_reftext).then(|| XrefSignifier {
+                label: join_signifier(
+                    parser.attribute_value("appendix-refsig").as_maybe_str(),
+                    &number.to_string(),
+                ),
+                emphasize: true,
+            });
             let section_number = if sectnums_active { Some(number) } else { None };
-            (section_number, Some(caption))
+            (section_number, Some(caption), signifier)
         } else if sectnums_active {
-            (Some(parser.assign_section_number(level)), None)
+            let number = parser.assign_section_number(level);
+            let signifier = (!has_explicit_reftext).then(|| XrefSignifier {
+                label: join_signifier(
+                    parser.attribute_value("section-refsig").as_maybe_str(),
+                    &number.to_string(),
+                ),
+                emphasize: false,
+            });
+            (Some(number), None, signifier)
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         let mut most_recent_level = level;
@@ -148,21 +176,30 @@ impl<'src> SectionBlock<'src> {
             .unwrap_or_else(|| section_title.rendered());
 
         let section_id = if sectids && manual_id.is_none() {
-            Some(parser.generate_and_register_unique_id(
+            let id = parser.generate_and_register_unique_id(
                 &proposed_base_id,
                 Some(reftext),
                 RefType::Section,
-            ))
+            );
+            if let Some(signifier) = xref_signifier {
+                parser.set_ref_signifier(&id, signifier);
+            }
+            Some(id)
         } else {
-            if let Some(manual_id) = manual_id
-                && parser
-                    .register_ref(manual_id, Some(reftext), RefType::Section)
-                    .is_err()
-            {
-                warnings.push(Warning {
-                    source: metadata.source.trim_remainder(level_and_title.after),
-                    warning: WarningType::DuplicateId(manual_id.to_string()),
-                });
+            if let Some(manual_id) = manual_id {
+                match parser.register_ref(manual_id, Some(reftext), RefType::Section) {
+                    Ok(()) => {
+                        if let Some(signifier) = xref_signifier {
+                            parser.set_ref_signifier(manual_id, signifier);
+                        }
+                    }
+                    Err(_duplicate_error) => {
+                        warnings.push(Warning {
+                            source: metadata.source.trim_remainder(level_and_title.after),
+                            warning: WarningType::DuplicateId(manual_id.to_string()),
+                        });
+                    }
+                }
             }
 
             None
@@ -250,6 +287,17 @@ fn appendix_caption(parser: &Parser, number: &SectionNumber) -> String {
     match parser.attribute_value("appendix-caption") {
         InterpretedValue::Value(label) if !label.is_empty() => format!("{label} {letter}: "),
         _ => format!("{letter}. "),
+    }
+}
+
+/// Combines a reference signifier with a reference number for the `full`/`short`
+/// xrefstyle label. When the signifier is set the label is `"<signifier>
+/// <number>"` (e.g. `"Section 2.3"`); when it is unset (or empty) — as after
+/// `:!section-refsig:` — the signifier is dropped and only the number remains.
+fn join_signifier(signifier: Option<&str>, number: &str) -> String {
+    match signifier {
+        Some(signifier) if !signifier.is_empty() => format!("{signifier} {number}"),
+        _ => number.to_string(),
     }
 }
 

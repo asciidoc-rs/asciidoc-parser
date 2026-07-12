@@ -591,6 +591,15 @@ impl Parser {
             .register_ref(id, reftext, ref_type)
     }
 
+    /// Attaches an [`XrefSignifier`](crate::parser::XrefSignifier) to an
+    /// already-registered catalog element, so a cross-reference to it can build
+    /// `full`/`short` [`xrefstyle`](crate::parser::XrefStyle) text.
+    ///
+    /// Takes `&self` for the same reason as [`register_ref`](Self::register_ref).
+    pub(crate) fn set_ref_signifier(&self, id: &str, signifier: crate::parser::XrefSignifier) {
+        self.catalog.borrow_mut().set_signifier(id, signifier);
+    }
+
     /// Registers a callout number defined by a verbatim block.
     ///
     /// Takes `&self` so it can be called from the callouts substitution step,

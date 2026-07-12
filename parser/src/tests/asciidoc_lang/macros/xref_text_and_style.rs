@@ -90,17 +90,31 @@ image::big-cats.png[]
 "##
 );
 
-#[ignore]
+/// Builds the spec's running-example document under the given `header` lines: a
+/// section titled "Installation" numbered 2.3 and a captioned figure "Big Cats"
+/// (Figure 1), preceded by a paragraph that cross-references both.
+fn installation_and_figure(header: &str) -> String {
+    format!(
+        "{header}\n\n\
+         Section: <<install>>. Figure: <<big-cats>>.\n\n\
+         == One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n\
+         [#install]\n=== Installation\n\n\
+         .Big Cats\n[#big-cats]\nimage::big-cats.png[]\n"
+    )
+}
+
+/// Parses `input` and returns its first rendered paragraph (the one carrying the
+/// cross references in these tests).
+fn first_paragraph(input: &str) -> String {
+    rendered_paragraphs(&Parser::default().parse(input))
+        .into_iter()
+        .next()
+        .unwrap_or_default()
+}
+
 #[test]
 fn cross_reference_styles() {
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/605):
-    // The full/short xrefstyle formatting builds the reference text from the
-    // target's signifier and number (e.g. "Section 2.3"), which requires
-    // section/figure numbering and the corresponding `<context>-caption`
-    // attributes. The crate does not yet compute those numbers, so the
-    // xrefstyle value is parsed (including the `xrefstyle=` attribute on the
-    // xref macro) but does not yet change the generated reference text.
-    to_do_verifies!(
+    verifies!(
         r##"
 There are three built-in styles supported by the xrefstyle document attribute that you can choose from to customize the generated text of a cross reference.
 
@@ -141,10 +155,91 @@ Otherwise, the *basic* style is used.
 
 "##
     );
+
+    // `full`: the signifier and number, then the title in typographic quotes.
+    // A section takes its signifier from `section-refsig` ("Section"); a figure
+    // (captioned image) from its `figure-caption` label ("Figure").
+    assert_eq!(
+        first_paragraph(&installation_and_figure(":sectnums:\n:xrefstyle: full")),
+        r##"Section: <a href="#install">Section 2.3, &#8220;Installation&#8221;</a>. Figure: <a href="#big-cats">Figure 1, &#8220;Big Cats&#8221;</a>."##
+    );
+
+    // `short`: the signifier and number only.
+    assert_eq!(
+        first_paragraph(&installation_and_figure(":sectnums:\n:xrefstyle: short")),
+        r##"Section: <a href="#install">Section 2.3</a>. Figure: <a href="#big-cats">Figure 1</a>."##
+    );
+
+    // `basic`: the title only (no emphasis, since neither is a chapter or
+    // appendix).
+    assert_eq!(
+        first_paragraph(&installation_and_figure(":sectnums:\n:xrefstyle: basic")),
+        r##"Section: <a href="#install">Installation</a>. Figure: <a href="#big-cats">Big Cats</a>."##
+    );
+
+    // The `xrefstyle=` attribute on the xref macro overrides the document value
+    // for a single reference.
+    let doc = Parser::default().parse(
+        ":sectnums:\n:xrefstyle: full\n\n\
+         Full: <<install>>. Short: xref:install[xrefstyle=short].\n\n\
+         == One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n[#install]\n=== Installation\n",
+    );
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[
+            r##"Full: <a href="#install">Section 2.3, &#8220;Installation&#8221;</a>. Short: <a href="#install">Section 2.3</a>."##
+        ]
+    );
+
+    // A chapter or appendix title is emphasized (rendered in `<em>`) instead of
+    // quoted — in every style, including `basic`. An appendix is lettered (A,
+    // B, ...) and takes its signifier from `appendix-refsig`.
+    let appendix = |style: &str| {
+        format!(":xrefstyle: {style}\n\nSee <<data>>.\n\n[appendix]\n[#data]\n== Data\n")
+    };
+    assert_eq!(
+        first_paragraph(&appendix("full")),
+        r##"See <a href="#data">Appendix A, <em>Data</em></a>."##
+    );
+    assert_eq!(
+        first_paragraph(&appendix("short")),
+        r##"See <a href="#data">Appendix A</a>."##
+    );
+    assert_eq!(
+        first_paragraph(&appendix("basic")),
+        r##"See <a href="#data"><em>Data</em></a>."##
+    );
+
+    // The formatting applies only when the target has no explicit reftext: an
+    // explicit reftext is used verbatim, whatever the style.
+    let doc = Parser::default().parse(
+        ":sectnums:\n:xrefstyle: full\n\nSee <<install>>.\n\n\
+         [reftext=\"the installer\"]\n[#install]\n== Installation\n",
+    );
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[r##"See <a href="#install">the installer</a>."##]
+    );
+
+    // The *full* and *short* styles apply only to a target with a caption. A
+    // listing has no caption unless `listing-caption` is set, so it falls back
+    // to *basic* (its title) — then gains a "Listing 1" caption once the
+    // attribute is set.
+    let listing = ":xrefstyle: short\n\nSee <<lst>>.\n\n.My Code\n[#lst]\n----\ncode\n----\n";
+    assert_eq!(
+        first_paragraph(listing),
+        r##"See <a href="#lst">My Code</a>."##
+    );
+    assert_eq!(
+        first_paragraph(&format!(":listing-caption: Listing\n{listing}")),
+        r##"See <a href="#lst">Listing 1</a>."##
+    );
 }
 
-non_normative!(
-    r##"
+#[test]
+fn reference_signifiers() {
+    verifies!(
+        r##"
 == Reference signifiers
 
 You can use document attributes to customize the signifier that is placed in front of the reference's number.
@@ -197,6 +292,53 @@ The *short* xrefstyle will fall back to the number only:
 
 The *basic* xrefstyle is unaffected by the value of the signifier.
 
+"##
+    );
+
+    // Customizing `section-refsig` replaces the word in front of a section's
+    // number. (`chapter-refsig` applies only in the `book` doctype, which this
+    // parser does not model.) The figure signifier, from `figure-caption`, is
+    // unaffected.
+    assert_eq!(
+        first_paragraph(&installation_and_figure(
+            ":sectnums:\n:xrefstyle: full\n:section-refsig: Sect."
+        )),
+        r##"Section: <a href="#install">Sect. 2.3, &#8220;Installation&#8221;</a>. Figure: <a href="#big-cats">Figure 1, &#8220;Big Cats&#8221;</a>."##
+    );
+    assert_eq!(
+        first_paragraph(&installation_and_figure(
+            ":sectnums:\n:xrefstyle: short\n:section-refsig: Sect."
+        )),
+        r##"Section: <a href="#install">Sect. 2.3</a>. Figure: <a href="#big-cats">Figure 1</a>."##
+    );
+
+    // Unsetting the signifier drops the word, leaving only the number; *short*
+    // then falls back to the number alone.
+    assert_eq!(
+        first_paragraph(&installation_and_figure(
+            ":sectnums:\n:xrefstyle: full\n:!section-refsig:"
+        )),
+        r##"Section: <a href="#install">2.3, &#8220;Installation&#8221;</a>. Figure: <a href="#big-cats">Figure 1, &#8220;Big Cats&#8221;</a>."##
+    );
+    assert_eq!(
+        first_paragraph(&installation_and_figure(
+            ":sectnums:\n:xrefstyle: short\n:!section-refsig:"
+        )),
+        r##"Section: <a href="#install">2.3</a>. Figure: <a href="#big-cats">Figure 1</a>."##
+    );
+
+    // The *basic* xrefstyle uses the title only, so it is unaffected by the
+    // signifier's value (set or unset).
+    assert_eq!(
+        first_paragraph(&installation_and_figure(
+            ":sectnums:\n:xrefstyle: basic\n:section-refsig: Sect."
+        )),
+        r##"Section: <a href="#install">Installation</a>. Figure: <a href="#big-cats">Big Cats</a>."##
+    );
+}
+
+non_normative!(
+    r##"
 Only the aforementioned styles are provided out of the box.
 Support for a custom formatting string is planned.
 Refer to https://github.com/asciidoctor/asciidoctor/issues/2212[#2212^] for details.

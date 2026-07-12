@@ -13,6 +13,65 @@
 
 use crate::document::Catalog;
 
+/// The cross-reference text style selected by the `xrefstyle` attribute.
+///
+/// The style is chosen from the `xrefstyle` value in effect for a reference:
+/// the `xrefstyle=` attribute on the `xref:` macro if present, otherwise the
+/// document-wide `xrefstyle` attribute. It controls how the automatic text of a
+/// cross-reference is generated for a target that carries a reference number
+/// (see [Cross reference styles]).
+///
+/// A reference whose `xrefstyle` is *unset* has no `XrefStyle`; it uses the
+/// target's reference text verbatim. An unrecognized value is treated as
+/// [`Basic`](Self::Basic), mirroring Asciidoctor.
+///
+/// [Cross reference styles]: https://docs.asciidoctor.org/asciidoc/latest/macros/xref-text-and-style/#cross-reference-styles
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XrefStyle {
+    /// The signifier and number followed by the title, quoted (or emphasized
+    /// for a chapter or appendix): e.g. `Section 2.3, “Installation”`.
+    Full,
+
+    /// The signifier and number only: e.g. `Section 2.3`.
+    Short,
+
+    /// The title only, emphasized for a chapter or appendix: e.g.
+    /// `Installation`.
+    Basic,
+}
+
+impl XrefStyle {
+    /// Interprets an `xrefstyle` attribute value. `full` and `short` select
+    /// those styles; every other value (including `basic` and any unrecognized
+    /// value) yields [`Basic`](Self::Basic), mirroring Asciidoctor.
+    pub(crate) fn parse(value: &str) -> Self {
+        match value {
+            "full" => Self::Full,
+            "short" => Self::Short,
+            _ => Self::Basic,
+        }
+    }
+}
+
+/// A referenceable target's signifier and reference number, used to build the
+/// automatic text of a cross-reference for the [`Full`](XrefStyle::Full) and
+/// [`Short`](XrefStyle::Short) styles (and to emphasize a chapter or appendix
+/// title under [`Basic`](XrefStyle::Basic)).
+///
+/// This carries only the target-derived pieces; how they are combined with the
+/// target's title is decided by the reference's [`XrefStyle`] at render time.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XrefSignifier {
+    /// The signifier and reference number, already combined (e.g. `"Section
+    /// 2.3"`, `"Figure 1"`, or just `"2.3"` when the target's `*-refsig`
+    /// attribute is unset).
+    pub label: String,
+
+    /// Whether the target's title is emphasized (rendered inside `<em>`) rather
+    /// than quoted. `true` for chapters and appendices.
+    pub emphasize: bool,
+}
+
 /// The resolved destination of a cross-reference.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedReference {
@@ -24,6 +83,27 @@ pub struct ResolvedReference {
     /// The display text to use when the cross-reference did not specify its own
     /// text. This is typically the target's reference text (reftext).
     pub text: Option<String>,
+
+    /// The target's signifier and number, when it carries one and has no
+    /// explicit reftext. Present only for targets eligible for `full`/`short`
+    /// [`xrefstyle`](XrefStyle) formatting (numbered sections and captioned
+    /// blocks); `None` otherwise. Ignored unless the reference selects a style.
+    pub signifier: Option<XrefSignifier>,
+}
+
+impl ResolvedReference {
+    /// Constructs a resolved reference with no [`signifier`](Self::signifier).
+    ///
+    /// This is the common case for a host-supplied (cross-document) resolver,
+    /// which resolves a target to an `href` and display `text` but does not
+    /// participate in `xrefstyle` number formatting.
+    pub fn new(href: String, text: Option<String>) -> Self {
+        Self {
+            href,
+            text,
+            signifier: None,
+        }
+    }
 }
 
 /// A warning produced while resolving cross-references.
@@ -106,15 +186,17 @@ impl ReferenceResolver for CatalogResolver<'_> {
             return Some(ResolvedReference {
                 href: format!("#{target}"),
                 text: entry.reftext.clone(),
+                signifier: entry.signifier.clone(),
             });
         }
 
         // Natural cross-reference: match on reference text.
         if let Some(id) = self.catalog.resolve_id(target) {
-            let text = self.catalog.get_ref(&id).and_then(|e| e.reftext.clone());
+            let entry = self.catalog.get_ref(&id);
             return Some(ResolvedReference {
                 href: format!("#{id}"),
-                text,
+                text: entry.and_then(|e| e.reftext.clone()),
+                signifier: entry.and_then(|e| e.signifier.clone()),
             });
         }
 

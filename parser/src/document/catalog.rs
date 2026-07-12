@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom};
+use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom, parser::XrefSignifier};
 
 /// Document catalog for tracking referenceable elements.
 ///
@@ -65,6 +65,7 @@ impl Catalog {
             id: id.to_string(),
             reftext: reftext.map(|s| s.to_owned()),
             ref_type,
+            signifier: None,
         };
 
         self.refs.insert(id.to_string(), entry);
@@ -115,6 +116,7 @@ impl Catalog {
             id: unique_id.clone(),
             reftext: reftext.map(|s| s.to_owned()),
             ref_type,
+            signifier: None,
         };
 
         self.refs.insert(unique_id.clone(), entry);
@@ -141,6 +143,16 @@ impl Catalog {
     /// Resolve reference text to an ID, if possible.
     pub fn resolve_id(&self, reftext: &str) -> Option<String> {
         self.reftext_to_id.get(reftext).cloned()
+    }
+
+    /// Attaches an [`XrefSignifier`] to an already-registered element, so a
+    /// cross-reference to it can build `full`/`short`
+    /// [`xrefstyle`](crate::parser::XrefStyle) text. A no-op if `id` is not
+    /// registered.
+    pub(crate) fn set_signifier(&mut self, id: &str, signifier: XrefSignifier) {
+        if let Some(entry) = self.refs.get_mut(id) {
+            entry.signifier = Some(signifier);
+        }
     }
 
     /// Returns an iterator over all registered reference IDs, in an
@@ -315,6 +327,14 @@ pub struct RefEntry {
 
     /// Type of referenceable element.
     pub ref_type: RefType,
+
+    /// The signifier and number used to build `full`/`short`
+    /// [`xrefstyle`](crate::parser::XrefStyle) cross-reference text for this
+    /// target. Present only for a numbered section or captioned block that has
+    /// no explicit reftext; `None` for every other element (plain anchors,
+    /// bibliography entries, unnumbered sections, and targets carrying an
+    /// explicit reftext, for which `xrefstyle` formatting does not apply).
+    pub signifier: Option<XrefSignifier>,
 }
 
 /// Error that occurs when attempting to register a duplicate ID.

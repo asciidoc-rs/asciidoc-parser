@@ -146,10 +146,7 @@ fn cross_document_resolution() {
         if let Some(entry) = doc_b.catalog().get_ref(id) {
             index.insert(
                 entry.id.clone(),
-                ResolvedReference {
-                    href: format!("doc-b.html#{id}"),
-                    text: entry.reftext.clone(),
-                },
+                ResolvedReference::new(format!("doc-b.html#{id}"), entry.reftext.clone()),
             );
         }
     }
@@ -177,10 +174,7 @@ fn resolution_is_repeatable() {
     let first = CrossDocResolver {
         index: HashMap::from([(
             "topic".to_string(),
-            ResolvedReference {
-                href: "first.html#topic".to_string(),
-                text: Some("First".to_string()),
-            },
+            ResolvedReference::new("first.html#topic".to_string(), Some("First".to_string())),
         )]),
     };
     doc.resolve_references(&first, &HtmlSubstitutionRenderer {});
@@ -192,10 +186,7 @@ fn resolution_is_repeatable() {
     let second = CrossDocResolver {
         index: HashMap::from([(
             "topic".to_string(),
-            ResolvedReference {
-                href: "second.html#topic".to_string(),
-                text: Some("Second".to_string()),
-            },
+            ResolvedReference::new("second.html#topic".to_string(), Some("Second".to_string())),
         )]),
     };
     doc.resolve_references(&second, &HtmlSubstitutionRenderer {});
@@ -216,10 +207,7 @@ fn re_resolution_is_a_full_independent_sweep() {
     let knows_topic = CrossDocResolver {
         index: HashMap::from([(
             "topic".to_string(),
-            ResolvedReference {
-                href: "first.html#topic".to_string(),
-                text: Some("Topic".to_string()),
-            },
+            ResolvedReference::new("first.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
     let warnings = doc.resolve_references(&knows_topic, &HtmlSubstitutionRenderer {});
@@ -251,10 +239,7 @@ fn footnote_cross_references_resolve_via_host_resolver() {
     let resolver = CrossDocResolver {
         index: HashMap::from([(
             "topic".to_string(),
-            ResolvedReference {
-                href: "other.html#topic".to_string(),
-                text: Some("Topic".to_string()),
-            },
+            ResolvedReference::new("other.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
     let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
@@ -284,6 +269,43 @@ fn xref_macro_honors_role_and_non_blank_window() {
     assert_eq!(
         first_paragraph(&doc),
         r##"<a href="#sec" class="hint" target="_top">Go</a>"##
+    );
+}
+
+#[test]
+fn xrefstyle_value_interpretation() {
+    // Whether `xrefstyle` is *set* matters, not just its value. An appendix
+    // title is emphasized under any set style (its title is italicized rather
+    // than shown verbatim), but when `xrefstyle` is unset the target's reftext
+    // is used verbatim — no emphasis. This mirrors Ruby Asciidoctor, whose
+    // default `xrefstyle` is nil (not `basic`).
+    let with_xrefstyle = |header: &str| {
+        Parser::default().parse(&format!(
+            "{header}See <<data>>.\n\n[appendix]\n[#data]\n== Data\n"
+        ))
+    };
+
+    // Unset: reftext verbatim, no emphasis.
+    assert_eq!(
+        first_paragraph(&with_xrefstyle("")),
+        r##"See <a href="#data">Data</a>."##
+    );
+
+    // Explicit `basic`: the appendix title is emphasized.
+    assert_eq!(
+        first_paragraph(&with_xrefstyle(":xrefstyle: basic\n\n")),
+        r##"See <a href="#data"><em>Data</em></a>."##
+    );
+
+    // Set but empty (`:xrefstyle:`) and any unrecognized value both behave as
+    // `basic`.
+    assert_eq!(
+        first_paragraph(&with_xrefstyle(":xrefstyle:\n\n")),
+        r##"See <a href="#data"><em>Data</em></a>."##
+    );
+    assert_eq!(
+        first_paragraph(&with_xrefstyle(":xrefstyle: bogus\n\n")),
+        r##"See <a href="#data"><em>Data</em></a>."##
     );
 }
 
