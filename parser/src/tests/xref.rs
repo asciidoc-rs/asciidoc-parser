@@ -152,6 +152,66 @@ fn footnote_in_heading_does_not_leak_into_generated_id() {
 }
 
 #[test]
+fn footnote_reaching_a_heading_via_attribute_is_kept_out_of_xref_text() {
+    // The footnote enters the title through an attribute reference, so it is not
+    // visible in the raw title source. Because markers are annotated during the
+    // single title render (not gated on the source text), the footnote is still
+    // kept out of the reference text — and remains a real, numbered footnote.
+    let doc = Parser::default().parse(concat!(
+        ":disclaimer: footnote:[Not legal advice.]\n",
+        "\n",
+        "See <<Terms>>.\n",
+        "\n",
+        "== Terms{disclaimer}\n",
+    ));
+
+    assert_eq!(first_paragraph(&doc), "See <a href=\"#_terms\">Terms</a>.");
+
+    let footnotes = doc.catalog().footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(footnotes[0].index, "1");
+    assert_eq!(footnotes[0].text, "Not legal advice.");
+}
+
+#[test]
+fn footnote_in_heading_does_not_advance_a_counter_twice() {
+    // Deriving the footnote-free reference text from the same single render
+    // means a stateful `{counter:…}` in the title advances exactly once: the
+    // heading, its reference text, and the following body all agree.
+    let doc = Parser::default().parse(concat!(
+        "See <<Chapter 1>>.\n",
+        "\n",
+        "== Chapter {counter:ch}footnote:[a note]\n",
+        "\n",
+        "Next is {counter:ch}.\n",
+    ));
+
+    // The reference text reflects the first (and only) counter value, `1`.
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#_chapter_1\">Chapter 1</a>."
+    );
+
+    // The body's counter is `2`, not `3`: the title render did not advance it a
+    // second time.
+    let mut paragraphs = vec![];
+    fn collect<'a>(blocks: impl Iterator<Item = &'a Block<'a>>, out: &mut Vec<String>) {
+        for block in blocks {
+            if let Block::Simple(simple) = block {
+                out.push(simple.content().rendered().to_string());
+            }
+            collect(block.nested_blocks(), out);
+        }
+    }
+    collect(doc.nested_blocks(), &mut paragraphs);
+
+    assert!(
+        paragraphs.iter().any(|p| p == "Next is 2."),
+        "paragraphs were {paragraphs:?}"
+    );
+}
+
+#[test]
 fn unresolved_reference_falls_back_and_warns() {
     // Parse without resolving, then resolve against the document's own catalog
     // (cloned so it does not alias the `&mut doc` borrow).

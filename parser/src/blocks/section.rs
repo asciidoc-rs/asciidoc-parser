@@ -8,7 +8,7 @@ use crate::{
     blocks::{
         Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
-    content::{Content, SubstitutionGroup},
+    content::{Content, SubstitutionGroup, strip_footnote_marker_spans},
     document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
     parser::XrefSignifier,
@@ -146,23 +146,25 @@ impl<'src> SectionBlock<'src> {
         // footnotes out of sequence. The crate deliberately diverges toward
         // straightforward document-order numbering; see
         // https://github.com/asciidoc-rs/asciidoc-parser/issues/594.
+        //
+        // A footnote in the title is a real, document-order footnote, but its
+        // marker must not leak into the section's reference text (an xref's link
+        // text) or auto-generated ID. Marking the title's footnote markers with
+        // sentinels lets those be excised below from a single render — no second
+        // substitution pass, so counters and attribute-expanded footnotes are
+        // processed exactly once.
         let mut section_title = Content::from(level_and_title.item.1);
+        parser.mark_footnote_spans.set(true);
         SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
+        parser.mark_footnote_spans.set(false);
 
-        // A footnote in the title is a real, document-order footnote (see above),
-        // but its marker must not leak into the section's reference text (an
-        // xref's link text) or its auto-generated ID. Derive a footnote-free
-        // rendering of the title for those uses by substituting it again with
-        // footnotes suppressed. Only needed when the title actually contains a
-        // footnote macro; otherwise the primary rendering is already clean.
-        let footnote_free_title: Option<String> =
-            level_and_title.item.1.data().contains("footnote").then(|| {
-                let mut title = Content::from(level_and_title.item.1);
-                parser.suppress_footnotes.set(true);
-                SubstitutionGroup::Title.apply(&mut title, parser, metadata.attrlist.as_ref());
-                parser.suppress_footnotes.set(false);
-                title.rendered_owned()
-            });
+        // The footnote-free rendering of the title, for the reference text and
+        // auto-generated ID; a no-op string copy when the title had no footnote.
+        let title_reftext = strip_footnote_marker_spans(section_title.rendered());
+
+        // Strip the now-consumed sentinels from the title itself, keeping the
+        // footnote marker so the heading still renders it.
+        section_title.remove_footnote_marker_sentinels();
 
         // A section carrying the `bibliography` style implicitly adds that style
         // to each top-level unordered list in its body (see the "Bibliography
@@ -191,14 +193,7 @@ impl<'src> SectionBlock<'src> {
         let blocks = maw_blocks.item;
         let source = metadata.source.trim_remainder(blocks.after);
 
-        // Prefer the footnote-free rendering (when the title carried a footnote)
-        // so neither the generated ID nor the reference text includes the
-        // footnote marker.
-        let title_reftext = footnote_free_title
-            .as_deref()
-            .unwrap_or(section_title.rendered());
-
-        let proposed_base_id = generate_section_id(title_reftext, parser);
+        let proposed_base_id = generate_section_id(&title_reftext, parser);
 
         let manual_id = metadata
             .attrlist
@@ -214,7 +209,7 @@ impl<'src> SectionBlock<'src> {
             .as_ref()
             .and_then(|a| a.named_attribute("reftext").map(|a| a.value()))
             .or_else(|| metadata.anchor_reftext.as_ref().map(|span| span.data()))
-            .unwrap_or(title_reftext);
+            .unwrap_or(&title_reftext);
 
         let section_id = if sectids && manual_id.is_none() {
             let id = parser.generate_and_register_unique_id(

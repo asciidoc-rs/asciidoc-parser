@@ -1636,16 +1636,6 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
 
         let parser = self.parser;
 
-        // When rendering a footnote-free variant of the content (e.g. a section
-        // title's reference text and auto-generated ID), drop the footnote
-        // entirely: emit no marker, register nothing, advance no counter, and
-        // record no warning. The content's primary rendering handles all of
-        // that. A bare `footnote:[]` (neither ID nor text) is not a footnote and
-        // falls through to the literal-text branch below either way.
-        if parser.suppress_footnotes.get() && (caps.get(2).is_some() || caps.get(3).is_some()) {
-            return LookaheadResult::Continue;
-        }
-
         // Resolve the macro into an (id, text) pair. The deprecated
         // `footnoteref:` form packs both into the bracketed text (`id,text`),
         // whereas the `footnote:` form takes the id from the macro target.
@@ -1676,6 +1666,17 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                 caps.get(3).map(|m| m.as_str().to_string()),
             )
         };
+
+        // While a section title is substituted, bracket a real footnote's marker
+        // with sentinels so it can later be excised from the section's reference
+        // text and auto-generated ID (see `Parser::mark_footnote_spans`). The
+        // footnote is still defined and numbered here, in document order; only
+        // the marker's *placement* is annotated. A bare `footnote:[]` (the
+        // literal-text branch below) is not a footnote and is left unmarked.
+        let mark_span = parser.mark_footnote_spans.get() && (id.is_some() || content.is_some());
+        if mark_span {
+            dest.push(crate::content::FOOTNOTE_MARKER_START);
+        }
 
         // `id` and `content` own their data, so each branch renders its marker
         // before they are dropped (the params borrow them).
@@ -1742,6 +1743,10 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
         } else {
             // `footnote:[]` with neither an ID nor text is not a footnote.
             dest.push_str(&caps[0]);
+        }
+
+        if mark_span {
+            dest.push(crate::content::FOOTNOTE_MARKER_END);
         }
 
         LookaheadResult::Continue

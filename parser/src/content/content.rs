@@ -118,6 +118,47 @@ pub(crate) struct XrefSegment {
 const XREF_PLACEHOLDER_START: char = '\u{E000}';
 const XREF_PLACEHOLDER_END: char = '\u{E001}';
 
+/// Sentinel codepoints (Unicode Private Use Area) bracketing a footnote's
+/// rendered inline marker while a section title is being substituted. Like the
+/// cross-reference placeholders above, these cannot collide with user text and
+/// are inert to the remaining substitution steps.
+///
+/// A footnote in a section title is a real, document-order footnote, but its
+/// marker must be kept out of the section's reference text and auto-generated
+/// ID. Marking the marker in a single render (rather than re-rendering the
+/// title with footnotes suppressed) means stateful substitutions — counters,
+/// attribute references that expand into footnotes — run exactly once. See
+/// [`strip_footnote_marker_spans`] and
+/// [`Content::remove_footnote_marker_sentinels`].
+pub(crate) const FOOTNOTE_MARKER_START: char = '\u{E002}';
+pub(crate) const FOOTNOTE_MARKER_END: char = '\u{E003}';
+
+/// Removes each footnote marker span — a [`FOOTNOTE_MARKER_START`] …
+/// [`FOOTNOTE_MARKER_END`] region and everything between, i.e. the sentinels
+/// *and* the marker they bracket — leaving footnote-free text suitable for a
+/// section's reference text and auto-generated ID.
+pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+
+    while let Some(start) = rest.find(FOOTNOTE_MARKER_START) {
+        out.push_str(&rest[..start]);
+        rest = &rest[start + FOOTNOTE_MARKER_START.len_utf8()..];
+
+        // Drop through the matching end sentinel (the marker text). A start
+        // without an end cannot occur — the substitution always emits both — but
+        // if it somehow did, drop the remainder rather than reintroduce the
+        // stray sentinel.
+        rest = match rest.find(FOOTNOTE_MARKER_END) {
+            Some(end) => &rest[end + FOOTNOTE_MARKER_END.len_utf8()..],
+            None => "",
+        };
+    }
+
+    out.push_str(rest);
+    out
+}
+
 impl<'src> Content<'src> {
     /// Constructs a `Content` from a source `Span` and a potentially-filtered
     /// view of that source text.
@@ -193,6 +234,31 @@ impl<'src> Content<'src> {
     /// Returns `true` if `self` contains no text.
     pub fn is_empty(&self) -> bool {
         self.rendered.as_ref().is_empty()
+    }
+
+    /// Removes the [`FOOTNOTE_MARKER_START`]/[`FOOTNOTE_MARKER_END`] sentinels
+    /// bracketing each footnote marker, *keeping* the marker itself, so the
+    /// content renders normally. Called after a section title's reference text
+    /// and ID have been derived (via [`strip_footnote_marker_spans`], which
+    /// needs the sentinels to locate the markers). The sentinels are removed
+    /// from the deferred template too, so a later cross-reference resolution
+    /// rebuild does not reintroduce them.
+    pub(crate) fn remove_footnote_marker_sentinels(&mut self) {
+        if !self.rendered.as_ref().contains(FOOTNOTE_MARKER_START) {
+            return;
+        }
+
+        self.rendered = self
+            .rendered
+            .as_ref()
+            .replace([FOOTNOTE_MARKER_START, FOOTNOTE_MARKER_END], "")
+            .into();
+
+        if let Some(deferred) = self.deferred.as_mut() {
+            deferred.template = deferred
+                .template
+                .replace([FOOTNOTE_MARKER_START, FOOTNOTE_MARKER_END], "");
+        }
     }
 
     /// Returns `true` if this content contains one or more cross-references
@@ -539,6 +605,41 @@ mod tests {
         fn basic_non_empty_span() {
             let content = crate::content::Content::from(crate::Span::new("blah"));
             assert!(!content.is_empty());
+        }
+    }
+
+    mod strip_footnote_marker_spans {
+        use super::super::{
+            FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, strip_footnote_marker_spans,
+        };
+
+        fn marked(marker: &str) -> String {
+            format!("{FOOTNOTE_MARKER_START}{marker}{FOOTNOTE_MARKER_END}")
+        }
+
+        #[test]
+        fn leaves_unmarked_text_unchanged() {
+            assert_eq!(strip_footnote_marker_spans("Plain title"), "Plain title");
+        }
+
+        #[test]
+        fn removes_a_marker_span_and_its_sentinels() {
+            let input = format!("Title{}", marked("[1]"));
+            assert_eq!(strip_footnote_marker_spans(&input), "Title");
+        }
+
+        #[test]
+        fn removes_multiple_spans_keeping_surrounding_text() {
+            let input = format!("a{}b{}c", marked("[1]"), marked("[2]"));
+            assert_eq!(strip_footnote_marker_spans(&input), "abc");
+        }
+
+        #[test]
+        fn a_start_without_an_end_drops_the_remainder() {
+            // Defensive: the substitution always emits balanced sentinels, but a
+            // lone start must not leak the sentinel into the output.
+            let input = format!("Title{FOOTNOTE_MARKER_START}dangling");
+            assert_eq!(strip_footnote_marker_spans(&input), "Title");
         }
     }
 
