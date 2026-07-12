@@ -1686,6 +1686,15 @@ fn process_content<'src>(
             // expanded) source: an owned source is a private copy whose spans do
             // not index the document source map. A cell nested inside a borrowed
             // cell keeps document spans and so is still at "document level" here.
+            //
+            // KNOWN LIMITATION: when this cell *is* inside an owned source, its
+            // directive lives in content that was expanded privately into that
+            // owned copy and is absent from the document source, so no document
+            // span maps to it. Such a directive is therefore attributed to the
+            // root file and its warning is dropped (see below). Reporting its
+            // true cursor needs a cursor representation that reaches into
+            // owned-cell content; tracked in
+            // https://github.com/asciidoc-rs/asciidoc-parser/issues/641.
             let at_document_level = parser.owned_cell_source_depth == 0;
 
             // The cell content is a contiguous slice of the (preprocessed)
@@ -1725,7 +1734,8 @@ fn process_content<'src>(
             // every such warning belongs to that first line. When this cell is
             // itself inside an owned source, `trimmed` does not index the document
             // source, so the warnings cannot be re-anchored and are dropped (as
-            // they were before this attribution existed).
+            // they were before this attribution existed); see the known
+            // limitation above (issue #641).
             if at_document_level {
                 let directive_line = trimmed.take_line().item;
                 for pw in preprocessor_warnings {
@@ -3060,7 +3070,9 @@ mod tests {
         // that cell's private source, whose spans do not index the document
         // source map. An unresolved directive in the inner cell therefore cannot
         // be re-anchored: it is rendered (attributed to the root file) but its
-        // warning is dropped rather than mis-mapped.
+        // warning is dropped rather than mis-mapped. Reporting its true cursor is
+        // tracked as a known limitation in
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/641.
         #[test]
         fn unresolved_directive_inside_owned_cell_source_is_dropped() {
             // `cell.adoc` is pulled in as the top cell's owned source; it holds a
