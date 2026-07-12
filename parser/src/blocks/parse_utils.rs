@@ -13,7 +13,7 @@ pub(crate) fn parse_blocks_until<'src, F>(
     parser: &mut Parser,
 ) -> MatchAndWarnings<'src, MatchedItem<'src, Vec<Block<'src>>>>
 where
-    F: FnMut(&Span<'src>) -> bool,
+    F: FnMut(&Span<'src>, &Parser) -> bool,
 {
     let mut blocks: Vec<Block<'src>> = vec![];
     let mut warnings: Vec<Warning<'src>> = vec![];
@@ -21,7 +21,13 @@ where
     source = source.discard_empty_lines();
 
     while !source.data().is_empty() {
-        if f(&source) {
+        // The predicate is given the parser (as a shared borrow) so a stop
+        // condition can consult the running document-attribute state — notably
+        // `leveloffset`, which shifts the effective level a section boundary is
+        // compared against. Every block preceding `source` (including any
+        // `:leveloffset:` attribute entry) has already been applied to the
+        // parser at this point, so the offset it reads is current.
+        if f(&source, parser) {
             break;
         }
 

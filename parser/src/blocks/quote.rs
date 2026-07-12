@@ -199,7 +199,7 @@ impl<'src> QuoteBlock<'src> {
         let (content_model, content, blocks, mut warnings) = match type_ {
             // A quote block contains other blocks.
             QuoteType::Quote => {
-                let maw_blocks = parse_blocks_until(inside_delimiters, |_| false, parser);
+                let maw_blocks = parse_blocks_until(inside_delimiters, |_, _| false, parser);
                 (
                     ContentModel::Compound,
                     None,
@@ -431,7 +431,7 @@ impl<'src> QuoteBlock<'src> {
         // must not be lost.
         let mut nested_warning_types: Vec<WarningType> = vec![];
         let owned = OwnedQuoteBlocks::new(body, |source| {
-            let mut maw = parse_blocks_until(Span::new(source), |_| false, parser);
+            let mut maw = parse_blocks_until(Span::new(source), |_, _| false, parser);
             nested_warning_types.extend(maw.warnings.drain(..).map(|w| w.warning));
             OwnedQuoteBlocksInner {
                 blocks: maw.item.item,
