@@ -267,10 +267,7 @@ fn absolute_offset_set_in_header_shifts_body_headings() {
 
     assert_eq!(
         section_levels(&doc),
-        vec![
-            (1, "Chapter One".to_string()),
-            (2, "A Section".to_string()),
-        ]
+        vec![(1, "Chapter One".to_string()), (2, "A Section".to_string()),]
     );
 }
 
@@ -287,8 +284,5 @@ fn malformed_relative_offset_is_ignored() {
         "== Real Section",
     ));
 
-    assert_eq!(
-        section_levels(&doc),
-        vec![(1, "Real Section".to_string())]
-    );
+    assert_eq!(section_levels(&doc), vec![(1, "Real Section".to_string())]);
 }
