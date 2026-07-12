@@ -402,11 +402,11 @@ include::example$section.adoc[tag=with-anchor-and-reftext]
                     "tigers-subspecies",
                     RefEntry {
                         id: "tigers-subspecies",
-                        reftext: Some("Subspecies of Tiger",),
+                        reftext: Some("Subspecies",),
                         ref_type: RefType::Section,
                     }
                 ),]),
-                reftext_to_id: HashMap::from([("Subspecies of Tiger", "tigers-subspecies"),]),
+                reftext_to_id: HashMap::from([("Subspecies", "tigers-subspecies"),]),
             },
         }
     );
