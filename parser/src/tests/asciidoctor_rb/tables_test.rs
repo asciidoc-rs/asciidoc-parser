@@ -1411,40 +1411,70 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
-    // Cross-reference resolution from inside an AsciiDoc table cell to a
-    // reference in the main document.
     fn cross_reference_link_in_an_asciidoc_table_cell_should_resolve_to_reference_in_main_document()
     {
+        let doc =
+            Parser::default().parse("== Some\n\n|===\na|See <<_more>>\n|===\n\n== More\n\ncontent");
+
+        // The cross-reference inside the AsciiDoc cell resolves against the main
+        // document's catalog, even though its target section is defined *after*
+        // the table.
+        assert_xpath(&doc, "//a[@href=\"#_more\"]", 1);
+        assert_xpath(&doc, "//a[@href=\"#_more\"][text()=\"More\"]", 1);
     }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
-    // Cataloging an anchor at the start of an AsciiDoc table cell as a document
-    // reference.
-    fn should_discover_anchor_at_start_of_cell_and_register_it_as_a_reference() {}
+    fn should_discover_anchor_at_start_of_cell_and_register_it_as_a_reference() {
+        let doc = Parser::default().parse(
+            "The highest peak in the Front Range is <<grays-peak>>, which tops <<mount-evans>> by just a few feet.\n\n[cols=\"1s,1\"]\n|===\n|[[mount-evans,Mount Evans]]Mount Evans\n|14,271 feet\n\nh|[[grays-peak,Grays Peak]]\nGrays Peak\n|14,278 feet\n|===",
+        );
+
+        // The anchors at the start of the cells are cataloged as document
+        // references.
+        let catalog = doc.catalog();
+        assert!(catalog.contains_id("mount-evans"));
+        assert!(catalog.contains_id("grays-peak"));
+
+        // The cross-references in the introductory paragraph resolve against
+        // those cataloged anchors, using each anchor's reftext.
+        assert_xpath(
+            &doc,
+            "(//p)[1]/a[@href=\"#grays-peak\"][text()=\"Grays Peak\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(//p)[1]/a[@href=\"#mount-evans\"][text()=\"Mount Evans\"]",
+            1,
+        );
+
+        // The anchors render as targets within their respective cells.
+        assert_xpath(&doc, "(//table/tbody/tr)[1]//td//a[@id=\"mount-evans\"]", 1);
+        assert_xpath(&doc, "(//table/tbody/tr)[2]//th//a[@id=\"grays-peak\"]", 1);
+    }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
-    // Cataloging an anchor at the start of a cell in an implicit header row when
-    // the column has a style.
-    fn should_catalog_anchor_at_start_of_cell_in_implicit_header_row_when_column_has_a_style() {}
+    fn should_catalog_anchor_at_start_of_cell_in_implicit_header_row_when_column_has_a_style() {
+        let doc = Parser::default()
+            .parse("[cols=1a]\n|===\n|[[foo,Foo]]* not AsciiDoc\n\n| AsciiDoc\n|===");
+
+        assert!(doc.catalog().contains_id("foo"));
+    }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
-    // Cataloging an anchor at the start of a cell in an explicit header row when
-    // the column has a style.
-    fn should_catalog_anchor_at_start_of_cell_in_explicit_header_row_when_column_has_a_style() {}
+    fn should_catalog_anchor_at_start_of_cell_in_explicit_header_row_when_column_has_a_style() {
+        let doc = Parser::default()
+            .parse("[%header,cols=1a]\n|===\n|[[foo,Foo]]* not AsciiDoc\n| AsciiDoc\n|===");
+
+        assert!(doc.catalog().contains_id("foo"));
+    }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/543):
-    // Cataloging an anchor at the start of a cell in the first row.
-    fn should_catalog_anchor_at_start_of_cell_in_first_row() {}
+    fn should_catalog_anchor_at_start_of_cell_in_first_row() {
+        let doc = Parser::default().parse("|===\n|[[foo,Foo]]foo\n| bar\n|===");
+
+        assert!(doc.catalog().contains_id("foo"));
+    }
 
     #[test]
     fn footnotes_should_not_be_shared_between_an_asciidoc_table_cell_and_the_main_document() {
