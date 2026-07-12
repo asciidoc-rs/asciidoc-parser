@@ -112,6 +112,42 @@ fn unresolved_reference_falls_back_and_warns() {
 }
 
 #[test]
+fn xrefstyle_survives_deferred_resolution() {
+    // `xrefstyle` formatting is compatible with the two-phase resolve mechanism
+    // used for forward (and cross-document) references. The two inputs it needs
+    // are resolved at their natural points: the effective *style* is a property
+    // of the reference site, captured during parsing (alongside `provided_text`,
+    // `window`, and `roles`), while the target's *signifier and number* live in
+    // the catalog and are read only when references are resolved (alongside the
+    // target's `reftext`). So a forward reference is an unresolved fallback
+    // until resolution, then picks up its full styled text — the same lifecycle
+    // as a plain reference.
+    let src = ":sectnums:\n:xrefstyle: full\n\nSee <<install>>.\n\n\
+              == One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n\
+              [#install]\n=== Installation\n";
+
+    // Parse without resolving: the target section is parsed *after* the
+    // reference, so it is still pending and renders the unresolved fallback.
+    let mut doc = Parser::default().parse_deferred(src);
+    assert!(first_simple(&doc).content().has_unresolved_refs());
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#install\">[install]</a>."
+    );
+
+    // Resolving against the now-complete catalog applies the full style, drawing
+    // the signifier and number from the catalog entry registered for the target.
+    let catalog = doc.catalog().clone();
+    let resolver = CatalogResolver::new(&catalog);
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    assert!(warnings.is_empty());
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#install\">Section 2.3, &#8220;Installation&#8221;</a>.",
+    );
+}
+
+#[test]
 fn escaped_reference_is_not_a_cross_reference() {
     // A backslash-escaped shorthand is emitted literally and is not deferred.
     let doc = Parser::default().parse("See \\<<later>>.\n\n[#later]\n== Later\n");
