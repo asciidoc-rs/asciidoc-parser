@@ -1,7 +1,7 @@
 use std::{borrow::Cow, path::Path, sync::LazyLock};
 
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
-use regex::{Captures, Regex, Replacer};
+use regex::{Captures, Match, Regex, Replacer};
 
 use crate::{
     Parser, Span,
@@ -665,26 +665,123 @@ fn strip_see_and_seealso(term: &str) -> String {
     term.to_string()
 }
 
+// Ruby Asciidoctor's `InlineLinkRx` gates the angle-bracketed-URL alternative
+// (`\2([^\s]+?)&gt;`) with a back-reference to the `&lt;`-prefix capture group,
+// so it fires *only* when a leading `&lt;` was seen. The `regex` crate has no
+// back-references, so we can't express that gate inline. Instead we split the
+// pattern into two parallel top-level branches:
+//
+//   * the ANGLE branch requires a literal `&lt;` prefix and therefore keeps the
+//     angle-bracketed-URL alternative, and
+//   * the NON-ANGLE branch omits that alternative entirely.
+//
+// A stray `&gt;` with no matching `&lt;` (e.g. `https://example.org>;`) can then
+// only match the bare-link alternative, exactly as Ruby routes it. See #503.
+//
+// `InlineLinkReplacer` normalizes the two capture-group sets into a single view
+// (see `NormalizedCaps`), so the numbering below is only referenced there.
 static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?msx)
-        ( ^ | link: | [\ \t] | \\?&lt;() | [>\(\)\[\];"'] )   # capture group 1: prefix
-                                                              # capture group 2: flag for prefix == "&lt;"
-        ( \\? (?: https? | file | ftp | irc ):// )            # capture group 3: scheme
         (?:
-            ( [^\s\[\]]+ )                                    # capture group 4: target
-            \[ ( | .*?[^\\] ) \]                              # capture group 5: attrlist
-          | ( [^\s]+? ) &gt;                                  # capture group 6: URL inside <>
-                                                              # (Ruby gates this with a `\2` back-ref to
-                                                              # group 2; unsupported here - see issue #503)
-          | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )              # capture group 7: bare link,
-                                                              # capture group 8: trailing char
+            #### ANGLE branch: prefix is `&lt;`, keeping the `&gt;` alternative.
+            ( \\?&lt; )                                       # group 1: prefix
+            ( \\? (?: https? | file | ftp | irc ):// )        # group 2: scheme
+            (?:
+                ( [^\s\[\]]+ )                                # group 3: target
+                \[ ( | .*?[^\\] ) \]                          # group 4: attrlist
+              | ( [^\s]+? ) &gt;                              # group 5: URL inside <>
+              | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )          # group 6: bare link,
+                                                              # group 7: trailing char
+            )
+          |
+            #### NON-ANGLE branch: no `&gt;` alternative (unreachable without `&lt;`).
+            ( ^ | link: | [\ \t] | [>\(\)\[\];"'] )           # group 8: prefix
+            ( \\? (?: https? | file | ftp | irc ):// )        # group 9: scheme
+            (?:
+                ( [^\s\[\]]+ )                                # group 10: target
+                \[ ( | .*?[^\\] ) \]                          # group 11: attrlist
+              | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )          # group 12: bare link,
+                                                              # group 13: trailing char
+            )
         )
     "#,
     )
     .unwrap()
 });
+
+/// A branch-agnostic view over the capture groups of [`INLINE_LINK`], which has
+/// two parallel top-level branches (angle / non-angle). Exactly one branch
+/// participates in any given match; this resolves the relevant groups so the
+/// replacer doesn't have to special-case the branch numbering everywhere.
+struct NormalizedCaps<'c, 't> {
+    caps: &'c Captures<'t>,
+    /// True when the ANGLE branch matched (prefix was `&lt;`). Corresponds to
+    /// the `&lt;` flag (old capture group 2) in the Ruby implementation.
+    is_angle: bool,
+    prefix: usize,
+    scheme: usize,
+    /// Formal-macro target: the URL preceding a `[…]` attrlist.
+    target: usize,
+    attrlist: usize,
+    /// URL captured inside `<…&gt;`; only present in the ANGLE branch.
+    angle_url: Option<usize>,
+    /// Bare (auto-linked) URL.
+    bare: usize,
+}
+
+impl<'c, 't> NormalizedCaps<'c, 't> {
+    fn new(caps: &'c Captures<'t>) -> Self {
+        if caps.get(1).is_some() {
+            NormalizedCaps {
+                caps,
+                is_angle: true,
+                prefix: 1,
+                scheme: 2,
+                target: 3,
+                attrlist: 4,
+                angle_url: Some(5),
+                bare: 6,
+            }
+        } else {
+            NormalizedCaps {
+                caps,
+                is_angle: false,
+                prefix: 8,
+                scheme: 9,
+                target: 10,
+                attrlist: 11,
+                angle_url: None,
+                bare: 12,
+            }
+        }
+    }
+
+    fn prefix(&self) -> &'t str {
+        self.caps.get(self.prefix).map_or("", |m| m.as_str())
+    }
+
+    fn scheme(&self) -> &'t str {
+        self.caps.get(self.scheme).map_or("", |m| m.as_str())
+    }
+
+    fn target(&self) -> Option<Match<'t>> {
+        self.caps.get(self.target)
+    }
+
+    fn attrlist(&self) -> Option<Match<'t>> {
+        self.caps.get(self.attrlist)
+    }
+
+    fn angle_url(&self) -> Option<Match<'t>> {
+        self.angle_url.and_then(|g| self.caps.get(g))
+    }
+
+    fn bare(&self) -> Option<Match<'t>> {
+        self.caps.get(self.bare)
+    }
+}
 
 #[derive(Debug)]
 struct InlineLinkReplacer<'p>(&'p Parser);
@@ -695,27 +792,34 @@ impl Replacer for InlineLinkReplacer<'_> {
             .item
             .item;
 
-        if caps.get(2).is_some() && caps.get(5).is_none() {
+        // `INLINE_LINK` has two parallel top-level branches (angle / non-angle);
+        // resolve which one matched so the logic below can stay branch-agnostic.
+        // See the note on `INLINE_LINK` and issue #503.
+        let n = NormalizedCaps::new(caps);
+        let prefix_match = n.prefix();
+        let scheme_match = n.scheme();
+
+        if n.is_angle && n.attrlist().is_none() {
             // Honor the escapes.
-            if caps[1].starts_with('\\') {
+            if prefix_match.starts_with('\\') {
                 dest.push_str(&caps[0][1..]);
                 return;
             }
 
-            if caps[3].starts_with('\\') {
-                dest.push_str(&caps[1]);
-                dest.push_str(&caps[0][caps[1].len() + 1..]);
+            if scheme_match.starts_with('\\') {
+                dest.push_str(prefix_match);
+                dest.push_str(&caps[0][prefix_match.len() + 1..]);
                 return;
             }
 
-            let Some(link_suffix) = caps.get(6) else {
+            let Some(link_suffix) = n.angle_url() else {
                 dest.push_str(&caps[0]);
                 return;
             };
 
             let target = format!(
                 "{scheme}{link_suffix}",
-                scheme = &caps[3],
+                scheme = scheme_match,
                 link_suffix = link_suffix.as_str()
             );
 
@@ -743,8 +847,8 @@ impl Replacer for InlineLinkReplacer<'_> {
             return;
         }
 
-        let mut prefix = caps[1].to_string();
-        let scheme = &caps[3];
+        let mut prefix = prefix_match.to_string();
+        let scheme = scheme_match;
 
         // Honor the escape.
         if scheme.starts_with('\\') {
@@ -753,36 +857,28 @@ impl Replacer for InlineLinkReplacer<'_> {
             return;
         }
 
-        // Groups 4, 6, and 7 are mutually exclusive regex alternatives;
-        // exactly one will be Some(_) when we reach this point.
-        // Group 4 = formal macro target (URL before '['), group 7 = bare link.
+        // The target and bare-link groups are mutually exclusive regex
+        // alternatives; exactly one is `Some(_)` when we reach this point.
+        // `target` = formal macro target (URL before '['); `bare` = bare link.
         //
-        // Group 6 is the URL captured before a `&gt;`. When the `&lt;` prefix is
-        // also present (group 2), the angle-bracketed-URL case is handled earlier
-        // and returns. Reaching here with group 6 means a stray `&gt;` with no
-        // matching `&lt;`; Asciidoctor treats that as a bare link that keeps the
-        // literal `&gt;`, then strips trailing punctuation via the rule below
-        // (e.g. `https://example.org>` renders with href `https://example.org&gt`
-        // and the `;` left outside the link).
-        //
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/503):
-        // Group 6 should never participate without group 2. Ruby gates it with a
-        // `\2` back-reference, which the `regex` crate can't express, so it can
-        // fire spuriously here and a stray `&gt;` followed by more punctuation
-        // (e.g. `>;`) still diverges from Asciidoctor.
-        let url_part = caps
-            .get(4)
+        // The angle-bracketed-URL alternative (`angle_url`) only exists in the
+        // ANGLE branch, and that case returns above (before an attrlist can be
+        // present), so it never contributes here. A stray `&gt;` with no leading
+        // `&lt;` therefore lands in the bare-link group and keeps its literal
+        // `&gt;`, with any trailing punctuation stripped by the rule below --
+        // matching Ruby Asciidoctor (see issue #503).
+        let url_part = n
+            .target()
+            .or_else(|| n.bare())
             .map(|m| m.as_str().to_owned())
-            .or_else(|| caps.get(7).map(|m| m.as_str().to_owned()))
-            .or_else(|| caps.get(6).map(|m| format!("{}&gt;", m.as_str())))
             .unwrap_or_default();
         let mut target = format!("{scheme}{url_part}");
 
         let mut suffix = "".to_owned();
         let mut link_text: Option<String> = None;
 
-        // NOTE: If capture group 5 exists (the attrlist), we're looking at a formal macro (e.g., https://example.org[]).
-        if let Some(attrlist) = caps.get(5) {
+        // NOTE: If the attrlist group matched, we're looking at a formal macro (e.g., https://example.org[]).
+        if let Some(attrlist) = n.attrlist() {
             if prefix == "link:" {
                 prefix = "".to_owned();
             }
@@ -804,9 +900,9 @@ impl Replacer for InlineLinkReplacer<'_> {
             }
 
             // Strip a trailing ';' or ':' (and an adjacent ')') out of a bare
-            // URL. Keying off the target's final character rather than capture
-            // group 8 covers both the bare-link case (group 7) and the stray
-            // `&gt;` case (group 6, whose reconstructed URL ends in ';').
+            // URL. Keying off the target's final character rather than the
+            // trailing-char capture group handles a bare link that ends in a
+            // literal `&gt;` (whose final character is ';'), matching Ruby.
             if let Some(tail) = target.chars().last().filter(|c| *c == ';' || *c == ':') {
                 target.truncate(target.len() - 1);
                 suffix = tail.to_string();

@@ -906,3 +906,55 @@ mod pr498 {
         );
     }
 }
+
+mod issue503 {
+    use crate::tests::prelude::*;
+
+    #[test]
+    fn stray_gt_followed_by_punctuation() {
+        // Regression for https://github.com/asciidoc-rs/asciidoc-parser/issues/503:
+        // a bare URL abutting `>;` (rendered to `&gt;;`) with NO matching leading
+        // `<`. Ruby Asciidoctor treats the whole run as a bare link (keeping the
+        // literal `&gt;` in the URL) and strips a single trailing `;`.
+        //
+        // Reference (Ruby Asciidoctor 2.0.23):
+        //   $ printf '%s' 'foo https://example.org>;' | asciidoctor -e -o - -
+        //   <p>foo <a href="https://example.org&gt;" class="bare">https://example.org&gt;</a>;</p>
+        //
+        // Previously the ungated angle-URL alternative fired for the stray `&gt;`
+        // and split the run, dropping the `;` from the `&gt;` entity.
+        let doc = Parser::default().parse("foo https://example.org>;");
+
+        let rendered = doc
+            .nested_blocks()
+            .next()
+            .unwrap()
+            .rendered_content()
+            .unwrap();
+
+        assert_eq!(
+            rendered,
+            r#"foo <a href="https://example.org&gt;" class="bare">https://example.org&gt;</a>;"#
+        );
+    }
+
+    #[test]
+    fn angle_bracketed_url_still_matches() {
+        // The genuine angle-bracketed autolink (`<url>`) must keep working: the
+        // `&lt;` prefix gates the angle-URL alternative back on, so the `&gt;`
+        // delimiter is consumed and the brackets are dropped from the link.
+        let doc = Parser::default().parse("See <https://example.org> for details.");
+
+        let rendered = doc
+            .nested_blocks()
+            .next()
+            .unwrap()
+            .rendered_content()
+            .unwrap();
+
+        assert_eq!(
+            rendered,
+            r#"See <a href="https://example.org" class="bare">https://example.org</a> for details."#
+        );
+    }
+}
