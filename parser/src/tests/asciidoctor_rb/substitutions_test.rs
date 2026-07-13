@@ -57,6 +57,7 @@ mod dispatcher {
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby() {
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
         todo!(
             "{}",
             r###"
@@ -5021,7 +5022,7 @@ mod macros {
         //
         // The cases that remain below exercise the *shorthand* menu syntax
         // (`"File &gt; Save"`), which is intentionally not implemented: per the
-        // spec it is not on a standards track. See issue #263.
+        // spec it is not on a standards track.
         context 'Menu shorthand syntax (deferred)' do
             test 'should process menu with menu item using inline syntax' do
             para = block_from_string '"File &gt; Save As&#8230;"', attributes: { 'experimental' => '' }
@@ -6907,6 +6908,7 @@ foo&#8201;&#8212;&#8201;"#;
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby() {
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
         todo!(
             "{}",
             r###"
@@ -7149,6 +7151,7 @@ mod resolve_subs {
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby() {
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
         todo!(
             "{}",
             r###"

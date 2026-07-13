@@ -25,7 +25,7 @@ pub struct PathResolver {
     /// File separator to use for path operations. (Defaults to
     /// platform-appropriate separator.)
     pub file_separator: char,
-    // TO DO: Port this from Ruby?
+    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653): Port this from Ruby?
     // attr_accessor :working_dir
 }
 
@@ -122,7 +122,7 @@ impl PathResolver {
     /// an optional path root (e.g., `/`, `./`, `c:/`, or `//`), which is only
     /// present if the path is absolute.
     fn partition_path(&self, path: &str, web: WebPath) -> (Vec<String>, Option<String>) {
-        // TO DO: Add cache implementation?
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653): Add cache implementation?
 
         let posix_path = self.posixify(path);
 
@@ -135,6 +135,7 @@ impl PathResolver {
                 None
             }
         } else {
+            // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653):
             todo!(
                 "Port this: {}",
                 r#"
@@ -173,7 +174,7 @@ impl PathResolver {
             .map(|s| s.to_owned())
             .collect();
 
-        // TO DO: Add cache write?
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653): Add cache write?
 
         (path_segments, root)
     }

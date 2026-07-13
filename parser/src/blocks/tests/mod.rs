@@ -366,7 +366,7 @@ mod error_cases {
                     },),
                 ],
                 source: Span {
-                    // TO DO: Fix bug that includes blank lines.
+                    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/655): Fix bug that includes blank lines.
                     data: "=== Section Title\n\nabc\n\n.ancestor section== Section 2\n\ndef",
                     line: 1,
                     col: 1,

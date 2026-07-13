@@ -2111,10 +2111,10 @@ mod tests {
     fn attribute_substitution_with_multiline_attribute() {
         let source = ":longpath: very/long/path/to/some/ \\\nsubdirectory\n:ext: adoc\n\ninclude::{longpath}/file.{ext}[]";
 
-        // TODO: This should be "very/long/path/to/some/subdirectory/file.adoc" (without
-        // space) but the current Attribute::parse() incorrectly preserves the space
-        // before the backslash in multi-line attribute continuation. This is a bug
-        // that should be fixed.
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/658): This should be
+        // "very/long/path/to/some/subdirectory/file.adoc" (without space) but the current
+        // Attribute::parse() incorrectly preserves the space before the backslash in
+        // multi-line attribute continuation. This is a bug that should be fixed.
         let handler = InlineFileHandler::from_pairs([(
             "very/long/path/to/some/ subdirectory/file.adoc",
             "Multi-line attribute worked!",

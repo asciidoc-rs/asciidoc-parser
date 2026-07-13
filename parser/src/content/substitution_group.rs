@@ -208,7 +208,7 @@ impl SubstitutionGroup {
         if let Some(attrlist) = attrlist {
             if let Some(block_style) = attrlist.nth_attribute(1).and_then(|a| a.block_style()) {
                 result = match block_style {
-                    // TO DO: Many other style-specific substitution groups.
+                    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/656): Many other style-specific substitution groups.
                     "pass" => SubstitutionGroup::None,
                     _ => result,
                 };
