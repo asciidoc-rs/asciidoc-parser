@@ -7112,8 +7112,10 @@ mod post_replacements {
 //   mid-list group name as a reset, yielding `[specialcharacters, quotes,
 //   attributes, replacements, macros, post_replacements]` (the leading `quotes`
 //   is dropped, no de-duplication). This is a substitution-resolution behavior
-//   difference, not a missing test; it should be addressed on its own rather
-//   than by asserting the current output here.
+//   difference, not a missing test, and is tracked separately in
+//   https://github.com/asciidoc-rs/asciidoc-parser/issues/663 rather than by
+//   asserting the current output here. Once that is fixed, this case becomes
+//   portable as an executable test.
 //
 // * The `coderay` / `pygments` cases resolve `specialcharacters` to a
 //   `:highlight` sub driven by a source highlighter. Source highlighting is out
