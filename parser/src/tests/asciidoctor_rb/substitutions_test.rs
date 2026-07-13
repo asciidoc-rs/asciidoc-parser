@@ -54,11 +54,10 @@ mod dispatcher {
         );
     }
 
-    // Tombstone (https://github.com/asciidoc-rs/asciidoc-parser/issues/652):
-    // The three remaining Asciidoctor `dispatcher` tests each drive a
-    // Ruby-internal substitution API that this crate does not expose, so they
-    // are intentionally not ported 1:1. The behaviors they observe are covered
-    // by executable tests elsewhere:
+    // Tombstone: The three remaining Asciidoctor `dispatcher` tests each drive
+    // a Ruby-internal substitution API that this crate does not expose, so
+    // they are intentionally not ported 1:1. The behaviors they observe are
+    // covered by executable tests elsewhere:
     //
     // * "should not drop trailing blank lines when performing substitutions"
     //   appends empty strings to `para.lines` and calls
@@ -7091,9 +7090,8 @@ mod post_replacements {
     }
 }
 
-// Tombstone (https://github.com/asciidoc-rs/asciidoc-parser/issues/652):
-// Asciidoctor's "Resolve subs" context is intentionally not ported 1:1. Every
-// test in it drives Ruby's `Asciidoctor::Block.new(doc, ..., subs:,
+// Tombstone: Asciidoctor's "Resolve subs" context is intentionally not ported
+// 1:1. Every test in it drives Ruby's `Asciidoctor::Block.new(doc, ..., subs:,
 // attributes:)` constructor plus `block.commit_subs` / `block.subs` — the
 // mutable Ruby Block subs-resolution lifecycle. This crate has no equivalent
 // surface: a block's substitution group is resolved from its attrlist `subs=`
