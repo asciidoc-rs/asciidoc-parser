@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.22.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.21.0...v0.22.0)
+_13 July 2026_
+
+### Added
+
+* Parse and expose document subtitle from the title line ([#649](https://github.com/asciidoc-rs/asciidoc-parser/pull/649))
+* Expose AsciiDoc table cell as introspectable nested document ([#545](https://github.com/asciidoc-rs/asciidoc-parser/pull/545)) ([#648](https://github.com/asciidoc-rs/asciidoc-parser/pull/648))
+
+### Fixed
+
+* [**breaking**] Report cursor for unresolved include in owned table cell ([#641](https://github.com/asciidoc-rs/asciidoc-parser/pull/641)) ([#651](https://github.com/asciidoc-rs/asciidoc-parser/pull/651))
+
 ## [0.21.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.20.0...v0.21.0)
 _12 July 2026_
 
