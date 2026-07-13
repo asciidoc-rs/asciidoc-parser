@@ -41,6 +41,9 @@ mod context;
 pub(crate) use context::is_built_in_context;
 pub use context::{AdmonitionVariant, BuiltInContext};
 
+mod find;
+pub use find::{BlockSelector, Descend, Descendants, FindBlocks, FindBlocksIter, TraverseBlocks};
+
 mod is_block;
 pub use is_block::{ContentModel, IsBlock};
 
