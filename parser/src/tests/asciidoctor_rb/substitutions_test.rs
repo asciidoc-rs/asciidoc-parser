@@ -57,6 +57,7 @@ mod dispatcher {
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby() {
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
         todo!(
             "{}",
             r###"
@@ -5009,49 +5010,12 @@ mod macros {
         }
     }
 
-    #[ignore]
-    #[test]
-    fn todo_migrate_from_ruby_2() {
-        todo!(
-            "{}",
-            r###"
-        // NOTE: The `btn:`, `kbd:`, and `menu:` (macro-syntax) UI-macro tests
-        // from this Asciidoctor context are ported as executable tests in
-        // `mod ui_macros` above.
-        //
-        // The cases that remain below exercise the *shorthand* menu syntax
-        // (`"File &gt; Save"`), which is intentionally not implemented: per the
-        // spec it is not on a standards track. See issue #263.
-        context 'Menu shorthand syntax (deferred)' do
-            test 'should process menu with menu item using inline syntax' do
-            para = block_from_string '"File &gt; Save As&#8230;"', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">File</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Save As&#8230;</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'should process menu with menu item in submenu using inline syntax' do
-            para = block_from_string '"Tools &gt; Project &gt; Build"', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">Tools</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">Project</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Build</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'inline menu syntax should not match closing quote of XML attribute' do
-            para = block_from_string '<span class="xmltag">&lt;node&gt;</span><span class="classname">r</span>', attributes: { 'experimental' => '' }
-            assert_equal '<span class="xmltag">&lt;node&gt;</span><span class="classname">r</span>', para.sub_macros(para.source)
-            end
-
-            test 'should process inline menu with items containing multibyte characters' do
-            para = block_from_string '"视图 &gt; 放大 &gt; 重置"', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">视图</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">放大</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">重置</b></span>', para.sub_macros(para.source)
-            end
-
-            test 'should process an inline menu that begins with a character reference' do
-            para = block_from_string '"&#8942; &gt; More Tools &gt; Extensions"', attributes: { 'experimental' => '' }
-            assert_equal '<span class="menuseq"><b class="menu">&#8942;</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">More Tools</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Extensions</b></span>', para.sub_macros(para.source)
-            end
-        end
-        end
-        "###
-        );
-    }
+    // Tombstone: Asciidoctor's "Menu shorthand syntax" tests are intentionally
+    // not ported. The shorthand menu syntax (e.g. `"File > Save"`) is a
+    // deprecated form that is not on a standards track, so this crate does not
+    // implement it. (The `btn:`, `kbd:`, and `menu:` macro-syntax UI-macro
+    // tests from the same Asciidoctor context are ported as executable
+    // tests in `mod ui_macros` above.)
 }
 
 mod passthroughs {
@@ -6907,6 +6871,7 @@ foo&#8201;&#8212;&#8201;"#;
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby() {
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
         todo!(
             "{}",
             r###"
@@ -7149,6 +7114,7 @@ mod resolve_subs {
     #[ignore]
     #[test]
     fn todo_migrate_from_ruby() {
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
         todo!(
             "{}",
             r###"

@@ -103,6 +103,7 @@ It also ignores alignment operators assigned to the table's column specifiers; h
     // The interaction between the header row and alignment operators on a cell
     // specifier depends on cell specifiers, which are not yet implemented.
     if false {
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/654):
         todo!("cell specifiers and cell-level alignment for the header row");
     }
 }
