@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.22.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.21.0...v0.22.0)
+_13 July 2026_
+
+### Added
+
+* Parse and expose document subtitle from the title line ([#649](https://github.com/asciidoc-rs/asciidoc-parser/pull/649))
+* Expose AsciiDoc table cell as introspectable nested document ([#545](https://github.com/asciidoc-rs/asciidoc-parser/pull/545)) ([#648](https://github.com/asciidoc-rs/asciidoc-parser/pull/648))
+
+### Fixed
+
+* [**breaking**] Report cursor for unresolved include in owned table cell ([#641](https://github.com/asciidoc-rs/asciidoc-parser/pull/641)) ([#651](https://github.com/asciidoc-rs/asciidoc-parser/pull/651))
+
+### Breaking changes
+
+Reporting the originating cursor for an unresolved include in an owned table cell ([#651](https://github.com/asciidoc-rs/asciidoc-parser/pull/651)) adds a new public field to an externally-constructible struct. Code that builds it with a struct literal must add the new field (`None` preserves the previous behavior):
+
+* `Warning` (`warnings`) gains `origin: Option<SourceLine>`. This carries a pre-resolved originating `(file, line)` for warnings that arise from privately expanded content — an `include::` directive inside an include-expanded table cell — which no document span maps to. Code that only reads warnings (the common case, via `Document::warnings()`) is unaffected.
+
 ## [0.21.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.20.0...v0.21.0)
 _12 July 2026_
 
