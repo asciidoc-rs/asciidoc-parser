@@ -13,11 +13,12 @@ use crate::{
 /// A search over a [`Document`] or a [`Block`] for its descendant blocks.
 ///
 /// This is the Rust-native counterpart to Asciidoctor's [block-finding API].
-/// Where Asciidoctor exposes `find_by(selector = {}, &block_filter)`, this trait
-/// leans on Rust's iterator patterns: [`descendant_blocks`] is a plain
-/// [`Iterator`] you compose with the standard combinators, [`find_blocks`] takes
-/// a declarative [`BlockSelector`], and [`traverse_blocks`] gives per-block
-/// control over the walk (including subtree pruning) via the [`Descend`] enum.
+/// Where Asciidoctor exposes `find_by(selector = {}, &block_filter)`, this
+/// trait leans on Rust's iterator patterns: [`descendant_blocks`] is a plain
+/// [`Iterator`] you compose with the standard combinators, [`find_blocks`]
+/// takes a declarative [`BlockSelector`], and [`traverse_blocks`] gives
+/// per-block control over the walk (including subtree pruning) via the
+/// [`Descend`] enum.
 ///
 /// The trait is implemented for [`Document`] and [`Block`] and is sealed (it
 /// cannot be implemented for other types); bring it into scope to call its
@@ -38,9 +39,9 @@ use crate::{
 /// # Differences from Asciidoctor
 ///
 /// * **The receiver is never yielded.** These iterators visit descendants only.
-///   (Asciidoctor includes the receiver as a candidate.) A [`Document`] is not a
-///   [`Block`], so "descendants only" is the one rule that reads the same on both
-///   receivers. To include a starting block, chain it yourself:
+///   (Asciidoctor includes the receiver as a candidate.) A [`Document`] is not
+///   a [`Block`], so "descendants only" is the one rule that reads the same on
+///   both receivers. To include a starting block, chain it yourself:
 ///   `std::iter::once(block).chain(block.descendant_blocks())`.
 /// * **`traverse_documents` is off by default** (as in Asciidoctor).
 ///
@@ -52,8 +53,8 @@ use crate::{
 ///     blocks::{Block, BlockSelector, Descend, FindBlocks, IsBlock},
 /// };
 ///
-/// let doc = Parser::default()
-///     .parse("= Title\n\n== First\n\n[source,rust]\n----\nfn main() {}\n----\n");
+/// let doc =
+///     Parser::default().parse("= Title\n\n== First\n\n[source,rust]\n----\nfn main() {}\n----\n");
 ///
 /// // The Rust-native core: a plain iterator you compose with std combinators.
 /// let sections = doc
@@ -92,8 +93,9 @@ pub trait FindBlocks<'a>: sealed::Sealed<'a> {
     /// block.
     ///
     /// This is the equivalent of Asciidoctor's `find_by` with no arguments.
-    /// Because it is an ordinary [`Iterator`], the idiomatic way to search is to
-    /// compose it with the standard combinators (`filter`, `find`, `map`, …).
+    /// Because it is an ordinary [`Iterator`], the idiomatic way to search is
+    /// to compose it with the standard combinators (`filter`, `find`,
+    /// `map`, …).
     ///
     /// AsciiDoc table cells are not entered; use [`find_blocks`] with
     /// [`BlockSelector::traverse_documents`] to include them.
@@ -108,10 +110,10 @@ pub trait FindBlocks<'a>: sealed::Sealed<'a> {
 
     /// Returns an iterator over the descendant blocks that match `selector`.
     ///
-    /// This mirrors Asciidoctor's `find_by(selector)`: a block is yielded when it
-    /// matches every field the selector sets (see [`BlockSelector`]). Traversal
-    /// still descends through non-matching blocks, so matches at any depth are
-    /// found.
+    /// This mirrors Asciidoctor's `find_by(selector)`: a block is yielded when
+    /// it matches every field the selector sets (see [`BlockSelector`]).
+    /// Traversal still descends through non-matching blocks, so matches at
+    /// any depth are found.
     fn find_blocks(&'a self, selector: &BlockSelector<'a>) -> FindBlocksIter<'a> {
         FindBlocksIter {
             inner: Descendants {
@@ -122,8 +124,8 @@ pub trait FindBlocks<'a>: sealed::Sealed<'a> {
         }
     }
 
-    /// Returns the first descendant block whose [id](IsBlock::id) equals `id`, if
-    /// any.
+    /// Returns the first descendant block whose [id](IsBlock::id) equals `id`,
+    /// if any.
     ///
     /// Block ids are unique within a document, so at most one block can match.
     /// This is the equivalent of Asciidoctor's `find_by(id: '…').first`.
@@ -132,9 +134,10 @@ pub trait FindBlocks<'a>: sealed::Sealed<'a> {
             .find(|block| block.id() == Some(id))
     }
 
-    /// Returns an iterator that walks the descendant blocks under the control of
-    /// `control`, which is called once per block, in document order, to decide
-    /// whether the block is yielded and whether its children are visited.
+    /// Returns an iterator that walks the descendant blocks under the control
+    /// of `control`, which is called once per block, in document order, to
+    /// decide whether the block is yielded and whether its children are
+    /// visited.
     ///
     /// This is the equivalent of Asciidoctor's `find_by` block filter; the
     /// [`Descend`] return value plays the role of the filter's `:accept` /
@@ -203,7 +206,10 @@ mod sealed {
 /// with [`context`](Self::context) rather than `style`.
 ///
 /// ```
-/// use asciidoc_parser::{Parser, blocks::{BlockSelector, FindBlocks}};
+/// use asciidoc_parser::{
+///     Parser,
+///     blocks::{BlockSelector, FindBlocks},
+/// };
 ///
 /// let doc = Parser::default().parse("[#intro]\nHello.\n");
 /// let block = doc.find_blocks(&BlockSelector::new().id("intro")).next();
@@ -306,8 +312,8 @@ pub enum Descend {
     /// / `true`.)
     Accept,
 
-    /// Omit this block but still descend into its children. (Asciidoctor `:skip`
-    /// / `false`.)
+    /// Omit this block but still descend into its children. (Asciidoctor
+    /// `:skip` / `false`.)
     Skip,
 
     /// Omit this block and skip its children. (Asciidoctor `:reject`.)
@@ -342,8 +348,8 @@ impl<'a> Iterator for Descendants<'a> {
     }
 }
 
-/// An iterator over the descendant blocks matching a [`BlockSelector`], returned
-/// by [`FindBlocks::find_blocks`].
+/// An iterator over the descendant blocks matching a [`BlockSelector`],
+/// returned by [`FindBlocks::find_blocks`].
 pub struct FindBlocksIter<'a> {
     inner: Descendants<'a>,
     selector: BlockSelector<'a>,
@@ -353,7 +359,9 @@ impl<'a> Iterator for FindBlocksIter<'a> {
     type Item = &'a Block<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.by_ref().find(|block| self.selector.matches(block))
+        self.inner
+            .by_ref()
+            .find(|block| self.selector.matches(block))
     }
 }
 
@@ -434,8 +442,8 @@ impl<'a> Iterator for ChildBlocks<'a> {
 /// including the two kinds that the `'src`-bound [`IsBlock::nested_blocks`]
 /// cannot expose:
 ///
-/// * A Markdown-style blockquote's children borrow the block's own owned source,
-///   so they are read through [`QuoteBlock::blocks`] rather than
+/// * A Markdown-style blockquote's children borrow the block's own owned
+///   source, so they are read through [`QuoteBlock::blocks`] rather than
 ///   `nested_blocks`. (For a `____`-delimited quote the two agree.)
 /// * An AsciiDoc table cell is a nested document; its blocks are reached only
 ///   when `traverse_documents` is set.
@@ -497,9 +505,8 @@ mod tests {
         // A section containing a list (which owns its items) and a source
         // listing. The walk should yield each in document order, descending into
         // the section and the list.
-        let doc = Parser::default().parse(
-            "== Section\n\n* one\n* two\n\n[source,rust]\n----\nfn main() {}\n----\n",
-        );
+        let doc = Parser::default()
+            .parse("== Section\n\n* one\n* two\n\n[source,rust]\n----\nfn main() {}\n----\n");
 
         let contexts = contexts(&doc);
 
@@ -533,13 +540,13 @@ mod tests {
 
     #[test]
     fn find_blocks_by_context_and_style() {
-        let doc = Parser::default().parse(
-            "[source,rust]\n----\nfn main() {}\n----\n\n----\nplain listing\n----\n",
-        );
+        let doc = Parser::default()
+            .parse("[source,rust]\n----\nfn main() {}\n----\n\n----\nplain listing\n----\n");
 
         // Both are listings.
         assert_eq!(
-            doc.find_blocks(&BlockSelector::new().context("listing")).count(),
+            doc.find_blocks(&BlockSelector::new().context("listing"))
+                .count(),
             2
         );
 
@@ -586,9 +593,7 @@ mod tests {
     fn traverse_blocks_prune_stops_at_matched_subtree() {
         // A sidebar nested inside a sidebar. Prune on the outer sidebar collects
         // it but not the inner one; reject everything else.
-        let doc = Parser::default().parse(
-            "****\nOuter.\n\n[.inner]\n*****\nInner.\n*****\n****\n",
-        );
+        let doc = Parser::default().parse("****\nOuter.\n\n[.inner]\n*****\nInner.\n*****\n****\n");
 
         let sidebars: Vec<_> = doc
             .traverse_blocks(|b| {
@@ -642,7 +647,8 @@ mod tests {
         // By default the walk stops at the table.
         assert_eq!(doc.find_blocks(&BlockSelector::new()).count(), 1);
         assert_eq!(
-            doc.find_blocks(&BlockSelector::new().context("table")).count(),
+            doc.find_blocks(&BlockSelector::new().context("table"))
+                .count(),
             1
         );
 
