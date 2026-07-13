@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::Span;
+use crate::{Span, parser::SourceLine};
 
 /// Describes a possible parse error (i.e. a "warning") and its location.
 ///
@@ -13,6 +13,27 @@ pub struct Warning<'src> {
 
     /// Type of warning detected.
     pub warning: WarningType,
+
+    /// A pre-resolved originating `(file, line)` for this warning, independent
+    /// of the document source map.
+    ///
+    /// This is `None` for the overwhelming majority of warnings: their
+    /// [`source`](Self::source) span indexes the (preprocessed) document
+    /// source, so the originating file and line are recovered by resolving
+    /// `source.line()` through [`Document::source_map`].
+    ///
+    /// It is `Some` only when the warning arises from content that was expanded
+    /// *privately* and never appears in the document source — an `include::`
+    /// directive buried inside an owned (include-expanded) AsciiDoc table cell.
+    /// No document span maps to such a directive, so its true `(file, line)` is
+    /// resolved when the warning is raised (against the owning cell's own
+    /// source map) and carried here directly. In that case `source` still
+    /// points at the enclosing cell's directive line in the document (a
+    /// best-effort anchor), but `origin` names where the failing directive
+    /// actually lives.
+    ///
+    /// [`Document::source_map`]: crate::Document::source_map
+    pub origin: Option<SourceLine>,
 }
 
 /// Type of possible parse error that was detected.
@@ -314,6 +335,7 @@ mod tests {
             let w1 = Warning {
                 source: crate::Span::new("abc"),
                 warning: WarningType::EmptyAttributeValue,
+                origin: None,
             };
 
             let w2 = w1.clone();
@@ -642,6 +664,7 @@ mod tests {
                 warnings: vec![Warning {
                     source: crate::Span::new("abc"),
                     warning: WarningType::EmptyAttributeValue,
+                    origin: None,
                 }],
             };
 
@@ -668,6 +691,7 @@ mod tests {
                 warnings: vec![Warning {
                     source: crate::Span::new("abc"),
                     warning: WarningType::EmptyAttributeValue,
+                    origin: None,
                 }],
             };
 

@@ -128,6 +128,7 @@ impl<'src> ListBlock<'src> {
                                     expected_text,
                                     actual_text,
                                 ),
+                                origin: None,
                             });
                         }
                     }
@@ -216,6 +217,7 @@ impl<'src> ListBlock<'src> {
                             position as usize,
                             marker_number as usize,
                         ),
+                        origin: None,
                     });
                 }
 
@@ -223,6 +225,7 @@ impl<'src> ListBlock<'src> {
                     warnings.push(Warning {
                         source: item.span(),
                         warning: WarningType::NoCalloutFound(position as usize),
+                        origin: None,
                     });
                 }
             }

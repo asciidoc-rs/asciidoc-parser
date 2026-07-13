@@ -119,6 +119,7 @@ impl<'src> Document<'src> {
                 warnings.push(Warning {
                     source: root.slice(pw.offset..pw.offset + pw.len),
                     warning: pw.warning,
+                    origin: None,
                 });
             }
 
@@ -126,6 +127,7 @@ impl<'src> Document<'src> {
                 warnings.push(Warning {
                     source: root.slice(sw.offset..sw.offset + sw.len),
                     warning: sw.warning,
+                    origin: None,
                 });
             }
 

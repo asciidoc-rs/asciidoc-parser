@@ -264,6 +264,7 @@ impl<'src> RawDelimitedBlock<'src> {
             warnings: vec![Warning {
                 source: delimiter.item,
                 warning: WarningType::UnterminatedDelimitedBlock,
+                origin: None,
             }],
         })
     }

@@ -227,6 +227,7 @@ impl<'src> QuoteBlock<'src> {
                 Warning {
                     source: delimiter.item,
                     warning: WarningType::UnterminatedDelimitedBlock,
+                    origin: None,
                 },
             );
         }
@@ -445,7 +446,11 @@ impl<'src> QuoteBlock<'src> {
 
         let warnings = nested_warning_types
             .into_iter()
-            .map(|warning| Warning { source, warning })
+            .map(|warning| Warning {
+                source,
+                warning,
+                origin: None,
+            })
             .collect();
 
         Some(MatchAndWarnings {

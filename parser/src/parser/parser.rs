@@ -12,7 +12,7 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
-        ResolvedAttributes, SafeMode, SourceMap, SvgFileHandler,
+        ResolvedAttributes, SafeMode, SourceLine, SourceMap, SvgFileHandler,
         built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
         preprocessor::preprocess,
     },
@@ -195,20 +195,47 @@ pub struct Parser {
     /// [`Document::parse`]: crate::Document
     pub(crate) source_map: Option<Rc<SourceMap>>,
 
-    /// Number of include-expanded (owned) AsciiDoc table cells currently being
-    /// parsed in the call stack.
+    /// Stack of source maps for the include-expanded (owned) AsciiDoc table
+    /// cells currently being parsed in the call stack (innermost last).
     ///
     /// An AsciiDoc cell whose first line is an `include::` directive is parsed
     /// from a private, preprocessor-expanded copy of its content rather than
-    /// from the document source. While that owned copy is being parsed this
-    /// counter is greater than zero, and a span's line number no longer indexes
-    /// the document [`source_map`](Self::source_map). A cell reached this way
-    /// therefore cannot map its position back to an originating `(file, line)`,
-    /// so it falls back to the root-file diagnostic. A cell nested inside a
-    /// *borrowed* cell keeps document spans and is unaffected (the counter
-    /// stays zero). The counter is incremented and decremented around each
-    /// owned-cell parse, so it nests correctly.
-    pub(crate) owned_cell_source_depth: usize,
+    /// from the document source. While that owned copy is being parsed a span's
+    /// line number no longer indexes the document
+    /// [`source_map`](Self::source_map); it indexes the owned copy instead.
+    /// Each owned cell's own source map (produced by re-running the
+    /// preprocessor over its content) is pushed here for the duration of
+    /// its parse, so a directive buried inside the owned content can still
+    /// be mapped back to the file and line it *originally* came from —
+    /// needed to name that file in the "Unresolved directive" message and
+    /// to report the warning's true cursor via
+    /// [`Warning::origin`](crate::warnings::Warning::origin).
+    ///
+    /// The stack is empty while parsing the top-level document (and while
+    /// parsing a *borrowed* cell, which keeps document spans). It is non-empty
+    /// exactly when a span's line indexes an owned copy rather than the
+    /// document, which the source-map lookup uses to decide which map to
+    /// consult. It is pushed and popped around each owned-cell parse, so it
+    /// nests correctly.
+    pub(crate) owned_cell_source_maps: Vec<Rc<SourceMap>>,
+
+    /// Warnings raised by an `include::` directive buried inside an owned
+    /// (include-expanded) AsciiDoc table cell, each already resolved to the
+    /// `(file, line)` where the directive originally appeared.
+    ///
+    /// Such a warning is raised deep inside the owned cell's parse, where the
+    /// only spans available borrow the owned copy and cannot escape it, and no
+    /// document span maps to the directive. It is therefore recorded here (in a
+    /// lifetime-free, pre-resolved form) and drained once an enclosing
+    /// document-level cell can anchor it to a real document span while carrying
+    /// its true origin (see
+    /// [`Warning::origin`](crate::warnings::Warning::origin)).
+    ///
+    /// Wrapped in a [`RefCell`] only for symmetry with the other deferred
+    /// warning buffers; it is mutated through `&mut self`-free helpers so the
+    /// owned-cell parse (which holds the parser mutably) can still record into
+    /// it from within a `self_cell` construction closure.
+    owned_cell_warnings: RefCell<Vec<ResolvedWarning>>,
 
     /// Catalog of callout numbers registered by verbatim blocks, used to
     /// validate the callout lists that annotate them.
@@ -248,6 +275,24 @@ pub(crate) struct DeferredWarning {
 
     /// The type of warning, already carrying any owned data it needs (such as
     /// the missing attribute's name).
+    pub(crate) warning: WarningType,
+}
+
+/// A warning whose location is already resolved to an originating
+/// `(file, line)`, independent of any source map.
+///
+/// Used for a warning raised inside an owned (include-expanded) AsciiDoc table
+/// cell, whose directive never appears in the document source: it is resolved
+/// against the owning cell's own source map when raised, then carried in this
+/// form until an enclosing document-level cell can surface it (see
+/// [`Parser::owned_cell_warnings`]).
+#[derive(Clone, Debug)]
+pub(crate) struct ResolvedWarning {
+    /// The originating file and line where the directive appeared.
+    pub(crate) origin: SourceLine,
+
+    /// The type of warning, already carrying any owned data it needs (such as
+    /// the missing include target).
     pub(crate) warning: WarningType,
 }
 
@@ -294,7 +339,8 @@ impl Default for Parser {
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
             source_map: None,
-            owned_cell_source_depth: 0,
+            owned_cell_source_maps: vec![],
+            owned_cell_warnings: RefCell::new(vec![]),
             callouts: RefCell::new(CalloutCatalog::default()),
             substitution_warnings: RefCell::new(vec![]),
         }
@@ -564,6 +610,7 @@ impl Parser {
             warnings.push(Warning {
                 source: span,
                 warning: WarningType::LeveloffsetExcludesAllHeadingLevels(offset),
+                origin: None,
             });
         }
 
@@ -878,6 +925,64 @@ impl Parser {
     /// buffer empty.
     pub(crate) fn take_substitution_warnings(&self) -> Vec<DeferredWarning> {
         std::mem::take(&mut *self.substitution_warnings.borrow_mut())
+    }
+
+    /// Returns `true` while the parser is parsing the content of an owned
+    /// (include-expanded) AsciiDoc table cell, i.e. when a span's line indexes
+    /// an owned copy rather than the document source.
+    pub(crate) fn is_in_owned_cell_source(&self) -> bool {
+        !self.owned_cell_source_maps.is_empty()
+    }
+
+    /// Pushes an owned cell's source map for the duration of its parse. Paired
+    /// with [`pop_owned_cell_source_map`](Self::pop_owned_cell_source_map).
+    pub(crate) fn push_owned_cell_source_map(&mut self, source_map: Rc<SourceMap>) {
+        self.owned_cell_source_maps.push(source_map);
+    }
+
+    /// Pops the source map pushed by the matching
+    /// [`push_owned_cell_source_map`](Self::push_owned_cell_source_map).
+    pub(crate) fn pop_owned_cell_source_map(&mut self) {
+        self.owned_cell_source_maps.pop();
+    }
+
+    /// Resolves a line number in the innermost owned cell's source back to the
+    /// file and line it originally came from, using that cell's source map.
+    ///
+    /// Returns `None` when not inside an owned cell source.
+    pub(crate) fn owned_cell_original_file_and_line(&self, line: usize) -> Option<SourceLine> {
+        self.owned_cell_source_maps
+            .last()
+            .and_then(|sm| sm.original_file_and_line(line))
+    }
+
+    /// Records a warning raised by a directive at `line` in the innermost owned
+    /// cell's source, resolving `line` to the file and line it originally came
+    /// from so the warning can be surfaced later with a real cursor (see
+    /// [`take_owned_cell_warnings`]).
+    ///
+    /// A no-op when not inside an owned cell source (the line does not resolve
+    /// to an owned origin) — the caller only reaches this from an owned-cell
+    /// parse, but the guard keeps a stray call from recording an unanchorable
+    /// warning.
+    ///
+    /// Takes `&self`: an owned-cell parse holds the parser mutably behind a
+    /// `self_cell` construction closure, so recording goes through interior
+    /// mutability.
+    ///
+    /// [`take_owned_cell_warnings`]: Self::take_owned_cell_warnings
+    pub(crate) fn record_owned_cell_warning(&self, line: usize, warning: WarningType) {
+        if let Some(origin) = self.owned_cell_original_file_and_line(line) {
+            self.owned_cell_warnings
+                .borrow_mut()
+                .push(ResolvedWarning { origin, warning });
+        }
+    }
+
+    /// Takes the owned-cell warnings recorded during parsing, leaving the
+    /// buffer empty.
+    pub(crate) fn take_owned_cell_warnings(&self) -> Vec<ResolvedWarning> {
+        std::mem::take(&mut *self.owned_cell_warnings.borrow_mut())
     }
 
     /// Generate a unique ID derived from `base_id` and register it in the
@@ -1214,6 +1319,7 @@ impl Parser {
                 warnings.push(Warning {
                     source: attr.span(),
                     warning: WarningType::AttributeValueIsLocked(attr_name),
+                    origin: None,
                 });
             }
             return;
@@ -1360,6 +1466,7 @@ impl Parser {
                 warnings.push(Warning {
                     source: attr.span(),
                     warning: WarningType::AttributeValueIsLocked(attr_name),
+                    origin: None,
                 });
             }
             return;
@@ -1587,6 +1694,50 @@ mod tests {
     fn default_is_unset() {
         let p = Parser::default();
         assert_eq!(p.attribute_value("foo"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn owned_cell_warning_is_recorded_only_inside_an_owned_cell_source() {
+        use std::rc::Rc;
+
+        use crate::{
+            parser::{SourceLine, SourceMap},
+            warnings::WarningType,
+        };
+
+        let mut p = Parser::default();
+
+        // Outside an owned cell source there is no map to resolve against, so a
+        // recorded warning has no origin and is dropped rather than queued.
+        assert!(!p.is_in_owned_cell_source());
+        p.record_owned_cell_warning(1, WarningType::IncludeFileNotFound("x.adoc".to_owned()));
+        assert!(p.take_owned_cell_warnings().is_empty());
+
+        // Publish a cell source map (output line 1 came from `cell.adoc` line 2,
+        // the way the preprocessor would record an include-expanded cell).
+        let mut sm = SourceMap::default();
+        sm.append(1, SourceLine(Some("cell.adoc".to_owned()), 2));
+        p.push_owned_cell_source_map(Rc::new(sm));
+        assert!(p.is_in_owned_cell_source());
+
+        // Now the same call resolves the line to its origin and queues the
+        // warning with that pre-resolved (file, line).
+        p.record_owned_cell_warning(1, WarningType::IncludeFileNotFound("y.adoc".to_owned()));
+        let recorded = p.take_owned_cell_warnings();
+        let [recorded] = recorded.as_slice() else {
+            panic!("expected exactly one recorded warning, got {recorded:?}");
+        };
+        assert_eq!(recorded.origin, SourceLine(Some("cell.adoc".to_owned()), 2));
+        assert_eq!(
+            recorded.warning,
+            WarningType::IncludeFileNotFound("y.adoc".to_owned())
+        );
+
+        // Taking drains the buffer, and popping restores the not-in-owned-cell
+        // state.
+        assert!(p.take_owned_cell_warnings().is_empty());
+        p.pop_owned_cell_source_map();
+        assert!(!p.is_in_owned_cell_source());
     }
 
     #[test]

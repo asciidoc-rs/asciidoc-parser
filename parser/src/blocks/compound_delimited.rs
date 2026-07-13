@@ -176,6 +176,7 @@ impl<'src> CompoundDelimitedBlock<'src> {
                     Warning {
                         source: delimiter.item,
                         warning: WarningType::UnterminatedDelimitedBlock,
+                        origin: None,
                     },
                 );
                 warnings
