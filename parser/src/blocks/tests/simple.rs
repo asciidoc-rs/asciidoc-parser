@@ -652,6 +652,38 @@ fn with_block_anchor_trailing_comma() {
 }
 
 #[test]
+fn with_block_anchor_invalid_id_before_comma() {
+    // A block anchor with a reftext (`[[id,reftext]]`) whose id part is not a
+    // valid XML name is rejected: the warning points at the id (the text before
+    // the comma), and the anchor is not applied to the block.
+    let mut parser = Parser::default();
+
+    let maw = crate::blocks::Block::parse(
+        crate::Span::new("[[1bad,reftext]]\nThis paragraph gets a lot of attention.\n"),
+        &mut parser,
+    );
+
+    assert_eq!(
+        maw.warnings,
+        [Warning {
+            source: Span {
+                data: "1bad",
+                line: 1,
+                col: 3,
+                offset: 2,
+            },
+            warning: WarningType::InvalidBlockAnchorName,
+        }]
+    );
+
+    // The block is still produced; the rejected anchor stays as literal text
+    // and no id is registered.
+    let mi = maw.item.unwrap();
+    assert!(mi.item.anchor().is_none());
+    assert!(mi.item.id().is_none());
+}
+
+#[test]
 fn with_block_anchor_and_reftext() {
     let mut parser = Parser::default();
 

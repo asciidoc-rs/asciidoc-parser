@@ -712,4 +712,34 @@ mod error_cases {
 
         assert!(warnings.next().is_none());
     }
+
+    #[test]
+    fn duplicate_id_warning_from_leading_anchor_in_description_list_term() {
+        // A leading `[[id]]` anchor on a description-list term is registered in
+        // the catalog; a second term reusing the same id is reported as a
+        // duplicate (the warning points at the offending term's line).
+        let mut parser = Parser::default();
+
+        let doc = parser.parse("[[dup]]term1:: def1\n[[dup]]term2:: def2\n");
+
+        let mut warnings = doc.warnings();
+
+        assert_eq!(
+            warnings.next().unwrap(),
+            Warning {
+                source: Span {
+                    data: "[[dup]]term2",
+                    line: 2,
+                    col: 1,
+                    offset: 20,
+                },
+                warning: WarningType::DuplicateId("dup".to_owned()),
+            }
+        );
+
+        assert!(warnings.next().is_none());
+
+        // The first anchor is cataloged.
+        assert!(doc.catalog().contains_id("dup"));
+    }
 }
