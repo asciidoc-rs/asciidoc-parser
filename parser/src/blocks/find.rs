@@ -559,6 +559,35 @@ mod tests {
     }
 
     #[test]
+    fn find_blocks_by_context_excludes_non_matching() {
+        // The paragraph is visited but excluded by the context filter, leaving
+        // only the listing.
+        let doc = Parser::default().parse("A paragraph.\n\n----\na listing\n----\n");
+
+        let listings: Vec<_> = doc
+            .find_blocks(&BlockSelector::new().context("listing"))
+            .collect();
+
+        assert_eq!(listings.len(), 1);
+        assert_eq!(
+            listings.first().unwrap().resolved_context().as_ref(),
+            "listing"
+        );
+    }
+
+    #[test]
+    fn find_blocks_by_id_selector() {
+        // Exercises the `id` selector field; the walk visits the non-matching
+        // "World." paragraph as well as the matching block.
+        let doc = Parser::default().parse("[#intro]\nHello.\n\nWorld.\n");
+
+        let matched: Vec<_> = doc.find_blocks(&BlockSelector::new().id("intro")).collect();
+
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched.first().unwrap().id(), Some("intro"));
+    }
+
+    #[test]
     fn find_blocks_by_role() {
         let doc = Parser::default().parse("[.important]\nAttention.\n\nOrdinary.\n");
 
@@ -591,9 +620,11 @@ mod tests {
 
     #[test]
     fn traverse_blocks_prune_stops_at_matched_subtree() {
-        // A sidebar nested inside a sidebar. Prune on the outer sidebar collects
-        // it but not the inner one; reject everything else.
-        let doc = Parser::default().parse("****\nOuter.\n\n[.inner]\n*****\nInner.\n*****\n****\n");
+        // A sidebar nested inside a sidebar, followed by a top-level paragraph.
+        // Prune on the outer sidebar collects it but does not descend (so the
+        // inner sidebar is not reported); the trailing paragraph is rejected.
+        let doc = Parser::default()
+            .parse("****\nOuter.\n\n[.inner]\n*****\nInner.\n*****\n****\n\nAfter.\n");
 
         let sidebars: Vec<_> = doc
             .traverse_blocks(|b| {
@@ -605,7 +636,30 @@ mod tests {
             })
             .collect();
 
+        // Only the outer sidebar: the inner sidebar is behind the prune, and the
+        // trailing paragraph is rejected.
         assert_eq!(sidebars.len(), 1);
+    }
+
+    #[test]
+    fn traverse_blocks_reject_excludes_block_and_children() {
+        // The counterpart to the skip case: rejecting the sidebar excludes it
+        // *and* the paragraph inside it, while the top-level sibling paragraph
+        // is still accepted.
+        let doc = Parser::default().parse("****\nInside.\n****\n\nOutside.\n");
+
+        let contexts: Vec<_> = doc
+            .traverse_blocks(|b| {
+                if b.resolved_context().as_ref() == "sidebar" {
+                    Descend::Reject
+                } else {
+                    Descend::Accept
+                }
+            })
+            .map(|b| b.resolved_context().as_ref().to_string())
+            .collect();
+
+        assert_eq!(contexts, vec!["paragraph"]);
     }
 
     #[test]
@@ -658,6 +712,21 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn traverse_documents_skips_non_asciidoc_cells() {
+        // One plain cell and one AsciiDoc (`a|`) cell. With `traverse_documents`
+        // the plain cell contributes no blocks (its content is inline), while the
+        // AsciiDoc cell contributes its paragraph.
+        let doc = Parser::default().parse("|===\n| plain\na| AsciiDoc _text_.\n|===\n");
+
+        let deep = doc
+            .find_blocks(&BlockSelector::new().traverse_documents(true))
+            .count();
+
+        // The table plus the one paragraph from the AsciiDoc cell.
+        assert_eq!(deep, 2);
     }
 
     #[test]
