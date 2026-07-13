@@ -54,44 +54,30 @@ mod dispatcher {
         );
     }
 
-    #[ignore]
-    #[test]
-    fn todo_migrate_from_ruby() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
-        todo!(
-            "{}",
-            r###"
-        # TODO
-        # - test negatives
-        # - test role on every quote type
-
-        test 'should not drop trailing blank lines when performing substitutions' do
-          para = block_from_string %([%hardbreaks]\nthis\nis\n-> {program})
-          para.lines << ''
-          para.lines << ''
-          para.document.attributes['program'] = 'Asciidoctor'
-          result = para.apply_subs para.lines
-          assert_equal ['this<br>', 'is<br>', '&#8594; Asciidoctor<br>', '<br>', ''], result
-          result = para.apply_subs para.lines * "\n"
-          assert_equal %(this<br>\nis<br>\n&#8594; Asciidoctor<br>\n<br>\n), result
-        end
-
-        test 'should expand subs passed to expand_subs' do
-          para = block_from_string %({program}\n*bold*\n2 > 1)
-          para.document.attributes['program'] = 'Asciidoctor'
-          assert_equal [:specialcharacters], (para.expand_subs [:specialchars])
-          refute para.expand_subs([:none])
-          assert_equal [:specialcharacters, :quotes, :attributes, :replacements, :macros, :post_replacements], (para.expand_subs [:normal])
-        end
-
-        test 'apply_subs should allow the subs argument to be nil' do
-          block = block_from_string %([pass]\n*raw*)
-          result = block.apply_subs block.source, nil
-          assert_equal '*raw*', result
-        end
-        "###
-        );
-    }
+    // Tombstone: The three remaining Asciidoctor `dispatcher` tests each drive
+    // a Ruby-internal substitution API that this crate does not expose, so
+    // they are intentionally not ported 1:1. The behaviors they observe are
+    // covered by executable tests elsewhere:
+    //
+    // * "should not drop trailing blank lines when performing substitutions"
+    //   appends empty strings to `para.lines` and calls
+    //   `para.apply_subs(para.lines)`. There is no public API to inject
+    //   trailing blank lines into a parsed block's line list (block parsing
+    //   strips them), so the line-array round-trip has no analogue here. The
+    //   `[%hardbreaks]` line-break behavior it relies on is covered by `mod
+    //   post_replacements` above.
+    //
+    // * "should expand subs passed to expand_subs" exercises Ruby's
+    //   `expand_subs([:specialchars | :none | :normal])`. The equivalent
+    //   resolution lives in `SubstitutionGroup::from_custom_string` and is
+    //   covered by the `special_chars` / `none` / `normal` tests in
+    //   `content::substitution_group`.
+    //
+    // * "apply_subs should allow the subs argument to be nil" passes an
+    //   explicit `nil` subs argument to `apply_subs`. This crate resolves a
+    //   `[pass]` block to `SubstitutionGroup::None` / `Pass` (no subs) at parse
+    //   time rather than accepting a nil subs argument; the raw passthrough
+    //   behavior is covered by `mod passthroughs` below.
 }
 
 mod quotes {
@@ -6868,46 +6854,40 @@ foo&#8201;&#8212;&#8201;"#;
         );
     }
 
-    #[ignore]
     #[test]
-    fn todo_migrate_from_ruby() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
-        todo!(
-            "{}",
-            r###"
-      test 'should replace right single quote marks' do
-        given = [
-          %(`'Twas the night),
-          %(a `'57 Chevy!),
-          %(the whites`' place),
-          %(the whites`'.),
-          %(the whites`'--where the wild things are),
-          %(the whites`'\nhave),
-          %(It's Mary`'s little lamb.),
-          %(consecutive single quotes '' are not modified),
-          %(he is 6' tall),
-          %(\\`'),
-        ]
-        expected = [
-          %(&#8217;Twas the night),
-          %(a &#8217;57 Chevy!),
-          %(the whites&#8217; place),
-          %(the whites&#8217;.),
-          %(the whites&#8217;--where the wild things are),
-          %(the whites&#8217;\nhave),
-          %(It&#8217;s Mary&#8217;s little lamb.),
-          %(consecutive single quotes '' are not modified),
-          %(he is 6' tall),
-          %(`'),
-        ]
-        given.size.times do |i|
-          para = block_from_string given[i]
-          assert_equal expected[i], para.sub_replacements(para.source)
-        end
-      end
-    end
-    "###
-        );
+    fn should_replace_right_single_quote_marks() {
+        // Ported from Asciidoctor's `should replace right single quote marks`.
+        // In Asciidoctor this exercises `sub_replacements`, which corresponds to
+        // the `CharacterReplacements` substitution step here.
+        let cases = [
+            (r#"`'Twas the night"#, "&#8217;Twas the night"),
+            (r#"a `'57 Chevy!"#, "a &#8217;57 Chevy!"),
+            (r#"the whites`' place"#, "the whites&#8217; place"),
+            (r#"the whites`'."#, "the whites&#8217;."),
+            (
+                r#"the whites`'--where the wild things are"#,
+                "the whites&#8217;--where the wild things are",
+            ),
+            ("the whites`'\nhave", "the whites&#8217;\nhave"),
+            (
+                r#"It's Mary`'s little lamb."#,
+                "It&#8217;s Mary&#8217;s little lamb.",
+            ),
+            (
+                r#"consecutive single quotes '' are not modified"#,
+                "consecutive single quotes '' are not modified",
+            ),
+            (r#"he is 6' tall"#, "he is 6' tall"),
+            (r#"\`'"#, "`'"),
+        ];
+
+        let p = Parser::default();
+
+        for (given, expected) in cases {
+            let mut content = crate::content::Content::from(crate::Span::new(given));
+            SubstitutionStep::CharacterReplacements.apply(&mut content, &p, None);
+            assert_eq!(content.rendered, CowStr::from(expected), "input: {given:?}");
+        }
     }
 }
 
@@ -7110,104 +7090,35 @@ mod post_replacements {
     }
 }
 
-mod resolve_subs {
-    #[ignore]
-    #[test]
-    fn todo_migrate_from_ruby() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/652): port this test.
-        todo!(
-            "{}",
-            r###"
-
-    context 'Resolve subs' do
-      test 'should resolve subs for block' do
-        doc = empty_document parse: true
-        block = Asciidoctor::Block.new doc, :paragraph
-        block.attributes['subs'] = 'quotes,normal'
-        block.commit_subs
-        assert_equal [:quotes, :specialcharacters, :attributes, :replacements, :macros, :post_replacements], block.subs
-      end
-
-      test 'should resolve specialcharacters sub as highlight for source block when source highlighter is coderay' do
-        doc = empty_document attributes: { 'source-highlighter' => 'coderay' }, parse: true
-        block = Asciidoctor::Block.new doc, :listing, content_model: :verbatim
-        block.style = 'source'
-        block.attributes['subs'] = 'specialcharacters'
-        block.attributes['language'] = 'ruby'
-        block.commit_subs
-        assert_equal [:highlight], block.subs
-      end
-
-      test 'should resolve specialcharacters sub as highlight for source block when source highlighter is pygments', if: ENV['PYGMENTS_VERSION'] do
-        doc = empty_document attributes: { 'source-highlighter' => 'pygments' }, parse: true
-        block = Asciidoctor::Block.new doc, :listing, content_model: :verbatim
-        block.style = 'source'
-        block.attributes['subs'] = 'specialcharacters'
-        block.attributes['language'] = 'ruby'
-        block.commit_subs
-        assert_equal [:highlight], block.subs
-      end
-
-      test 'should not replace specialcharacters sub with highlight for source block when source highlighter is not set' do
-        doc = empty_document parse: true
-        block = Asciidoctor::Block.new doc, :listing, content_model: :verbatim
-        block.style = 'source'
-        block.attributes['subs'] = 'specialcharacters'
-        block.attributes['language'] = 'ruby'
-        block.commit_subs
-        assert_equal [:specialcharacters], block.subs
-      end
-
-      test 'should not use subs if subs option passed to block constructor is nil' do
-        doc = empty_document parse: true
-        block = Asciidoctor::Block.new doc, :paragraph, source: '*bold* _italic_', subs: nil, attributes: { 'subs' => 'quotes' }
-        assert_empty block.subs
-        block.commit_subs
-        assert_empty block.subs
-      end
-
-      test 'should not use subs if subs option passed to block constructor is empty array' do
-        doc = empty_document parse: true
-        block = Asciidoctor::Block.new doc, :paragraph, source: '*bold* _italic_', subs: [], attributes: { 'subs' => 'quotes' }
-        assert_empty block.subs
-        block.commit_subs
-        assert_empty block.subs
-      end
-
-      test 'should use subs from subs option passed to block constructor' do
-        doc = empty_document parse: true
-        block = Asciidoctor::Block.new doc, :paragraph, source: '*bold* _italic_', subs: [:specialcharacters], attributes: { 'subs' => 'quotes' }
-        assert_equal [:specialcharacters], block.subs
-        block.commit_subs
-        assert_equal [:specialcharacters], block.subs
-      end
-
-      test 'should use subs from subs attribute if subs option is not passed to block constructor' do
-        doc = empty_document parse: true
-        block = Asciidoctor::Block.new doc, :paragraph, source: '*bold* _italic_', attributes: { 'subs' => 'quotes' }
-        assert_empty block.subs
-        # in this case, we have to call commit_subs to resolve the subs
-        block.commit_subs
-        assert_equal [:quotes], block.subs
-      end
-
-      test 'should use subs from subs attribute if subs option passed to block constructor is :default' do
-        doc = empty_document parse: true
-        block = Asciidoctor::Block.new doc, :paragraph, source: '*bold* _italic_', subs: :default, attributes: { 'subs' => 'quotes' }
-        assert_equal [:quotes], block.subs
-        block.commit_subs
-        assert_equal [:quotes], block.subs
-      end
-
-      test 'should use built-in subs if subs option passed to block constructor is :default and subs attribute is absent' do
-        doc = empty_document parse: true
-        block = Asciidoctor::Block.new doc, :paragraph, source: '*bold* _italic_', subs: :default
-        assert_equal [:specialcharacters, :quotes, :attributes, :replacements, :macros, :post_replacements], block.subs
-        block.commit_subs
-        assert_equal [:specialcharacters, :quotes, :attributes, :replacements, :macros, :post_replacements], block.subs
-      end
-    end
-    "###
-        );
-    }
-}
+// Tombstone: Asciidoctor's "Resolve subs" context is intentionally not ported
+// 1:1. Every test in it drives Ruby's `Asciidoctor::Block.new(doc, ..., subs:,
+// attributes:)` constructor plus `block.commit_subs` / `block.subs` — the
+// mutable Ruby Block subs-resolution lifecycle. This crate has no equivalent
+// surface: a block's substitution group is resolved from its attrlist `subs=`
+// attribute at parse time via `SubstitutionGroup::override_via_attrlist` /
+// `SubstitutionGroup::from_custom_string`, which are covered by the executable
+// tests in `content::substitution_group` (`from_custom_string`, `subtraction`,
+// `addition`, `prepend`, `append`, etc.).
+//
+// Notes on the individual cases:
+//
+// * "should resolve subs for block" (`subs = 'quotes,normal'`) — the closest
+//   analogue is `SubstitutionGroup::from_custom_string(None, "quotes,normal")`.
+//   The two implementations diverge here: Asciidoctor expands `normal` in place
+//   and de-duplicates, yielding `[quotes, specialcharacters, attributes,
+//   replacements, macros, post_replacements]`, whereas this crate treats a
+//   mid-list group name as a reset, yielding `[specialcharacters, quotes,
+//   attributes, replacements, macros, post_replacements]` (the leading `quotes`
+//   is dropped, no de-duplication). This is a substitution-resolution behavior
+//   difference, not a missing test, and is tracked separately in
+//   https://github.com/asciidoc-rs/asciidoc-parser/issues/663 rather than by
+//   asserting the current output here. Once that is fixed, this case becomes
+//   portable as an executable test.
+//
+// * The `coderay` / `pygments` cases resolve `specialcharacters` to a
+//   `:highlight` sub driven by a source highlighter. Source highlighting is out
+//   of scope for this crate (see the note in `lists_test.rs`).
+//
+// * The remaining cases (`subs:` option nil / `[]` / `:default` / explicit
+//   array passed to the block constructor) test Ruby constructor plumbing that
+//   has no counterpart here.
