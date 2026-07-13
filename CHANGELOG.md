@@ -19,6 +19,12 @@ _13 July 2026_
 
 * [**breaking**] Report cursor for unresolved include in owned table cell ([#641](https://github.com/asciidoc-rs/asciidoc-parser/pull/641)) ([#651](https://github.com/asciidoc-rs/asciidoc-parser/pull/651))
 
+### Breaking changes
+
+Reporting the originating cursor for an unresolved include in an owned table cell ([#651](https://github.com/asciidoc-rs/asciidoc-parser/pull/651)) adds a new public field to an externally-constructible struct. Code that builds it with a struct literal must add the new field (`None` preserves the previous behavior):
+
+* `Warning` (`warnings`) gains `origin: Option<SourceLine>`. This carries a pre-resolved originating `(file, line)` for warnings that arise from privately expanded content — an `include::` directive inside an include-expanded table cell — which no document span maps to. Code that only reads warnings (the common case, via `Document::warnings()`) is unaffected.
+
 ## [0.21.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.20.0...v0.21.0)
 _12 July 2026_
 
