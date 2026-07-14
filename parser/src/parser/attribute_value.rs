@@ -59,7 +59,7 @@ pub enum AllowableValue {
 }
 
 /// Allowable context(s) for modification of this attribute value.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ModificationContext {
     /// Value can only be configured via API.
     ApiOnly,

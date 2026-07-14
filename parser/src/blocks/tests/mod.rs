@@ -248,7 +248,12 @@ mod error_cases {
     };
 
     #[test]
-    fn missing_block_after_title_line() {
+    fn title_line_separated_from_block_by_blank_line_attaches() {
+        // Regression test for issue #664: a block title (`.title`) separated
+        // from its block by a blank line attaches to the following block,
+        // matching Asciidoctor (which tolerates the intervening blank line).
+        // The title line is *not* demoted to a standalone paragraph and no
+        // spurious `MissingBlockAfterTitleOrAttributeList` warning is emitted.
         let mut parser = Parser::default();
         let mut warnings: Vec<crate::warnings::Warning<'_>> = vec![];
 
@@ -317,31 +322,6 @@ mod error_cases {
                     Block::Simple(SimpleBlock {
                         content: Content {
                             original: Span {
-                                data: ".ancestor section== Section 2",
-                                line: 5,
-                                col: 1,
-                                offset: 24,
-                            },
-                            rendered: ".ancestor section== Section 2",
-                        },
-                        source: Span {
-                            data: ".ancestor section== Section 2",
-                            line: 5,
-                            col: 1,
-                            offset: 24,
-                        },
-                        style: SimpleBlockStyle::Paragraph,
-                        title_source: None,
-                        title: None,
-                        caption: None,
-                        number: None,
-                        anchor: None,
-                        anchor_reftext: None,
-                        attrlist: None,
-                    },),
-                    Block::Simple(SimpleBlock {
-                        content: Content {
-                            original: Span {
                                 data: "def",
                                 line: 7,
                                 col: 1,
@@ -350,14 +330,19 @@ mod error_cases {
                             rendered: "def",
                         },
                         source: Span {
-                            data: "def",
-                            line: 7,
+                            data: ".ancestor section== Section 2\n\ndef",
+                            line: 5,
                             col: 1,
-                            offset: 55,
+                            offset: 24,
                         },
                         style: SimpleBlockStyle::Paragraph,
-                        title_source: None,
-                        title: None,
+                        title_source: Some(Span {
+                            data: "ancestor section== Section 2",
+                            line: 5,
+                            col: 2,
+                            offset: 25,
+                        }),
+                        title: Some("ancestor section== Section 2"),
                         caption: None,
                         number: None,
                         anchor: None,
@@ -393,17 +378,52 @@ mod error_cases {
             }
         );
 
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn attribute_list_separated_from_block_by_blank_line_attaches() {
+        // Issue #664 (generalized): the blank-line tolerance applies to any
+        // block metadata, not just titles. A block attribute list separated
+        // from its block by a blank line attaches to the following block (its
+        // role is applied here) rather than dangling with a warning.
+        let doc = Parser::default().parse("[.myrole]\n\ndef");
+
+        let blocks: Vec<_> = doc.nested_blocks().collect();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].roles(), vec!["myrole"]);
+        assert_eq!(blocks[0].rendered_content(), Some("def"));
+        assert!(doc.warnings().next().is_none());
+    }
+
+    #[test]
+    fn multiple_blank_lines_between_title_and_block_are_tolerated() {
+        // More than one blank line between the metadata and its block is also
+        // tolerated, matching Asciidoctor's `skip_blank_lines`.
+        let doc = Parser::default().parse(".My Title\n\n\ndef");
+
+        let blocks: Vec<_> = doc.nested_blocks().collect();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].title(), Some("My Title"));
+        assert_eq!(blocks[0].rendered_content(), Some("def"));
+        assert!(doc.warnings().next().is_none());
+    }
+
+    #[test]
+    fn title_with_only_blank_lines_after_still_warns() {
+        // A title followed by nothing but blank lines has no block to attach to,
+        // so the `MissingBlockAfterTitleOrAttributeList` warning still fires and
+        // the title line is demoted to paragraph content.
+        let doc = Parser::default().parse(".My Title\n\n");
+
+        let blocks: Vec<_> = doc.nested_blocks().collect();
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].title().is_none());
         assert_eq!(
-            warnings,
-            vec![Warning {
-                source: Span {
-                    data: ".ancestor section== Section 2\n\ndef",
-                    line: 5,
-                    col: 1,
-                    offset: 24,
-                },
-                warning: WarningType::MissingBlockAfterTitleOrAttributeList,
-            },]
+            doc.warnings()
+                .map(|w| w.warning.clone())
+                .collect::<Vec<_>>(),
+            vec![WarningType::MissingBlockAfterTitleOrAttributeList]
         );
     }
 

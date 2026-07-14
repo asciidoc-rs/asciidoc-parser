@@ -188,11 +188,17 @@ impl InterpretedValue {
                         line
                     };
 
-                    let line = line
-                        .trim_start_matches('\r')
-                        .trim_end_matches(' ')
-                        .trim_end_matches('\\')
-                        .trim_end_matches(' ');
+                    let line = line.trim_start_matches('\r').trim_end_matches(' ');
+
+                    // Strip the soft-wrap line continuation marker (a space
+                    // followed by a backslash). Only non-final lines carry a
+                    // continuation; a trailing backslash on the final line is a
+                    // literal character and is preserved.
+                    let line = if count < last_count {
+                        line.trim_end_matches('\\').trim_end_matches(' ')
+                    } else {
+                        line
+                    };
 
                     if line.ends_with('+') {
                         format!("{}\n", line.trim_end_matches('+').trim_end_matches(' '))
@@ -531,6 +537,72 @@ mod tests {
                 offset: 17
             }
         );
+    }
+
+    #[test]
+    fn bare_trailing_backslash_is_literal() {
+        // A bare trailing backslash (no preceding space) is not a soft-wrap line
+        // continuation; it is a literal character and the value ends at that line.
+        // See https://github.com/asciidoc-rs/asciidoc-parser/issues/666.
+        let mi = crate::document::Attribute::parse(
+            crate::Span::new(":longpath: very/long/path/to/some/\\\nsubdirectory"),
+            &Parser::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Attribute {
+                name: Span {
+                    data: "longpath",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+                value_source: Some(Span {
+                    data: "very/long/path/to/some/\\",
+                    line: 1,
+                    col: 12,
+                    offset: 11,
+                }),
+                value: InterpretedValue::Value("very/long/path/to/some/\\"),
+                source: Span {
+                    data: ":longpath: very/long/path/to/some/\\",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                }
+            }
+        );
+
+        assert_eq!(
+            mi.item.value(),
+            InterpretedValue::Value("very/long/path/to/some/\\")
+        );
+
+        // `subdirectory` is left as a separate line, not folded into the value.
+        assert_eq!(
+            mi.after,
+            Span {
+                data: "subdirectory",
+                line: 2,
+                col: 1,
+                offset: 36
+            }
+        );
+    }
+
+    #[test]
+    fn literal_trailing_backslash_on_final_line() {
+        // The soft-wrap continuation on the first line is folded, but the bare
+        // trailing backslash on the final line is kept as a literal character.
+        let mi = crate::document::Attribute::parse(
+            crate::Span::new(":foo: bar \\\nbaz\\"),
+            &Parser::default(),
+        )
+        .unwrap();
+
+        assert_eq!(mi.item.value(), InterpretedValue::Value("bar baz\\"));
     }
 
     #[test]
