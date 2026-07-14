@@ -288,6 +288,27 @@ impl<'src> Block<'src> {
             mut warnings,
         } = BlockMetadata::parse(source, parser);
 
+        // Tolerate a blank line between a block's metadata (title, anchor, or
+        // attribute list) and the block it decorates. Asciidoctor's
+        // `parse_block_metadata_lines` skips blank lines after each metadata
+        // line, so metadata separated from its block by one or more blank lines
+        // still attaches to that block rather than dangling as a spurious
+        // `MissingBlockAfterTitleOrAttributeList`. Advancing `block_start` past
+        // the gap lets the block-type dispatch below see the content directly.
+        //
+        // This applies at the block level only. Inside a list item,
+        // blank-separated metadata follows the list-continuation rules handled
+        // in `ListItem::parse` (where such metadata is discarded), so leave
+        // `block_start` pointing at the blank line for those callers. Likewise,
+        // if only blank lines follow (no block content), leave it untouched so
+        // the genuinely-dangling-metadata warning still fires.
+        if parent_list_markers.is_none() && !metadata.is_empty() {
+            let after_blanks = metadata.block_start.discard_empty_lines();
+            if after_blanks != metadata.block_start && !after_blanks.is_empty() {
+                metadata.block_start = after_blanks;
+            }
+        }
+
         // The `[literal]` block style normally marks a literal *paragraph*,
         // which is handled directly as a simple (literal) block below, bypassing
         // the delimited-block parsers. The exception is when `[literal]` is set
