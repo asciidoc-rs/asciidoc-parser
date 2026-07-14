@@ -127,10 +127,9 @@ mod unset_in_body {
 "#
     );
 
-    #[ignore]
     #[test]
     fn sectnums_example() {
-        to_do_verifies!(
+        verifies!(
             r#"
 == Unset a document attribute in the body
 
@@ -164,14 +163,46 @@ All of the sections below where the attribute is unset will not be numbered.
 
         let mut parser = Parser::default();
 
-        parser.parse("= Title\n:sectnums:\n\n== Section Title\n\nsectnums = {sectnums}\n\n:!sectnums:\n\nsectnums = {sectnums}\n\n== Section Title\n\n=== Section Title\n\n:sectnums:\n\n== Section Title\n\nsectnums = {sectnums}");
+        let document = parser.parse("= Title\n:sectnums:\n\n== Section Title\n\nsectnums = {sectnums}\n\n:!sectnums:\n\nsectnums = {sectnums}\n\n== Section Title\n\n=== Section Title\n\n:sectnums:\n\n== Section Title\n\nsectnums = {sectnums}");
 
         assert_eq!(
             parser.attribute_value("sectnums"),
             InterpretedValue::Value("all".to_owned())
         );
 
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/328):
-        // Differentiate between numbers on and numbers off when we can.
+        // The sections before `sectnums` is unset are numbered; the sections
+        // where it is unset are not; and numbering resumes once it is reset.
+        let mut top_sections = document.nested_blocks().filter_map(|block| {
+            if let crate::blocks::Block::Section(section) = block {
+                Some(section)
+            } else {
+                None
+            }
+        });
+
+        // First section: `sectnums` is active, so it is numbered.
+        let first = top_sections.next().unwrap();
+        assert_eq!(first.section_number().unwrap().to_string(), "1");
+
+        // Second section: `sectnums` was unset in the first section's body, so
+        // neither it nor its nested subsection is numbered.
+        let second = top_sections.next().unwrap();
+        assert!(second.section_number().is_none());
+
+        let nested = second
+            .nested_blocks()
+            .find_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert!(nested.section_number().is_none());
+
+        // Third section: `sectnums` was reset, so numbering resumes.
+        let third = top_sections.next().unwrap();
+        assert_eq!(third.section_number().unwrap().to_string(), "2");
     }
 }
