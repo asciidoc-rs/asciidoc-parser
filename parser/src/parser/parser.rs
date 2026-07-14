@@ -656,6 +656,64 @@ impl Parser {
         }
     }
 
+    /// Applies the `notitle` ⇔ `showtitle` inverse-toggle linkage
+    /// (Asciidoctor asciidoctor/asciidoctor#3804).
+    ///
+    /// `notitle` and `showtitle` are two spellings of a single "show the
+    /// document title" switch, wired as opposites: assigning either attribute
+    /// rewrites the other to its logical inverse. This keeps the resolved
+    /// document internally consistent — a consumer may key off *either*
+    /// attribute and get the same answer — and yields last-assignment-wins
+    /// semantics for free, since each assignment overwrites the partner set by
+    /// the previous one.
+    ///
+    /// `attr_name` is the attribute just assigned and `value` its stored value;
+    /// the call is a no-op for any other name. A "set" toggle (an empty `Set`
+    /// or an explicit value) turns the partner off; an explicit [unset] turns
+    /// it on. The partner is written with the same `modification_context` and
+    /// `silent_when_locked` flag as the triggering assignment so it behaves
+    /// identically under later permission checks.
+    ///
+    /// Writing the partner as an explicit tombstone (rather than deleting it,
+    /// as Asciidoctor does) is behaviorally equivalent here — `is_attribute_set`
+    /// treats an [unset] tombstone and an absent attribute alike, so
+    /// `ifdef`/`ifndef` agree with Asciidoctor — while additionally giving the
+    /// resolved document a concrete signal on both spellings.
+    ///
+    /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
+    fn apply_title_visibility_linkage(
+        &mut self,
+        attr_name: &str,
+        value: &InterpretedValue,
+        modification_context: ModificationContext,
+        silent_when_locked: bool,
+    ) {
+        let partner = match attr_name {
+            "notitle" => "showtitle",
+            "showtitle" => "notitle",
+            _ => return,
+        };
+
+        let partner_value = match value {
+            InterpretedValue::Unset => InterpretedValue::Set,
+            _ => InterpretedValue::Unset,
+        };
+
+        // The partner supersedes (and resets) any counter of the same name,
+        // mirroring a direct assignment.
+        self.counter_values.borrow_mut().remove(partner);
+
+        Arc::make_mut(&mut self.attribute_values).insert(
+            partner.to_string(),
+            AttributeValue {
+                allowable_value: AllowableValue::Any,
+                modification_context,
+                silent_when_locked,
+                value: partner_value,
+            },
+        );
+    }
+
     /// Forces the `doctype` attribute to `value`.
     ///
     /// Used when a nested AsciiDoc table cell resets its doctype to the default
@@ -704,15 +762,18 @@ impl Parser {
         value: V,
         modification_context: ModificationContext,
     ) -> Self {
+        let name = name.as_ref().to_lowercase();
+        let value = InterpretedValue::Value(value.as_ref().to_string());
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context,
             silent_when_locked: false,
-            value: InterpretedValue::Value(value.as_ref().to_string()),
+            value: value.clone(),
         };
 
-        Arc::make_mut(&mut self.attribute_values)
-            .insert(name.as_ref().to_lowercase(), attribute_value);
+        Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
+
+        self.apply_title_visibility_linkage(&name, &value, modification_context, false);
 
         self
     }
@@ -748,15 +809,18 @@ impl Parser {
         value: V,
         modification_context: ModificationContext,
     ) -> Self {
+        let name = name.as_ref().to_lowercase();
+        let value = InterpretedValue::Value(value.as_ref().to_string());
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context,
             silent_when_locked: true,
-            value: InterpretedValue::Value(value.as_ref().to_string()),
+            value: value.clone(),
         };
 
-        Arc::make_mut(&mut self.attribute_values)
-            .insert(name.as_ref().to_lowercase(), attribute_value);
+        Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
+
+        self.apply_title_visibility_linkage(&name, &value, modification_context, true);
 
         self
     }
@@ -1061,19 +1125,22 @@ impl Parser {
         value: bool,
         modification_context: ModificationContext,
     ) -> Self {
+        let name = name.as_ref().to_lowercase();
+        let value = if value {
+            InterpretedValue::Set
+        } else {
+            InterpretedValue::Unset
+        };
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context,
             silent_when_locked: false,
-            value: if value {
-                InterpretedValue::Set
-            } else {
-                InterpretedValue::Unset
-            },
+            value: value.clone(),
         };
 
-        Arc::make_mut(&mut self.attribute_values)
-            .insert(name.as_ref().to_lowercase(), attribute_value);
+        Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
+
+        self.apply_title_visibility_linkage(&name, &value, modification_context, false);
 
         self
     }
@@ -1105,19 +1172,22 @@ impl Parser {
         value: bool,
         modification_context: ModificationContext,
     ) -> Self {
+        let name = name.as_ref().to_lowercase();
+        let value = if value {
+            InterpretedValue::Set
+        } else {
+            InterpretedValue::Unset
+        };
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context,
             silent_when_locked: true,
-            value: if value {
-                InterpretedValue::Set
-            } else {
-                InterpretedValue::Unset
-            },
+            value: value.clone(),
         };
 
-        Arc::make_mut(&mut self.attribute_values)
-            .insert(name.as_ref().to_lowercase(), attribute_value);
+        Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
+
+        self.apply_title_visibility_linkage(&name, &value, modification_context, true);
 
         self
     }
@@ -1341,6 +1411,16 @@ impl Parser {
             value = self.resolve_leveloffset_and_warn(value, attr.span(), warnings);
         }
 
+        // `notitle` and `showtitle` are inverse spellings of one title-
+        // visibility toggle; keep the partner in sync (see
+        // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
+        self.apply_title_visibility_linkage(
+            &attr_name,
+            &value,
+            ModificationContext::Anywhere,
+            false,
+        );
+
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context: ModificationContext::Anywhere,
@@ -1481,6 +1561,16 @@ impl Parser {
         if attr_name == "leveloffset" {
             value = self.resolve_leveloffset_and_warn(value, attr.span(), warnings);
         }
+
+        // `notitle` and `showtitle` are inverse spellings of one title-
+        // visibility toggle; keep the partner in sync (see
+        // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
+        self.apply_title_visibility_linkage(
+            &attr_name,
+            &value,
+            ModificationContext::Anywhere,
+            false,
+        );
 
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
@@ -2094,6 +2184,129 @@ mod tests {
             // notitle set -> hidden; notitle unset -> shown.
             assert!(!with("notitle", true).resolve_show_title(true));
             assert!(with("notitle", false).resolve_show_title(false));
+        }
+    }
+
+    mod notitle_showtitle_linkage {
+        use crate::{
+            document::InterpretedValue,
+            parser::{ModificationContext, Parser},
+        };
+
+        // Asciidoctor asciidoctor/asciidoctor#3804: `notitle` and `showtitle`
+        // are two spellings of one title-visibility toggle, wired as inverses.
+        // Assigning either rewrites the partner to its logical inverse, so a
+        // consumer can read the resolved document off *either* spelling.
+
+        fn parse_header(entries: &str) -> Parser {
+            let mut parser = Parser::default();
+            parser.parse(&format!("= Title\n{entries}\n\nbody"));
+            parser
+        }
+
+        #[test]
+        fn header_showtitle_set_unsets_notitle() {
+            // `:showtitle:` => notitle unset.
+            let parser = parse_header(":showtitle:");
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Unset);
+            assert!(!parser.is_attribute_set("notitle"));
+        }
+
+        #[test]
+        fn header_showtitle_unset_sets_notitle() {
+            // `:!showtitle:` => notitle set.
+            let parser = parse_header(":!showtitle:");
+            assert_eq!(
+                parser.attribute_value("showtitle"),
+                InterpretedValue::Unset
+            );
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("notitle"));
+        }
+
+        #[test]
+        fn header_notitle_set_unsets_showtitle() {
+            // `:notitle:` => showtitle unset.
+            let parser = parse_header(":notitle:");
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert_eq!(
+                parser.attribute_value("showtitle"),
+                InterpretedValue::Unset
+            );
+            assert!(!parser.is_attribute_set("showtitle"));
+        }
+
+        #[test]
+        fn header_notitle_unset_sets_showtitle() {
+            // `:!notitle:` => showtitle set. This is the case called out in the
+            // issue: a consumer keying off `showtitle` now sees a signal.
+            let parser = parse_header(":!notitle:");
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Unset);
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("showtitle"));
+        }
+
+        #[test]
+        fn last_assignment_wins() {
+            // Each assignment rewrites the partner, so whichever is assigned
+            // last decides the resolved toggle.
+            let parser = parse_header(":notitle:\n:showtitle:");
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Unset);
+
+            let parser = parse_header(":showtitle:\n:notitle:");
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert_eq!(
+                parser.attribute_value("showtitle"),
+                InterpretedValue::Unset
+            );
+        }
+
+        #[test]
+        fn body_assignment_is_linked() {
+            // A body attribute entry links the partner just as a header entry
+            // does.
+            let mut parser = Parser::default();
+            parser.parse("= Title\n\nintro\n\n:notitle:\n\nmore");
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert_eq!(
+                parser.attribute_value("showtitle"),
+                InterpretedValue::Unset
+            );
+        }
+
+        #[test]
+        fn api_assignment_is_linked() {
+            // Setting either attribute via the API links the partner, matching
+            // Asciidoctor's `attributes: { 'notitle!' => '' }` etc.
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                true,
+                ModificationContext::Anywhere,
+            );
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert_eq!(
+                parser.attribute_value("showtitle"),
+                InterpretedValue::Unset
+            );
+
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                false,
+                ModificationContext::Anywhere,
+            );
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Unset);
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+        }
+
+        #[test]
+        fn unrelated_attributes_are_untouched() {
+            // A document that never assigns either spelling leaves both absent —
+            // the linkage is a no-op for every other attribute.
+            let parser = parse_header(":sectnums:");
+            assert!(!parser.has_attribute("notitle"));
+            assert!(!parser.has_attribute("showtitle"));
         }
     }
 
