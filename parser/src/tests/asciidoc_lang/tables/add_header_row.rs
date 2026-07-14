@@ -117,7 +117,7 @@ It also ignores alignment operators assigned to the table's column specifiers; h
     // The columns carry alignment operators (`^` centers, `.>` bottom-aligns),
     // and the first row is promoted to the header. The header row ignores the
     // column alignment operators, so its cells fall back to the default
-    // alignment (left, top)...
+    // alignment (left, top) ...
     let table = parse_table(
         "[cols=\"^.>,^.>\",options=\"header\"]\n|===\n|Column 1 |Column 2\n\n|Cell 1 |Cell 2\n|===",
     );
@@ -129,7 +129,7 @@ It also ignores alignment operators assigned to the table's column specifiers; h
         ]
     );
 
-    // ...while the body cells in the same columns *do* honor the column
+    // ... while the body cells in the same columns *do* honor the column
     // alignment operators.
     assert_eq!(
         table.body_rows()[0]
