@@ -1982,7 +1982,10 @@ impl<'src> TableCell<'src> {
     /// specifier overrides the column's [style](ColumnStyle); with no cell
     /// style operator, the cell is processed with the column's style. A
     /// header cell (`is_header`) is always processed as plain header
-    /// content, regardless of any style operator on the column or the cell.
+    /// content, regardless of any style operator on the column or the cell, and
+    /// it ignores the column's alignment operators: with no operator on its own
+    /// specifier, a header cell falls back to the default alignment rather than
+    /// inheriting the column's.
     ///
     /// Leading and trailing whitespace is always stripped. For every style but
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) the cell holds inline
@@ -2001,9 +2004,21 @@ impl<'src> TableCell<'src> {
         warnings: &mut Vec<Warning<'src>>,
     ) -> Self {
         // A cell's own alignment operator overrides the column's alignment; with
-        // no operator, the cell inherits the column's alignment.
-        let h_align = raw.spec.h_align.unwrap_or(column.h_align);
-        let v_align = raw.spec.v_align.unwrap_or(column.v_align);
+        // no operator, the cell inherits the column's alignment. The header row
+        // ignores alignment operators on the column specifier, so a header cell
+        // with no operator of its own falls back to the default alignment rather
+        // than the column's; a cell specifier's own operator is still applied.
+        let (h_align, v_align) = if is_header {
+            (
+                raw.spec.h_align.unwrap_or(HorizontalAlignment::Left),
+                raw.spec.v_align.unwrap_or(VerticalAlignment::Top),
+            )
+        } else {
+            (
+                raw.spec.h_align.unwrap_or(column.h_align),
+                raw.spec.v_align.unwrap_or(column.v_align),
+            )
+        };
 
         // A cell's own style operator overrides the column's style; with no
         // operator, the cell is processed with the column's style. The header
@@ -2069,12 +2084,21 @@ impl<'src> TableCell<'src> {
             column.style
         };
 
+        // A data field carries no cell specifier, so its alignment comes from the
+        // column — except in the header row, which ignores the column's alignment
+        // operators and falls back to the default alignment.
+        let (h_align, v_align) = if is_header {
+            (HorizontalAlignment::Left, VerticalAlignment::Top)
+        } else {
+            (column.h_align, column.v_align)
+        };
+
         let source = field.content;
         let content = process_content(field.content, field.replacement, style, parser, warnings);
 
         Self {
-            h_align: column.h_align,
-            v_align: column.v_align,
+            h_align,
+            v_align,
             style,
             colspan: 1,
             rowspan: 1,
