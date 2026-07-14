@@ -38,6 +38,20 @@ fn header_texts(table: &crate::blocks::TableBlock<'_>) -> Vec<String> {
         .collect()
 }
 
+/// Return the `(horizontal, vertical)` alignment of each cell in the table's
+/// header row, panicking if the table has no header row.
+fn header_alignments(
+    table: &crate::blocks::TableBlock<'_>,
+) -> Vec<(HorizontalAlignment, VerticalAlignment)> {
+    table
+        .header_row()
+        .expect("expected a header row")
+        .cells()
+        .iter()
+        .map(|cell| (cell.h_align(), cell.v_align()))
+        .collect()
+}
+
 non_normative!(
     r#"
 = Create a Header Row
@@ -93,19 +107,72 @@ TIP: The header row ignores any style operators assigned via column and cell spe
         crate::blocks::TableCellContent::AsciiDoc(_)
     ));
 
-    to_do_verifies!(
+    verifies!(
         r#"
 It also ignores alignment operators assigned to the table's column specifiers; however, any alignment operators assigned to a cell specifier in the header row are applied.
 
 "#
     );
 
-    // The interaction between the header row and alignment operators on a cell
-    // specifier depends on cell specifiers, which are not yet implemented.
-    if false {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/654):
-        todo!("cell specifiers and cell-level alignment for the header row");
-    }
+    // The columns carry alignment operators (`^` centers, `.>` bottom-aligns),
+    // and the first row is promoted to the header. The header row ignores the
+    // column alignment operators, so its cells fall back to the default
+    // alignment (left, top) ...
+    let table = parse_table(
+        "[cols=\"^.>,^.>\",options=\"header\"]\n|===\n|Column 1 |Column 2\n\n|Cell 1 |Cell 2\n|===",
+    );
+    assert_eq!(
+        header_alignments(&table),
+        vec![
+            (HorizontalAlignment::Left, VerticalAlignment::Top),
+            (HorizontalAlignment::Left, VerticalAlignment::Top),
+        ]
+    );
+
+    // ... while the body cells in the same columns *do* honor the column
+    // alignment operators.
+    assert_eq!(
+        table.body_rows()[0]
+            .cells()
+            .iter()
+            .map(|cell| (cell.h_align(), cell.v_align()))
+            .collect::<Vec<_>>(),
+        vec![
+            (HorizontalAlignment::Center, VerticalAlignment::Bottom),
+            (HorizontalAlignment::Center, VerticalAlignment::Bottom),
+        ]
+    );
+
+    // Alignment operators on a cell specifier *in the header row* are applied.
+    // Here the columns are centered (`^`), but the header cells carry their own
+    // operators (`>` right, `.>` bottom), which override the ignored column
+    // alignment; the horizontal alignment of the second header cell has no cell
+    // operator, so it falls back to the default (left) rather than the column's
+    // center.
+    let table = parse_table(
+        "[cols=\"2*^\",options=\"header\"]\n|===\n>|Column 1 .>|Column 2\n\n|Cell 1 |Cell 2\n|===",
+    );
+    assert_eq!(
+        header_alignments(&table),
+        vec![
+            (HorizontalAlignment::Right, VerticalAlignment::Top),
+            (HorizontalAlignment::Left, VerticalAlignment::Bottom),
+        ]
+    );
+
+    // The body cells, which have no cell specifier, still honor the column's
+    // center alignment.
+    assert_eq!(
+        table.body_rows()[0]
+            .cells()
+            .iter()
+            .map(|cell| (cell.h_align(), cell.v_align()))
+            .collect::<Vec<_>>(),
+        vec![
+            (HorizontalAlignment::Center, VerticalAlignment::Top),
+            (HorizontalAlignment::Center, VerticalAlignment::Top),
+        ]
+    );
 }
 
 #[test]
