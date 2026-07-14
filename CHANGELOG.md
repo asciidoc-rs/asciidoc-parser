@@ -27,11 +27,7 @@ _14 July 2026_
 * Treat a bare trailing backslash as literal, not a line continuation ([#666](https://github.com/asciidoc-rs/asciidoc-parser/pull/666)) ([#684](https://github.com/asciidoc-rs/asciidoc-parser/pull/684))
 * Drop backslash when escaping an attribute reference ([#667](https://github.com/asciidoc-rs/asciidoc-parser/pull/667)) ([#676](https://github.com/asciidoc-rs/asciidoc-parser/pull/676))
 * Expand mid-list subs group name in place and de-dup ([#673](https://github.com/asciidoc-rs/asciidoc-parser/pull/673))
-
-### Other
-
 * Verify section numbering on/off for sectnums unset in body ([#328](https://github.com/asciidoc-rs/asciidoc-parser/pull/328)) ([#668](https://github.com/asciidoc-rs/asciidoc-parser/pull/668))
-* Remove stale section source blank-line TO DO ([#655](https://github.com/asciidoc-rs/asciidoc-parser/pull/655)) ([#665](https://github.com/asciidoc-rs/asciidoc-parser/pull/665))
 
 ## [0.22.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.22.0...v0.22.1)
 _13 July 2026_
