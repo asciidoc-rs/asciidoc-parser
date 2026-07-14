@@ -24,9 +24,9 @@ mod escape_with_backslashes {
     #[ignore]
     #[test]
     fn punctuation() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/316):
-        // Some of the macros described here are not yet implemented, so this test can't
-        // work properly.
+        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/667):
+        // Backslash-escaping of attribute references (`\{id}`) and special characters
+        // (`\&sect;`) isn't implemented yet, so this test can't work properly.
         to_do_verifies!(
             r#"
 To prevent a punctuation character from being interpreted as an attribute reference or formatting syntax (e.g., `+_+`, `+^+`) in normal content, prepend the character with a backslash (`\`).
