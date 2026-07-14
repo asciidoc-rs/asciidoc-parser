@@ -154,7 +154,9 @@ impl PathResolver {
                 // environment). The root is everything up to and including the
                 // first slash. `is_root` guarantees a slash for the drive-letter
                 // case, so `None` here is unreachable in practice.
-                posix_path.find('/').map(|slash| posix_path[..=slash].to_owned())
+                posix_path
+                    .find('/')
+                    .map(|slash| posix_path[..=slash].to_owned())
             }
         } else if posix_path.starts_with("./") {
             // ex. ./sample/path
@@ -562,7 +564,10 @@ mod tests {
             let pr = PathResolver::default();
             assert_eq!(
                 pr.partition_path("uri:classloader:sample/path", WebPath(false)),
-                (seg(&["sample", "path"]), Some("uri:classloader:".to_owned()))
+                (
+                    seg(&["sample", "path"]),
+                    Some("uri:classloader:".to_owned())
+                )
             );
         }
 
@@ -593,8 +598,12 @@ mod tests {
         #[test]
         fn drive_letter_is_relative_on_posix_resolver() {
             // Without a Windows-style separator, a drive-letter prefix is not
-            // treated as a root.
-            let pr = PathResolver::default();
+            // treated as a root. (Constructed explicitly rather than via
+            // `default()`, whose separator is platform-dependent.)
+            let pr = PathResolver {
+                file_separator: '/',
+            };
+
             assert_eq!(
                 pr.partition_path("C:/sample/path", WebPath(false)),
                 (seg(&["C:", "sample", "path"]), None)
