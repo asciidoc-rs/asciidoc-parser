@@ -2464,6 +2464,7 @@ mod special {
                 ),
                 1,
             );
+            assert_rendered_contains(&doc, "This is a winner.");
         }
     }
 
@@ -2482,6 +2483,7 @@ mod special {
                 ),
                 1,
             );
+            assert_rendered_contains(&doc, "This is a winner.");
         }
     }
 
@@ -2499,6 +2501,7 @@ mod special {
                 ),
                 1,
             );
+            assert_rendered_contains(&doc, "This is important, fool!");
         }
     }
 }
