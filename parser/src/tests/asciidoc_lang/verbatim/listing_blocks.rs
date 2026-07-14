@@ -68,7 +68,7 @@ include::example$listing.adoc[tag=style]
                         col: 1,
                         offset: 10,
                     },
-                    rendered: "This is an example of a paragraph assigned\nthe <code>listing</code> style in an attribute list.\nNotice that the monospace marks are\npreserved in the output.",
+                    rendered: "This is an example of a paragraph assigned\nthe `listing` style in an attribute list.\nNotice that the monospace marks are\npreserved in the output.",
                 },
                 source: Span {
                     data: "[listing]\nThis is an example of a paragraph assigned\nthe `listing` style in an attribute list.\nNotice that the monospace marks are\npreserved in the output.",

@@ -2521,6 +2521,11 @@ fn port_from_ruby() {
     # been ported to `mod special` below now that conditional preprocessor
     # directives are implemented.
 
+    # NOTE: the remaining un-ported tests below are tracked by dedicated
+    # issues: '[open]' styled paragraph -> open block (#679), inline doctype
+    # (#680), and unknown/custom paragraph style logging (#681). The DocBook
+    # 'simpara' styled-paragraph tests are out of scope (no DocBook backend).
+
     context 'Styled Paragraphs' do
       test 'should wrap text in simpara for styled paragraphs when converted to DocBook' do
         input = <<~'EOS'
