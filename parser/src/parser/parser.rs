@@ -661,26 +661,27 @@ impl Parser {
     ///
     /// `notitle` and `showtitle` are two spellings of a single "show the
     /// document title" switch, wired as opposites: assigning either attribute
-    /// rewrites the other to its logical inverse. This keeps the resolved
-    /// document internally consistent — a consumer may key off *either*
-    /// attribute and get the same answer — and yields last-assignment-wins
-    /// semantics for free, since each assignment overwrites the partner set by
-    /// the previous one.
+    /// updates the other so the resolved document reflects one consistent
+    /// toggle. This yields last-assignment-wins semantics for free, since each
+    /// assignment rewrites the partner left by the previous one.
     ///
     /// `attr_name` is the attribute just assigned and `value` its stored value;
-    /// the call is a no-op for any other name. A "set" toggle (an empty `Set`
-    /// or an explicit value) turns the partner off; an explicit [unset] turns
-    /// it on. The partner is written with the same `modification_context` and
-    /// `silent_when_locked` flag as the triggering assignment so it behaves
-    /// identically under later permission checks.
+    /// the call is a no-op for any other name. Turning the toggle *off* (an
+    /// explicit [unset], e.g. `:!notitle:`) turns the partner *on* — it is
+    /// stored [set] with the same `modification_context` and
+    /// `silent_when_locked` flag as the triggering assignment. Turning the
+    /// toggle *on* (an empty `Set` or an explicit value, e.g. `:notitle:`)
+    /// *removes* the partner entirely.
     ///
-    /// Writing the partner as an explicit tombstone (rather than deleting it,
-    /// as Asciidoctor does) is behaviorally equivalent here —
-    /// `is_attribute_set` treats an [unset] tombstone and an absent
-    /// attribute alike, so `ifdef`/`ifndef` agree with Asciidoctor — while
-    /// additionally giving the resolved document a concrete signal on both
-    /// spellings.
+    /// The partner is removed — rather than left as an explicit unset
+    /// tombstone — to mirror Asciidoctor's attribute-hash semantics, where an
+    /// "off" attribute is simply absent. That keeps every observer consistent:
+    /// `has_attribute`, `ifdef`/`ifndef`, and `{partner}` reference
+    /// substitution all see the same absence Asciidoctor does (so, e.g., a
+    /// `{showtitle}` reference stays literal after `:notitle:` rather than
+    /// silently resolving to an empty string).
     ///
+    /// [set]: https://docs.asciidoctor.org/asciidoc/latest/attributes/set-attributes/
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     fn apply_title_visibility_linkage(
         &mut self,
@@ -695,24 +696,27 @@ impl Parser {
             _ => return,
         };
 
-        let partner_value = match value {
-            InterpretedValue::Unset => InterpretedValue::Set,
-            _ => InterpretedValue::Unset,
-        };
-
-        // The partner supersedes (and resets) any counter of the same name,
-        // mirroring a direct assignment.
+        // Either way the partner supersedes (and resets) any counter of the
+        // same name, mirroring a direct assignment.
         self.counter_values.borrow_mut().remove(partner);
 
-        Arc::make_mut(&mut self.attribute_values).insert(
-            partner.to_string(),
-            AttributeValue {
-                allowable_value: AllowableValue::Any,
-                modification_context,
-                silent_when_locked,
-                value: partner_value,
-            },
-        );
+        if let InterpretedValue::Unset = value {
+            // The toggle is off, so the partner turns on.
+            Arc::make_mut(&mut self.attribute_values).insert(
+                partner.to_string(),
+                AttributeValue {
+                    allowable_value: AllowableValue::Any,
+                    modification_context,
+                    silent_when_locked,
+                    value: InterpretedValue::Set,
+                },
+            );
+        } else if self.attribute_values.contains_key(partner) {
+            // The toggle is on, so the partner turns off — and, matching
+            // Asciidoctor, "off" means absent. (Guarded so the common case of
+            // no prior partner entry does not clone the shared map.)
+            Arc::make_mut(&mut self.attribute_values).remove(partner);
+        }
     }
 
     /// Forces the `doctype` attribute to `value`.
@@ -2190,14 +2194,16 @@ mod tests {
 
     mod notitle_showtitle_linkage {
         use crate::{
+            blocks::{Block, IsBlock},
             document::InterpretedValue,
             parser::{ModificationContext, Parser},
         };
 
         // Asciidoctor asciidoctor/asciidoctor#3804: `notitle` and `showtitle`
         // are two spellings of one title-visibility toggle, wired as inverses.
-        // Assigning either rewrites the partner to its logical inverse, so a
-        // consumer can read the resolved document off *either* spelling.
+        // Assigning either updates the partner so the resolved document carries
+        // one consistent signal — following Asciidoctor's hash semantics, where
+        // turning the toggle *on* sets one spelling and *removes* the other.
 
         fn parse_header(entries: &str) -> Parser {
             let mut parser = Parser::default();
@@ -2207,29 +2213,27 @@ mod tests {
 
         #[test]
         fn header_showtitle_set_unsets_notitle() {
-            // `:showtitle:` => notitle unset.
+            // `:showtitle:` => notitle removed (absent).
             let parser = parse_header(":showtitle:");
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
-            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Unset);
-            assert!(!parser.is_attribute_set("notitle"));
+            assert!(!parser.has_attribute("notitle"));
         }
 
         #[test]
         fn header_showtitle_unset_sets_notitle() {
             // `:!showtitle:` => notitle set.
             let parser = parse_header(":!showtitle:");
-            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
+            assert!(!parser.is_attribute_set("showtitle"));
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
             assert!(parser.is_attribute_set("notitle"));
         }
 
         #[test]
         fn header_notitle_set_unsets_showtitle() {
-            // `:notitle:` => showtitle unset.
+            // `:notitle:` => showtitle removed (absent).
             let parser = parse_header(":notitle:");
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
-            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
-            assert!(!parser.is_attribute_set("showtitle"));
+            assert!(!parser.has_attribute("showtitle"));
         }
 
         #[test]
@@ -2237,7 +2241,7 @@ mod tests {
             // `:!notitle:` => showtitle set. This is the case called out in the
             // issue: a consumer keying off `showtitle` now sees a signal.
             let parser = parse_header(":!notitle:");
-            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Unset);
+            assert!(!parser.is_attribute_set("notitle"));
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
             assert!(parser.is_attribute_set("showtitle"));
         }
@@ -2248,11 +2252,11 @@ mod tests {
             // last decides the resolved toggle.
             let parser = parse_header(":notitle:\n:showtitle:");
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
-            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Unset);
+            assert!(!parser.has_attribute("notitle"));
 
             let parser = parse_header(":showtitle:\n:notitle:");
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
-            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
+            assert!(!parser.has_attribute("showtitle"));
         }
 
         #[test]
@@ -2262,7 +2266,7 @@ mod tests {
             let mut parser = Parser::default();
             parser.parse("= Title\n\nintro\n\n:notitle:\n\nmore");
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
-            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
+            assert!(!parser.has_attribute("showtitle"));
         }
 
         #[test]
@@ -2275,15 +2279,33 @@ mod tests {
                 ModificationContext::Anywhere,
             );
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
-            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
+            assert!(!parser.has_attribute("showtitle"));
 
             let parser = Parser::default().with_intrinsic_attribute_bool(
                 "notitle",
                 false,
                 ModificationContext::Anywhere,
             );
-            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Unset);
+            assert!(!parser.is_attribute_set("notitle"));
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+        }
+
+        #[test]
+        fn turning_the_toggle_on_leaves_no_partner_tombstone() {
+            // `:notitle:` removes `showtitle` outright rather than leaving an
+            // unset tombstone, so a `{showtitle}` reference stays literal (as it
+            // would with the attribute absent) instead of resolving to an empty
+            // string. This guards the interaction flagged in review.
+            let parser = parse_header(":notitle:");
+            assert!(!parser.has_attribute("showtitle"));
+
+            let mut parser = Parser::default();
+            let doc = parser.parse("= Title\n:notitle:\n\n{showtitle}");
+            let block = doc.nested_blocks().next().unwrap();
+            let Block::Simple(simple_block) = block else {
+                panic!("expected a simple block");
+            };
+            assert_eq!(simple_block.content().rendered(), "{showtitle}");
         }
 
         #[test]
