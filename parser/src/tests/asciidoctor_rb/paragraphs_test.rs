@@ -2445,6 +2445,62 @@ mod special {
         assert_output_contains(&doc, "The backend is html5.");
         assert_output_contains(&doc, "Last line of sidebar.");
     }
+
+    // Asciidoctor's `ADMONITION_STYLES`: the five built-in admonition labels.
+    const ADMONITION_STYLES: [&str; 5] = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
+
+    // Ported from Ruby Asciidoctor's paragraphs_test.rb ('note multiline
+    // syntax'). A styled paragraph whose style is an admonition label renders as
+    // an admonition block.
+    #[test]
+    fn note_multiline_syntax() {
+        for style in ADMONITION_STYLES {
+            let doc = Parser::default().parse(&format!("[{style}]\nThis is a winner."));
+            assert_xpath(
+                &doc,
+                &format!(
+                    "//div[@class = \"admonitionblock {}\"]",
+                    style.to_lowercase()
+                ),
+                1,
+            );
+        }
+    }
+
+    // Ported from Ruby Asciidoctor's paragraphs_test.rb ('note block syntax').
+    // An example-delimited block carrying an admonition style renders as an
+    // admonition block.
+    #[test]
+    fn note_block_syntax() {
+        for style in ADMONITION_STYLES {
+            let doc = Parser::default().parse(&format!("[{style}]\n====\nThis is a winner.\n===="));
+            assert_xpath(
+                &doc,
+                &format!(
+                    "//div[@class = \"admonitionblock {}\"]",
+                    style.to_lowercase()
+                ),
+                1,
+            );
+        }
+    }
+
+    // Ported from Ruby Asciidoctor's paragraphs_test.rb ('note inline syntax').
+    // The inline label form (e.g. `NOTE: ...`) renders as an admonition block.
+    #[test]
+    fn note_inline_syntax() {
+        for style in ADMONITION_STYLES {
+            let doc = Parser::default().parse(&format!("{style}: This is important, fool!"));
+            assert_xpath(
+                &doc,
+                &format!(
+                    "//div[@class = \"admonitionblock {}\"]",
+                    style.to_lowercase()
+                ),
+                1,
+            );
+        }
+    }
 }
 
 #[ignore]
@@ -2454,23 +2510,9 @@ fn port_from_ruby() {
         "Port this: {}",
         r###"
   context 'special' do
-    test 'note multiline syntax' do
-      Asciidoctor::ADMONITION_STYLES.each do |style|
-        assert_xpath %(//div[@class='admonitionblock #{style.downcase}']), convert_string(%([#{style}]\nThis is a winner.))
-      end
-    end
-
-    test 'note block syntax' do
-      Asciidoctor::ADMONITION_STYLES.each do |style|
-        assert_xpath %(//div[@class='admonitionblock #{style.downcase}']), convert_string(%([#{style}]\n====\nThis is a winner.\n====))
-      end
-    end
-
-    test 'note inline syntax' do
-      Asciidoctor::ADMONITION_STYLES.each do |style|
-        assert_xpath %(//div[@class='admonitionblock #{style.downcase}']), convert_string(%(#{style}: This is important, fool!))
-      end
-    end
+    # NOTE: 'note multiline syntax', 'note block syntax', and 'note inline
+    # syntax' have been ported to `mod special` now that admonitions are
+    # implemented.
 
     # NOTE: 'should process preprocessor conditional in paragraph content' has
     # been ported to `mod special` below now that conditional preprocessor
