@@ -7104,16 +7104,12 @@ mod post_replacements {
 //
 // * "should resolve subs for block" (`subs = 'quotes,normal'`) — the closest
 //   analogue is `SubstitutionGroup::from_custom_string(None, "quotes,normal")`.
-//   The two implementations diverge here: Asciidoctor expands `normal` in place
-//   and de-duplicates, yielding `[quotes, specialcharacters, attributes,
-//   replacements, macros, post_replacements]`, whereas this crate treats a
-//   mid-list group name as a reset, yielding `[specialcharacters, quotes,
-//   attributes, replacements, macros, post_replacements]` (the leading `quotes`
-//   is dropped, no de-duplication). This is a substitution-resolution behavior
-//   difference, not a missing test, and is tracked separately in
-//   https://github.com/asciidoc-rs/asciidoc-parser/issues/663 rather than by
-//   asserting the current output here. Once that is fixed, this case becomes
-//   portable as an executable test.
+//   Both implementations now expand `normal` in place and de-duplicate,
+//   yielding `[quotes, specialcharacters, attributes, replacements, macros,
+//   post_replacements]`. This is covered by the executable
+//   `from_custom_string::group_name_mid_list_expands_in_place_and_dedups` test
+//   in `content::substitution_group` (see
+//   https://github.com/asciidoc-rs/asciidoc-parser/issues/663).
 //
 // * The `coderay` / `pygments` cases resolve `specialcharacters` to a
 //   `:highlight` sub driven by a source highlighter. Source highlighting is out

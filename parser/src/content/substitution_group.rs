@@ -97,23 +97,27 @@ impl SubstitutionGroup {
         for (count, mut step) in custom.split(",").enumerate() {
             step = step.trim();
 
+            // A group name (`normal`/`verbatim`) is expanded *in place*: its
+            // constituent steps are appended to the running list rather than
+            // replacing it. This matches Asciidoctor's `resolve_subs`, where a
+            // group name mid-list contributes its steps like any other token.
             if step == "n" || step == "normal" {
-                steps = vec![
+                steps.extend([
                     SubstitutionStep::SpecialCharacters,
                     SubstitutionStep::Quotes,
                     SubstitutionStep::AttributeReferences,
                     SubstitutionStep::CharacterReplacements,
                     SubstitutionStep::Macros,
                     SubstitutionStep::PostReplacement,
-                ];
+                ]);
                 continue;
             }
 
             if step == "v" || step == "verbatim" {
-                steps = vec![
+                steps.extend([
                     SubstitutionStep::SpecialCharacters,
                     SubstitutionStep::Callouts,
-                ];
+                ]);
                 continue;
             }
 
@@ -169,7 +173,18 @@ impl SubstitutionGroup {
             }
         }
 
-        Some(Self::Custom(steps))
+        // De-duplicate the final list, first occurrence winning. Asciidoctor
+        // ensures each substitution runs at most once, so a step contributed by
+        // more than one token (e.g. the `quotes` in `quotes,normal`) is kept
+        // only in its earliest position.
+        let mut deduped: Vec<SubstitutionStep> = Vec::with_capacity(steps.len());
+        for step in steps {
+            if !deduped.contains(&step) {
+                deduped.push(step);
+            }
+        }
+
+        Some(Self::Custom(deduped))
     }
 
     pub(crate) fn apply(
@@ -505,6 +520,9 @@ mod tests {
 
         #[test]
         fn addition() {
+            // `n` expands to normal's steps (which already include
+            // replacements); the trailing `r` is de-duplicated away, matching
+            // Asciidoctor.
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "n,r"),
                 Some(SubstitutionGroup::Custom(vec![
@@ -514,7 +532,6 @@ mod tests {
                     SubstitutionStep::CharacterReplacements,
                     SubstitutionStep::Macros,
                     SubstitutionStep::PostReplacement,
-                    SubstitutionStep::CharacterReplacements,
                 ]))
             );
 
@@ -530,6 +547,9 @@ mod tests {
 
         #[test]
         fn incremental() {
+            // `n` expands to normal's steps (which already include
+            // replacements); the trailing `r` is de-duplicated away, matching
+            // Asciidoctor.
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "n,r"),
                 Some(SubstitutionGroup::Custom(vec![
@@ -539,7 +559,6 @@ mod tests {
                     SubstitutionStep::CharacterReplacements,
                     SubstitutionStep::Macros,
                     SubstitutionStep::PostReplacement,
-                    SubstitutionStep::CharacterReplacements,
                 ]))
             );
 
@@ -549,6 +568,36 @@ mod tests {
                     SubstitutionStep::SpecialCharacters,
                     SubstitutionStep::Callouts,
                     SubstitutionStep::Macros,
+                ]))
+            );
+        }
+
+        #[test]
+        fn group_name_mid_list_expands_in_place_and_dedups() {
+            // A group name (`normal`) appearing mid-list is expanded in place
+            // and appended to what came before, rather than resetting the
+            // accumulated steps. The leading `quotes` is preserved, and the
+            // redundant `quotes` from `normal`'s expansion is de-duplicated
+            // away, matching Asciidoctor's `resolve_subs`.
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "quotes,normal"),
+                Some(SubstitutionGroup::Custom(vec![
+                    SubstitutionStep::Quotes,
+                    SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::AttributeReferences,
+                    SubstitutionStep::CharacterReplacements,
+                    SubstitutionStep::Macros,
+                    SubstitutionStep::PostReplacement,
+                ]))
+            );
+
+            // Same behavior for the shorthand `v` group name mid-list.
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "m,v"),
+                Some(SubstitutionGroup::Custom(vec![
+                    SubstitutionStep::Macros,
+                    SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
                 ]))
             );
         }
