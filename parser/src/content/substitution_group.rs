@@ -221,10 +221,28 @@ impl SubstitutionGroup {
         let mut result = self.clone();
 
         if let Some(attrlist) = attrlist {
-            if let Some(block_style) = attrlist.nth_attribute(1).and_then(|a| a.block_style()) {
+            // A declared block style reinterprets a simple-content (paragraph)
+            // block as another context, which can change the substitution group
+            // that applies. This masquerade only affects blocks whose default
+            // group is `Normal`: a delimited block's delimiter already fixes its
+            // group (verbatim, pass, stem, etc.), and Asciidoctor does not let a
+            // style keyword override it. So the mapping below is scoped to
+            // `Normal` blocks, matching Asciidoctor's parser.
+            if result == SubstitutionGroup::Normal
+                && let Some(block_style) = attrlist.nth_attribute(1).and_then(|a| a.block_style())
+            {
                 result = match block_style {
-                    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/656): Many other style-specific substitution groups.
+                    // The verbatim masquerade styles (`literal`, `listing`, and
+                    // `source`) apply only special characters and callouts.
+                    "literal" | "listing" | "source" => SubstitutionGroup::Verbatim,
+
+                    // The `pass` style excludes the content from all
+                    // substitutions.
                     "pass" => SubstitutionGroup::None,
+
+                    // Every other style (`normal`, `verse`, `quote`, `sidebar`,
+                    // `example`, admonitions, …) keeps the normal substitution
+                    // group.
                     _ => result,
                 };
             }
@@ -686,6 +704,96 @@ mod tests {
                         .to_string()
                         .into_boxed_str()
                 )
+            );
+        }
+    }
+
+    mod override_via_attrlist {
+        use crate::{
+            attributes::{Attrlist, AttrlistContext},
+            tests::prelude::*,
+        };
+
+        /// Resolve the substitution group that `base` maps to when the given
+        /// attribute list (block style, `subs=`, …) is applied.
+        fn resolve(base: SubstitutionGroup, attrlist: &str) -> SubstitutionGroup {
+            let p = Parser::default();
+            let attrlist = Attrlist::parse(crate::Span::new(attrlist), &p, AttrlistContext::Block)
+                .item
+                .item;
+
+            base.override_via_attrlist(Some(&attrlist))
+        }
+
+        #[test]
+        fn verbatim_masquerade_styles_promote_normal_to_verbatim() {
+            // On a simple-content (paragraph) block, the `literal`, `listing`,
+            // and `source` styles switch the substitution group to verbatim.
+            for style in ["literal", "listing", "source"] {
+                assert_eq!(
+                    resolve(SubstitutionGroup::Normal, style),
+                    SubstitutionGroup::Verbatim,
+                    "style `{style}` should map Normal to Verbatim"
+                );
+            }
+        }
+
+        #[test]
+        fn pass_style_suppresses_substitutions_on_normal() {
+            assert_eq!(
+                resolve(SubstitutionGroup::Normal, "pass"),
+                SubstitutionGroup::None
+            );
+        }
+
+        #[test]
+        fn non_masquerade_styles_keep_normal() {
+            // Styles whose content model is simple (or compound) keep the normal
+            // substitution group; e.g. `verse` uses normal subs even though its
+            // content model is verbatim.
+            for style in ["normal", "verse", "quote", "sidebar", "example"] {
+                assert_eq!(
+                    resolve(SubstitutionGroup::Normal, style),
+                    SubstitutionGroup::Normal,
+                    "style `{style}` should keep Normal"
+                );
+            }
+        }
+
+        #[test]
+        fn style_does_not_override_a_delimited_block_group() {
+            // A delimited block's delimiter fixes its substitution group; a style
+            // keyword must not override it (matching Asciidoctor). A `[pass]`
+            // style on a `----`/`....` verbatim block keeps verbatim subs, and a
+            // `[source]` style on a `++++` pass block keeps the pass group.
+            assert_eq!(
+                resolve(SubstitutionGroup::Verbatim, "pass"),
+                SubstitutionGroup::Verbatim
+            );
+
+            assert_eq!(
+                resolve(SubstitutionGroup::Pass, "source"),
+                SubstitutionGroup::Pass
+            );
+
+            assert_eq!(
+                resolve(SubstitutionGroup::Stem, "source"),
+                SubstitutionGroup::Stem
+            );
+        }
+
+        #[test]
+        fn subs_attribute_still_overrides() {
+            // An explicit `subs=` attribute overrides the group regardless of the
+            // block style, and takes precedence over the style masquerade.
+            assert_eq!(
+                resolve(SubstitutionGroup::Normal, "listing,subs=normal"),
+                SubstitutionGroup::Normal
+            );
+
+            assert_eq!(
+                resolve(SubstitutionGroup::Verbatim, "subs=none"),
+                SubstitutionGroup::None
             );
         }
     }

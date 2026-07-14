@@ -119,11 +119,10 @@ impl<'src> Span<'src> {
     fn one_line_with_continuation(self) -> Option<MatchedItem<'src, Self>> {
         let line = self.take_normalized_line();
 
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/666): The spec
-        // requires a *space* before the backslash for a soft-wrap line continuation.
-        // This accepts a bare trailing `\`, so `foo\` (no space) is wrongly folded
-        // instead of being kept literal (Asciidoctor keeps it literal).
-        if line.item.ends_with('\\') {
+        // A soft-wrap line continuation is a *space* immediately followed by a
+        // trailing backslash. A bare trailing backslash (no preceding space) is a
+        // literal character and does not continue the line (matching Asciidoctor).
+        if line.item.ends_with(" \\") {
             Some(line)
         } else {
             None
@@ -1339,7 +1338,7 @@ mod tests {
 
         #[test]
         fn multiple_continuations() {
-            let span = crate::Span::new("abc \\\ndef\\\nghi");
+            let span = crate::Span::new("abc \\\ndef \\\nghi");
             let line = span.take_line_with_continuation().unwrap();
 
             assert_eq!(
@@ -1348,14 +1347,44 @@ mod tests {
                     data: "",
                     line: 3,
                     col: 4,
-                    offset: 14
+                    offset: 15
                 }
             );
 
             assert_eq!(
                 line.item,
                 Span {
-                    data: "abc \\\ndef\\\nghi",
+                    data: "abc \\\ndef \\\nghi",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+        }
+
+        #[test]
+        fn bare_backslash_is_not_a_continuation() {
+            // A soft-wrap line continuation requires a *space* before the trailing
+            // backslash. A bare `\` (no preceding space) is a literal character and
+            // terminates the line; the next line is not folded in.
+            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/666.
+            let span = crate::Span::new("abc\\\ndef");
+            let line = span.take_line_with_continuation().unwrap();
+
+            assert_eq!(
+                line.after,
+                Span {
+                    data: "def",
+                    line: 2,
+                    col: 1,
+                    offset: 5
+                }
+            );
+
+            assert_eq!(
+                line.item,
+                Span {
+                    data: "abc\\",
                     line: 1,
                     col: 1,
                     offset: 0
