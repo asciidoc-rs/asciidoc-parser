@@ -118,6 +118,11 @@ impl<'src> Span<'src> {
 
     fn one_line_with_continuation(self) -> Option<MatchedItem<'src, Self>> {
         let line = self.take_normalized_line();
+
+        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/666): The spec
+        // requires a *space* before the backslash for a soft-wrap line continuation.
+        // This accepts a bare trailing `\`, so `foo\` (no space) is wrongly folded
+        // instead of being kept literal (Asciidoctor keeps it literal).
         if line.item.ends_with('\\') {
             Some(line)
         } else {
