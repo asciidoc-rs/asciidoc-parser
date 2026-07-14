@@ -680,15 +680,18 @@ impl Replacer for AttributeReplacer<'_> {
         // Otherwise this is a plain attribute reference (group 3).
         let attr_name = &caps[3];
 
-        if !self.parser.has_attribute(attr_name) {
-            // An escaped reference (e.g. `\{id}`) to an attribute that isn't set
-            // is left exactly as written and is never treated as a missing
-            // reference, so it neither drops the line nor warns.
-            if escaped {
-                dest.push_str(&caps[0]);
-                return;
-            }
+        // An escaped reference (e.g. `\{id}`) is emitted literally with the
+        // escaping backslash removed, whether or not the attribute is set. It is
+        // never treated as a missing reference, so it neither drops the line nor
+        // warns. This mirrors Asciidoctor, whose `sub_attributes` returns the
+        // match minus its leading backslash before any missing-attribute
+        // handling runs.
+        if escaped {
+            dest.push_str(&caps[0][1..]);
+            return;
+        }
 
+        if !self.parser.has_attribute(attr_name) {
             match self.mode {
                 AttributeMissing::Skip => dest.push_str(&caps[0]),
                 AttributeMissing::Drop => {
@@ -707,11 +710,6 @@ impl Replacer for AttributeReplacer<'_> {
                     );
                 }
             }
-            return;
-        }
-
-        if escaped {
-            dest.push_str(&caps[0][1..]);
             return;
         }
 
@@ -1522,14 +1520,17 @@ mod tests {
         }
 
         #[test]
-        fn ignore_escaped_non_match() {
+        fn escaped_reference_to_unset_attribute_drops_backslash() {
+            // `ah` is a valid attribute name but is unset. An escaped reference
+            // still has its backslash removed and is passed through literally,
+            // matching Asciidoctor (see issue #667).
             let mut content = Content::from(crate::Span::new("bl\\{ah}"));
             let p = Parser::default();
             SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
-                CowStr::Boxed("bl\\{ah}".to_string().into_boxed_str())
+                CowStr::Boxed("bl{ah}".to_string().into_boxed_str())
             );
         }
 
@@ -1718,11 +1719,15 @@ mod tests {
             }
 
             #[test]
-            fn escaped_missing_reference_is_left_verbatim_and_never_dropped() {
+            fn escaped_missing_reference_drops_the_backslash_and_never_drops_the_line() {
+                // An escaped reference has its backslash removed and is passed
+                // through literally; it is never treated as a missing reference,
+                // so even under `drop-line` the line survives and no warning is
+                // recorded.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(
                     render("In the path /items/\\{id}, x.", &p),
-                    "In the path /items/\\{id}, x."
+                    "In the path /items/{id}, x."
                 );
                 assert!(p.take_substitution_warnings().is_empty());
             }

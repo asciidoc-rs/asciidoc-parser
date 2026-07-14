@@ -417,7 +417,7 @@ In the path /items/\{id}, id is a path parameter.
     }
 
     #[test]
-    fn backslash_remains_if_no_such_attribute() {
+    fn backslash_remains_when_braces_do_not_hold_a_valid_attribute_name() {
         verifies!(
             r#"
 Keep in mind that the backslash will only be recognized if the text between the curly braces is a valid attribute name.
@@ -426,9 +426,15 @@ If the syntax that follows the backslash does not match an attribute reference, 
 "#
         );
 
+        // The braces here enclose spaces, which is not a valid attribute name,
+        // so this does not look like an attribute reference at all. The escaping
+        // backslash is therefore left in place, unlike an escaped *valid*
+        // reference such as `\{id}` (see `prefix_with_backslash`), whose
+        // backslash is always removed regardless of whether the attribute is
+        // set.
         let mut parser = Parser::default();
 
-        let doc = parser.parse("In the path /items/\\{id}, id is a path parameter.");
+        let doc = parser.parse("In the path /items/\\{not a name}, this is preserved.");
 
         assert_eq!(
             doc,
@@ -450,15 +456,15 @@ If the syntax that follows the backslash does not match an attribute reference, 
                 blocks: &[Block::Simple(SimpleBlock {
                     content: Content {
                         original: Span {
-                            data: "In the path /items/\\{id}, id is a path parameter.",
+                            data: "In the path /items/\\{not a name}, this is preserved.",
                             line: 1,
                             col: 1,
                             offset: 0,
                         },
-                        rendered: "In the path /items/\\{id}, id is a path parameter.",
+                        rendered: "In the path /items/\\{not a name}, this is preserved.",
                     },
                     source: Span {
-                        data: "In the path /items/\\{id}, id is a path parameter.",
+                        data: "In the path /items/\\{not a name}, this is preserved.",
                         line: 1,
                         col: 1,
                         offset: 0,
@@ -473,7 +479,7 @@ If the syntax that follows the backslash does not match an attribute reference, 
                     attrlist: None,
                 },),],
                 source: Span {
-                    data: "In the path /items/\\{id}, id is a path parameter.",
+                    data: "In the path /items/\\{not a name}, this is preserved.",
                     line: 1,
                     col: 1,
                     offset: 0,
