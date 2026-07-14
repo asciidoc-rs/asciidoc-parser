@@ -2111,11 +2111,11 @@ mod tests {
     fn attribute_substitution_with_multiline_attribute() {
         let source = ":longpath: very/long/path/to/some/ \\\nsubdirectory\n:ext: adoc\n\ninclude::{longpath}/file.{ext}[]";
 
-        // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/658): This should be
-        // "very/long/path/to/some/subdirectory/file.adoc" (without space) but the
-        // current Attribute::parse() incorrectly preserves the space before the
-        // backslash in multi-line attribute continuation. This is a bug that
-        // should be fixed.
+        // A soft-wrap line continuation folds the ` \` marker, the newline, and any
+        // ensuing indentation into a single space (see the `wrap_values` spec test).
+        // So `{longpath}` correctly resolves to "very/long/path/to/some/ subdirectory"
+        // *with* the space, matching Asciidoctor. The space is inherent to soft
+        // wrapping, not a stray artifact.
         let handler = InlineFileHandler::from_pairs([(
             "very/long/path/to/some/ subdirectory/file.adoc",
             "Multi-line attribute worked!",
