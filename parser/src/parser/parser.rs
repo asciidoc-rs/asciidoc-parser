@@ -675,10 +675,11 @@ impl Parser {
     /// identically under later permission checks.
     ///
     /// Writing the partner as an explicit tombstone (rather than deleting it,
-    /// as Asciidoctor does) is behaviorally equivalent here — `is_attribute_set`
-    /// treats an [unset] tombstone and an absent attribute alike, so
-    /// `ifdef`/`ifndef` agree with Asciidoctor — while additionally giving the
-    /// resolved document a concrete signal on both spellings.
+    /// as Asciidoctor does) is behaviorally equivalent here —
+    /// `is_attribute_set` treats an [unset] tombstone and an absent
+    /// attribute alike, so `ifdef`/`ifndef` agree with Asciidoctor — while
+    /// additionally giving the resolved document a concrete signal on both
+    /// spellings.
     ///
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     fn apply_title_visibility_linkage(
@@ -2217,10 +2218,7 @@ mod tests {
         fn header_showtitle_unset_sets_notitle() {
             // `:!showtitle:` => notitle set.
             let parser = parse_header(":!showtitle:");
-            assert_eq!(
-                parser.attribute_value("showtitle"),
-                InterpretedValue::Unset
-            );
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
             assert!(parser.is_attribute_set("notitle"));
         }
@@ -2230,10 +2228,7 @@ mod tests {
             // `:notitle:` => showtitle unset.
             let parser = parse_header(":notitle:");
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
-            assert_eq!(
-                parser.attribute_value("showtitle"),
-                InterpretedValue::Unset
-            );
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
             assert!(!parser.is_attribute_set("showtitle"));
         }
 
@@ -2257,10 +2252,7 @@ mod tests {
 
             let parser = parse_header(":showtitle:\n:notitle:");
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
-            assert_eq!(
-                parser.attribute_value("showtitle"),
-                InterpretedValue::Unset
-            );
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
         }
 
         #[test]
@@ -2270,10 +2262,7 @@ mod tests {
             let mut parser = Parser::default();
             parser.parse("= Title\n\nintro\n\n:notitle:\n\nmore");
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
-            assert_eq!(
-                parser.attribute_value("showtitle"),
-                InterpretedValue::Unset
-            );
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
         }
 
         #[test]
@@ -2286,10 +2275,7 @@ mod tests {
                 ModificationContext::Anywhere,
             );
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
-            assert_eq!(
-                parser.attribute_value("showtitle"),
-                InterpretedValue::Unset
-            );
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Unset);
 
             let parser = Parser::default().with_intrinsic_attribute_bool(
                 "notitle",
