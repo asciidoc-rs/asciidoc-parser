@@ -1676,13 +1676,12 @@ mod psv {
 
         assert_xpath(&doc, "//ul//table", 1);
 
+        // Exactly one warning is expected: the unterminated example block,
+        // attributed to line 9 (where `====` opens inside the cell).
         let warnings: Vec<_> = doc.warnings().collect();
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.warning == WarningType::UnterminatedDelimitedBlock
-                    && w.source.line() == 9)
-        );
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].warning, WarningType::UnterminatedDelimitedBlock);
+        assert_eq!(warnings[0].source.line(), 9);
     }
 
     #[test]
