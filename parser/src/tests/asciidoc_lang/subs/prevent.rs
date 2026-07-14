@@ -21,13 +21,9 @@ mod escape_with_backslashes {
 "#
     );
 
-    #[ignore]
     #[test]
     fn punctuation() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/667):
-        // Backslash-escaping of attribute references (`\{id}`) and special characters
-        // (`\&sect;`) isn't implemented yet, so this test can't work properly.
-        to_do_verifies!(
+        verifies!(
             r#"
 To prevent a punctuation character from being interpreted as an attribute reference or formatting syntax (e.g., `+_+`, `+^+`) in normal content, prepend the character with a backslash (`\`).
 
@@ -89,7 +85,7 @@ The URL \https://example.org isn't converted into an active link.
 
         assert_eq!(
             result,
-            "In /items/{id}, the id attribute isn&#8217;t replaced.\nThe curly braces around it are preserved.\n\n*Stars* isn&#8217;t displayed as bold text.\nThe asterisks around it are preserved.\n\n&sect; appears as an entity reference.\nIt&#8217;s not converted into the section symbol (&#167;).\n\n=&gt; The backslash prevents the equals sign followed by a greater than sign from combining to form a double arrow character (&#8658;).\n\n[[Word]] is not interpreted as an anchor.\nThe double brackets around it are preserved.\n\n[[[Word]]] is not interpreted as a bibliography anchor.\nThe triple brackets around it are preserved.\n\n((DD AND CC) OR (DD AND EE)) is not interpreted as a flow index term.\nThe double brackets around it are preserved.\n\nThe URL https://example.org isn&#8217;t converted into an active link.\n\n"
+            "In /items/{id}, the id attribute isn&#8217;t replaced.\nThe curly braces around it are preserved.\n\n*Stars* isn&#8217;t displayed as bold text.\nThe asterisks around it are preserved.\n\n&amp;sect; appears as an entity reference.\nIt&#8217;s not converted into the section symbol (&#167;).\n\n=&gt; The backslash prevents the equals sign followed by a greater\nthan sign from combining to form a double arrow character (&#8658;).\n\n[[Word]] is not interpreted as an anchor.\nThe double brackets around it are preserved.\n\n[[[Word]]] is not interpreted as a bibliography anchor.\nThe triple brackets around it are preserved.\n\n((DD AND CC) OR (DD AND EE)) is not interpreted as a flow index term.\nThe double brackets around it are preserved.\n\nThe URL https://example.org isn&#8217;t converted into an active link.\n\n"
         );
     }
 

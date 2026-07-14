@@ -964,12 +964,12 @@ mod tests {
         #[test]
         fn escaped_missing_reference_never_drops_the_block() {
             // An escaped reference is not a missing reference, so even under
-            // `drop-line` the block survives. (As elsewhere in the crate, the
-            // escaping backslash is preserved verbatim by the attribute
-            // substitution.)
+            // `drop-line` the block survives. As elsewhere in the crate, the
+            // escaping backslash is removed and the reference is passed through
+            // literally.
             let mut p = parser_with_mode("drop-line");
             let block = resolve("image::a\\{missing}b.png[]", &mut p).unwrap();
-            assert_eq!(block.resolved_target(), "a\\{missing}b.png");
+            assert_eq!(block.resolved_target(), "a{missing}b.png");
             assert!(p.take_substitution_warnings().is_empty());
         }
     }

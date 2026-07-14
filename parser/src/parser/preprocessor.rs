@@ -478,13 +478,17 @@ impl<'p> PreprocessorState<'p> {
             fn replace_append(&mut self, caps: &regex::Captures<'_>, dest: &mut String) {
                 let attr_name = &caps[1];
 
-                if !self.0.has_attribute(attr_name) {
-                    dest.push_str(&caps[0]);
+                // An escaped reference (e.g. `\{id}`) is emitted literally with
+                // the escaping backslash removed, whether or not the attribute
+                // is set. This mirrors the content-substitution path and
+                // Asciidoctor's `sub_attributes` (see issue #667).
+                if caps[0].starts_with('\\') {
+                    dest.push_str(&caps[0][1..]);
                     return;
                 }
 
-                if caps[0].starts_with('\\') {
-                    dest.push_str(&caps[0][1..]);
+                if !self.0.has_attribute(attr_name) {
+                    dest.push_str(&caps[0]);
                     return;
                 }
 
@@ -2034,6 +2038,30 @@ mod tests {
             source_map.original_file_and_line(3),
             Some(SourceLine(Some("main.adoc".to_owned()), 3))
         );
+    }
+
+    #[test]
+    fn escaped_attribute_reference_in_include_target_drops_backslash() {
+        // An escaped reference (`\{missing}`) has its backslash removed during
+        // preprocessing even when the attribute is unset, so the include target
+        // resolves against the literal `{missing}` form rather than retaining
+        // the backslash. This matches the content-substitution path and
+        // Asciidoctor (see issue #667).
+        let source = "include::pre\\{missing}post.adoc[]";
+
+        let handler = InlineFileHandler::from_pairs([(
+            "pre{missing}post.adoc",
+            "Included via escaped literal target.",
+        )]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Included via escaped literal target.\n");
     }
 
     #[test]
