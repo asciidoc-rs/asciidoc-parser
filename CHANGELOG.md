@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.23.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.22.1...v0.23.0)
+_14 July 2026_
+
+### Added
+
+* Honor cell-level alignment in table header row ([#654](https://github.com/asciidoc-rs/asciidoc-parser/pull/654)) ([#685](https://github.com/asciidoc-rs/asciidoc-parser/pull/685))
+* Implement remaining style-specific substitution groups ([#682](https://github.com/asciidoc-rs/asciidoc-parser/pull/682))
+* Link notitle and showtitle as inverse title-visibility toggles ([#677](https://github.com/asciidoc-rs/asciidoc-parser/pull/677)) ([#678](https://github.com/asciidoc-rs/asciidoc-parser/pull/678))
+* Port system-path root handling in PathResolver::partition_path ([#653](https://github.com/asciidoc-rs/asciidoc-parser/pull/653)) ([#674](https://github.com/asciidoc-rs/asciidoc-parser/pull/674))
+
+### Documented
+
+* Clarify multi-line attribute soft-wrap folding is spec-correct ([#658](https://github.com/asciidoc-rs/asciidoc-parser/pull/658)) ([#671](https://github.com/asciidoc-rs/asciidoc-parser/pull/671))
+
+### Fixed
+
+* Attach block metadata separated from its block by a blank line ([#664](https://github.com/asciidoc-rs/asciidoc-parser/pull/664)) ([#686](https://github.com/asciidoc-rs/asciidoc-parser/pull/686))
+* Treat a bare trailing backslash as literal, not a line continuation ([#666](https://github.com/asciidoc-rs/asciidoc-parser/pull/666)) ([#684](https://github.com/asciidoc-rs/asciidoc-parser/pull/684))
+* Drop backslash when escaping an attribute reference ([#667](https://github.com/asciidoc-rs/asciidoc-parser/pull/667)) ([#676](https://github.com/asciidoc-rs/asciidoc-parser/pull/676))
+* Expand mid-list subs group name in place and de-dup ([#673](https://github.com/asciidoc-rs/asciidoc-parser/pull/673))
+
+### Other
+
+* Verify section numbering on/off for sectnums unset in body ([#328](https://github.com/asciidoc-rs/asciidoc-parser/pull/328)) ([#668](https://github.com/asciidoc-rs/asciidoc-parser/pull/668))
+* Remove stale section source blank-line TO DO ([#655](https://github.com/asciidoc-rs/asciidoc-parser/pull/655)) ([#665](https://github.com/asciidoc-rs/asciidoc-parser/pull/665))
+
 ## [0.22.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.22.0...v0.22.1)
 _13 July 2026_
 
