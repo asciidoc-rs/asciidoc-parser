@@ -25,10 +25,15 @@ pub struct PathResolver {
     /// File separator to use for path operations. (Defaults to
     /// platform-appropriate separator.)
     pub file_separator: char,
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653): Ruby's
-    // `PathResolver` also carries a `working_dir`, but it is only consumed by
-    // `system_path` / `relative_path`, neither of which is ported yet. Add this
-    // field when the first consumer lands rather than as an unused field now.
+    // Ruby's `PathResolver` also carries a `working_dir`, but it is read only by
+    // `system_path` — the filesystem-resolution + safe-mode-jail routine — as a
+    // fallback base directory, and Ruby always seeds it from `Dir.pwd`. This
+    // crate performs no filesystem I/O: `include::` and asset resolution are
+    // delegated to the client via `IncludeFileHandler`, so there is no consumer
+    // for `working_dir`, and a `Dir.pwd`-derived base would contradict this
+    // type's deterministic, OS-independent design. Intentionally not ported; if
+    // a built-in filesystem handler ever ports `system_path`, prefer an explicit
+    // caller-supplied base over an implicit working directory.
 }
 
 impl Default for PathResolver {
