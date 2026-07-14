@@ -1664,12 +1664,10 @@ mod psv {
     }
 
     #[test]
-    #[ignore]
-    // TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/542): an
-    // unterminated example block inside an AsciiDoc table cell that is itself
+    // An unterminated example block inside an AsciiDoc table cell that is itself
     // attached to a list item — Asciidoctor reports the warning at the inner
-    // block's line (9). Enable once the cursor/line of nested-cell warnings is
-    // tracked (same nested-cell source-map work as #542).
+    // block's line (9). The cursor/line of nested-cell warnings is tracked via
+    // the nested-cell source-map work landed for #542.
     fn should_show_correct_line_number_in_warning_about_unterminated_block_inside_asciidoc_table_cell()
      {
         let doc = Parser::default().parse(
@@ -1678,13 +1676,12 @@ mod psv {
 
         assert_xpath(&doc, "//ul//table", 1);
 
+        // Exactly one warning is expected: the unterminated example block,
+        // attributed to line 9 (where `====` opens inside the cell).
         let warnings: Vec<_> = doc.warnings().collect();
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.warning == WarningType::UnterminatedDelimitedBlock
-                    && w.source.line() == 9)
-        );
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].warning, WarningType::UnterminatedDelimitedBlock);
+        assert_eq!(warnings[0].source.line(), 9);
     }
 
     #[test]
