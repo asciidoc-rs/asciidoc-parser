@@ -25,8 +25,10 @@ pub struct PathResolver {
     /// File separator to use for path operations. (Defaults to
     /// platform-appropriate separator.)
     pub file_separator: char,
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653): Port this from Ruby?
-    // attr_accessor :working_dir
+    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653): Ruby's
+    // `PathResolver` also carries a `working_dir`, but it is only consumed by
+    // `system_path` / `relative_path`, neither of which is ported yet. Add this
+    // field when the first consumer lands rather than as an unused field now.
 }
 
 impl Default for PathResolver {
@@ -122,8 +124,11 @@ impl PathResolver {
     /// an optional path root (e.g., `/`, `./`, `c:/`, or `//`), which is only
     /// present if the path is absolute.
     fn partition_path(&self, path: &str, web: WebPath) -> (Vec<String>, Option<String>) {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653): Add cache implementation?
-
+        // Ruby memoizes partition results per (path, web) in a hash. That cache
+        // exists to avoid Ruby's comparatively expensive string work; here the
+        // partitioning is cheap and the resolver takes `&self`, so caching would
+        // require interior mutability that the derived `Clone`/`Eq` would then
+        // have to skip. Deliberately not ported.
         let posix_path = self.posixify(path);
 
         let root: Option<String> = if web.0 {
@@ -134,32 +139,29 @@ impl PathResolver {
             } else {
                 None
             }
+        } else if self.is_root(&posix_path) {
+            if self.is_unc(&posix_path) {
+                // ex. //sample/path
+                Some(DOUBLE_SLASH.to_owned())
+            } else if posix_path.starts_with('/') {
+                // ex. /sample/path
+                Some("/".to_owned())
+            } else if posix_path.starts_with(URI_CLASSLOADER) {
+                // ex. uri:classloader:sample/path (or uri:classloader:/sample/path)
+                Some(URI_CLASSLOADER.to_owned())
+            } else {
+                // ex. C:/sample/path (or file:///sample/path in browser
+                // environment). The root is everything up to and including the
+                // first slash. `is_root` guarantees a slash for the drive-letter
+                // case, so `None` here is unreachable in practice.
+                posix_path.find('/').map(|slash| posix_path[..=slash].to_owned())
+            }
+        } else if posix_path.starts_with("./") {
+            // ex. ./sample/path
+            Some("./".to_owned())
         } else {
-            // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653):
-            todo!(
-                "Port this: {}",
-                r#"
-				elsif root? posix_path
-				  # ex. //sample/path
-				  if unc? posix_path
-					root = DOUBLE_SLASH
-				  # ex. /sample/path
-				  elsif posix_path.start_with? SLASH
-					root = SLASH
-				  # ex. uri:classloader:sample/path (or uri:classloader:/sample/path)
-				  elsif posix_path.start_with? URI_CLASSLOADER
-					root = posix_path.slice 0, URI_CLASSLOADER.length
-				  # ex. C:/sample/path (or file:///sample/path in browser environment)
-				  else
-					root = posix_path.slice 0, (posix_path.index SLASH) + 1
-				  end
-				# ex. ./sample/path
-				elsif posix_path.start_with? DOT_SLASH
-				  root = DOT_SLASH
-				end
-				# otherwise ex. sample/path
-                "#
-            );
+            // otherwise ex. sample/path
+            None
         };
 
         let path_after_root = if let Some(root) = &root {
@@ -173,8 +175,6 @@ impl PathResolver {
             .filter(|s| *s != ".")
             .map(|s| s.to_owned())
             .collect();
-
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/653): Add cache write?
 
         (path_segments, root)
     }
@@ -195,6 +195,24 @@ impl PathResolver {
     /// with a `'/'`.
     pub fn is_web_root(&self, path: &str) -> bool {
         path.starts_with('/')
+    }
+
+    /// Return `true` if the path is an absolute (rooted) system path. A path is
+    /// absolute if it starts with `'/'` or, on a Windows-style resolver, if it
+    /// starts with a drive letter or slash root (e.g. `C:/` or `\`).
+    fn is_absolute_path(&self, path: &str) -> bool {
+        path.starts_with('/') || (self.file_separator == '\\' && WINDOWS_ROOT.is_match(path))
+    }
+
+    /// Return `true` if the path has a root, meaning it is either an absolute
+    /// path or a `uri:classloader:` path.
+    fn is_root(&self, path: &str) -> bool {
+        self.is_absolute_path(path) || path.starts_with(URI_CLASSLOADER)
+    }
+
+    /// Return `true` if the path is a UNC path (i.e. starts with `'//'`).
+    fn is_unc(&self, path: &str) -> bool {
+        path.starts_with(DOUBLE_SLASH)
     }
 }
 
@@ -240,6 +258,21 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
     "#,
     )
     .unwrap()
+});
+
+/// Path root marker for a UNC path (e.g. `//sample/path`).
+const DOUBLE_SLASH: &str = "//";
+
+/// Path root marker for a JRuby classloader URI (e.g.
+/// `uri:classloader:/sample/path`).
+const URI_CLASSLOADER: &str = "uri:classloader:";
+
+/// Matches the root of a Windows-style path: an optional drive letter followed
+/// by a leading slash (either separator). Mirrors Ruby Asciidoctor's
+/// `WindowsRootRx`.
+static WINDOWS_ROOT: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"^(?:[a-zA-Z]:)?[\\/]").unwrap()
 });
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -457,5 +490,115 @@ mod tests {
         assert!(pr.is_web_root("/blah"));
         assert!(!pr.is_web_root(""));
         assert!(!pr.is_web_root("./blah"));
+    }
+
+    mod partition_path {
+        use super::super::WebPath;
+        use crate::parser::PathResolver;
+
+        fn seg(items: &[&str]) -> Vec<String> {
+            items.iter().map(|s| (*s).to_owned()).collect()
+        }
+
+        #[test]
+        fn relative_system_path() {
+            let pr = PathResolver::default();
+            assert_eq!(
+                pr.partition_path("sample/path", WebPath(false)),
+                (seg(&["sample", "path"]), None)
+            );
+        }
+
+        #[test]
+        fn dot_slash_system_path() {
+            let pr = PathResolver::default();
+            assert_eq!(
+                pr.partition_path("./sample/path", WebPath(false)),
+                (seg(&["sample", "path"]), Some("./".to_owned()))
+            );
+        }
+
+        #[test]
+        fn self_references_are_removed() {
+            let pr = PathResolver::default();
+            assert_eq!(
+                pr.partition_path("sample/./path", WebPath(false)),
+                (seg(&["sample", "path"]), None)
+            );
+        }
+
+        #[test]
+        fn absolute_system_path() {
+            let pr = PathResolver::default();
+            assert_eq!(
+                pr.partition_path("/sample/path", WebPath(false)),
+                (seg(&["sample", "path"]), Some("/".to_owned()))
+            );
+        }
+
+        #[test]
+        fn unc_path() {
+            let pr = PathResolver::default();
+            assert_eq!(
+                pr.partition_path("//server/share/path", WebPath(false)),
+                (seg(&["server", "share", "path"]), Some("//".to_owned()))
+            );
+        }
+
+        #[test]
+        fn uri_classloader_rooted() {
+            let pr = PathResolver::default();
+            assert_eq!(
+                pr.partition_path("uri:classloader:/sample/path", WebPath(false)),
+                (
+                    seg(&["", "sample", "path"]),
+                    Some("uri:classloader:".to_owned())
+                )
+            );
+        }
+
+        #[test]
+        fn uri_classloader_relative() {
+            let pr = PathResolver::default();
+            assert_eq!(
+                pr.partition_path("uri:classloader:sample/path", WebPath(false)),
+                (seg(&["sample", "path"]), Some("uri:classloader:".to_owned()))
+            );
+        }
+
+        #[test]
+        fn windows_drive_letter() {
+            let pr = PathResolver {
+                file_separator: '\\',
+            };
+
+            assert_eq!(
+                pr.partition_path("C:\\sample\\path", WebPath(false)),
+                (seg(&["sample", "path"]), Some("C:/".to_owned()))
+            );
+        }
+
+        #[test]
+        fn windows_drive_letter_forward_slashes() {
+            let pr = PathResolver {
+                file_separator: '\\',
+            };
+
+            assert_eq!(
+                pr.partition_path("C:/sample/path", WebPath(false)),
+                (seg(&["sample", "path"]), Some("C:/".to_owned()))
+            );
+        }
+
+        #[test]
+        fn drive_letter_is_relative_on_posix_resolver() {
+            // Without a Windows-style separator, a drive-letter prefix is not
+            // treated as a root.
+            let pr = PathResolver::default();
+            assert_eq!(
+                pr.partition_path("C:/sample/path", WebPath(false)),
+                (seg(&["C:", "sample", "path"]), None)
+            );
+        }
     }
 }
