@@ -29,6 +29,12 @@ _14 July 2026_
 * Expand mid-list subs group name in place and de-dup ([#673](https://github.com/asciidoc-rs/asciidoc-parser/pull/673))
 * Verify section numbering on/off for sectnums unset in body ([#328](https://github.com/asciidoc-rs/asciidoc-parser/pull/328)) ([#668](https://github.com/asciidoc-rs/asciidoc-parser/pull/668))
 
+### Breaking changes
+
+Linking `notitle` and `showtitle` ([#678](https://github.com/asciidoc-rs/asciidoc-parser/pull/678)) also added a `Copy` derive to the public `ModificationContext` enum. `cargo-semver-checks` classifies any newly added `Copy` impl as technically breaking, which is why this is a minor (`0.x.0`) release. Almost no downstream code needs to change:
+
+* `ModificationContext` — the field-less enum passed to `Parser::with_intrinsic_attribute()` and its variants — now derives `Copy` in addition to `Clone`. Constructing it, passing it to those builder methods, and matching on it all continue to work unchanged. The lint fires only because a `Copy` value is captured by reference (rather than moved) in a **non-`move`** closure ([rust-lang/rust#100905](https://github.com/rust-lang/rust/issues/100905)); the sole way to be affected is code that relied on such a closure *moving* the value to end the original binding's lifetime. If you hit a borrow-checker error along those lines, add `move` to the closure so it captures its own copy. No signature, variant, or field changed.
+
 ## [0.22.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.22.0...v0.22.1)
 _13 July 2026_
 
