@@ -2487,6 +2487,27 @@ mod special {
         }
     }
 
+    // Ported from Ruby Asciidoctor's paragraphs_test.rb ('Styled Paragraphs' >
+    // 'should convert open paragraph to open block'). An `[open]` styled
+    // paragraph renders as an open block whose inline content sits directly in
+    // the content wrapper, with no wrapping `<p>`.
+    #[test]
+    fn should_convert_open_paragraph_to_open_block() {
+        let doc = Parser::default().parse("[open]\nMake it what you want.");
+        assert_css(&doc, ".openblock", 1);
+        assert_css(&doc, ".openblock p", 0);
+
+        // The inline content sits directly in the `div.content` wrapper (no
+        // wrapping `<p>`), so assert the wrapper structure and that the text
+        // lives inside it — not merely somewhere in the rendered tree.
+        assert_css(&doc, "div.openblock > div.content", 1);
+        assert_xpath(
+            &doc,
+            "//div[@class = \"openblock\"]/div[@class = \"content\"][contains(text(), \"Make it what you want.\")]",
+            1,
+        );
+    }
+
     // Ported from Ruby Asciidoctor's paragraphs_test.rb ('note inline syntax').
     // The inline label form (e.g. `NOTE: ...`) renders as an admonition block.
     #[test]
@@ -2657,15 +2678,17 @@ fn port_from_ruby() {
     # been ported to `mod special` below now that conditional preprocessor
     # directives are implemented.
 
+    # NOTE: '[open]' styled paragraph -> open block (#679) has been ported to
+    # `mod special` below.
+
     # NOTE: 'context Custom' (unknown/custom paragraph style handling, #681)
     # has been ported to `mod custom` below.
 
     # NOTE: the 'Inline doctype' tests (#680) have been ported to
     # `mod special::inline_doctype` below.
 
-    # NOTE: the remaining un-ported tests below are tracked by a dedicated
-    # issue: '[open]' styled paragraph -> open block (#679). The DocBook
-    # 'simpara' styled-paragraph tests are out of scope (no DocBook backend).
+    # NOTE: the remaining DocBook 'simpara' styled-paragraph tests below are out
+    # of scope (no DocBook backend).
 
     context 'Styled Paragraphs' do
       test 'should wrap text in simpara for styled paragraphs when converted to DocBook' do
@@ -2708,16 +2731,8 @@ fn port_from_ruby() {
         assert_css 'chapter > simpara', output, 1
       end
 
-      test 'should convert open paragraph to open block' do
-        input = <<~'EOS'
-        [open]
-        Make it what you want.
-        EOS
-
-        output = convert_string_to_embedded input
-        assert_css '.openblock', output, 1
-        assert_css '.openblock p', output, 0
-      end
+      # NOTE: 'should convert open paragraph to open block' has been ported to
+      # `mod special` below.
 
       test 'should wrap text in simpara for styled paragraphs with title when converted to DocBook' do
         input = <<~'EOS'
