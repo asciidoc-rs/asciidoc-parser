@@ -2496,7 +2496,16 @@ mod special {
         let doc = Parser::default().parse("[open]\nMake it what you want.");
         assert_css(&doc, ".openblock", 1);
         assert_css(&doc, ".openblock p", 0);
-        assert_rendered_contains(&doc, "Make it what you want.");
+
+        // The inline content sits directly in the `div.content` wrapper (no
+        // wrapping `<p>`), so assert the wrapper structure and that the text
+        // lives inside it — not merely somewhere in the rendered tree.
+        assert_css(&doc, "div.openblock > div.content", 1);
+        assert_xpath(
+            &doc,
+            "//div[@class = \"openblock\"]/div[@class = \"content\"][contains(text(), \"Make it what you want.\")]",
+            1,
+        );
     }
 
     // Ported from Ruby Asciidoctor's paragraphs_test.rb ('note inline syntax').
