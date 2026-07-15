@@ -64,7 +64,15 @@ impl ResolvedAttributes {
             return InterpretedValue::Value(value.clone());
         }
 
-        match self.effective_attribute_for_read(name) {
+        // An unset `relfilesuffix` reads as the *effective* value of
+        // `outfilesuffix` — routed through this same reader so an
+        // `outfilesuffix` counter overlay is honored too (see
+        // [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
+        if self.tracks_outfilesuffix(name) {
+            return self.attribute_value("outfilesuffix");
+        }
+
+        match self.effective_attribute(name) {
             Some(av) => {
                 if let InterpretedValue::Set = av.value
                     && let Some(default) = self.default_attribute_values.get(name)
@@ -93,19 +101,16 @@ impl ResolvedAttributes {
         synthesized_attr(name, &self.attribute_values)
     }
 
-    /// Like [`effective_attribute`](Self::effective_attribute), but
-    /// additionally resolves the read-only default of `relfilesuffix`: when
-    /// it has not been explicitly set, it tracks the current value of
-    /// `outfilesuffix`. Mirrors [`Parser::effective_attribute_for_read`],
-    /// so a lookup here returns the same value the parser would report
-    /// after `parse`.
+    /// Reports whether `name` is `relfilesuffix` in its unset state, in which
+    /// case a *read* resolves it to the current value of `outfilesuffix`.
+    /// Mirrors [`Parser::tracks_outfilesuffix`], so a lookup here returns the
+    /// same value the parser would report after `parse`. Callers apply a
+    /// like-named counter overlay first, so a `{counter:relfilesuffix}` still
+    /// wins over the tracked default.
     ///
-    /// [`Parser::effective_attribute_for_read`]: crate::Parser::effective_attribute_for_read
-    fn effective_attribute_for_read(&self, name: &str) -> Option<&AttributeValue> {
-        if name == "relfilesuffix" && !self.attribute_values.contains_key(name) {
-            return self.effective_attribute("outfilesuffix");
-        }
-        self.effective_attribute(name)
+    /// [`Parser::tracks_outfilesuffix`]: crate::Parser::tracks_outfilesuffix
+    fn tracks_outfilesuffix(&self, name: &str) -> bool {
+        name == "relfilesuffix" && !self.attribute_values.contains_key(name)
     }
 
     /// Returns `true` if the named document attribute is present (whether or
@@ -114,7 +119,13 @@ impl ResolvedAttributes {
     /// Mirrors [`Parser::has_attribute`](crate::Parser::has_attribute).
     pub(crate) fn has_attribute<N: AsRef<str>>(&self, name: N) -> bool {
         let name = name.as_ref();
-        self.counter_values.contains_key(name) || self.effective_attribute_for_read(name).is_some()
+        if self.counter_values.contains_key(name) {
+            return true;
+        }
+        if self.tracks_outfilesuffix(name) {
+            return self.has_attribute("outfilesuffix");
+        }
+        self.effective_attribute(name).is_some()
     }
 
     /// Returns `true` if the named document attribute is present and set (i.e.
@@ -131,7 +142,11 @@ impl ResolvedAttributes {
             return true;
         }
 
-        self.effective_attribute_for_read(name)
+        if self.tracks_outfilesuffix(name) {
+            return self.is_attribute_set("outfilesuffix");
+        }
+
+        self.effective_attribute(name)
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or(false)
     }

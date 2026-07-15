@@ -467,7 +467,15 @@ impl Parser {
             return InterpretedValue::Value(value.clone());
         }
 
-        match self.effective_attribute_for_read(name) {
+        // An unset `relfilesuffix` reads as the *effective* value of
+        // `outfilesuffix` — routed through this same reader so an
+        // `outfilesuffix` counter overlay is honored too (see
+        // [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
+        if self.tracks_outfilesuffix(name) {
+            return self.attribute_value("outfilesuffix");
+        }
+
+        match self.effective_attribute(name) {
             Some(av) => {
                 if let InterpretedValue::Set = av.value
                     && let Some(default) = self.default_attribute_values.get(name)
@@ -489,9 +497,9 @@ impl Parser {
     /// materialized in either table.
     ///
     /// This is the *raw* lookup used by the attribute writers to decide whether
-    /// a name is locked against modification. The attribute *readers* use
-    /// [`effective_attribute_for_read`](Self::effective_attribute_for_read),
-    /// which additionally resolves the read-only default of `relfilesuffix`.
+    /// a name is locked against modification. The attribute *readers* additionally
+    /// resolve the read-only default of `relfilesuffix` (see
+    /// [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
     ///
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     pub(crate) fn effective_attribute(&self, name: &str) -> Option<&AttributeValue> {
@@ -504,21 +512,24 @@ impl Parser {
         synthesized_attr(name, &self.attribute_values)
     }
 
-    /// Like [`effective_attribute`](Self::effective_attribute), but
-    /// additionally resolves the read-only default of `relfilesuffix`: when
-    /// it has not been explicitly set, it tracks the current value of
-    /// `outfilesuffix` (the two diverge for non-HTML backends, e.g. `.xml`
-    /// for DocBook). See [issue #657](https://github.com/asciidoc-rs/asciidoc-parser/issues/657).
+    /// Reports whether `name` is `relfilesuffix` in its unset state, in which
+    /// case a *read* resolves it to the current value of `outfilesuffix` (the
+    /// two diverge for non-HTML backends, e.g. `.xml` for DocBook — see
+    /// [issue #657](https://github.com/asciidoc-rs/asciidoc-parser/issues/657)).
     ///
-    /// Only the value *readers* use this. The attribute *writers* deliberately
-    /// consult [`effective_attribute`](Self::effective_attribute) instead, so
+    /// Returns `false` once `relfilesuffix` is explicitly set or unset (an entry
+    /// — a value or an [unset] tombstone — then lives in the per-parser map),
+    /// and for every other name. The redirect is deliberately confined to the
+    /// value *readers*: the attribute *writers* consult
+    /// [`effective_attribute`](Self::effective_attribute) directly, so
     /// `relfilesuffix` stays modifiable anywhere rather than inheriting the
-    /// header-only modification context of `outfilesuffix`.
-    pub(crate) fn effective_attribute_for_read(&self, name: &str) -> Option<&AttributeValue> {
-        if name == "relfilesuffix" && !self.attribute_values.contains_key(name) {
-            return self.effective_attribute("outfilesuffix");
-        }
-        self.effective_attribute(name)
+    /// header-only modification context of `outfilesuffix`. Callers must apply a
+    /// like-named counter overlay first, so a `{counter:relfilesuffix}` still
+    /// wins over the tracked default.
+    ///
+    /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
+    pub(crate) fn tracks_outfilesuffix(&self, name: &str) -> bool {
+        name == "relfilesuffix" && !self.attribute_values.contains_key(name)
     }
 
     /// Returns `true` if the parser has a [document attribute] by this name.
@@ -526,8 +537,13 @@ impl Parser {
     /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     pub fn has_attribute<N: AsRef<str>>(&self, name: N) -> bool {
         let name = name.as_ref();
-        self.counter_values.borrow().contains_key(name)
-            || self.effective_attribute_for_read(name).is_some()
+        if self.counter_values.borrow().contains_key(name) {
+            return true;
+        }
+        if self.tracks_outfilesuffix(name) {
+            return self.has_attribute("outfilesuffix");
+        }
+        self.effective_attribute(name).is_some()
     }
 
     /// Returns `true` if the parser has a [document attribute] by this name
@@ -543,7 +559,11 @@ impl Parser {
             return true;
         }
 
-        self.effective_attribute_for_read(name)
+        if self.tracks_outfilesuffix(name) {
+            return self.is_attribute_set("outfilesuffix");
+        }
+
+        self.effective_attribute(name)
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or(false)
     }

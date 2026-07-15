@@ -1333,12 +1333,15 @@ A non-empty value replaces the `family` query string parameter in the Google Fon
 /// <https://github.com/asciidoc-rs/asciidoc-parser/issues/657>.
 #[test]
 fn relfilesuffix_tracks_outfilesuffix() {
-    // On a pristine parser `relfilesuffix` reports the `outfilesuffix` default.
+    // On a pristine parser `relfilesuffix` reports the `outfilesuffix` default,
+    // and reads as present and set (like the header-only `outfilesuffix` it
+    // tracks) even though it is not stored.
     let parser = Parser::default();
     assert_eq!(
         parser.attribute_value("relfilesuffix").as_maybe_str(),
         Some(".html")
     );
+    assert!(parser.has_attribute("relfilesuffix"));
     assert!(parser.is_attribute_set("relfilesuffix"));
 
     // Changing `outfilesuffix` (here, to a DocBook-style suffix) moves
@@ -1372,6 +1375,56 @@ fn relfilesuffix_tracks_outfilesuffix() {
         Some(".adoc")
     );
     assert_eq!(doc.warnings().count(), 0);
+}
+
+/// The read-only default resolves the *effective* value of `outfilesuffix`,
+/// including a counter overlay: a counter takes precedence over a like-named
+/// attribute, so a `{counter:outfilesuffix}` must move `relfilesuffix` with it
+/// rather than leaving it reading the underlying attribute. Regression test for
+/// the counter-overlay gap in the issue #657 fix.
+#[test]
+fn relfilesuffix_tracks_outfilesuffix_counter_overlay() {
+    let mut parser = Parser::default();
+    parser.parse("= Title\n\nSuffix is {counter:outfilesuffix}.\n");
+
+    // Resolving the counter overlays `outfilesuffix`: the counter increments its
+    // last character, so `.html` becomes `.htmm`. An unset `relfilesuffix` must
+    // read that overlaid value, not the raw `.html` attribute underneath it.
+    let outfilesuffix = parser.attribute_value("outfilesuffix");
+    assert_eq!(outfilesuffix.as_maybe_str(), Some(".htmm"));
+    assert_eq!(parser.attribute_value("relfilesuffix"), outfilesuffix);
+}
+
+/// The same tracking applies to a parsed [`Document`]'s attribute snapshot
+/// (`ResolvedAttributes`), which mirrors the parser: querying `relfilesuffix`
+/// on the document reports the `outfilesuffix` in effect at the end of parsing.
+///
+/// [`Document`]: crate::Document
+#[test]
+fn relfilesuffix_tracks_outfilesuffix_on_document() {
+    // Default backend: the snapshot reports the `.html` default, present/set.
+    let doc = Parser::default().parse("= Title\n\nBody.\n");
+    assert_eq!(
+        doc.attribute_value("relfilesuffix").as_maybe_str(),
+        Some(".html")
+    );
+    assert!(doc.has_attribute("relfilesuffix"));
+    assert!(doc.is_attribute_set("relfilesuffix"));
+
+    // A header-set `outfilesuffix` carries into the snapshot's `relfilesuffix`.
+    let doc = Parser::default().parse("= Title\n:outfilesuffix: .xml\n\nBody.\n");
+    assert_eq!(
+        doc.attribute_value("relfilesuffix").as_maybe_str(),
+        Some(".xml")
+    );
+
+    // An explicit `relfilesuffix` in the document wins in the snapshot too.
+    let doc =
+        Parser::default().parse("= Title\n:outfilesuffix: .xml\n:relfilesuffix: .adoc\n\nBody.\n");
+    assert_eq!(
+        doc.attribute_value("relfilesuffix").as_maybe_str(),
+        Some(".adoc")
+    );
 }
 
 #[test]
