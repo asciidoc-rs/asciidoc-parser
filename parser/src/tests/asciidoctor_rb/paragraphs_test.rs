@@ -2614,6 +2614,12 @@ mod special {
         // candidate has no inline content, so the parse-time warning and the
         // (empty) rendered output stay in agreement — the preamble never masks a
         // silently-dropped candidate.
+        //
+        // This matches Asciidoctor 2.0.26 exactly: `= Title\n\nfirst
+        // paragraph\n\n== Section` under `-d inline` logs `no inline candidate`
+        // and emits nothing (the preamble is `@blocks[0]`, and its content model
+        // is compound). Rendering the inner paragraph instead would diverge from
+        // Asciidoctor.
         #[test]
         fn preamble_is_a_compound_candidate() {
             let doc = Parser::default()
@@ -2626,6 +2632,23 @@ mod special {
 
             refute_rendered_contains(&doc, "first paragraph");
             refute_rendered_contains(&doc, "body");
+        }
+
+        // A title with a paragraph but *no* section creates no preamble (this
+        // crate, like Asciidoctor, only wraps a preamble when a section follows),
+        // so the paragraph is itself the first block and is rendered as inline
+        // content with no warning. Asciidoctor 2.0.26 emits `first paragraph`
+        // for `= Title\n\nfirst paragraph` under `-d inline`. This is the
+        // boundary that distinguishes the candidate from the compound-preamble
+        // case above.
+        #[test]
+        fn titled_paragraph_without_section_is_rendered() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("= Title\n\nfirst paragraph");
+
+            assert!(doc.warnings().next().is_none());
+            assert_rendered_contains(&doc, "first paragraph");
         }
     }
 }
