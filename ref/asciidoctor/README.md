@@ -16,5 +16,7 @@ building toward covering the suite in full.
 were hand-ported into `parser/src/tests/asciidoctor_rb/` before this
 line-by-line approach; those will be migrated to it over time.)
 
+The vendored files are unmodified copies of their upstream originals, taken from
+Asciidoctor **v2.0.26**.
+
 Asciidoctor is distributed under the MIT License; see [`LICENSE`](LICENSE).
-The vendored files are unmodified copies of their upstream originals.
