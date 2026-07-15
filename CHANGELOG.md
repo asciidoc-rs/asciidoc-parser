@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.23.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.23.0...v0.23.1)
+_15 July 2026_
+
+### Added
+
+* Render document-level `doctype: inline` ([#680](https://github.com/asciidoc-rs/asciidoc-parser/pull/680)) ([#690](https://github.com/asciidoc-rs/asciidoc-parser/pull/690))
+* Render [open] styled paragraph as an open block ([#679](https://github.com/asciidoc-rs/asciidoc-parser/pull/679)) ([#688](https://github.com/asciidoc-rs/asciidoc-parser/pull/688))
+* Handle unknown/custom paragraph styles ([#681](https://github.com/asciidoc-rs/asciidoc-parser/pull/681)) ([#687](https://github.com/asciidoc-rs/asciidoc-parser/pull/687))
+
+### Fixed
+
+* Default `relfilesuffix` to `outfilesuffix` instead of hardcoded `.html` ([#657](https://github.com/asciidoc-rs/asciidoc-parser/pull/657)) ([#689](https://github.com/asciidoc-rs/asciidoc-parser/pull/689))
+
+### Other
+
+* Mark multiple level-0 heading support as out of scope ([#380](https://github.com/asciidoc-rs/asciidoc-parser/pull/380)) ([#692](https://github.com/asciidoc-rs/asciidoc-parser/pull/692))
+
 ## [0.23.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.22.1...v0.23.0)
 _14 July 2026_
 
