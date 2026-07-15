@@ -2559,6 +2559,53 @@ mod special {
             // Nothing is rendered (the list is not an inline candidate).
             refute_rendered_contains(&doc, "bullet");
         }
+
+        // A leading `[comment]`-styled paragraph produces no output, so it is
+        // transparent: the inline candidate is the first *following* block, and
+        // the comment text is never emitted.
+        #[test]
+        fn should_skip_leading_comment_styled_paragraph() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("[comment]\nthis is a comment\n\nvisible text");
+
+            assert!(doc.warnings().next().is_none());
+            assert_rendered_contains(&doc, "visible text");
+            refute_rendered_contains(&doc, "this is a comment");
+        }
+
+        // A leading `////` comment block is likewise transparent: its raw
+        // content is never emitted, and the following paragraph is the
+        // candidate.
+        #[test]
+        fn should_skip_leading_comment_block() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("////\nhidden comment\n////\n\nvisible text");
+
+            assert!(doc.warnings().next().is_none());
+            assert_rendered_contains(&doc, "visible text");
+            refute_rendered_contains(&doc, "hidden comment");
+        }
+
+        // A document title followed by a paragraph and a section wraps the
+        // paragraph in a compound preamble, which is the first block. A compound
+        // candidate has no inline content, so the parse-time warning and the
+        // (empty) rendered output stay in agreement — the preamble never masks a
+        // silently-dropped candidate.
+        #[test]
+        fn preamble_is_a_compound_candidate() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("= Title\n\nfirst paragraph\n\n== Section\n\nbody");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].warning, WarningType::NoInlineDoctypeCandidate);
+
+            refute_rendered_contains(&doc, "first paragraph");
+            refute_rendered_contains(&doc, "body");
+        }
     }
 }
 

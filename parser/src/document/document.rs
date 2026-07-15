@@ -132,32 +132,6 @@ impl<'src> Document<'src> {
             }
 
             let mut blocks = maw_blocks.item.item;
-
-            // Under `doctype: inline`, only the first block is converted, as bare
-            // inline content, and everything after it is dropped (the rendering
-            // lives on the embed path). A compound or empty first block has no
-            // inline content to emit, so warn here — matching Asciidoctor's
-            // `Document#convert` — and let the embed path render nothing. The
-            // rendered inline output of a valid candidate is read back from the
-            // first block's own content.
-            if matches!(
-                parser.attribute_value("doctype"),
-                InterpretedValue::Value(ref v) if v == "inline"
-            ) && let Some(first) = blocks
-                .iter()
-                .find(|b| !matches!(b, Block::DocumentAttribute(_)))
-                && matches!(
-                    first.content_model(),
-                    ContentModel::Compound | ContentModel::Empty
-                )
-            {
-                warnings.push(Warning {
-                    source: first.span(),
-                    warning: WarningType::NoInlineDoctypeCandidate,
-                    origin: None,
-                });
-            }
-
             let mut has_content_blocks = false;
             let mut preamble_split_index: Option<usize> = None;
 
@@ -187,6 +161,30 @@ impl<'src> Document<'src> {
 
                 section_blocks.insert(0, Block::Preamble(preamble));
                 blocks = section_blocks;
+            }
+
+            // Under `doctype: inline`, only the first eligible block is converted,
+            // as bare inline content, and everything after it is dropped (the
+            // rendering lives on the embed path). A compound or empty candidate
+            // has no inline content to emit, so warn here — matching
+            // Asciidoctor's `Document#convert` — and let the embed path render
+            // nothing. This runs on the final block list (after any preamble
+            // split) and uses the same candidate selection as the renderer, so
+            // the two always agree on which block is the candidate.
+            if matches!(
+                parser.attribute_value("doctype"),
+                InterpretedValue::Value(ref v) if v == "inline"
+            ) && let Some(first) = first_inline_candidate(blocks.iter())
+                && matches!(
+                    first.content_model(),
+                    ContentModel::Compound | ContentModel::Empty
+                )
+            {
+                warnings.push(Warning {
+                    source: first.span(),
+                    warning: WarningType::NoInlineDoctypeCandidate,
+                    origin: None,
+                });
             }
 
             // Capture the parser's fully-resolved attribute state so it can be
@@ -511,6 +509,32 @@ impl std::fmt::Debug for Document<'_> {
             .field("catalog", &dependent.catalog)
             .finish()
     }
+}
+
+/// Returns the first block eligible to be the sole rendered block of an
+/// `inline` document.
+///
+/// A document-attribute entry and a comment (either a `[comment]`-styled block
+/// or a `////` comment block) produce no output, so they are transparent here
+/// and skipped, mirroring how Asciidoctor drops them before taking `blocks[0]`.
+/// The returned block is the one an `inline` document renders (when it holds
+/// inline content) or reports as having *no inline candidate* (when it is
+/// compound or empty).
+///
+/// Both the parse-time `no inline candidate` check and the embed-path renderer
+/// select the candidate through this function so the two never disagree about
+/// which block is the candidate.
+pub(crate) fn first_inline_candidate<'a, 'src>(
+    blocks: impl Iterator<Item = &'a Block<'src>>,
+) -> Option<&'a Block<'src>>
+where
+    'src: 'a,
+{
+    blocks.into_iter().find(|b| {
+        !matches!(b, Block::DocumentAttribute(_))
+            && b.resolved_context().as_ref() != "comment"
+            && b.declared_style() != Some("comment")
+    })
 }
 
 #[cfg(test)]

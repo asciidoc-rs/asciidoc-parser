@@ -21,7 +21,7 @@ use crate::{
         SimpleBlockStyle, Stripes, TableBlock, TableCellContent, TableColumn, TableRow,
         VerticalAlignment,
     },
-    document::{InterpretedValue, TocMode},
+    document::{InterpretedValue, TocMode, first_inline_candidate},
 };
 
 /// The document-wide `icons` mode, which controls how callouts and callout
@@ -555,19 +555,19 @@ impl ToVirtualDom for Document<'_> {
             node = node.with_id(id);
         }
 
-        // Under `doctype: inline`, the document renders only its first block, as
-        // bare inline content (no block wrappers), and drops everything after
-        // it. A compound or empty first block has no inline candidate (a
-        // `no inline candidate` warning was recorded at parse time), so the
-        // document renders as empty.
+        // Under `doctype: inline`, the document renders only its first eligible
+        // block, as bare inline content (no block wrappers), and drops
+        // everything after it. A compound or empty candidate has no inline
+        // content (a `no inline candidate` warning was recorded at parse time),
+        // so the document renders as empty. The candidate is selected the same
+        // way as the parse-time check (see [`first_inline_candidate`]), so a
+        // preamble, comment, or attribute entry never masks the real candidate.
         if matches!(
             self.attribute_value("doctype"),
             InterpretedValue::Value(ref v) if v == "inline"
         ) {
-            if let Some(rendered) = self
-                .nested_blocks()
-                .find(|b| !matches!(b, Block::DocumentAttribute(_)))
-                .and_then(|b| b.rendered_content())
+            if let Some(rendered) =
+                first_inline_candidate(self.nested_blocks()).and_then(|b| b.rendered_content())
             {
                 node.children.extend(parse_html_content(rendered));
             }
