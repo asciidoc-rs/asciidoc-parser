@@ -46,6 +46,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+mod attribute_list_test;
 mod lists_test;
 mod paragraphs_test;
 mod substitutions_test;
