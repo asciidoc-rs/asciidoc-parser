@@ -1324,6 +1324,56 @@ A non-empty value replaces the `family` query string parameter in the Google Fon
     }
 }
 
+/// The reference page describes `relfilesuffix` as defaulting to `.html`, but
+/// that default is really "the value of `outfilesuffix`" — the two diverge for
+/// non-HTML backends (e.g. `.xml` for DocBook). `relfilesuffix` is not stored
+/// by default: when it has not been explicitly set it tracks the current value
+/// of `outfilesuffix`, yet it remains freely modifiable (it is not header-only
+/// like `outfilesuffix`). See
+/// <https://github.com/asciidoc-rs/asciidoc-parser/issues/657>.
+#[test]
+fn relfilesuffix_tracks_outfilesuffix() {
+    // On a pristine parser `relfilesuffix` reports the `outfilesuffix` default.
+    let parser = Parser::default();
+    assert_eq!(
+        parser.attribute_value("relfilesuffix").as_maybe_str(),
+        Some(".html")
+    );
+    assert!(parser.is_attribute_set("relfilesuffix"));
+
+    // Changing `outfilesuffix` (here, to a DocBook-style suffix) moves
+    // `relfilesuffix` with it, rather than leaving it pinned at `.html`.
+    let mut parser = Parser::default();
+    parser.parse("= Title\n:outfilesuffix: .xml\n");
+    assert_eq!(
+        parser.attribute_value("outfilesuffix").as_maybe_str(),
+        Some(".xml")
+    );
+    assert_eq!(
+        parser.attribute_value("relfilesuffix").as_maybe_str(),
+        Some(".xml")
+    );
+
+    // An explicit `relfilesuffix` wins and no longer tracks `outfilesuffix`.
+    let mut parser = Parser::default();
+    parser.parse("= Title\n:outfilesuffix: .xml\n:relfilesuffix: .adoc\n");
+    assert_eq!(
+        parser.attribute_value("relfilesuffix").as_maybe_str(),
+        Some(".adoc")
+    );
+
+    // Unlike `outfilesuffix` (header-only), `relfilesuffix` may be set from the
+    // document body: the assignment is honored without an
+    // `AttributeValueIsLocked` warning.
+    let mut parser = Parser::default();
+    let doc = parser.parse("= Title\n\nSome text.\n\n:relfilesuffix: .adoc\n");
+    assert_eq!(
+        parser.attribute_value("relfilesuffix").as_maybe_str(),
+        Some(".adoc")
+    );
+    assert_eq!(doc.warnings().count(), 0);
+}
+
 #[test]
 fn image_and_icon_attributes() {
     verifies!(

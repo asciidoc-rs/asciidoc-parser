@@ -467,7 +467,7 @@ impl Parser {
             return InterpretedValue::Value(value.clone());
         }
 
-        match self.effective_attribute(name) {
+        match self.effective_attribute_for_read(name) {
             Some(av) => {
                 if let InterpretedValue::Set = av.value
                     && let Some(default) = self.default_attribute_values.get(name)
@@ -488,6 +488,11 @@ impl Parser {
     /// `safe-mode-*` flags). The synthesized attributes are never
     /// materialized in either table.
     ///
+    /// This is the *raw* lookup used by the attribute writers to decide whether
+    /// a name is locked against modification. The attribute *readers* use
+    /// [`effective_attribute_for_read`](Self::effective_attribute_for_read),
+    /// which additionally resolves the read-only default of `relfilesuffix`.
+    ///
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     pub(crate) fn effective_attribute(&self, name: &str) -> Option<&AttributeValue> {
         if let Some(av) = self.attribute_values.get(name) {
@@ -499,12 +504,30 @@ impl Parser {
         synthesized_attr(name, &self.attribute_values)
     }
 
+    /// Like [`effective_attribute`](Self::effective_attribute), but
+    /// additionally resolves the read-only default of `relfilesuffix`: when
+    /// it has not been explicitly set, it tracks the current value of
+    /// `outfilesuffix` (the two diverge for non-HTML backends, e.g. `.xml`
+    /// for DocBook). See [issue #657](https://github.com/asciidoc-rs/asciidoc-parser/issues/657).
+    ///
+    /// Only the value *readers* use this. The attribute *writers* deliberately
+    /// consult [`effective_attribute`](Self::effective_attribute) instead, so
+    /// `relfilesuffix` stays modifiable anywhere rather than inheriting the
+    /// header-only modification context of `outfilesuffix`.
+    pub(crate) fn effective_attribute_for_read(&self, name: &str) -> Option<&AttributeValue> {
+        if name == "relfilesuffix" && !self.attribute_values.contains_key(name) {
+            return self.effective_attribute("outfilesuffix");
+        }
+        self.effective_attribute(name)
+    }
+
     /// Returns `true` if the parser has a [document attribute] by this name.
     ///
     /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     pub fn has_attribute<N: AsRef<str>>(&self, name: N) -> bool {
         let name = name.as_ref();
-        self.counter_values.borrow().contains_key(name) || self.effective_attribute(name).is_some()
+        self.counter_values.borrow().contains_key(name)
+            || self.effective_attribute_for_read(name).is_some()
     }
 
     /// Returns `true` if the parser has a [document attribute] by this name
@@ -520,7 +543,7 @@ impl Parser {
             return true;
         }
 
-        self.effective_attribute(name)
+        self.effective_attribute_for_read(name)
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or(false)
     }
