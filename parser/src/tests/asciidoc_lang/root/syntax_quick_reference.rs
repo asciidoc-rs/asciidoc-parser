@@ -450,17 +450,20 @@ include::sections:example$section.adoc[tag=b-base]
 "#
     );
 
-    to_do_verifies!(
+    // Out of scope (https://github.com/asciidoc-rs/asciidoc-parser/issues/380):
+    // multiple level-0 headings are only valid for the `book` doctype, where the
+    // additional level-0 titles are interpreted as parts of a multi-part book. We
+    // don't support the `book` doctype's parts, so this is treated as
+    // non-normative.
+    non_normative!(
         r#"
 The `book` document type can have additional level 0 section titles, which are interpreted as xref:sections:parts.adoc[parts].
 The presence of at least one part implicitly makes the document a multi-part book.
 "#
     );
 
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/380): the
-    // `book` doctype's additional level-0 titles (parts) and multi-part books
-    // are not yet implemented. Today a second level-0 heading always warns,
-    // regardless of `:doctype: book`.
+    // The `book` doctype's parts are out of scope (see above): today a second
+    // level-0 heading always warns, regardless of `:doctype: book`.
     let doc = Parser::default()
         .parse("= Book Title\n:doctype: book\n\n== Chapter One\n\n= Part Two\n\n== Chapter Two");
     assert!(
