@@ -241,39 +241,47 @@ impl<'src> Attrlist<'src> {
         }
 
         for attr in later_attributes {
-            if attr.name_str().is_some() {
-                if let Some(existing) = self
-                    .attributes
-                    .iter_mut()
-                    .find(|a| a.name_str() == attr.name_str())
-                {
-                    *existing = attr;
-                } else {
-                    self.attributes.push(attr);
+            // An attribute carries a positional index exactly when it is a
+            // positional (unnamed) attribute; a named attribute has `None`.
+            // Dispatching on the index keeps a positional at its Asciidoctor
+            // position — the same 1-based entry count `nth_attribute` uses,
+            // which includes named entries and blank slots — so positions stay
+            // aligned across lines even when a later line interleaves named
+            // attributes before a positional.
+            match attr.positional_index() {
+                // Named: accumulate, with a later attribute replacing the
+                // earlier one of the same name in place.
+                None => {
+                    if let Some(existing) = self
+                        .attributes
+                        .iter_mut()
+                        .find(|a| a.name_str() == attr.name_str())
+                    {
+                        *existing = attr;
+                    } else {
+                        self.attributes.push(attr);
+                    }
                 }
-                continue;
-            }
 
-            // Place a positional at its Asciidoctor position — the same
-            // 1-based entry count `nth_attribute` uses, which includes named
-            // entries and blank slots — so positions stay aligned across lines
-            // even when a later line interleaves named attributes before a
-            // positional. Every positional produced by parsing (or synthesized)
-            // records its position, so a missing one is a parser-internal bug.
-            let position = attr
-                .positional_index()
-                .expect("a positional attribute always carries a position");
-
-            if position == 1 {
-                if let Some(existing) = self.nth_positional_mut(1) {
-                    *existing = ElementAttribute::merge_block_style_shorthand(existing, &attr);
-                } else {
-                    self.attributes.push(attr);
+                // The first positional additionally carries the block style and
+                // shorthand items (`#id`, `.role`, `%option`), which are merged.
+                Some(1) => {
+                    if let Some(existing) = self.nth_positional_mut(1) {
+                        *existing = ElementAttribute::merge_block_style_shorthand(existing, &attr);
+                    } else {
+                        self.attributes.push(attr);
+                    }
                 }
-            } else if let Some(existing) = self.nth_positional_mut(position) {
-                *existing = attr;
-            } else {
-                self.attributes.push(attr);
+
+                // A later positional replaces the earlier one at the same
+                // position, otherwise it extends the list.
+                Some(position) => {
+                    if let Some(existing) = self.nth_positional_mut(position) {
+                        *existing = attr;
+                    } else {
+                        self.attributes.push(attr);
+                    }
+                }
             }
         }
     }
