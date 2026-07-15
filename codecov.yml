@@ -27,3 +27,11 @@ component_management:
       name: AsciiDoc spec coverage
       paths:
         - "ref/**/*.adoc"
+
+    - component_id: asciidoctor
+      name: Asciidoctor reference coverage
+      # Asciidoctor's own test suite, which this crate is validated against,
+      # being ported one file at a time (see ref/asciidoctor/README.md and
+      # sdd/src/main.rs). Grows as more files are ported.
+      paths:
+        - "ref/asciidoctor/test/**/*.rb"
