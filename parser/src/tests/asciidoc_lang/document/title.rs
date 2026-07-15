@@ -105,8 +105,11 @@ image::document-title.png[Title of document]
         );
     }
 
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/380):
-    // Add option to support multiple level-0 headings.
+    // Out of scope (https://github.com/asciidoc-rs/asciidoc-parser/issues/380):
+    // multiple level-0 headings are only valid for the `book` doctype, where the
+    // additional level-0 titles are interpreted as parts of a multi-part book. We
+    // don't support the `book` doctype's parts, so this is treated as
+    // non-normative.
     non_normative!(
         r#"
 === Doctypes and titles

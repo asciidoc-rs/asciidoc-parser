@@ -318,9 +318,11 @@ include::example$section.adoc[tag=b-base]
     );
 }
 
-// TODO (https://github.com/asciidoc-rs/asciidoc-parser/issues/380):
-// Option to support multiple level-0 headings.
-// Ignoring this rule for now.
+// Out of scope (https://github.com/asciidoc-rs/asciidoc-parser/issues/380):
+// multiple level-0 headings are only valid for the `book` doctype, where the
+// additional level-0 titles are interpreted as parts of a multi-part book. We
+// don't support the `book` doctype's parts, so this rule is treated as
+// non-normative.
 non_normative!(
     r#"
 Section levels must be nested logically.
