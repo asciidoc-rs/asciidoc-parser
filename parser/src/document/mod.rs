@@ -20,6 +20,8 @@ pub use docinfo::DocinfoLocation;
 
 mod document;
 pub use document::Document;
+#[cfg(test)]
+pub(crate) use document::first_inline_candidate;
 
 mod header;
 pub use header::Header;

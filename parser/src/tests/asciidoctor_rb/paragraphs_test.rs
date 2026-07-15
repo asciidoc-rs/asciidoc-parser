@@ -2525,6 +2525,132 @@ mod special {
             assert_rendered_contains(&doc, "This is important, fool!");
         }
     }
+
+    // Ported from Ruby Asciidoctor's paragraphs_test.rb, `context 'Inline
+    // doctype'`. Under `doctype: inline` the document converts only its first
+    // block, as bare inline content; a compound (or empty) first block has no
+    // inline candidate and is reported.
+    mod inline_doctype {
+        use crate::tests::prelude::*;
+
+        // Ported from 'should only format and output text in first paragraph
+        // when doctype is inline'.
+        #[test]
+        fn should_only_output_first_paragraph() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse(
+                    "http://asciidoc.org[AsciiDoc] is a _lightweight_ markup language...\n\nignored",
+                );
+
+            // The first paragraph is rendered as bare inline content, with the
+            // full inline substitutions applied and no `<div class="paragraph">
+            // <p>` wrapper.
+            let first = doc.nested_blocks().next().unwrap();
+            assert_eq!(
+                first.rendered_content(),
+                Some(
+                    "<a href=\"http://asciidoc.org\">AsciiDoc</a> is a <em>lightweight</em> markup language&#8230;&#8203;"
+                )
+            );
+            assert_css(&doc, ".paragraph", 0);
+            assert_xpath(&doc, "//a[@href = \"http://asciidoc.org\"]", 1);
+            assert_xpath(&doc, "//em[text() = \"lightweight\"]", 1);
+
+            // The second paragraph (`ignored`) is dropped from the output.
+            refute_rendered_contains(&doc, "ignored");
+
+            // A valid inline candidate produces no warning.
+            assert!(doc.warnings().next().is_none());
+        }
+
+        // Ported from 'should output nil and warn if first block is not a
+        // paragraph'. A list is a compound block, so it is not an inline
+        // candidate: nothing is emitted and a warning is logged.
+        #[test]
+        fn should_warn_if_first_block_is_not_a_paragraph() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("* bullet");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].warning, WarningType::NoInlineDoctypeCandidate);
+
+            // Nothing is rendered (the list is not an inline candidate).
+            refute_rendered_contains(&doc, "bullet");
+        }
+
+        // A leading `[comment]`-styled paragraph produces no output, so it is
+        // transparent: the inline candidate is the first *following* block, and
+        // the comment text is never emitted.
+        #[test]
+        fn should_skip_leading_comment_styled_paragraph() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("[comment]\nthis is a comment\n\nvisible text");
+
+            assert!(doc.warnings().next().is_none());
+            assert_rendered_contains(&doc, "visible text");
+            refute_rendered_contains(&doc, "this is a comment");
+        }
+
+        // A leading `////` comment block is likewise transparent: its raw
+        // content is never emitted, and the following paragraph is the
+        // candidate.
+        #[test]
+        fn should_skip_leading_comment_block() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("////\nhidden comment\n////\n\nvisible text");
+
+            assert!(doc.warnings().next().is_none());
+            assert_rendered_contains(&doc, "visible text");
+            refute_rendered_contains(&doc, "hidden comment");
+        }
+
+        // A document title followed by a paragraph and a section wraps the
+        // paragraph in a compound preamble, which is the first block. A compound
+        // candidate has no inline content, so the parse-time warning and the
+        // (empty) rendered output stay in agreement — the preamble never masks a
+        // silently-dropped candidate.
+        //
+        // This matches Asciidoctor 2.0.26 exactly: `= Title\n\nfirst
+        // paragraph\n\n== Section` under `-d inline` logs `no inline candidate`
+        // and emits nothing (the preamble is `@blocks[0]`, and its content model
+        // is compound). Rendering the inner paragraph instead would diverge from
+        // Asciidoctor.
+        #[test]
+        fn preamble_is_a_compound_candidate() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("= Title\n\nfirst paragraph\n\n== Section\n\nbody");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].warning, WarningType::NoInlineDoctypeCandidate);
+
+            refute_rendered_contains(&doc, "first paragraph");
+            refute_rendered_contains(&doc, "body");
+        }
+
+        // A title with a paragraph but *no* section creates no preamble (this
+        // crate, like Asciidoctor, only wraps a preamble when a section follows),
+        // so the paragraph is itself the first block and is rendered as inline
+        // content with no warning. Asciidoctor 2.0.26 emits `first paragraph`
+        // for `= Title\n\nfirst paragraph` under `-d inline`. This is the
+        // boundary that distinguishes the candidate from the compound-preamble
+        // case above.
+        #[test]
+        fn titled_paragraph_without_section_is_rendered() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("= Title\n\nfirst paragraph");
+
+            assert!(doc.warnings().next().is_none());
+            assert_rendered_contains(&doc, "first paragraph");
+        }
+    }
 }
 
 // Ported from Ruby Asciidoctor's paragraphs_test.rb (`context 'Custom'`),
@@ -2581,9 +2707,11 @@ fn port_from_ruby() {
     # NOTE: 'context Custom' (unknown/custom paragraph style handling, #681)
     # has been ported to `mod custom` below.
 
-    # NOTE: the remaining un-ported test below is tracked by a dedicated issue:
-    # inline doctype (#680). The DocBook 'simpara' styled-paragraph tests are
-    # out of scope (no DocBook backend).
+    # NOTE: the 'Inline doctype' tests (#680) have been ported to
+    # `mod special::inline_doctype` below.
+
+    # NOTE: the remaining DocBook 'simpara' styled-paragraph tests below are out
+    # of scope (no DocBook backend).
 
     context 'Styled Paragraphs' do
       test 'should wrap text in simpara for styled paragraphs when converted to DocBook' do
@@ -2678,23 +2806,6 @@ fn port_from_ruby() {
         assert_css 'blockquote > title', output, 1
         assert_xpath '//blockquote/title[text() = "Quote title"]', output, 1
         assert_css 'blockquote > title + simpara', output, 1
-      end
-    end
-
-    context 'Inline doctype' do
-      test 'should only format and output text in first paragraph when doctype is inline' do
-        input = "http://asciidoc.org[AsciiDoc] is a _lightweight_ markup language...\n\nignored"
-        output = convert_string input, doctype: 'inline'
-        assert_equal '<a href="http://asciidoc.org">AsciiDoc</a> is a <em>lightweight</em> markup language&#8230;&#8203;', output
-      end
-
-      test 'should output nil and warn if first block is not a paragraph' do
-        input = '* bullet'
-        using_memory_logger do |logger|
-          output = convert_string input, doctype: 'inline'
-          assert_nil output
-          assert_message logger, :WARN, '~no inline candidate'
-        end
       end
     end
   end
