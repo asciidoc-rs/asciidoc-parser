@@ -65,8 +65,16 @@ impl<'src> Attrlist<'src> {
 
         let mut index = 0;
 
+        // 1-based counter over every comma-delimited entry, incremented per
+        // entry — named attributes and blank (`nil`) slots included — so that
+        // positional attributes are numbered the way Asciidoctor numbers them
+        // (see `nth_attribute`).
+        let mut entry_number = 0usize;
+
         let after_index = loop {
-            let (attr, new_index, warning_types) = ElementAttribute::parse(
+            entry_number += 1;
+
+            let (mut attr, new_index, warning_types) = ElementAttribute::parse(
                 &source_cow,
                 index,
                 parser,
@@ -96,17 +104,37 @@ impl<'src> Attrlist<'src> {
 
             let mut after = Span::new(source_cow.as_ref()).discard(new_index);
 
+            // A completely empty (or whitespace-only) attribute list: the first
+            // entry is an empty, *unquoted* positional with nothing after it.
+            // Yield no attributes. An explicit empty *quoted* positional
+            // (`""` / `''`) carries a value and is kept below, so it is excluded
+            // here by `!attr.value_is_quoted()`.
             if attr.name().is_none()
                 && attr.value().is_empty()
+                && !attr.value_is_quoted()
                 && after.is_empty()
                 && attributes.is_empty()
             {
                 break index;
             }
 
-            if attr.name().is_none() || attr.value() != "None" {
+            if attr.name().is_some() {
+                // A named attribute whose value is the literal `None` unsets the
+                // attribute (Asciidoctor semantics); it still consumes a
+                // position but is not stored.
+                if attr.value() != "None" {
+                    attributes.push(attr);
+                }
+            } else if !attr.value().is_empty() || attr.value_is_quoted() {
+                // A positional attribute — including an explicit empty quoted
+                // value (`""` / `''`). Record its position so later positionals
+                // stay aligned across named and blank entries.
+                attr.set_positional_index(entry_number);
                 attributes.push(attr);
             }
+            // Otherwise this is an empty, unquoted positional: a blank (`nil`)
+            // slot. It consumes `entry_number` (already incremented) but is not
+            // stored, so a later positional keeps its Asciidoctor position.
 
             after = after.take_whitespace().after;
 
@@ -120,6 +148,9 @@ impl<'src> Attrlist<'src> {
                             warning: WarningType::EmptyAttributeValue,
                             origin: None,
                         });
+                        // Consume the blank slot between consecutive commas here,
+                        // advancing the position counter past it.
+                        entry_number += 1;
                         after = after.discard(1);
                         index = after.byte_offset();
                         continue;
@@ -209,39 +240,57 @@ impl<'src> Attrlist<'src> {
             self.anchor = later_anchor;
         }
 
-        let mut positional_index = 0usize;
-
         for attr in later_attributes {
-            if attr.name_str().is_some() {
-                if let Some(existing) = self
-                    .attributes
-                    .iter_mut()
-                    .find(|a| a.name_str() == attr.name_str())
-                {
-                    *existing = attr;
-                } else {
-                    self.attributes.push(attr);
+            // An attribute carries a positional index exactly when it is a
+            // positional (unnamed) attribute; a named attribute has `None`.
+            // Dispatching on the index keeps a positional at its Asciidoctor
+            // position — the same 1-based entry count `nth_attribute` uses,
+            // which includes named entries and blank slots — so positions stay
+            // aligned across lines even when a later line interleaves named
+            // attributes before a positional.
+            match attr.positional_index() {
+                // Named: accumulate, with a later attribute replacing the
+                // earlier one of the same name in place.
+                None => {
+                    if let Some(existing) = self
+                        .attributes
+                        .iter_mut()
+                        .find(|a| a.name_str() == attr.name_str())
+                    {
+                        *existing = attr;
+                    } else {
+                        self.attributes.push(attr);
+                    }
                 }
-                continue;
-            }
 
-            positional_index += 1;
-
-            if positional_index == 1 {
-                if let Some(existing) = self.nth_positional_mut(1) {
-                    *existing = ElementAttribute::merge_block_style_shorthand(existing, &attr);
-                } else {
-                    self.attributes.push(attr);
+                // The first positional additionally carries the block style and
+                // shorthand items (`#id`, `.role`, `%option`), which are merged.
+                Some(1) => {
+                    if let Some(existing) = self.nth_positional_mut(1) {
+                        *existing = ElementAttribute::merge_block_style_shorthand(existing, &attr);
+                    } else {
+                        self.attributes.push(attr);
+                    }
                 }
-            } else if let Some(existing) = self.nth_positional_mut(positional_index) {
-                *existing = attr;
-            } else {
-                self.attributes.push(attr);
+
+                // A later positional replaces the earlier one at the same
+                // position, otherwise it extends the list.
+                Some(position) => {
+                    if let Some(existing) = self.nth_positional_mut(position) {
+                        *existing = attr;
+                    } else {
+                        self.attributes.push(attr);
+                    }
+                }
             }
         }
     }
 
-    /// Return a mutable reference to the (1-based) `n`th positional attribute.
+    /// Return a mutable reference to the positional attribute at (1-based)
+    /// Asciidoctor position `n` — the position recorded on each attribute, not
+    /// its ordinal among stored positionals (the two differ once named entries
+    /// or blank slots consume positions). See
+    /// [`nth_attribute`](Self::nth_attribute).
     ///
     /// `n` must be 1 or greater; the only caller is
     /// [`merge_block_attribute_line`](Self::merge_block_attribute_line), which
@@ -251,8 +300,7 @@ impl<'src> Attrlist<'src> {
 
         self.attributes
             .iter_mut()
-            .filter(|attr| attr.name_str().is_none())
-            .nth(n - 1)
+            .find(|attr| attr.positional_index() == Some(n))
     }
 
     /// Returns an iterator over the attributes contained within
@@ -297,16 +345,20 @@ impl<'src> Attrlist<'src> {
 
     /// Returns the given (1-based) positional attribute.
     ///
-    /// **IMPORTANT:** Named attributes with names are disregarded when
-    /// counting.
+    /// **IMPORTANT:** Positions are numbered the way Asciidoctor numbers them:
+    /// every comma-delimited entry consumes a position, including named entries
+    /// and blank (`nil`) slots. A later positional therefore keeps its position
+    /// even when an earlier entry is named or left blank (e.g.
+    /// `image::x[Alt,,3]` has `Alt` at position 1 and `3` at position 3,
+    /// with position 2 empty). A position that is empty, or that is
+    /// occupied by a named attribute, yields `None`.
     pub fn nth_attribute(&'src self, n: usize) -> Option<&'src ElementAttribute<'src>> {
         if n == 0 {
             None
         } else {
             self.attributes
                 .iter()
-                .filter(|attr| attr.name().is_none())
-                .nth(n - 1)
+                .find(|attr| attr.positional_index() == Some(n))
         }
     }
 
@@ -480,35 +532,11 @@ impl<'src> Attrlist<'src> {
             .unwrap_or_default();
 
         if let Some(option_attr) = self.named_attribute("opts") {
-            let mut option_span = Span::new(option_attr.value());
-            let mut formal_options: Vec<&'src str> = vec![];
-            option_span = option_span.take_while(|c| c == ',').after;
-
-            while !option_span.is_empty() {
-                let mi = option_span.take_while(|c| c != ',');
-                if !mi.item.is_empty() {
-                    formal_options.push(mi.item.data());
-                }
-                option_span = mi.after.take_while(|c| c == ',').after;
-            }
-
-            options.append(&mut formal_options);
+            options.append(&mut split_options(option_attr.value()));
         }
 
         if let Some(option_attr) = self.named_attribute("options") {
-            let mut option_span = Span::new(option_attr.value());
-            let mut formal_options: Vec<&'_ str> = vec![];
-            option_span = option_span.take_while(|c| c == ',').after;
-
-            while !option_span.is_empty() {
-                let mi = option_span.take_while(|c| c != ',');
-                if !mi.item.is_empty() {
-                    formal_options.push(mi.item.data());
-                }
-                option_span = mi.after.take_while(|c| c == ',').after;
-            }
-
-            options.append(&mut formal_options);
+            options.append(&mut split_options(option_attr.value()));
         }
 
         options
@@ -546,6 +574,18 @@ impl std::fmt::Debug for Attrlist<'_> {
             .field("source", &self.source)
             .finish()
     }
+}
+
+/// Split an `opts`/`options` attribute value into individual option tokens,
+/// matching Asciidoctor: split on commas, trim surrounding whitespace from each
+/// token, and drop empty tokens. So `'opt1,,opt2 , opt3'` yields `opt1`,
+/// `opt2`, `opt3`.
+fn split_options(value: &str) -> Vec<&str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|opt| !opt.is_empty())
+        .collect()
 }
 
 /// Context for attribute list parsing.
@@ -687,15 +727,13 @@ mod tests {
         )
         .unwrap_if_no_warnings();
 
+        // A leading comma leaves position 1 blank (a `nil` slot, as in
+        // Asciidoctor): it consumes the position but stores no attribute, so
+        // `300` and `400` remain at positions 2 and 3.
         assert_eq!(
             mi.item,
             Attrlist {
                 attributes: &[
-                    ElementAttribute {
-                        name: None,
-                        shorthand_items: &[],
-                        value: ""
-                    },
                     ElementAttribute {
                         name: None,
                         shorthand_items: &[],
@@ -725,23 +763,9 @@ mod tests {
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.block_style().is_none());
 
-        assert_eq!(
-            mi.item.nth_attribute(1).unwrap(),
-            ElementAttribute {
-                name: None,
-                shorthand_items: &[],
-                value: ""
-            }
-        );
-
-        assert_eq!(
-            mi.item.named_or_positional_attribute("alt", 1).unwrap(),
-            ElementAttribute {
-                name: None,
-                shorthand_items: &[],
-                value: ""
-            }
-        );
+        // Position 1 is the blank slot: no attribute there.
+        assert!(mi.item.nth_attribute(1).is_none());
+        assert!(mi.item.named_or_positional_attribute("alt", 1).is_none());
 
         assert_eq!(
             mi.item.nth_attribute(2).unwrap(),
@@ -1455,6 +1479,39 @@ mod tests {
         first.merge_block_attribute_line(later);
         assert_eq!(first.anchor(), Some("id1"));
         assert_eq!(first.named_attribute("foo").unwrap().value(), "bar");
+    }
+
+    #[test]
+    fn merge_block_attribute_line_positions_account_for_named_entries() {
+        // A later line whose positional is preceded by a named attribute must
+        // merge at its Asciidoctor position (which counts the named entry), not
+        // at its ordinal among unnamed entries. Here `Author2` is the later
+        // line's *second* entry, so it replaces position 2 (`Author1`) rather
+        // than merging into position 1 (`quote`); `Extra` is position 3.
+        let p = Parser::default();
+
+        let mut first = crate::attributes::Attrlist::parse(
+            crate::Span::new("quote,Author1"),
+            &p,
+            AttrlistContext::Block,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        let later = crate::attributes::Attrlist::parse(
+            crate::Span::new("width=300,Author2,Extra"),
+            &p,
+            AttrlistContext::Block,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        first.merge_block_attribute_line(later);
+
+        assert_eq!(first.nth_attribute(1).unwrap().value(), "quote");
+        assert_eq!(first.nth_attribute(2).unwrap().value(), "Author2");
+        assert_eq!(first.nth_attribute(3).unwrap().value(), "Extra");
+        assert_eq!(first.named_attribute("width").unwrap().value(), "300");
     }
 
     #[test]

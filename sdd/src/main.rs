@@ -9,36 +9,27 @@ use std::{collections::HashMap, fs, io::BufRead, path::Path};
 
 use walkdir::{DirEntry, WalkDir};
 
+// Spec sources whose lines we measure coverage against, as `(root, extension,
+// within)` triples: the normative documentation prose (`.adoc`) of the AsciiDoc
+// language description, plus the Asciidoctor reference test suite (`.rb`) that
+// this crate is validated against.
+//
+// `within`, when `Some`, restricts a source to files whose path contains that
+// segment.
+//
+// NOTE: The Asciidoctor test suite is being ported one file at a time (see
+// `ref/asciidoctor/README.md`); every `.rb` file vendored under
+// `ref/asciidoctor/test` is picked up here automatically. Coverage grows as
+// more files are ported — at present `attribute_list_test.rb` is the first.
+const SPEC_SOURCES: &[(&str, &str, Option<&str>)] = &[
+    ("../ref/asciidoc-lang/docs/modules", ".adoc", None),
+    ("../ref/asciidoctor/test", ".rb", None),
+];
+
 fn main() {
     let mut spec_coverage: HashMap<String, Vec<(String, bool)>> = HashMap::new();
 
-    let rs_files: Vec<DirEntry> = WalkDir::new("../parser/src/tests")
-        .into_iter()
-        .filter_entry(|e| {
-            if let Some(file_name) = e.file_name().to_str() {
-                !file_name.starts_with(".")
-            } else {
-                false
-            }
-        })
-        .filter_map(|e| {
-            let e = e.expect("Directory read error");
-
-            if !e.file_type().is_file() {
-                return None;
-            }
-
-            if let Some(file_name) = e.file_name().to_str()
-                && file_name.ends_with(".rs")
-            {
-                Some(e)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    for entry in rs_files {
+    for entry in collect_files("../parser/src/tests", ".rs") {
         let path = entry.path();
         if let Some((spec_path, cov)) = parse_rs_file(path) {
             spec_coverage.insert(spec_path, cov);
@@ -47,35 +38,25 @@ fn main() {
 
     println!("{{\n    \"coverage\": {{");
 
-    let adoc_files: Vec<DirEntry> = WalkDir::new("../ref/asciidoc-lang/docs/modules")
-        .into_iter()
-        .filter_entry(|e| {
-            if let Some(file_name) = e.file_name().to_str() {
-                !file_name.starts_with(".")
-            } else {
-                false
-            }
-        })
-        .filter_map(|e| {
-            let e = e.expect("Directory read error");
-
-            if !e.file_type().is_file() {
-                return None;
-            }
-
-            if let Some(file_name) = e.file_name().to_str()
-                && file_name.ends_with(".adoc")
+    let mut spec_files: Vec<DirEntry> = vec![];
+    for (root, extension, within) in SPEC_SOURCES {
+        for entry in collect_files(root, extension) {
+            // Skip files outside the source's required path segment.
+            if let Some(segment) = within
+                && !entry.path().to_str().unwrap().contains(segment)
             {
-                Some(e)
-            } else {
-                None
+                continue;
             }
-        })
-        .collect();
+            spec_files.push(entry);
+        }
+    }
 
-    let last_index = adoc_files.len() - 1;
+    // `saturating_sub` guards the empty case (e.g. a `ref/` source not present):
+    // the loop below then simply doesn't run, emitting a valid empty coverage
+    // object.
+    let last_index = spec_files.len().saturating_sub(1);
 
-    for (count, entry) in adoc_files.into_iter().enumerate() {
+    for (count, entry) in spec_files.into_iter().enumerate() {
         let path = entry.path().to_str().unwrap().trim_start_matches("../");
         // (unwrap: Should have been filtered out above.)
 
@@ -84,7 +65,7 @@ fn main() {
         // }
         println!("        {path:?}: {{");
 
-        emit_adoc_coverage(path, spec_coverage.get(path));
+        emit_coverage(path, spec_coverage.get(path));
 
         if count < last_index {
             println!("        }},");
@@ -94,6 +75,37 @@ fn main() {
     }
 
     println!("    }}\n}}");
+}
+
+// Collect every file ending in `extension` under `root`, skipping dotfiles.
+// Returns an empty vec if the root doesn't exist, so a spec source that isn't
+// vendored simply contributes no coverage.
+fn collect_files(root: &str, extension: &str) -> Vec<DirEntry> {
+    WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|e| {
+            if let Some(file_name) = e.file_name().to_str() {
+                !file_name.starts_with('.')
+            } else {
+                false
+            }
+        })
+        .filter_map(|e| {
+            let e = e.ok()?;
+
+            if !e.file_type().is_file() {
+                return None;
+            }
+
+            if let Some(file_name) = e.file_name().to_str()
+                && file_name.ends_with(extension)
+            {
+                Some(e)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
@@ -187,7 +199,7 @@ fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
     tracked_file.map(|tracked_file| (tracked_file, lines))
 }
 
-fn emit_adoc_coverage(path: &str, coverage: Option<&Vec<(String, bool)>>) {
+fn emit_coverage(path: &str, coverage: Option<&Vec<(String, bool)>>) {
     // if !path.contains("/id.adoc") {
     //     return;
     // }
