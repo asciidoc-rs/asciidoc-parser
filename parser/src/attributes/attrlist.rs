@@ -258,12 +258,11 @@ impl<'src> Attrlist<'src> {
             // 1-based entry count `nth_attribute` uses, which includes named
             // entries and blank slots — so positions stay aligned across lines
             // even when a later line interleaves named attributes before a
-            // positional. (A parsed positional always carries a position; fall
-            // back to appending if one is somehow absent, rather than panic.)
-            let Some(position) = attr.positional_index() else {
-                self.attributes.push(attr);
-                continue;
-            };
+            // positional. Every positional produced by parsing (or synthesized)
+            // records its position, so a missing one is a parser-internal bug.
+            let position = attr
+                .positional_index()
+                .expect("a positional attribute always carries a position");
 
             if position == 1 {
                 if let Some(existing) = self.nth_positional_mut(1) {
