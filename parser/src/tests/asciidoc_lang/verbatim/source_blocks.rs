@@ -192,18 +192,13 @@ include::example$source.adoc[tag=src-implied]
                 anchor: None,
                 anchor_reftext: None,
                 attrlist: Some(Attrlist {
-                    attributes: &[
-                        ElementAttribute {
-                            name: None,
-                            value: "",
-                            shorthand_items: &[],
-                        },
-                        ElementAttribute {
-                            name: None,
-                            value: "ruby",
-                            shorthand_items: &[],
-                        },
-                    ],
+                    // The leading comma leaves position 1 blank (a `nil` slot),
+                    // so only the language (`ruby`, at position 2) is stored.
+                    attributes: &[ElementAttribute {
+                        name: None,
+                        value: "ruby",
+                        shorthand_items: &[],
+                    }],
                     anchor: None,
                     source: Span {
                         data: ",ruby",
@@ -296,18 +291,13 @@ include::example$source.adoc[tag=src-inc]
             anchor: None,
             anchor_reftext: None,
             attrlist: Some(Attrlist {
-                attributes: &[
-                    ElementAttribute {
-                        name: None,
-                        value: "",
-                        shorthand_items: &[],
-                    },
-                    ElementAttribute {
-                        name: None,
-                        value: "ruby",
-                        shorthand_items: &[],
-                    },
-                ],
+                // The leading comma leaves position 1 blank (a `nil` slot), so
+                // only the language (`ruby`, at position 2) is stored.
+                attributes: &[ElementAttribute {
+                    name: None,
+                    value: "ruby",
+                    shorthand_items: &[],
+                }],
                 anchor: None,
                 source: Span {
                     data: ",ruby",

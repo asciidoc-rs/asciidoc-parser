@@ -20,6 +20,26 @@ pub struct ElementAttribute<'src> {
     value: CowStr<'src>,
     shorthand_item_indices: Vec<usize>,
 
+    /// The 1-based position of a *positional* (unnamed) attribute within its
+    /// attribute list, counting every comma-delimited entry — named entries and
+    /// blank slots included — the way Asciidoctor numbers positional keys.
+    /// `None` for a named attribute (or an attribute synthesized without a
+    /// known position). Consumed by [`Attrlist::nth_attribute`] so that
+    /// later positionals keep their index even when earlier entries are
+    /// named or blank.
+    ///
+    /// [`Attrlist::nth_attribute`]: crate::attributes::Attrlist::nth_attribute
+    positional_index: Option<usize>,
+
+    /// `true` when this attribute's `value` came from a genuinely
+    /// quote-delimited string (`"…"` or `'…'` with both delimiters
+    /// present), as opposed to an unquoted value or a lone leading quote.
+    /// This distinguishes an explicit empty quoted positional (`""` / `''`,
+    /// which is a real empty-valued attribute) from a blank slot, and gates
+    /// the quote-unescaping and single-quoted substitution that only apply
+    /// to genuinely quoted values.
+    value_is_quoted: bool,
+
     /// `true` when the normal substitution group was already applied to `value`
     /// while parsing this attribute (a single-quoted value in a block attribute
     /// list). Consumers that would otherwise substitute the value themselves —
@@ -52,7 +72,7 @@ impl<'src> ElementAttribute<'src> {
     ) -> (Self, usize, Vec<WarningType>) {
         let mut warnings: Vec<WarningType> = vec![];
 
-        let (name, value, shorthand_item_indices, value_is_substituted, offset) = {
+        let (name, value, shorthand_item_indices, value_is_quoted, value_is_substituted, offset) = {
             let mut source = Span::new(source_text.as_ref());
             source = source.discard(start_index);
 
@@ -78,10 +98,18 @@ impl<'src> ElementAttribute<'src> {
             let after = after.take_whitespace_with_newline().after;
             let first_char = after.data().chars().next();
 
+            // `value_is_quoted` is set only when the value was genuinely
+            // delimited by a matching pair of quotes (`take_quoted_string`
+            // succeeded). A lone leading quote with no terminator is *not*
+            // quoted: Asciidoctor treats it as a literal (its `single_quoted`
+            // flag is set `unless value.start_with? APOS`), so it receives no
+            // unescaping and no substitution.
+            let mut value_is_quoted = false;
             let value = match first_char {
                 Some('\'') | Some('"') => match after.take_quoted_string() {
                     Some(v) => {
                         parse_shorthand = ParseShorthand(false);
+                        value_is_quoted = true;
                         v
                     }
                     None => {
@@ -96,9 +124,7 @@ impl<'src> ElementAttribute<'src> {
             let mut value = cowstr_from_source_and_span(source_text, &value.item);
             let mut value_is_substituted = false;
 
-            if let Some(first) = first_char
-                && (first == '\'' || first == '\"')
-            {
+            if value_is_quoted && let Some(first) = first_char {
                 let escaped_quote = format!("\\{first}");
                 let mut new_value = value.replace(&escaped_quote, &first.to_string());
 
@@ -133,6 +159,7 @@ impl<'src> ElementAttribute<'src> {
                 name,
                 value,
                 shorthand_item_indices,
+                value_is_quoted,
                 value_is_substituted,
                 after.byte_offset(),
             )
@@ -143,6 +170,8 @@ impl<'src> ElementAttribute<'src> {
                 name,
                 value,
                 shorthand_item_indices,
+                positional_index: None,
+                value_is_quoted,
                 value_is_substituted,
             },
             offset,
@@ -171,6 +200,8 @@ impl<'src> ElementAttribute<'src> {
             name: None,
             value: CowStr::from(SOURCE),
             shorthand_item_indices,
+            positional_index: Some(1),
+            value_is_quoted: false,
             value_is_substituted: false,
         }
     }
@@ -184,6 +215,8 @@ impl<'src> ElementAttribute<'src> {
             name: None,
             value: CowStr::from(span.data()),
             shorthand_item_indices: vec![],
+            positional_index: Some(2),
+            value_is_quoted: false,
             value_is_substituted: false,
         }
     }
@@ -474,8 +507,34 @@ impl<'src> ElementAttribute<'src> {
             name: None,
             value: CowStr::from(value),
             shorthand_item_indices,
+            // The merged shorthand is the first positional of the earlier line,
+            // so it keeps that line's position (1).
+            positional_index: earlier.positional_index,
+            value_is_quoted: false,
             value_is_substituted: false,
         }
+    }
+
+    /// Return the 1-based positional index of this attribute, if it is a
+    /// positional (unnamed) attribute whose position is known. See the
+    /// [`positional_index`](Self::positional_index) field for the numbering
+    /// rules.
+    pub(crate) fn positional_index(&self) -> Option<usize> {
+        self.positional_index
+    }
+
+    /// Record the 1-based positional index of this attribute. Called by the
+    /// attribute-list parser once it knows the entry's position within the
+    /// list.
+    pub(crate) fn set_positional_index(&mut self, index: usize) {
+        self.positional_index = Some(index);
+    }
+
+    /// Returns `true` when this attribute's value came from a genuinely
+    /// quote-delimited string (both delimiters present). See the
+    /// [`value_is_quoted`](Self::value_is_quoted) field.
+    pub(crate) fn value_is_quoted(&self) -> bool {
+        self.value_is_quoted
     }
 
     /// Return the attribute's value.
