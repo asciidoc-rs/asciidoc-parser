@@ -32,6 +32,10 @@ I’m reading page-by-page, line-by-line, and writing tests to verify that the i
 
 (*) Yes, I’m aware that the Asciidoc language authors consider this a “language description,” not a specification. I’m splitting the difference here.
 
+## Extensions
+
+Extensions (custom block, block macro, inline macro, and similar processors, as provided by the [Ruby implementation of Asciidoctor](https://github.com/asciidoctor/asciidoctor)) are not planned for the 1.0 release of this crate. They may be added in a subsequent version.
+
 ## No planned support for some AsciiDoc features
 
 The following features are supported in the [Ruby implementation of Asciidoctor](https://github.com/asciidoctor/asciidoctor), on which this project is based, but are not supported – and will likely never be supported – in this crate:

@@ -43,10 +43,6 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
         }
     }
 
-    // TO DO (#262): Implement extensions that can define macros.
-    // Port Ruby Asciidoctor's implementation from
-    // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb#L306-L347.
-
     // The UI macros (`kbd:`, `btn:`, and `menu:`) are recognized only when the
     // `experimental` document attribute is set. Although the UI macros are a
     // stable part of the AsciiDoc language, requiring the attribute is an
