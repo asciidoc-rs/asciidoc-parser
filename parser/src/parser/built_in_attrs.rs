@@ -290,10 +290,14 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         any(ApiOrHeader, Value(".html".into())),
     );
 
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/657): `relfilesuffix` should default to the current value of
-    // `outfilesuffix` rather than a hardcoded `.html`; they diverge for
-    // non-HTML backends (e.g. `.xml` for DocBook).
-    attrs.insert("relfilesuffix".to_owned(), set(Anywhere, ".html"));
+    // `relfilesuffix` — the path suffix added to relative (inter-document)
+    // xrefs — is intentionally *not* registered here. When it has not been
+    // explicitly set it tracks the current value of `outfilesuffix` rather than
+    // a hardcoded `.html`, since the two diverge for non-HTML backends (e.g.
+    // `.xml` for DocBook). That read-only default is resolved on the fly by the
+    // attribute readers (see `Parser::effective_attribute_for_read`); it stays
+    // absent from this table so that, like Asciidoctor, it is genuinely unset
+    // (and hence freely modifiable anywhere) until an author assigns it.
     attrs.insert("webfonts".to_owned(), empty(ApiOrHeader, Set));
 
     // ### Image and icon attributes
