@@ -697,6 +697,14 @@ impl ToVirtualDom for Block<'_> {
             return example_to_node(self);
         }
 
+        // An `[open]` styled paragraph renders as an open block
+        // (`div.openblock > div.content`), with its inline content placed
+        // directly in the content wrapper and no `<p>`. The delimited `--` open
+        // block is a `Block::CompoundDelimited` handled by the match below.
+        if matches!(self, Block::Simple(_)) && is_open(self) {
+            return open_paragraph_to_node(self);
+        }
+
         match self {
             Block::Simple(simple) => {
                 // Comment blocks should not be rendered.
@@ -1421,6 +1429,42 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
     node
 }
 
+/// Renders an `[open]` styled paragraph as an open block, matching
+/// Asciidoctor's HTML output.
+///
+/// The paragraph form of an open block (`[open]` over a single paragraph)
+/// produces the same `div.openblock > div.content` structure as the delimited
+/// `--` form in [`compound_delimited_to_node`], but its inline content is
+/// rendered directly inside the content wrapper without a wrapping `<p>` —
+/// mirroring the `[example]` and `[sidebar]` paragraph styles. The outer
+/// `div.openblock` carries the block's id and roles, and a title, when present,
+/// is rendered as a `div.title` *before* the content wrapper.
+fn open_paragraph_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
+    let mut node = VirtualNode::new("div").with_class("openblock");
+
+    for role in block.roles() {
+        node = node.with_class(role);
+    }
+
+    if let Some(id) = block.id() {
+        node = node.with_id(id);
+    }
+
+    // The title, when present, precedes the content wrapper.
+    if let Some(title) = block.title() {
+        node.children
+            .push(VirtualNode::new("div").with_class("title").with_text(title));
+    }
+
+    let mut content = VirtualNode::new("div").with_class("content");
+    if let Some(rendered) = block.rendered_content() {
+        content = content.with_html_content(rendered);
+    }
+    node.children.push(content);
+
+    node
+}
+
 /// Returns `true` if `block` is a collapsible block: an example block (or
 /// example-styled paragraph) carrying the `collapsible` option.
 ///
@@ -1499,18 +1543,20 @@ fn is_sidebar<'a>(block: &'a Block<'a>) -> bool {
     block.resolved_context().as_ref() == "sidebar"
 }
 
-/// Returns `true` if `block` is an open block: the `--` structural container,
-/// rendered by [`compound_delimited_to_node`] as `div.openblock`.
+/// Returns `true` if `block` is an open block: the `--` structural container
+/// or a paragraph carrying the `[open]` style, both of which resolve to the
+/// `open` context and render as `div.openblock`.
 ///
-/// Only a delimited open block (a [`Block::CompoundDelimited`] resolving to the
-/// `open` context) qualifies. Every masquerade style on a `--` block is
-/// intercepted earlier — by [`is_sidebar`], [`is_example`], `QuoteBlock`,
-/// `AdmonitionBlock`, or `RawDelimitedBlock` — so a `CompoundDelimited` block
-/// that reaches here always resolves to `open`. Like a sidebar, an open block
-/// renders its own title (as a `div.title` before its content wrapper), so
-/// [`add_block_with_title`] must not also emit one.
+/// The delimited form is a [`Block::CompoundDelimited`] rendered by
+/// [`compound_delimited_to_node`]; the paragraph form is a [`Block::Simple`]
+/// rendered by [`open_paragraph_to_node`]. Every masquerade style on a `--`
+/// block is intercepted earlier — by [`is_sidebar`], [`is_example`],
+/// `QuoteBlock`, `AdmonitionBlock`, or `RawDelimitedBlock` — so a
+/// `CompoundDelimited` block that reaches here always resolves to `open`. Like
+/// a sidebar, an open block renders its own title (as a `div.title` before its
+/// content wrapper), so [`add_block_with_title`] must not also emit one.
 fn is_open<'a>(block: &'a Block<'a>) -> bool {
-    matches!(block, Block::CompoundDelimited(_)) && block.resolved_context().as_ref() == "open"
+    block.resolved_context().as_ref() == "open"
 }
 
 /// Renders a sidebar block, matching Asciidoctor's HTML output.
