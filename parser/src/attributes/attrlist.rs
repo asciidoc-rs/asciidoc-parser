@@ -240,8 +240,6 @@ impl<'src> Attrlist<'src> {
             self.anchor = later_anchor;
         }
 
-        let mut positional_index = 0usize;
-
         for attr in later_attributes {
             if attr.name_str().is_some() {
                 if let Some(existing) = self
@@ -256,15 +254,24 @@ impl<'src> Attrlist<'src> {
                 continue;
             }
 
-            positional_index += 1;
+            // Place a positional at its Asciidoctor position — the same
+            // 1-based entry count `nth_attribute` uses, which includes named
+            // entries and blank slots — so positions stay aligned across lines
+            // even when a later line interleaves named attributes before a
+            // positional. (A parsed positional always carries a position; fall
+            // back to appending if one is somehow absent, rather than panic.)
+            let Some(position) = attr.positional_index() else {
+                self.attributes.push(attr);
+                continue;
+            };
 
-            if positional_index == 1 {
+            if position == 1 {
                 if let Some(existing) = self.nth_positional_mut(1) {
                     *existing = ElementAttribute::merge_block_style_shorthand(existing, &attr);
                 } else {
                     self.attributes.push(attr);
                 }
-            } else if let Some(existing) = self.nth_positional_mut(positional_index) {
+            } else if let Some(existing) = self.nth_positional_mut(position) {
                 *existing = attr;
             } else {
                 self.attributes.push(attr);
@@ -272,7 +279,11 @@ impl<'src> Attrlist<'src> {
         }
     }
 
-    /// Return a mutable reference to the (1-based) `n`th positional attribute.
+    /// Return a mutable reference to the positional attribute at (1-based)
+    /// Asciidoctor position `n` — the position recorded on each attribute, not
+    /// its ordinal among stored positionals (the two differ once named entries
+    /// or blank slots consume positions). See
+    /// [`nth_attribute`](Self::nth_attribute).
     ///
     /// `n` must be 1 or greater; the only caller is
     /// [`merge_block_attribute_line`](Self::merge_block_attribute_line), which
@@ -282,8 +293,7 @@ impl<'src> Attrlist<'src> {
 
         self.attributes
             .iter_mut()
-            .filter(|attr| attr.name_str().is_none())
-            .nth(n - 1)
+            .find(|attr| attr.positional_index() == Some(n))
     }
 
     /// Returns an iterator over the attributes contained within
@@ -1462,6 +1472,39 @@ mod tests {
         first.merge_block_attribute_line(later);
         assert_eq!(first.anchor(), Some("id1"));
         assert_eq!(first.named_attribute("foo").unwrap().value(), "bar");
+    }
+
+    #[test]
+    fn merge_block_attribute_line_positions_account_for_named_entries() {
+        // A later line whose positional is preceded by a named attribute must
+        // merge at its Asciidoctor position (which counts the named entry), not
+        // at its ordinal among unnamed entries. Here `Author2` is the later
+        // line's *second* entry, so it replaces position 2 (`Author1`) rather
+        // than merging into position 1 (`quote`); `Extra` is position 3.
+        let p = Parser::default();
+
+        let mut first = crate::attributes::Attrlist::parse(
+            crate::Span::new("quote,Author1"),
+            &p,
+            AttrlistContext::Block,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        let later = crate::attributes::Attrlist::parse(
+            crate::Span::new("width=300,Author2,Extra"),
+            &p,
+            AttrlistContext::Block,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        first.merge_block_attribute_line(later);
+
+        assert_eq!(first.nth_attribute(1).unwrap().value(), "quote");
+        assert_eq!(first.nth_attribute(2).unwrap().value(), "Author2");
+        assert_eq!(first.nth_attribute(3).unwrap().value(), "Extra");
+        assert_eq!(first.named_attribute("width").unwrap().value(), "300");
     }
 
     #[test]
