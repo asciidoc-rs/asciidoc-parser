@@ -47,6 +47,11 @@ pub enum WarningType {
     )]
     DocumentHeaderNotTerminated,
 
+    #[error(
+        "no inline candidate; use the inline doctype to convert a single paragraph, verbatim, or raw block"
+    )]
+    NoInlineDoctypeCandidate,
+
     #[error("An empty attribute value was detected")]
     EmptyAttributeValue,
 
@@ -160,6 +165,10 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::DocumentHeaderNotTerminated => {
                 write!(f, "WarningType::DocumentHeaderNotTerminated")
+            }
+
+            WarningType::NoInlineDoctypeCandidate => {
+                write!(f, "WarningType::NoInlineDoctypeCandidate")
             }
 
             WarningType::EmptyAttributeValue => write!(f, "WarningType::EmptyAttributeValue"),
@@ -362,6 +371,13 @@ mod tests {
                 let warning = WarningType::DocumentHeaderNotTerminated;
                 let debug_output = format!("{:?}", warning);
                 assert_eq!(debug_output, "WarningType::DocumentHeaderNotTerminated");
+            }
+
+            #[test]
+            fn no_inline_doctype_candidate() {
+                let warning = WarningType::NoInlineDoctypeCandidate;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::NoInlineDoctypeCandidate");
             }
 
             #[test]

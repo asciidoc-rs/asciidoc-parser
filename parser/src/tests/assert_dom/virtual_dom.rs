@@ -555,6 +555,25 @@ impl ToVirtualDom for Document<'_> {
             node = node.with_id(id);
         }
 
+        // Under `doctype: inline`, the document renders only its first block, as
+        // bare inline content (no block wrappers), and drops everything after
+        // it. A compound or empty first block has no inline candidate (a
+        // `no inline candidate` warning was recorded at parse time), so the
+        // document renders as empty.
+        if matches!(
+            self.attribute_value("doctype"),
+            InterpretedValue::Value(ref v) if v == "inline"
+        ) {
+            if let Some(rendered) = self
+                .nested_blocks()
+                .find(|b| !matches!(b, Block::DocumentAttribute(_)))
+                .and_then(|b| b.rendered_content())
+            {
+                node.children.extend(parse_html_content(rendered));
+            }
+            return node;
+        }
+
         // The document title renders as an `<h1>` when it is shown. This
         // virtual DOM models the *embedded* output, whose default is
         // title-hidden: the title shows only when `showtitle` is set, or (absent

@@ -5,7 +5,7 @@ use std::{marker::PhantomData, rc::Rc, slice::Iter};
 use self_cell::self_cell;
 
 use crate::{
-    Parser, Span,
+    HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{Block, ContentModel, IsBlock, Preamble, parse_utils::parse_blocks_until},
     document::{Catalog, Docinfo, DocinfoLocation, Header, InterpretedValue, TocConfig, TocMode},
@@ -15,7 +15,7 @@ use crate::{
         ReferenceWarning, ResolvedAttributes, SourceMap,
     },
     strings::CowStr,
-    warnings::Warning,
+    warnings::{Warning, WarningType},
 };
 
 /// A document represents the top-level block element in AsciiDoc. It consists
@@ -132,6 +132,32 @@ impl<'src> Document<'src> {
             }
 
             let mut blocks = maw_blocks.item.item;
+
+            // Under `doctype: inline`, only the first block is converted, as bare
+            // inline content, and everything after it is dropped (the rendering
+            // lives on the embed path). A compound or empty first block has no
+            // inline content to emit, so warn here — matching Asciidoctor's
+            // `Document#convert` — and let the embed path render nothing. The
+            // rendered inline output of a valid candidate is read back from the
+            // first block's own content.
+            if matches!(
+                parser.attribute_value("doctype"),
+                InterpretedValue::Value(ref v) if v == "inline"
+            ) && let Some(first) = blocks
+                .iter()
+                .find(|b| !matches!(b, Block::DocumentAttribute(_)))
+                && matches!(
+                    first.content_model(),
+                    ContentModel::Compound | ContentModel::Empty
+                )
+            {
+                warnings.push(Warning {
+                    source: first.span(),
+                    warning: WarningType::NoInlineDoctypeCandidate,
+                    origin: None,
+                });
+            }
+
             let mut has_content_blocks = false;
             let mut preamble_split_index: Option<usize> = None;
 

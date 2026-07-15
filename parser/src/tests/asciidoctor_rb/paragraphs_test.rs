@@ -2504,6 +2504,62 @@ mod special {
             assert_rendered_contains(&doc, "This is important, fool!");
         }
     }
+
+    // Ported from Ruby Asciidoctor's paragraphs_test.rb, `context 'Inline
+    // doctype'`. Under `doctype: inline` the document converts only its first
+    // block, as bare inline content; a compound (or empty) first block has no
+    // inline candidate and is reported.
+    mod inline_doctype {
+        use crate::tests::prelude::*;
+
+        // Ported from 'should only format and output text in first paragraph
+        // when doctype is inline'.
+        #[test]
+        fn should_only_output_first_paragraph() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse(
+                    "http://asciidoc.org[AsciiDoc] is a _lightweight_ markup language...\n\nignored",
+                );
+
+            // The first paragraph is rendered as bare inline content, with the
+            // full inline substitutions applied and no `<div class="paragraph">
+            // <p>` wrapper.
+            let first = doc.nested_blocks().next().unwrap();
+            assert_eq!(
+                first.rendered_content(),
+                Some(
+                    "<a href=\"http://asciidoc.org\">AsciiDoc</a> is a <em>lightweight</em> markup language&#8230;&#8203;"
+                )
+            );
+            assert_css(&doc, ".paragraph", 0);
+            assert_xpath(&doc, "//a[@href = \"http://asciidoc.org\"]", 1);
+            assert_xpath(&doc, "//em[text() = \"lightweight\"]", 1);
+
+            // The second paragraph (`ignored`) is dropped from the output.
+            refute_rendered_contains(&doc, "ignored");
+
+            // A valid inline candidate produces no warning.
+            assert!(doc.warnings().next().is_none());
+        }
+
+        // Ported from 'should output nil and warn if first block is not a
+        // paragraph'. A list is a compound block, so it is not an inline
+        // candidate: nothing is emitted and a warning is logged.
+        #[test]
+        fn should_warn_if_first_block_is_not_a_paragraph() {
+            let doc = Parser::default()
+                .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
+                .parse("* bullet");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].warning, WarningType::NoInlineDoctypeCandidate);
+
+            // Nothing is rendered (the list is not an inline candidate).
+            refute_rendered_contains(&doc, "bullet");
+        }
+    }
 }
 
 #[ignore]
@@ -2521,10 +2577,13 @@ fn port_from_ruby() {
     # been ported to `mod special` below now that conditional preprocessor
     # directives are implemented.
 
+    # NOTE: the 'Inline doctype' tests (#680) have been ported to
+    # `mod special::inline_doctype` below.
+
     # NOTE: the remaining un-ported tests below are tracked by dedicated
-    # issues: '[open]' styled paragraph -> open block (#679), inline doctype
-    # (#680), and unknown/custom paragraph style logging (#681). The DocBook
-    # 'simpara' styled-paragraph tests are out of scope (no DocBook backend).
+    # issues: '[open]' styled paragraph -> open block (#679) and
+    # unknown/custom paragraph style logging (#681). The DocBook 'simpara'
+    # styled-paragraph tests are out of scope (no DocBook backend).
 
     context 'Styled Paragraphs' do
       test 'should wrap text in simpara for styled paragraphs when converted to DocBook' do
@@ -2627,23 +2686,6 @@ fn port_from_ruby() {
         assert_css 'blockquote > title', output, 1
         assert_xpath '//blockquote/title[text() = "Quote title"]', output, 1
         assert_css 'blockquote > title + simpara', output, 1
-      end
-    end
-
-    context 'Inline doctype' do
-      test 'should only format and output text in first paragraph when doctype is inline' do
-        input = "http://asciidoc.org[AsciiDoc] is a _lightweight_ markup language...\n\nignored"
-        output = convert_string input, doctype: 'inline'
-        assert_equal '<a href="http://asciidoc.org">AsciiDoc</a> is a <em>lightweight</em> markup language&#8230;&#8203;', output
-      end
-
-      test 'should output nil and warn if first block is not a paragraph' do
-        input = '* bullet'
-        using_memory_logger do |logger|
-          output = convert_string input, doctype: 'inline'
-          assert_nil output
-          assert_message logger, :WARN, '~no inline candidate'
-        end
       end
     end
   end
