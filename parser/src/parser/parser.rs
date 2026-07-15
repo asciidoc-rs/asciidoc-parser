@@ -497,8 +497,8 @@ impl Parser {
     /// materialized in either table.
     ///
     /// This is the *raw* lookup used by the attribute writers to decide whether
-    /// a name is locked against modification. The attribute *readers* additionally
-    /// resolve the read-only default of `relfilesuffix` (see
+    /// a name is locked against modification. The attribute *readers*
+    /// additionally resolve the read-only default of `relfilesuffix` (see
     /// [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
     ///
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
@@ -517,15 +517,15 @@ impl Parser {
     /// two diverge for non-HTML backends, e.g. `.xml` for DocBook — see
     /// [issue #657](https://github.com/asciidoc-rs/asciidoc-parser/issues/657)).
     ///
-    /// Returns `false` once `relfilesuffix` is explicitly set or unset (an entry
-    /// — a value or an [unset] tombstone — then lives in the per-parser map),
-    /// and for every other name. The redirect is deliberately confined to the
-    /// value *readers*: the attribute *writers* consult
-    /// [`effective_attribute`](Self::effective_attribute) directly, so
-    /// `relfilesuffix` stays modifiable anywhere rather than inheriting the
-    /// header-only modification context of `outfilesuffix`. Callers must apply a
-    /// like-named counter overlay first, so a `{counter:relfilesuffix}` still
-    /// wins over the tracked default.
+    /// Returns `false` once `relfilesuffix` is explicitly set or unset (an
+    /// entry — a value or an [unset] tombstone — then lives in the
+    /// per-parser map), and for every other name. The redirect is
+    /// deliberately confined to the value *readers*: the attribute
+    /// *writers* consult [`effective_attribute`](Self::effective_attribute)
+    /// directly, so `relfilesuffix` stays modifiable anywhere rather than
+    /// inheriting the header-only modification context of `outfilesuffix`.
+    /// Callers must apply a like-named counter overlay first, so a
+    /// `{counter:relfilesuffix}` still wins over the tracked default.
     ///
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     pub(crate) fn tracks_outfilesuffix(&self, name: &str) -> bool {
