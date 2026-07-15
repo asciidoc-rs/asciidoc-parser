@@ -34,7 +34,7 @@ I’m reading page-by-page, line-by-line, and writing tests to verify that the i
 
 ## Extensions
 
-Extensions (custom block, block macro, inline macro, and similar processors, as provided by the [Ruby implementation of Asciidoctor](https://github.com/asciidoctor/asciidoctor)) are not planned for the 1.0 release of this crate. They may be added in a subsequent version.
+Extensions – custom block, block macro, inline macro, and similar processors, as provided by the [Ruby implementation of Asciidoctor](https://github.com/asciidoctor/asciidoctor) – are not planned for the 1.0 release of this crate. They may be added in a subsequent version.
 
 ## No planned support for some AsciiDoc features
 
