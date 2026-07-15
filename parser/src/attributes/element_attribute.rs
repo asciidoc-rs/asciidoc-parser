@@ -76,6 +76,13 @@ impl<'src> ElementAttribute<'src> {
             let mut source = Span::new(source_text.as_ref());
             source = source.discard(start_index);
 
+            // Skip any leading, non-semantic whitespace before this entry
+            // (Asciidoctor's `skip_blank`). Name detection has to run first, so
+            // without this a name with leading blanks — e.g. `[  first = value]`
+            // or the second/third entries once a comma is consumed — would fail
+            // to be recognized and fall through to a positional literal.
+            source = source.take_whitespace_with_newline().after;
+
             let (name, after): (Option<Span<'_>>, Span) = match source.take_attr_name() {
                 Some(name) => {
                     let space = name.after.take_whitespace_with_newline();

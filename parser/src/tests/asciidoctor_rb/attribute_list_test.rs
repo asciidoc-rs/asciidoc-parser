@@ -50,7 +50,6 @@
 //!   attribute reference (`name='{val}`): this crate resolves attribute
 //!   references at the whole-attrlist level before parsing, so a defined
 //!   `{val}` resolves where the no-document Ruby path keeps it literal.
-//! * Leading, non-semantic whitespace before the first attribute name.
 //! * `parse_into`'s positional *rekeying* and the static `AttributeList.rekey`
 //!   helper, neither of which this crate exposes.
 //!
@@ -656,12 +655,10 @@ fn collect_named_attributes_quoted() {
     assert_eq!(a.named("third"), Some("three"));
 }
 
-// `asciidoc-parser` does not strip leading, non-semantic whitespace before the
-// first attribute name, so `     first    = ...` is not recognized as a named
-// attribute (it becomes a positional literal). Asciidoctor skips that leading
-// blank. Kept `non_normative!`.
-non_normative!(
-    r#"
+#[test]
+fn collect_named_attributes_quoted_containing_non_semantic_spaces() {
+    verifies!(
+        r#"
   test 'collect named attributes quoted containing non-semantic spaces' do
     attributes = {}
     line = %(     first    =     'value', second     ="value two"     , third=       three      )
@@ -671,7 +668,17 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // Leading blanks before the name, and whitespace around `=` and the commas,
+    // are all non-semantic and skipped.
+    let a = parse_attrlist(
+        r#"     first    =     'value', second     ="value two"     , third=       three      "#,
+    );
+    assert_eq!(a.named("first"), Some("value"));
+    assert_eq!(a.named("second"), Some("value two"));
+    assert_eq!(a.named("third"), Some("three"));
+}
 
 #[test]
 fn collect_mixed_named_and_unnamed_attributes() {
