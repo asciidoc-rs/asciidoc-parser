@@ -2518,6 +2518,39 @@ mod special {
     }
 }
 
+// Ported from Ruby Asciidoctor's paragraphs_test.rb (`context 'Custom'`),
+// covering how an unregistered (unknown) paragraph style is handled.
+mod custom {
+    use crate::tests::prelude::*;
+
+    // Ported from Ruby Asciidoctor's paragraphs_test.rb ('should not warn if
+    // paragraph style is unregisted'). An unknown block style such as `[foo]`
+    // on a paragraph is accepted silently: the style is retained on the block,
+    // the content is parsed as an ordinary paragraph, and no warning is
+    // emitted.
+    #[test]
+    fn should_not_warn_if_paragraph_style_is_unregistered() {
+        let doc = Parser::default().parse("[foo]\nbar");
+
+        // The unknown style is retained on the block, and its content is parsed
+        // as an ordinary paragraph.
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.declared_style(), Some("foo"));
+        assert_eq!(block.rendered_content(), Some("bar"));
+
+        // No warning is produced.
+        assert_eq!(doc.warnings().count(), 0);
+    }
+
+    // Not ported: 'should log debug message if paragraph style is unknown and
+    // debug level is enabled'. Asciidoctor logs `unknown style for paragraph:
+    // foo` only at DEBUG severity. This crate has no debug-severity logging
+    // channel — its `Warning` mechanism conveys WARN-level possible parse
+    // errors only (see `crate::warnings`) — so there is no equivalent behavior
+    // to assert. The observable behavior at default severity (no warning) is
+    // covered by `should_not_warn_if_paragraph_style_is_unregistered` above.
+}
+
 #[ignore]
 #[test]
 fn port_from_ruby() {
@@ -2536,10 +2569,12 @@ fn port_from_ruby() {
     # NOTE: '[open]' styled paragraph -> open block (#679) has been ported to
     # `mod special` below.
 
-    # NOTE: the remaining un-ported tests below are tracked by dedicated
-    # issues: inline doctype (#680) and unknown/custom paragraph style logging
-    # (#681). The DocBook 'simpara' styled-paragraph tests are out of scope (no
-    # DocBook backend).
+    # NOTE: 'context Custom' (unknown/custom paragraph style handling, #681)
+    # has been ported to `mod custom` below.
+
+    # NOTE: the remaining un-ported test below is tracked by a dedicated issue:
+    # inline doctype (#680). The DocBook 'simpara' styled-paragraph tests are
+    # out of scope (no DocBook backend).
 
     context 'Styled Paragraphs' do
       test 'should wrap text in simpara for styled paragraphs when converted to DocBook' do
@@ -2655,29 +2690,7 @@ fn port_from_ruby() {
     end
   end
 
-  context 'Custom' do
-    test 'should not warn if paragraph style is unregisted' do
-      input = <<~'EOS'
-      [foo]
-      bar
-      EOS
-      using_memory_logger do |logger|
-        convert_string_to_embedded input
-        assert_empty logger.messages
-      end
-    end
-
-    test 'should log debug message if paragraph style is unknown and debug level is enabled' do
-      input = <<~'EOS'
-      [foo]
-      bar
-      EOS
-      using_memory_logger Logger::Severity::DEBUG do |logger|
-        convert_string_to_embedded input
-        assert_message logger, :DEBUG, '<stdin>: line 2: unknown style for paragraph: foo', Hash
-      end
-    end
-  end
+  # NOTE: 'context Custom' has been ported to `mod custom` above.
 
 "###
     );
