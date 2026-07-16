@@ -3043,7 +3043,7 @@ mod macros {
     #[test]
     fn should_link_to_data_uri_if_value_of_link_attribute_is_self_and_inline_image_is_embedded() {
         todo!(
-            "Port when `data-uri` image embedding is implemented (asciidoc-rs/asciidoc-parser#697): {}",
+            "Port when `data-uri` image embedding and `link=self` data-URI resolution are implemented (asciidoc-rs/asciidoc-parser#697): {}",
             r###"
         test 'should link to data URI if value of link attribute is self and inline image is embedded' do
             para = block_from_string 'image:circle.svg[Tiger,100,link=self]', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'data-uri' => '', 'imagesdir' => 'fixtures', 'docdir' => testdir }
