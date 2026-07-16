@@ -65,12 +65,13 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// The `target_image_path` is resolved relative to the directory retrieved
     /// from the specified document-scoped attribute key, if provided.
     ///
-    /// NOT YET IMPLEMENTED:
-    /// If the `data-uri` attribute is set on the document, and the safe mode
-    /// level is less than `SafeMode::SECURE`, the image will be safely
-    /// converted to a data URI by reading it from the same directory. If
-    /// neither of these conditions are satisfied, a relative path (i.e., URL)
-    /// will be returned.
+    /// In Asciidoctor, if the `data-uri` attribute is set on the document and
+    /// the safe mode is below `SafeMode::Secure`, the image is converted to a
+    /// data URI by reading its bytes from the same directory; otherwise a
+    /// relative path (i.e., URL) is returned. The `data-uri` embedding path is
+    /// not yet implemented in this crate (tracked by
+    /// <https://github.com/asciidoc-rs/asciidoc-parser/issues/697>), so a
+    /// normalized web path is always returned.
     ///
     /// ## Parameters
     ///
@@ -791,9 +792,11 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // attribute is set and the safe mode is below `SafeMode::Secure`. That
         // requires reading the image's bytes, which this crate leaves to the
         // caller rather than performing file/network access itself; the
-        // `data-uri` attribute is therefore not implemented and the image is
-        // always emitted as a normalized web path. Because data-uri embedding is
-        // absent, there is no safe-mode-sensitive behavior to gate here.
+        // `data-uri` attribute is therefore not yet implemented (tracked by
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/697) and the
+        // image is always emitted as a normalized web path. Because data-uri
+        // embedding is absent, there is no safe-mode-sensitive behavior to gate
+        // here.
         let asset_dir = parser
             .attribute_value(asset_dir_key)
             .as_maybe_str()
