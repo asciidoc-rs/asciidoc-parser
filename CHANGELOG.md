@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.23.3](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.23.2...v0.23.3)
+_16 July 2026_
+
+### Added
+
+* Track Asciidoctor's paragraphs_test.rb via SDD ([#696](https://github.com/asciidoc-rs/asciidoc-parser/pull/696))
+
+### Fixed
+
+* Safe-mode handling in `InlineSubstitutionRenderer` is complete (close #277) ([#698](https://github.com/asciidoc-rs/asciidoc-parser/pull/698))
+
 ## [0.23.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.23.1...v0.23.2)
 _15 July 2026_
 
