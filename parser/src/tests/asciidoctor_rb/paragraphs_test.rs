@@ -1668,9 +1668,18 @@ mod normal {
         );
     }
 
+    // This test stays `non_normative!`: the upstream `input` ends with the
+    // single-line paragraph `roll it back`, which renders no `<br>` regardless
+    // of the `hardbreaks` setting, so the upstream `(//p)[2]/br == 0` assertion
+    // can't actually demonstrate that `:!hardbreaks:` took effect (see
+    // https://github.com/asciidoctor/asciidoctor/issues/4818). The Rust test
+    // below instead feeds a multi-line final paragraph (`roll\nit\nback`), so
+    // the absence of `<br>` genuinely proves the toggle. Because the parser
+    // never receives the verbatim upstream input, we don't claim line coverage
+    // of it.
     #[test]
     fn should_be_able_to_toggle_hardbreaks_by_setting_hardbreaks_option_on_document() {
-        verifies!(
+        non_normative!(
             r#"
     test 'should be able to toggle hardbreaks by setting hardbreaks-option on document' do
       input = <<~'EOS'
@@ -1691,9 +1700,6 @@ mod normal {
     end
 "#
         );
-
-        // NOTE: I substituted different test material in this test.
-        // See https://github.com/asciidoctor/asciidoctor/issues/4818 for why.
 
         let doc = Parser::default()
             .parse(":hardbreaks-option:\n\nmake\nit\nso\n\n:!hardbreaks:\n\nroll\nit\nback");
