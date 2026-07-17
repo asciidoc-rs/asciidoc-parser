@@ -48,8 +48,13 @@
 
 mod attribute_list_test;
 mod converter_test;
+mod extensions_test;
+mod helpers_test;
+mod invoker_test;
 mod lists_test;
 mod logger_test;
+mod options_test;
 mod paragraphs_test;
 mod substitutions_test;
 mod tables_test;
+mod test_helper_test;
