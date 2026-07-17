@@ -63,8 +63,8 @@
 //! * Attribute *references* are case-sensitive, so `{He-Man}` does not resolve
 //!   the lowercased `:He-Man:` entry.
 //! * Multi-line attribute values fuse only the modern backslash continuation,
-//!   not the legacy `+`; and a trailing `+` in a fused value becomes a bare
-//!   newline.
+//!   not the legacy `+`, so a legacy `+`-continued value keeps only its first
+//!   line.
 //! * Non-ASCII attribute names, names with spaces, and named tokens beginning
 //!   with `_` or containing `.` are not accepted.
 //! * A counter modifies a locked (API-set or built-in) attribute rather than
@@ -259,14 +259,15 @@ mod assignment {
 
         // Divergence: Asciidoctor fuses a legacy `+`-terminated multi-line
         // attribute value; this crate only fuses the modern backslash
-        // continuation, so the `+`-continued lines are not joined and the value
-        // is just the first line (with its trailing `+` preserved).
+        // continuation, so the `+`-continued lines are not joined, and the
+        // trailing `+` is treated as a hard-break marker and stripped, leaving
+        // just the first line's text.
         let doc = Parser::default().parse(
             ":description: This is the first      +\n              Ruby implementation of +\n              AsciiDoc.",
         );
         assert_eq!(
             doc.attribute_value("description"),
-            InterpretedValue::Value("This is the first      +")
+            InterpretedValue::Value("This is the first")
         );
     }
 
@@ -296,10 +297,9 @@ mod assignment {
         );
     }
 
-    // Tracked in #729.
     #[test]
     fn honors_line_break_characters_in_multi_line_values() {
-        non_normative!(
+        verifies!(
             r#"
     test 'honors line break characters in multi-line values' do
       str = <<~'EOS'
@@ -314,22 +314,18 @@ mod assignment {
 "#
         );
 
-        // Divergence: in a multi-line attribute value this crate treats a
-        // trailing `+` as a hard line break and stores a bare newline, whereas
-        // Asciidoctor preserves the literal `+` before the newline.
         let doc = Parser::default().parse(
             ":signature: Linus Torvalds + \\\nLinux Hacker + \\\nlinus.torvalds@example.com",
         );
         assert_eq!(
             doc.attribute_value("signature"),
-            InterpretedValue::Value("Linus Torvalds\nLinux Hacker\nlinus.torvalds@example.com")
+            InterpretedValue::Value("Linus Torvalds +\nLinux Hacker +\nlinus.torvalds@example.com")
         );
     }
 
-    // Tracked in #729.
     #[test]
     fn should_allow_pass_macro_to_surround_a_multi_line_value_that_contains_line_breaks() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should allow pass macro to surround a multi-line value that contains line breaks' do
       str = <<~'EOS'
@@ -353,11 +349,9 @@ mod assignment {
                 ModificationContext::ApiOnly,
             )
             .parse(":signature: pass:a[{author} + \\\n{title} + \\\n{email}]");
-        // Divergence: see `honors_line_break_characters_in_multi_line_values` —
-        // a trailing `+` in the fused value becomes a bare newline in this crate.
         assert_eq!(
             doc.attribute_value("signature"),
-            InterpretedValue::Value("Linus Torvalds\nLinux Hacker\nlinus.torvalds@example.com")
+            InterpretedValue::Value("Linus Torvalds +\nLinux Hacker +\nlinus.torvalds@example.com")
         );
     }
 
@@ -546,9 +540,10 @@ mod assignment {
         );
 
         // Divergence: this crate only fuses the modern backslash continuation,
-        // not the legacy `+` continuation, so the value is just the first line
-        // (`Asciidoctor +`) and the `{version}` reference never participates in
-        // the header value. (The INFO drop-line log is also not modeled.)
+        // not the legacy `+` continuation, so the `{version}` line never
+        // participates in the header value; the trailing `+` is treated as a
+        // hard-break marker and stripped, leaving just `Asciidoctor`. (The INFO
+        // drop-line log is also not modeled.)
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "attribute-missing",
@@ -558,7 +553,7 @@ mod assignment {
             .parse(":release: Asciidoctor +\n          {version}\n");
         assert_eq!(
             doc.attribute_value("release"),
-            InterpretedValue::Value("Asciidoctor +")
+            InterpretedValue::Value("Asciidoctor")
         );
     }
 
@@ -1534,17 +1529,53 @@ mod assignment {
         );
 
         // Divergence: this crate resolves TOC configuration through the
-        // `Document::toc_*` accessors (`toc_mode`, `toc_position` semantics,
-        // `toc_class`, …) rather than materializing the `toc-position` /
-        // `toc-placement` / `toc-class` document attributes that Asciidoctor's
-        // matrix inspects, so the attribute-level matrix can't be verified. The
-        // raw `toc` attribute is stored as given.
-        let doc = Parser::default()
-            .with_intrinsic_attribute("toc", "left", ModificationContext::Anywhere)
-            .parse("");
-        assert_eq!(doc.attribute_value("toc"), InterpretedValue::Value("left"));
-        assert_eq!(doc.attribute_value("toc-position"), InterpretedValue::Unset);
-        assert_eq!(doc.attribute_value("toc-class"), InterpretedValue::Unset);
+        // `Document::toc_*` accessors rather than materializing the
+        // `toc-position` / `toc-placement` / `toc-class` document attributes
+        // that Asciidoctor's matrix inspects. It also folds Asciidoctor's
+        // separate `toc-position` and `toc-placement` into a single `TocMode`
+        // that is resolved from the `toc` value alone. So each matrix row is
+        // exercised here through `toc_mode()` / `toc_class()`, asserting this
+        // crate's actual behavior.
+        //
+        // Three rows diverge from Asciidoctor's matrix (and are asserted as this
+        // crate's actual behavior): the `toc2` alias is not recognized (it
+        // resolves to `Disabled`, not a left-placed TOC); explicit
+        // `toc-placement` / `toc-position` attributes are not honored (only the
+        // `toc` value drives the mode); and `toc-class` is never switched to
+        // `toc2`.
+        use crate::document::TocMode;
+        // Each row is the raw attribute spec (as it appears in the vendored
+        // matrix, parsed the same way Ruby does — space-separated entries,
+        // `name=value`, or `name!` for an unset) paired with the `TocMode` this
+        // crate resolves for it.
+        let rows: &[(&str, TocMode)] = &[
+            ("toc", TocMode::Auto),
+            ("toc=header", TocMode::Auto),
+            ("toc=beeboo", TocMode::Auto),
+            ("toc=left", TocMode::Left),
+            ("toc2", TocMode::Disabled),
+            ("toc=right", TocMode::Right),
+            ("toc=preamble", TocMode::Preamble),
+            ("toc=macro", TocMode::Macro),
+            ("toc toc-placement=macro toc-position=left", TocMode::Auto),
+            ("toc toc-placement!", TocMode::Auto),
+        ];
+        for (spec, expected_mode) in rows {
+            let mut parser = Parser::default();
+            for entry in spec.split(' ') {
+                parser = if let Some(name) = entry.strip_suffix('!') {
+                    parser.with_intrinsic_attribute_bool(name, false, ModificationContext::Anywhere)
+                } else if let Some((name, value)) = entry.split_once('=') {
+                    parser.with_intrinsic_attribute(name, value, ModificationContext::Anywhere)
+                } else {
+                    parser.with_intrinsic_attribute(entry, "", ModificationContext::Anywhere)
+                };
+            }
+            let doc = parser.parse("");
+            assert_eq!(doc.toc_mode(), *expected_mode, "toc_mode for {spec:?}");
+            // `toc-class` is never materialized as `toc2`; it stays the default.
+            assert_eq!(doc.toc_class(), "toc", "toc_class for {spec:?}");
+        }
     }
 }
 
