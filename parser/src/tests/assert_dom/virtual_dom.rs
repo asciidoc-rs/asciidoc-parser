@@ -18,9 +18,8 @@ use crate::{
         AdmonitionBlock, Block, Break, ColumnStyle, CompoundDelimitedBlock, ContentModel, Frame,
         Grid, HorizontalAlignment, IsBlock, ListBlock, ListItem, ListItemMarker, ListType,
         MediaBlock, MediaType, Preamble, QuoteBlock, QuoteType, RawDelimitedBlock, SectionBlock,
-        SimpleBlock,
-        SimpleBlockStyle, Stripes, TableBlock, TableCellContent, TableColumn, TableRow,
-        VerticalAlignment,
+        SimpleBlock, SimpleBlockStyle, Stripes, TableBlock, TableCellContent, TableColumn,
+        TableRow, VerticalAlignment,
     },
     document::{InterpretedValue, TocMode, first_inline_candidate},
 };
@@ -1393,12 +1392,16 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
             img
         };
 
-        node = node.with_child(VirtualNode::new("div").with_class("content").with_child(content_child));
+        node = node.with_child(
+            VirtualNode::new("div")
+                .with_class("content")
+                .with_child(content_child),
+        );
     } else if media.type_() == MediaType::Video {
         let macro_attrlist = media.macro_attrlist();
 
-        let mut video = VirtualNode::new("video")
-            .with_attribute("src", media_src_with_time_range(media));
+        let mut video =
+            VirtualNode::new("video").with_attribute("src", media_src_with_time_range(media));
 
         if let Some(poster) = macro_attrlist
             .named_or_positional_attribute("poster", 1)
@@ -1435,12 +1438,16 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
             video = video.with_attribute("preload", preload.value().to_string());
         }
 
-        node = node.with_child(VirtualNode::new("div").with_class("content").with_child(video));
+        node = node.with_child(
+            VirtualNode::new("div")
+                .with_class("content")
+                .with_child(video),
+        );
     } else if media.type_() == MediaType::Audio {
         let macro_attrlist = media.macro_attrlist();
 
-        let mut audio = VirtualNode::new("audio")
-            .with_attribute("src", media_src_with_time_range(media));
+        let mut audio =
+            VirtualNode::new("audio").with_attribute("src", media_src_with_time_range(media));
 
         if !macro_attrlist.has_option("nocontrols") {
             audio = audio.with_attribute("controls", "");
@@ -1451,7 +1458,11 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
             }
         }
 
-        node = node.with_child(VirtualNode::new("div").with_class("content").with_child(audio));
+        node = node.with_child(
+            VirtualNode::new("div")
+                .with_class("content")
+                .with_child(audio),
+        );
     }
 
     // The block title renders as a `div.title`, prefixed with the caption (e.g.

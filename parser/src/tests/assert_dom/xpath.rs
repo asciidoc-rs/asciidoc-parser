@@ -248,11 +248,12 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
             // Check if rest is a preceding-sibling axis.
             if let Some(axis_rest) = rest.strip_prefix("/preceding-sibling::") {
                 // Parse the axis_rest to see if there's a continuation after the axis.
-                let (axis_selector, continuation) = if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
-                    (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
-                } else {
-                    (axis_rest.trim(), None)
-                };
+                let (axis_selector, continuation) =
+                    if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
+                        (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
+                    } else {
+                        (axis_rest.trim(), None)
+                    };
 
                 let mut final_results = Vec::new();
                 for node in results {
@@ -277,11 +278,12 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
             // Check if rest is a following-sibling axis.
             if let Some(axis_rest) = rest.strip_prefix("/following-sibling::") {
                 // Parse the axis_rest to see if there's a continuation after the axis.
-                let (axis_selector, continuation) = if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
-                    (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
-                } else {
-                    (axis_rest.trim(), None)
-                };
+                let (axis_selector, continuation) =
+                    if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
+                        (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
+                    } else {
+                        (axis_rest.trim(), None)
+                    };
 
                 let mut final_results = Vec::new();
                 for node in results {
@@ -630,18 +632,21 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
         return query_descendant_or_self(node, descendant_rest);
     }
 
-    if let Some((first, rest)) = find_unbracketed_slash(pattern).map(|i| (&pattern[..i], &pattern[i + 1..])) {
+    if let Some((first, rest)) =
+        find_unbracketed_slash(pattern).map(|i| (&pattern[..i], &pattern[i + 1..]))
+    {
         let first = first.trim();
         let rest = rest.trim();
 
         // Check if rest is an axis specifier.
         if let Some(axis_rest) = rest.strip_prefix("following-sibling::") {
             // Parse the axis_rest to see if there's a continuation after the axis.
-            let (axis_selector, continuation) = if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
-                (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
-            } else {
-                (axis_rest.trim(), None)
-            };
+            let (axis_selector, continuation) =
+                if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
+                    (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
+                } else {
+                    (axis_rest.trim(), None)
+                };
 
             let mut final_results = Vec::new();
             for child in &node.children {
@@ -668,11 +673,12 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
 
         if let Some(axis_rest) = rest.strip_prefix("preceding-sibling::") {
             // Parse the axis_rest to see if there's a continuation after the axis.
-            let (axis_selector, continuation) = if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
-                (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
-            } else {
-                (axis_rest.trim(), None)
-            };
+            let (axis_selector, continuation) =
+                if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
+                    (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
+                } else {
+                    (axis_rest.trim(), None)
+                };
 
             let mut final_results = Vec::new();
             for child in &node.children {

@@ -283,7 +283,8 @@ mod comments {
 "#
         );
 
-        let doc = Parser::default().parse("first paragraph\n\n// line comment\n\nsecond paragraph\n");
+        let doc =
+            Parser::default().parse("first paragraph\n\n// line comment\n\nsecond paragraph\n");
         refute_output_contains(&doc, "line comment");
         assert_xpath(&doc, "//p", 2);
     }
@@ -365,8 +366,9 @@ mod comments {
 "#
         );
 
-        let doc = Parser::default()
-            .parse("====\nfirst paragraph\n\n////\nblock comment\n////\n\nsecond paragraph\n====\n");
+        let doc = Parser::default().parse(
+            "====\nfirst paragraph\n\n////\nblock comment\n////\n\nsecond paragraph\n====\n",
+        );
         refute_rendered_contains(&doc, "block comment");
         assert_xpath(&doc, "//p", 2);
     }
@@ -475,7 +477,8 @@ mod comments {
     }
 
     #[test]
-    fn preprocessor_directives_should_not_be_processed_within_comment_block_within_block_metadata() {
+    fn preprocessor_directives_should_not_be_processed_within_comment_block_within_block_metadata()
+    {
         verifies!(
             r#"
     test 'preprocessor directives should not be processed within comment block within block metadata' do
@@ -621,7 +624,8 @@ mod comments {
     }
 
     #[test]
-    fn preprocessor_directives_should_not_be_processed_on_subsequent_lines_of_a_comment_paragraph() {
+    fn preprocessor_directives_should_not_be_processed_on_subsequent_lines_of_a_comment_paragraph()
+    {
         verifies!(
             r#"
     # WARNING this assertion fails if the directive is the first line of the paragraph instead of the second
@@ -759,7 +763,11 @@ mod comments {
         let doc = Parser::default()
             .parse("====\nparagraph\n\n[comment#idname]\nskip\n\nparagraph\n====\n");
         assert_xpath(&doc, "/*[@class=\"exampleblock\"]", 1);
-        assert_xpath(&doc, "/*[@class=\"exampleblock\"]//*[@class=\"paragraph\"]", 2);
+        assert_xpath(
+            &doc,
+            "/*[@class=\"exampleblock\"]//*[@class=\"paragraph\"]",
+            2,
+        );
         assert_xpath(&doc, "//*[@class=\"paragraph\"][@id=\"idname\"]", 0);
     }
 
@@ -770,8 +778,6 @@ mod comments {
 "#
     );
 }
-
-
 
 mod sidebar_blocks {
     use crate::tests::prelude::*;
@@ -804,7 +810,8 @@ mod sidebar_blocks {
 
         // The Ruby xpath single-quotes the class value; the crate's xpath
         // engine matches attribute values only when double-quoted.
-        let doc = Parser::default().parse("== Section\n\n.Sidebar\n****\nContent goes here\n****\n");
+        let doc =
+            Parser::default().parse("== Section\n\n.Sidebar\n****\nContent goes here\n****\n");
         assert_xpath(&doc, "//*[@class=\"sidebarblock\"]//p", 1);
     }
 
@@ -851,7 +858,11 @@ mod quote_and_verse_blocks {
         assert_css(&doc, ".quoteblock > blockquote", 1);
         assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 1);
         assert_css(&doc, ".quoteblock > .attribution", 0);
-        assert_xpath(&doc, "//*[@class=\"quoteblock\"]//p[text()=\"A famous quote.\"]", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]//p[text()=\"A famous quote.\"]",
+            1,
+        );
     }
 
     #[test]
@@ -988,7 +999,11 @@ mod quote_and_verse_blocks {
         assert_css(&doc, ".quoteblock", 1);
         assert_css(&doc, ".quoteblock > blockquote", 1);
         assert_css(&doc, ".quoteblock > blockquote > .paragraph", 1);
-        assert_css(&doc, ".quoteblock > blockquote > .paragraph + .admonitionblock", 1);
+        assert_css(
+            &doc,
+            ".quoteblock > blockquote > .paragraph + .admonitionblock",
+            1,
+        );
     }
 
     #[test]
@@ -1133,13 +1148,16 @@ mod quote_and_verse_blocks {
 "#
         );
 
-        let doc =
-            Parser::default().parse("> A famous quote.\n>\n> Some more inspiring words.\n");
+        let doc = Parser::default().parse("> A famous quote.\n>\n> Some more inspiring words.\n");
         assert_css(&doc, ".quoteblock", 1);
         assert_css(&doc, ".quoteblock > blockquote", 1);
         assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 2);
         assert_css(&doc, ".quoteblock > .attribution", 0);
-        assert_xpath(&doc, "(//*[@class=\"quoteblock\"]//p)[1][text()=\"A famous quote.\"]", 1);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"quoteblock\"]//p)[1][text()=\"A famous quote.\"]",
+            1,
+        );
         assert_xpath(
             &doc,
             "(//*[@class=\"quoteblock\"]//p)[2][text()=\"Some more inspiring words.\"]",
@@ -1177,7 +1195,11 @@ mod quote_and_verse_blocks {
         assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 1);
         assert_css(&doc, ".quoteblock > blockquote > .admonitionblock", 1);
         assert_css(&doc, ".quoteblock > .attribution", 0);
-        assert_xpath(&doc, "(//*[@class=\"quoteblock\"]//p)[1][text()=\"A famous quote.\"]", 1);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"quoteblock\"]//p)[1][text()=\"A famous quote.\"]",
+            1,
+        );
         assert_xpath(
             &doc,
             "(//*[@class=\"quoteblock\"]//*[@class=\"admonitionblock note\"]//*[@class=\"content\"])[1][normalize-space(text())=\"Some more inspiring words.\"]",
@@ -1440,7 +1462,8 @@ mod quote_and_verse_blocks {
 "##
         );
 
-        let doc = Parser::default().parse("[verse, Famous Poet, Famous Poem]\n____\nA famous verse.\n____\n");
+        let doc = Parser::default()
+            .parse("[verse, Famous Poet, Famous Poem]\n____\nA famous verse.\n____\n");
         assert_css(&doc, ".verseblock", 1);
         assert_css(&doc, ".verseblock p", 0);
         assert_css(&doc, ".verseblock > pre", 1);
@@ -1540,8 +1563,7 @@ mod quote_and_verse_blocks {
 "#
         );
 
-        let doc =
-            Parser::default().parse("[verse]\n____\nA famous verse.\n\nStanza two.\n____\n");
+        let doc = Parser::default().parse("[verse]\n____\nA famous verse.\n\nStanza two.\n____\n");
         assert_xpath(&doc, "//*[@class=\"verseblock\"]", 1);
         assert_xpath(&doc, "//*[@class=\"verseblock\"]/pre", 1);
         assert_xpath(&doc, "//*[@class=\"verseblock\"]//p", 0);
@@ -1678,9 +1700,6 @@ mod quote_and_verse_blocks {
 "#
     );
 }
-
-
-
 
 mod example_blocks {
     use crate::{document::InterpretedValue, parser::ModificationContext, tests::prelude::*};
@@ -1933,7 +1952,10 @@ mod example_blocks {
             "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Look! Writing Docs with AsciiDoc\"]",
             1,
         );
-        assert_eq!(doc.attribute_value("example-number"), InterpretedValue::Unset);
+        assert_eq!(
+            doc.attribute_value("example-number"),
+            InterpretedValue::Unset
+        );
     }
 
     // NOTE: divergence from Asciidoctor. Asciidoctor honors an empty `:caption:`
@@ -2002,7 +2024,8 @@ mod example_blocks {
     }
 
     #[test]
-    fn should_use_explicit_caption_if_specified_even_if_block_specific_global_caption_is_disabled() {
+    fn should_use_explicit_caption_if_specified_even_if_block_specific_global_caption_is_disabled()
+    {
         verifies!(
             r#"
     test 'should use explicit caption if specified even if block-specific global caption is disabled' do
@@ -2038,7 +2061,10 @@ mod example_blocks {
             "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Look! Writing Docs with AsciiDoc\"]",
             1,
         );
-        assert_eq!(doc.attribute_value("example-number"), InterpretedValue::Unset);
+        assert_eq!(
+            doc.attribute_value("example-number"),
+            InterpretedValue::Unset
+        );
     }
 
     #[test]
@@ -2078,7 +2104,10 @@ mod example_blocks {
             "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Look! Writing Docs with AsciiDoc\"]",
             1,
         );
-        assert_eq!(doc.attribute_value("example-number"), InterpretedValue::Unset);
+        assert_eq!(
+            doc.attribute_value("example-number"),
+            InterpretedValue::Unset
+        );
     }
 
     #[test]
@@ -2254,8 +2283,16 @@ mod example_blocks {
         let doc = Parser::default().parse(
             ".Before\n====\nbefore\n====\n\n.Show Me The Goods\n[%collapsible]\n====\nThis content is revealed when the user clicks the words \"Show Me The Goods\".\n====\n\n.After\n====\nafter\n====\n",
         );
-        assert_xpath(&doc, "//*[@class=\"title\"][text()=\"Example 1. Before\"]", 1);
-        assert_xpath(&doc, "//*[@class=\"title\"][text()=\"Example 2. After\"]", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"title\"][text()=\"Example 1. Before\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"title\"][text()=\"Example 2. After\"]",
+            1,
+        );
         assert_css(&doc, "details", 1);
         assert_css(&doc, "details > summary.title", 1);
         assert_xpath(&doc, "//details/summary[text()=\"Show Me The Goods\"]", 1);
@@ -2285,8 +2322,7 @@ mod example_blocks {
 "#
         );
 
-        let doc =
-            Parser::default().parse("outside\n\n====\ninside\n\nstill inside\n\neof\n");
+        let doc = Parser::default().parse("outside\n\n====\ninside\n\nstill inside\n\neof\n");
         assert_xpath(&doc, "/*[@class=\"exampleblock\"]", 1);
         let warnings: Vec<_> = doc
             .warnings()
@@ -2303,8 +2339,6 @@ mod example_blocks {
 "#
     );
 }
-
-
 
 mod admonition_blocks {
     use crate::tests::prelude::*;
@@ -2408,9 +2442,6 @@ mod admonition_blocks {
     );
 }
 
-
-
-
 mod preformatted_blocks {
     use crate::tests::prelude::*;
 
@@ -2450,8 +2481,8 @@ mod preformatted_blocks {
 "#
         );
 
-        let doc = Parser::default()
-            .parse("paragraph 1\n----\nlisting content\n----\nparagraph 2\n");
+        let doc =
+            Parser::default().parse("paragraph 1\n----\nlisting content\n----\nparagraph 2\n");
         assert_xpath(&doc, "/*[@class=\"paragraph\"]/p", 2);
         assert_xpath(&doc, "/*[@class=\"listingblock\"]", 1);
         assert_xpath(
@@ -2687,8 +2718,9 @@ mod preformatted_blocks {
 "#
         );
 
-        let doc = Parser::default()
-            .parse("[subs=\"attributes\"]\n....\n\n\n  first line\n\nlast line\n\n{empty}\n\n....\n");
+        let doc = Parser::default().parse(
+            "[subs=\"attributes\"]\n....\n\n\n  first line\n\nlast line\n\n{empty}\n\n....\n",
+        );
         assert_xpath(&doc, "//pre[text()=\"  first line\n\nlast line\"]", 1);
     }
 
@@ -2717,8 +2749,7 @@ mod preformatted_blocks {
 "#
         );
 
-        let doc = Parser::default()
-            .parse("----\r\nsource line 1\r\nsource line 2\r\n----\r\n");
+        let doc = Parser::default().parse("----\r\nsource line 1\r\nsource line 2\r\n----\r\n");
         assert_xpath(&doc, "/*[@class=\"listingblock\"]//pre", 1);
         assert_xpath(
             &doc,
@@ -2806,7 +2837,10 @@ mod preformatted_blocks {
         // default behavior.
         let doc = Parser::default()
             .parse("[indent=\"-1\"]\n----\n    def names\n\n      @names.split\n\n    end\n----\n");
-        assert_eq!(pre_text(&doc), "    def names\n\n      @names.split\n\n    end");
+        assert_eq!(
+            pre_text(&doc),
+            "    def names\n\n      @names.split\n\n    end"
+        );
     }
 
     // NOTE: divergence from Asciidoctor (see
@@ -2932,8 +2966,9 @@ mod preformatted_blocks {
 "#
         );
 
-        let doc = Parser::default()
-            .parse(":tabsize: 4\n\n[indent=0]\n----\n\tdef names\n\n\t\t@names.split\n\n\tend\n----\n");
+        let doc = Parser::default().parse(
+            ":tabsize: 4\n\n[indent=0]\n----\n\tdef names\n\n\t\t@names.split\n\n\tend\n----\n",
+        );
         assert_eq!(pre_text(&doc), "def names\n\n    @names.split\n\nend");
     }
 
@@ -3016,9 +3051,8 @@ mod preformatted_blocks {
 "#
         );
 
-        let doc = Parser::default().parse(
-            "----\nputs 'Hello, World!' # <1>\nputs 'Goodbye, World ;(' # <2>\n----\n",
-        );
+        let doc = Parser::default()
+            .parse("----\nputs 'Hello, World!' # <1>\nputs 'Goodbye, World ;(' # <2>\n----\n");
         // The assert helpers operate on the decoded virtual DOM, where the
         // conum is a `<b class="conum">` element; the guard text (` # `) is
         // preserved in the text node immediately before it.
@@ -3082,8 +3116,9 @@ mod preformatted_blocks {
 
         // The Ruby subs-list introspection (`block.subs`) is exercised through
         // the rendered output here.
-        let doc = Parser::default()
-            .parse("[subs=\"verbatim,quotes\"]\n----\nMap<String, String> *attributes*; //<1>\n----\n");
+        let doc = Parser::default().parse(
+            "[subs=\"verbatim,quotes\"]\n----\nMap<String, String> *attributes*; //<1>\n----\n",
+        );
         // Decoded virtual DOM: specialcharacters escaping is reflected as the
         // literal `<`/`>` in the text node, and `*attributes*` becomes a
         // `<strong>` element.
@@ -3198,8 +3233,8 @@ mod preformatted_blocks {
 "#
         );
 
-        let doc = Parser::default()
-            .parse("..gitignore\n----\n/.bundle/\n/build/\n/Gemfile.lock\n----\n");
+        let doc =
+            Parser::default().parse("..gitignore\n----\n/.bundle/\n/build/\n/Gemfile.lock\n----\n");
         assert_xpath(&doc, "//*[@class=\"title\"][text()=\".gitignore\"]", 1);
     }
 
@@ -3226,7 +3261,7 @@ mod preformatted_blocks {
 
     #[test]
     fn listing_block_with_title_should_generate_screen_element_inside_formalpara_element_in_docbook()
-    {
+     {
         non_normative!(
             r#"
     test 'listing block with title should generate screen element inside formalpara element in docbook' do
@@ -3251,7 +3286,7 @@ mod preformatted_blocks {
 
     #[test]
     fn should_not_prepend_caption_to_title_of_listing_block_with_title_if_listing_caption_attribute_is_not_set()
-    {
+     {
         verifies!(
             r#"
     test 'should not prepend caption to title of listing block with title if listing-caption attribute is not set' do
@@ -3284,7 +3319,7 @@ mod preformatted_blocks {
     #[ignore]
     #[test]
     fn should_prepend_caption_specified_by_listing_caption_attribute_and_number_to_title_of_listing_block_with_title()
-    {
+     {
         verifies!(
             r#"
     test 'should prepend caption specified by listing-caption attribute and number to title of listing block with title' do
@@ -3320,7 +3355,7 @@ mod preformatted_blocks {
     #[ignore]
     #[test]
     fn should_prepend_caption_specified_by_caption_attribute_on_listing_block_even_if_listing_caption_attribute_is_not_set()
-    {
+     {
         verifies!(
             r#"
     test 'should prepend caption specified by caption attribute on listing block even if listing-caption attribute is not set' do
@@ -3356,7 +3391,7 @@ mod preformatted_blocks {
     #[ignore]
     #[test]
     fn listing_block_without_an_explicit_style_and_with_a_second_positional_argument_should_be_promoted_to_a_source_block()
-    {
+     {
         verifies!(
             r#"
     test 'listing block without an explicit style and with a second positional argument should be promoted to a source block' do
@@ -3392,7 +3427,7 @@ mod preformatted_blocks {
     #[ignore]
     #[test]
     fn listing_block_without_an_explicit_style_should_be_promoted_to_a_source_block_if_source_language_is_set()
-    {
+     {
         verifies!(
             r#"
     test 'listing block without an explicit style should be promoted to a source block if source-language is set' do
@@ -3411,8 +3446,8 @@ mod preformatted_blocks {
 "#
         );
 
-        let doc = Parser::default()
-            .parse(":source-language: ruby\n\n----\nputs 'Hello, Ruby!'\n----\n");
+        let doc =
+            Parser::default().parse(":source-language: ruby\n\n----\nputs 'Hello, Ruby!'\n----\n");
         let block = doc
             .nested_blocks()
             .find(|b| b.raw_context().as_ref() == "listing")
@@ -3422,7 +3457,7 @@ mod preformatted_blocks {
 
     #[test]
     fn listing_block_with_an_explicit_style_and_a_second_positional_argument_should_not_be_promoted_to_a_source_block()
-    {
+     {
         verifies!(
             r#"
     test 'listing block with an explicit style and a second positional argument should not be promoted to a source block' do
@@ -3458,7 +3493,7 @@ mod preformatted_blocks {
 
     #[test]
     fn listing_block_with_an_explicit_style_should_not_be_promoted_to_a_source_block_if_source_language_is_set()
-    {
+     {
         verifies!(
             r#"
     test 'listing block with an explicit style should not be promoted to a source block if source-language is set' do
@@ -3519,7 +3554,7 @@ mod preformatted_blocks {
 
     #[test]
     fn source_block_with_title_and_no_language_should_generate_screen_element_inside_formalpara_element_for_docbook()
-    {
+     {
         non_normative!(
             r#"
     test 'source block with title and no language should generate screen element inside formalpara element for docbook' do
@@ -3550,9 +3585,6 @@ mod preformatted_blocks {
 "#
     );
 }
-
-
-
 
 mod open_blocks {
     use crate::tests::prelude::*;
@@ -3617,7 +3649,11 @@ mod open_blocks {
             "--\nThis is an open block.\n\nIt can span multiple lines.\n\n____\nIt can hold great quotes like this one.\n____\n--\n",
         );
         assert_xpath(&doc, "//*[@class=\"openblock\"]//p", 3);
-        assert_xpath(&doc, "//*[@class=\"openblock\"]//*[@class=\"quoteblock\"]", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"openblock\"]//*[@class=\"quoteblock\"]",
+            1,
+        );
     }
 
     non_normative!(
@@ -3927,8 +3963,6 @@ mod passthrough_blocks {
 "#
     );
 }
-
-
 
 mod math_blocks {
     use crate::tests::prelude::*;
@@ -4400,7 +4434,7 @@ mod math_blocks {
 
     #[test]
     fn should_convert_contents_of_asciimath_block_to_mathml_in_docbook_output_if_asciimath_gem_is_available()
-    {
+     {
         non_normative!(
             r#"
     test 'should convert contents of asciimath block to MathML in DocBook output if asciimath gem is available' do
@@ -4481,7 +4515,11 @@ mod math_blocks {
         );
         assert_css(&doc, ".stemblock", 1);
         assert_css(&doc, ".stemblock .title", 1);
-        assert_xpath(&doc, "//*[@class=\"title\"][text()=\"The Lorenz Equations\"]", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"title\"][text()=\"The Lorenz Equations\"]",
+            1,
+        );
     }
 
     // NOTE: divergence from Asciidoctor (duplicate stem-block title; see
@@ -4520,7 +4558,7 @@ mod math_blocks {
     #[ignore]
     #[test]
     fn should_add_asciimath_delimiters_around_stem_block_content_if_stem_attribute_is_asciimath_empty_or_not_set()
-    {
+     {
         verifies!(
             r##"
     test 'should add AsciiMath delimiters around stem block content if stem attribute is asciimath, empty, or not set' do
@@ -4556,7 +4594,7 @@ mod math_blocks {
     #[ignore]
     #[test]
     fn should_add_latex_math_delimiters_around_stem_block_content_if_stem_attribute_is_latexmath_latex_or_tex()
-    {
+     {
         verifies!(
             r#"
     test 'should add LaTeX math delimiters around stem block content if stem attribute is latexmath, latex, or tex' do
@@ -4583,7 +4621,11 @@ mod math_blocks {
         );
 
         let doc = Parser::default()
-            .with_intrinsic_attribute("stem", "latexmath", crate::parser::ModificationContext::ApiOnly)
+            .with_intrinsic_attribute(
+                "stem",
+                "latexmath",
+                crate::parser::ModificationContext::ApiOnly,
+            )
             .parse("[stem]\n++++\n\\sqrt{3x-1}+(1+x)^2 < y\n++++\n");
         assert_css(&doc, ".stemblock", 1);
         assert_eq!(stem_pre_text(&doc), "\\[\\sqrt{3x-1}+(1+x)^2 < y\\]");
@@ -4637,7 +4679,6 @@ mod math_blocks {
 "#
     );
 }
-
 
 mod custom_blocks {
     use crate::tests::prelude::*;
@@ -4739,7 +4780,11 @@ mod metadata {
 
         let doc = Parser::default().parse(".Title\n== Section\n\nparagraph\n");
         assert_xpath(&doc, "//*[@class=\"paragraph\"]", 1);
-        assert_xpath(&doc, "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Title\"]", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Title\"]",
+            1,
+        );
         assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]", 1);
     }
 
@@ -4775,7 +4820,11 @@ mod metadata {
 
         let doc = Parser::default().parse(".Block title\n= Section Title\n\nsection paragraph\n");
         assert_xpath(&doc, "//*[@id=\"content\"]/h1[text()=\"Section Title\"]", 1);
-        assert_xpath(&doc, "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
+            1,
+        );
     }
 
     // NOTE: divergence from Asciidoctor (block-title carryover; see
@@ -4785,7 +4834,7 @@ mod metadata {
     #[ignore]
     #[test]
     fn block_title_above_document_title_gets_carried_over_to_first_block_in_first_section_if_no_preamble()
-    {
+     {
         verifies!(
             r#"
     test 'block title above document title gets carried over to first block in first section if no preamble' do
@@ -4808,8 +4857,9 @@ mod metadata {
 "#
         );
 
-        let doc = Parser::default()
-            .parse(":doctype: book\n.Block title\n= Document Title\n\n== First Section\n\nparagraph\n");
+        let doc = Parser::default().parse(
+            ":doctype: book\n.Block title\n= Document Title\n\n== First Section\n\nparagraph\n",
+        );
         assert_xpath(
             &doc,
             "//*[@class=\"sect1\"]//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
@@ -4847,8 +4897,16 @@ mod metadata {
         );
 
         let doc = Parser::default()
-            .with_intrinsic_attribute("link-url", "https://acme.com", crate::parser::ModificationContext::ApiOnly)
-            .with_intrinsic_attribute("link-text", "ACME", crate::parser::ModificationContext::ApiOnly)
+            .with_intrinsic_attribute(
+                "link-url",
+                "https://acme.com",
+                crate::parser::ModificationContext::ApiOnly,
+            )
+            .with_intrinsic_attribute(
+                "link-text",
+                "ACME",
+                crate::parser::ModificationContext::ApiOnly,
+            )
             .with_intrinsic_attribute("tm", "(TM)", crate::parser::ModificationContext::ApiOnly)
             .parse(".{link-url}[{link-text}]{tm}\nThe one and only!\n");
         assert_css(&doc, ".title", 1);
@@ -5289,7 +5347,8 @@ mod images {
 "#
         );
 
-        let doc = Parser::default().parse(":alt-text: Tiger\n\nimage::images/tiger.png[{alt-text}]\n");
+        let doc =
+            Parser::default().parse(":alt-text: Tiger\n\nimage::images/tiger.png[{alt-text}]\n");
         assert_xpath(
             &doc,
             "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
@@ -5477,7 +5536,11 @@ mod images {
         );
 
         let doc = Parser::default().parse("image::images/tiger.png[Tiger,]");
-        assert_xpath(&doc, "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"]", 1);
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"]",
+            1,
+        );
         assert_xpath(
             &doc,
             "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@width]",
@@ -5523,8 +5586,9 @@ mod images {
 "#
         );
 
-        let doc = Parser::default()
-            .parse("image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,window=_blank]");
+        let doc = Parser::default().parse(
+            "image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,window=_blank]",
+        );
         assert_xpath(
             &doc,
             "/*[@class=\"imageblock\"]//a[@class=\"image\"][@href=\"http://en.wikipedia.org/wiki/Tiger\"][@target=\"_blank\"][@rel=\"noopener\"]/img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
@@ -5534,7 +5598,7 @@ mod images {
 
     #[test]
     fn adds_rel_noopener_attribute_to_block_image_with_link_that_targets_name_window_when_the_noopener_option_is_set()
-    {
+     {
         verifies!(
             r#"
     test 'adds rel=noopener attribute to block image with link that targets name window when the noopener option is set' do
@@ -5569,8 +5633,9 @@ mod images {
 "#
         );
 
-        let doc = Parser::default()
-            .parse("image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,opts=nofollow]");
+        let doc = Parser::default().parse(
+            "image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,opts=nofollow]",
+        );
         assert_xpath(
             &doc,
             "/*[@class=\"imageblock\"]//a[@class=\"image\"][@href=\"http://en.wikipedia.org/wiki/Tiger\"][@rel=\"nofollow\"]/img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
@@ -5713,7 +5778,7 @@ mod images {
 
     #[test]
     fn keeps_attribute_reference_unprocessed_if_image_target_is_missing_attribute_reference_and_attribute_missing_is_skip()
-    {
+     {
         verifies!(
             r#"
     test 'keeps attribute reference unprocessed if image target is missing attribute reference and attribute-missing is skip' do
@@ -5738,7 +5803,7 @@ mod images {
 
     #[test]
     fn should_not_drop_line_if_image_target_is_missing_attribute_reference_and_attribute_missing_is_drop()
-    {
+     {
         verifies!(
             r#"
     test 'should not drop line if image target is missing attribute reference and attribute-missing is drop' do
@@ -5756,14 +5821,15 @@ mod images {
 "#
         );
 
-        let doc = Parser::default().parse(":attribute-missing: drop\n\nimage::{bogus}/photo.jpg[]\n");
+        let doc =
+            Parser::default().parse(":attribute-missing: drop\n\nimage::{bogus}/photo.jpg[]\n");
         assert_css(&doc, "img[src=\"/photo.jpg\"]", 1);
         assert_eq!(doc.warnings().count(), 0);
     }
 
     #[test]
     fn drops_line_if_image_target_is_missing_attribute_reference_and_attribute_missing_is_drop_line()
-    {
+     {
         verifies!(
             r#"
     test 'drops line if image target is missing attribute reference and attribute-missing is drop-line' do
@@ -5813,7 +5879,7 @@ mod images {
 
     #[test]
     fn dropped_image_does_not_break_processing_of_following_section_and_attribute_missing_is_drop_line()
-    {
+     {
         verifies!(
             r#"
     test 'dropped image does not break processing of following section and attribute-missing is drop-line' do
@@ -6117,8 +6183,9 @@ mod images {
 "#
         );
 
-        let doc = Parser::default()
-            .parse("image::data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=[Dot]");
+        let doc = Parser::default().parse(
+            "image::data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=[Dot]",
+        );
         assert_xpath(
             &doc,
             "//img[@src=\"data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=\"][@alt=\"Dot\"]",
@@ -6227,7 +6294,8 @@ mod media {
     }
 
     #[test]
-    fn should_detect_and_convert_video_macro_with_positional_attributes_for_poster_and_dimensions() {
+    fn should_detect_and_convert_video_macro_with_positional_attributes_for_poster_and_dimensions()
+    {
         verifies!(
             r#"
     test 'should detect and convert video macro with positional attributes for poster and dimensions' do
@@ -6287,7 +6355,8 @@ mod media {
 "#
         );
 
-        let doc = Parser::default().parse("video::cats-vs-dogs.avi[cats-and-dogs.png,align=center]");
+        let doc =
+            Parser::default().parse("video::cats-vs-dogs.avi[cats-and-dogs.png,align=center]");
         assert_css(&doc, "video", 1);
         assert_css(&doc, "video[src=\"cats-vs-dogs.avi\"]", 1);
         assert_css(&doc, ".videoblock.text-center", 1);
@@ -6361,7 +6430,7 @@ mod media {
 
     #[test]
     fn video_macro_should_add_time_range_anchor_with_start_and_end_time_if_start_and_end_attributes_are_set()
-    {
+     {
         verifies!(
             r#"
     test 'video macro should add time range anchor with start and end time if start and end attributes are set' do
@@ -6436,7 +6505,11 @@ mod media {
         assert_css(&doc, "video", 1);
         // The crate's CSS engine does not parse an attribute selector whose
         // value is a URL; the equivalent xpath is used instead.
-        assert_xpath(&doc, "//video[@src=\"http://example.org/videos/cats-vs-dogs.avi\"]", 1);
+        assert_xpath(
+            &doc,
+            "//video[@src=\"http://example.org/videos/cats-vs-dogs.avi\"]",
+            1,
+        );
     }
 
     // The vimeo/youtube service video tests below require rendering a custom
@@ -6462,8 +6535,8 @@ mod media {
 "#
         );
 
-        let doc =
-            Parser::default().parse("video::67480300[vimeo, 400, 300, start=60, options=\"autoplay,muted\"]");
+        let doc = Parser::default()
+            .parse("video::67480300[vimeo, 400, 300, start=60, options=\"autoplay,muted\"]");
         assert_css(&doc, "video", 0);
         assert_css(&doc, "iframe", 1);
     }
@@ -6486,7 +6559,8 @@ mod media {
 "#
         );
 
-        let doc = Parser::default().parse("video::67480300/123456789[vimeo, 400, 300, options=loop]");
+        let doc =
+            Parser::default().parse("video::67480300/123456789[vimeo, 400, 300, options=loop]");
         assert_css(&doc, "iframe", 1);
     }
 
@@ -6508,8 +6582,8 @@ mod media {
 "#
         );
 
-        let doc =
-            Parser::default().parse("video::67480300[vimeo, 400, 300, options=loop, hash=123456789]");
+        let doc = Parser::default()
+            .parse("video::67480300[vimeo, 400, 300, options=loop, hash=123456789]");
         assert_css(&doc, "iframe", 1);
     }
 
@@ -6649,7 +6723,8 @@ mod media {
 "#
         );
 
-        let doc = Parser::default().parse("audio::podcast.mp3[options=\"autoplay,nocontrols,loop\"]");
+        let doc =
+            Parser::default().parse("audio::podcast.mp3[options=\"autoplay,nocontrols,loop\"]");
         assert_css(&doc, "audio", 1);
         assert_css(&doc, "audio[autoplay]", 1);
         assert_css(&doc, "audio:not([controls])", 1);
@@ -6821,9 +6896,11 @@ mod admonition_icons {
 "##
         );
 
-        let doc = Parser::default().with_intrinsic_attribute("icons", "", crate::parser::ModificationContext::ApiOnly).parse(
-            "TIP: Set the icontype using either the icontype attribute on the icons attribute.",
-        );
+        let doc = Parser::default()
+            .with_intrinsic_attribute("icons", "", crate::parser::ModificationContext::ApiOnly)
+            .parse(
+                "TIP: Set the icontype using either the icontype attribute on the icons attribute.",
+            );
         assert_xpath(
             &doc,
             "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/img[@src=\"./images/icons/tip.png\"]",
@@ -7228,8 +7305,16 @@ mod source_code {
         assert_eq!(block.raw_context().as_ref(), "listing");
         assert_eq!(block.declared_style(), Some("source"));
         assert_css(&doc, ".listingblock", 2);
-        assert_css(&doc, ".listingblock pre code.language-ruby[data-lang=ruby]", 1);
-        assert_css(&doc, ".listingblock pre code.language-javascript[data-lang=javascript]", 1);
+        assert_css(
+            &doc,
+            ".listingblock pre code.language-ruby[data-lang=ruby]",
+            1,
+        );
+        assert_css(
+            &doc,
+            ".listingblock pre code.language-javascript[data-lang=javascript]",
+            1,
+        );
     }
 
     // NOTE: divergence from Asciidoctor. This crate does not split a fenced
@@ -7265,8 +7350,16 @@ mod source_code {
         let doc = Parser::default()
             .parse("```ruby,numbered\nputs \"Hello, World!\"\n```\n\n``` javascript, numbered\nalert(\"Hello, World!\")\n```\n");
         assert_css(&doc, ".listingblock", 2);
-        assert_css(&doc, ".listingblock pre code.language-ruby[data-lang=ruby]", 1);
-        assert_css(&doc, ".listingblock pre code.language-javascript[data-lang=javascript]", 1);
+        assert_css(
+            &doc,
+            ".listingblock pre code.language-ruby[data-lang=ruby]",
+            1,
+        );
+        assert_css(
+            &doc,
+            ".listingblock pre code.language-javascript[data-lang=javascript]",
+            1,
+        );
     }
 
     #[test]
@@ -7332,7 +7425,8 @@ mod source_code {
 "#
         );
 
-        let doc = Parser::default().parse("[source,js]\n....\nconsole.log('Hello, World!')\n....\n");
+        let doc =
+            Parser::default().parse("[source,js]\n....\nconsole.log('Hello, World!')\n....\n");
         let block = doc.nested_blocks().next().unwrap();
         assert_eq!(block.declared_style(), Some("source"));
         assert_css(&doc, ".listingblock", 1);
@@ -7780,6 +7874,585 @@ mod abstract_and_part_intro {
     end
 "##
     );
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
+mod substitutions {
+    use crate::{content::SubstitutionStep, tests::prelude::*};
+
+    non_normative!(
+        r#"
+  context 'Substitutions' do
+"#
+    );
+
+    // NOTE: divergence from Asciidoctor. An empty `[subs=","]` list is not
+    // honored by this crate — a verbatim block keeps its default (Verbatim)
+    // substitution group rather than an empty list. Kept `#[ignore]`d.
+    // TODO: honor an empty `subs` list.
+    #[ignore]
+    #[test]
+    fn processor_should_not_crash_if_subs_are_empty() {
+        verifies!(
+            r#"
+    test 'processor should not crash if subs are empty' do
+      input = <<~'EOS'
+      [subs=","]
+      ....
+      content
+      ....
+      EOS
+
+      doc = document_from_string input
+      block = doc.blocks.first
+      assert_equal [], block.subs
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[subs=\",\"]\n....\ncontent\n....\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.substitution_group(),
+            SubstitutionGroup::Custom(vec![])
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate's default verbatim
+    // substitution list includes `Callouts`, so appending to it yields
+    // `[specialcharacters, callouts, attributes, macros]` rather than Ruby's
+    // `[specialcharacters, attributes, macros]`. Kept `#[ignore]`d.
+    // TODO: reconcile the default verbatim subs list with Asciidoctor.
+    #[ignore]
+    #[test]
+    fn should_be_able_to_append_subs_to_default_block_substitution_list() {
+        verifies!(
+            r#"
+    test 'should be able to append subs to default block substitution list' do
+      input = <<~'EOS'
+      :application: Asciidoctor
+
+      [subs="+attributes,+macros"]
+      ....
+      {application}
+      ....
+      EOS
+
+      doc = document_from_string input
+      block = doc.blocks.first
+      assert_equal [:specialcharacters, :attributes, :macros], block.subs
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":application: Asciidoctor\n\n[subs=\"+attributes,+macros\"]\n....\n{application}\n....\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.substitution_group(),
+            SubstitutionGroup::Custom(vec![
+                SubstitutionStep::SpecialCharacters,
+                SubstitutionStep::AttributeReferences,
+                SubstitutionStep::Macros,
+            ])
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor (default verbatim subs include
+    // `Callouts`; see
+    // `should_be_able_to_append_subs_to_default_block_substitution_list`).
+    // TODO: reconcile the default verbatim subs list with Asciidoctor.
+    #[ignore]
+    #[test]
+    fn should_be_able_to_prepend_subs_to_default_block_substitution_list() {
+        verifies!(
+            r#"
+    test 'should be able to prepend subs to default block substitution list' do
+      input = <<~'EOS'
+      :application: Asciidoctor
+
+      [subs="attributes+"]
+      ....
+      {application}
+      ....
+      EOS
+
+      doc = document_from_string input
+      block = doc.blocks.first
+      assert_equal [:attributes, :specialcharacters], block.subs
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":application: Asciidoctor\n\n[subs=\"attributes+\"]\n....\n{application}\n....\n",
+        );
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.substitution_group(),
+            SubstitutionGroup::Custom(vec![
+                SubstitutionStep::AttributeReferences,
+                SubstitutionStep::SpecialCharacters,
+            ])
+        );
+    }
+
+    #[test]
+    fn should_be_able_to_remove_subs_to_default_block_substitution_list() {
+        verifies!(
+            r#"
+    test 'should be able to remove subs to default block substitution list' do
+      input = <<~'EOS'
+      [subs="-quotes,-replacements"]
+      content
+      EOS
+
+      doc = document_from_string input
+      block = doc.blocks.first
+      assert_equal [:specialcharacters, :attributes, :macros, :post_replacements], block.subs
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[subs=\"-quotes,-replacements\"]\ncontent\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.substitution_group(),
+            SubstitutionGroup::Custom(vec![
+                SubstitutionStep::SpecialCharacters,
+                SubstitutionStep::AttributeReferences,
+                SubstitutionStep::Macros,
+                SubstitutionStep::PostReplacement,
+            ])
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. The combined prepend/append/remove
+    // modifiers do not yield Asciidoctor's exact list here, and the `+macros`
+    // sub does not produce the expected inline link in the rendered output.
+    // Kept `#[ignore]`d with the Ruby-intended assertions.
+    // TODO: reconcile combined subs modifiers and verbatim macro substitution.
+    #[ignore]
+    #[test]
+    fn should_be_able_to_prepend_append_and_remove_subs_from_default_block_substitution_list() {
+        verifies!(
+            r##"
+    test 'should be able to prepend, append and remove subs from default block substitution list' do
+      input = <<~'EOS'
+      :application: asciidoctor
+
+      [subs="attributes+,-verbatim,+specialcharacters,+macros"]
+      ....
+      https://{application}.org[{gt}{gt}] <1>
+      ....
+      EOS
+
+      doc = document_from_string input, standalone: false
+      block = doc.blocks.first
+      assert_equal [:attributes, :specialcharacters, :macros], block.subs
+      result = doc.convert
+      assert_includes result, '<pre><a href="https://asciidoctor.org">&gt;&gt;</a> &lt;1&gt;</pre>'
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse(
+            ":application: asciidoctor\n\n[subs=\"attributes+,-verbatim,+specialcharacters,+macros\"]\n....\nhttps://{application}.org[{gt}{gt}] <1>\n....\n",
+        );
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.substitution_group(),
+            SubstitutionGroup::Custom(vec![
+                SubstitutionStep::AttributeReferences,
+                SubstitutionStep::SpecialCharacters,
+                SubstitutionStep::Macros,
+            ])
+        );
+        assert_xpath(&doc, "//pre/a[@href=\"https://asciidoctor.org\"]", 1);
+    }
+
+    #[test]
+    fn should_be_able_to_set_subs_then_modify_them() {
+        verifies!(
+            r#"
+    test 'should be able to set subs then modify them' do
+      input = <<~'EOS'
+      [subs="verbatim,-callouts"]
+      _hey now_ <1>
+      EOS
+
+      doc = document_from_string input, standalone: false
+      block = doc.blocks.first
+      assert_equal [:specialcharacters], block.subs
+      result = doc.convert
+      assert_includes result, '_hey now_ &lt;1&gt;'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[subs=\"verbatim,-callouts\"]\n_hey now_ <1>\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(
+            block.substitution_group(),
+            SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters])
+        );
+        // Quotes are not applied (`_hey now_` stays literal); specialcharacters
+        // escapes `<1>` (shown decoded as `<1>` in the DOM text).
+        assert_rendered_contains(&doc, "_hey now_ <1>");
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
+mod references {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'References' do
+"#
+    );
+
+    #[test]
+    fn should_not_recognize_block_anchor_with_illegal_id_characters() {
+        verifies!(
+            r#"
+    test 'should not recognize block anchor with illegal id characters' do
+      input = <<~'EOS'
+      [[illegal$id,Reference Text]]
+      ----
+      content
+      ----
+      EOS
+
+      doc = document_from_string input
+      block = doc.blocks.first
+      assert_nil block.id
+      assert_nil(block.attr 'reftext')
+      refute doc.catalog[:refs].key? 'illegal$id'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[[illegal$id,Reference Text]]\n----\ncontent\n----\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.id(), None);
+        assert!(!doc.catalog().contains_id("illegal$id"));
+    }
+
+    #[test]
+    fn should_not_recognize_block_anchor_that_starts_with_digit() {
+        verifies!(
+            r#"
+    test 'should not recognize block anchor that starts with digit' do
+      input = <<~'EOS'
+      [[3-blind-mice]]
+      --
+      see how they run
+      --
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_includes output, '[[3-blind-mice]]'
+      assert_xpath '/*[@id=":3-blind-mice"]', output, 0
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[[3-blind-mice]]\n--\nsee how they run\n--\n");
+        assert_rendered_contains(&doc, "[[3-blind-mice]]");
+        assert_xpath(&doc, "/*[@id=\":3-blind-mice\"]", 0);
+    }
+
+    #[test]
+    fn should_recognize_block_anchor_that_starts_with_colon() {
+        verifies!(
+            r#"
+    test 'should recognize block anchor that starts with colon' do
+      input = <<~'EOS'
+      [[:idname]]
+      --
+      content
+      --
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@id=":idname"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[[:idname]]\n--\ncontent\n--\n");
+        assert_xpath(&doc, "/*[@id=\":idname\"]", 1);
+    }
+
+    #[test]
+    fn should_use_specified_id_and_reftext_when_registering_block_reference() {
+        verifies!(
+            r#"
+    test 'should use specified id and reftext when registering block reference' do
+      input = <<~'EOS'
+      [[debian,Debian Install]]
+      .Installation on Debian
+      ----
+      $ apt-get install asciidoctor
+      ----
+      EOS
+
+      doc = document_from_string input
+      ref = doc.catalog[:refs]['debian']
+      refute_nil ref
+      assert_equal 'Debian Install', ref.reftext
+      assert_equal 'debian', (doc.resolve_id 'Debian Install')
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[[debian,Debian Install]]\n.Installation on Debian\n----\n$ apt-get install asciidoctor\n----\n",
+        );
+        let entry = doc
+            .catalog()
+            .get_ref("debian")
+            .expect("ref should be registered");
+        assert_eq!(entry.reftext.as_deref(), Some("Debian Install"));
+        assert_eq!(
+            doc.catalog().resolve_id("Debian Install").as_deref(),
+            Some("debian")
+        );
+    }
+
+    #[test]
+    fn should_allow_square_brackets_in_block_reference_text() {
+        verifies!(
+            r#"
+    test 'should allow square brackets in block reference text' do
+      input = <<~'EOS'
+      [[debian,[Debian] Install]]
+      .Installation on Debian
+      ----
+      $ apt-get install asciidoctor
+      ----
+      EOS
+
+      doc = document_from_string input
+      ref = doc.catalog[:refs]['debian']
+      refute_nil ref
+      assert_equal '[Debian] Install', ref.reftext
+      assert_equal 'debian', (doc.resolve_id '[Debian] Install')
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[[debian,[Debian] Install]]\n.Installation on Debian\n----\n$ apt-get install asciidoctor\n----\n",
+        );
+        let entry = doc
+            .catalog()
+            .get_ref("debian")
+            .expect("ref should be registered");
+        assert_eq!(entry.reftext.as_deref(), Some("[Debian] Install"));
+        assert_eq!(
+            doc.catalog().resolve_id("[Debian] Install").as_deref(),
+            Some("debian")
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not trim the leading
+    // space after the id when a block reference's reftext contains a comma, so
+    // the reftext is " Debian, Ubuntu" rather than "Debian, Ubuntu". Kept
+    // `#[ignore]`d with the Ruby-intended reftext.
+    // TODO: trim the leading space of a comma-containing block reftext.
+    #[ignore]
+    #[test]
+    fn should_allow_comma_in_block_reference_text() {
+        verifies!(
+            r#"
+    test 'should allow comma in block reference text' do
+      input = <<~'EOS'
+      [[debian, Debian, Ubuntu]]
+      .Installation on Debian
+      ----
+      $ apt-get install asciidoctor
+      ----
+      EOS
+
+      doc = document_from_string input
+      ref = doc.catalog[:refs]['debian']
+      refute_nil ref
+      assert_equal 'Debian, Ubuntu', ref.reftext
+      assert_equal 'debian', (doc.resolve_id 'Debian, Ubuntu')
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[[debian, Debian, Ubuntu]]\n.Installation on Debian\n----\n$ apt-get install asciidoctor\n----\n",
+        );
+        let entry = doc
+            .catalog()
+            .get_ref("debian")
+            .expect("ref should be registered");
+        assert_eq!(entry.reftext.as_deref(), Some("Debian, Ubuntu"));
+    }
+
+    // NOTE: divergence from Asciidoctor. This test exercises resolving an
+    // attribute reference in a block title against the attribute value in
+    // effect at the block's location, a discrete heading, and cross-reference
+    // rendering. This crate does not resolve the attribute reference in the
+    // registered title, so the assertions do not hold. Kept `#[ignore]`d.
+    // TODO: resolve attribute references in block titles at the block location.
+    #[ignore]
+    #[test]
+    fn should_resolve_attribute_reference_in_title_using_attribute_defined_at_location_of_block() {
+        verifies!(
+            r##"
+    test 'should resolve attribute reference in title using attribute defined at location of block' do
+      input = <<~'EOS'
+      = Document Title
+      :foo: baz
+
+      intro paragraph. see <<free-standing>>.
+
+      :foo: bar
+
+      .foo is {foo}
+      [#formal-para]
+      paragraph with title
+
+      [discrete#free-standing]
+      == foo is still {foo}
+      EOS
+
+      doc = document_from_string input
+      ref = doc.catalog[:refs]['formal-para']
+      refute_nil ref
+      assert_equal 'foo is bar', ref.title
+      assert_equal 'formal-para', (doc.resolve_id 'foo is bar')
+      output = doc.convert standalone: false
+      assert_include '<a href="#free-standing">foo is still bar</a>', output
+      assert_include '<h2 id="free-standing" class="discrete">foo is still bar</h2>', output
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "= Document Title\n:foo: baz\n\nintro paragraph. see <<free-standing>>.\n\n:foo: bar\n\n.foo is {foo}\n[#formal-para]\nparagraph with title\n\n[discrete#free-standing]\n== foo is still {foo}\n",
+        );
+        let entry = doc
+            .catalog()
+            .get_ref("formal-para")
+            .expect("ref should be registered");
+        assert_eq!(entry.reftext.as_deref(), Some("foo is bar"));
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not substitute
+    // attribute references in a block reference's reftext when registering it,
+    // so the reftext is stored verbatim ("Evolution of the {label-tiger}").
+    // Kept `#[ignore]`d with the Ruby-intended (substituted) reftext.
+    // TODO: substitute attribute references in a block reftext at registration.
+    #[ignore]
+    #[test]
+    fn should_substitute_attribute_references_in_reftext_when_registering_block_reference() {
+        verifies!(
+            r#"
+    test 'should substitute attribute references in reftext when registering block reference' do
+      input = <<~'EOS'
+      :label-tiger: Tiger
+
+      [[tiger-evolution,Evolution of the {label-tiger}]]
+      ****
+      Information about the evolution of the tiger.
+      ****
+      EOS
+
+      doc = document_from_string input
+      ref = doc.catalog[:refs]['tiger-evolution']
+      refute_nil ref
+      assert_equal 'Evolution of the Tiger', ref.attributes['reftext']
+      assert_equal 'tiger-evolution', (doc.resolve_id 'Evolution of the Tiger')
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":label-tiger: Tiger\n\n[[tiger-evolution,Evolution of the {label-tiger}]]\n****\nInformation about the evolution of the tiger.\n****\n",
+        );
+        let entry = doc
+            .catalog()
+            .get_ref("tiger-evolution")
+            .expect("ref should be registered");
+        assert_eq!(entry.reftext.as_deref(), Some("Evolution of the Tiger"));
+        assert_eq!(
+            doc.catalog()
+                .resolve_id("Evolution of the Tiger")
+                .as_deref(),
+            Some("tiger-evolution")
+        );
+    }
+
+    #[test]
+    fn should_use_specified_reftext_when_registering_block_reference() {
+        verifies!(
+            r#"
+    test 'should use specified reftext when registering block reference' do
+      input = <<~'EOS'
+      [[debian]]
+      [reftext="Debian Install"]
+      .Installation on Debian
+      ----
+      $ apt-get install asciidoctor
+      ----
+      EOS
+
+      doc = document_from_string input
+      ref = doc.catalog[:refs]['debian']
+      refute_nil ref
+      assert_equal 'Debian Install', ref.reftext
+      assert_equal 'debian', (doc.resolve_id 'Debian Install')
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[[debian]]\n[reftext=\"Debian Install\"]\n.Installation on Debian\n----\n$ apt-get install asciidoctor\n----\n",
+        );
+        let entry = doc
+            .catalog()
+            .get_ref("debian")
+            .expect("ref should be registered");
+        assert_eq!(entry.reftext.as_deref(), Some("Debian Install"));
+        assert_eq!(
+            doc.catalog().resolve_id("Debian Install").as_deref(),
+            Some("debian")
+        );
+    }
 
     non_normative!(
         r#"
