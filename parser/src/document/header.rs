@@ -21,6 +21,7 @@ pub struct Header<'src> {
     subtitle: Option<String>,
     attributes: Vec<Attribute<'src>>,
     author_line: Option<AuthorLine<'src>>,
+    authors: Vec<Author>,
     revision_line: Option<RevisionLine<'src>>,
     comments: Vec<Span<'src>>,
     source: Span<'src>,
@@ -37,6 +38,7 @@ impl<'src> Header<'src> {
         let mut title: Option<String> = None;
         let mut attributes: Vec<Attribute> = vec![];
         let mut author_line: Option<AuthorLine<'src>> = None;
+        let mut author_attribute: Option<Author> = None;
         let mut revision_line: Option<RevisionLine<'src>> = None;
         let mut comments: Vec<Span<'src>> = vec![];
         let mut warnings: Vec<Warning<'src>> = vec![];
@@ -76,6 +78,12 @@ impl<'src> Header<'src> {
                     if let Some(email) = author.email() {
                         parser.set_attribute_by_value_from_header("email", email);
                     }
+
+                    // Retain the author parsed from the raw (pre-substitution)
+                    // value so the resolved author list does not have to
+                    // re-parse the HTML-encoded `author` attribute. A later
+                    // `:author:` entry overrides an earlier one.
+                    author_attribute = Some(author);
                 }
 
                 parser.set_attribute_from_header(&attr.item, &mut warnings);
@@ -142,6 +150,11 @@ impl<'src> Header<'src> {
             None => (None, None),
         };
 
+        // Resolve the document's author list. The author line, when present, is
+        // the source of truth; otherwise the list is derived from the `author`
+        // and indexed `author_N` document attributes (see [`resolve_authors`]).
+        let authors = resolve_authors(author_line.as_ref(), author_attribute, parser);
+
         MatchAndWarnings {
             item: MatchedItem {
                 item: Self {
@@ -151,6 +164,7 @@ impl<'src> Header<'src> {
                     subtitle,
                     attributes,
                     author_line,
+                    authors,
                     revision_line,
                     comments,
                     source: source.trim_trailing_whitespace(),
@@ -210,6 +224,18 @@ impl<'src> Header<'src> {
     /// Returns the author line, if found.
     pub fn author_line(&self) -> Option<&AuthorLine<'src>> {
         self.author_line.as_ref()
+    }
+
+    /// Returns the document's authors.
+    ///
+    /// Authors may be declared on the [author line] or via the `author` /
+    /// `author_N` (and companion `email_N`, …) document attributes; this
+    /// returns the resolved list regardless of which mechanism was used. When
+    /// the document has no author information, the slice is empty.
+    ///
+    /// [author line]: https://docs.asciidoctor.org/asciidoc/latest/document/author-line/
+    pub fn authors(&self) -> &[Author] {
+        &self.authors
     }
 
     /// Returns the revision line, if found.
@@ -305,6 +331,54 @@ fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
     }
 }
 
+/// Resolves the document's author list.
+///
+/// When an [`AuthorLine`] is present it is authoritative (and has already
+/// populated the `author_N` attributes). Otherwise the list is reconstructed
+/// from document attributes, mirroring Asciidoctor's `parse_header_metadata`
+/// reconciliation: a directly-assigned `author` attribute stands in for a
+/// single author, and failing that a contiguous run of indexed `author_N`
+/// attributes (`author_1`, `author_2`, …) each contributes one author. In
+/// either case the email is taken from the companion `email`/`email_N`
+/// attribute, reflecting its final value.
+///
+/// `author_attribute` is the author already parsed from the raw `author`
+/// attribute value (see the header parse loop); it is reused rather than
+/// re-parsing the HTML-encoded stored value.
+fn resolve_authors(
+    author_line: Option<&AuthorLine>,
+    author_attribute: Option<Author>,
+    parser: &Parser,
+) -> Vec<Author> {
+    if let Some(author_line) = author_line {
+        return author_line.authors().cloned().collect();
+    }
+
+    let value = |name: &str| match parser.attribute_value(name) {
+        InterpretedValue::Value(value) => Some(value),
+        _ => None,
+    };
+
+    // A directly-assigned `author` attribute describes a single author.
+    if let Some(author) = author_attribute {
+        return vec![author.with_email(value("email"))];
+    }
+
+    // Otherwise, walk the indexed `author_N` attributes until one is missing.
+    let mut authors = vec![];
+    let mut index = 1;
+
+    while let Some(name) = value(&format!("author_{index}")) {
+        if let Some(author) = Author::parse(&name, parser) {
+            authors.push(author.with_email(value(&format!("email_{index}"))));
+        }
+
+        index += 1;
+    }
+
+    authors
+}
+
 fn apply_header_subs(source: &str, parser: &Parser) -> String {
     let span = Span::new(source);
 
@@ -323,6 +397,7 @@ impl std::fmt::Debug for Header<'_> {
             .field("subtitle", &self.subtitle)
             .field("attributes", &DebugSliceReference(&self.attributes))
             .field("author_line", &self.author_line)
+            .field("authors", &self.authors)
             .field("revision_line", &self.revision_line)
             .field("comments", &DebugSliceReference(&self.comments))
             .field("source", &self.source)
@@ -769,6 +844,60 @@ mod tests {
     }
 
     #[test]
+    fn authors_from_author_line() {
+        let doc = Parser::default().parse("= Title\nKismet R. Lee <kismet@asciidoctor.org>");
+
+        assert_eq!(doc.authors().len(), 1);
+
+        let author = doc.authors().first().unwrap();
+        assert_eq!(author.name(), "Kismet R. Lee");
+        assert_eq!(author.email(), Some("kismet@asciidoctor.org"));
+        assert_eq!(author.initials(), "KRL");
+    }
+
+    #[test]
+    fn authors_from_author_attribute() {
+        // With no author line, a directly-assigned `author` attribute stands in
+        // for a single author, taking its email from the `email` attribute.
+        let doc =
+            Parser::default().parse("= Title\n:author: Jane Q. Public\n:email: jane@example.com");
+
+        assert_eq!(doc.authors().len(), 1);
+
+        let author = doc.authors().first().unwrap();
+        assert_eq!(author.name(), "Jane Q. Public");
+        assert_eq!(author.firstname(), "Jane");
+        assert_eq!(author.middlename(), Some("Q."));
+        assert_eq!(author.lastname(), Some("Public"));
+        assert_eq!(author.email(), Some("jane@example.com"));
+        assert_eq!(author.initials(), "JQP");
+    }
+
+    #[test]
+    fn authors_from_author_attribute_with_inline_email() {
+        // The email may be given inline in the `author` attribute value; the
+        // resolved author reflects the parsed name and that email.
+        let doc = Parser::default().parse("= Title\n:author: John Q. Smith <john@example.com>");
+
+        assert_eq!(doc.authors().len(), 1);
+
+        let author = doc.authors().first().unwrap();
+        assert_eq!(author.name(), "John Q. Smith");
+        assert_eq!(author.firstname(), "John");
+        assert_eq!(author.middlename(), Some("Q."));
+        assert_eq!(author.lastname(), Some("Smith"));
+        assert_eq!(author.email(), Some("john@example.com"));
+        assert_eq!(author.initials(), "JQS");
+    }
+
+    #[test]
+    fn authors_is_empty_without_author_info() {
+        let doc = Parser::default().parse("= Title\n\nBody.");
+
+        assert!(doc.authors().is_empty());
+    }
+
+    #[test]
     fn impl_debug() {
         let doc = Parser::default().parse("= Example Title\n\nabc\n\ndef");
         let header = doc.header();
@@ -793,6 +922,7 @@ mod tests {
     subtitle: None,
     attributes: &[],
     author_line: None,
+    authors: [],
     revision_line: None,
     comments: &[],
     source: Span {
