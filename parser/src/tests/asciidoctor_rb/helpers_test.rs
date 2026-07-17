@@ -51,10 +51,12 @@
 //!   whitespace trimming. The helper's isolated contract asserted by these
 //!   tests cannot be reproduced through any public API, so both cases are
 //!   `non_normative!`. Exercising that path *did* surface one genuine
-//!   discrepancy: the crate's `CGI_ESCAPE_SET` does not encode `*`, so
-//!   `encode_uri_component` yields a literal `*` where Asciidoctor (via
-//!   `CGI.escape`) yields `%2A`. (It correctly leaves `~` unescaped, matching
-//!   Ruby 2.5+.) This only affects `*` inside a `mailto:` subject/body.
+//!   discrepancy — the crate's `CGI_ESCAPE_SET` did not encode `*`, yielding a
+//!   literal `*` where Asciidoctor (via `CGI.escape`) yields `%2A` — which this
+//!   change fixes (it already, correctly, left `~` unescaped to match Ruby
+//!   2.5+). The helper's contract is now guarded directly by a unit test beside
+//!   `encode_uri_component` in `content::macros`, since it cannot be observed
+//!   cleanly end-to-end.
 //! * **URIs and Paths** — `rootname` has no analog in this crate (extension
 //!   stripping for includes/paths is downstream); `UriSniffRx` exists here as
 //!   the private `URI_SNIFF` regex but is used only to strip a scheme for
