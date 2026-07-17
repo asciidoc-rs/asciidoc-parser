@@ -55,3 +55,4 @@ mod lists_test;
 mod paragraphs_test;
 mod substitutions_test;
 mod tables_test;
+mod test_helper_test;
