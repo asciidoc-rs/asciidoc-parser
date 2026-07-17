@@ -4637,3 +4637,284 @@ mod math_blocks {
 "#
     );
 }
+
+
+mod custom_blocks {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Custom Blocks' do
+"#
+    );
+
+    #[test]
+    fn should_not_warn_if_block_style_is_unknown() {
+        verifies!(
+            r#"
+    test 'should not warn if block style is unknown' do
+      input = <<~'EOS'
+      [foo]
+      --
+      bar
+      --
+      EOS
+      convert_string_to_embedded input
+      assert_empty @logger.messages
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[foo]\n--\nbar\n--\n");
+        assert_eq!(doc.warnings().count(), 0);
+    }
+
+    #[test]
+    fn should_log_debug_message_if_block_style_is_unknown_and_debug_level_is_enabled() {
+        non_normative!(
+            r#"
+    test 'should log debug message if block style is unknown and debug level is enabled' do
+      input = <<~'EOS'
+      [foo]
+      --
+      bar
+      --
+      EOS
+      using_memory_logger Logger::Severity::DEBUG do |logger|
+        convert_string_to_embedded input
+        assert_message logger, :DEBUG, '<stdin>: line 2: unknown style for open block: foo', Hash
+      end
+    end
+
+"#
+        );
+
+        // Not ported: this crate has no DEBUG-severity logging channel for
+        // unknown block styles.
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
+mod metadata {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Metadata' do
+"#
+    );
+
+    // NOTE: divergence from Asciidoctor. A block title placed above a section
+    // heading is not carried over to the first block inside that section by
+    // this crate, so the paragraph has no title. Kept `#[ignore]`d with the
+    // Ruby-intended assertions.
+    // TODO: carry a block title above a section onto the section's first block.
+    #[ignore]
+    #[test]
+    fn block_title_above_section_gets_carried_over_to_first_block_in_section() {
+        verifies!(
+            r#"
+    test 'block title above section gets carried over to first block in section' do
+      input = <<~'EOS'
+      .Title
+      == Section
+
+      paragraph
+      EOS
+      output = convert_string input
+      assert_xpath '//*[@class="paragraph"]', output, 1
+      assert_xpath '//*[@class="paragraph"]/*[@class="title"][text()="Title"]', output, 1
+      assert_xpath '//*[@class="paragraph"]/p[text()="paragraph"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(".Title\n== Section\n\nparagraph\n");
+        assert_xpath(&doc, "//*[@class=\"paragraph\"]", 1);
+        assert_xpath(&doc, "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Title\"]", 1);
+        assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]", 1);
+    }
+
+    // NOTE: divergence from Asciidoctor (block-title carryover; see
+    // `block_title_above_section_gets_carried_over_to_first_block_in_section`).
+    // The crate does emit the `Level0SectionHeadingNotSupported` warning at
+    // line 2 (matching the Ruby error), but the surrounding structure differs.
+    // TODO: demote a document title to a section title when a block title
+    // precedes it.
+    #[ignore]
+    #[test]
+    fn block_title_above_document_title_demotes_document_title_to_a_section_title() {
+        verifies!(
+            r#"
+    test 'block title above document title demotes document title to a section title' do
+      input = <<~'EOS'
+      .Block title
+      = Section Title
+
+      section paragraph
+      EOS
+      output = convert_string input
+      assert_xpath '//*[@id="header"]/*', output, 0
+      assert_xpath '//*[@id="preamble"]/*', output, 0
+      assert_xpath '//*[@id="content"]/h1[text()="Section Title"]', output, 1
+      assert_xpath '//*[@class="paragraph"]', output, 1
+      assert_xpath '//*[@class="paragraph"]/*[@class="title"][text()="Block title"]', output, 1
+      assert_message @logger, :ERROR, '<stdin>: line 2: level 0 sections can only be used when doctype is book', Hash
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(".Block title\n= Section Title\n\nsection paragraph\n");
+        assert_xpath(&doc, "//*[@id=\"content\"]/h1[text()=\"Section Title\"]", 1);
+        assert_xpath(&doc, "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]", 1);
+    }
+
+    // NOTE: divergence from Asciidoctor (block-title carryover; see
+    // `block_title_above_section_gets_carried_over_to_first_block_in_section`).
+    // TODO: carry a block title above a demoted document title onto the first
+    // section's first block.
+    #[ignore]
+    #[test]
+    fn block_title_above_document_title_gets_carried_over_to_first_block_in_first_section_if_no_preamble()
+    {
+        verifies!(
+            r#"
+    test 'block title above document title gets carried over to first block in first section if no preamble' do
+      input = <<~'EOS'
+      :doctype: book
+      .Block title
+      = Document Title
+
+      == First Section
+
+      paragraph
+      EOS
+      doc = document_from_string input
+      # NOTE block title demotes document title to level-0 section
+      refute doc.header?
+      output = doc.convert
+      assert_xpath '//*[@class="sect1"]//*[@class="paragraph"]/*[@class="title"][text()="Block title"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":doctype: book\n.Block title\n= Document Title\n\n== First Section\n\nparagraph\n");
+        assert_xpath(
+            &doc,
+            "//*[@class=\"sect1\"]//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not render a macro
+    // link inside a block title (nor were the referenced attributes supplied),
+    // so `.title a[href]` is absent. Kept `#[ignore]`d with the Ruby-intended
+    // assertions.
+    // TODO: apply the normal substitutions (including macros) to a block title.
+    #[ignore]
+    #[test]
+    fn should_apply_substitutions_to_a_block_title_in_normal_order() {
+        verifies!(
+            r##"
+    test 'should apply substitutions to a block title in normal order' do
+      input = <<~'EOS'
+      .{link-url}[{link-text}]{tm}
+      The one and only!
+      EOS
+
+      output = convert_string_to_embedded input, attributes: {
+        'link-url' => 'https://acme.com',
+        'link-text' => 'ACME',
+        'tm' => '(TM)',
+      }
+      assert_css '.title', output, 1
+      assert_css '.title a[href="https://acme.com"]', output, 1
+      assert_xpath %(//*[@class="title"][contains(text(),"#{decode_char 8482}")]), output, 1
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .with_intrinsic_attribute("link-url", "https://acme.com", crate::parser::ModificationContext::ApiOnly)
+            .with_intrinsic_attribute("link-text", "ACME", crate::parser::ModificationContext::ApiOnly)
+            .with_intrinsic_attribute("tm", "(TM)", crate::parser::ModificationContext::ApiOnly)
+            .parse(".{link-url}[{link-text}]{tm}\nThe one and only!\n");
+        assert_css(&doc, ".title", 1);
+        assert_css(&doc, ".title a[href=\"https://acme.com\"]", 1);
+    }
+
+    #[test]
+    fn empty_attribute_list_should_not_appear_in_output() {
+        verifies!(
+            r#"
+    test 'empty attribute list should not appear in output' do
+      input = <<~'EOS'
+      []
+      --
+      Block content
+      --
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_includes output, 'Block content'
+      refute_includes output, '[]'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[]\n--\nBlock content\n--\n");
+        assert_rendered_contains(&doc, "Block content");
+        refute_rendered_contains(&doc, "[]");
+    }
+
+    // NOTE: divergence from Asciidoctor. An empty block anchor `[[]]` is not
+    // recognized as an (empty) anchor by this crate and is rendered as a
+    // paragraph containing the literal text `[[]]`. Kept `#[ignore]`d with the
+    // Ruby-intended assertions.
+    // TODO: treat an empty block anchor `[[]]` as an ignored anchor.
+    #[ignore]
+    #[test]
+    fn empty_block_anchor_should_not_appear_in_output() {
+        verifies!(
+            r#"
+    test 'empty block anchor should not appear in output' do
+      input = <<~'EOS'
+      [[]]
+      --
+      Block content
+      --
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_includes output, 'Block content'
+      refute_includes output, '[[]]'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[[]]\n--\nBlock content\n--\n");
+        assert_rendered_contains(&doc, "Block content");
+        refute_rendered_contains(&doc, "[[]]");
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
