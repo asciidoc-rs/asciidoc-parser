@@ -52,18 +52,58 @@ mod default_post_replacements_substitution {
 "#
     );
 
-    #[ignore]
     #[test]
     fn attribute_entry_values() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/307):
-        // Search for an example of post-replacement mattering for attribute values.
-        //
-        // No test here because I don't know how to test this.
-        to_do_verifies!(
+        verifies!(
             r#"
 |Attribute entry values |{n}
 
 "#
+        );
+
+        // The post replacements step is _not_ applied when an attribute entry
+        // value is parsed. A xref:attributes:wrap-values.adoc#hard[hard-wrapped]
+        // attribute value therefore stores the line-break marker (` +`)
+        // verbatim rather than converting it to a `<br>`. The marker is only
+        // interpreted as a line break later, if and when the value is used in a
+        // block whose substitutions include post_replacements.
+        //
+        // A passthrough block with `subs=attributes` resolves the attribute
+        // reference but does not run post_replacements, so the stored ` +`
+        // survives verbatim. This demonstrates the step was not applied to the
+        // attribute value itself.
+        let doc = Parser::default().parse(
+            ":haiku: Write your docs in text, + \\\nAsciiDoc makes it easy, + \\\nNow get back to work!\n\n[subs=attributes]\n++++\n{haiku}\n++++",
+        );
+
+        let block1 = doc.nested_blocks().next().unwrap();
+
+        let Block::RawDelimited(block1) = block1 else {
+            panic!("Unexpected block type: {block1:?}");
+        };
+
+        assert_eq!(
+            block1.content().rendered(),
+            "Write your docs in text, +\nAsciiDoc makes it easy, +\nNow get back to work!"
+        );
+
+        // By contrast, referencing the same attribute in a normal paragraph
+        // _does_ produce line breaks, because post_replacements is applied to
+        // the paragraph (not to the attribute value). This confirms the `<br>`
+        // comes from the containing block, not from the attribute entry value.
+        let doc = Parser::default().parse(
+            ":haiku: Write your docs in text, + \\\nAsciiDoc makes it easy, + \\\nNow get back to work!\n\n{haiku}",
+        );
+
+        let block1 = doc.nested_blocks().next().unwrap();
+
+        let Block::Simple(block1) = block1 else {
+            panic!("Unexpected block type: {block1:?}");
+        };
+
+        assert_eq!(
+            block1.content().rendered(),
+            "Write your docs in text,<br>\nAsciiDoc makes it easy,<br>\nNow get back to work!"
         );
     }
 

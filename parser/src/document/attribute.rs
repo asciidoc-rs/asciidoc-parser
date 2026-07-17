@@ -200,8 +200,15 @@ impl InterpretedValue {
                         line
                     };
 
-                    if line.ends_with('+') {
-                        format!("{}\n", line.trim_end_matches('+').trim_end_matches(' '))
+                    // A hard line break marker (a space followed by `+`) before
+                    // a line continuation preserves the newline instead of
+                    // folding it into a space. The `+` itself is left in the
+                    // value verbatim: the post_replacements substitution step is
+                    // not applied to attribute entry values, so the `+` is only
+                    // interpreted as a line break later, when the value is used
+                    // in a block whose substitutions include post_replacements.
+                    if line.ends_with(" +") {
+                        format!("{line}\n")
                     } else if count < last_count {
                         format!("{line} ")
                     } else {
@@ -628,7 +635,7 @@ mod tests {
                     col: 7,
                     offset: 6,
                 }),
-                value: InterpretedValue::Value("bar\nblah"),
+                value: InterpretedValue::Value("bar +\nblah"),
                 source: Span {
                     data: ":foo: bar + \\\n blah",
                     line: 1,
@@ -638,7 +645,7 @@ mod tests {
             }
         );
 
-        assert_eq!(mi.item.value(), InterpretedValue::Value("bar\nblah"));
+        assert_eq!(mi.item.value(), InterpretedValue::Value("bar +\nblah"));
 
         assert_eq!(
             mi.after,
