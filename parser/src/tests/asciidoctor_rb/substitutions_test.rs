@@ -1171,12 +1171,21 @@ mod quotes {
 
     #[test]
     fn single_line_constrained_monospaced_string() {
-        verifies!(
+        // The upstream test's first sub-case exercises
+        // compatibility mode, which this crate does not
+        // support; it is reproduced non-normatively. Only
+        // the modern sub-case below is verified.
+        non_normative!(
             r#"
     test 'single-line constrained monospaced string' do
       para = block_from_string(%(`a few <{monospaced}> words`), attributes: { 'monospaced' => 'monospaced', 'compat-mode' => '' })
       assert_equal '<code>a few &lt;{monospaced}&gt; words</code>', para.apply_subs(para.source)
 
+"#
+        );
+
+        verifies!(
+            r#"
       para = block_from_string(%(`a few <{monospaced}> words`), attributes: { 'monospaced' => 'monospaced' })
       assert_equal '<code>a few &lt;monospaced&gt; words</code>', para.apply_subs(para.source)
     end
@@ -1184,8 +1193,6 @@ mod quotes {
 "#
         );
 
-        // The crate disregards compatibility mode, so only the modern
-        // (non-compat) sub-case of the upstream test is exercised here.
         let mut p = Parser::default().with_intrinsic_attribute(
             "monospaced",
             "monospaced",
@@ -1235,12 +1242,21 @@ mod quotes {
 
     #[test]
     fn single_line_constrained_monospaced_string_with_role() {
-        verifies!(
+        // The upstream test's first sub-case exercises
+        // compatibility mode, which this crate does not
+        // support; it is reproduced non-normatively. Only
+        // the modern sub-case below is verified.
+        non_normative!(
             r#"
     test 'single-line constrained monospaced string with role' do
       para = block_from_string(%([input]`a few <{monospaced}> words`), attributes: { 'monospaced' => 'monospaced', 'compat-mode' => '' })
       assert_equal '<code class="input">a few &lt;{monospaced}&gt; words</code>', para.apply_subs(para.source)
 
+"#
+        );
+
+        verifies!(
+            r#"
       para = block_from_string(%([input]`a few <{monospaced}> words`), attributes: { 'monospaced' => 'monospaced' })
       assert_equal '<code class="input">a few &lt;monospaced&gt; words</code>', para.apply_subs(para.source)
     end
@@ -1248,8 +1264,6 @@ mod quotes {
 "#
         );
 
-        // The crate disregards compatibility mode, so only the modern
-        // (non-compat) sub-case of the upstream test is exercised here.
         let mut p = Parser::default().with_intrinsic_attribute(
             "monospaced",
             "monospaced",
@@ -1301,12 +1315,21 @@ mod quotes {
 
     #[test]
     fn escaped_single_line_constrained_monospaced_string() {
-        verifies!(
+        // The upstream test's first sub-case exercises
+        // compatibility mode, which this crate does not
+        // support; it is reproduced non-normatively. Only
+        // the modern sub-case below is verified.
+        non_normative!(
             r#"
     test 'escaped single-line constrained monospaced string' do
       para = block_from_string(%(#{BACKSLASH}`a few <monospaced> words`), attributes: { 'compat-mode' => '' })
       assert_equal '`a few &lt;monospaced&gt; words`', para.apply_subs(para.source)
 
+"#
+        );
+
+        verifies!(
+            r#"
       para = block_from_string(%(#{BACKSLASH}`a few <monospaced> words`))
       assert_equal '`a few &lt;monospaced&gt; words`', para.apply_subs(para.source)
     end
@@ -1314,8 +1337,6 @@ mod quotes {
 "#
         );
 
-        // The crate disregards compatibility mode, so only the modern
-        // (non-compat) sub-case of the upstream test is exercised here.
         let mut p = Parser::default().with_intrinsic_attribute(
             "monospaced",
             "monospaced",
@@ -1365,12 +1386,21 @@ mod quotes {
 
     #[test]
     fn escaped_single_line_constrained_monospaced_string_with_role() {
-        verifies!(
+        // The upstream test's first sub-case exercises
+        // compatibility mode, which this crate does not
+        // support; it is reproduced non-normatively. Only
+        // the modern sub-case below is verified.
+        non_normative!(
             r#"
     test 'escaped single-line constrained monospaced string with role' do
       para = block_from_string(%([input]#{BACKSLASH}`a few <monospaced> words`), attributes: { 'compat-mode' => '' })
       assert_equal '[input]`a few &lt;monospaced&gt; words`', para.apply_subs(para.source)
 
+"#
+        );
+
+        verifies!(
+            r#"
       para = block_from_string(%([input]#{BACKSLASH}`a few <monospaced> words`))
       assert_equal '[input]`a few &lt;monospaced&gt; words`', para.apply_subs(para.source)
     end
@@ -1378,8 +1408,6 @@ mod quotes {
 "#
         );
 
-        // The crate disregards compatibility mode, so only the modern
-        // (non-compat) sub-case of the upstream test is exercised here.
         let mut p = Parser::default().with_intrinsic_attribute(
             "monospaced",
             "monospaced",
@@ -1431,12 +1459,21 @@ mod quotes {
 
     #[test]
     fn escaped_role_on_single_line_constrained_monospaced_string() {
-        verifies!(
+        // The upstream test's first sub-case exercises
+        // compatibility mode, which this crate does not
+        // support; it is reproduced non-normatively. Only
+        // the modern sub-case below is verified.
+        non_normative!(
             r#"
     test 'escaped role on single-line constrained monospaced string' do
       para = block_from_string(%(#{BACKSLASH}[input]`a few <monospaced> words`), attributes: { 'compat-mode' => '' })
       assert_equal '[input]<code>a few &lt;monospaced&gt; words</code>', para.apply_subs(para.source)
 
+"#
+        );
+
+        verifies!(
+            r#"
       para = block_from_string(%(#{BACKSLASH}[input]`a few <monospaced> words`))
       assert_equal '[input]<code>a few &lt;monospaced&gt; words</code>', para.apply_subs(para.source)
     end
@@ -1444,8 +1481,6 @@ mod quotes {
 "#
         );
 
-        // The crate disregards compatibility mode, so only the modern
-        // (non-compat) sub-case of the upstream test is exercised here.
         let mut p = Parser::default().with_intrinsic_attribute(
             "monospaced",
             "monospaced",
@@ -1497,12 +1532,21 @@ mod quotes {
 
     #[test]
     fn escaped_role_on_escaped_single_line_constrained_monospaced_string() {
-        verifies!(
+        // The upstream test's first sub-case exercises
+        // compatibility mode, which this crate does not
+        // support; it is reproduced non-normatively. Only
+        // the modern sub-case below is verified.
+        non_normative!(
             r#"
     test 'escaped role on escaped single-line constrained monospaced string' do
       para = block_from_string(%(#{BACKSLASH}[input]#{BACKSLASH}`a few <monospaced> words`), attributes: { 'compat-mode' => '' })
       assert_equal %(#{BACKSLASH}[input]`a few &lt;monospaced&gt; words`), para.apply_subs(para.source)
 
+"#
+        );
+
+        verifies!(
+            r#"
       para = block_from_string(%(#{BACKSLASH}[input]#{BACKSLASH}`a few <monospaced> words`))
       assert_equal %(#{BACKSLASH}[input]`a few &lt;monospaced&gt; words`), para.apply_subs(para.source)
     end
@@ -1510,8 +1554,6 @@ mod quotes {
 "#
         );
 
-        // The crate disregards compatibility mode, so only the modern
-        // (non-compat) sub-case of the upstream test is exercised here.
         let mut p = Parser::default().with_intrinsic_attribute(
             "monospaced",
             "monospaced",
@@ -1722,12 +1764,21 @@ mod quotes {
 
     #[test]
     fn multi_line_constrained_monospaced_string() {
-        verifies!(
+        // The upstream test's first sub-case exercises
+        // compatibility mode, which this crate does not
+        // support; it is reproduced non-normatively. Only
+        // the modern sub-case below is verified.
+        non_normative!(
             r#"
     test 'multi-line constrained monospaced string' do
       para = block_from_string(%(`a few\n<{monospaced}> words`), attributes: { 'monospaced' => 'monospaced', 'compat-mode' => '' })
       assert_equal "<code>a few\n&lt;{monospaced}&gt; words</code>", para.apply_subs(para.source)
 
+"#
+        );
+
+        verifies!(
+            r#"
       para = block_from_string(%(`a few\n<{monospaced}> words`), attributes: { 'monospaced' => 'monospaced' })
       assert_equal "<code>a few\n&lt;monospaced&gt; words</code>", para.apply_subs(para.source)
     end
