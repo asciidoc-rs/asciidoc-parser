@@ -2407,3 +2407,1147 @@ mod admonition_blocks {
 "#
     );
 }
+
+
+
+
+mod preformatted_blocks {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context "Preformatted Blocks" do
+"#
+    );
+
+    // Returns the text of the document's single `<pre>` element.
+    fn pre_text(doc: &crate::Document) -> String {
+        let vd = doc.to_virtual_dom();
+        let pres = crate::tests::assert_dom::query_xpath(&vd, "//pre");
+        assert_eq!(pres.len(), 1, "expected exactly one <pre>");
+        pres[0].text.clone().unwrap_or_default()
+    }
+
+    #[test]
+    fn should_separate_adjacent_paragraphs_and_listing_into_blocks() {
+        verifies!(
+            r#"
+    test 'should separate adjacent paragraphs and listing into blocks' do
+      input = <<~'EOS'
+      paragraph 1
+      ----
+      listing content
+      ----
+      paragraph 2
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="paragraph"]/p', output, 2
+      assert_xpath '/*[@class="listingblock"]', output, 1
+      assert_xpath '(/*[@class="paragraph"]/following-sibling::*)[1][@class="listingblock"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("paragraph 1\n----\nlisting content\n----\nparagraph 2\n");
+        assert_xpath(&doc, "/*[@class=\"paragraph\"]/p", 2);
+        assert_xpath(&doc, "/*[@class=\"listingblock\"]", 1);
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"paragraph\"]/following-sibling::*)[1][@class=\"listingblock\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_warn_if_listing_block_is_not_terminated() {
+        verifies!(
+            r#"
+    test 'should warn if listing block is not terminated' do
+      input = <<~'EOS'
+      outside
+
+      ----
+      inside
+
+      still inside
+
+      eof
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="listingblock"]', output, 1
+      assert_message @logger, :WARN, '<stdin>: line 3: unterminated listing block', Hash
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("outside\n\n----\ninside\n\nstill inside\n\neof\n");
+        assert_xpath(&doc, "/*[@class=\"listingblock\"]", 1);
+        // This crate emits a single generic `UnterminatedDelimitedBlock` warning
+        // rather than Asciidoctor's block-type-specific message text.
+        let warnings: Vec<_> = doc
+            .warnings()
+            .filter(|w| w.warning == WarningType::UnterminatedDelimitedBlock)
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    fn should_not_crash_when_converting_verbatim_block_that_has_no_lines() {
+        verifies!(
+            r#"
+    test 'should not crash when converting verbatim block that has no lines' do
+      [%(----\n----), %(....\n....)].each do |input|
+        output = convert_string_to_embedded input
+        assert_css 'pre', output, 1
+        assert_css 'pre:empty', output, 1
+      end
+    end
+
+"#
+        );
+
+        for input in ["----\n----", "....\n...."] {
+            let doc = Parser::default().parse(input);
+            assert_css(&doc, "pre", 1);
+            assert_css(&doc, "pre:empty", 1);
+        }
+    }
+
+    #[test]
+    fn should_return_content_as_empty_string_for_verbatim_or_raw_block_that_has_no_lines() {
+        verifies!(
+            r#"
+    test 'should return content as empty string for verbatim or raw block that has no lines' do
+      [%(----\n----), %(....\n....)].each do |input|
+        doc = document_from_string input
+        assert_equal '', doc.blocks[0].content
+      end
+    end
+
+"#
+        );
+
+        // The crate exposes the verbatim content through the rendered `<pre>`,
+        // which is empty for a block with no lines.
+        for input in ["----\n----", "....\n...."] {
+            let doc = Parser::default().parse(input);
+            assert_eq!(pre_text(&doc), "");
+        }
+    }
+
+    #[test]
+    fn should_preserve_newlines_in_literal_block() {
+        verifies!(
+            r#"
+    test 'should preserve newlines in literal block' do
+      input = <<~'EOS'
+      ....
+      line one
+
+      line two
+
+      line three
+      ....
+      EOS
+      [true, false].each do |standalone|
+        output = convert_string input, standalone: standalone
+        assert_xpath '//pre', output, 1
+        assert_xpath '//pre/text()', output, 1
+        text = xmlnodes_at_xpath('//pre/text()', output, 1).text
+        lines = text.lines
+        assert_equal 5, lines.size
+        expected = "line one\n\nline two\n\nline three".lines
+        assert_equal expected, lines
+        blank_lines = output.scan(/\n[ \t]*\n/).size
+        assert blank_lines >= 2
+      end
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("....\nline one\n\nline two\n\nline three\n....\n");
+        assert_eq!(pre_text(&doc), "line one\n\nline two\n\nline three");
+    }
+
+    #[test]
+    fn should_preserve_newlines_in_listing_block() {
+        verifies!(
+            r#"
+    test 'should preserve newlines in listing block' do
+      input = <<~'EOS'
+      ----
+      line one
+
+      line two
+
+      line three
+      ----
+      EOS
+      [true, false].each do |standalone|
+        output = convert_string input, standalone: standalone
+        assert_xpath '//pre', output, 1
+        assert_xpath '//pre/text()', output, 1
+        text = xmlnodes_at_xpath('//pre/text()', output, 1).text
+        lines = text.lines
+        assert_equal 5, lines.size
+        expected = "line one\n\nline two\n\nline three".lines
+        assert_equal expected, lines
+        blank_lines = output.scan(/\n[ \t]*\n/).size
+        assert blank_lines >= 2
+      end
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("----\nline one\n\nline two\n\nline three\n----\n");
+        assert_eq!(pre_text(&doc), "line one\n\nline two\n\nline three");
+    }
+
+    #[test]
+    fn should_preserve_newlines_in_verse_block() {
+        verifies!(
+            r#"
+    test 'should preserve newlines in verse block' do
+      input = <<~'EOS'
+      --
+      [verse]
+      ____
+      line one
+
+      line two
+
+      line three
+      ____
+      --
+      EOS
+      [true, false].each do |standalone|
+        output = convert_string input, standalone: standalone
+        assert_xpath '//*[@class="verseblock"]/pre', output, 1
+        assert_xpath '//*[@class="verseblock"]/pre/text()', output, 1
+        text = xmlnodes_at_xpath('//*[@class="verseblock"]/pre/text()', output, 1).text
+        lines = text.lines
+        assert_equal 5, lines.size
+        expected = "line one\n\nline two\n\nline three".lines
+        assert_equal expected, lines
+        blank_lines = output.scan(/\n[ \t]*\n/).size
+        assert blank_lines >= 2
+      end
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("--\n[verse]\n____\nline one\n\nline two\n\nline three\n____\n--\n");
+        assert_xpath(&doc, "//*[@class=\"verseblock\"]/pre", 1);
+        assert_eq!(pre_text(&doc), "line one\n\nline two\n\nline three");
+    }
+
+    // NOTE: divergence from Asciidoctor. Asciidoctor strips the leading and
+    // trailing blank lines of a verbatim block (here yielding
+    // "  first line\n\nlast line"); this crate preserves them. Kept
+    // `#[ignore]`d with the Ruby-intended pre text.
+    // TODO: strip leading/trailing blank lines of verbatim blocks.
+    #[ignore]
+    #[test]
+    fn should_strip_leading_and_trailing_blank_lines_when_converting_verbatim_block() {
+        verifies!(
+            r#"
+    test 'should strip leading and trailing blank lines when converting verbatim block' do
+      # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      [subs="attributes"]
+      ....
+
+
+        first line
+
+      last line
+
+      {empty}
+
+      ....
+      EOS
+
+      doc = document_from_string input, standalone: false
+      block = doc.blocks.first
+      assert_equal ['', '', '  first line', '', 'last line', '', '{empty}', ''], block.lines
+      result = doc.convert
+      assert_xpath %(//pre[text()="  first line\n\nlast line"]), result, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("[subs=\"attributes\"]\n....\n\n\n  first line\n\nlast line\n\n{empty}\n\n....\n");
+        assert_xpath(&doc, "//pre[text()=\"  first line\n\nlast line\"]", 1);
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not normalize CRLF
+    // line endings to LF in verbatim content, so the `<pre>` text retains the
+    // carriage returns. Kept `#[ignore]`d with the Ruby-intended text.
+    // TODO: normalize CRLF line endings in verbatim blocks.
+    #[ignore]
+    #[test]
+    fn should_process_block_with_crlf_line_endings() {
+        verifies!(
+            r#"
+    test 'should process block with CRLF line endings' do
+      input = <<~EOS
+      ----\r
+      source line 1\r
+      source line 2\r
+      ----\r
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="listingblock"]//pre', output, 1
+      assert_xpath %(/*[@class="listingblock"]//pre[text()="source line 1\nsource line 2"]), output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("----\r\nsource line 1\r\nsource line 2\r\n----\r\n");
+        assert_xpath(&doc, "/*[@class=\"listingblock\"]//pre", 1);
+        assert_xpath(
+            &doc,
+            "/*[@class=\"listingblock\"]//pre[text()=\"source line 1\nsource line 2\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not honor the `indent`
+    // attribute to reindent verbatim content. Kept `#[ignore]`d with the
+    // Ruby-intended (reindented) text.
+    // TODO: honor the `indent` attribute on verbatim blocks.
+    #[ignore]
+    #[test]
+    fn should_remove_block_indent_if_indent_attribute_is_0() {
+        verifies!(
+            r#"
+    test 'should remove block indent if indent attribute is 0' do
+      # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      [indent="0"]
+      ----
+          def names
+
+            @names.split
+
+          end
+      ----
+      EOS
+
+      # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
+      expected = <<~EOS.chop
+      def names
+
+        @names.split
+
+      end
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'pre', output, 1
+      assert_css '.listingblock pre', output, 1
+      result = xmlnodes_at_xpath('//pre', output, 1).text
+      assert_equal expected, result
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("[indent=\"0\"]\n----\n    def names\n\n      @names.split\n\n    end\n----\n");
+        assert_eq!(pre_text(&doc), "def names\n\n  @names.split\n\nend");
+    }
+
+    #[test]
+    fn should_not_remove_block_indent_if_indent_attribute_is_minus_1() {
+        verifies!(
+            r#"
+    test 'should not remove block indent if indent attribute is -1' do
+      # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      [indent="-1"]
+      ----
+          def names
+
+            @names.split
+
+          end
+      ----
+      EOS
+
+      expected = (input.lines.slice 2, 5).join.chop
+
+      output = convert_string_to_embedded input
+      assert_css 'pre', output, 1
+      assert_css '.listingblock pre', output, 1
+      result = xmlnodes_at_xpath('//pre', output, 1).text
+      assert_equal expected, result
+    end
+
+"#
+        );
+
+        // indent="-1" preserves the source indentation, which is this crate's
+        // default behavior.
+        let doc = Parser::default()
+            .parse("[indent=\"-1\"]\n----\n    def names\n\n      @names.split\n\n    end\n----\n");
+        assert_eq!(pre_text(&doc), "    def names\n\n      @names.split\n\n    end");
+    }
+
+    // NOTE: divergence from Asciidoctor (see
+    // `should_remove_block_indent_if_indent_attribute_is_0`): the `indent`
+    // attribute is not honored, so content is not reindented to one space.
+    // TODO: honor the `indent` attribute on verbatim blocks.
+    #[ignore]
+    #[test]
+    fn should_set_block_indent_to_value_specified_by_indent_attribute() {
+        verifies!(
+            r#"
+    test 'should set block indent to value specified by indent attribute' do
+      # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      [indent="1"]
+      ----
+          def names
+
+            @names.split
+
+          end
+      ----
+      EOS
+
+      expected = (input.lines.slice 2, 5).map {|l| l.sub '    ', ' ' }.join.chop
+
+      output = convert_string_to_embedded input
+      assert_css 'pre', output, 1
+      assert_css '.listingblock pre', output, 1
+      result = xmlnodes_at_xpath('//pre', output, 1).text
+      assert_equal expected, result
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("[indent=\"1\"]\n----\n    def names\n\n      @names.split\n\n    end\n----\n");
+        assert_eq!(pre_text(&doc), " def names\n\n   @names.split\n\n end");
+    }
+
+    // NOTE: divergence from Asciidoctor (see
+    // `should_remove_block_indent_if_indent_attribute_is_0`): the
+    // `source-indent` document attribute is not honored.
+    // TODO: honor the `source-indent` attribute on verbatim blocks.
+    #[ignore]
+    #[test]
+    fn should_set_block_indent_to_value_specified_by_indent_document_attribute() {
+        verifies!(
+            r#"
+    test 'should set block indent to value specified by indent document attribute' do
+      # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      :source-indent: 1
+
+      [source,ruby]
+      ----
+          def names
+
+            @names.split
+
+          end
+      ----
+      EOS
+
+      expected = (input.lines.slice 4, 5).map {|l| l.sub '    ', ' ' }.join.chop
+
+      output = convert_string_to_embedded input
+      assert_css 'pre', output, 1
+      assert_css '.listingblock pre', output, 1
+      result = xmlnodes_at_xpath('//pre', output, 1).text
+      assert_equal expected, result
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":source-indent: 1\n\n[source,ruby]\n----\n    def names\n\n      @names.split\n\n    end\n----\n",
+        );
+        assert_eq!(pre_text(&doc), " def names\n\n   @names.split\n\n end");
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not expand tabs based
+    // on the `tabsize` attribute. Kept `#[ignore]`d with the Ruby-intended
+    // (tab-expanded) text.
+    // TODO: honor the `tabsize` attribute on verbatim blocks.
+    #[ignore]
+    #[test]
+    fn should_expand_tabs_if_tabsize_attribute_is_positive() {
+        verifies!(
+            r#"
+    test 'should expand tabs if tabsize attribute is positive' do
+      input = <<~EOS
+      :tabsize: 4
+
+      [indent=0]
+      ----
+      \tdef names
+
+      \t\t@names.split
+
+      \tend
+      ----
+      EOS
+
+      # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
+      expected = <<~EOS.chop
+      def names
+
+          @names.split
+
+      end
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'pre', output, 1
+      assert_css '.listingblock pre', output, 1
+      result = xmlnodes_at_xpath('//pre', output, 1).text
+      assert_equal expected, result
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":tabsize: 4\n\n[indent=0]\n----\n\tdef names\n\n\t\t@names.split\n\n\tend\n----\n");
+        assert_eq!(pre_text(&doc), "def names\n\n    @names.split\n\nend");
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not apply the `nowrap`
+    // option (nor the `prewrap` document attribute) as a `nowrap` class on the
+    // `<pre>` element.
+    // TODO: honor the `nowrap` option / `prewrap` attribute on verbatim blocks.
+    #[ignore]
+    #[test]
+    fn literal_block_should_honor_nowrap_option() {
+        verifies!(
+            r#"
+    test 'literal block should honor nowrap option' do
+      input = <<~'EOS'
+      [options="nowrap"]
+      ----
+      Do not wrap me if I get too long.
+      ----
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'pre.nowrap', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("[options=\"nowrap\"]\n----\nDo not wrap me if I get too long.\n----\n");
+        assert_css(&doc, "pre.nowrap", 1);
+    }
+
+    // NOTE: divergence from Asciidoctor (see
+    // `literal_block_should_honor_nowrap_option`): the `prewrap` document
+    // attribute is not honored.
+    // TODO: honor the `prewrap` attribute on verbatim blocks.
+    #[ignore]
+    #[test]
+    fn literal_block_should_set_nowrap_class_if_prewrap_document_attribute_is_disabled() {
+        verifies!(
+            r#"
+    test 'literal block should set nowrap class if prewrap document attribute is disabled' do
+      input = <<~'EOS'
+      :prewrap!:
+
+      ----
+      Do not wrap me if I get too long.
+      ----
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'pre.nowrap', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":prewrap!:\n\n----\nDo not wrap me if I get too long.\n----\n");
+        assert_css(&doc, "pre.nowrap", 1);
+    }
+
+    #[test]
+    fn should_preserve_guard_in_front_of_callout_if_icons_are_not_enabled() {
+        verifies!(
+            r#"
+    test 'should preserve guard in front of callout if icons are not enabled' do
+      input = <<~'EOS'
+      ----
+      puts 'Hello, World!' # <1>
+      puts 'Goodbye, World ;(' # <2>
+      ----
+      EOS
+
+      result = convert_string_to_embedded input
+      assert_include ' # <b class="conum">(1)</b>', result
+      assert_include ' # <b class="conum">(2)</b>', result
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "----\nputs 'Hello, World!' # <1>\nputs 'Goodbye, World ;(' # <2>\n----\n",
+        );
+        // The assert helpers operate on the decoded virtual DOM, where the
+        // conum is a `<b class="conum">` element; the guard text (` # `) is
+        // preserved in the text node immediately before it.
+        assert_xpath(&doc, "//pre//b[@class=\"conum\"][text()=\"(1)\"]", 1);
+        assert_xpath(&doc, "//pre//b[@class=\"conum\"][text()=\"(2)\"]", 1);
+        assert_rendered_contains(&doc, " # ");
+    }
+
+    #[test]
+    fn should_preserve_guard_around_callout_if_icons_are_not_enabled() {
+        verifies!(
+            r#"
+    test 'should preserve guard around callout if icons are not enabled' do
+      input = <<~'EOS'
+      ----
+      <parent> <!--1-->
+        <child/> <!--2-->
+      </parent>
+      ----
+      EOS
+
+      result = convert_string_to_embedded input
+      assert_include ' &lt;!--<b class="conum">(1)</b>--&gt;', result
+      assert_include ' &lt;!--<b class="conum">(2)</b>--&gt;', result
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("----\n<parent> <!--1-->\n  <child/> <!--2-->\n</parent>\n----\n");
+        // Decoded virtual DOM: the conum `<b class="conum">` sits between the
+        // preserved guard text ` <!--` and `-->`.
+        assert_xpath(&doc, "//pre//b[@class=\"conum\"][text()=\"(1)\"]", 1);
+        assert_xpath(&doc, "//pre//b[@class=\"conum\"][text()=\"(2)\"]", 1);
+        assert_rendered_contains(&doc, " <!--");
+        assert_rendered_contains(&doc, "-->");
+    }
+
+    #[test]
+    fn literal_block_should_honor_explicit_subs_list() {
+        verifies!(
+            r#"
+    test 'literal block should honor explicit subs list' do
+      input = <<~'EOS'
+      [subs="verbatim,quotes"]
+      ----
+      Map<String, String> *attributes*; //<1>
+      ----
+      EOS
+
+      block = block_from_string input
+      assert_equal [:specialcharacters, :callouts, :quotes], block.subs
+      output = block.convert
+      assert_includes output, 'Map&lt;String, String&gt; <strong>attributes</strong>;'
+      assert_xpath '//pre/b[text()="(1)"]', output, 1
+    end
+
+"#
+        );
+
+        // The Ruby subs-list introspection (`block.subs`) is exercised through
+        // the rendered output here.
+        let doc = Parser::default()
+            .parse("[subs=\"verbatim,quotes\"]\n----\nMap<String, String> *attributes*; //<1>\n----\n");
+        // Decoded virtual DOM: specialcharacters escaping is reflected as the
+        // literal `<`/`>` in the text node, and `*attributes*` becomes a
+        // `<strong>` element.
+        assert_rendered_contains(&doc, "Map<String, String> ");
+        assert_xpath(&doc, "//pre//strong[text()=\"attributes\"]", 1);
+        assert_xpath(&doc, "//pre//b[@class=\"conum\"][text()=\"(1)\"]", 1);
+    }
+
+    #[test]
+    fn should_be_able_to_disable_callouts_for_literal_block() {
+        verifies!(
+            r#"
+    test 'should be able to disable callouts for literal block' do
+      input = <<~'EOS'
+      [subs="specialcharacters"]
+      ----
+      No callout here <1>
+      ----
+      EOS
+      block = block_from_string input
+      assert_equal [:specialcharacters], block.subs
+      output = block.convert
+      assert_xpath '//pre/b[text()="(1)"]', output, 0
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("[subs=\"specialcharacters\"]\n----\nNo callout here <1>\n----\n");
+        assert_xpath(&doc, "//pre//b[text()=\"(1)\"]", 0);
+    }
+
+    #[test]
+    fn listing_block_should_honor_explicit_subs_list() {
+        verifies!(
+            r#"
+    test 'listing block should honor explicit subs list' do
+      input = <<~'EOS'
+      [subs="specialcharacters,quotes"]
+      ----
+      $ *python functional_tests.py*
+      Traceback (most recent call last):
+        File "functional_tests.py", line 4, in <module>
+          assert 'Django' in browser.title
+      AssertionError
+      ----
+      EOS
+
+      output = convert_string_to_embedded input
+
+      assert_css '.listingblock pre', output, 1
+      assert_css '.listingblock pre strong', output, 1
+      assert_css '.listingblock pre em', output, 0
+
+      input2 = <<~'EOS'
+      [subs="specialcharacters,macros"]
+      ----
+      $ pass:quotes[*python functional_tests.py*]
+      Traceback (most recent call last):
+        File "functional_tests.py", line 4, in <module>
+          assert pass:quotes['Django'] in browser.title
+      AssertionError
+      ----
+      EOS
+
+      output2 = convert_string_to_embedded input2
+      # FIXME JRuby is adding extra trailing newlines in the second document,
+      # for now, rstrip is necessary
+      assert_equal output.rstrip, output2.rstrip
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[subs=\"specialcharacters,quotes\"]\n----\n$ *python functional_tests.py*\nTraceback (most recent call last):\n  File \"functional_tests.py\", line 4, in <module>\n    assert 'Django' in browser.title\nAssertionError\n----\n",
+        );
+        assert_css(&doc, ".listingblock pre", 1);
+        assert_css(&doc, ".listingblock pre strong", 1);
+        assert_css(&doc, ".listingblock pre em", 0);
+
+        let doc2 = Parser::default().parse(
+            "[subs=\"specialcharacters,macros\"]\n----\n$ pass:quotes[*python functional_tests.py*]\nTraceback (most recent call last):\n  File \"functional_tests.py\", line 4, in <module>\n    assert pass:quotes['Django'] in browser.title\nAssertionError\n----\n",
+        );
+        assert_eq!(pre_text(&doc), pre_text(&doc2));
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not treat a block
+    // title whose first character is a period (`..gitignore`) as a title;
+    // Asciidoctor renders the title ".gitignore". Kept `#[ignore]`d.
+    // TODO: allow a leading period in a block title when not followed by a space.
+    #[ignore]
+    #[test]
+    fn first_character_of_block_title_may_be_a_period_if_not_followed_by_space() {
+        verifies!(
+            r#"
+    test 'first character of block title may be a period if not followed by space' do
+      input = <<~'EOS'
+      ..gitignore
+      ----
+      /.bundle/
+      /build/
+      /Gemfile.lock
+      ----
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//*[@class="title"][text()=".gitignore"]', output
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("..gitignore\n----\n/.bundle/\n/build/\n/Gemfile.lock\n----\n");
+        assert_xpath(&doc, "//*[@class=\"title\"][text()=\".gitignore\"]", 1);
+    }
+
+    #[test]
+    fn listing_block_without_title_should_generate_screen_element_in_docbook() {
+        non_normative!(
+            r#"
+    test 'listing block without title should generate screen element in docbook' do
+      input = <<~'EOS'
+      ----
+      listing block
+      ----
+      EOS
+
+      output = convert_string_to_embedded input, backend: 'docbook'
+      assert_xpath '/screen[text()="listing block"]', output, 1
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    #[test]
+    fn listing_block_with_title_should_generate_screen_element_inside_formalpara_element_in_docbook()
+    {
+        non_normative!(
+            r#"
+    test 'listing block with title should generate screen element inside formalpara element in docbook' do
+      input = <<~'EOS'
+      .title
+      ----
+      listing block
+      ----
+      EOS
+
+      output = convert_string_to_embedded input, backend: 'docbook'
+      assert_xpath '/formalpara', output, 1
+      assert_xpath '/formalpara/title[text()="title"]', output, 1
+      assert_xpath '/formalpara/para/screen[text()="listing block"]', output, 1
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    #[test]
+    fn should_not_prepend_caption_to_title_of_listing_block_with_title_if_listing_caption_attribute_is_not_set()
+    {
+        verifies!(
+            r#"
+    test 'should not prepend caption to title of listing block with title if listing-caption attribute is not set' do
+      input = <<~'EOS'
+      .title
+      ----
+      listing block content
+      ----
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="listingblock"][1]/*[@class="title"][text()="title"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(".title\n----\nlisting block content\n----\n");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"listingblock\"][1]/*[@class=\"title\"][text()=\"title\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not honor the
+    // `listing-caption` attribute to prepend a numbered caption to a listing
+    // block's title. Kept `#[ignore]`d with the Ruby-intended title.
+    // TODO: honor the `listing-caption` attribute.
+    #[ignore]
+    #[test]
+    fn should_prepend_caption_specified_by_listing_caption_attribute_and_number_to_title_of_listing_block_with_title()
+    {
+        verifies!(
+            r#"
+    test 'should prepend caption specified by listing-caption attribute and number to title of listing block with title' do
+      input = <<~'EOS'
+      :listing-caption: Listing
+
+      .title
+      ----
+      listing block content
+      ----
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="listingblock"][1]/*[@class="title"][text()="Listing 1. title"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":listing-caption: Listing\n\n.title\n----\nlisting block content\n----\n");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"listingblock\"][1]/*[@class=\"title\"][text()=\"Listing 1. title\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not evaluate a
+    // `caption` attribute containing a `{counter:..}` reference to prepend a
+    // numbered caption. Kept `#[ignore]`d with the Ruby-intended title.
+    // TODO: honor a `caption` attribute with a counter on a listing block.
+    #[ignore]
+    #[test]
+    fn should_prepend_caption_specified_by_caption_attribute_on_listing_block_even_if_listing_caption_attribute_is_not_set()
+    {
+        verifies!(
+            r#"
+    test 'should prepend caption specified by caption attribute on listing block even if listing-caption attribute is not set' do
+      input = <<~'EOS'
+      [caption="Listing {counter:listing-number}. "]
+      .Behold!
+      ----
+      listing block content
+      ----
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="listingblock"][1]/*[@class="title"][text()="Listing 1. Behold!"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[caption=\"Listing {counter:listing-number}. \"]\n.Behold!\n----\nlisting block content\n----\n",
+        );
+        assert_xpath(
+            &doc,
+            "/*[@class=\"listingblock\"][1]/*[@class=\"title\"][text()=\"Listing 1. Behold!\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not promote a listing
+    // block with an implicit style and a language positional argument to a
+    // source block. Kept `#[ignore]`d with the Ruby-intended assertions.
+    // TODO: promote `[,lang]` listing blocks to source blocks.
+    #[ignore]
+    #[test]
+    fn listing_block_without_an_explicit_style_and_with_a_second_positional_argument_should_be_promoted_to_a_source_block()
+    {
+        verifies!(
+            r#"
+    test 'listing block without an explicit style and with a second positional argument should be promoted to a source block' do
+      input = <<~'EOS'
+      [,ruby]
+      ----
+      puts 'Hello, Ruby!'
+      ----
+      EOS
+      matches = (document_from_string input).find_by context: :listing, style: 'source'
+      assert_equal 1, matches.length
+      assert_equal 'ruby', (matches[0].attr 'language')
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[,ruby]\n----\nputs 'Hello, Ruby!'\n----\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.declared_style(), Some("source"));
+        assert_eq!(
+            block
+                .attrlist()
+                .and_then(|a| a.named_attribute("language"))
+                .map(|v| v.value().to_string()),
+            Some("ruby".to_string())
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor (see the `[,lang]` promotion case): a
+    // listing block is not promoted to source when `source-language` is set.
+    // TODO: promote listing blocks to source when `source-language` is set.
+    #[ignore]
+    #[test]
+    fn listing_block_without_an_explicit_style_should_be_promoted_to_a_source_block_if_source_language_is_set()
+    {
+        verifies!(
+            r#"
+    test 'listing block without an explicit style should be promoted to a source block if source-language is set' do
+      input = <<~'EOS'
+      :source-language: ruby
+
+      ----
+      puts 'Hello, Ruby!'
+      ----
+      EOS
+      matches = (document_from_string input).find_by context: :listing, style: 'source'
+      assert_equal 1, matches.length
+      assert_equal 'ruby', (matches[0].attr 'language')
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":source-language: ruby\n\n----\nputs 'Hello, Ruby!'\n----\n");
+        let block = doc
+            .nested_blocks()
+            .find(|b| b.raw_context().as_ref() == "listing")
+            .unwrap();
+        assert_eq!(block.declared_style(), Some("source"));
+    }
+
+    #[test]
+    fn listing_block_with_an_explicit_style_and_a_second_positional_argument_should_not_be_promoted_to_a_source_block()
+    {
+        verifies!(
+            r#"
+    test 'listing block with an explicit style and a second positional argument should not be promoted to a source block' do
+      input = <<~'EOS'
+      [listing,ruby]
+      ----
+      puts 'Hello, Ruby!'
+      ----
+      EOS
+      matches = (document_from_string input).find_by context: :listing
+      assert_equal 1, matches.length
+      assert_equal 'listing', matches[0].style
+      assert_nil matches[0].attr 'language'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[listing,ruby]\n----\nputs 'Hello, Ruby!'\n----\n");
+        let matches: Vec<_> = doc
+            .nested_blocks()
+            .filter(|b| b.raw_context().as_ref() == "listing")
+            .collect();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].declared_style(), Some("listing"));
+        assert_eq!(
+            matches[0]
+                .attrlist()
+                .and_then(|a| a.named_attribute("language")),
+            None
+        );
+    }
+
+    #[test]
+    fn listing_block_with_an_explicit_style_should_not_be_promoted_to_a_source_block_if_source_language_is_set()
+    {
+        verifies!(
+            r#"
+    test 'listing block with an explicit style should not be promoted to a source block if source-language is set' do
+      input = <<~'EOS'
+      :source-language: ruby
+
+      [listing]
+      ----
+      puts 'Hello, Ruby!'
+      ----
+      EOS
+      matches = (document_from_string input).find_by context: :listing
+      assert_equal 1, matches.length
+      assert_equal 'listing', matches[0].style
+      assert_nil matches[0].attr 'language'
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":source-language: ruby\n\n[listing]\n----\nputs 'Hello, Ruby!'\n----\n");
+        let matches: Vec<_> = doc
+            .nested_blocks()
+            .filter(|b| b.raw_context().as_ref() == "listing")
+            .collect();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].declared_style(), Some("listing"));
+        assert_eq!(
+            matches[0]
+                .attrlist()
+                .and_then(|a| a.named_attribute("language")),
+            None
+        );
+    }
+
+    #[test]
+    fn source_block_with_no_title_or_language_should_generate_screen_element_in_docbook() {
+        non_normative!(
+            r#"
+    test 'source block with no title or language should generate screen element in docbook' do
+      input = <<~'EOS'
+      [source]
+      ----
+      source block
+      ----
+      EOS
+
+      output = convert_string_to_embedded input, backend: 'docbook'
+      assert_xpath '/screen[@linenumbering="unnumbered"][text()="source block"]', output, 1
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    #[test]
+    fn source_block_with_title_and_no_language_should_generate_screen_element_inside_formalpara_element_for_docbook()
+    {
+        non_normative!(
+            r#"
+    test 'source block with title and no language should generate screen element inside formalpara element for docbook' do
+      input = <<~'EOS'
+      [source]
+      .title
+      ----
+      source block
+      ----
+      EOS
+
+      output = convert_string_to_embedded input, backend: 'docbook'
+      assert_xpath '/formalpara', output, 1
+      assert_xpath '/formalpara/title[text()="title"]', output, 1
+      assert_xpath '/formalpara/para/screen[@linenumbering="unnumbered"][text()="source block"]', output, 1
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
