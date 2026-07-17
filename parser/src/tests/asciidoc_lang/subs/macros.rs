@@ -188,6 +188,22 @@ mod default_macros_substitution {
             block1.content().rendered(),
             r#"See <a href="https://example.org">the <span class="image"><img src="logo.png" alt="Logo"></span> here</a>."#
         );
+
+        // Nesting also applies to the text of a cross-reference macro: the
+        // inner image is processed inside the `xref:` target's text.
+        let doc =
+            Parser::default().parse("[[sec]]Target.\n\nSee xref:sec[image:logo.png[Logo]] now.");
+
+        let block2 = doc.nested_blocks().nth(1).unwrap();
+
+        let Block::Simple(block2) = block2 else {
+            panic!("Unexpected block type: {block2:?}");
+        };
+
+        assert_eq!(
+            block2.content().rendered(),
+            r##"See <a href="#sec"><span class="image"><img src="logo.png" alt="Logo"></span></a> now."##
+        );
     }
 
     #[test]
