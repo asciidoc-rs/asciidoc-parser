@@ -6684,3 +6684,438 @@ mod media {
 "#
     );
 }
+
+mod admonition_icons {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Admonition icons' do
+"#
+    );
+
+    // NOTE: divergence from Asciidoctor pervasive to the image-based icon tests
+    // below. This crate renders font-based admonition icons (`:icons: font` →
+    // `<i class="fa icon-...">`) but does not render image-based icons
+    // (`:icons:` / `:icons: image` → `<img src=".../tip.png">`); it emits the
+    // admonition label as a `.icon > .title` instead. The image-icon tests are
+    // kept `#[ignore]`d with the Ruby-intended assertions; the ones that also
+    // require reading icon files (data-uri) or emitting document-head asset
+    // links are reproduced as `non_normative`.
+
+    // TODO: render image-based admonition icons.
+    #[ignore]
+    #[test]
+    fn can_resolve_icon_relative_to_default_iconsdir() {
+        verifies!(
+            r#"
+    test 'can resolve icon relative to default iconsdir' do
+      input = <<~'EOS'
+      :icons:
+
+      [TIP]
+      You can use icons for admonitions by setting the 'icons' attribute.
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="./images/icons/tip.png"][@alt="Tip"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":icons:\n\n[TIP]\nYou can use icons for admonitions by setting the 'icons' attribute.\n",
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/img[@src=\"./images/icons/tip.png\"][@alt=\"Tip\"]",
+            1,
+        );
+    }
+
+    // TODO: render image-based admonition icons with a custom iconsdir.
+    #[ignore]
+    #[test]
+    fn can_resolve_icon_relative_to_custom_iconsdir() {
+        verifies!(
+            r#"
+    test 'can resolve icon relative to custom iconsdir' do
+      input = <<~'EOS'
+      :icons:
+      :iconsdir: icons
+
+      [TIP]
+      You can use icons for admonitions by setting the 'icons' attribute.
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="icons/tip.png"][@alt="Tip"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":icons:\n:iconsdir: icons\n\n[TIP]\nYou can use icons for admonitions by setting the 'icons' attribute.\n",
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/img[@src=\"icons/tip.png\"][@alt=\"Tip\"]",
+            1,
+        );
+    }
+
+    // TODO: render image-based admonition icons.
+    #[ignore]
+    #[test]
+    fn should_add_file_extension_to_custom_icon_if_not_specified() {
+        verifies!(
+            r#"
+    test 'should add file extension to custom icon if not specified' do
+      input = <<~'EOS'
+      :icons: font
+      :iconsdir: images/icons
+
+      [TIP,icon=a]
+      Override the icon of an admonition block using an attribute
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="images/icons/a.png"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":icons: font\n:iconsdir: images/icons\n\n[TIP,icon=a]\nOverride the icon of an admonition block using an attribute\n",
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/img[@src=\"images/icons/a.png\"]",
+            1,
+        );
+    }
+
+    // TODO: render image-based admonition icons (icontype variations).
+    #[ignore]
+    #[test]
+    fn should_allow_icontype_to_be_specified_when_using_built_in_admonition_icon() {
+        verifies!(
+            r##"
+    test 'should allow icontype to be specified when using built-in admonition icon' do
+      input = 'TIP: Set the icontype using either the icontype attribute on the icons attribute.'
+      [
+        { 'icons' => '', 'ext' => 'png' },
+        { 'icons' => '', 'icontype' => 'jpg', 'ext' => 'jpg' },
+        { 'icons' => 'jpg', 'ext' => 'jpg' },
+        { 'icons' => 'image', 'ext' => 'png' },
+      ].each do |attributes|
+        expected_src = %(./images/icons/tip.#{attributes.delete 'ext'})
+        output = convert_string input, attributes: attributes
+        assert_xpath %(//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="#{expected_src}"]), output, 1
+      end
+    end
+
+"##
+        );
+
+        let doc = Parser::default().with_intrinsic_attribute("icons", "", crate::parser::ModificationContext::ApiOnly).parse(
+            "TIP: Set the icontype using either the icontype attribute on the icons attribute.",
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/img[@src=\"./images/icons/tip.png\"]",
+            1,
+        );
+    }
+
+    // TODO: render image-based admonition icons (custom icon, icontype variations).
+    #[ignore]
+    #[test]
+    fn should_allow_icontype_to_be_specified_when_using_custom_admonition_icon() {
+        verifies!(
+            r##"
+    test 'should allow icontype to be specified when using custom admonition icon' do
+      input = <<~'EOS'
+      [TIP,icon=hint]
+      Set the icontype using either the icontype attribute on the icons attribute.
+      EOS
+      [
+        { 'icons' => '', 'ext' => 'png' },
+        { 'icons' => '', 'icontype' => 'jpg', 'ext' => 'jpg' },
+        { 'icons' => 'jpg', 'ext' => 'jpg' },
+        { 'icons' => 'image', 'ext' => 'png' },
+      ].each do |attributes|
+        expected_src = %(./images/icons/hint.#{attributes.delete 'ext'})
+        output = convert_string input, attributes: attributes
+        assert_xpath %(//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="#{expected_src}"]), output, 1
+      end
+    end
+
+"##
+        );
+
+        let doc = Parser::default().with_intrinsic_attribute("icons", "", crate::parser::ModificationContext::ApiOnly).parse(
+            "[TIP,icon=hint]\nSet the icontype using either the icontype attribute on the icons attribute.\n",
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/img[@src=\"./images/icons/hint.png\"]",
+            1,
+        );
+    }
+
+    // The data-uri icon tests require reading icon files from disk and
+    // base64-encoding them; out of scope for this crate.
+    non_normative!(
+        r#"
+    test 'embeds base64-encoded data uri of icon when data-uri attribute is set and safe mode level is less than SECURE' do
+      input = <<~'EOS'
+      :icons:
+      :iconsdir: fixtures
+      :icontype: gif
+      :data-uri:
+
+      [TIP]
+      You can use icons for admonitions by setting the 'icons' attribute.
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SAFE, attributes: { 'docdir' => testdir }
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Tip"]', output, 1
+    end
+
+    test 'should embed base64-encoded data uri of custom icon when data-uri attribute is set' do
+      input = <<~'EOS'
+      :icons:
+      :iconsdir: fixtures
+      :icontype: gif
+      :data-uri:
+
+      [TIP,icon=tip]
+      You can set a custom icon using the icon attribute on the block.
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SAFE, attributes: { 'docdir' => testdir }
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Tip"]', output, 1
+    end
+"#
+    );
+
+    // TODO: render image-based admonition icons.
+    #[ignore]
+    #[test]
+    fn does_not_embed_base64_encoded_data_uri_of_icon_when_safe_mode_level_is_secure_or_greater() {
+        verifies!(
+            r#"
+    test 'does not embed base64-encoded data uri of icon when safe mode level is SECURE or greater' do
+      input = <<~'EOS'
+      :icons:
+      :iconsdir: fixtures
+      :icontype: gif
+      :data-uri:
+
+      [TIP]
+      You can use icons for admonitions by setting the 'icons' attribute.
+      EOS
+
+      output = convert_string input, attributes: { 'icons' => '' }
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="fixtures/tip.gif"][@alt="Tip"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":icons:\n:iconsdir: fixtures\n:icontype: gif\n:data-uri:\n\n[TIP]\nYou can use icons for admonitions by setting the 'icons' attribute.\n",
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/img[@src=\"fixtures/tip.gif\"][@alt=\"Tip\"]",
+            1,
+        );
+    }
+
+    // Safe-mode ancestor-directory cleaning during icon data-uri reads is out of
+    // scope.
+    non_normative!(
+        r#"
+    test 'cleans reference to ancestor directories before reading icon if safe mode level is at least SAFE' do
+      input = <<~'EOS'
+      :icons:
+      :iconsdir: ../fixtures
+      :icontype: gif
+      :data-uri:
+
+      [TIP]
+      You can use icons for admonitions by setting the 'icons' attribute.
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SAFE, attributes: { 'docdir' => testdir }
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Tip"]', output, 1
+      assert_message @logger, :WARN, 'image has illegal reference to ancestor of jail; recovering automatically'
+    end
+"#
+    );
+
+    #[test]
+    fn should_import_font_awesome_and_use_font_based_icons_when_value_of_icons_attribute_is_font() {
+        verifies!(
+            r##"
+    test 'should import Font Awesome and use font-based icons when value of icons attribute is font' do
+      input = <<~'EOS'
+      :icons: font
+
+      [TIP]
+      You can use icons for admonitions by setting the 'icons' attribute.
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SERVER
+      assert_css %(html > head > link[rel="stylesheet"][href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/#{Asciidoctor::FONT_AWESOME_VERSION}/css/font-awesome.min.css"]), output, 1
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/i[@class="fa icon-tip"]', output, 1
+    end
+
+"##
+        );
+
+        // This crate renders the font-based icon as `<i class="fa icon-tip">`.
+        // The Font Awesome stylesheet `<link>` in the document head is a
+        // standalone-document concern this crate's DOM does not model.
+        let doc = Parser::default().parse(
+            ":icons: font\n\n[TIP]\nYou can use icons for admonitions by setting the 'icons' attribute.\n",
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/i[@class=\"fa icon-tip\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. When `:icons: font` is set, this crate
+    // always renders the font icon; it does not fall back to an `<img>` when a
+    // custom image icon is specified on the block. Kept `#[ignore]`d.
+    // TODO: honor a custom image icon over a font icon.
+    #[ignore]
+    #[test]
+    fn font_based_icon_should_not_override_icon_specified_on_admonition() {
+        verifies!(
+            r#"
+    test 'font-based icon should not override icon specified on admonition' do
+      input = <<~'EOS'
+      :icons: font
+      :iconsdir: images/icons
+
+      [TIP,icon=a.png]
+      Override the icon of an admonition block using an attribute
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/i[@class="fa icon-tip"]', output, 0
+      assert_xpath '//*[@class="admonitionblock tip"]//*[@class="icon"]/img[@src="images/icons/a.png"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":icons: font\n:iconsdir: images/icons\n\n[TIP,icon=a.png]\nOverride the icon of an admonition block using an attribute\n",
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/i[@class=\"fa icon-tip\"]",
+            0,
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/img[@src=\"images/icons/a.png\"]",
+            1,
+        );
+    }
+
+    // The asset-uri-scheme tests assert document-head `<link>`/`<script>` CDN
+    // asset URLs (Font Awesome, highlight.js) in standalone output, which this
+    // crate's DOM does not model.
+    non_normative!(
+        r##"
+    test 'should use http uri scheme for assets when asset-uri-scheme is http' do
+      input = <<~'EOS'
+      :asset-uri-scheme: http
+      :icons: font
+      :source-highlighter: highlightjs
+
+      TIP: You can control the URI scheme used for assets with the asset-uri-scheme attribute
+
+      [source,ruby]
+      puts "AsciiDoc, FTW!"
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SAFE
+      assert_css %(html > head > link[rel="stylesheet"][href="http://cdnjs.cloudflare.com/ajax/libs/font-awesome/#{Asciidoctor::FONT_AWESOME_VERSION}/css/font-awesome.min.css"]), output, 1
+      assert_css %(html > body > script[src="http://cdnjs.cloudflare.com/ajax/libs/highlight.js/#{Asciidoctor::HIGHLIGHT_JS_VERSION}/highlight.min.js"]), output, 1
+    end
+
+    test 'should use no uri scheme for assets when asset-uri-scheme is blank' do
+      input = <<~'EOS'
+      :asset-uri-scheme:
+      :icons: font
+      :source-highlighter: highlightjs
+
+      TIP: You can control the URI scheme used for assets with the asset-uri-scheme attribute
+
+      [source,ruby]
+      puts "AsciiDoc, FTW!"
+      EOS
+
+      output = convert_string input, safe: Asciidoctor::SafeMode::SAFE
+      assert_css %(html > head > link[rel="stylesheet"][href="//cdnjs.cloudflare.com/ajax/libs/font-awesome/#{Asciidoctor::FONT_AWESOME_VERSION}/css/font-awesome.min.css"]), output, 1
+      assert_css %(html > body > script[src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/#{Asciidoctor::HIGHLIGHT_JS_VERSION}/highlight.min.js"]), output, 1
+    end
+"##
+    );
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
+mod image_paths {
+    use crate::tests::prelude::*;
+
+    // Both Image-paths tests exercise Ruby's `Block#normalize_asset_path`, a
+    // safe-mode filesystem path-jailing API with no equivalent in this crate.
+    non_normative!(
+        r##"
+  context 'Image paths' do
+    test 'restricts access to ancestor directories when safe mode level is at least SAFE' do
+      input = 'image::asciidoctor.png[Asciidoctor]'
+      basedir = testdir
+      block = block_from_string input, attributes: { 'docdir' => basedir }
+      doc = block.document
+      assert doc.safe >= Asciidoctor::SafeMode::SAFE
+
+      assert_equal File.join(basedir, 'images'), block.normalize_asset_path('images')
+      assert_equal File.join(basedir, 'etc/images'), block.normalize_asset_path("#{disk_root}etc/images")
+      assert_equal File.join(basedir, 'images'), block.normalize_asset_path('../../images')
+    end
+
+    test 'does not restrict access to ancestor directories when safe mode is disabled' do
+      input = 'image::asciidoctor.png[Asciidoctor]'
+      basedir = testdir
+      block = block_from_string input, safe: Asciidoctor::SafeMode::UNSAFE, attributes: { 'docdir' => basedir }
+      doc = block.document
+      assert doc.safe == Asciidoctor::SafeMode::UNSAFE
+
+      assert_equal File.join(basedir, 'images'), block.normalize_asset_path('images')
+      absolute_path = "#{disk_root}etc/images"
+      assert_equal absolute_path, block.normalize_asset_path(absolute_path)
+      assert_equal File.expand_path(File.join(basedir, '../../images')), block.normalize_asset_path('../../images')
+    end
+  end
+
+"##
+    );
+}
