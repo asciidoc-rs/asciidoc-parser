@@ -7348,3 +7348,443 @@ mod source_code {
 "#
     );
 }
+
+mod abstract_and_part_intro {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Abstract and Part Intro' do
+"#
+    );
+
+    // NOTE: divergence from Asciidoctor pervasive to this context. This crate
+    // does not model the `abstract` and `partintro` block styles: an
+    // `[abstract]` open block is not converted to a `quoteblock.abstract` (nor
+    // does an `[abstract]` paragraph gain the `abstract` class), a `[partintro]`
+    // open block does not gain the `partintro` class, and the associated
+    // validation warnings/errors are not emitted. The HTML tests are kept
+    // `#[ignore]`d with the Ruby-intended assertions; the DocBook variants are
+    // reproduced as `non_normative`.
+    // TODO: implement the abstract and partintro block styles.
+
+    #[ignore]
+    #[test]
+    fn should_make_abstract_on_open_block_without_title_a_quote_block_for_article() {
+        verifies!(
+            r#"
+    test 'should make abstract on open block without title a quote block for article' do
+      input = <<~'EOS'
+      = Article
+
+      [abstract]
+      --
+      This article is about stuff.
+
+      And other stuff.
+      --
+
+      == Section One
+
+      content
+      EOS
+
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock.abstract', output, 1
+      assert_css '#preamble .quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph', output, 2
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "= Article\n\n[abstract]\n--\nThis article is about stuff.\n\nAnd other stuff.\n--\n\n== Section One\n\ncontent\n",
+        );
+        assert_css(&doc, ".quoteblock.abstract", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph", 2);
+    }
+
+    #[ignore]
+    #[test]
+    fn should_make_abstract_on_open_block_with_title_a_quote_block_with_title_for_article() {
+        verifies!(
+            r#"
+    test 'should make abstract on open block with title a quote block with title for article' do
+      input = <<~'EOS'
+      = Article
+
+      .My abstract
+      [abstract]
+      --
+      This article is about stuff.
+      --
+
+      == Section One
+
+      content
+      EOS
+
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock.abstract', output, 1
+      assert_css '#preamble .quoteblock', output, 1
+      assert_css '.quoteblock > .title', output, 1
+      assert_css '.quoteblock > .title + blockquote', output, 1
+      assert_css '.quoteblock > .title + blockquote > .paragraph', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "= Article\n\n.My abstract\n[abstract]\n--\nThis article is about stuff.\n--\n\n== Section One\n\ncontent\n",
+        );
+        assert_css(&doc, ".quoteblock.abstract", 1);
+        assert_css(&doc, ".quoteblock > .title", 1);
+    }
+
+    #[ignore]
+    #[test]
+    fn should_allow_abstract_in_document_with_title_if_doctype_is_book() {
+        verifies!(
+            r#"
+    test 'should allow abstract in document with title if doctype is book' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      [abstract]
+      Abstract for book with title is valid
+      EOS
+
+      output = convert_string input
+      assert_css '.abstract', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("= Book\n:doctype: book\n\n[abstract]\nAbstract for book with title is valid\n");
+        assert_css(&doc, ".abstract", 1);
+    }
+
+    #[ignore]
+    #[test]
+    fn should_not_allow_abstract_as_direct_child_of_document_if_doctype_is_book() {
+        verifies!(
+            r#"
+    test 'should not allow abstract as direct child of document if doctype is book' do
+      input = <<~'EOS'
+      :doctype: book
+
+      [abstract]
+      Abstract for book without title is invalid.
+      EOS
+
+      output = convert_string input
+      assert_css '.abstract', output, 0
+      assert_message @logger, :WARN, 'abstract block cannot be used in a document without a doctitle when doctype is book. Excluding block content.'
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":doctype: book\n\n[abstract]\nAbstract for book without title is invalid.\n");
+        assert_css(&doc, ".abstract", 0);
+    }
+
+    // The DocBook abstract variants are backend-specific and out of scope.
+    non_normative!(
+        r#"
+    test 'should make abstract on open block without title converted to DocBook' do
+      input = <<~'EOS'
+      = Article
+
+      [abstract]
+      --
+      This article is about stuff.
+
+      And other stuff.
+      --
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_css 'info > abstract', output, 1
+      assert_css 'info > abstract > simpara', output, 2
+    end
+
+    test 'should make abstract on open block with title converted to DocBook' do
+      input = <<~'EOS'
+      = Article
+
+      .My abstract
+      [abstract]
+      --
+      This article is about stuff.
+      --
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_css 'info > abstract', output, 1
+      assert_css 'info > abstract > title', output, 1
+      assert_css 'info > abstract > title + simpara', output, 1
+    end
+
+    test 'should allow abstract in document with title if doctype is book converted to DocBook' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      [abstract]
+      Abstract for book with title is valid
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_css 'info > abstract', output, 1
+      assert_css 'preface', output, 0
+    end
+
+    test 'should not allow abstract as direct child of document if doctype is book converted to DocBook' do
+      input = <<~'EOS'
+      :doctype: book
+
+      [abstract]
+      Abstract for book is invalid.
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_css 'abstract', output, 0
+      assert_message @logger, :WARN, 'abstract block cannot be used in a document without a doctitle when doctype is book. Excluding block content.'
+    end
+"#
+    );
+
+    #[ignore]
+    #[test]
+    fn should_accept_partintro_on_open_block_without_title() {
+        verifies!(
+            r##"
+    # TODO partintro shouldn't be recognized if doctype is not book, should be in proper place
+    test 'should accept partintro on open block without title' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      [partintro]
+      --
+      This is a part intro.
+
+      It can have multiple paragraphs.
+      --
+
+      == Chapter 1
+
+      content
+      EOS
+
+      output = convert_string input
+      assert_css '.openblock', output, 1
+      assert_css '.openblock.partintro', output, 1
+      assert_css '.openblock .title', output, 0
+      assert_css '.openblock .content', output, 1
+      assert_xpath %(//h1[@id="_part_1"]/following-sibling::*[#{contains_class(:openblock)}]), output, 1
+      assert_xpath %(//*[#{contains_class(:openblock)}]/*[@class="content"]/*[@class="paragraph"]), output, 2
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "= Book\n:doctype: book\n\n= Part 1\n\n[partintro]\n--\nThis is a part intro.\n\nIt can have multiple paragraphs.\n--\n\n== Chapter 1\n\ncontent\n",
+        );
+        assert_css(&doc, ".openblock.partintro", 1);
+        assert_css(&doc, ".openblock .content", 1);
+    }
+
+    #[ignore]
+    #[test]
+    fn should_accept_partintro_on_open_block_with_title() {
+        verifies!(
+            r##"
+    test 'should accept partintro on open block with title' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      .Intro title
+      [partintro]
+      --
+      This is a part intro with a title.
+      --
+
+      == Chapter 1
+
+      content
+      EOS
+
+      output = convert_string input
+      assert_css '.openblock', output, 1
+      assert_css '.openblock.partintro', output, 1
+      assert_css '.openblock .title', output, 1
+      assert_css '.openblock .content', output, 1
+      assert_xpath %(//h1[@id="_part_1"]/following-sibling::*[#{contains_class(:openblock)}]), output, 1
+      assert_xpath %(//*[#{contains_class(:openblock)}]/*[@class="title"][text()="Intro title"]), output, 1
+      assert_xpath %(//*[#{contains_class(:openblock)}]/*[@class="content"]/*[@class="paragraph"]), output, 1
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "= Book\n:doctype: book\n\n= Part 1\n\n.Intro title\n[partintro]\n--\nThis is a part intro with a title.\n--\n\n== Chapter 1\n\ncontent\n",
+        );
+        assert_css(&doc, ".openblock.partintro", 1);
+        assert_css(&doc, ".openblock .title", 1);
+    }
+
+    #[ignore]
+    #[test]
+    fn should_exclude_partintro_if_not_a_child_of_part() {
+        verifies!(
+            r#"
+    test 'should exclude partintro if not a child of part' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      [partintro]
+      part intro paragraph
+      EOS
+
+      output = convert_string input
+      assert_css '.partintro', output, 0
+      assert_message @logger, :ERROR, 'partintro block can only be used when doctype is book and must be a child of a book part. Excluding block content.'
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("= Book\n:doctype: book\n\n[partintro]\npart intro paragraph\n");
+        assert_css(&doc, ".partintro", 0);
+    }
+
+    #[ignore]
+    #[test]
+    fn should_not_allow_partintro_unless_doctype_is_book() {
+        verifies!(
+            r#"
+    test 'should not allow partintro unless doctype is book' do
+      input = <<~'EOS'
+      [partintro]
+      part intro paragraph
+      EOS
+
+      output = convert_string input
+      assert_css '.partintro', output, 0
+      assert_message @logger, :ERROR, 'partintro block can only be used when doctype is book and must be a child of a book part. Excluding block content.'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[partintro]\npart intro paragraph\n");
+        assert_css(&doc, ".partintro", 0);
+    }
+
+    // The DocBook partintro variants are backend-specific and out of scope.
+    non_normative!(
+        r##"
+    test 'should accept partintro on open block without title converted to DocBook' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      [partintro]
+      --
+      This is a part intro.
+
+      It can have multiple paragraphs.
+      --
+
+      == Chapter 1
+
+      content
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_css 'partintro', output, 1
+      assert_css 'part[xml|id="_part_1"] > partintro', output, 1
+      assert_css 'partintro > simpara', output, 2
+    end
+
+    test 'should accept partintro on open block with title converted to DocBook' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      .Intro title
+      [partintro]
+      --
+      This is a part intro with a title.
+      --
+
+      == Chapter 1
+
+      content
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_css 'partintro', output, 1
+      assert_css 'part[xml|id="_part_1"] > partintro', output, 1
+      assert_css 'partintro > title', output, 1
+      assert_css 'partintro > title + simpara', output, 1
+    end
+
+    test 'should exclude partintro if not a child of part converted to DocBook' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      [partintro]
+      part intro paragraph
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_css 'partintro', output, 0
+      assert_message @logger, :ERROR, 'partintro block can only be used when doctype is book and must be a child of a book part. Excluding block content.'
+    end
+
+    test 'should not allow partintro unless doctype is book converted to DocBook' do
+      input = <<~'EOS'
+      [partintro]
+      part intro paragraph
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_css 'partintro', output, 0
+      assert_message @logger, :ERROR, 'partintro block can only be used when doctype is book and must be a child of a book part. Excluding block content.'
+    end
+"##
+    );
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
