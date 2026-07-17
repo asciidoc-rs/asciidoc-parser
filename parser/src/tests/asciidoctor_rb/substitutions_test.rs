@@ -1106,23 +1106,16 @@ mod quotes {
         );
     }
 
-    // Not ported to this crate:
-    // - 'single-line constrained monospaced string': Not ported; only the
-    //   multi-line constrained monospaced string variant was ported.
-    // - 'single-line constrained monospaced string with role': Not ported;
-    //   constrained monospaced string with role not covered in Rust.
-    // - 'escaped single-line constrained monospaced string': Not ported; escaped
-    //   constrained monospaced string not covered in Rust.
-    // - 'escaped single-line constrained monospaced string with role': Not ported;
-    //   escaped constrained monospaced string with role not covered in Rust.
-    // - 'escaped role on single-line constrained monospaced string': Not ported;
-    //   escaped role on constrained monospaced string not covered in Rust.
-    // - 'escaped role on escaped single-line constrained monospaced string': Not
-    //   ported; escaped role on escaped constrained monospaced string not covered
-    //   in Rust.
     non_normative!(
         r#"
     # NOTE must use apply_subs because constrained monospaced is handled as a passthrough
+"#
+    );
+
+    #[test]
+    fn single_line_constrained_monospaced_string() {
+        verifies!(
+            r#"
     test 'single-line constrained monospaced string' do
       para = block_from_string(%(`a few <{monospaced}> words`), attributes: { 'monospaced' => 'monospaced', 'compat-mode' => '' })
       assert_equal '<code>a few &lt;{monospaced}&gt; words</code>', para.apply_subs(para.source)
@@ -1131,7 +1124,62 @@ mod quotes {
       assert_equal '<code>a few &lt;monospaced&gt; words</code>', para.apply_subs(para.source)
     end
 
+"#
+        );
+
+        // The crate disregards compatibility mode, so only the modern
+        // (non-compat) sub-case of the upstream test is exercised here.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "monospaced",
+            "monospaced",
+            ModificationContext::Anywhere,
+        );
+
+        let maw =
+            crate::blocks::Block::parse(crate::Span::new("`a few <{monospaced}> words`"), &mut p);
+
+        let block = maw.item.unwrap().item;
+
+        assert_eq!(
+            block,
+            Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "`a few <{monospaced}> words`",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    rendered: "<code>a few &lt;monospaced&gt; words</code>",
+                },
+                source: Span {
+                    data: "`a few <{monospaced}> words`",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            },)
+        );
+    }
+
+    non_normative!(
+        r#"
     # NOTE must use apply_subs because constrained monospaced is handled as a passthrough
+"#
+    );
+
+    #[test]
+    fn single_line_constrained_monospaced_string_with_role() {
+        verifies!(
+            r#"
     test 'single-line constrained monospaced string with role' do
       para = block_from_string(%([input]`a few <{monospaced}> words`), attributes: { 'monospaced' => 'monospaced', 'compat-mode' => '' })
       assert_equal '<code class="input">a few &lt;{monospaced}&gt; words</code>', para.apply_subs(para.source)
@@ -1140,7 +1188,64 @@ mod quotes {
       assert_equal '<code class="input">a few &lt;monospaced&gt; words</code>', para.apply_subs(para.source)
     end
 
+"#
+        );
+
+        // The crate disregards compatibility mode, so only the modern
+        // (non-compat) sub-case of the upstream test is exercised here.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "monospaced",
+            "monospaced",
+            ModificationContext::Anywhere,
+        );
+
+        let maw = crate::blocks::Block::parse(
+            crate::Span::new("[input]`a few <{monospaced}> words`"),
+            &mut p,
+        );
+
+        let block = maw.item.unwrap().item;
+
+        assert_eq!(
+            block,
+            Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "[input]`a few <{monospaced}> words`",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    rendered: "<code class=\"input\">a few &lt;monospaced&gt; words</code>",
+                },
+                source: Span {
+                    data: "[input]`a few <{monospaced}> words`",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            },)
+        );
+    }
+
+    non_normative!(
+        r#"
     # NOTE must use apply_subs because constrained monospaced is handled as a passthrough
+"#
+    );
+
+    #[test]
+    fn escaped_single_line_constrained_monospaced_string() {
+        verifies!(
+            r#"
     test 'escaped single-line constrained monospaced string' do
       para = block_from_string(%(#{BACKSLASH}`a few <monospaced> words`), attributes: { 'compat-mode' => '' })
       assert_equal '`a few &lt;monospaced&gt; words`', para.apply_subs(para.source)
@@ -1149,7 +1254,62 @@ mod quotes {
       assert_equal '`a few &lt;monospaced&gt; words`', para.apply_subs(para.source)
     end
 
+"#
+        );
+
+        // The crate disregards compatibility mode, so only the modern
+        // (non-compat) sub-case of the upstream test is exercised here.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "monospaced",
+            "monospaced",
+            ModificationContext::Anywhere,
+        );
+
+        let maw =
+            crate::blocks::Block::parse(crate::Span::new("\\`a few <monospaced> words`"), &mut p);
+
+        let block = maw.item.unwrap().item;
+
+        assert_eq!(
+            block,
+            Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "\\`a few <monospaced> words`",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    rendered: "`a few &lt;monospaced&gt; words`",
+                },
+                source: Span {
+                    data: "\\`a few <monospaced> words`",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            },)
+        );
+    }
+
+    non_normative!(
+        r#"
     # NOTE must use apply_subs because constrained monospaced is handled as a passthrough
+"#
+    );
+
+    #[test]
+    fn escaped_single_line_constrained_monospaced_string_with_role() {
+        verifies!(
+            r#"
     test 'escaped single-line constrained monospaced string with role' do
       para = block_from_string(%([input]#{BACKSLASH}`a few <monospaced> words`), attributes: { 'compat-mode' => '' })
       assert_equal '[input]`a few &lt;monospaced&gt; words`', para.apply_subs(para.source)
@@ -1158,7 +1318,64 @@ mod quotes {
       assert_equal '[input]`a few &lt;monospaced&gt; words`', para.apply_subs(para.source)
     end
 
+"#
+        );
+
+        // The crate disregards compatibility mode, so only the modern
+        // (non-compat) sub-case of the upstream test is exercised here.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "monospaced",
+            "monospaced",
+            ModificationContext::Anywhere,
+        );
+
+        let maw = crate::blocks::Block::parse(
+            crate::Span::new("[input]\\`a few <monospaced> words`"),
+            &mut p,
+        );
+
+        let block = maw.item.unwrap().item;
+
+        assert_eq!(
+            block,
+            Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "[input]\\`a few <monospaced> words`",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    rendered: "[input]`a few &lt;monospaced&gt; words`",
+                },
+                source: Span {
+                    data: "[input]\\`a few <monospaced> words`",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            },)
+        );
+    }
+
+    non_normative!(
+        r#"
     # NOTE must use apply_subs because constrained monospaced is handled as a passthrough
+"#
+    );
+
+    #[test]
+    fn escaped_role_on_single_line_constrained_monospaced_string() {
+        verifies!(
+            r#"
     test 'escaped role on single-line constrained monospaced string' do
       para = block_from_string(%(#{BACKSLASH}[input]`a few <monospaced> words`), attributes: { 'compat-mode' => '' })
       assert_equal '[input]<code>a few &lt;monospaced&gt; words</code>', para.apply_subs(para.source)
@@ -1167,7 +1384,64 @@ mod quotes {
       assert_equal '[input]<code>a few &lt;monospaced&gt; words</code>', para.apply_subs(para.source)
     end
 
+"#
+        );
+
+        // The crate disregards compatibility mode, so only the modern
+        // (non-compat) sub-case of the upstream test is exercised here.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "monospaced",
+            "monospaced",
+            ModificationContext::Anywhere,
+        );
+
+        let maw = crate::blocks::Block::parse(
+            crate::Span::new("\\[input]`a few <monospaced> words`"),
+            &mut p,
+        );
+
+        let block = maw.item.unwrap().item;
+
+        assert_eq!(
+            block,
+            Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "\\[input]`a few <monospaced> words`",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    rendered: "[input]<code>a few &lt;monospaced&gt; words</code>",
+                },
+                source: Span {
+                    data: "\\[input]`a few <monospaced> words`",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            },)
+        );
+    }
+
+    non_normative!(
+        r#"
     # NOTE must use apply_subs because constrained monospaced is handled as a passthrough
+"#
+    );
+
+    #[test]
+    fn escaped_role_on_escaped_single_line_constrained_monospaced_string() {
+        verifies!(
+            r#"
     test 'escaped role on escaped single-line constrained monospaced string' do
       para = block_from_string(%(#{BACKSLASH}[input]#{BACKSLASH}`a few <monospaced> words`), attributes: { 'compat-mode' => '' })
       assert_equal %(#{BACKSLASH}[input]`a few &lt;monospaced&gt; words`), para.apply_subs(para.source)
@@ -1176,6 +1450,56 @@ mod quotes {
       assert_equal %(#{BACKSLASH}[input]`a few &lt;monospaced&gt; words`), para.apply_subs(para.source)
     end
 
+"#
+        );
+
+        // The crate disregards compatibility mode, so only the modern
+        // (non-compat) sub-case of the upstream test is exercised here.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "monospaced",
+            "monospaced",
+            ModificationContext::Anywhere,
+        );
+
+        let maw = crate::blocks::Block::parse(
+            crate::Span::new("\\[input]\\`a few <monospaced> words`"),
+            &mut p,
+        );
+
+        let block = maw.item.unwrap().item;
+
+        assert_eq!(
+            block,
+            Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "\\[input]\\`a few <monospaced> words`",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    rendered: "\\[input]`a few &lt;monospaced&gt; words`",
+                },
+                source: Span {
+                    data: "\\[input]\\`a few <monospaced> words`",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            },)
+        );
+    }
+
+    non_normative!(
+        r#"
     # NOTE must use apply_subs because constrained monospaced is handled as a passthrough
 "#
     );
