@@ -219,7 +219,13 @@ impl InterpretedValue {
             // the remaining value is right-trimmed. Contrast with a multi-line
             // (continued) value, where the marker is preserved so it can drive
             // post_replacements when the value is later used.
-            content.rendered = stripped.trim_end().into();
+            //
+            // Trim only ASCII whitespace (matching Ruby's `rstrip`, which
+            // Asciidoctor applies here); Unicode whitespace such as a
+            // non-breaking space is significant and must be preserved.
+            content.rendered = stripped
+                .trim_end_matches([' ', '\t', '\n', '\r', '\x0C', '\x0B'])
+                .into();
         }
 
         SubstitutionGroup::Header.apply(&mut content, parser, None);
@@ -746,6 +752,13 @@ mod tests {
 
         // Only the final ` +` is stripped; an earlier ` +` remains literal.
         assert_eq!(value(":foo: bar + +\nx"), InterpretedValue::Value("bar +"));
+
+        // Trimming after the marker uses ASCII whitespace rules (Ruby `rstrip`);
+        // a preceding non-breaking space is significant and is preserved.
+        assert_eq!(
+            value(":foo: bar\u{00a0} +\nx"),
+            InterpretedValue::Value("bar\u{00a0}")
+        );
     }
 
     #[test]
