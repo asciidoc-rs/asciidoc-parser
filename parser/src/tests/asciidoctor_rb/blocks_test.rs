@@ -3551,3 +3551,379 @@ mod preformatted_blocks {
     );
 }
 
+
+
+
+mod open_blocks {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context "Open Blocks" do
+"#
+    );
+
+    #[test]
+    fn can_convert_open_block() {
+        verifies!(
+            r#"
+    test "can convert open block" do
+      input = <<~'EOS'
+      --
+      This is an open block.
+
+      It can span multiple lines.
+      --
+      EOS
+
+      output = convert_string input
+      assert_xpath '//*[@class="openblock"]//p', output, 2
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("--\nThis is an open block.\n\nIt can span multiple lines.\n--\n");
+        assert_xpath(&doc, "//*[@class=\"openblock\"]//p", 2);
+    }
+
+    #[test]
+    fn open_block_can_contain_another_block() {
+        verifies!(
+            r#"
+    test "open block can contain another block" do
+      input = <<~'EOS'
+      --
+      This is an open block.
+
+      It can span multiple lines.
+
+      ____
+      It can hold great quotes like this one.
+      ____
+      --
+      EOS
+
+      output = convert_string input
+      assert_xpath '//*[@class="openblock"]//p', output, 3
+      assert_xpath '//*[@class="openblock"]//*[@class="quoteblock"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "--\nThis is an open block.\n\nIt can span multiple lines.\n\n____\nIt can hold great quotes like this one.\n____\n--\n",
+        );
+        assert_xpath(&doc, "//*[@class=\"openblock\"]//p", 3);
+        assert_xpath(&doc, "//*[@class=\"openblock\"]//*[@class=\"quoteblock\"]", 1);
+    }
+
+    non_normative!(
+        r#"
+    test 'should transfer id and reftext on open block to DocBook output' do
+      input = <<~'EOS'
+      Check out that <<open>>!
+
+      [[open,Open Block]]
+      --
+      This is an open block.
+
+      TIP: An open block can have other blocks inside of it.
+      --
+
+      Back to our regularly scheduled programming.
+      EOS
+
+      output = convert_string input, backend: :docbook, keep_namespaces: true
+      assert_css 'article:root > para[xml|id="open"]', output, 1
+      assert_css 'article:root > para[xreflabel="Open Block"]', output, 1
+      assert_css 'article:root > simpara', output, 2
+      assert_css 'article:root > para', output, 1
+      assert_css 'article:root > para > simpara', output, 1
+      assert_css 'article:root > para > tip', output, 1
+    end
+
+    test 'should transfer id and reftext on open paragraph to DocBook output' do
+      input = <<~'EOS'
+      [open#openpara,reftext="Open Paragraph"]
+      This is an open paragraph.
+      EOS
+
+      output = convert_string input, backend: :docbook, keep_namespaces: true
+      assert_css 'article:root > simpara', output, 1
+      assert_css 'article:root > simpara[xml|id="openpara"]', output, 1
+      assert_css 'article:root > simpara[xreflabel="Open Paragraph"]', output, 1
+    end
+
+    test 'should transfer title on open block to DocBook output' do
+      input = <<~'EOS'
+      .Behold the open
+      --
+      This is an open block with a title.
+      --
+      EOS
+
+      output = convert_string input, backend: :docbook
+      assert_css 'article > formalpara', output, 1
+      assert_css 'article > formalpara > *', output, 2
+      assert_css 'article > formalpara > title', output, 1
+      assert_xpath '/article/formalpara/title[text()="Behold the open"]', output, 1
+      assert_css 'article > formalpara > para', output, 1
+      assert_css 'article > formalpara > para > simpara', output, 1
+    end
+
+    test 'should transfer title on open paragraph to DocBook output' do
+      input = <<~'EOS'
+      .Behold the open
+      This is an open paragraph with a title.
+      EOS
+
+      output = convert_string input, backend: :docbook
+      assert_css 'article > formalpara', output, 1
+      assert_css 'article > formalpara > *', output, 2
+      assert_css 'article > formalpara > title', output, 1
+      assert_xpath '/article/formalpara/title[text()="Behold the open"]', output, 1
+      assert_css 'article > formalpara > para', output, 1
+      assert_css 'article > formalpara > para[text()="This is an open paragraph with a title."]', output, 1
+    end
+
+    test 'should transfer role on open block to DocBook output' do
+      input = <<~'EOS'
+      [.container]
+      --
+      This is an open block.
+      It holds stuff.
+      --
+      EOS
+
+      output = convert_string input, backend: :docbook
+      assert_css 'article > para[role=container]', output, 1
+      assert_css 'article > para[role=container] > simpara', output, 1
+    end
+
+    test 'should transfer role on open paragraph to DocBook output' do
+      input = <<~'EOS'
+      [.container]
+      This is an open block.
+      It holds stuff.
+      EOS
+
+      output = convert_string input, backend: :docbook
+      assert_css 'article > simpara[role=container]', output, 1
+    end
+"#
+    );
+
+    // The six preceding tests are backend-specific (DocBook) and out of scope.
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
+mod passthrough_blocks {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Passthrough Blocks' do
+"#
+    );
+
+    // Returns the text of the single `<pre>` this crate renders inside the
+    // `div.passblock` wrapper for a passthrough block. Asciidoctor emits the
+    // passthrough content with no enclosing element; the substantive behavior
+    // (which substitutions are or are not applied) is captured in this text.
+    fn pass_text(doc: &crate::Document) -> String {
+        let vd = doc.to_virtual_dom();
+        let pres = crate::tests::assert_dom::query_xpath(&vd, "//pre");
+        assert_eq!(pres.len(), 1);
+        pres[0].text.clone().unwrap_or_default()
+    }
+
+    #[test]
+    fn can_parse_a_passthrough_block() {
+        verifies!(
+            r#"
+    test 'can parse a passthrough block' do
+      input = <<~'EOS'
+      ++++
+      This is a passthrough block.
+      ++++
+      EOS
+
+      block = block_from_string input
+      refute_nil block
+      assert_equal 1, block.lines.size
+      assert_equal 'This is a passthrough block.', block.source
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("++++\nThis is a passthrough block.\n++++\n");
+        assert_eq!(pass_text(&doc), "This is a passthrough block.");
+    }
+
+    #[test]
+    fn does_not_perform_subs_on_a_passthrough_block_by_default() {
+        verifies!(
+            r#"
+    test 'does not perform subs on a passthrough block by default' do
+      input = <<~'EOS'
+      :type: passthrough
+
+      ++++
+      This is a '{type}' block.
+      http://asciidoc.org
+      image:tiger.png[]
+      ++++
+      EOS
+
+      expected = %(This is a '{type}' block.\nhttp://asciidoc.org\nimage:tiger.png[])
+      output = convert_string_to_embedded input
+      assert_equal expected, output.strip
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":type: passthrough\n\n++++\nThis is a '{type}' block.\nhttp://asciidoc.org\nimage:tiger.png[]\n++++\n",
+        );
+        assert_eq!(
+            pass_text(&doc),
+            "This is a '{type}' block.\nhttp://asciidoc.org\nimage:tiger.png[]"
+        );
+    }
+
+    #[test]
+    fn does_not_perform_subs_on_a_passthrough_block_with_pass_style_by_default() {
+        verifies!(
+            r#"
+    test 'does not perform subs on a passthrough block with pass style by default' do
+      input = <<~'EOS'
+      :type: passthrough
+
+      [pass]
+      ++++
+      This is a '{type}' block.
+      http://asciidoc.org
+      image:tiger.png[]
+      ++++
+      EOS
+
+      expected = %(This is a '{type}' block.\nhttp://asciidoc.org\nimage:tiger.png[])
+      output = convert_string_to_embedded input
+      assert_equal expected, output.strip
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":type: passthrough\n\n[pass]\n++++\nThis is a '{type}' block.\nhttp://asciidoc.org\nimage:tiger.png[]\n++++\n",
+        );
+        assert_eq!(
+            pass_text(&doc),
+            "This is a '{type}' block.\nhttp://asciidoc.org\nimage:tiger.png[]"
+        );
+    }
+
+    #[test]
+    fn passthrough_block_honors_explicit_subs_list() {
+        verifies!(
+            r##"
+    test 'passthrough block honors explicit subs list' do
+      input = <<~'EOS'
+      :type: passthrough
+
+      [subs="attributes,quotes,macros"]
+      ++++
+      This is a _{type}_ block.
+      http://asciidoc.org
+      ++++
+      EOS
+
+      expected = %(This is a <em>passthrough</em> block.\n<a href="http://asciidoc.org" class="bare">http://asciidoc.org</a>)
+      output = convert_string_to_embedded input
+      assert_equal expected, output.strip
+    end
+
+"##
+        );
+
+        // The explicit subs turn `{type}` into "passthrough" (attributes),
+        // `_.._` into `<em>` (quotes), and the URL into a link (macros).
+        let doc = Parser::default().parse(
+            ":type: passthrough\n\n[subs=\"attributes,quotes,macros\"]\n++++\nThis is a _{type}_ block.\nhttp://asciidoc.org\n++++\n",
+        );
+        assert_xpath(&doc, "//em[text()=\"passthrough\"]", 1);
+        assert_xpath(&doc, "//a[@href=\"http://asciidoc.org\"]", 1);
+    }
+
+    // NOTE: divergence from Asciidoctor. Asciidoctor strips the leading and
+    // trailing blank lines of a raw (passthrough) block; this crate preserves
+    // them. Kept `#[ignore]`d with the Ruby-intended converted result.
+    // TODO: strip leading/trailing blank lines of raw blocks.
+    #[ignore]
+    #[test]
+    fn should_strip_leading_and_trailing_blank_lines_when_converting_raw_block() {
+        verifies!(
+            r#"
+    test 'should strip leading and trailing blank lines when converting raw block' do
+      # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
+      input = <<~EOS
+      ++++
+      line above
+      ++++
+
+
+      ++++
+
+
+        first line
+
+      last line
+
+
+      ++++
+
+      ++++
+      line below
+      ++++
+      EOS
+
+      doc = document_from_string input, standalone: false
+      block = doc.blocks[1]
+      assert_equal ['', '', '  first line', '', 'last line', '', ''], block.lines
+      result = doc.convert
+      assert_equal "line above\n  first line\n\nlast line\nline below", result, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "++++\nline above\n++++\n\n++++\n\n\n  first line\n\nlast line\n\n\n++++\n\n++++\nline below\n++++\n",
+        );
+        let vd = doc.to_virtual_dom();
+        let pres = crate::tests::assert_dom::query_xpath(&vd, "//pre");
+        assert_eq!(
+            pres[1].text.clone().unwrap_or_default(),
+            "  first line\n\nlast line"
+        );
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
