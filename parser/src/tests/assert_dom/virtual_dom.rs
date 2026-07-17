@@ -17,7 +17,8 @@ use crate::{
     blocks::{
         AdmonitionBlock, Block, Break, ColumnStyle, CompoundDelimitedBlock, ContentModel, Frame,
         Grid, HorizontalAlignment, IsBlock, ListBlock, ListItem, ListItemMarker, ListType,
-        MediaBlock, Preamble, QuoteBlock, QuoteType, RawDelimitedBlock, SectionBlock, SimpleBlock,
+        MediaBlock, MediaType, Preamble, QuoteBlock, QuoteType, RawDelimitedBlock, SectionBlock,
+        SimpleBlock,
         SimpleBlockStyle, Stripes, TableBlock, TableCellContent, TableColumn, TableRow,
         VerticalAlignment,
     },
@@ -1315,6 +1316,18 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
 
     let mut node = VirtualNode::new("div").with_class(class);
 
+    // A `float` block attribute adds a direction class and an `align` block
+    // attribute adds a `text-<align>` class (mirroring Asciidoctor's HTML5
+    // converter). Both live on the block's attribute list, not the macro's.
+    if let Some(attrlist) = media.attrlist() {
+        if let Some(float) = attrlist.named_attribute("float") {
+            node = node.with_class(float.value().to_string());
+        }
+        if let Some(align) = attrlist.named_attribute("align") {
+            node = node.with_class(format!("text-{}", align.value()));
+        }
+    }
+
     for role in media.roles() {
         node = node.with_class(role);
     }
@@ -1323,10 +1336,108 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
         node = node.with_id(id);
     }
 
-    // TODO: Media blocks typically contain an <img> or similar element.
-    // We'll add this when we need more detailed media representation.
+    // Only images grow a rendered `<img>` (inside a `div.content`, optionally
+    // wrapped in a link). Video and audio are left as the bare container.
+    if media.type_() == MediaType::Image {
+        let macro_attrlist = media.macro_attrlist();
+
+        let mut img = VirtualNode::new("img")
+            .with_attribute("src", encode_uri_spaces(media.resolved_target()))
+            .with_attribute("alt", image_alt_text(media));
+
+        if let Some(width) = macro_attrlist
+            .named_or_positional_attribute("width", 2)
+            .map(|a| a.value())
+            .filter(|v| !v.is_empty())
+        {
+            img = img.with_attribute("width", width.to_string());
+        }
+        if let Some(height) = macro_attrlist
+            .named_or_positional_attribute("height", 3)
+            .map(|a| a.value())
+            .filter(|v| !v.is_empty())
+        {
+            img = img.with_attribute("height", height.to_string());
+        }
+
+        // A `link` macro attribute wraps the image in `<a class="image">`,
+        // carrying `target`/`rel` for windowed or opt-tagged links.
+        let content_child = if let Some(link) = macro_attrlist.named_attribute("link") {
+            let mut anchor = VirtualNode::new("a")
+                .with_class("image")
+                .with_attribute("href", link.value().to_string());
+
+            let window = macro_attrlist.named_attribute("window").map(|a| a.value());
+            if let Some(window) = window {
+                anchor = anchor.with_attribute("target", window.to_string());
+            }
+
+            let mut rel: Vec<&str> = vec![];
+            if window == Some("_blank") || macro_attrlist.has_option("noopener") {
+                rel.push("noopener");
+            }
+            if macro_attrlist.has_option("nofollow") {
+                rel.push("nofollow");
+            }
+            if !rel.is_empty() {
+                anchor = anchor.with_attribute("rel", rel.join(" "));
+            }
+
+            anchor.with_child(img)
+        } else {
+            img
+        };
+
+        node = node.with_child(VirtualNode::new("div").with_class("content").with_child(content_child));
+    }
+
+    // The block title renders as a `div.title`, prefixed with the caption (e.g.
+    // "Figure 1. ") when the image is auto-numbered or carries an explicit
+    // caption.
+    if let Some(title) = media.title() {
+        let caption = media.caption().unwrap_or("");
+        node = node.with_child(
+            VirtualNode::new("div")
+                .with_class("title")
+                .with_text(format!("{caption}{title}")),
+        );
+    }
 
     node
+}
+
+/// Percent-encodes the spaces in an image target, matching how Asciidoctor's
+/// HTML converter emits an image `src`.
+fn encode_uri_spaces(target: &str) -> String {
+    target.replace(' ', "%20")
+}
+
+/// Resolves the alt text for an image: the macro's `alt` (named or first
+/// positional) wins, then a positional alt on the block attribute list above
+/// the macro, and finally an alt auto-generated from the target's base name.
+fn image_alt_text(media: &MediaBlock<'_>) -> String {
+    if let Some(alt) = media
+        .macro_attrlist()
+        .named_or_positional_attribute("alt", 1)
+        .map(|a| a.value())
+        .filter(|v| !v.is_empty())
+    {
+        return alt.to_string();
+    }
+
+    if let Some(alt) = media
+        .attrlist()
+        .and_then(|a| a.nth_attribute(1))
+        .map(|a| a.value())
+        .filter(|v| !v.is_empty())
+    {
+        return alt.to_string();
+    }
+
+    let target = media.resolved_target();
+    let base = target.rsplit('/').next().unwrap_or(target);
+    let stem = base.rsplit_once('.').map(|(name, _)| name).unwrap_or(base);
+    stem.replace(['-', '_'], " ")
 }
 
 fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {

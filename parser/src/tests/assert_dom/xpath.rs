@@ -142,7 +142,7 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
                     if let Some(axis_rest) = remaining.strip_prefix("/preceding-sibling::") {
                         // Parse the axis_rest to see if there's a continuation after the axis.
                         let (axis_selector, continuation) =
-                            if let Some(slash_pos) = axis_rest.find('/') {
+                            if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                                 (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
                             } else {
                                 (axis_rest.trim(), None)
@@ -172,7 +172,7 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
                     if let Some(axis_rest) = remaining.strip_prefix("/following-sibling::") {
                         // Parse the axis_rest to see if there's a continuation after the axis.
                         let (axis_selector, continuation) =
-                            if let Some(slash_pos) = axis_rest.find('/') {
+                            if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                                 (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
                             } else {
                                 (axis_rest.trim(), None)
@@ -248,7 +248,7 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
             // Check if rest is a preceding-sibling axis.
             if let Some(axis_rest) = rest.strip_prefix("/preceding-sibling::") {
                 // Parse the axis_rest to see if there's a continuation after the axis.
-                let (axis_selector, continuation) = if let Some(slash_pos) = axis_rest.find('/') {
+                let (axis_selector, continuation) = if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                     (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
                 } else {
                     (axis_rest.trim(), None)
@@ -277,7 +277,7 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
             // Check if rest is a following-sibling axis.
             if let Some(axis_rest) = rest.strip_prefix("/following-sibling::") {
                 // Parse the axis_rest to see if there's a continuation after the axis.
-                let (axis_selector, continuation) = if let Some(slash_pos) = axis_rest.find('/') {
+                let (axis_selector, continuation) = if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                     (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
                 } else {
                     (axis_rest.trim(), None)
@@ -362,6 +362,35 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
 /// - base_selector: `*`
 /// - predicate_part: Some(`[@class="foo"]`)
 /// - continuation: Some(`//p[text()="bar"]`)
+/// Returns the byte index of the first `/` in `s` that lies outside any `[..]`
+/// predicate and outside a quoted string. This is what path-splitting must use
+/// so a `/` inside a predicate value (e.g. `img[@src="images/tiger.png"]`) is
+/// not mistaken for a step separator.
+fn find_unbracketed_slash(s: &str) -> Option<usize> {
+    let mut bracket_depth = 0i32;
+    let mut in_string = false;
+    let mut string_delim = '\0';
+
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '"' | '\'' if bracket_depth > 0 => {
+                if !in_string {
+                    in_string = true;
+                    string_delim = ch;
+                } else if ch == string_delim {
+                    in_string = false;
+                }
+            }
+            '[' if !in_string => bracket_depth += 1,
+            ']' if !in_string => bracket_depth -= 1,
+            '/' if bracket_depth == 0 && !in_string => return Some(i),
+            _ => {}
+        }
+    }
+
+    None
+}
+
 fn parse_selector_with_predicates(pattern: &str) -> (&str, Option<&str>, Option<&str>) {
     let mut base_end = 0;
     let mut predicate_start: Option<usize> = None;
@@ -601,14 +630,14 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
         return query_descendant_or_self(node, descendant_rest);
     }
 
-    if let Some((first, rest)) = pattern.split_once('/') {
+    if let Some((first, rest)) = find_unbracketed_slash(pattern).map(|i| (&pattern[..i], &pattern[i + 1..])) {
         let first = first.trim();
         let rest = rest.trim();
 
         // Check if rest is an axis specifier.
         if let Some(axis_rest) = rest.strip_prefix("following-sibling::") {
             // Parse the axis_rest to see if there's a continuation after the axis.
-            let (axis_selector, continuation) = if let Some(slash_pos) = axis_rest.find('/') {
+            let (axis_selector, continuation) = if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                 (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
             } else {
                 (axis_rest.trim(), None)
@@ -639,7 +668,7 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
 
         if let Some(axis_rest) = rest.strip_prefix("preceding-sibling::") {
             // Parse the axis_rest to see if there's a continuation after the axis.
-            let (axis_selector, continuation) = if let Some(slash_pos) = axis_rest.find('/') {
+            let (axis_selector, continuation) = if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                 (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
             } else {
                 (axis_rest.trim(), None)
