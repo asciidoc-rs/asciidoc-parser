@@ -48,6 +48,7 @@
 
 mod attribute_list_test;
 mod converter_test;
+mod invoker_test;
 mod lists_test;
 mod paragraphs_test;
 mod substitutions_test;
