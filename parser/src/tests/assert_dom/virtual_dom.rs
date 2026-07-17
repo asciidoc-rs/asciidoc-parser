@@ -1316,16 +1316,21 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
 
     let mut node = VirtualNode::new("div").with_class(class);
 
-    // A `float` block attribute adds a direction class and an `align` block
-    // attribute adds a `text-<align>` class (mirroring Asciidoctor's HTML5
-    // converter). Both live on the block's attribute list, not the macro's.
-    if let Some(attrlist) = media.attrlist() {
-        if let Some(float) = attrlist.named_attribute("float") {
-            node = node.with_class(float.value().to_string());
-        }
-        if let Some(align) = attrlist.named_attribute("align") {
-            node = node.with_class(format!("text-{}", align.value()));
-        }
+    // A `float` attribute adds a direction class and an `align` attribute adds
+    // a `text-<align>` class (mirroring Asciidoctor's HTML5 converter). These
+    // may sit on the block's attribute list (image blocks) or inside the macro
+    // (video/audio blocks), so both are consulted.
+    let media_named = |name: &str| {
+        media
+            .macro_attrlist()
+            .named_attribute(name)
+            .or_else(|| media.attrlist().and_then(|a| a.named_attribute(name)))
+    };
+    if let Some(float) = media_named("float") {
+        node = node.with_class(float.value().to_string());
+    }
+    if let Some(align) = media_named("align") {
+        node = node.with_class(format!("text-{}", align.value()));
     }
 
     for role in media.roles() {
@@ -1389,6 +1394,64 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
         };
 
         node = node.with_child(VirtualNode::new("div").with_class("content").with_child(content_child));
+    } else if media.type_() == MediaType::Video {
+        let macro_attrlist = media.macro_attrlist();
+
+        let mut video = VirtualNode::new("video")
+            .with_attribute("src", media_src_with_time_range(media));
+
+        if let Some(poster) = macro_attrlist
+            .named_or_positional_attribute("poster", 1)
+            .map(|a| a.value())
+            .filter(|v| !v.is_empty())
+        {
+            video = video.with_attribute("poster", poster.to_string());
+        }
+        if let Some(width) = macro_attrlist
+            .named_or_positional_attribute("width", 2)
+            .map(|a| a.value())
+            .filter(|v| !v.is_empty())
+        {
+            video = video.with_attribute("width", width.to_string());
+        }
+        if let Some(height) = macro_attrlist
+            .named_or_positional_attribute("height", 3)
+            .map(|a| a.value())
+            .filter(|v| !v.is_empty())
+        {
+            video = video.with_attribute("height", height.to_string());
+        }
+        // `controls` is present by default, suppressed by the `nocontrols`
+        // option.
+        if !macro_attrlist.has_option("nocontrols") {
+            video = video.with_attribute("controls", "");
+        }
+        for opt in ["autoplay", "muted", "loop"] {
+            if macro_attrlist.has_option(opt) {
+                video = video.with_attribute(opt, "");
+            }
+        }
+        if let Some(preload) = macro_attrlist.named_attribute("preload") {
+            video = video.with_attribute("preload", preload.value().to_string());
+        }
+
+        node = node.with_child(VirtualNode::new("div").with_class("content").with_child(video));
+    } else if media.type_() == MediaType::Audio {
+        let macro_attrlist = media.macro_attrlist();
+
+        let mut audio = VirtualNode::new("audio")
+            .with_attribute("src", media_src_with_time_range(media));
+
+        if !macro_attrlist.has_option("nocontrols") {
+            audio = audio.with_attribute("controls", "");
+        }
+        for opt in ["autoplay", "loop"] {
+            if macro_attrlist.has_option(opt) {
+                audio = audio.with_attribute(opt, "");
+            }
+        }
+
+        node = node.with_child(VirtualNode::new("div").with_class("content").with_child(audio));
     }
 
     // The block title renders as a `div.title`, prefixed with the caption (e.g.
@@ -1410,6 +1473,24 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
 /// HTML converter emits an image `src`.
 fn encode_uri_spaces(target: &str) -> String {
     target.replace(' ', "%20")
+}
+
+/// Builds the `src` for a video/audio block: the resolved target plus a
+/// media-fragment time range (`#t=start,end`) when a `start` and/or `end`
+/// attribute is set.
+fn media_src_with_time_range(media: &MediaBlock<'_>) -> String {
+    let macro_attrlist = media.macro_attrlist();
+    let start = macro_attrlist.named_attribute("start").map(|a| a.value());
+    let end = macro_attrlist.named_attribute("end").map(|a| a.value());
+
+    let mut src = media.resolved_target().to_string();
+    match (start, end) {
+        (Some(s), Some(e)) => src.push_str(&format!("#t={s},{e}")),
+        (Some(s), None) => src.push_str(&format!("#t={s}")),
+        (None, Some(e)) => src.push_str(&format!("#t=,{e}")),
+        (None, None) => {}
+    }
+    src
 }
 
 /// Resolves the alt text for an image: the macro's `alt` (named or first
