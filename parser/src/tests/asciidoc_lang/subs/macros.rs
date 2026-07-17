@@ -152,14 +152,11 @@ mod default_macros_substitution {
 "#
         );
 
-        // Resolves https://github.com/asciidoc-rs/asciidoc-parser/issues/305:
-        // "Does Asciidoctor allow one macro to contain another?"
-        //
-        // Yes. The macros substitution step is applied to the *positional text*
-        // of a macro, so a macro nested in that text is itself processed. The
-        // canonical example is an inline image in the text of a link: the link
-        // text `image:logo.png[Logo]` is substituted into an image span, which
-        // then becomes the link's content.
+        // Can one macro contain another? Yes. The macros substitution step is
+        // applied to the *positional text* of a macro, so a macro nested in that
+        // text is itself processed. The canonical example is an inline image in
+        // the text of a link: the link text `image:logo.png[Logo]` is
+        // substituted into an image span, which then becomes the link's content.
         let doc = Parser::default().parse("https://example.org[image:logo.png[Logo]]");
 
         let block1 = doc.nested_blocks().next().unwrap();
