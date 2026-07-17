@@ -46,6 +46,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+mod api_test;
 mod attribute_list_test;
 mod converter_test;
 mod extensions_test;
