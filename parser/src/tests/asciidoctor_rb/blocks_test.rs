@@ -1680,3 +1680,627 @@ mod quote_and_verse_blocks {
 }
 
 
+
+
+mod example_blocks {
+    use crate::{document::InterpretedValue, parser::ModificationContext, tests::prelude::*};
+
+    non_normative!(
+        r#"
+  context "Example Blocks" do
+"#
+    );
+
+    // Returns the top-level example blocks, skipping the `attribute`-context
+    // blocks this crate emits for mid-document attribute entries (Asciidoctor
+    // does not model those as blocks).
+    fn example_blocks<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::Block<'a>> {
+        doc.nested_blocks()
+            .filter(|b| b.raw_context().as_ref() == "example")
+            .collect()
+    }
+
+    #[test]
+    fn can_convert_example_block() {
+        verifies!(
+            r#"
+    test "can convert example block" do
+      input = <<~'EOS'
+      ====
+      This is an example of an example block.
+
+      How crazy is that?
+      ====
+      EOS
+
+      output = convert_string input
+      assert_xpath '//*[@class="exampleblock"]//p', output, 2
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("====\nThis is an example of an example block.\n\nHow crazy is that?\n====\n");
+        assert_xpath(&doc, "//*[@class=\"exampleblock\"]//p", 2);
+    }
+
+    #[test]
+    fn assigns_sequential_numbered_caption_to_example_block_with_title() {
+        verifies!(
+            r#"
+    test 'assigns sequential numbered caption to example block with title' do
+      input = <<~'EOS'
+      .Writing Docs with AsciiDoc
+      ====
+      Here's how you write AsciiDoc.
+
+      You just write.
+      ====
+
+      .Writing Docs with DocBook
+      ====
+      Here's how you write DocBook.
+
+      You futz with XML.
+      ====
+      EOS
+
+      doc = document_from_string input
+      assert_equal 1, doc.blocks[0].numeral
+      assert_equal 1, doc.blocks[0].number
+      assert_equal 2, doc.blocks[1].numeral
+      assert_equal 2, doc.blocks[1].number
+      output = doc.convert
+      assert_xpath '(//*[@class="exampleblock"])[1]/*[@class="title"][text()="Example 1. Writing Docs with AsciiDoc"]', output, 1
+      assert_xpath '(//*[@class="exampleblock"])[2]/*[@class="title"][text()="Example 2. Writing Docs with DocBook"]', output, 1
+      assert_equal 2, doc.attributes['example-number']
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ".Writing Docs with AsciiDoc\n====\nHere's how you write AsciiDoc.\n\nYou just write.\n====\n\n.Writing Docs with DocBook\n====\nHere's how you write DocBook.\n\nYou futz with XML.\n====\n",
+        );
+        // This crate exposes `number()` (usize) rather than Ruby's `numeral`.
+        let blocks = example_blocks(&doc);
+        assert_eq!(blocks[0].number(), Some(1));
+        assert_eq!(blocks[1].number(), Some(2));
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Example 1. Writing Docs with AsciiDoc\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[2]/*[@class=\"title\"][text()=\"Example 2. Writing Docs with DocBook\"]",
+            1,
+        );
+        assert_eq!(
+            doc.attribute_value("example-number"),
+            InterpretedValue::Value("2".to_string())
+        );
+    }
+
+    #[test]
+    fn assigns_sequential_character_caption_to_example_block_with_title() {
+        verifies!(
+            r#"
+    test 'assigns sequential character caption to example block with title' do
+      input = <<~'EOS'
+      :example-number: @
+
+      .Writing Docs with AsciiDoc
+      ====
+      Here's how you write AsciiDoc.
+
+      You just write.
+      ====
+
+      .Writing Docs with DocBook
+      ====
+      Here's how you write DocBook.
+
+      You futz with XML.
+      ====
+      EOS
+
+      doc = document_from_string input
+      assert_equal 'A', doc.blocks[0].numeral
+      assert_equal 'A', doc.blocks[0].number
+      assert_equal 'B', doc.blocks[1].numeral
+      assert_equal 'B', doc.blocks[1].number
+      output = doc.convert
+      assert_xpath '(//*[@class="exampleblock"])[1]/*[@class="title"][text()="Example A. Writing Docs with AsciiDoc"]', output, 1
+      assert_xpath '(//*[@class="exampleblock"])[2]/*[@class="title"][text()="Example B. Writing Docs with DocBook"]', output, 1
+      assert_equal 'B', doc.attributes['example-number']
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":example-number: @\n\n.Writing Docs with AsciiDoc\n====\nHere's how you write AsciiDoc.\n\nYou just write.\n====\n\n.Writing Docs with DocBook\n====\nHere's how you write DocBook.\n\nYou futz with XML.\n====\n",
+        );
+        // NOTE: divergence from Asciidoctor: Ruby's `numeral`/`number` carry the
+        // character sequence ('A', 'B'); this crate's `number()` is a `usize` and
+        // returns `None` for character captions. The character caption itself is
+        // rendered in the title and reflected in the `example-number` attribute.
+        let blocks = example_blocks(&doc);
+        assert_eq!(blocks[0].number(), None);
+        assert_eq!(blocks[1].number(), None);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Example A. Writing Docs with AsciiDoc\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[2]/*[@class=\"title\"][text()=\"Example B. Writing Docs with DocBook\"]",
+            1,
+        );
+        assert_eq!(
+            doc.attribute_value("example-number"),
+            InterpretedValue::Value("B".to_string())
+        );
+    }
+
+    #[test]
+    fn should_increment_counter_for_example_even_when_example_number_is_locked_by_the_api() {
+        verifies!(
+            r#"
+    test 'should increment counter for example even when example-number is locked by the API' do
+      input = <<~'EOS'
+      .Writing Docs with AsciiDoc
+      ====
+      Here's how you write AsciiDoc.
+
+      You just write.
+      ====
+
+      .Writing Docs with DocBook
+      ====
+      Here's how you write DocBook.
+
+      You futz with XML.
+      ====
+      EOS
+
+      doc = document_from_string input, attributes: { 'example-number' => '`' }
+      output = doc.convert
+      assert_xpath '(//*[@class="exampleblock"])[1]/*[@class="title"][text()="Example a. Writing Docs with AsciiDoc"]', output, 1
+      assert_xpath '(//*[@class="exampleblock"])[2]/*[@class="title"][text()="Example b. Writing Docs with DocBook"]', output, 1
+      assert_equal 'b', doc.attributes['example-number']
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .with_intrinsic_attribute("example-number", "`", ModificationContext::ApiOnly)
+            .parse(
+                ".Writing Docs with AsciiDoc\n====\nHere's how you write AsciiDoc.\n\nYou just write.\n====\n\n.Writing Docs with DocBook\n====\nHere's how you write DocBook.\n\nYou futz with XML.\n====\n",
+            );
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Example a. Writing Docs with AsciiDoc\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[2]/*[@class=\"title\"][text()=\"Example b. Writing Docs with DocBook\"]",
+            1,
+        );
+        assert_eq!(
+            doc.attribute_value("example-number"),
+            InterpretedValue::Value("b".to_string())
+        );
+    }
+
+    #[test]
+    fn should_use_explicit_caption_if_specified() {
+        verifies!(
+            r#"
+    test 'should use explicit caption if specified' do
+      input = <<~'EOS'
+      [caption="Look! "]
+      .Writing Docs with AsciiDoc
+      ====
+      Here's how you write AsciiDoc.
+
+      You just write.
+      ====
+      EOS
+
+      doc = document_from_string input
+      assert_nil doc.blocks[0].numeral
+      output = doc.convert
+      assert_xpath '(//*[@class="exampleblock"])[1]/*[@class="title"][text()="Look! Writing Docs with AsciiDoc"]', output, 1
+      refute doc.attributes.key? 'example-number'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[caption=\"Look! \"]\n.Writing Docs with AsciiDoc\n====\nHere's how you write AsciiDoc.\n\nYou just write.\n====\n",
+        );
+        let blocks = example_blocks(&doc);
+        assert_eq!(blocks[0].number(), None);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Look! Writing Docs with AsciiDoc\"]",
+            1,
+        );
+        assert_eq!(doc.attribute_value("example-number"), InterpretedValue::Unset);
+    }
+
+    // NOTE: divergence from Asciidoctor. Asciidoctor honors an empty `:caption:`
+    // attribute to disable the automatic block caption (so the second example's
+    // title is just "second example"); this crate keeps numbering it
+    // ("Example 2. second example"). Kept `#[ignore]`d with the Ruby-intended
+    // assertions until the empty-`:caption:` toggle is honored.
+    // TODO: honor an empty `:caption:` to suppress the block caption.
+    #[ignore]
+    #[test]
+    fn automatic_caption_can_be_turned_off_and_on_and_modified() {
+        verifies!(
+            r#"
+    test 'automatic caption can be turned off and on and modified' do
+      input = <<~'EOS'
+      .first example
+      ====
+      an example
+      ====
+
+      :caption:
+
+      .second example
+      ====
+      another example
+      ====
+
+      :caption!:
+      :example-caption: Exhibit
+
+      .third example
+      ====
+      yet another example
+      ====
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="exampleblock"]', output, 3
+      assert_xpath '(/*[@class="exampleblock"])[1]/*[@class="title"][starts-with(text(), "Example ")]', output, 1
+      assert_xpath '(/*[@class="exampleblock"])[2]/*[@class="title"][text()="second example"]', output, 1
+      assert_xpath '(/*[@class="exampleblock"])[3]/*[@class="title"][starts-with(text(), "Exhibit ")]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ".first example\n====\nan example\n====\n\n:caption:\n\n.second example\n====\nanother example\n====\n\n:caption!:\n:example-caption: Exhibit\n\n.third example\n====\nyet another example\n====\n",
+        );
+        assert_xpath(&doc, "/*[@class=\"exampleblock\"]", 3);
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][starts-with(text(), \"Example \")]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"exampleblock\"])[2]/*[@class=\"title\"][text()=\"second example\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "(/*[@class=\"exampleblock\"])[3]/*[@class=\"title\"][starts-with(text(), \"Exhibit \")]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_use_explicit_caption_if_specified_even_if_block_specific_global_caption_is_disabled() {
+        verifies!(
+            r#"
+    test 'should use explicit caption if specified even if block-specific global caption is disabled' do
+      input = <<~'EOS'
+      :!example-caption:
+
+      [caption="Look! "]
+      .Writing Docs with AsciiDoc
+      ====
+      Here's how you write AsciiDoc.
+
+      You just write.
+      ====
+      EOS
+
+      doc = document_from_string input
+      assert_nil doc.blocks[0].numeral
+      output = doc.convert
+      assert_xpath '(//*[@class="exampleblock"])[1]/*[@class="title"][text()="Look! Writing Docs with AsciiDoc"]', output, 1
+      refute doc.attributes.key? 'example-number'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":!example-caption:\n\n[caption=\"Look! \"]\n.Writing Docs with AsciiDoc\n====\nHere's how you write AsciiDoc.\n\nYou just write.\n====\n",
+        );
+        let blocks = example_blocks(&doc);
+        assert_eq!(blocks[0].number(), None);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Look! Writing Docs with AsciiDoc\"]",
+            1,
+        );
+        assert_eq!(doc.attribute_value("example-number"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn should_use_global_caption_if_specified_even_if_block_specific_global_caption_is_disabled() {
+        verifies!(
+            r#"
+    test 'should use global caption if specified even if block-specific global caption is disabled' do
+      input = <<~'EOS'
+      :!example-caption:
+      :caption: Look!{sp}
+
+      .Writing Docs with AsciiDoc
+      ====
+      Here's how you write AsciiDoc.
+
+      You just write.
+      ====
+      EOS
+
+      doc = document_from_string input
+      assert_nil doc.blocks[0].numeral
+      output = doc.convert
+      assert_xpath '(//*[@class="exampleblock"])[1]/*[@class="title"][text()="Look! Writing Docs with AsciiDoc"]', output, 1
+      refute doc.attributes.key? 'example-number'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":!example-caption:\n:caption: Look!{sp}\n\n.Writing Docs with AsciiDoc\n====\nHere's how you write AsciiDoc.\n\nYou just write.\n====\n",
+        );
+        let blocks = example_blocks(&doc);
+        assert_eq!(blocks[0].number(), None);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"exampleblock\"])[1]/*[@class=\"title\"][text()=\"Look! Writing Docs with AsciiDoc\"]",
+            1,
+        );
+        assert_eq!(doc.attribute_value("example-number"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn should_not_process_caption_attribute_on_block_that_does_not_support_a_caption() {
+        verifies!(
+            r#"
+    test 'should not process caption attribute on block that does not support a caption' do
+      input = <<~'EOS'
+      [caption="Look! "]
+      .No caption here
+      --
+      content
+      --
+      EOS
+
+      doc = document_from_string input
+      assert_nil doc.blocks[0].caption
+      assert_equal 'Look! ', (doc.blocks[0].attr 'caption')
+      output = doc.convert
+      assert_xpath '(//*[@class="openblock"])[1]/*[@class="title"][text()="No caption here"]', output, 1
+    end
+
+"#
+        );
+
+        let doc =
+            Parser::default().parse("[caption=\"Look! \"]\n.No caption here\n--\ncontent\n--\n");
+        // The open block does not support a caption, so `caption()` is `None`
+        // even though the `caption` attribute is present on the block. (Ruby
+        // additionally reads the raw `caption` attribute back off the block.)
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.caption(), None);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"openblock\"])[1]/*[@class=\"title\"][text()=\"No caption here\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_create_details_summary_set_if_collapsible_option_is_set() {
+        verifies!(
+            r#"
+    test 'should create details/summary set if collapsible option is set' do
+      input = <<~'EOS'
+      .Toggle Me
+      [%collapsible]
+      ====
+      This content is revealed when the user clicks the words "Toggle Me".
+      ====
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'details', output, 1
+      assert_css 'details[open]', output, 0
+      assert_css 'details > summary.title', output, 1
+      assert_xpath '//details/summary[text()="Toggle Me"]', output, 1
+      assert_css 'details > summary.title + .content', output, 1
+      assert_css 'details > summary.title + .content p', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ".Toggle Me\n[%collapsible]\n====\nThis content is revealed when the user clicks the words \"Toggle Me\".\n====\n",
+        );
+        assert_css(&doc, "details", 1);
+        assert_css(&doc, "details[open]", 0);
+        assert_css(&doc, "details > summary.title", 1);
+        assert_xpath(&doc, "//details/summary[text()=\"Toggle Me\"]", 1);
+        assert_css(&doc, "details > summary.title + .content", 1);
+        // The crate's CSS engine does not resolve a sibling-then-descendant
+        // chain (`+ .content p`); the equivalent xpath is used instead.
+        assert_xpath(&doc, "//details//*[@class=\"content\"]//p", 1);
+    }
+
+    #[test]
+    fn should_open_details_summary_set_if_collapsible_and_open_options_are_set() {
+        verifies!(
+            r#"
+    test 'should open details/summary set if collapsible and open options are set' do
+      input = <<~'EOS'
+      .Toggle Me
+      [%collapsible%open]
+      ====
+      This content is revealed when the user clicks the words "Toggle Me".
+      ====
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'details', output, 1
+      assert_css 'details[open]', output, 1
+      assert_css 'details > summary.title', output, 1
+      assert_xpath '//details/summary[text()="Toggle Me"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ".Toggle Me\n[%collapsible%open]\n====\nThis content is revealed when the user clicks the words \"Toggle Me\".\n====\n",
+        );
+        assert_css(&doc, "details", 1);
+        assert_css(&doc, "details[open]", 1);
+        assert_css(&doc, "details > summary.title", 1);
+        assert_xpath(&doc, "//details/summary[text()=\"Toggle Me\"]", 1);
+    }
+
+    #[test]
+    fn should_add_default_summary_element_if_collapsible_option_is_set_and_title_is_not_specifed() {
+        verifies!(
+            r#"
+    test 'should add default summary element if collapsible option is set and title is not specifed' do
+      input = <<~'EOS'
+      [%collapsible]
+      ====
+      This content is revealed when the user clicks the words "Details".
+      ====
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'details', output, 1
+      assert_css 'details > summary.title', output, 1
+      assert_xpath '//details/summary[text()="Details"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[%collapsible]\n====\nThis content is revealed when the user clicks the words \"Details\".\n====\n",
+        );
+        assert_css(&doc, "details", 1);
+        assert_css(&doc, "details > summary.title", 1);
+        assert_xpath(&doc, "//details/summary[text()=\"Details\"]", 1);
+    }
+
+    #[test]
+    fn should_not_allow_collapsible_block_to_increment_example_number() {
+        verifies!(
+            r#"
+    test 'should not allow collapsible block to increment example number' do
+      input = <<~'EOS'
+      .Before
+      ====
+      before
+      ====
+
+      .Show Me The Goods
+      [%collapsible]
+      ====
+      This content is revealed when the user clicks the words "Show Me The Goods".
+      ====
+
+      .After
+      ====
+      after
+      ====
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//*[@class="title"][text()="Example 1. Before"]', output, 1
+      assert_xpath '//*[@class="title"][text()="Example 2. After"]', output, 1
+      assert_css 'details', output, 1
+      assert_css 'details > summary.title', output, 1
+      assert_xpath '//details/summary[text()="Show Me The Goods"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ".Before\n====\nbefore\n====\n\n.Show Me The Goods\n[%collapsible]\n====\nThis content is revealed when the user clicks the words \"Show Me The Goods\".\n====\n\n.After\n====\nafter\n====\n",
+        );
+        assert_xpath(&doc, "//*[@class=\"title\"][text()=\"Example 1. Before\"]", 1);
+        assert_xpath(&doc, "//*[@class=\"title\"][text()=\"Example 2. After\"]", 1);
+        assert_css(&doc, "details", 1);
+        assert_css(&doc, "details > summary.title", 1);
+        assert_xpath(&doc, "//details/summary[text()=\"Show Me The Goods\"]", 1);
+    }
+
+    #[test]
+    fn should_warn_if_example_block_is_not_terminated() {
+        verifies!(
+            r#"
+    test 'should warn if example block is not terminated' do
+      input = <<~'EOS'
+      outside
+
+      ====
+      inside
+
+      still inside
+
+      eof
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="exampleblock"]', output, 1
+      assert_message @logger, :WARN, '<stdin>: line 3: unterminated example block', Hash
+    end
+
+"#
+        );
+
+        let doc =
+            Parser::default().parse("outside\n\n====\ninside\n\nstill inside\n\neof\n");
+        assert_xpath(&doc, "/*[@class=\"exampleblock\"]", 1);
+        let warnings: Vec<_> = doc
+            .warnings()
+            .filter(|w| w.warning == WarningType::UnterminatedDelimitedBlock)
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
