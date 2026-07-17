@@ -66,9 +66,12 @@ impl<'src> RawDelimitedBlock<'src> {
             return true;
         }
 
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/145):
-        // Seek spec clarity: Do the characters after the fourth char
-        // have to match the first four?
+        // Every character after the initial four must match the fourth
+        // (delimiter) character. This matches Asciidoctor, whose
+        // `is_delimited_block?` requires the run following the leading char to
+        // be uniform (see https://github.com/asciidoc-rs/asciidoc-parser/issues/145
+        // and https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/issues/56):
+        // `----xyz` is not a delimiter, but `----` plus any number of `-` is.
 
         if data.len() >= 4 {
             if data.starts_with("////") {
