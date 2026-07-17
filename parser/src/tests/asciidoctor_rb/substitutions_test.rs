@@ -125,18 +125,10 @@ mod dispatcher {
         );
     }
 
-    // Not ported to this crate:
-    // - 'apply_subs should not modify string directly': apply_subs string-mutation
-    //   semantics: crate uses immutable Content/Span.
-    // - 'should not drop trailing blank lines when performing substitutions':
-    //   para.lines trailing-blank round-trip: no crate API to inject trailing blank
-    //   lines.
-    // - 'should expand subs passed to expand_subs': expand_subs Ruby API; covered
-    //   by content::substitution_group tests.
-    // - 'apply_subs should allow the subs argument to be nil': nil subs argument to
-    //   apply_subs: no crate equivalent.
-    non_normative!(
-        r#"
+    #[test]
+    fn apply_subs_should_not_modify_string_directly() {
+        verifies!(
+            r#"
     test 'apply_subs should not modify string directly' do
       input = '<html> -- the root of all web'
       para = block_from_string input
@@ -146,6 +138,57 @@ mod dispatcher {
       assert_equal input, para_source
     end
 
+"#
+        );
+
+        // The crate models `apply_subs` as immutable substitution: the block's
+        // `original` span is preserved while `rendered` holds the result, so the
+        // upstream "source string is not mutated" guarantee holds by construction.
+        let mut p = Parser::default();
+
+        let maw =
+            crate::blocks::Block::parse(crate::Span::new("<html> -- the root of all web"), &mut p);
+
+        let block = maw.item.unwrap().item;
+
+        assert_eq!(
+            block,
+            Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "<html> -- the root of all web",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    rendered: "&lt;html&gt;&#8201;&#8212;&#8201;the root of all web",
+                },
+                source: Span {
+                    data: "<html> -- the root of all web",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            },)
+        );
+    }
+
+    // Not ported to this crate:
+    // - 'should not drop trailing blank lines when performing substitutions':
+    //   para.lines trailing-blank round-trip: no crate API to inject trailing blank
+    //   lines.
+    // - 'should expand subs passed to expand_subs': expand_subs Ruby API; sub-list
+    //   resolution is covered by content::substitution_group tests.
+    non_normative!(
+        r#"
     test 'should not drop trailing blank lines when performing substitutions' do
       para = block_from_string %([%hardbreaks]\nthis\nis\n-> {program})
       para.lines << ''
@@ -165,13 +208,27 @@ mod dispatcher {
       assert_equal [:specialcharacters, :quotes, :attributes, :replacements, :macros, :post_replacements], (para.expand_subs [:normal])
     end
 
+"#
+    );
+
+    #[test]
+    fn apply_subs_should_allow_the_subs_argument_to_be_nil() {
+        verifies!(
+            r#"
     test 'apply_subs should allow the subs argument to be nil' do
       block = block_from_string %([pass]\n*raw*)
       result = block.apply_subs block.source, nil
       assert_equal '*raw*', result
     end
 "#
-    );
+        );
+
+        // Upstream passes an explicit `nil` subs list; this crate resolves a
+        // `[pass]` block to no substitutions at parse time, so its raw content is
+        // emitted verbatim.
+        let doc = Parser::default().parse("[pass]\n*raw*");
+        assert_eq!(rendered_paragraphs(&doc), &["*raw*"]);
+    }
 }
 
 non_normative!(
