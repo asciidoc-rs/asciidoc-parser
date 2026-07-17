@@ -359,8 +359,13 @@ fn resolve_authors(
         _ => None,
     };
 
-    // A directly-assigned `author` attribute describes a single author.
-    if let Some(author) = author_attribute {
+    // A directly-assigned `author` attribute describes a single author — but
+    // only while it remains set. A later `:author!:` unsets the attribute
+    // without carrying a raw value to refresh `author_attribute`, so consult
+    // the attribute's final state rather than trusting the cached parse.
+    if value("author").is_some()
+        && let Some(author) = author_attribute
+    {
         return vec![author.with_email(value("email"))];
     }
 
@@ -894,6 +899,16 @@ mod tests {
     fn authors_is_empty_without_author_info() {
         let doc = Parser::default().parse("= Title\n\nBody.");
 
+        assert!(doc.authors().is_empty());
+    }
+
+    #[test]
+    fn author_unset_after_being_assigned_yields_no_authors() {
+        // A later `:author!:` unsets the attribute; the resolved author list
+        // must reflect the removal, not the earlier assignment.
+        let doc = Parser::default().parse("= Title\n:author: Jane Doe\n:author!:\n\nBody.");
+
+        assert_eq!(doc.attribute_value("author"), InterpretedValue::Unset);
         assert!(doc.authors().is_empty());
     }
 
