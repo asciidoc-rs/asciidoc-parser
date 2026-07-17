@@ -2304,3 +2304,106 @@ mod example_blocks {
     );
 }
 
+
+
+mod admonition_blocks {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Admonition Blocks' do
+"#
+    );
+
+    #[test]
+    fn caption_block_level_attribute_should_be_used_as_caption() {
+        verifies!(
+            r#"
+    test 'caption block-level attribute should be used as caption' do
+      input = <<~'EOS'
+      :tip-caption: Pro Tip
+
+      [caption="Pro Tip"]
+      TIP: Override the caption of an admonition block using an attribute entry
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="admonitionblock tip"]//*[@class="icon"]/*[@class="title"][text()="Pro Tip"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":tip-caption: Pro Tip\n\n[caption=\"Pro Tip\"]\nTIP: Override the caption of an admonition block using an attribute entry\n",
+        );
+        assert_xpath(
+            &doc,
+            "/*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/*[@class=\"title\"][text()=\"Pro Tip\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn can_override_caption_of_admonition_block_using_document_attribute() {
+        verifies!(
+            r#"
+    test 'can override caption of admonition block using document attribute' do
+      input = <<~'EOS'
+      :tip-caption: Pro Tip
+
+      TIP: Override the caption of an admonition block using an attribute entry
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="admonitionblock tip"]//*[@class="icon"]/*[@class="title"][text()="Pro Tip"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":tip-caption: Pro Tip\n\nTIP: Override the caption of an admonition block using an attribute entry\n",
+        );
+        assert_xpath(
+            &doc,
+            "/*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/*[@class=\"title\"][text()=\"Pro Tip\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn blank_caption_document_attribute_should_not_blank_admonition_block_caption() {
+        verifies!(
+            r#"
+    test 'blank caption document attribute should not blank admonition block caption' do
+      input = <<~'EOS'
+      :caption:
+
+      TIP: Override the caption of an admonition block using an attribute entry
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="admonitionblock tip"]//*[@class="icon"]/*[@class="title"][text()="Tip"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":caption:\n\nTIP: Override the caption of an admonition block using an attribute entry\n",
+        );
+        assert_xpath(
+            &doc,
+            "/*[@class=\"admonitionblock tip\"]//*[@class=\"icon\"]/*[@class=\"title\"][text()=\"Tip\"]",
+            1,
+        );
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
