@@ -8602,11 +8602,10 @@ mod passthroughs {
         );
     }
 
-    // Not ported to this crate:
-    // - 'collect multi-line inline double plus passthroughs': No Rust fn exercises
-    //   this input; multi-line double-plus variant not ported.
-    non_normative!(
-        r#"
+    #[test]
+    fn collect_multiline_inline_double_plus_passthroughs() {
+        verifies!(
+            r#"
     test 'collect multi-line inline double plus passthroughs' do
       para = block_from_string("++<code>\n{code}\n</code>++")
       result = para.extract_passthroughs(para.source)
@@ -8618,7 +8617,36 @@ mod passthroughs {
     end
 
 "#
-    );
+        );
+
+        let mut content =
+            crate::content::Content::from(crate::Span::new("++<code>\n{code}\n</code>++"));
+
+        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+
+        assert_eq!(
+            content,
+            Content {
+                original: Span {
+                    data: "++<code>\n{code}\n</code>++",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                rendered: "\u{96}0\u{97}",
+            }
+        );
+
+        assert_eq!(
+            pt,
+            Passthroughs(vec![Passthrough {
+                text: "<code>\n{code}\n</code>".to_owned(),
+                subs: SubstitutionGroup::Verbatim,
+                type_: None,
+                attrlist: None,
+            },],)
+        );
+    }
 
     #[test]
     fn collect_passthroughs_from_inline_pass_macro() {
@@ -8998,11 +9026,10 @@ mod passthroughs {
         assert!(pt.0.is_empty());
     }
 
-    // Not ported to this crate:
-    // - 'should warn if substitutions on pass macro are invalid': No Rust fn
-    //   asserts the invalid-substitution-type warning for pass macro.
-    non_normative!(
-        r#"
+    #[test]
+    fn should_warn_if_substitutions_on_pass_macro_are_invalid() {
+        verifies!(
+            r#"
     test 'should warn if substitutions on pass macro are invalid' do
       subs = 'bogus'
       input = %(pass:#{subs}[++])
@@ -9014,7 +9041,26 @@ mod passthroughs {
     end
 
 "#
-    );
+        );
+
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "stem",
+            "asciimath",
+            ModificationContext::Anywhere,
+        );
+        let doc = p.parse("pass:bogus[++]");
+        assert_eq!(
+            doc.nested_blocks().next().unwrap().rendered_content(),
+            Some("++")
+        );
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::InvalidSubstitutionTypeForPassthroughMacro("bogus".to_string())
+        );
+    }
 
     #[test]
     fn should_allow_content_of_inline_pass_macro_to_be_empty() {

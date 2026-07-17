@@ -136,6 +136,9 @@ pub enum WarningType {
     #[error("invalid substitution type for stem macro: {0}")]
     InvalidSubstitutionTypeForStemMacro(String),
 
+    #[error("invalid substitution type for passthrough macro: {0}")]
+    InvalidSubstitutionTypeForPassthroughMacro(String),
+
     /// A footnote reference (`footnote:id[]`) names an ID that was never
     /// defined by an earlier footnote.
     #[error("invalid footnote reference: {0}")]
@@ -277,6 +280,11 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::InvalidSubstitutionTypeForStemMacro(subs) => f
                 .debug_tuple("WarningType::InvalidSubstitutionTypeForStemMacro")
+                .field(subs)
+                .finish(),
+
+            WarningType::InvalidSubstitutionTypeForPassthroughMacro(subs) => f
+                .debug_tuple("WarningType::InvalidSubstitutionTypeForPassthroughMacro")
                 .field(subs)
                 .finish(),
 
@@ -644,6 +652,17 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::InvalidSubstitutionTypeForStemMacro(\"bogus\")"
+                );
+            }
+
+            #[test]
+            fn invalid_substitution_type_for_passthrough_macro() {
+                let warning =
+                    WarningType::InvalidSubstitutionTypeForPassthroughMacro("bogus".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::InvalidSubstitutionTypeForPassthroughMacro(\"bogus\")"
                 );
             }
 

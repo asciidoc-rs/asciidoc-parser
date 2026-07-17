@@ -37,7 +37,12 @@ impl Passthroughs {
         {
             let text = content.rendered.as_ref();
             if text.contains("++") || text.contains("$$") || text.contains("ss:") {
-                let replacer = InlinePassMacroReplacer(&mut passthroughs);
+                let source = content.original();
+                let replacer = InlinePassMacroReplacer {
+                    passthroughs: &mut passthroughs,
+                    parser,
+                    source,
+                };
 
                 if let Cow::Owned(new_result) = INLINE_PASS_MACRO.replace_all(text, replacer) {
                     content.rendered = new_result.into();
@@ -153,7 +158,11 @@ static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlinePassMacroReplacer<'p>(&'p mut Passthroughs);
+struct InlinePassMacroReplacer<'p> {
+    passthroughs: &'p mut Passthroughs,
+    parser: &'p Parser,
+    source: Span<'p>,
+}
 
 impl Replacer for InlinePassMacroReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
@@ -181,17 +190,32 @@ impl Replacer for InlinePassMacroReplacer<'_> {
                 return;
             }
 
-            let subs = caps
-                .get(14)
-                .and_then(|m| SubstitutionGroup::from_custom_string(None, m.as_str()))
-                .unwrap_or(SubstitutionGroup::None);
+            // Resolve the substitution list. An explicit but unrecognized
+            // substitution name (e.g. `pass:bogus[…]`) is a warning and falls
+            // back to no substitutions, mirroring Asciidoctor's
+            // `Substitutors#extract_passthroughs`.
+            let subs = match caps.get(14).map(|m| m.as_str()) {
+                None => SubstitutionGroup::None,
+                Some(subs_list) => match SubstitutionGroup::from_custom_string(None, subs_list) {
+                    Some(group) => group,
+                    None => {
+                        self.parser.record_substitution_warning(
+                            self.source,
+                            WarningType::InvalidSubstitutionTypeForPassthroughMacro(
+                                subs_list.to_string(),
+                            ),
+                        );
+                        SubstitutionGroup::None
+                    }
+                },
+            };
 
             let mut text = caps[15].to_string();
             if !text.is_empty() {
                 text = text.replace("\\]", "]");
             }
 
-            self.0.push(
+            self.passthroughs.push(
                 Passthrough {
                     text,
                     subs,
@@ -305,7 +329,7 @@ impl InlinePassMacroReplacer<'_> {
             }
         };
 
-        self.0.push(passthrough, dest);
+        self.passthroughs.push(passthrough, dest);
     }
 }
 
