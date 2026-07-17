@@ -47,6 +47,7 @@
 // THE SOFTWARE.
 
 mod attribute_list_test;
+mod attributes_test;
 mod lists_test;
 mod paragraphs_test;
 mod substitutions_test;
