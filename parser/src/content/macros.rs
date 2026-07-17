@@ -1149,8 +1149,7 @@ fn extract_attributes_from_text<'src>(
         // `extract_attributes_from_text` (substitutors.rb) and is what makes a
         // macro nested inside a link/xref's text (e.g. `link[image:...[]]`)
         // survive intact: the already-rendered inner macro output happens to
-        // contain `=` and `"` characters, but is not a real attribute list. See
-        // https://github.com/asciidoc-rs/asciidoc-parser/issues/305.
+        // contain `=` and `"` characters, but is not a real attribute list.
         if resolved_text.value() == text.data() {
             let empty_attrs = Attrlist::parse(Span::default(), parser, AttrlistContext::Inline)
                 .item
@@ -1529,8 +1528,7 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
                 // such as `xref:sec[image:...[]]`, whose HTML contains `=` and
                 // `"`), not a real attribute list. Treat the text as plain link
                 // text and honor no named attributes, matching Asciidoctor's
-                // `extract_attributes_from_text`. See
-                // https://github.com/asciidoc-rs/asciidoc-parser/issues/305.
+                // `extract_attributes_from_text`.
                 let first = attrlist.nth_attribute(1).map(|a| a.value().to_string());
 
                 if first.as_deref() == Some(normalized.as_str()) {
