@@ -3927,3 +3927,713 @@ mod passthrough_blocks {
 "#
     );
 }
+
+
+
+mod math_blocks {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Math blocks' do
+"#
+    );
+
+    // Text of the single `<pre>` this crate renders inside a `div.stemblock`.
+    // NOTE: divergence from Asciidoctor pervasive to this context — this crate
+    // renders stem content as `div.stemblock > pre` with the content verbatim.
+    // Asciidoctor wraps the content in a `.content` element and surrounds it
+    // with math delimiters (`\[..\]` for LaTeX, `\$..\$` for AsciiMath),
+    // splits AsciiMath equations on newlines, and emits MathJax configuration
+    // in standalone output. None of that is modeled here, so the tests that
+    // assert it are kept `#[ignore]`d with the Ruby-intended assertions.
+    fn stem_pre_text(doc: &crate::Document) -> String {
+        let vd = doc.to_virtual_dom();
+        let pres = crate::tests::assert_dom::query_xpath(&vd, "//pre");
+        assert_eq!(pres.len(), 1);
+        pres[0].text.clone().unwrap_or_default()
+    }
+
+    #[test]
+    fn should_not_crash_when_converting_stem_block_that_has_no_lines() {
+        verifies!(
+            r#"
+    test 'should not crash when converting stem block that has no lines' do
+      input = <<~'EOS'
+      [stem]
+      ++++
+      ++++
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[stem]\n++++\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+    }
+
+    #[test]
+    fn should_return_content_as_empty_string_for_stem_or_pass_block_that_has_no_lines() {
+        verifies!(
+            r#"
+    test 'should return content as empty string for stem or pass block that has no lines' do
+      [%(++++\n++++), %([stem]\n++++\n++++)].each do |input|
+        doc = document_from_string input
+        assert_equal '', doc.blocks[0].content
+      end
+    end
+
+"#
+        );
+
+        for input in ["++++\n++++", "[stem]\n++++\n++++"] {
+            let doc = Parser::default().parse(input);
+            assert_eq!(stem_pre_text(&doc), "");
+        }
+    }
+
+    // TODO: wrap latexmath content in `\[..\]` delimiters.
+    #[ignore]
+    #[test]
+    fn should_add_latex_math_delimiters_around_latexmath_block_content() {
+        verifies!(
+            r#"
+    test 'should add LaTeX math delimiters around latexmath block content' do
+      input = <<~'EOS'
+      [latexmath]
+      ++++
+      \sqrt{3x-1}+(1+x)^2 < y
+      ++++
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]/child::text()', output
+      assert_equal '\[\sqrt{3x-1}+(1+x)^2 &lt; y\]', nodes.first.to_s.strip
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[latexmath]\n++++\n\\sqrt{3x-1}+(1+x)^2 < y\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+        assert_eq!(stem_pre_text(&doc), "\\[\\sqrt{3x-1}+(1+x)^2 < y\\]");
+    }
+
+    // TODO: recognize existing `\[..\]` delimiters in latexmath content.
+    #[ignore]
+    #[test]
+    fn should_not_add_latex_math_delimiters_around_latexmath_block_content_if_already_present() {
+        verifies!(
+            r#"
+    test 'should not add LaTeX math delimiters around latexmath block content if already present' do
+      input = <<~'EOS'
+      [latexmath]
+      ++++
+      \[\sqrt{3x-1}+(1+x)^2 < y\]
+      ++++
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]/child::text()', output
+      assert_equal '\[\sqrt{3x-1}+(1+x)^2 &lt; y\]', nodes.first.to_s.strip
+    end
+
+"#
+        );
+
+        let doc =
+            Parser::default().parse("[latexmath]\n++++\n\\[\\sqrt{3x-1}+(1+x)^2 < y\\]\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+        assert_eq!(stem_pre_text(&doc), "\\[\\sqrt{3x-1}+(1+x)^2 < y\\]");
+    }
+
+    #[test]
+    fn should_display_latexmath_block_in_alt_of_equation_in_docbook_backend() {
+        non_normative!(
+            r#"
+    test 'should display latexmath block in alt of equation in DocBook backend' do
+      input = <<~'EOS'
+      [latexmath]
+      ++++
+      \sqrt{3x-1}+(1+x)^2 < y
+      ++++
+      EOS
+
+      expect = <<~'EOS'
+      <informalequation>
+      <alt><![CDATA[\sqrt{3x-1}+(1+x)^2 < y]]></alt>
+      <mathphrase><![CDATA[\sqrt{3x-1}+(1+x)^2 < y]]></mathphrase>
+      </informalequation>
+      EOS
+
+      output = convert_string_to_embedded input, backend: :docbook
+      assert_equal expect.strip, output.strip
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    // TODO: emit MathJax equationNumbers configuration in standalone output.
+    #[ignore]
+    #[test]
+    fn should_set_auto_number_option_for_latexmath_to_none_by_default() {
+        verifies!(
+            r#"
+    test 'should set autoNumber option for latexmath to none by default' do
+      input = <<~'EOS'
+      :stem: latexmath
+
+      [stem]
+      ++++
+      y = x^2
+      ++++
+      EOS
+
+      output = convert_string input
+      assert_includes output, 'TeX: { equationNumbers: { autoNumber: "none" } }'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(":stem: latexmath\n\n[stem]\n++++\ny = x^2\n++++\n");
+        assert_rendered_contains(&doc, "TeX: { equationNumbers: { autoNumber: \"none\" } }");
+    }
+
+    // TODO: emit MathJax equationNumbers configuration in standalone output.
+    #[ignore]
+    #[test]
+    fn should_set_auto_number_option_for_latexmath_to_none_if_eqnums_is_set_to_none() {
+        verifies!(
+            r#"
+    test 'should set autoNumber option for latexmath to none if eqnums is set to none' do
+      input = <<~'EOS'
+      :stem: latexmath
+      :eqnums: none
+
+      [stem]
+      ++++
+      y = x^2
+      ++++
+      EOS
+
+      output = convert_string input
+      assert_includes output, 'TeX: { equationNumbers: { autoNumber: "none" } }'
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":stem: latexmath\n:eqnums: none\n\n[stem]\n++++\ny = x^2\n++++\n");
+        assert_rendered_contains(&doc, "TeX: { equationNumbers: { autoNumber: \"none\" } }");
+    }
+
+    // TODO: emit MathJax equationNumbers configuration in standalone output.
+    #[ignore]
+    #[test]
+    fn should_set_auto_number_option_for_latexmath_to_ams_if_eqnums_is_set() {
+        verifies!(
+            r#"
+    test 'should set autoNumber option for latexmath to AMS if eqnums is set' do
+      input = <<~'EOS'
+      :stem: latexmath
+      :eqnums:
+
+      [stem]
+      ++++
+      \begin{equation}
+      y = x^2
+      \end{equation}
+      ++++
+      EOS
+
+      output = convert_string input
+      assert_includes output, 'TeX: { equationNumbers: { autoNumber: "AMS" } }'
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":stem: latexmath\n:eqnums:\n\n[stem]\n++++\n\\begin{equation}\ny = x^2\n\\end{equation}\n++++\n",
+        );
+        assert_rendered_contains(&doc, "TeX: { equationNumbers: { autoNumber: \"AMS\" } }");
+    }
+
+    // TODO: emit MathJax equationNumbers configuration in standalone output.
+    #[ignore]
+    #[test]
+    fn should_set_auto_number_option_for_latexmath_to_all_if_eqnums_is_set_to_all() {
+        verifies!(
+            r#"
+    test 'should set autoNumber option for latexmath to all if eqnums is set to all' do
+      input = <<~'EOS'
+      :stem: latexmath
+      :eqnums: all
+
+      [stem]
+      ++++
+      y = x^2
+      ++++
+      EOS
+
+      output = convert_string input
+      assert_includes output, 'TeX: { equationNumbers: { autoNumber: "all" } }'
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":stem: latexmath\n:eqnums: all\n\n[stem]\n++++\ny = x^2\n++++\n");
+        assert_rendered_contains(&doc, "TeX: { equationNumbers: { autoNumber: \"all\" } }");
+    }
+
+    // TODO: add AsciiMath `\$..\$` delimiters and equation splitting.
+    #[ignore]
+    #[test]
+    fn should_not_split_equation_in_asciimath_block_at_single_newline() {
+        verifies!(
+            r##"
+    test 'should not split equation in AsciiMath block at single newline' do
+      input = <<~'EOS'
+      [asciimath]
+      ++++
+      f: bbb"N" -> bbb"N"
+      f: x |-> x + 1
+      ++++
+      EOS
+      expected = <<~'EOS'.chop
+      \$f: bbb"N" -&gt; bbb"N"
+      f: x |-&gt; x + 1\$
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]', output
+      assert_equal expected, nodes.first.inner_html.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("[asciimath]\n++++\nf: bbb\"N\" -> bbb\"N\"\nf: x |-> x + 1\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+        assert_eq!(
+            stem_pre_text(&doc),
+            "\\$f: bbb\"N\" -> bbb\"N\"\nf: x |-> x + 1\\$"
+        );
+    }
+
+    // TODO: add AsciiMath `\$..\$` delimiters and equation splitting.
+    #[ignore]
+    #[test]
+    fn should_split_equation_in_asciimath_block_at_escaped_newline() {
+        verifies!(
+            r##"
+    test 'should split equation in AsciiMath block at escaped newline' do
+      input = <<~'EOS'
+      [asciimath]
+      ++++
+      f: bbb"N" -> bbb"N" \
+      f: x |-> x + 1
+      ++++
+      EOS
+      expected = <<~'EOS'.chop
+      \$f: bbb"N" -&gt; bbb"N"\$
+      \$f: x |-&gt; x + 1\$
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]', output
+      assert_equal expected, nodes.first.inner_html.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("[asciimath]\n++++\nf: bbb\"N\" -> bbb\"N\" \\\nf: x |-> x + 1\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+    }
+
+    // TODO: add AsciiMath `\$..\$` delimiters and equation splitting.
+    #[ignore]
+    #[test]
+    fn should_split_equation_in_asciimath_block_at_sequence_of_escaped_newlines() {
+        verifies!(
+            r##"
+    test 'should split equation in AsciiMath block at sequence of escaped newlines' do
+      input = <<~'EOS'
+      [asciimath]
+      ++++
+      f: bbb"N" -> bbb"N" \
+      \
+      f: x |-> x + 1
+      ++++
+      EOS
+      expected = <<~'EOS'.chop
+      \$f: bbb"N" -&gt; bbb"N"\$
+      <br>
+      \$f: x |-&gt; x + 1\$
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]', output
+      assert_equal expected, nodes.first.inner_html.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("[asciimath]\n++++\nf: bbb\"N\" -> bbb\"N\" \\\n\\\nf: x |-> x + 1\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+    }
+
+    // TODO: add AsciiMath `\$..\$` delimiters and equation splitting.
+    #[ignore]
+    #[test]
+    fn should_split_equation_in_asciimath_block_at_newline_sequence_and_preserve_breaks() {
+        verifies!(
+            r##"
+    test 'should split equation in AsciiMath block at newline sequence and preserve breaks' do
+      input = <<~'EOS'
+      [asciimath]
+      ++++
+      f: bbb"N" -> bbb"N"
+
+
+      f: x |-> x + 1
+      ++++
+      EOS
+      expected = <<~'EOS'.chop
+      \$f: bbb"N" -&gt; bbb"N"\$
+      <br>
+      <br>
+      \$f: x |-&gt; x + 1\$
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]', output
+      assert_equal expected, nodes.first.inner_html.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("[asciimath]\n++++\nf: bbb\"N\" -> bbb\"N\"\n\n\nf: x |-> x + 1\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+    }
+
+    // TODO: wrap asciimath content in `\$..\$` delimiters.
+    #[ignore]
+    #[test]
+    fn should_add_asciimath_delimiters_around_asciimath_block_content() {
+        verifies!(
+            r##"
+    test 'should add AsciiMath delimiters around asciimath block content' do
+      input = <<~'EOS'
+      [asciimath]
+      ++++
+      sqrt(3x-1)+(1+x)^2 < y
+      ++++
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]/child::text()', output
+      assert_equal '\$sqrt(3x-1)+(1+x)^2 &lt; y\$', nodes.first.to_s.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse("[asciimath]\n++++\nsqrt(3x-1)+(1+x)^2 < y\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+        assert_eq!(stem_pre_text(&doc), "\\$sqrt(3x-1)+(1+x)^2 < y\\$");
+    }
+
+    // TODO: recognize existing `\$..\$` delimiters in asciimath content.
+    #[ignore]
+    #[test]
+    fn should_not_add_asciimath_delimiters_around_asciimath_block_content_if_already_present() {
+        verifies!(
+            r##"
+    test 'should not add AsciiMath delimiters around asciimath block content if already present' do
+      input = <<~'EOS'
+      [asciimath]
+      ++++
+      \$sqrt(3x-1)+(1+x)^2 < y\$
+      ++++
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]/child::text()', output
+      assert_equal '\$sqrt(3x-1)+(1+x)^2 &lt; y\$', nodes.first.to_s.strip
+    end
+
+"##
+        );
+
+        let doc =
+            Parser::default().parse("[asciimath]\n++++\n\\$sqrt(3x-1)+(1+x)^2 < y\\$\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+        assert_eq!(stem_pre_text(&doc), "\\$sqrt(3x-1)+(1+x)^2 < y\\$");
+    }
+
+    #[test]
+    fn should_convert_contents_of_asciimath_block_to_mathml_in_docbook_output_if_asciimath_gem_is_available()
+    {
+        non_normative!(
+            r#"
+    test 'should convert contents of asciimath block to MathML in DocBook output if asciimath gem is available' do
+      asciimath_available = !(Asciidoctor::Helpers.require_library 'asciimath', true, :ignore).nil?
+      input = <<~'EOS'
+      [asciimath]
+      ++++
+      x+b/(2a)<+-sqrt((b^2)/(4a^2)-c/a)
+      ++++
+
+      [asciimath]
+      ++++
+      ++++
+      EOS
+
+      expect = <<~'EOS'.chop
+      <informalequation>
+      <mml:math xmlns:mml="http://www.w3.org/1998/Math/MathML"><mml:mi>x</mml:mi><mml:mo>+</mml:mo><mml:mfrac><mml:mi>b</mml:mi><mml:mrow><mml:mn>2</mml:mn><mml:mi>a</mml:mi></mml:mrow></mml:mfrac><mml:mo>&lt;</mml:mo><mml:mo>&#xB1;</mml:mo><mml:msqrt><mml:mrow><mml:mfrac><mml:msup><mml:mi>b</mml:mi><mml:mn>2</mml:mn></mml:msup><mml:mrow><mml:mn>4</mml:mn><mml:msup><mml:mi>a</mml:mi><mml:mn>2</mml:mn></mml:msup></mml:mrow></mml:mfrac><mml:mo>&#x2212;</mml:mo><mml:mfrac><mml:mi>c</mml:mi><mml:mi>a</mml:mi></mml:mfrac></mml:mrow></mml:msqrt></mml:math>
+      </informalequation>
+      <informalequation>
+      <mml:math xmlns:mml="http://www.w3.org/1998/Math/MathML"></mml:math>
+      </informalequation>
+      EOS
+
+      using_memory_logger do |logger|
+        doc = document_from_string input, backend: :docbook, standalone: false
+        actual = doc.convert
+        if asciimath_available
+          assert_equal expect, actual.strip
+          assert_equal :loaded, doc.converter.instance_variable_get(:@asciimath_status)
+        else
+          assert_message logger, :WARN, 'optional gem \'asciimath\' is not available. Functionality disabled.'
+          assert_equal :unavailable, doc.converter.instance_variable_get(:@asciimath_status)
+        end
+      end
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook (MathML conversion).
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate renders the title of a stem
+    // block twice (once as a sibling of the `div.stemblock` and once inside
+    // it), so the document-wide `//*[@class="title"]` count is 2 rather than 1.
+    // Kept `#[ignore]`d with the Ruby-intended assertions.
+    // TODO: render a stem block's title only once.
+    #[ignore]
+    #[test]
+    fn should_output_title_for_latexmath_block_if_defined() {
+        verifies!(
+            r#"
+    test 'should output title for latexmath block if defined' do
+      input = <<~'EOS'
+      .The Lorenz Equations
+      [latexmath]
+      ++++
+      \begin{aligned}
+      \dot{x} & = \sigma(y-x) \\
+      \dot{y} & = \rho x - y - xz \\
+      \dot{z} & = -\beta z + xy
+      \end{aligned}
+      ++++
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      assert_css '.stemblock .title', output, 1
+      assert_xpath '//*[@class="title"][text()="The Lorenz Equations"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ".The Lorenz Equations\n[latexmath]\n++++\n\\begin{aligned}\n\\dot{x} & = \\sigma(y-x) \\\\\n\\dot{y} & = \\rho x - y - xz \\\\\n\\dot{z} & = -\\beta z + xy\n\\end{aligned}\n++++\n",
+        );
+        assert_css(&doc, ".stemblock", 1);
+        assert_css(&doc, ".stemblock .title", 1);
+        assert_xpath(&doc, "//*[@class=\"title\"][text()=\"The Lorenz Equations\"]", 1);
+    }
+
+    // NOTE: divergence from Asciidoctor (duplicate stem-block title; see
+    // `should_output_title_for_latexmath_block_if_defined`).
+    // TODO: render a stem block's title only once.
+    #[ignore]
+    #[test]
+    fn should_output_title_for_asciimath_block_if_defined() {
+        verifies!(
+            r#"
+    test 'should output title for asciimath block if defined' do
+      input = <<~'EOS'
+      .Simple fraction
+      [asciimath]
+      ++++
+      a//b
+      ++++
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.stemblock', output, 1
+      assert_css '.stemblock .title', output, 1
+      assert_xpath '//*[@class="title"][text()="Simple fraction"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(".Simple fraction\n[asciimath]\n++++\na//b\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+        assert_css(&doc, ".stemblock .title", 1);
+        assert_xpath(&doc, "//*[@class=\"title\"][text()=\"Simple fraction\"]", 1);
+    }
+
+    // TODO: wrap stem content in AsciiMath delimiters per the `stem` attribute.
+    #[ignore]
+    #[test]
+    fn should_add_asciimath_delimiters_around_stem_block_content_if_stem_attribute_is_asciimath_empty_or_not_set()
+    {
+        verifies!(
+            r##"
+    test 'should add AsciiMath delimiters around stem block content if stem attribute is asciimath, empty, or not set' do
+      input = <<~'EOS'
+      [stem]
+      ++++
+      sqrt(3x-1)+(1+x)^2 < y
+      ++++
+      EOS
+
+      [
+        {},
+        { 'stem' => '' },
+        { 'stem' => 'asciimath' },
+        { 'stem' => 'bogus' },
+      ].each do |attributes|
+        output = convert_string_to_embedded input, attributes: attributes
+        assert_css '.stemblock', output, 1
+        nodes = xmlnodes_at_xpath '//*[@class="content"]/child::text()', output
+        assert_equal '\$sqrt(3x-1)+(1+x)^2 &lt; y\$', nodes.first.to_s.strip
+      end
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse("[stem]\n++++\nsqrt(3x-1)+(1+x)^2 < y\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+        assert_eq!(stem_pre_text(&doc), "\\$sqrt(3x-1)+(1+x)^2 < y\\$");
+    }
+
+    // TODO: wrap stem content in LaTeX delimiters per the `stem` attribute.
+    #[ignore]
+    #[test]
+    fn should_add_latex_math_delimiters_around_stem_block_content_if_stem_attribute_is_latexmath_latex_or_tex()
+    {
+        verifies!(
+            r#"
+    test 'should add LaTeX math delimiters around stem block content if stem attribute is latexmath, latex, or tex' do
+      input = <<~'EOS'
+      [stem]
+      ++++
+      \sqrt{3x-1}+(1+x)^2 < y
+      ++++
+      EOS
+
+      [
+        { 'stem' => 'latexmath' },
+        { 'stem' => 'latex' },
+        { 'stem' => 'tex' },
+      ].each do |attributes|
+        output = convert_string_to_embedded input, attributes: attributes
+        assert_css '.stemblock', output, 1
+        nodes = xmlnodes_at_xpath '//*[@class="content"]/child::text()', output
+        assert_equal '\[\sqrt{3x-1}+(1+x)^2 &lt; y\]', nodes.first.to_s.strip
+      end
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .with_intrinsic_attribute("stem", "latexmath", crate::parser::ModificationContext::ApiOnly)
+            .parse("[stem]\n++++\n\\sqrt{3x-1}+(1+x)^2 < y\n++++\n");
+        assert_css(&doc, ".stemblock", 1);
+        assert_eq!(stem_pre_text(&doc), "\\[\\sqrt{3x-1}+(1+x)^2 < y\\]");
+    }
+
+    // NOTE: divergence from Asciidoctor. The stem-style delimiter wrapping is
+    // not modeled (see the delimiter tests above). The style is recorded on the
+    // block as its declared style.
+    // TODO: wrap stem content per the style set by the second positional
+    // attribute.
+    #[ignore]
+    #[test]
+    fn should_allow_stem_style_to_be_set_using_second_positional_argument_of_block_attributes() {
+        verifies!(
+            r##"
+    test 'should allow stem style to be set using second positional argument of block attributes' do
+      input = <<~'EOS'
+      :stem: latexmath
+
+      [stem,asciimath]
+      ++++
+      sqrt(3x-1)+(1+x)^2 < y
+      ++++
+      EOS
+
+      doc = document_from_string input
+      stemblock = doc.blocks[0]
+      assert_equal :stem, stemblock.context
+      assert_equal 'asciimath', stemblock.attributes['style']
+      output = doc.convert standalone: false
+      assert_css '.stemblock', output, 1
+      nodes = xmlnodes_at_xpath '//*[@class="content"]/child::text()', output
+      assert_equal '\$sqrt(3x-1)+(1+x)^2 &lt; y\$', nodes.first.to_s.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse(":stem: latexmath\n\n[stem,asciimath]\n++++\nsqrt(3x-1)+(1+x)^2 < y\n++++\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.declared_style(), Some("asciimath"));
+        assert_css(&doc, ".stemblock", 1);
+        assert_eq!(stem_pre_text(&doc), "\\$sqrt(3x-1)+(1+x)^2 < y\\$");
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
