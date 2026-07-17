@@ -125,7 +125,7 @@ This syntax ensures that the newlines are preserved in the output as hard line b
                 offset: 8,
             }),
             value: InterpretedValue::Value(
-                "Write your docs in text,\nAsciiDoc makes it easy,\nNow get back to work!"
+                "Write your docs in text, +\nAsciiDoc makes it easy, +\nNow get back to work!"
             ),
             source: Span {
                 data: ":haiku: Write your docs in text, + \\\nAsciiDoc makes it easy, + \\\nNow get back to work!",
@@ -139,7 +139,8 @@ This syntax ensures that the newlines are preserved in the output as hard line b
     assert_eq!(
         mi.item.value(),
         &crate::document::InterpretedValue::Value(
-            "Write your docs in text,\nAsciiDoc makes it easy,\nNow get back to work!".to_string()
+            "Write your docs in text, +\nAsciiDoc makes it easy, +\nNow get back to work!"
+                .to_string()
         ),
     );
 }
