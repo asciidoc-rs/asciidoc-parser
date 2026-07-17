@@ -1142,17 +1142,22 @@ fn extract_attributes_from_text<'src>(
     let attrs = attrlist_maw.item.item;
 
     if let Some(resolved_text) = attrs.nth_attribute(1) {
-        // NOTE: If resolved text remains unchanged, return an empty attribute list and
-        // return unparsed text. Commented out because I haven't seen an example of this
-        // happening in practice. Each of the call sites for this function introduces a
-        // constraint that should make this impossible.
-
-        /* if resolved_text.value() == text.data() {
-            let empty_attrs = Attrlist::parse(Span::default(), parser, AttrlistContext::Inline).item.item;
+        // If the resolved text is unchanged from the input — i.e. the attribute
+        // list parse produced a single positional value equal to the whole text
+        // and split nothing off as a named attribute — clear the attributes and
+        // return the text unparsed. This matches Asciidoctor's
+        // `extract_attributes_from_text` (substitutors.rb) and is what makes a
+        // macro nested inside a link/xref's text (e.g. `link[image:...[]]`)
+        // survive intact: the already-rendered inner macro output happens to
+        // contain `=` and `"` characters, but is not a real attribute list.
+        if resolved_text.value() == text.data() {
+            let empty_attrs = Attrlist::parse(Span::default(), parser, AttrlistContext::Inline)
+                .item
+                .item;
             (text.data().to_owned(), empty_attrs)
-        } else { */
-        (resolved_text.value().to_owned(), attrs)
-        /* } */
+        } else {
+            (resolved_text.value().to_owned(), attrs)
+        }
     } else {
         let default_text = default_text.map(|s| s.to_string());
         (default_text.unwrap_or_default(), attrs)
@@ -1517,18 +1522,28 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
                         .item
                         .item;
 
-                window = attrlist
-                    .named_attribute("window")
-                    .map(|a| a.value().to_string());
-                roles = attrlist.roles().iter().map(|r| r.to_string()).collect();
-                xrefstyle_override = attrlist
-                    .named_attribute("xrefstyle")
-                    .map(|a| XrefStyle::parse(a.value()));
+                // If the attribute-list parse split nothing off as a named
+                // attribute — the sole positional value is the whole text —
+                // the `=` was incidental (e.g. an already-rendered inner macro
+                // such as `xref:sec[image:...[]]`, whose HTML contains `=` and
+                // `"`), not a real attribute list. Treat the text as plain link
+                // text and honor no named attributes, matching Asciidoctor's
+                // `extract_attributes_from_text`.
+                let first = attrlist.nth_attribute(1).map(|a| a.value().to_string());
 
-                attrlist
-                    .nth_attribute(1)
-                    .map(|a| a.value().to_string())
-                    .filter(|s| !s.is_empty())
+                if first.as_deref() == Some(normalized.as_str()) {
+                    Some(raw_text.replace("\\]", "]"))
+                } else {
+                    window = attrlist
+                        .named_attribute("window")
+                        .map(|a| a.value().to_string());
+                    roles = attrlist.roles().iter().map(|r| r.to_string()).collect();
+                    xrefstyle_override = attrlist
+                        .named_attribute("xrefstyle")
+                        .map(|a| XrefStyle::parse(a.value()));
+
+                    first.filter(|s| !s.is_empty())
+                }
             } else {
                 Some(raw_text.replace("\\]", "]"))
             };

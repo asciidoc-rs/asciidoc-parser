@@ -143,13 +143,8 @@ mod default_macros_substitution {
         assert_eq!(block1.content().rendered(), "foo icon:heart[] bar");
     }
 
-    #[ignore]
     #[test]
     fn macros() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/305):
-        // I can't concieve of how macro substitutions can be applied _within_
-        // macros. Deferring for now.
-
         verifies!(
             r#"
 |Macros |{y}
@@ -157,8 +152,12 @@ mod default_macros_substitution {
 "#
         );
 
-        let doc = Parser::default()
-            .parse(":icons:\n:heart: icon:heart[]\n\nClick image:pause.png[title=Pause pass:a[{heart}] Resume] when you need a break.");
+        // Can one macro contain another? Yes. The macros substitution step is
+        // applied to the *positional text* of a macro, so a macro nested in that
+        // text is itself processed. The canonical example is an inline image in
+        // the text of a link: the link text `image:logo.png[Logo]` is
+        // substituted into an image span, which then becomes the link's content.
+        let doc = Parser::default().parse("https://example.org[image:logo.png[Logo]]");
 
         let block1 = doc.nested_blocks().next().unwrap();
 
@@ -168,7 +167,39 @@ mod default_macros_substitution {
 
         assert_eq!(
             block1.content().rendered(),
-            r#"Click <span class="image"><img src="pause.png" alt="pause" title="Pause &#169; Resume"></span> when you need a break."#
+            r#"<a href="https://example.org"><span class="image"><img src="logo.png" alt="Logo"></span></a>"#
+        );
+
+        // The same nesting works when the inner macro appears mid-sentence in
+        // the outer link's text.
+        let doc =
+            Parser::default().parse("See https://example.org[the image:logo.png[Logo] here].");
+
+        let block1 = doc.nested_blocks().next().unwrap();
+
+        let Block::Simple(block1) = block1 else {
+            panic!("Unexpected block type: {block1:?}");
+        };
+
+        assert_eq!(
+            block1.content().rendered(),
+            r#"See <a href="https://example.org">the <span class="image"><img src="logo.png" alt="Logo"></span> here</a>."#
+        );
+
+        // Nesting also applies to the text of a cross-reference macro: the
+        // inner image is processed inside the `xref:` target's text.
+        let doc =
+            Parser::default().parse("[[sec]]Target.\n\nSee xref:sec[image:logo.png[Logo]] now.");
+
+        let block2 = doc.nested_blocks().nth(1).unwrap();
+
+        let Block::Simple(block2) = block2 else {
+            panic!("Unexpected block type: {block2:?}");
+        };
+
+        assert_eq!(
+            block2.content().rendered(),
+            r##"See <a href="#sec"><span class="image"><img src="logo.png" alt="Logo"></span></a> now."##
         );
     }
 
