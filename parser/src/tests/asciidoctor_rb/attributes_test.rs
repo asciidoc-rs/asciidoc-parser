@@ -147,6 +147,7 @@ mod assignment {
     # NOTE AsciiDoc.py recognizes this entry
 "#
     );
+    // Tracked in #728.
     #[test]
     fn does_not_recognize_attribute_entry_if_name_contains_colon() {
         non_normative!(
@@ -177,6 +178,7 @@ mod assignment {
     # NOTE AsciiDoc.py recognizes this entry
 "#
     );
+    // Tracked in #728.
     #[test]
     fn does_not_recognize_attribute_entry_if_name_ends_with_colon() {
         non_normative!(
@@ -205,6 +207,7 @@ mod assignment {
     # NOTE AsciiDoc.py does not recognize this entry
 "#
     );
+    // Tracked in #726.
     #[test]
     fn allows_any_word_character_defined_by_unicode_in_an_attribute_name() {
         non_normative!(
@@ -236,6 +239,7 @@ mod assignment {
         }
     }
 
+    // Tracked in #729.
     #[test]
     fn creates_an_attribute_by_fusing_a_legacy_multi_line_value() {
         non_normative!(
@@ -292,6 +296,7 @@ mod assignment {
         );
     }
 
+    // Tracked in #729.
     #[test]
     fn honors_line_break_characters_in_multi_line_values() {
         non_normative!(
@@ -321,6 +326,7 @@ mod assignment {
         );
     }
 
+    // Tracked in #729.
     #[test]
     fn should_allow_pass_macro_to_surround_a_multi_line_value_that_contains_line_breaks() {
         non_normative!(
@@ -521,6 +527,7 @@ mod assignment {
         assert_eq!(doc.attribute_value("release"), InterpretedValue::Value(""));
     }
 
+    // Tracked in #729.
     #[test]
     fn assigns_multi_line_attribute_to_empty_string_if_substitution_fails_to_resolve_attribute() {
         non_normative!(
@@ -612,6 +619,7 @@ mod assignment {
         assert_xpath(&doc, "//em[text()=\"big\"]", 1);
     }
 
+    // Tracked in #736.
     // Out of scope: this crate does not implement the `max-attribute-value-size`
     // limit.
     non_normative!(
@@ -632,6 +640,7 @@ mod assignment {
 "#
     );
 
+    // Tracked in #736.
     // Out of scope: this crate does not implement the `max-attribute-value-size`
     // limit.
     non_normative!(
@@ -652,6 +661,7 @@ mod assignment {
 "#
     );
 
+    // Tracked in #736.
     // Out of scope: this crate does not implement the `max-attribute-value-size`
     // limit.
     non_normative!(
@@ -672,6 +682,7 @@ mod assignment {
 "#
     );
 
+    // Tracked in #736.
     // Out of scope: this crate does not implement the `max-attribute-value-size`
     // limit.
     non_normative!(
@@ -692,6 +703,7 @@ mod assignment {
 "#
     );
 
+    // Tracked in #737.
     // Out of scope: this crate does not define the built-in `user-home` intrinsic
     // attribute.
     non_normative!(
@@ -709,6 +721,7 @@ mod assignment {
 "#
     );
 
+    // Tracked in #737.
     // Out of scope: this crate does not define the built-in `user-home` intrinsic
     // attribute.
     non_normative!(
@@ -1067,6 +1080,7 @@ mod assignment {
         );
     }
 
+    // Tracked in #734.
     #[test]
     fn can_soft_unset_built_in_attribute_from_api_and_still_override_in_document() {
         verifies!(
@@ -1110,6 +1124,7 @@ mod assignment {
         assert_css(&doc, "h2#_heading", 1);
     }
 
+    // Tracked in #738.
     #[test]
     fn backend_and_doctype_attributes_are_set_by_default_in_default_configuration() {
         non_normative!(
@@ -1237,6 +1252,7 @@ mod assignment {
 "#
     );
 
+    // Tracked in #738.
     #[test]
     fn backend_attributes_defined_in_document_options_overrides_backend_attribute_in_document() {
         non_normative!(
@@ -1479,6 +1495,7 @@ mod assignment {
 "#
     );
 
+    // Tracked in #738.
     #[test]
     fn verify_toc_attribute_matrix() {
         non_normative!(
@@ -1564,6 +1581,7 @@ mod interpolation {
         assert_xpath(&doc, "//p[text()=\"Yo, Tanglefoot!\nBeat Spiderman!\"]", 1);
     }
 
+    // Tracked in #724.
     #[test]
     fn attribute_lookup_is_not_case_sensitive() {
         non_normative!(
@@ -1617,6 +1635,7 @@ mod interpolation {
         assert_xpath(&doc, "//p[text()=\"R is for Ruby!\"]", 1);
     }
 
+    // Tracked in #726.
     #[test]
     fn collapses_spaces_in_attribute_names() {
         non_normative!(
@@ -1840,6 +1859,7 @@ mod interpolation {
         assert_xpath(&doc, "//p[text()=\"Line 1\n{set:a}\nLine 2\"]", 1);
     }
 
+    // Tracked in #730.
     #[test]
     fn should_drop_line_that_only_contains_unresolved_attribute_when_attribute_missing_is_drop() {
         non_normative!(
@@ -2038,6 +2058,7 @@ mod interpolation {
         assert_rendered_contains(&doc, "2010-01-01 == 2010-01-01");
     }
 
+    // Tracked in #731.
     #[test]
     fn should_warn_if_unterminated_block_comment_is_detected_in_document_header() {
         non_normative!(
@@ -2277,6 +2298,7 @@ mod interpolation {
         assert_rendered_contains(&doc, "{foo}");
     }
 
+    // Tracked in #735.
     #[test]
     fn does_not_show_docdir_and_shows_relative_docfile_if_safe_mode_is_server_or_greater() {
         non_normative!(
@@ -3006,6 +3028,7 @@ mod intrinsic_attributes {
         assert_eq!(blocks[2].caption(), Some("Figure 4. "));
     }
 
+    // Tracked in #725.
     #[test]
     fn should_not_allow_counter_to_modify_locked_attribute() {
         non_normative!(
@@ -3032,6 +3055,7 @@ mod intrinsic_attributes {
         assert_xpath(&doc, "//p[text()=\"bas is not bas\"]", 1);
     }
 
+    // Tracked in #725.
     #[test]
     fn should_not_allow_counter2_to_modify_locked_attribute() {
         non_normative!(
@@ -3056,6 +3080,7 @@ mod intrinsic_attributes {
         assert_xpath(&doc, "//p[text()=\"bas\"]", 1);
     }
 
+    // Tracked in #725.
     #[test]
     fn should_not_allow_counter_to_modify_built_in_locked_attribute() {
         non_normative!(
@@ -3086,6 +3111,7 @@ mod intrinsic_attributes {
         );
     }
 
+    // Tracked in #725.
     #[test]
     fn should_not_allow_counter2_to_modify_built_in_locked_attribute() {
         non_normative!(
@@ -3147,6 +3173,7 @@ mod block_attributes {
             .map(|a| a.value())
     }
 
+    // Tracked in #727.
     #[test]
     fn parses_attribute_names_as_name_token() {
         non_normative!(
@@ -3839,6 +3866,7 @@ mod block_attributes {
         assert_eq!(first_block(&doc).roles(), vec!["role1", "role2", "role3"]);
     }
 
+    // Tracked in #732.
     #[test]
     fn setting_a_role_using_the_role_attribute_replaces_any_existing_roles() {
         non_normative!(
@@ -4129,6 +4157,7 @@ mod block_attributes {
         assert_eq!(p.roles(), vec!["lead"]);
     }
 
+    // Tracked in #733.
     #[test]
     fn last_wins_for_id_attribute() {
         non_normative!(
@@ -4165,6 +4194,7 @@ mod block_attributes {
         assert_eq!(first_block(&doc).id(), Some("bar"));
     }
 
+    // Tracked in #733.
     #[test]
     fn trailing_block_attributes_transfer_to_the_following_section() {
         non_normative!(
