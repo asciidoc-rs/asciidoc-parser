@@ -4918,3 +4918,1282 @@ mod metadata {
 "#
     );
 }
+
+mod images {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Images' do
+"#
+    );
+
+    #[test]
+    fn can_convert_block_image_with_alt_text_defined_in_macro() {
+        verifies!(
+            r#"
+    test 'can convert block image with alt text defined in macro' do
+      input = 'image::images/tiger.png[Tiger]'
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("image::images/tiger.png[Tiger]");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    // The following SVG interactive/inline/data-uri/remote-fetch tests depend
+    // on safe modes, image files on disk, and network reads that this crate
+    // does not model; they are reproduced verbatim to account for the Ruby
+    // source without asserting behavior.
+    non_normative!(
+        r#"
+    test 'converts SVG image using img element by default' do
+      input = 'image::tiger.svg[Tiger]'
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '/*[@class="imageblock"]//img[@src="tiger.svg"][@alt="Tiger"]', output, 1
+    end
+
+    test 'converts interactive SVG image with alt text using object element' do
+      input = <<~'EOS'
+      :imagesdir: images
+
+      [%interactive]
+      image::tiger.svg[Tiger,100]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '/*[@class="imageblock"]//object[@type="image/svg+xml"][@data="images/tiger.svg"][@width="100"]/span[@class="alt"][text()="Tiger"]', output, 1
+    end
+
+    test 'converts SVG image with alt text using img element when safe mode is secure' do
+      input = <<~'EOS'
+      [%interactive]
+      image::images/tiger.svg[Tiger,100]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.svg"][@alt="Tiger"]', output, 1
+    end
+
+    test 'inserts fallback image for SVG inside object element using same dimensions' do
+      input = <<~'EOS'
+      :imagesdir: images
+
+      [%interactive]
+      image::tiger.svg[Tiger,100,fallback=tiger.png]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '/*[@class="imageblock"]//object[@type="image/svg+xml"][@data="images/tiger.svg"][@width="100"]/img[@src="images/tiger.png"][@width="100"]', output, 1
+    end
+
+    test 'detects SVG image URI that contains a query string' do
+      input = <<~'EOS'
+      :imagesdir: images
+
+      [%interactive]
+      image::http://example.org/tiger.svg?foo=bar[Tiger,100]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '/*[@class="imageblock"]//object[@type="image/svg+xml"][@data="http://example.org/tiger.svg?foo=bar"][@width="100"]/span[@class="alt"][text()="Tiger"]', output, 1
+    end
+
+    test 'detects SVG image when format attribute is svg' do
+      input = <<~'EOS'
+      :imagesdir: images
+
+      [%interactive]
+      image::http://example.org/tiger-svg[Tiger,100,format=svg]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '/*[@class="imageblock"]//object[@type="image/svg+xml"][@data="http://example.org/tiger-svg"][@width="100"]/span[@class="alt"][text()="Tiger"]', output, 1
+    end
+
+    test 'converts to inline SVG image when inline option is set on block' do
+      input = <<~'EOS'
+      :imagesdir: fixtures
+
+      [%inline]
+      image::circle.svg[Tiger,100]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docdir' => testdir }
+      assert_match(/<svg\s[^>]*width="100"[^>]*>/, output, 1)
+      refute_match(/<svg\s[^>]*width="500"[^>]*>/, output)
+      refute_match(/<svg\s[^>]*height="500"[^>]*>/, output)
+      refute_match(/<svg\s[^>]*style="[^>]*>/, output)
+    end
+
+    test 'should honor percentage width for SVG image with inline option' do
+      input = <<~'EOS'
+      :imagesdir: fixtures
+
+      image::circle.svg[Circle,50%,opts=inline]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docdir' => testdir }
+      assert_match(/<svg\s[^>]*width="50%"[^>]*>/, output, 1)
+    end
+
+    test 'should not crash if explicit width on SVG image block is an integer' do
+      input = <<~'EOS'
+      :imagesdir: fixtures
+
+      image::circle.svg[Circle,opts=inline]
+      EOS
+
+      doc = document_from_string input, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docdir' => testdir }
+      doc.blocks[0].set_attr 'width', 50
+      output = doc.convert
+      assert_match %r/<svg\s[^>]*width="50"[^>]*>/, output, 1
+    end
+
+    test 'converts to inline SVG image when inline option is set on block and data-uri is set on document' do
+      input = <<~'EOS'
+      :imagesdir: fixtures
+      :data-uri:
+
+      [%inline]
+      image::circle.svg[Tiger,100]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docdir' => testdir }
+      assert_match(/<svg\s[^>]*width="100">/, output, 1)
+    end
+
+    test 'should not throw exception if SVG to inline is empty' do
+      input = 'image::empty.svg[nada,opts=inline]'
+      output = convert_string_to_embedded input, safe: :safe, attributes: { 'docdir' => testdir, 'imagesdir' => 'fixtures' }
+      assert_xpath '//svg', output, 0
+      assert_xpath '//span[@class="alt"][text()="nada"]', output, 1
+      assert_message @logger, :WARN, '~contents of SVG is empty:'
+    end
+
+    test 'should not throw exception if SVG to inline contains an incomplete start tag and explicit width is specified' do
+      input = 'image::incomplete.svg[,200,opts=inline]'
+      output = convert_string_to_embedded input, safe: :safe, attributes: { 'docdir' => testdir, 'imagesdir' => 'fixtures' }
+      assert_xpath '//svg', output, 1
+      assert_xpath '//span[@class="alt"]', output, 0
+    end
+
+    test 'embeds remote SVG to inline when inline option is set on block and allow-uri-read is set on document' do
+      input = %(image::http://#{resolve_localhost}:9876/fixtures/circle.svg[Circle,100,100,opts=inline])
+      output = using_test_webserver do
+        convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
+      end
+
+      assert_css 'svg', output, 1
+      assert_css 'svg[style]', output, 0
+      assert_css 'svg[width="100"]', output, 1
+      assert_css 'svg[height="100"]', output, 1
+      assert_css 'svg circle', output, 1
+    end
+
+    test 'should cache remote SVG when allow-uri-read, cache-uri, and inline option are set' do
+      begin
+        if OpenURI.respond_to? :cache_open_uri
+          OpenURI.singleton_class.send :remove_method, :open_uri
+          OpenURI.singleton_class.send :alias_method, :open_uri, :cache_open_uri
+        end
+        using_test_webserver do |base_url, thr|
+          image_url = %(#{base_url}/fixtures/circle.svg)
+          attributes = { 'allow-uri-read' => '', 'cache-uri' => '' }
+          input = %(image::#{image_url}[Circle,100,100,opts=inline])
+          output = convert_string_to_embedded input, safe: :safe, attributes: attributes
+          assert defined? OpenURI::Cache
+          assert_css 'svg circle', output, 1
+          # NOTE we can't assert here since this is using the system-wide cache
+          #assert_equal thr[:requests].size, 1
+          #assert_equal thr[:requests][0], image_url
+          thr[:requests].clear
+          Dir.mktmpdir do |cache_path|
+            original_cache_path = OpenURI::Cache.cache_path
+            begin
+              OpenURI::Cache.cache_path = cache_path
+              assert_nil OpenURI::Cache.get image_url
+              2.times do
+                output = convert_string_to_embedded input, safe: :safe, attributes: attributes
+                refute_nil OpenURI::Cache.get image_url
+                assert_css 'svg circle', output, 1
+              end
+              assert_equal 1, thr[:requests].size
+              assert_match %r/ \/fixtures\/circle\.svg /, thr[:requests][0], 1
+            ensure
+              OpenURI::Cache.cache_path = original_cache_path
+            end
+          end
+        end
+      ensure
+        OpenURI.singleton_class.send :alias_method, :cache_open_uri, :open_uri
+        OpenURI.singleton_class.send :remove_method, :open_uri
+        OpenURI.singleton_class.send :alias_method, :open_uri, :original_open_uri
+      end
+    end
+
+    test 'converts to alt text for SVG with inline option set if SVG cannot be read' do
+      input = <<~'EOS'
+      [%inline]
+      image::no-such-image.svg[Alt Text]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER
+      assert_xpath '//span[@class="alt"][text()="Alt Text"]', output, 1
+      assert_message @logger, :WARN, '~SVG does not exist or cannot be read'
+    end
+"#
+    );
+
+    #[test]
+    fn can_convert_block_image_with_alt_text_defined_in_macro_containing_square_bracket() {
+        verifies!(
+            r#"
+    test 'can convert block image with alt text defined in macro containing square bracket' do
+      input = 'image::images/tiger.png[A [Bengal] Tiger]'
+      output = convert_string input
+      img = xmlnodes_at_xpath '//img', output, 1
+      assert_equal 'A [Bengal] Tiger', img.attr('alt')
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("image::images/tiger.png[A [Bengal] Tiger]");
+        assert_xpath(&doc, "//img[@alt=\"A [Bengal] Tiger\"]", 1);
+    }
+
+    #[test]
+    fn can_convert_block_image_with_target_containing_spaces() {
+        verifies!(
+            r#"
+    test 'can convert block image with target containing spaces' do
+      input = 'image::images/big tiger.png[A Big Tiger]'
+      output = convert_string input
+      img = xmlnodes_at_xpath '//img', output, 1
+      assert_equal 'images/big%20tiger.png', img.attr('src')
+      assert_equal 'A Big Tiger', img.attr('alt')
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("image::images/big tiger.png[A Big Tiger]");
+        assert_xpath(
+            &doc,
+            "//img[@src=\"images/big%20tiger.png\"][@alt=\"A Big Tiger\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate recognizes an image macro
+    // whose target has a leading or trailing space and renders it as an image
+    // block; Asciidoctor does not treat such a line as a block image. Kept
+    // `#[ignore]`d with the Ruby-intended assertion (no `<img>`).
+    // TODO: reject a block image macro whose target has leading/trailing spaces.
+    #[ignore]
+    #[test]
+    fn should_not_recognize_block_image_if_target_has_leading_or_trailing_spaces() {
+        verifies!(
+            r#"
+    test 'should not recognize block image if target has leading or trailing spaces' do
+      [' tiger.png', 'tiger.png '].each do |target|
+        input = %(image::#{target}[Tiger])
+
+        output = convert_string_to_embedded input
+        assert_xpath '//img', output, 0
+      end
+    end
+
+"#
+        );
+
+        for target in [" tiger.png", "tiger.png "] {
+            let doc = Parser::default().parse(&format!("image::{target}[Tiger]"));
+            assert_xpath(&doc, "//img", 0);
+        }
+    }
+
+    #[test]
+    fn can_convert_block_image_with_alt_text_defined_in_block_attribute_above_macro() {
+        verifies!(
+            r#"
+    test 'can convert block image with alt text defined in block attribute above macro' do
+      input = <<~'EOS'
+      [Tiger]
+      image::images/tiger.png[]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[Tiger]\nimage::images/tiger.png[]\n");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn alt_text_in_macro_overrides_alt_text_above_macro() {
+        verifies!(
+            r#"
+    test 'alt text in macro overrides alt text above macro' do
+      input = <<~'EOS'
+      [Alt Text]
+      image::images/tiger.png[Tiger]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[Alt Text]\nimage::images/tiger.png[Tiger]\n");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_substitute_attribute_references_in_alt_text_defined_in_image_block_macro() {
+        verifies!(
+            r#"
+    test 'should substitute attribute references in alt text defined in image block macro' do
+      input = <<~'EOS'
+      :alt-text: Tiger
+
+      image::images/tiger.png[{alt-text}]
+      EOS
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(":alt-text: Tiger\n\nimage::images/tiger.png[{alt-text}]\n");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_set_direction_css_class_on_image_if_float_attribute_is_set() {
+        verifies!(
+            r#"
+    test 'should set direction CSS class on image if float attribute is set' do
+      input = <<~'EOS'
+      [float=left]
+      image::images/tiger.png[Tiger]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.imageblock.left', output, 1
+      assert_css '.imageblock[style]', output, 0
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[float=left]\nimage::images/tiger.png[Tiger]\n");
+        assert_css(&doc, ".imageblock.left", 1);
+        assert_css(&doc, ".imageblock[style]", 0);
+    }
+
+    #[test]
+    fn should_set_text_alignment_css_class_on_image_if_align_attribute_is_set() {
+        verifies!(
+            r#"
+    test 'should set text alignment CSS class on image if align attribute is set' do
+      input = <<~'EOS'
+      [align=center]
+      image::images/tiger.png[Tiger]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.imageblock.text-center', output, 1
+      assert_css '.imageblock[style]', output, 0
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[align=center]\nimage::images/tiger.png[Tiger]\n");
+        assert_css(&doc, ".imageblock.text-center", 1);
+        assert_css(&doc, ".imageblock[style]", 0);
+    }
+
+    #[test]
+    fn style_attribute_is_dropped_from_image_macro() {
+        verifies!(
+            r#"
+    test 'style attribute is dropped from image macro' do
+      input = <<~'EOS'
+      [style=value]
+      image::images/tiger.png[Tiger]
+      EOS
+
+      doc = document_from_string input
+      img = doc.blocks[0]
+      refute(img.attributes.key? 'style')
+      assert_nil img.style
+    end
+
+"#
+        );
+
+        // This crate does not apply a `style` named attribute as the block
+        // style (`declared_style()` is `None`), matching `assert_nil img.style`.
+        // NOTE: divergence — Asciidoctor also removes the `style` key from the
+        // block's attributes; this crate retains it as a plain named attribute.
+        let doc = Parser::default().parse("[style=value]\nimage::images/tiger.png[Tiger]\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.declared_style(), None);
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not apply the
+    // specialcharacters and replacement substitutions to image alt text, so the
+    // alt attribute retains the raw characters. Kept `#[ignore]`d with the
+    // Ruby-intended (substituted) alt text.
+    // TODO: apply specialchars/replacement subs to image alt text.
+    #[ignore]
+    #[test]
+    fn should_apply_specialcharacters_and_replacement_substitutions_to_alt_text() {
+        verifies!(
+            r##"
+    test 'should apply specialcharacters and replacement substitutions to alt text' do
+      input = 'A tiger\'s "roar" is < a bear\'s "growl"'
+      expected = 'A tiger&#8217;s &quot;roar&quot; is &lt; a bear&#8217;s &quot;growl&quot;'
+      result = convert_string_to_embedded %(image::images/tiger-roar.png[#{input}])
+      assert_includes result, %(alt="#{expected}")
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("image::images/tiger-roar.png[A tiger's \"roar\" is < a bear's \"growl\"]");
+        assert_xpath(
+            &doc,
+            "//img[@alt=\"A tiger&#8217;s &quot;roar&quot; is &lt; a bear&#8217;s &quot;growl&quot;\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_not_encode_double_quotes_in_alt_text_when_converting_to_docbook() {
+        non_normative!(
+            r#"
+    test 'should not encode double quotes in alt text when converting to DocBook' do
+      input = 'Select "File > Open"'
+      expected = 'Select "File &gt; Open"'
+      result = convert_string_to_embedded %(image::images/open.png[#{input}]), backend: :docbook
+      assert_includes result, %(<phrase>#{expected}</phrase>)
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    #[test]
+    fn should_auto_generate_alt_text_for_block_image_if_alt_text_is_not_specified() {
+        verifies!(
+            r#"
+    test 'should auto-generate alt text for block image if alt text is not specified' do
+      input = 'image::images/lions-and-tigers.png[]'
+      image = block_from_string input
+      assert_equal 'lions and tigers', (image.attr 'alt')
+      assert_equal 'lions and tigers', (image.attr 'default-alt')
+      output = image.convert
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/lions-and-tigers.png"][@alt="lions and tigers"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("image::images/lions-and-tigers.png[]");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/lions-and-tigers.png\"][@alt=\"lions and tigers\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn can_convert_block_image_with_alt_text_and_height_and_width() {
+        verifies!(
+            r#"
+    test "can convert block image with alt text and height and width" do
+      input = 'image::images/tiger.png[Tiger, 200, 300]'
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.png"][@alt="Tiger"][@width="200"][@height="300"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("image::images/tiger.png[Tiger, 200, 300]");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"][@width=\"200\"][@height=\"300\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn should_not_output_empty_width_attribute_if_positional_width_attribute_is_empty() {
+        verifies!(
+            r#"
+    test 'should not output empty width attribute if positional width attribute is empty' do
+      input = 'image::images/tiger.png[Tiger,]'
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.png"]', output, 1
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.png"][@width]', output, 0
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("image::images/tiger.png[Tiger,]");
+        assert_xpath(&doc, "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"]", 1);
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@width]",
+            0,
+        );
+    }
+
+    #[test]
+    fn can_convert_block_image_with_link() {
+        verifies!(
+            r##"
+    test "can convert block image with link" do
+      input = <<~'EOS'
+      image::images/tiger.png[Tiger, link='http://en.wikipedia.org/wiki/Tiger']
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//a[@class="image"][@href="http://en.wikipedia.org/wiki/Tiger"]/img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("image::images/tiger.png[Tiger, link='http://en.wikipedia.org/wiki/Tiger']\n");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//a[@class=\"image\"][@href=\"http://en.wikipedia.org/wiki/Tiger\"]/img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn adds_rel_noopener_attribute_to_block_image_with_link_that_targets_blank_window() {
+        verifies!(
+            r#"
+    test 'adds rel=noopener attribute to block image with link that targets _blank window' do
+      input = 'image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,window=_blank]'
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//a[@class="image"][@href="http://en.wikipedia.org/wiki/Tiger"][@target="_blank"][@rel="noopener"]/img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,window=_blank]");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//a[@class=\"image\"][@href=\"http://en.wikipedia.org/wiki/Tiger\"][@target=\"_blank\"][@rel=\"noopener\"]/img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn adds_rel_noopener_attribute_to_block_image_with_link_that_targets_name_window_when_the_noopener_option_is_set()
+    {
+        verifies!(
+            r#"
+    test 'adds rel=noopener attribute to block image with link that targets name window when the noopener option is set' do
+      input = 'image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,window=name,opts=noopener]'
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//a[@class="image"][@href="http://en.wikipedia.org/wiki/Tiger"][@target="name"][@rel="noopener"]/img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,window=name,opts=noopener]",
+        );
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//a[@class=\"image\"][@href=\"http://en.wikipedia.org/wiki/Tiger\"][@target=\"name\"][@rel=\"noopener\"]/img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn adds_rel_nofollow_attribute_to_block_image_with_a_link_when_the_nofollow_option_is_set() {
+        verifies!(
+            r#"
+    test 'adds rel=nofollow attribute to block image with a link when the nofollow option is set' do
+      input = 'image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,opts=nofollow]'
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//a[@class="image"][@href="http://en.wikipedia.org/wiki/Tiger"][@rel="nofollow"]/img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("image::images/tiger.png[Tiger,link=http://en.wikipedia.org/wiki/Tiger,opts=nofollow]");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//a[@class=\"image\"][@href=\"http://en.wikipedia.org/wiki/Tiger\"][@rel=\"nofollow\"]/img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn can_convert_block_image_with_caption() {
+        verifies!(
+            r#"
+    test 'can convert block image with caption' do
+      input = <<~'EOS'
+      .The AsciiDoc Tiger
+      image::images/tiger.png[Tiger]
+      EOS
+
+      doc = document_from_string input
+      assert_equal 1, doc.blocks[0].numeral
+      output = doc.convert
+      assert_xpath '//*[@class="imageblock"]//img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+      assert_xpath '//*[@class="imageblock"]/*[@class="title"][text()="Figure 1. The AsciiDoc Tiger"]', output, 1
+      assert_equal 1, doc.attributes['figure-number']
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(".The AsciiDoc Tiger\nimage::images/tiger.png[Tiger]\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.number(), Some(1));
+        assert_xpath(
+            &doc,
+            "//*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"imageblock\"]/*[@class=\"title\"][text()=\"Figure 1. The AsciiDoc Tiger\"]",
+            1,
+        );
+        assert_eq!(
+            doc.attribute_value("figure-number"),
+            crate::document::InterpretedValue::Value("1".to_string())
+        );
+    }
+
+    #[test]
+    fn can_convert_block_image_with_explicit_caption() {
+        verifies!(
+            r#"
+    test 'can convert block image with explicit caption' do
+      input = <<~'EOS'
+      [caption="Voila! "]
+      .The AsciiDoc Tiger
+      image::images/tiger.png[Tiger]
+      EOS
+
+      doc = document_from_string input
+      assert_nil doc.blocks[0].numeral
+      output = doc.convert
+      assert_xpath '//*[@class="imageblock"]//img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+      assert_xpath '//*[@class="imageblock"]/*[@class="title"][text()="Voila! The AsciiDoc Tiger"]', output, 1
+      refute doc.attributes.key?('figure-number')
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("[caption=\"Voila! \"]\n.The AsciiDoc Tiger\nimage::images/tiger.png[Tiger]\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.number(), None);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"imageblock\"]/*[@class=\"title\"][text()=\"Voila! The AsciiDoc Tiger\"]",
+            1,
+        );
+        assert_eq!(
+            doc.attribute_value("figure-number"),
+            crate::document::InterpretedValue::Unset
+        );
+    }
+
+    // DocBook-backend image tests (align/content-width/scale/scaledwidth) are
+    // out of scope for this crate.
+    non_normative!(
+        r#"
+    test 'can align image in DocBook backend' do
+      input = 'image::images/sunset.jpg[Sunset,align=right]'
+      output = convert_string_to_embedded input, backend: :docbook
+      assert_xpath '//imagedata', output, 1
+      assert_xpath '//imagedata[@align="right"]', output, 1
+    end
+
+    test 'should set content width and depth in DocBook backend if no scaling' do
+      input = 'image::images/sunset.jpg[Sunset,500,332]'
+      output = convert_string_to_embedded input, backend: :docbook
+      assert_xpath '//imagedata', output, 1
+      assert_xpath '//imagedata[@contentwidth="500"]', output, 1
+      assert_xpath '//imagedata[@contentdepth="332"]', output, 1
+      assert_xpath '//imagedata[@width]', output, 0
+      assert_xpath '//imagedata[@depth]', output, 0
+    end
+
+    test 'can scale image in DocBook backend' do
+      input = 'image::images/sunset.jpg[Sunset,500,332,scale=200]'
+      output = convert_string_to_embedded input, backend: :docbook
+      assert_xpath '//imagedata', output, 1
+      assert_xpath '//imagedata[@scale="200"]', output, 1
+      assert_xpath '//imagedata[@width]', output, 0
+      assert_xpath '//imagedata[@depth]', output, 0
+      assert_xpath '//imagedata[@contentwidth]', output, 0
+      assert_xpath '//imagedata[@contentdepth]', output, 0
+    end
+
+    test 'scale image width in DocBook backend' do
+      input = 'image::images/sunset.jpg[Sunset,500,332,scaledwidth=25%]'
+      output = convert_string_to_embedded input, backend: :docbook
+      assert_xpath '//imagedata', output, 1
+      assert_xpath '//imagedata[@width="25%"]', output, 1
+      assert_xpath '//imagedata[@depth]', output, 0
+      assert_xpath '//imagedata[@contentwidth]', output, 0
+      assert_xpath '//imagedata[@contentdepth]', output, 0
+    end
+
+    test 'adds % to scaled width if no units given in DocBook backend ' do
+      input = 'image::images/sunset.jpg[Sunset,scaledwidth=25]'
+      output = convert_string_to_embedded input, backend: :docbook
+      assert_xpath '//imagedata', output, 1
+      assert_xpath '//imagedata[@width="25%"]', output, 1
+    end
+"#
+    );
+
+    #[test]
+    fn keeps_attribute_reference_unprocessed_if_image_target_is_missing_attribute_reference_and_attribute_missing_is_skip()
+    {
+        verifies!(
+            r#"
+    test 'keeps attribute reference unprocessed if image target is missing attribute reference and attribute-missing is skip' do
+      input = <<~'EOS'
+      :attribute-missing: skip
+
+      image::{bogus}[]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'img[src="{bogus}"]', output, 1
+      assert_empty @logger
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(":attribute-missing: skip\n\nimage::{bogus}[]\n");
+        assert_css(&doc, "img[src=\"{bogus}\"]", 1);
+        assert_eq!(doc.warnings().count(), 0);
+    }
+
+    #[test]
+    fn should_not_drop_line_if_image_target_is_missing_attribute_reference_and_attribute_missing_is_drop()
+    {
+        verifies!(
+            r#"
+    test 'should not drop line if image target is missing attribute reference and attribute-missing is drop' do
+      input = <<~'EOS'
+      :attribute-missing: drop
+
+      image::{bogus}/photo.jpg[]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'img[src="/photo.jpg"]', output, 1
+      assert_empty @logger
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(":attribute-missing: drop\n\nimage::{bogus}/photo.jpg[]\n");
+        assert_css(&doc, "img[src=\"/photo.jpg\"]", 1);
+        assert_eq!(doc.warnings().count(), 0);
+    }
+
+    #[test]
+    fn drops_line_if_image_target_is_missing_attribute_reference_and_attribute_missing_is_drop_line()
+    {
+        verifies!(
+            r#"
+    test 'drops line if image target is missing attribute reference and attribute-missing is drop-line' do
+      input = <<~'EOS'
+      :attribute-missing: drop-line
+
+      image::{bogus}[]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_empty output.strip
+      assert_message @logger, :INFO, 'dropping line containing reference to missing attribute: bogus'
+    end
+
+"#
+        );
+
+        // The image line is dropped, leaving no image. (This crate does not
+        // emit Asciidoctor's INFO "dropping line" log message.)
+        let doc = Parser::default().parse(":attribute-missing: drop-line\n\nimage::{bogus}[]\n");
+        assert_xpath(&doc, "//img", 0);
+    }
+
+    #[test]
+    fn should_not_drop_line_if_image_target_resolves_to_blank_and_attribute_missing_is_drop_line() {
+        verifies!(
+            r#"
+    test 'should not drop line if image target resolves to blank and attribute-missing is drop-line' do
+      input = <<~'EOS'
+      :attribute-missing: drop-line
+
+      image::{blank}[]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'img[src=""]', output, 1
+      assert_empty @logger
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(":attribute-missing: drop-line\n\nimage::{blank}[]\n");
+        assert_css(&doc, "img[src=\"\"]", 1);
+        assert_eq!(doc.warnings().count(), 0);
+    }
+
+    #[test]
+    fn dropped_image_does_not_break_processing_of_following_section_and_attribute_missing_is_drop_line()
+    {
+        verifies!(
+            r#"
+    test 'dropped image does not break processing of following section and attribute-missing is drop-line' do
+      input = <<~'EOS'
+      :attribute-missing: drop-line
+
+      image::{bogus}[]
+
+      == Section Title
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css 'img', output, 0
+      assert_css 'h2', output, 1
+      refute_includes output, '== Section Title'
+      assert_message @logger, :INFO, 'dropping line containing reference to missing attribute: bogus'
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":attribute-missing: drop-line\n\nimage::{bogus}[]\n\n== Section Title\n");
+        assert_css(&doc, "img", 0);
+        assert_css(&doc, "h2", 1);
+        refute_rendered_contains(&doc, "== Section Title");
+    }
+
+    #[test]
+    fn should_pass_through_image_that_references_uri() {
+        verifies!(
+            r#"
+    test 'should pass through image that references uri' do
+      input = <<~'EOS'
+      :imagesdir: images
+
+      image::http://asciidoc.org/images/tiger.png[Tiger]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="http://asciidoc.org/images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse(":imagesdir: images\n\nimage::http://asciidoc.org/images/tiger.png[Tiger]\n");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"http://asciidoc.org/images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate percent-encodes only spaces
+    // in an image target; Asciidoctor applies fuller URI encoding. Kept
+    // `#[ignore]`d with the Ruby-intended src.
+    // TODO: apply full URI encoding to image targets that are URIs.
+    #[ignore]
+    #[test]
+    fn should_encode_spaces_in_image_target_if_value_is_a_uri() {
+        verifies!(
+            r##"
+    test 'should encode spaces in image target if value is a URI' do
+      input = 'image::http://example.org/svg?digraph=digraph G { a -> b; }[diagram]'
+      output = convert_string_to_embedded input
+      assert_xpath %(/*[@class="imageblock"]//img[@src="http://example.org/svg?digraph=digraph%20G%20{%20a%20-#{decode_char 62}%20b;%20}"]), output, 1
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("image::http://example.org/svg?digraph=digraph G { a -> b; }[diagram]");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"http://example.org/svg?digraph=digraph%20G%20{%20a%20-%3E%20b;%20}\"]",
+            1,
+        );
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate's rendered `src` is the
+    // macro target verbatim; it does not resolve the target relative to the
+    // `imagesdir` document attribute. Kept `#[ignore]`d with the Ruby-intended
+    // (imagesdir-prefixed) src.
+    // TODO: resolve image targets relative to `imagesdir`.
+    #[ignore]
+    #[test]
+    fn can_resolve_image_relative_to_imagesdir() {
+        verifies!(
+            r#"
+    test 'can resolve image relative to imagesdir' do
+      input = <<~'EOS'
+      :imagesdir: images
+
+      image::tiger.png[Tiger]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '/*[@class="imageblock"]//img[@src="images/tiger.png"][@alt="Tiger"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(":imagesdir: images\n\nimage::tiger.png[Tiger]\n");
+        assert_xpath(
+            &doc,
+            "/*[@class=\"imageblock\"]//img[@src=\"images/tiger.png\"][@alt=\"Tiger\"]",
+            1,
+        );
+    }
+
+    // The data-uri embedding and remote-image tests below require reading image
+    // files from disk (or over the network) and base64-encoding them, plus safe
+    // modes and a test web server, none of which this crate models.
+    non_normative!(
+        r##"
+    test 'embeds base64-encoded data uri for image when data-uri attribute is set' do
+      input = <<~'EOS'
+      :data-uri:
+      :imagesdir: fixtures
+
+      image::dot.gif[Dot]
+      EOS
+
+      doc = document_from_string input, safe: Asciidoctor::SafeMode::SAFE, attributes: { 'docdir' => testdir }
+      assert_equal 'fixtures', doc.attributes['imagesdir']
+      output = doc.convert
+      assert_xpath '//img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Dot"]', output, 1
+    end
+
+    test 'embeds base64-encoded data uri for image in classloader when data-uri attribute is set', if: jruby? do
+      require fixture_path 'assets.jar'
+      input = <<~'EOS'
+      :data-uri:
+      :imagesdir: uri:classloader:/images-in-jar
+
+      image::dot.gif[Dot]
+      EOS
+
+      doc = document_from_string input, safe: Asciidoctor::SafeMode::UNSAFE, attributes: { 'docdir' => testdir }
+      assert_equal 'uri:classloader:/images-in-jar', doc.attributes['imagesdir']
+      output = doc.convert
+      assert_xpath '//img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Dot"]', output, 1
+    end
+
+    test 'embeds SVG image with image/svg+xml mimetype when file extension is .svg' do
+      input = <<~'EOS'
+      :imagesdir: fixtures
+      :data-uri:
+
+      image::circle.svg[Tiger,100]
+      EOS
+
+      output = convert_string_to_embedded input, safe: Asciidoctor::SafeMode::SERVER, attributes: { 'docdir' => testdir }
+      assert_xpath '//img[starts-with(@src,"data:image/svg+xml;base64,")]', output, 1
+    end
+
+    test 'embeds empty base64-encoded data uri for unreadable image when data-uri attribute is set' do
+      input = <<~'EOS'
+      :data-uri:
+      :imagesdir: fixtures
+
+      image::unreadable.gif[Dot]
+      EOS
+
+      doc = document_from_string input, safe: Asciidoctor::SafeMode::SAFE, attributes: { 'docdir' => testdir }
+      assert_equal 'fixtures', doc.attributes['imagesdir']
+      output = doc.convert
+      assert_xpath '//img[@src="data:image/gif;base64,"]', output, 1
+      assert_message @logger, :WARN, '~image to embed not found or not readable'
+    end
+
+    test 'embeds base64-encoded data uri with application/octet-stream mimetype when file extension is missing' do
+      input = <<~'EOS'
+      :data-uri:
+      :imagesdir: fixtures
+
+      image::dot[Dot]
+      EOS
+
+      doc = document_from_string input, safe: Asciidoctor::SafeMode::SAFE, attributes: { 'docdir' => testdir }
+      assert_equal 'fixtures', doc.attributes['imagesdir']
+      output = doc.convert
+      assert_xpath '//img[starts-with(@src,"data:application/octet-stream;base64,")]', output, 1
+    end
+
+    test 'embeds base64-encoded data uri for remote image when data-uri attribute is set' do
+      input = <<~EOS
+      :data-uri:
+
+      image::http://#{resolve_localhost}:9876/fixtures/dot.gif[Dot]
+      EOS
+
+      output = using_test_webserver do
+        convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
+      end
+
+      assert_xpath '//img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Dot"]', output, 1
+    end
+
+    test 'embeds base64-encoded data uri for remote image when imagesdir is a URI and data-uri attribute is set' do
+      input = <<~EOS
+      :data-uri:
+      :imagesdir: http://#{resolve_localhost}:9876/fixtures
+
+      image::dot.gif[Dot]
+      EOS
+
+      output = using_test_webserver do
+        convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
+      end
+
+      assert_xpath '//img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Dot"]', output, 1
+    end
+
+    test 'should cache remote image when allow-uri-read, cache-uri, and data-uri are set' do
+      begin
+        if OpenURI.respond_to? :cache_open_uri
+          OpenURI.singleton_class.send :remove_method, :open_uri
+          OpenURI.singleton_class.send :alias_method, :open_uri, :cache_open_uri
+        end
+        using_test_webserver do |base_url, thr|
+          image_url = %(#{base_url}/fixtures/dot.gif)
+          image_data_uri = 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs='
+          attributes = { 'allow-uri-read' => '', 'cache-uri' => '', 'data-uri' => '' }
+          input = %(image::#{image_url}[Dot])
+          output = convert_string_to_embedded input, safe: :safe, attributes: attributes
+          assert defined? OpenURI::Cache
+          assert_xpath %(//img[@src="#{image_data_uri}"][@alt="Dot"]), output, 1
+          thr[:requests].clear
+          Dir.mktmpdir do |cache_path|
+            original_cache_path = OpenURI::Cache.cache_path
+            begin
+              OpenURI::Cache.cache_path = cache_path
+              assert_nil OpenURI::Cache.get image_url
+              2.times do
+                output = convert_string_to_embedded input, safe: :safe, attributes: attributes
+                refute_nil OpenURI::Cache.get image_url
+                assert_xpath %(//img[@src="#{image_data_uri}"][@alt="Dot"]), output, 1
+              end
+              assert_equal 1, thr[:requests].size
+              assert_match %r/ \/fixtures\/dot\.gif /, thr[:requests][0], 1
+            ensure
+              OpenURI::Cache.cache_path = original_cache_path
+            end
+          end
+        end
+      ensure
+        OpenURI.singleton_class.send :alias_method, :cache_open_uri, :open_uri
+        OpenURI.singleton_class.send :remove_method, :open_uri
+        OpenURI.singleton_class.send :alias_method, :open_uri, :original_open_uri
+      end
+    end
+
+    test 'uses remote image uri when data-uri attribute is set and image cannot be retrieved' do
+      image_uri = "http://#{resolve_localhost}:9876/fixtures/missing-image.gif"
+      input = <<~EOS
+      :data-uri:
+
+      image::#{image_uri}[Missing image]
+      EOS
+
+      output = using_test_webserver do
+        convert_string_to_embedded input, safe: :safe, attributes: { 'allow-uri-read' => '' }
+      end
+
+      assert_xpath %(/*[@class="imageblock"]//img[@src="#{image_uri}"][@alt="Missing image"]), output, 1
+      assert_message @logger, :WARN, '~could not retrieve image data from URI'
+    end
+
+    test 'uses remote image uri when data-uri attribute is set and allow-uri-read is not set' do
+      image_uri = "http://#{resolve_localhost}:9876/fixtures/dot.gif"
+      input = <<~EOS
+      :data-uri:
+
+      image::#{image_uri}[Dot]
+      EOS
+
+      output = using_test_webserver do
+        convert_string_to_embedded input, safe: :safe
+      end
+
+      assert_xpath %(/*[@class="imageblock"]//img[@src="#{image_uri}"][@alt="Dot"]), output, 1
+    end
+"##
+    );
+
+    #[test]
+    fn can_handle_embedded_data_uri_images() {
+        verifies!(
+            r#"
+    test 'can handle embedded data uri images' do
+      input = 'image::data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=[Dot]'
+      output = convert_string_to_embedded input
+      assert_xpath '//img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Dot"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("image::data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=[Dot]");
+        assert_xpath(
+            &doc,
+            "//img[@src=\"data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=\"][@alt=\"Dot\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn can_handle_embedded_data_uri_images_when_data_uri_attribute_is_set() {
+        verifies!(
+            r#"
+    test 'can handle embedded data uri images when data-uri attribute is set' do
+      input = <<~'EOS'
+      :data-uri:
+
+      image::data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=[Dot]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Dot"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            ":data-uri:\n\nimage::data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=[Dot]\n",
+        );
+        assert_xpath(
+            &doc,
+            "//img[@src=\"data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=\"][@alt=\"Dot\"]",
+            1,
+        );
+    }
+
+    // Safe-mode jail / ancestor-directory cleaning during data-uri file reads is
+    // out of scope.
+    non_normative!(
+        r#"
+    test 'cleans reference to ancestor directories in imagesdir before reading image if safe mode level is at least SAFE' do
+      input = <<~'EOS'
+      :data-uri:
+      :imagesdir: ../..//fixtures/./../../fixtures
+
+      image::dot.gif[Dot]
+      EOS
+
+      doc = document_from_string input, safe: Asciidoctor::SafeMode::SAFE, attributes: { 'docdir' => testdir }
+      assert_equal '../..//fixtures/./../../fixtures', doc.attributes['imagesdir']
+      output = doc.convert
+      assert_xpath '//img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Dot"]', output, 1
+      assert_message @logger, :WARN, 'image has illegal reference to ancestor of jail; recovering automatically'
+    end
+
+    test 'cleans reference to ancestor directories in target before reading image if safe mode level is at least SAFE' do
+      input = <<~'EOS'
+      :data-uri:
+      :imagesdir: ./
+
+      image::../..//fixtures/./../../fixtures/dot.gif[Dot]
+      EOS
+
+      doc = document_from_string input, safe: Asciidoctor::SafeMode::SAFE, attributes: { 'docdir' => testdir }
+      assert_equal './', doc.attributes['imagesdir']
+      output = doc.convert
+      assert_xpath '//img[@src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="][@alt="Dot"]', output, 1
+      assert_message @logger, :WARN, 'image has illegal reference to ancestor of jail; recovering automatically'
+    end
+"#
+    );
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
