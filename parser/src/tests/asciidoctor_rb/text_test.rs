@@ -272,10 +272,18 @@ fn horizontal_rule() {
     assert_xpath(&doc, "/hr/following-sibling::*[@class=\"paragraph\"]", 1);
 }
 
-#[test]
-fn markdown_horizontal_rules() {
-    verifies!(
-        r#"
+// The `markdown horizontal rules` (positive) test is out of scope as written,
+// so it is reproduced non-normatively rather than verified. It asserts a
+// thematic break for six variants at four leading offsets, but per the AsciiDoc
+// language spec (`blocks/partials/thematic-breaks.adoc`) only the
+// three-character `-`/`*` forms at column 1 are recognized; Asciidoctor's
+// additional `_`/`___`/`_ _ _` forms and 0–3 leading spaces are extensions this
+// crate deliberately does not implement (divergence tracked in
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/723). The
+// spec-recognized subset is verified directly against the language spec in
+// `tests::asciidoc_lang::blocks::thematic_breaks::markdown_style_thematic_breaks`.
+non_normative!(
+    r#"
   test 'markdown horizontal rules' do
     variants = [
       '---',
@@ -312,30 +320,7 @@ fn markdown_horizontal_rules() {
   end
 
 "#
-    );
-
-    // Per the AsciiDoc language spec, only the three-character `-` and `*` forms
-    // are recognized, and (as with the other block forms) at the start of the
-    // line. Asciidoctor's additional `_` variants and 0–3 leading-space offsets
-    // are Asciidoctor-specific extensions and are not modeled here (divergence
-    // tracked in https://github.com/asciidoc-rs/asciidoc-parser/issues/723);
-    // only the spec-recognized forms at column 1 are driven.
-    for variant in ["---", "- - -", "***", "* * *"] {
-        let input = format!(
-            "This line is separated by a horizontal rule...\n\n{variant}\n\n...from this line."
-        );
-        let doc = Parser::default().parse(&input);
-
-        assert_xpath(&doc, "//hr", 1);
-        assert_xpath(&doc, "/*[@class=\"paragraph\"]", 2);
-        assert_xpath(
-            &doc,
-            "(/*[@class=\"paragraph\"])[1]/following-sibling::hr",
-            1,
-        );
-        assert_xpath(&doc, "/hr/following-sibling::*[@class=\"paragraph\"]", 1);
-    }
-}
+);
 
 #[test]
 fn markdown_horizontal_rules_negative_case() {
@@ -809,14 +794,18 @@ mod basic_styling {
         );
 
         // Compat mode is unsupported; only the modern form is driven here.
-        // `not(@class)` is not supported by the test xpath engine; there are two
-        // `<code>` elements total and one carries the role, so the unclassed one
-        // is implied.
         let doc = Parser::default().parse("**B**__I__``M``[role]``M``");
         assert_xpath(&doc, "//strong", 1);
         assert_xpath(&doc, "//em", 1);
-        assert_xpath(&doc, "//code", 2);
         assert_xpath(&doc, "//code[@class=\"role\"]", 1);
+
+        // The test xpath engine has no `not(@class)`, so the Ruby assertion that
+        // exactly one `<code>` has no class is instead pinned by asserting the
+        // full rendered output (which also subsumes the checks above).
+        assert_eq!(
+            rendered_paragraphs(&doc)[0],
+            r#"<strong>B</strong><em>I</em><code>M</code><code class="role">M</code>"#
+        );
     }
 
     non_normative!(
