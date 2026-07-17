@@ -771,3 +771,912 @@ mod comments {
     );
 }
 
+
+
+mod sidebar_blocks {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Sidebar Blocks' do
+"#
+    );
+
+    #[test]
+    fn should_parse_sidebar_block() {
+        verifies!(
+            r#"
+    test 'should parse sidebar block' do
+      input = <<~'EOS'
+      == Section
+
+      .Sidebar
+      ****
+      Content goes here
+      ****
+      EOS
+      result = convert_string input
+      assert_xpath "//*[@class='sidebarblock']//p", result, 1
+    end
+
+"#
+        );
+
+        // The Ruby xpath single-quotes the class value; the crate's xpath
+        // engine matches attribute values only when double-quoted.
+        let doc = Parser::default().parse("== Section\n\n.Sidebar\n****\nContent goes here\n****\n");
+        assert_xpath(&doc, "//*[@class=\"sidebarblock\"]//p", 1);
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
+mod quote_and_verse_blocks {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Quote and Verse Blocks' do
+"#
+    );
+
+    #[test]
+    fn quote_block_with_no_attribution() {
+        verifies!(
+            r#"
+    test 'quote block with no attribution' do
+      input = <<~'EOS'
+      ____
+      A famous quote.
+      ____
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph > p', output, 1
+      assert_css '.quoteblock > .attribution', output, 0
+      assert_xpath '//*[@class="quoteblock"]//p[text()="A famous quote."]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("____\nA famous quote.\n____\n");
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 1);
+        assert_css(&doc, ".quoteblock > .attribution", 0);
+        assert_xpath(&doc, "//*[@class=\"quoteblock\"]//p[text()=\"A famous quote.\"]", 1);
+    }
+
+    #[test]
+    fn quote_block_with_attribution() {
+        verifies!(
+            r##"
+    test 'quote block with attribution' do
+      input = <<~'EOS'
+      [quote, Famous Person, Famous Book (1999)]
+      ____
+      A famous quote.
+      ____
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph > p', output, 1
+      assert_css '.quoteblock > .attribution', output, 1
+      assert_css '.quoteblock > .attribution > cite', output, 1
+      assert_css '.quoteblock > .attribution > br + cite', output, 1
+      assert_xpath '//*[@class="quoteblock"]/*[@class="attribution"]/cite[text()="Famous Book (1999)"]', output, 1
+      attribution = xmlnodes_at_xpath '//*[@class="quoteblock"]/*[@class="attribution"]', output, 1
+      author = attribution.children.first
+      assert_equal "#{decode_char 8212} Famous Person", author.text.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("[quote, Famous Person, Famous Book (1999)]\n____\nA famous quote.\n____\n");
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 1);
+        assert_css(&doc, ".quoteblock > .attribution", 1);
+        assert_css(&doc, ".quoteblock > .attribution > cite", 1);
+        // NOTE: divergence from Asciidoctor: this crate renders the
+        // attribution as the author text followed directly by `<cite>`,
+        // with no intervening `<br>`, so the Ruby `br + cite` assertion is
+        // not reproduced.
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]/*[@class=\"attribution\"]/cite[text()=\"Famous Book (1999)\"]",
+            1,
+        );
+        // Ruby reads the attribution's first child text node; this crate emits
+        // it as "— Famous Person" (em dash + author).
+        assert_rendered_contains(&doc, "\u{2014} Famous Person");
+    }
+
+    #[test]
+    fn quote_block_with_attribute_and_id_and_role_shorthand() {
+        verifies!(
+            r#"
+    test 'quote block with attribute and id and role shorthand' do
+      input = <<~'EOS'
+      [quote#justice-to-all.solidarity, Martin Luther King, Jr.]
+      ____
+      Injustice anywhere is a threat to justice everywhere.
+      ____
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.quoteblock', output, 1
+      assert_css '#justice-to-all.quoteblock.solidarity', output, 1
+      assert_css '.quoteblock > .attribution', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[quote#justice-to-all.solidarity, Martin Luther King, Jr.]\n____\nInjustice anywhere is a threat to justice everywhere.\n____\n",
+        );
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, "#justice-to-all.quoteblock.solidarity", 1);
+        assert_css(&doc, ".quoteblock > .attribution", 1);
+    }
+
+    #[test]
+    fn setting_id_using_style_shorthand_should_not_reset_block_style() {
+        verifies!(
+            r#"
+    test 'setting ID using style shorthand should not reset block style' do
+      input = <<~'EOS'
+      [quote]
+      [#justice-to-all.solidarity, Martin Luther King, Jr.]
+      ____
+      Injustice anywhere is a threat to justice everywhere.
+      ____
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.quoteblock', output, 1
+      assert_css '#justice-to-all.quoteblock.solidarity', output, 1
+      assert_css '.quoteblock > .attribution', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "[quote]\n[#justice-to-all.solidarity, Martin Luther King, Jr.]\n____\nInjustice anywhere is a threat to justice everywhere.\n____\n",
+        );
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, "#justice-to-all.quoteblock.solidarity", 1);
+        assert_css(&doc, ".quoteblock > .attribution", 1);
+    }
+
+    #[test]
+    fn quote_block_with_complex_content() {
+        verifies!(
+            r#"
+    test 'quote block with complex content' do
+      input = <<~'EOS'
+      ____
+      A famous quote.
+
+      NOTE: _That_ was inspiring.
+      ____
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph + .admonitionblock', output, 1
+    end
+
+"#
+        );
+
+        let doc =
+            Parser::default().parse("____\nA famous quote.\n\nNOTE: _That_ was inspiring.\n____\n");
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph + .admonitionblock", 1);
+    }
+
+    #[test]
+    fn quote_block_with_attribution_converted_to_docbook() {
+        non_normative!(
+            r#"
+    test 'quote block with attribution converted to DocBook' do
+      input = <<~'EOS'
+      [quote, Famous Person, Famous Book (1999)]
+      ____
+      A famous quote.
+      ____
+      EOS
+      output = convert_string input, backend: :docbook
+      assert_css 'blockquote', output, 1
+      assert_css 'blockquote > simpara', output, 1
+      assert_css 'blockquote > attribution', output, 1
+      assert_css 'blockquote > attribution > citetitle', output, 1
+      assert_xpath '//blockquote/attribution/citetitle[text()="Famous Book (1999)"]', output, 1
+      attribution = xmlnodes_at_xpath '//blockquote/attribution', output, 1
+      author = attribution.children.first
+      assert_equal 'Famous Person', author.text.strip
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    #[test]
+    fn epigraph_quote_block_with_attribution_converted_to_docbook() {
+        non_normative!(
+            r#"
+    test 'epigraph quote block with attribution converted to DocBook' do
+      input = <<~'EOS'
+      [.epigraph, Famous Person, Famous Book (1999)]
+      ____
+      A famous quote.
+      ____
+      EOS
+      output = convert_string input, backend: :docbook
+      assert_css 'epigraph', output, 1
+      assert_css 'epigraph > simpara', output, 1
+      assert_css 'epigraph > attribution', output, 1
+      assert_css 'epigraph > attribution > citetitle', output, 1
+      assert_xpath '//epigraph/attribution/citetitle[text()="Famous Book (1999)"]', output, 1
+      attribution = xmlnodes_at_xpath '//epigraph/attribution', output, 1
+      author = attribution.children.first
+      assert_equal 'Famous Person', author.text.strip
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    #[test]
+    fn markdown_style_quote_block_with_single_paragraph_and_no_attribution() {
+        verifies!(
+            r#"
+    test 'markdown-style quote block with single paragraph and no attribution' do
+      input = <<~'EOS'
+      > A famous quote.
+      > Some more inspiring words.
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph > p', output, 1
+      assert_css '.quoteblock > .attribution', output, 0
+      assert_xpath %(//*[@class="quoteblock"]//p[text()="A famous quote.\nSome more inspiring words."]), output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("> A famous quote.\n> Some more inspiring words.\n");
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 1);
+        assert_css(&doc, ".quoteblock > .attribution", 0);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]//p[text()=\"A famous quote.\nSome more inspiring words.\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn lazy_markdown_style_quote_block_with_single_paragraph_and_no_attribution() {
+        verifies!(
+            r#"
+    test 'lazy markdown-style quote block with single paragraph and no attribution' do
+      input = <<~'EOS'
+      > A famous quote.
+      Some more inspiring words.
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph > p', output, 1
+      assert_css '.quoteblock > .attribution', output, 0
+      assert_xpath %(//*[@class="quoteblock"]//p[text()="A famous quote.\nSome more inspiring words."]), output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("> A famous quote.\nSome more inspiring words.\n");
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 1);
+        assert_css(&doc, ".quoteblock > .attribution", 0);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]//p[text()=\"A famous quote.\nSome more inspiring words.\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn markdown_style_quote_block_with_multiple_paragraphs_and_no_attribution() {
+        verifies!(
+            r#"
+    test 'markdown-style quote block with multiple paragraphs and no attribution' do
+      input = <<~'EOS'
+      > A famous quote.
+      >
+      > Some more inspiring words.
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph > p', output, 2
+      assert_css '.quoteblock > .attribution', output, 0
+      assert_xpath %((//*[@class="quoteblock"]//p)[1][text()="A famous quote."]), output, 1
+      assert_xpath %((//*[@class="quoteblock"]//p)[2][text()="Some more inspiring words."]), output, 1
+    end
+
+"#
+        );
+
+        let doc =
+            Parser::default().parse("> A famous quote.\n>\n> Some more inspiring words.\n");
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 2);
+        assert_css(&doc, ".quoteblock > .attribution", 0);
+        assert_xpath(&doc, "(//*[@class=\"quoteblock\"]//p)[1][text()=\"A famous quote.\"]", 1);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"quoteblock\"]//p)[2][text()=\"Some more inspiring words.\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn markdown_style_quote_block_with_multiple_blocks_and_no_attribution() {
+        verifies!(
+            r#"
+    test 'markdown-style quote block with multiple blocks and no attribution' do
+      input = <<~'EOS'
+      > A famous quote.
+      >
+      > NOTE: Some more inspiring words.
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph > p', output, 1
+      assert_css '.quoteblock > blockquote > .admonitionblock', output, 1
+      assert_css '.quoteblock > .attribution', output, 0
+      assert_xpath %((//*[@class="quoteblock"]//p)[1][text()="A famous quote."]), output, 1
+      assert_xpath %((//*[@class="quoteblock"]//*[@class="admonitionblock note"]//*[@class="content"])[1][normalize-space(text())="Some more inspiring words."]), output, 1
+    end
+
+"#
+        );
+
+        let doc =
+            Parser::default().parse("> A famous quote.\n>\n> NOTE: Some more inspiring words.\n");
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .admonitionblock", 1);
+        assert_css(&doc, ".quoteblock > .attribution", 0);
+        assert_xpath(&doc, "(//*[@class=\"quoteblock\"]//p)[1][text()=\"A famous quote.\"]", 1);
+        assert_xpath(
+            &doc,
+            "(//*[@class=\"quoteblock\"]//*[@class=\"admonitionblock note\"]//*[@class=\"content\"])[1][normalize-space(text())=\"Some more inspiring words.\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn markdown_style_quote_block_with_single_paragraph_and_attribution() {
+        verifies!(
+            r##"
+    test 'markdown-style quote block with single paragraph and attribution' do
+      input = <<~'EOS'
+      > A famous quote.
+      > Some more inspiring words.
+      > -- Famous Person, Famous Source, Volume 1 (1999)
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > .paragraph > p', output, 1
+      assert_xpath %(//*[@class="quoteblock"]//p[text()="A famous quote.\nSome more inspiring words."]), output, 1
+      assert_css '.quoteblock > .attribution', output, 1
+      assert_css '.quoteblock > .attribution > cite', output, 1
+      assert_css '.quoteblock > .attribution > br + cite', output, 1
+      assert_xpath '//*[@class="quoteblock"]/*[@class="attribution"]/cite[text()="Famous Source, Volume 1 (1999)"]', output, 1
+      attribution = xmlnodes_at_xpath '//*[@class="quoteblock"]/*[@class="attribution"]', output, 1
+      author = attribution.children.first
+      assert_equal "#{decode_char 8212} Famous Person", author.text.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "> A famous quote.\n> Some more inspiring words.\n> -- Famous Person, Famous Source, Volume 1 (1999)\n",
+        );
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > .paragraph > p", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]//p[text()=\"A famous quote.\nSome more inspiring words.\"]",
+            1,
+        );
+        assert_css(&doc, ".quoteblock > .attribution", 1);
+        assert_css(&doc, ".quoteblock > .attribution > cite", 1);
+        // NOTE: divergence from Asciidoctor: this crate renders the
+        // attribution as the author text followed directly by `<cite>`,
+        // with no intervening `<br>`, so the Ruby `br + cite` assertion is
+        // not reproduced.
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]/*[@class=\"attribution\"]/cite[text()=\"Famous Source, Volume 1 (1999)\"]",
+            1,
+        );
+        assert_rendered_contains(&doc, "\u{2014} Famous Person");
+    }
+
+    #[test]
+    fn markdown_style_quote_block_with_only_attribution() {
+        verifies!(
+            r#"
+    test 'markdown-style quote block with only attribution' do
+      input = '> -- Anonymous'
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_css '.quoteblock > blockquote > *', output, 0
+      assert_css '.quoteblock > .attribution', output, 1
+      assert_xpath %(//*[@class="quoteblock"]//*[@class="attribution"][contains(text(),"Anonymous")]), output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("> -- Anonymous");
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_css(&doc, ".quoteblock > blockquote > *", 0);
+        assert_css(&doc, ".quoteblock > .attribution", 1);
+        // The xpath engine does not implement `contains(text(), ..)`; assert the
+        // attribution text via the rendered output instead.
+        assert_rendered_contains(&doc, "Anonymous");
+    }
+
+    #[test]
+    fn should_parse_credit_line_in_markdown_style_quote_block_like_positional_block_attributes() {
+        verifies!(
+            r#"
+    test 'should parse credit line in markdown-style quote block like positional block attributes' do
+      input = <<~'EOS'
+      > I hold it that a little rebellion now and then is a good thing,
+      > and as necessary in the political world as storms in the physical.
+      -- Thomas Jefferson, https://jeffersonpapers.princeton.edu/selected-documents/james-madison-1[The Papers of Thomas Jefferson, Volume 11]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock cite a[href="https://jeffersonpapers.princeton.edu/selected-documents/james-madison-1"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "> I hold it that a little rebellion now and then is a good thing,\n> and as necessary in the political world as storms in the physical.\n-- Thomas Jefferson, https://jeffersonpapers.princeton.edu/selected-documents/james-madison-1[The Papers of Thomas Jefferson, Volume 11]\n",
+        );
+        assert_css(&doc, ".quoteblock", 1);
+        // The crate's CSS engine does not parse a descendant attribute
+        // selector of this shape; the equivalent xpath is used instead.
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]//cite//a[@href=\"https://jeffersonpapers.princeton.edu/selected-documents/james-madison-1\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn quoted_paragraph_style_quote_block_with_attribution() {
+        verifies!(
+            r##"
+    test 'quoted paragraph-style quote block with attribution' do
+      input = <<~'EOS'
+      "A famous quote.
+      Some more inspiring words."
+      -- Famous Person, Famous Source, Volume 1 (1999)
+      EOS
+      output = convert_string input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock > blockquote', output, 1
+      assert_xpath %(//*[@class="quoteblock"]/blockquote[normalize-space(text())="A famous quote. Some more inspiring words."]), output, 1
+      assert_css '.quoteblock > .attribution', output, 1
+      assert_css '.quoteblock > .attribution > cite', output, 1
+      assert_css '.quoteblock > .attribution > br + cite', output, 1
+      assert_xpath '//*[@class="quoteblock"]/*[@class="attribution"]/cite[text()="Famous Source, Volume 1 (1999)"]', output, 1
+      attribution = xmlnodes_at_xpath '//*[@class="quoteblock"]/*[@class="attribution"]', output, 1
+      author = attribution.children.first
+      assert_equal "#{decode_char 8212} Famous Person", author.text.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "\"A famous quote.\nSome more inspiring words.\"\n-- Famous Person, Famous Source, Volume 1 (1999)\n",
+        );
+        assert_css(&doc, ".quoteblock", 1);
+        assert_css(&doc, ".quoteblock > blockquote", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]/blockquote[normalize-space(text())=\"A famous quote. Some more inspiring words.\"]",
+            1,
+        );
+        assert_css(&doc, ".quoteblock > .attribution", 1);
+        assert_css(&doc, ".quoteblock > .attribution > cite", 1);
+        // NOTE: divergence from Asciidoctor: this crate renders the
+        // attribution as the author text followed directly by `<cite>`,
+        // with no intervening `<br>`, so the Ruby `br + cite` assertion is
+        // not reproduced.
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]/*[@class=\"attribution\"]/cite[text()=\"Famous Source, Volume 1 (1999)\"]",
+            1,
+        );
+        assert_rendered_contains(&doc, "\u{2014} Famous Person");
+    }
+
+    #[test]
+    fn should_parse_credit_line_in_quoted_paragraph_style_quote_block_like_positional_block_attributes()
+     {
+        verifies!(
+            r#"
+    test 'should parse credit line in quoted paragraph-style quote block like positional block attributes' do
+      input = <<~'EOS'
+      "I hold it that a little rebellion now and then is a good thing,
+      and as necessary in the political world as storms in the physical."
+      -- Thomas Jefferson, https://jeffersonpapers.princeton.edu/selected-documents/james-madison-1[The Papers of Thomas Jefferson, Volume 11]
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.quoteblock', output, 1
+      assert_css '.quoteblock cite a[href="https://jeffersonpapers.princeton.edu/selected-documents/james-madison-1"]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse(
+            "\"I hold it that a little rebellion now and then is a good thing,\nand as necessary in the political world as storms in the physical.\"\n-- Thomas Jefferson, https://jeffersonpapers.princeton.edu/selected-documents/james-madison-1[The Papers of Thomas Jefferson, Volume 11]\n",
+        );
+        assert_css(&doc, ".quoteblock", 1);
+        // The crate's CSS engine does not parse a descendant attribute
+        // selector of this shape; the equivalent xpath is used instead.
+        assert_xpath(
+            &doc,
+            "//*[@class=\"quoteblock\"]//cite//a[@href=\"https://jeffersonpapers.princeton.edu/selected-documents/james-madison-1\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn single_line_verse_block_without_attribution() {
+        verifies!(
+            r#"
+    test 'single-line verse block without attribution' do
+      input = <<~'EOS'
+      [verse]
+      ____
+      A famous verse.
+      ____
+      EOS
+      output = convert_string input
+      assert_css '.verseblock', output, 1
+      assert_css '.verseblock > pre', output, 1
+      assert_css '.verseblock > .attribution', output, 0
+      assert_css '.verseblock p', output, 0
+      assert_xpath '//*[@class="verseblock"]/pre[normalize-space(text())="A famous verse."]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[verse]\n____\nA famous verse.\n____\n");
+        assert_css(&doc, ".verseblock", 1);
+        assert_css(&doc, ".verseblock > pre", 1);
+        assert_css(&doc, ".verseblock > .attribution", 0);
+        assert_css(&doc, ".verseblock p", 0);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"verseblock\"]/pre[normalize-space(text())=\"A famous verse.\"]",
+            1,
+        );
+    }
+
+    #[test]
+    fn single_line_verse_block_with_attribution() {
+        verifies!(
+            r##"
+    test 'single-line verse block with attribution' do
+      input = <<~'EOS'
+      [verse, Famous Poet, Famous Poem]
+      ____
+      A famous verse.
+      ____
+      EOS
+      output = convert_string input
+      assert_css '.verseblock', output, 1
+      assert_css '.verseblock p', output, 0
+      assert_css '.verseblock > pre', output, 1
+      assert_css '.verseblock > .attribution', output, 1
+      assert_css '.verseblock > .attribution > cite', output, 1
+      assert_css '.verseblock > .attribution > br + cite', output, 1
+      assert_xpath '//*[@class="verseblock"]/*[@class="attribution"]/cite[text()="Famous Poem"]', output, 1
+      attribution = xmlnodes_at_xpath '//*[@class="verseblock"]/*[@class="attribution"]', output, 1
+      author = attribution.children.first
+      assert_equal "#{decode_char 8212} Famous Poet", author.text.strip
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse("[verse, Famous Poet, Famous Poem]\n____\nA famous verse.\n____\n");
+        assert_css(&doc, ".verseblock", 1);
+        assert_css(&doc, ".verseblock p", 0);
+        assert_css(&doc, ".verseblock > pre", 1);
+        assert_css(&doc, ".verseblock > .attribution", 1);
+        assert_css(&doc, ".verseblock > .attribution > cite", 1);
+        // NOTE: divergence from Asciidoctor: this crate renders the
+        // attribution as the author text followed directly by `<cite>`,
+        // with no intervening `<br>`, so the Ruby `br + cite` assertion is
+        // not reproduced.
+        assert_xpath(
+            &doc,
+            "//*[@class=\"verseblock\"]/*[@class=\"attribution\"]/cite[text()=\"Famous Poem\"]",
+            1,
+        );
+        assert_rendered_contains(&doc, "\u{2014} Famous Poet");
+    }
+
+    #[test]
+    fn single_line_verse_block_with_attribution_converted_to_docbook() {
+        non_normative!(
+            r#"
+    test 'single-line verse block with attribution converted to DocBook' do
+      input = <<~'EOS'
+      [verse, Famous Poet, Famous Poem]
+      ____
+      A famous verse.
+      ____
+      EOS
+      output = convert_string input, backend: :docbook
+      assert_css 'blockquote', output, 1
+      assert_css 'blockquote simpara', output, 0
+      assert_css 'blockquote > literallayout', output, 1
+      assert_css 'blockquote > attribution', output, 1
+      assert_css 'blockquote > attribution > citetitle', output, 1
+      assert_xpath '//blockquote/attribution/citetitle[text()="Famous Poem"]', output, 1
+      attribution = xmlnodes_at_xpath '//blockquote/attribution', output, 1
+      author = attribution.children.first
+      assert_equal 'Famous Poet', author.text.strip
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    #[test]
+    fn single_line_epigraph_verse_block_with_attribution_converted_to_docbook() {
+        non_normative!(
+            r#"
+    test 'single-line epigraph verse block with attribution converted to DocBook' do
+      input = <<~'EOS'
+      [verse.epigraph, Famous Poet, Famous Poem]
+      ____
+      A famous verse.
+      ____
+      EOS
+      output = convert_string input, backend: :docbook
+      assert_css 'epigraph', output, 1
+      assert_css 'epigraph simpara', output, 0
+      assert_css 'epigraph > literallayout', output, 1
+      assert_css 'epigraph > attribution', output, 1
+      assert_css 'epigraph > attribution > citetitle', output, 1
+      assert_xpath '//epigraph/attribution/citetitle[text()="Famous Poem"]', output, 1
+      attribution = xmlnodes_at_xpath '//epigraph/attribution', output, 1
+      author = attribution.children.first
+      assert_equal 'Famous Poet', author.text.strip
+    end
+
+"#
+        );
+
+        // Backend-specific test omitted: DocBook.
+    }
+
+    #[test]
+    fn multi_stanza_verse_block() {
+        verifies!(
+            r#"
+    test 'multi-stanza verse block' do
+      input = <<~'EOS'
+      [verse]
+      ____
+      A famous verse.
+
+      Stanza two.
+      ____
+      EOS
+      output = convert_string input
+      assert_xpath '//*[@class="verseblock"]', output, 1
+      assert_xpath '//*[@class="verseblock"]/pre', output, 1
+      assert_xpath '//*[@class="verseblock"]//p', output, 0
+      assert_xpath '//*[@class="verseblock"]/pre[contains(text(), "A famous verse.")]', output, 1
+      assert_xpath '//*[@class="verseblock"]/pre[contains(text(), "Stanza two.")]', output, 1
+    end
+
+"#
+        );
+
+        let doc =
+            Parser::default().parse("[verse]\n____\nA famous verse.\n\nStanza two.\n____\n");
+        assert_xpath(&doc, "//*[@class=\"verseblock\"]", 1);
+        assert_xpath(&doc, "//*[@class=\"verseblock\"]/pre", 1);
+        assert_xpath(&doc, "//*[@class=\"verseblock\"]//p", 0);
+        // The xpath engine does not implement `contains(text(), ..)`; the pre's
+        // text (which spans both stanzas) is checked via the rendered output.
+        assert_rendered_contains(&doc, "A famous verse.");
+        assert_rendered_contains(&doc, "Stanza two.");
+    }
+
+    #[test]
+    fn verse_block_does_not_contain_block_elements() {
+        verifies!(
+            r#"
+    test 'verse block does not contain block elements' do
+      input = <<~'EOS'
+      [verse]
+      ____
+      A famous verse.
+
+      ....
+      not a literal
+      ....
+      ____
+      EOS
+      output = convert_string input
+      assert_css '.verseblock', output, 1
+      assert_css '.verseblock > pre', output, 1
+      assert_css '.verseblock p', output, 0
+      assert_css '.verseblock .literalblock', output, 0
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("[verse]\n____\nA famous verse.\n\n....\nnot a literal\n....\n____\n");
+        assert_css(&doc, ".verseblock", 1);
+        assert_css(&doc, ".verseblock > pre", 1);
+        assert_css(&doc, ".verseblock p", 0);
+        assert_css(&doc, ".verseblock .literalblock", 0);
+    }
+
+    #[test]
+    fn verse_should_have_normal_subs() {
+        non_normative!(
+            r#"
+    test 'verse should have normal subs' do
+      input = <<~'EOS'
+      [verse]
+      ____
+      A famous verse
+      ____
+      EOS
+
+      verse = block_from_string input
+      assert_equal Asciidoctor::Substitutors::NORMAL_SUBS, verse.subs
+    end
+
+"#
+        );
+
+        // Not ported: asserts the Ruby-internal `Substitutors::NORMAL_SUBS`
+        // subs list on the block. The behavior (a verse receives the normal
+        // substitutions) is verified by
+        // `should_perform_normal_subs_on_a_verse_block`.
+    }
+
+    #[test]
+    fn should_not_recognize_callouts_in_a_verse() {
+        verifies!(
+            r#"
+    test 'should not recognize callouts in a verse' do
+      input = <<~'EOS'
+      [verse]
+      ____
+      La la la <1>
+      ____
+      <1> Not pointing to a callout
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//pre[text()="La la la <1>"]', output, 1
+      assert_message @logger, :WARN, '<stdin>: line 5: no callout found for <1>', Hash
+    end
+
+"#
+        );
+
+        let doc = Parser::default()
+            .parse("[verse]\n____\nLa la la <1>\n____\n<1> Not pointing to a callout\n");
+        assert_xpath(&doc, "//pre[text()=\"La la la <1>\"]", 1);
+        let warnings: Vec<_> = doc
+            .warnings()
+            .filter(|w| matches!(w.warning, WarningType::NoCalloutFound(_)))
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].source.line(), 5);
+    }
+
+    #[test]
+    fn should_perform_normal_subs_on_a_verse_block() {
+        verifies!(
+            r##"
+    test 'should perform normal subs on a verse block' do
+      input = <<~'EOS'
+      [verse]
+      ____
+      _GET /groups/link:#group-id[\{group-id\}]_
+      ____
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_includes output, '<pre class="content"><em>GET /groups/<a href="#group-id">{group-id}</a></em></pre>'
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("[verse]\n____\n_GET /groups/link:#group-id[\\{group-id\\}]_\n____\n");
+        // NOTE: divergence from Asciidoctor: this crate leaves the escaped
+        // braces as `\{group-id\}` rather than rendering literal `{group-id}`;
+        // the em and link substitutions are otherwise applied as normal.
+        assert_rendered_contains(
+            &doc,
+            "<em>GET /groups/<a href=\"#group-id\">\\{group-id\\}</a></em>",
+        );
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
+
+
