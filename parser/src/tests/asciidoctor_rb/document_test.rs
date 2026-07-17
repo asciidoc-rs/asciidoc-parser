@@ -46,14 +46,20 @@
 //! with real assertions.
 //!
 //! Porting this file also surfaced several places where asciidoc-parser
-//! currently diverges from Asciidoctor's document model (marked `DIVERGENCE`
-//! in the comments below): it does not derive/override the doctitle from
-//! `:doctitle:`/`:title:` attribute entries, does not populate `authorcount`
-//! or derive author attributes from `:authors:`/`author_N` entries, does not
-//! implement compat-mode for legacy (setext) doctitles, does not parse
-//! attribute entries or an author line beneath a setext title, and does not
-//! implement the `manpage` doctype. Those tests are left `non_normative!` so
-//! coverage is not overstated; the gaps are called out for follow-up.
+//! currently diverges from Asciidoctor's document model. Each is tracked by an
+//! issue and marked `DIVERGENCE` (with the issue link) in the comments below:
+//!
+//! - doctitle not derived/overridden from `:doctitle:`/`:title:` attribute
+//!   entries: <https://github.com/asciidoc-rs/asciidoc-parser/issues/716>;
+//! - `authorcount` not populated and author attributes not derived from
+//!   `:authors:`/`author_N` entries:
+//!   <https://github.com/asciidoc-rs/asciidoc-parser/issues/718>;
+//! - compat-mode not enabled for a legacy (setext) doctitle: <https://github.com/asciidoc-rs/asciidoc-parser/issues/719>;
+//! - attribute entries / author line not parsed beneath a setext title: <https://github.com/asciidoc-rs/asciidoc-parser/issues/720>;
+//! - `manpage` doctype not implemented: <https://github.com/asciidoc-rs/asciidoc-parser/issues/721>.
+//!
+//! Those tests are left `non_normative!` so coverage is not overstated; the
+//! gaps are called out for follow-up.
 
 use crate::tests::prelude::*;
 
@@ -599,12 +605,12 @@ mod structure {
         assert_eq!(rendered_paragraphs(&doc), ["Snorf"]);
     }
 
-    // DIVERGENCE: several of these are out of scope (standalone `max-width`
-    // framing, the `Document::Title` partition/`sanitize` API), and several
-    // exercise document-title behaviors this crate does not match — it does
-    // not enable compat-mode for a legacy (setext) doctitle, and it does not
-    // derive or override `doctitle`/`title` from `:doctitle:`/`:title:`
-    // attribute entries.
+    // Out of scope here: standalone `max-width` framing and the Ruby
+    // `Document::Title` partition/`sanitize` API. DIVERGENCE: compat-mode is
+    // not enabled for a legacy (setext) doctitle
+    // (https://github.com/asciidoc-rs/asciidoc-parser/issues/719), and the
+    // doctitle is not derived/overridden from `:doctitle:`/`:title:` attribute
+    // entries (https://github.com/asciidoc-rs/asciidoc-parser/issues/716).
     non_normative!(
         r##"
 
@@ -830,10 +836,11 @@ mod structure {
         );
     }
 
-    // DIVERGENCE: `:doctitle:`/`:title:` attribute entries overriding the
-    // implicit doctitle (and the `doctitle` accessor reflecting a later
-    // override) are not implemented; these also assert on standalone
-    // `#preamble` markup produced by full-document conversion.
+    // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/716):
+    // `:doctitle:`/`:title:` attribute entries overriding the implicit doctitle
+    // (and the `doctitle` accessor reflecting a later override) are not
+    // implemented; these also assert on standalone `#preamble` markup produced
+    // by full-document conversion.
     non_normative!(
         r##"
 
@@ -971,11 +978,12 @@ mod structure {
         assert_eq!(rendered_paragraphs(&doc), ["ACME Docs"]);
     }
 
-    // DIVERGENCE: the sibling case (attribute defined *later* in the header)
-    // resolves `doctitle` lazily in Asciidoctor to `ACME Docs`; asciidoc-parser
-    // leaves it unresolved. The remaining tests here recognize titles preceded
-    // by blank lines / preprocessor conditionals / include files and assert on
-    // standalone `#header`/`#content` markup, all conversion concerns.
+    // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/716):
+    // the sibling case (attribute defined *later* in the header) resolves
+    // `doctitle` lazily in Asciidoctor to `ACME Docs`; asciidoc-parser leaves it
+    // unresolved. The remaining tests here recognize titles preceded by blank
+    // lines / preprocessor conditionals / include files and assert on standalone
+    // `#header`/`#content` markup, all conversion concerns.
     non_normative!(
         r##"
 
@@ -1128,13 +1136,13 @@ mod structure {
         assert_eq!(doc.header().title(), None);
     }
 
-    // DIVERGENCE / out of scope: the remainder of the structure suite. Most
-    // tests here convert to standalone HTML or DocBook (author/revision
-    // bylines, copyright, header/footer, footnotes-in-footer) or use the
-    // embedded-vs-standalone conversion toggles and `parse_header_only`. A few
-    // touch parser behavior this crate does not match: `authorcount` is never
-    // populated, and author attributes are not derived from `:authors:` or
-    // indexed `author_N` attribute entries.
+    // Out of scope: most of the remaining structure suite converts to standalone
+    // HTML or DocBook (author/revision bylines, copyright, header/footer,
+    // footnotes-in-footer) or uses the embedded-vs-standalone conversion toggles
+    // and `parse_header_only`. DIVERGENCE
+    // (https://github.com/asciidoc-rs/asciidoc-parser/issues/718): `authorcount`
+    // is never populated, and author attributes are not derived from `:authors:`
+    // or indexed `author_N` attribute entries.
     non_normative!(
         r##"
 
@@ -1893,10 +1901,12 @@ mod catalog {
 }
 
 // Backend/doctype selection driving DocBook, standalone/XHTML, and manpage
-// output — conversion. DIVERGENCE: the parser behaviors it also touches are
-// unimplemented here — attribute entries and an author line beneath a
-// setext title are not parsed, and the `manpage` doctype (mantitle,
-// manvolnum, manname/manpurpose, synopsis special section) is not modeled.
+// output — conversion. DIVERGENCE: attribute entries and an author line
+// beneath a setext title are not parsed
+// (https://github.com/asciidoc-rs/asciidoc-parser/issues/720), and the
+// `manpage` doctype (mantitle, manvolnum, manname/manpurpose, synopsis
+// special section) is not modeled
+// (https://github.com/asciidoc-rs/asciidoc-parser/issues/721).
 mod backends_and_doctypes {
     use crate::tests::prelude::*;
 
