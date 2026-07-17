@@ -10800,10 +10800,11 @@ mod description_lists_redux {
             assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 2);
         }
 
-        // Not yet supported: a block title offset by a blank line is not attached as
-        // the title of the following description list.
-        non_normative!(
-            r#"
+        #[test]
+        fn block_title_offset_by_blank_line_divides_lists_and_becomes_title_of_second_list_because_item_has_text()
+         {
+            verifies!(
+                r#"
     test 'block title offset by blank line divides lists and becomes title of second list because item has text' do
       input = <<~'EOS'
       == Lists
@@ -10820,7 +10821,19 @@ mod description_lists_redux {
       assert_xpath '(//*[@class="dlist"])[2]/*[@class="title"][text()="title"]', output, 1
     end
 "#
-        );
+            );
+
+            let doc =
+                Parser::default().parse("== Lists\n\nterm1:: def1\n\n.title\n\nterm2:: def2\n");
+
+            assert_xpath(&doc, "//*[@class=\"dlist\"]/dl", 2);
+
+            assert_xpath(
+                &doc,
+                "(//*[@class=\"dlist\"])[2]/*[@class=\"title\"][text()=\"title\"]",
+                1,
+            );
+        }
     }
 }
 non_normative!(
