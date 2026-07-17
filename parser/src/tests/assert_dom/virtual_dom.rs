@@ -1571,9 +1571,12 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
                 let mut attrs = attrlist.attributes();
                 // Skip first attribute (style="source").
                 attrs.next();
-                // Second attribute is the language.
+                // Second attribute is the language, which yields both a
+                // `language-<lang>` class and a `data-lang` attribute.
                 if let Some(lang_attr) = attrs.next() {
-                    code = code.with_attribute("data-lang", lang_attr.value());
+                    code = code
+                        .with_class(format!("language-{}", lang_attr.value()))
+                        .with_attribute("data-lang", lang_attr.value());
                 }
             }
 

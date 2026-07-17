@@ -7119,3 +7119,232 @@ mod image_paths {
 "##
     );
 }
+
+mod source_code {
+    use crate::tests::prelude::*;
+
+    non_normative!(
+        r#"
+  context 'Source code' do
+"#
+    );
+
+    // NOTE: divergence from Asciidoctor. A fenced code block with no language is
+    // not given the `source` style by this crate (its `declared_style()` is
+    // `None`), so no `<code>` element is rendered. Kept `#[ignore]`d with the
+    // Ruby-intended assertions.
+    // TODO: assign the `source` style to a language-less fenced code block.
+    #[ignore]
+    #[test]
+    fn should_support_fenced_code_block_using_backticks() {
+        verifies!(
+            r##"
+    test 'should support fenced code block using backticks' do
+      input = <<~'EOS'
+      ```
+      puts "Hello, World!"
+      ```
+      EOS
+
+      block = block_from_string input
+      assert_equal :listing, block.context
+      assert_equal 'source', (block.attr 'style')
+      assert_equal :fenced_code, (block.attr 'cloaked-context')
+      assert_nil (block.attr 'language')
+      output = convert_string_to_embedded input
+      assert_css '.listingblock', output, 1
+      assert_css '.listingblock pre code', output, 1
+      assert_css '.listingblock pre code:not([class])', output, 1
+    end
+
+"##
+        );
+
+        let doc = Parser::default().parse("```\nputs \"Hello, World!\"\n```\n");
+        assert_css(&doc, ".listingblock", 1);
+        assert_css(&doc, ".listingblock pre code", 1);
+        assert_css(&doc, ".listingblock pre code:not([class])", 1);
+    }
+
+    #[test]
+    fn should_not_recognize_fenced_code_blocks_with_more_than_three_delimiters() {
+        verifies!(
+            r##"
+    test 'should not recognize fenced code blocks with more than three delimiters' do
+      input = <<~'EOS'
+      ````ruby
+      puts "Hello, World!"
+      ````
+
+      ~~~~ javascript
+      alert("Hello, World!")
+      ~~~~
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.listingblock', output, 0
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("````ruby\nputs \"Hello, World!\"\n````\n\n~~~~ javascript\nalert(\"Hello, World!\")\n~~~~\n");
+        assert_css(&doc, ".listingblock", 0);
+    }
+
+    #[test]
+    fn should_support_fenced_code_blocks_with_languages() {
+        verifies!(
+            r##"
+    test 'should support fenced code blocks with languages' do
+      input = <<~'EOS'
+      ```ruby
+      puts "Hello, World!"
+      ```
+
+      ``` javascript
+      alert("Hello, World!")
+      ```
+      EOS
+
+      block = (document_from_string input).blocks[0]
+      assert_equal :listing, block.context
+      assert_equal 'source', (block.attr 'style')
+      assert_equal :fenced_code, (block.attr 'cloaked-context')
+      assert_equal 'ruby', (block.attr 'language')
+      output = convert_string_to_embedded input
+      assert_css '.listingblock', output, 2
+      assert_css '.listingblock pre code.language-ruby[data-lang=ruby]', output, 1
+      assert_css '.listingblock pre code.language-javascript[data-lang=javascript]', output, 1
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("```ruby\nputs \"Hello, World!\"\n```\n\n``` javascript\nalert(\"Hello, World!\")\n```\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.raw_context().as_ref(), "listing");
+        assert_eq!(block.declared_style(), Some("source"));
+        assert_css(&doc, ".listingblock", 2);
+        assert_css(&doc, ".listingblock pre code.language-ruby[data-lang=ruby]", 1);
+        assert_css(&doc, ".listingblock pre code.language-javascript[data-lang=javascript]", 1);
+    }
+
+    // NOTE: divergence from Asciidoctor. This crate does not split a fenced
+    // code block's info string on the comma, so `ruby,numbered` becomes the
+    // language rather than language `ruby` plus a line-numbering option. Kept
+    // `#[ignore]`d with the Ruby-intended assertions.
+    // TODO: parse the fenced code info string into language and options.
+    #[ignore]
+    #[test]
+    fn should_support_fenced_code_blocks_with_languages_and_numbering() {
+        verifies!(
+            r##"
+    test 'should support fenced code blocks with languages and numbering' do
+      input = <<~'EOS'
+      ```ruby,numbered
+      puts "Hello, World!"
+      ```
+
+      ``` javascript, numbered
+      alert("Hello, World!")
+      ```
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_css '.listingblock', output, 2
+      assert_css '.listingblock pre code.language-ruby[data-lang=ruby]', output, 1
+      assert_css '.listingblock pre code.language-javascript[data-lang=javascript]', output, 1
+    end
+
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("```ruby,numbered\nputs \"Hello, World!\"\n```\n\n``` javascript, numbered\nalert(\"Hello, World!\")\n```\n");
+        assert_css(&doc, ".listingblock", 2);
+        assert_css(&doc, ".listingblock pre code.language-ruby[data-lang=ruby]", 1);
+        assert_css(&doc, ".listingblock pre code.language-javascript[data-lang=javascript]", 1);
+    }
+
+    #[test]
+    fn should_allow_source_style_to_be_specified_on_literal_block() {
+        verifies!(
+            r#"
+    test 'should allow source style to be specified on literal block' do
+      input = <<~'EOS'
+      [source]
+      ....
+      console.log('Hello, World!')
+      ....
+      EOS
+
+      block = block_from_string input
+      assert_equal :listing, block.context
+      assert_equal 'source', (block.attr 'style')
+      assert_equal :literal, (block.attr 'cloaked-context')
+      assert_nil (block.attr 'language')
+      output = convert_string_to_embedded input
+      assert_css '.listingblock', output, 1
+      assert_css '.listingblock pre', output, 1
+      assert_css '.listingblock pre code', output, 1
+      assert_css '.listingblock pre code[data-lang]', output, 0
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[source]\n....\nconsole.log('Hello, World!')\n....\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.declared_style(), Some("source"));
+        assert_css(&doc, ".listingblock", 1);
+        assert_css(&doc, ".listingblock pre", 1);
+        assert_css(&doc, ".listingblock pre code", 1);
+        assert_css(&doc, ".listingblock pre code[data-lang]", 0);
+    }
+
+    #[test]
+    fn should_allow_source_style_and_language_to_be_specified_on_literal_block() {
+        verifies!(
+            r#"
+    test 'should allow source style and language to be specified on literal block' do
+      input = <<~'EOS'
+      [source,js]
+      ....
+      console.log('Hello, World!')
+      ....
+      EOS
+
+      block = block_from_string input
+      assert_equal :listing, block.context
+      assert_equal 'source', (block.attr 'style')
+      assert_equal :literal, (block.attr 'cloaked-context')
+      assert_equal 'js', (block.attr 'language')
+      output = convert_string_to_embedded input
+      assert_css '.listingblock', output, 1
+      assert_css '.listingblock pre', output, 1
+      assert_css '.listingblock pre code', output, 1
+      assert_css '.listingblock pre code[data-lang]', output, 1
+    end
+
+"#
+        );
+
+        let doc = Parser::default().parse("[source,js]\n....\nconsole.log('Hello, World!')\n....\n");
+        let block = doc.nested_blocks().next().unwrap();
+        assert_eq!(block.declared_style(), Some("source"));
+        assert_css(&doc, ".listingblock", 1);
+        assert_css(&doc, ".listingblock pre", 1);
+        assert_css(&doc, ".listingblock pre code", 1);
+        assert_css(&doc, ".listingblock pre code[data-lang]", 1);
+    }
+
+    non_normative!(
+        r#"
+  end
+
+"#
+    );
+}
