@@ -49,9 +49,12 @@ impl<'src> CompoundDelimitedBlock<'src> {
             return true;
         }
 
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/145):
-        // Seek spec clarity: Do the characters after the fourth char
-        // have to match the first four?
+        // Every character after the initial four must match the fourth
+        // (delimiter) character. This matches Asciidoctor, whose
+        // `is_delimited_block?` requires the run following the leading char to
+        // be uniform (see https://github.com/asciidoc-rs/asciidoc-parser/issues/145
+        // and https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/issues/56):
+        // `====xyz` is not a delimiter, but `====` plus any number of `=` is.
 
         if data.len() >= 4 {
             if data.starts_with("====") {
@@ -97,9 +100,11 @@ impl<'src> CompoundDelimitedBlock<'src> {
         let delimiter = metadata.block_start.take_normalized_line();
         let maybe_delimiter_text = delimiter.item.data();
 
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/146):
-        // Seek spec clarity on whether three hyphens can be used to
-        // delimit an open block. Assuming yes for now.
+        // An open block is delimited by exactly two hyphens (`--`). Three or
+        // more hyphens do not delimit an open block: `---` is a thematic break
+        // (see `Break`), matching Asciidoctor, which renders a lone `---` as an
+        // `<hr>` and treats `---` inside an open block as literal text. This is
+        // enforced by `is_valid_delimiter`, which accepts only exactly `--`.
         let context = match maybe_delimiter_text
             .split_at_checked(maybe_delimiter_text.len().min(4))?
             .0
