@@ -58,14 +58,15 @@
 //!   ignored (a base `:author:` entry and indexed `author_N` entries *are*
 //!   resolved into `authors()`, as of #713):
 //!   <https://github.com/asciidoc-rs/asciidoc-parser/issues/718>;
-//! - attribute entries / author line not parsed beneath a setext title: <https://github.com/asciidoc-rs/asciidoc-parser/issues/720>;
 //! - `manpage` doctype not implemented: <https://github.com/asciidoc-rs/asciidoc-parser/issues/721>.
 //!
 //! Those tests are left `non_normative!` so coverage is not overstated; the
 //! gaps are called out for follow-up.
 //!
-//! One further divergence is intentional and will not be addressed:
-//! asciidoc-parser does not enable compat-mode for a legacy (setext) doctitle.
+//! Some divergences are intentional and will not be addressed: asciidoc-parser
+//! does not support setext (two-line) document titles, so it neither enables
+//! compat-mode for a legacy doctitle nor parses the attribute entries / author
+//! line that may follow one.
 
 use crate::tests::prelude::*;
 
@@ -2047,11 +2048,11 @@ mod catalog {
 }
 
 // Backend/doctype selection driving DocBook, standalone/XHTML, and manpage
-// output — conversion. DIVERGENCE: attribute entries and an author line
-// beneath a setext title are not parsed
-// (https://github.com/asciidoc-rs/asciidoc-parser/issues/720), and the
-// `manpage` doctype (mantitle, manvolnum, manname/manpurpose, synopsis
-// special section) is not modeled
+// output — conversion. asciidoc-parser does not support setext (two-line)
+// document titles at all, so the attribute entries and author line beneath
+// one are not parsed — an intentional divergence that will not be addressed.
+// DIVERGENCE: the `manpage` doctype (mantitle, manvolnum, manname/manpurpose,
+// synopsis special section) is not modeled
 // (https://github.com/asciidoc-rs/asciidoc-parser/issues/721).
 mod backends_and_doctypes {
     use crate::tests::prelude::*;
