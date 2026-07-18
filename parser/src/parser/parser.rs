@@ -276,6 +276,20 @@ pub(crate) struct DeferredWarning {
     /// The type of warning, already carrying any owned data it needs (such as
     /// the missing attribute's name).
     pub(crate) warning: WarningType,
+
+    /// A pre-resolved originating `(file, line)` for this warning, carried
+    /// through to [`Warning::origin`].
+    ///
+    /// This is `None` for warnings that point at real (emitted) output: their
+    /// [`offset`](Self::offset)/[`len`](Self::len) span resolves the location
+    /// through the document source map. It is `Some` for a preprocessor
+    /// directive that produces no output of its own — a malformed or
+    /// unterminated conditional directive — where there is no output span to
+    /// resolve against, so the directive's own file and line are recorded here
+    /// directly (the `offset`/`len` span is then only a best-effort anchor).
+    ///
+    /// [`Warning::origin`]: crate::warnings::Warning::origin
+    pub(crate) origin: Option<SourceLine>,
 }
 
 /// A warning whose location is already resolved to an originating
@@ -1013,6 +1027,7 @@ impl Parser {
                 offset: source.byte_offset(),
                 len: source.len(),
                 warning,
+                origin: None,
             });
     }
 
