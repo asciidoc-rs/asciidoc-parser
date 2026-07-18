@@ -893,7 +893,7 @@ mod ids {
     // reftext is registered — the crate stores the raw `install on
     // {platform-name}`. (Attribute references in the anchor *ID* are resolved,
     // as the preceding test verifies.) Out of scope pending reftext
-    // substitution support.
+    // substitution support (see #753).
     non_normative!(
         r##"
     test 'should substitute attributes when registering reftext for section' do
