@@ -1968,7 +1968,8 @@ mod structure {
 // Exercises the Ruby catalog/`references` API (`catalog.keys`,
 // `doc.register`, `resolve_id`, the `catalog_assets` option). asciidoc-parser
 // exposes a `Catalog` with a different shape; section-id registration is
-// already covered by the crate's own tests.
+// already covered by the crate's own tests. A full link registry is tracked
+// by https://github.com/asciidoc-rs/asciidoc-parser/issues/335.
 mod catalog {
     use crate::tests::prelude::*;
 
