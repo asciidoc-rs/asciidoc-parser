@@ -588,21 +588,27 @@ mod structure {
     test 'document with no doctitle' do
       doc = document_from_string('Snorf')
       assert_nil doc.doctitle
+"##
+        );
+
+        let doc = Parser::default().parse("Snorf");
+
+        assert_eq!(doc.doctitle(), None);
+        assert_eq!(doc.header().title(), None);
+        assert_eq!(rendered_paragraphs(&doc), ["Snorf"]);
+
+        // asciidoc-parser models a missing header as an always-present header
+        // that carries no title, so it has no equivalent for Ruby's nil `name`,
+        // false `has_header?`, or nil `header`; those contracts are recorded as
+        // non-normative rather than counted as covered.
+        non_normative!(
+            r##"
       assert_nil doc.name
       refute doc.has_header?
       assert_nil doc.header
     end
 "##
         );
-
-        let doc = Parser::default().parse("Snorf");
-
-        // Asciidoctor signals the missing header via `doctitle`/`name`/`header`
-        // all being nil and `has_header?` false; asciidoc-parser models it as
-        // the (always-present) header carrying no title.
-        assert_eq!(doc.doctitle(), None);
-        assert_eq!(doc.header().title(), None);
-        assert_eq!(rendered_paragraphs(&doc), ["Snorf"]);
     }
 
     // Out of scope here: standalone `max-width` framing and the Ruby
