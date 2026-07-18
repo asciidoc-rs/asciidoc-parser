@@ -51,8 +51,12 @@
 //!
 //! - doctitle not derived/overridden from `:doctitle:`/`:title:` attribute
 //!   entries: <https://github.com/asciidoc-rs/asciidoc-parser/issues/716>;
-//! - `authorcount` not populated and author attributes not derived from
-//!   `:authors:`/`author_N` entries:
+//! - author-attribute gaps — the `authorcount` attribute is unset (the count
+//!   is available via `authors()`), the `author` attribute is not derived from
+//!   an indexed `author_1`, a semicolon-separated `:authors:` list is not split
+//!   into individual authors, and an explicit `:authorinitials:` override is
+//!   ignored (a base `:author:` entry and indexed `author_N` entries *are*
+//!   resolved into `authors()`, as of #713):
 //!   <https://github.com/asciidoc-rs/asciidoc-parser/issues/718>;
 //! - compat-mode not enabled for a legacy (setext) doctitle: <https://github.com/asciidoc-rs/asciidoc-parser/issues/719>;
 //! - attribute entries / author line not parsed beneath a setext title: <https://github.com/asciidoc-rs/asciidoc-parser/issues/720>;
@@ -1145,10 +1149,7 @@ mod structure {
     // Out of scope: most of the remaining structure suite converts to standalone
     // HTML or DocBook (author/revision bylines, copyright, header/footer,
     // footnotes-in-footer) or uses the embedded-vs-standalone conversion toggles
-    // and `parse_header_only`. DIVERGENCE
-    // (https://github.com/asciidoc-rs/asciidoc-parser/issues/718): `authorcount`
-    // is never populated, and author attributes are not derived from `:authors:`
-    // or indexed `author_N` attribute entries.
+    // and `parse_header_only`.
     non_normative!(
         r##"
 
@@ -1382,6 +1383,13 @@ mod structure {
       assert_xpath '(/article/info/authorgroup/author)[2]/personname/firstname[text()="Junior"]', output, 1
     end
 
+"##
+    );
+
+    #[test]
+    fn should_process_author_defined_by_attribute() {
+        verifies!(
+            r##"
     test 'should process author defined by attribute when implicit doctitle is absent' do
       input = <<~'EOS'
       :author: Doc Writer
@@ -1400,6 +1408,43 @@ mod structure {
       assert_xpath '//p[text()="Writer, Doc (DW)"]', output, 1
     end
 
+"##
+        );
+
+        let doc = Parser::default()
+            .parse(":author: Doc Writer\n\n{lastname}, {firstname} ({authorinitials})");
+
+        // Asciidoctor asserts `authorcount == 1`; asciidoc-parser does not set the
+        // `authorcount` attribute, so the count is observed via `authors()`.
+        assert_eq!(doc.authors().len(), 1);
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(doc.attribute_value("author_1"), InterpretedValue::Unset);
+        assert_eq!(
+            doc.attribute_value("lastname"),
+            InterpretedValue::Value("Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("firstname"),
+            InterpretedValue::Value("Doc")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DW")
+        );
+        assert_eq!(rendered_paragraphs(&doc), ["Writer, Doc (DW)"]);
+    }
+
+    // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/718):
+    // an explicit `:authorinitials:` entry that precedes `:author:` is
+    // overwritten by initials re-derived from the author name (Asciidoctor keeps
+    // the explicit value), and a semicolon-separated `:authors:` entry is not
+    // split into individual authors (`author`/`author_1`/`author_2`/… and the
+    // per-author initials remain unset).
+    non_normative!(
+        r##"
     test 'should process author and authorinitials defined by attribute when implicit doctitle is absent' do
       input = <<~'EOS'
       :authorinitials: DOC
@@ -1461,11 +1506,31 @@ mod structure {
       assert_xpath '//p[text()="Writer, Doc (DW)"]', output, 1
     end
 
+"##
+    );
+
+    #[test]
+    fn should_set_authorcount_to_0_if_document_has_no_header() {
+        verifies!(
+            r##"
     test 'should set authorcount to 0 if document has no header' do
       doc = document_from_string 'content'
       assert_equal 0, (doc.attr 'authorcount')
     end
 
+"##
+        );
+
+        let doc = Parser::default().parse("content");
+
+        // Asciidoctor asserts `authorcount == 0`; observed here via `authors()`.
+        assert_eq!(doc.authors().len(), 0);
+    }
+
+    #[test]
+    fn should_set_authorcount_to_0_if_author_not_set_and_doctitle_missing() {
+        verifies!(
+            r##"
     test 'should set authorcount to 0 if author not set by attribute and implicit doctitle is missing' do
       input = <<~'EOS'
       :idprefix:
@@ -1478,6 +1543,18 @@ mod structure {
       assert_equal 0, (doc.attr 'authorcount')
     end
 
+"##
+        );
+
+        let doc = Parser::default().parse(":idprefix:\n\n== Section Title\n\ncontent");
+
+        assert_eq!(doc.authors().len(), 0);
+    }
+
+    #[test]
+    fn should_set_authorcount_to_0_if_author_not_set_and_level_0_section_styled() {
+        verifies!(
+            r##"
     test 'should set authorcount to 0 if author not set by attribute and document starts with level-0 section with style' do
       input = <<~'EOS'
       :doctype: book
@@ -1497,6 +1574,23 @@ mod structure {
       assert_equal 0, (doc.attr 'authorcount')
     end
 
+"##
+        );
+
+        let doc = Parser::default().parse(
+            ":doctype: book\n\n[preface]\n= Preface\n\ncontent\n\n= Part\n\n== Chapter\n\ncontent",
+        );
+
+        assert_eq!(doc.authors().len(), 0);
+    }
+
+    // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/718): an
+    // indexed `author_1` attribute entry populates `authors()` but does not set
+    // the `author` attribute, so `{author}` does not resolve. The remainder of
+    // the suite is out of scope — DocBook author/revision entries, standalone
+    // header/footer rendering, copyright, and footnote-footer output.
+    non_normative!(
+        r##"
     test 'with author defined by indexed attribute name' do
       input = <<~'EOS'
       = Document Title
