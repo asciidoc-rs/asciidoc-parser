@@ -51,4 +51,5 @@ mod converter_test;
 mod lists_test;
 mod paragraphs_test;
 mod substitutions_test;
+mod syntax_highlighter_test;
 mod tables_test;
