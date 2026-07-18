@@ -208,17 +208,17 @@ non_normative!(
 "#
 );
 
-// The `store_attribute` group tests the internal static helper that applies a
-// parsed attribute entry to a document. This crate exposes the same behavior
-// through its public attribute API: a `:name: value` entry drives
-// [`Parser::attribute_value`], a negated name (`:name!:` / `:!name:`) unsets
-// it, and the *accessible* vs *inaccessible* distinction (whether a document
-// entry may override an API-supplied value) is modeled by
-// [`ModificationContext`](crate::parser::ModificationContext) —
-// `Anywhere` is accessible, `ApiOnly` is inaccessible (and a rejected override
-// is reported as [`WarningType::AttributeValueIsLocked`]). The Ruby helper's
-// return tuple and its `:attribute_entries` accumulator are Ruby-internal
-// bookkeeping and are not asserted.
+// The `store_attribute` group tests the internal static helper that stores an
+// attribute (optionally on a document). This crate exposes the same behavior
+// through its public attribute API: [`Parser::with_intrinsic_attribute`] stores
+// a value and [`Parser::with_intrinsic_attribute_bool`] with `false` stores it
+// unset (the negated-name case). The *accessible* vs *inaccessible* distinction
+// (whether a later document entry may override the stored value) is modeled by
+// [`ModificationContext`](crate::parser::ModificationContext) — `Anywhere` is
+// accessible, `ApiOnly` is inaccessible (and a rejected override is reported as
+// [`WarningType::AttributeValueIsLocked`]). The Ruby helper's return tuple and
+// its `:attribute_entries` accumulator are Ruby-internal bookkeeping and are
+// not asserted.
 
 #[test]
 fn store_attribute_with_value() {
@@ -233,8 +233,8 @@ fn store_attribute_with_value() {
 "#
     );
 
-    let mut parser = Parser::default();
-    parser.parse(":foo: bar");
+    let parser =
+        Parser::default().with_intrinsic_attribute("foo", "bar", ModificationContext::Anywhere);
     assert_eq!(
         parser.attribute_value("foo"),
         InterpretedValue::Value("bar")
@@ -256,13 +256,14 @@ fn store_attribute_with_negated_value() {
 "#
     );
 
-    // A negated name (`foo!` or `!foo`) unsets the attribute; both shorthand
-    // forms are observable as attribute entries.
-    for input in [":foo!:", ":!foo:"] {
-        let mut parser = Parser::default();
-        parser.parse(input);
-        assert_eq!(parser.attribute_value("foo"), InterpretedValue::Unset);
-    }
+    // A negated name (`foo!` or `!foo`) stores the attribute as unset; the API
+    // models this with `with_intrinsic_attribute_bool(name, false, ..)`.
+    let parser = Parser::default().with_intrinsic_attribute_bool(
+        "foo",
+        false,
+        ModificationContext::Anywhere,
+    );
+    assert_eq!(parser.attribute_value("foo"), InterpretedValue::Unset);
 }
 
 #[test]
