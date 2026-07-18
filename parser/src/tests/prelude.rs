@@ -59,3 +59,73 @@ pub(crate) fn first_break<'src>(doc: &'src crate::Document) -> &'src crate::bloc
 
     brk
 }
+
+/// Interprets `block` as a [`SectionBlock`], panicking if it is any other block
+/// type. Mirrors Ruby Asciidoctor's habit of indexing `doc.blocks[n]` and
+/// reading section-specific attributes off the result.
+///
+/// [`SectionBlock`]: crate::blocks::SectionBlock
+pub(crate) fn as_section<'src>(
+    block: &'src crate::blocks::Block<'src>,
+) -> &'src crate::blocks::SectionBlock<'src> {
+    let crate::blocks::Block::Section(section) = block else {
+        panic!("Wrong block type: {block:#?}");
+    };
+
+    section
+}
+
+/// Returns the document's top-level blocks as a `Vec`, for indexed access in
+/// the style of Ruby Asciidoctor's `doc.blocks[n]`.
+pub(crate) fn top_blocks<'src>(
+    doc: &'src crate::Document<'src>,
+) -> Vec<&'src crate::blocks::Block<'src>> {
+    doc.nested_blocks().collect()
+}
+
+/// Returns the first [`SectionBlock`] in document order, recursing into nested
+/// blocks. Mirrors Ruby Asciidoctor's `block_from_string('== ...')`, which
+/// returns the parsed section.
+///
+/// [`SectionBlock`]: crate::blocks::SectionBlock
+pub(crate) fn first_section<'src>(
+    doc: &'src crate::Document<'src>,
+) -> &'src crate::blocks::SectionBlock<'src> {
+    fn walk<'src>(
+        mut blocks: impl Iterator<Item = &'src crate::blocks::Block<'src>>,
+    ) -> Option<&'src crate::blocks::SectionBlock<'src>> {
+        blocks.find_map(|block| {
+            if let crate::blocks::Block::Section(section) = block {
+                Some(section)
+            } else {
+                walk(block.nested_blocks())
+            }
+        })
+    }
+
+    walk(doc.nested_blocks()).expect("expected at least one section block")
+}
+
+/// Returns every [`SectionBlock`] in the document, in document order, recursing
+/// into nested blocks.
+///
+/// [`SectionBlock`]: crate::blocks::SectionBlock
+pub(crate) fn all_sections<'src>(
+    doc: &'src crate::Document<'src>,
+) -> Vec<&'src crate::blocks::SectionBlock<'src>> {
+    fn walk<'src>(
+        blocks: impl Iterator<Item = &'src crate::blocks::Block<'src>>,
+        out: &mut Vec<&'src crate::blocks::SectionBlock<'src>>,
+    ) {
+        for block in blocks {
+            if let crate::blocks::Block::Section(section) = block {
+                out.push(section);
+            }
+            walk(block.nested_blocks(), out);
+        }
+    }
+
+    let mut out = vec![];
+    walk(doc.nested_blocks(), &mut out);
+    out
+}
