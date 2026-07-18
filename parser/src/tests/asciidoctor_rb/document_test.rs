@@ -58,12 +58,14 @@
 //!   ignored (a base `:author:` entry and indexed `author_N` entries *are*
 //!   resolved into `authors()`, as of #713):
 //!   <https://github.com/asciidoc-rs/asciidoc-parser/issues/718>;
-//! - compat-mode not enabled for a legacy (setext) doctitle: <https://github.com/asciidoc-rs/asciidoc-parser/issues/719>;
 //! - attribute entries / author line not parsed beneath a setext title: <https://github.com/asciidoc-rs/asciidoc-parser/issues/720>;
 //! - `manpage` doctype not implemented: <https://github.com/asciidoc-rs/asciidoc-parser/issues/721>.
 //!
 //! Those tests are left `non_normative!` so coverage is not overstated; the
 //! gaps are called out for follow-up.
+//!
+//! One further divergence is intentional and will not be addressed:
+//! asciidoc-parser does not enable compat-mode for a legacy (setext) doctitle.
 
 use crate::tests::prelude::*;
 
@@ -616,11 +618,11 @@ mod structure {
     }
 
     // Out of scope here: standalone `max-width` framing and the Ruby
-    // `Document::Title` partition/`sanitize` API. DIVERGENCE: compat-mode is
-    // not enabled for a legacy (setext) doctitle
-    // (https://github.com/asciidoc-rs/asciidoc-parser/issues/719), and the
-    // doctitle is not derived/overridden from `:doctitle:`/`:title:` attribute
-    // entries (https://github.com/asciidoc-rs/asciidoc-parser/issues/716).
+    // `Document::Title` partition/`sanitize` API. asciidoc-parser also does not
+    // enable compat-mode for a legacy (setext) doctitle — an intentional
+    // divergence that will not be addressed. DIVERGENCE
+    // (https://github.com/asciidoc-rs/asciidoc-parser/issues/716): the doctitle
+    // is not derived/overridden from `:doctitle:`/`:title:` attribute entries.
     non_normative!(
         r##"
 
