@@ -968,7 +968,7 @@ fn qualified_url_adjacent_to_text_in_round_brackets() {
 
 // Surfaced incompatibility: Asciidoctor recognizes a URL macro preceded by a
 // no-break space; this crate does not treat U+00A0 as a leading boundary and
-// leaves the macro as literal text.
+// leaves the macro as literal text. Tracked in #768.
 non_normative!(
     r###"
   test 'qualified url following no-break space' do
@@ -1867,7 +1867,8 @@ non_normative!(
 );
 
 // Surfaced incompatibility: Asciidoctor does not register a bibliography anchor
-// (`[[[label]]]`) found in prose; this crate registers `label`.
+// (`[[[label]]]`) found in prose; this crate registers `label`. Tracked in
+// #769.
 non_normative!(
     r###"
   test 'does not match bibliography anchor in prose when scanning for inline anchor' do
@@ -2166,7 +2167,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with path sans extension' do
@@ -2179,7 +2180,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'inter-document xref shorthand syntax should assume AsciiDoc extension if AsciiDoc extension not present' do
@@ -2198,7 +2199,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref macro with explicit inter-document target should assume implicit AsciiDoc file extension if no file extension is present' do
@@ -2224,7 +2225,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref macro with implicit inter-document target should preserve path with file extension' do
@@ -2248,7 +2249,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'inter-document xref should only remove the file extension part if the path contains a period elsewhere' do
@@ -2261,7 +2262,7 @@ non_normative!(
 
 // Surfaced incompatibility (inter-document xref): Asciidoctor keeps
 // `xref:using-.net-web-services` as an external path; this crate rewrites it to
-// the internal fragment `#using-.net-web-services`.
+// the internal fragment `#using-.net-web-services`. Tracked in #773.
 non_normative!(
     r###"
   test 'xref macro target containing dot should be interpreted as a path unless prefixed by #' do
@@ -2276,7 +2277,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'should not interpret double underscore in target of xref macro if sequence is preceded by a backslash' do
@@ -2289,7 +2290,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'should not interpret double underscore in target of xref shorthand if sequence is preceded by a backslash' do
@@ -2313,7 +2314,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with ancestor path sans extension' do
@@ -2326,7 +2327,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with absolute path sans extension' do
@@ -2360,7 +2361,7 @@ fn xref_using_angled_bracket_syntax_with_path_and_extension() {
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with path and extension with hash' do
@@ -2373,7 +2374,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with path and extension with fragment' do
@@ -2399,7 +2400,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using macro syntax with path and extension' do
@@ -2412,7 +2413,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with path and fragment' do
@@ -2425,7 +2426,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with path, fragment and text' do
@@ -2438,7 +2439,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with path and custom relfilesuffix and outfilesuffix' do
@@ -2452,7 +2453,7 @@ non_normative!(
 
 // Inter-document xref path resolution is not implemented: this crate treats the
 // target as an internal fragment rather than rewriting it to a `*.html`-style
-// path.
+// path. Tracked in #773.
 non_normative!(
     r###"
   test 'xref using angled bracket syntax with path and custom relfilesuffix' do
@@ -2585,7 +2586,7 @@ fn xref_with_escaped_text() {
 }
 
 // Inter-document xref path resolution (in a section title) is not implemented;
-// this crate emits an internal fragment.
+// this crate emits an internal fragment. Tracked in #773.
 non_normative!(
     r###"
   test 'xref with target that begins with attribute reference in title' do
@@ -2855,7 +2856,7 @@ non_normative!(
 
 // Surfaced incompatibility: this crate creates the fallback link but does not
 // emit the `possible invalid reference` log message that this test also
-// asserts.
+// asserts. Tracked in #772.
 non_normative!(
     r###"
   test 'should warn and create link if verbose flag is set and reference is not found' do
@@ -2905,7 +2906,8 @@ non_normative!(
 
 // Surfaced incompatibility: this crate creates the fallback link `<a
 // href="#foobaz">[foobaz]</a>` but does not emit the `possible invalid
-// reference` log message that this test also asserts (verbose logging).
+// reference` log message that this test also asserts (verbose logging). Tracked
+// in #772.
 non_normative!(
     r###"
   test 'should warn and create link if verbose flag is set and reference using # notation is not found' do
@@ -3064,7 +3066,8 @@ non_normative!(
 "###
 );
 
-// Inter-document self-xref fallback link text is not implemented here.
+// Inter-document self-xref fallback link text is not implemented here. Tracked
+// in #773.
 non_normative!(
     r###"
   test 'should use doctitle as fallback link text if inter-document xref points to current doc and no link text is provided' do
@@ -3081,6 +3084,7 @@ non_normative!(
 );
 
 // Inter-document xref fallback in an AsciiDoc table cell is out of scope here.
+// Tracked in #773.
 non_normative!(
     r###"
   test 'should use doctitle of root document as fallback link text for inter-document xref in AsciiDoc table cell that resolves to current doc' do
@@ -3098,7 +3102,8 @@ non_normative!(
 "###
 );
 
-// Inter-document self-xref fallback link text is not implemented here.
+// Inter-document self-xref fallback link text is not implemented here. Tracked
+// in #773.
 non_normative!(
     r###"
   test 'should use reftext on document as fallback link text if inter-document xref points to current doc and no link text is provided' do
@@ -3115,7 +3120,8 @@ non_normative!(
 "###
 );
 
-// Inter-document self-xref fallback link text is not implemented here.
+// Inter-document self-xref fallback link text is not implemented here. Tracked
+// in #773.
 non_normative!(
     r###"
   test 'should use reftext on document as fallback link text if xref points to empty fragment and no link text is provided' do
@@ -3132,7 +3138,8 @@ non_normative!(
 "###
 );
 
-// Inter-document self-xref fallback link text is not implemented here.
+// Inter-document self-xref fallback link text is not implemented here. Tracked
+// in #773.
 non_normative!(
     r###"
   test 'should use fallback link text if inter-document xref points to current doc without header and no link text is provided' do
@@ -3146,7 +3153,8 @@ non_normative!(
 "###
 );
 
-// Inter-document self-xref fallback link text is not implemented here.
+// Inter-document self-xref fallback link text is not implemented here. Tracked
+// in #773.
 non_normative!(
     r###"
   test 'should use fallback link text if fragment of internal xref is empty and no link text is provided' do
@@ -3295,7 +3303,7 @@ fn should_not_fail_to_resolve_broken_xref_in_title_of_block_with_id() {
 
 // Surfaced incompatibility: Asciidoctor resolves the forward xref in a block
 // title to the target title (`Conclusion`); this crate leaves it unresolved
-// (`[conclusion]`).
+// (`[conclusion]`). Tracked in #770.
 non_normative!(
     r###"
   test 'should resolve forward xref in title of block with ID' do
@@ -3316,7 +3324,8 @@ non_normative!(
 );
 
 // Surfaced incompatibility: Asciidoctor resolves `<<s1>>` to section s1's own
-// xreflabel; this crate leaves the sibling xref unresolved (`[s1]`).
+// xreflabel; this crate leaves the sibling xref unresolved (`[s1]`). Tracked in
+// #770.
 non_normative!(
     r###"
   test 'should not fail to resolve broken xref in section title' do
@@ -3337,6 +3346,7 @@ non_normative!(
 
 // Surfaced incompatibility: Asciidoctor resolves an xref in a section title to
 // the target section's title; this crate leaves it unresolved (`[b]`/`[a]`).
+// Tracked in #770.
 non_normative!(
     r###"
   test 'should break circular xref reference in section title' do
@@ -3358,7 +3368,7 @@ non_normative!(
 
 // Surfaced incompatibility: same section-title xref resolution gap —
 // Asciidoctor renders the target section's title (with the nested anchor
-// dropped); this crate leaves `[b]` unresolved.
+// dropped); this crate leaves `[b]` unresolved. Tracked in #770.
 non_normative!(
     r###"
   test 'should drop nested anchor in xreftext' do
@@ -3473,7 +3483,7 @@ fn should_resolve_first_matching_natural_xref() {
 
 // Surfaced incompatibility: Asciidoctor resolves `<<Cub => Tiger>>` to the
 // section id `_cub_tiger`; this crate applies replacement subs to the target
-// and fails to match.
+// and fails to match. Tracked in #771.
 non_normative!(
     r###"
   test 'should not match numeric character references while searching for fragment in xref target' do
