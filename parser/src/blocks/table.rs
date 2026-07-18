@@ -1780,9 +1780,13 @@ fn process_content<'src>(
                 parser.push_owned_cell_source_map(cell_source_map);
                 let (title, inline, toc, blocks, attributes) =
                     parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
-                parser.pop_owned_cell_source_map();
 
-                parser.truncate_substitution_warnings(substitution_warnings_mark);
+                let owned_root = Span::new(source);
+                for sw in parser.drain_substitution_warnings_since(substitution_warnings_mark) {
+                    let warning_source = owned_root.slice(sw.offset..sw.offset + sw.len);
+                    parser.record_owned_cell_warning(warning_source.line(), sw.warning);
+                }
+                parser.pop_owned_cell_source_map();
 
                 debug_assert!(
                     owned_warnings.is_empty(),
@@ -3254,6 +3258,65 @@ mod tests {
                 doc.source_map()
                     .original_file_and_line(warnings[0].source.line()),
                 Some(SourceLine(None, 2))
+            );
+        }
+
+        #[test]
+        fn duplicate_inline_anchor_in_borrowed_cell_reports_warning() {
+            let doc = Parser::default().parse(
+                "[#in-use]\n\
+                 registered\n\
+                 \n\
+                 [cols=1a]\n\
+                 |===\n\
+                 |[[in-use]]duplicate\n\
+                 |===",
+            );
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::DuplicateId("in-use".to_string())
+            );
+            assert_eq!(
+                doc.source_map()
+                    .original_file_and_line(warnings[0].source.line()),
+                Some(SourceLine(None, 6))
+            );
+            assert!(warnings[0].origin.is_none());
+        }
+
+        #[test]
+        fn duplicate_inline_anchor_in_owned_cell_reports_origin() {
+            let handler = InlineFileHandler::from_pairs([("cell.adoc", "[[in-use]]duplicate")]);
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_include_file_handler(handler)
+                .parse(
+                    "[#in-use]\n\
+                     registered\n\
+                     \n\
+                     [cols=1a]\n\
+                     |===\n\
+                     |include::cell.adoc[]\n\
+                     |===",
+                );
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::DuplicateId("in-use".to_string())
+            );
+            assert_eq!(
+                warnings[0].origin,
+                Some(SourceLine(Some("cell.adoc".to_string()), 1))
+            );
+            assert_eq!(
+                doc.source_map()
+                    .original_file_and_line(warnings[0].source.line()),
+                Some(SourceLine(None, 6))
             );
         }
     }

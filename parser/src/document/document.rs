@@ -8,7 +8,9 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{Block, ContentModel, IsBlock, Preamble, parse_utils::parse_blocks_until},
-    document::{Catalog, Docinfo, DocinfoLocation, Header, InterpretedValue, TocConfig, TocMode},
+    document::{
+        Author, Catalog, Docinfo, DocinfoLocation, Header, InterpretedValue, TocConfig, TocMode,
+    },
     internal::debug::DebugSliceReference,
     parser::{
         CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, ReferenceResolver,
@@ -247,6 +249,17 @@ impl<'src> Document<'src> {
     /// Return the document header.
     pub fn header(&self) -> &Header<'_> {
         &self.internal.borrow_dependent().header
+    }
+
+    /// Return the document's authors.
+    ///
+    /// Authors may be declared on the [author line] or via the `author` /
+    /// `author_N` document attributes; this returns the resolved list
+    /// regardless of which mechanism was used. See [`Header::authors`].
+    ///
+    /// [author line]: https://docs.asciidoctor.org/asciidoc/latest/document/author-line/
+    pub fn authors(&self) -> &[Author] {
+        self.header().authors()
     }
 
     /// Return the document title (the level-0 `= Title`), if there was one.
@@ -1456,6 +1469,7 @@ mod tests {
         subtitle: None,
         attributes: &[],
         author_line: None,
+        authors: [],
         revision_line: None,
         comments: &[],
         source: Span {
