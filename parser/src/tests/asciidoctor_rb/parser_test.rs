@@ -33,15 +33,23 @@
 //! unit test of `Asciidoctor::Parser`'s **internal static helpers**
 //! (`is_section_title?`, `sanitize_attribute_name`, `store_attribute`,
 //! `parse_style_attribute`, `parse_header_metadata`, `adjust_indentation!`).
-//! This crate deliberately does not expose analogs of most of those helpers on
-//! its [`Parser`](crate::Parser) or [`Document`](crate::Document) types, so a
-//! large fraction of this file is `non_normative!`: the Ruby lines are
-//! reproduced verbatim to keep the `sdd` coverage tool aligned, but no crate
-//! behavior is asserted against them.
+//! This crate does not expose those helpers by name, but most of the *behavior*
+//! they implement is observable through the public API, so those tests are
+//! `verifies!` and driven through the real path. The helpers with no public
+//! analog at all (`is_section_title?`, `sanitize_attribute_name` as a function,
+//! `adjust_indentation!`) stay `non_normative!`: the Ruby lines are reproduced
+//! verbatim to keep the `sdd` coverage tool aligned, but no crate behavior is
+//! asserted against them.
 //!
-//! Where the *behavior* a helper implements is observable through the public
-//! API, the test is `verifies!` and driven through the real path:
+//! The `verifies!` mappings:
 //!
+//! * **`store_attribute`** — a `:name: value` attribute entry drives
+//!   [`Parser::attribute_value`]; a negated name (`:name!:` / `:!name:`) unsets
+//!   it; and the accessible/inaccessible distinction (may a document entry
+//!   override an API-supplied value?) is modeled by
+//!   [`ModificationContext`](crate::parser::ModificationContext) — `Anywhere`
+//!   is accessible, `ApiOnly` is inaccessible (a rejected override is reported
+//!   as [`WarningType::AttributeValueIsLocked`]).
 //! * **`parse_style_attribute`** — the shorthand `style#id.role%opt` parsing is
 //!   exactly what [`Attrlist`](crate::attributes::Attrlist) does, so those
 //!   tests drive [`Attrlist::parse`] in a block context and assert on
@@ -200,16 +208,43 @@ non_normative!(
 "#
 );
 
-// The `store_attribute` group tests an internal static helper (and its
-// `:attribute_entries` bookkeeping) that this crate does not replicate.
-non_normative!(
-    r#"
+// The `store_attribute` group tests the internal static helper that applies a
+// parsed attribute entry to a document. This crate exposes the same behavior
+// through its public attribute API: a `:name: value` entry drives
+// [`Parser::attribute_value`], a negated name (`:name!:` / `:!name:`) unsets
+// it, and the *accessible* vs *inaccessible* distinction (whether a document
+// entry may override an API-supplied value) is modeled by
+// [`ModificationContext`](crate::parser::ModificationContext) —
+// `Anywhere` is accessible, `ApiOnly` is inaccessible (and a rejected override
+// is reported as [`WarningType::AttributeValueIsLocked`]). The Ruby helper's
+// return tuple and its `:attribute_entries` accumulator are Ruby-internal
+// bookkeeping and are not asserted.
+
+#[test]
+fn store_attribute_with_value() {
+    verifies!(
+        r#"
   test 'store attribute with value' do
     attr_name, attr_value = Asciidoctor::Parser.store_attribute 'foo', 'bar'
     assert_equal 'foo', attr_name
     assert_equal 'bar', attr_value
   end
 
+"#
+    );
+
+    let mut parser = Parser::default();
+    parser.parse(":foo: bar");
+    assert_eq!(
+        parser.attribute_value("foo"),
+        InterpretedValue::Value("bar")
+    );
+}
+
+#[test]
+fn store_attribute_with_negated_value() {
+    verifies!(
+        r#"
   test 'store attribute with negated value' do
     { 'foo!' => nil, '!foo' => nil, 'foo' => nil }.each do |name, value|
       attr_name, attr_value = Asciidoctor::Parser.store_attribute name, value
@@ -218,6 +253,22 @@ non_normative!(
     end
   end
 
+"#
+    );
+
+    // A negated name (`foo!` or `!foo`) unsets the attribute; both shorthand
+    // forms are observable as attribute entries.
+    for input in [":foo!:", ":!foo:"] {
+        let mut parser = Parser::default();
+        parser.parse(input);
+        assert_eq!(parser.attribute_value("foo"), InterpretedValue::Unset);
+    }
+}
+
+#[test]
+fn store_accessible_attribute_on_document_with_value() {
+    verifies!(
+        r#"
   test 'store accessible attribute on document with value' do
     doc = empty_document
     doc.set_attribute 'foo', 'baz'
@@ -232,6 +283,24 @@ non_normative!(
     assert_equal 'bar', attrs[:attribute_entries][0].value
   end
 
+"#
+    );
+
+    // An accessible (document-modifiable) attribute is overridden by a later
+    // `:foo:` entry.
+    let mut parser =
+        Parser::default().with_intrinsic_attribute("foo", "baz", ModificationContext::Anywhere);
+    parser.parse(":foo: bar");
+    assert_eq!(
+        parser.attribute_value("foo"),
+        InterpretedValue::Value("bar")
+    );
+}
+
+#[test]
+fn store_accessible_attribute_on_document_with_value_that_contains_attribute_reference() {
+    verifies!(
+        r#"
   test 'store accessible attribute on document with value that contains attribute reference' do
     doc = empty_document
     doc.set_attribute 'foo', 'baz'
@@ -247,6 +316,25 @@ non_normative!(
     assert_equal 'ultramega', attrs[:attribute_entries][0].value
   end
 
+"#
+    );
+
+    // The attribute reference in the value is resolved when the entry is
+    // applied.
+    let mut parser = Parser::default()
+        .with_intrinsic_attribute("foo", "baz", ModificationContext::Anywhere)
+        .with_intrinsic_attribute("release", "ultramega", ModificationContext::Anywhere);
+    parser.parse(":foo: {release}");
+    assert_eq!(
+        parser.attribute_value("foo"),
+        InterpretedValue::Value("ultramega")
+    );
+}
+
+#[test]
+fn store_inaccessible_attribute_on_document_with_value() {
+    verifies!(
+        r#"
   test 'store inaccessible attribute on document with value' do
     doc = empty_document attributes: { 'foo' => 'baz' }
     attrs = {}
@@ -257,6 +345,28 @@ non_normative!(
     refute attrs.key?(:attribute_entries)
   end
 
+"#
+    );
+
+    // An inaccessible (API-locked) attribute can't be overridden by a document
+    // entry; the value stays and the rejected override is reported.
+    let mut parser =
+        Parser::default().with_intrinsic_attribute("foo", "baz", ModificationContext::ApiOnly);
+    let doc = parser.parse(":foo: bar");
+    assert_eq!(
+        parser.attribute_value("foo"),
+        InterpretedValue::Value("baz")
+    );
+    assert!(
+        doc.warnings()
+            .any(|w| w.warning == WarningType::AttributeValueIsLocked("foo".to_string()))
+    );
+}
+
+#[test]
+fn store_accessible_attribute_on_document_with_negated_value() {
+    verifies!(
+        r#"
   test 'store accessible attribute on document with negated value' do
     { 'foo!' => nil, '!foo' => nil, 'foo' => nil }.each do |name, value|
       doc = empty_document
@@ -272,6 +382,22 @@ non_normative!(
     end
   end
 
+"#
+    );
+
+    // A negated entry unsets an accessible attribute.
+    for input in [":foo!:", ":!foo:"] {
+        let mut parser =
+            Parser::default().with_intrinsic_attribute("foo", "baz", ModificationContext::Anywhere);
+        parser.parse(input);
+        assert_eq!(parser.attribute_value("foo"), InterpretedValue::Unset);
+    }
+}
+
+#[test]
+fn store_inaccessible_attribute_on_document_with_negated_value() {
+    verifies!(
+        r#"
   test 'store inaccessible attribute on document with negated value' do
     { 'foo!' => nil, '!foo' => nil, 'foo' => nil }.each do |name, value|
       doc = empty_document attributes: { 'foo' => 'baz' }
@@ -284,7 +410,23 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // A negated entry can't unset an inaccessible (API-locked) attribute.
+    for input in [":foo!:", ":!foo:"] {
+        let mut parser =
+            Parser::default().with_intrinsic_attribute("foo", "baz", ModificationContext::ApiOnly);
+        let doc = parser.parse(input);
+        assert_eq!(
+            parser.attribute_value("foo"),
+            InterpretedValue::Value("baz")
+        );
+        assert!(
+            doc.warnings()
+                .any(|w| w.warning == WarningType::AttributeValueIsLocked("foo".to_string()))
+        );
+    }
+}
 
 #[test]
 fn parse_style_attribute_with_id_and_role() {
