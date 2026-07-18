@@ -630,6 +630,49 @@ fn peer_or_ancestor_section<'src>(
     }
 }
 
+/// Records a "section title out of sequence" warning for a *top-level* section
+/// whose level skips ahead of level 1 — the document root's expected first
+/// child level. The nested case (a section skipping a level under its *parent
+/// section*) is handled during parsing by [`peer_or_ancestor_section`]; this
+/// covers the document-root case (e.g. `= Doc` followed directly by `=== X`),
+/// which that boundary check never sees.
+///
+/// At most one such warning is possible: any later top-level section is a peer
+/// or ancestor of an earlier one (a deeper heading becomes a *child* instead),
+/// so it can never skip ahead of `most_recent_level + 1`.
+///
+/// Discrete headings are not part of the section sequence and are skipped. The
+/// caller restricts this to titled, non-`fragment` documents (a title-less
+/// document or a section fragment has no level-0 root to sequence against).
+pub(crate) fn root_section_sequence_warnings<'src>(blocks: &[Block<'src>]) -> Vec<Warning<'src>> {
+    let mut warnings = vec![];
+    let mut most_recent_level = 0;
+
+    for block in blocks {
+        let Block::Section(section) = block else {
+            continue;
+        };
+
+        if section.section_type() == SectionType::Discrete {
+            continue;
+        }
+
+        let found_level = section.level();
+
+        if found_level > most_recent_level + 1 {
+            warnings.push(Warning {
+                source: section.span().take_normalized_line().item,
+                warning: WarningType::SectionHeadingLevelSkipped(most_recent_level, found_level),
+                origin: None,
+            });
+        }
+
+        most_recent_level = found_level;
+    }
+
+    warnings
+}
+
 /// Propose a section ID from the section title.
 ///
 /// This function is called when (1) no `id` attribute is specified explicitly,

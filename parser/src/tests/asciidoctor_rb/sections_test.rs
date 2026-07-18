@@ -1945,11 +1945,11 @@ mod nesting {
         assert_eq!(nested.level(), 3);
     }
 
-    // NOTE: The crate does not warn when a top-level section skips level 1 (see
-    // #754), so a level-2 heading directly under the document title — here where
-    // a level-1 chapter is expected — emits no warning. The exact "expected
-    // levels 0 or 1" wording is book-specific (the book doctype is unsupported),
-    // so this test stays out of scope even once #754 is addressed.
+    // NOTE: The crate now warns generically when a top-level section skips level
+    // 1 (`SectionHeadingLevelSkipped(0, 2)` here; see #754 and the regression
+    // test below), but the exact "expected levels 0 or 1" wording is
+    // book-specific — a level-0 part or level-1 chapter — and the book doctype
+    // is unsupported, so this test remains out of scope.
     non_normative!(
         r##"
     test 'should warn if chapter title is out of sequence' do
@@ -2002,6 +2002,23 @@ mod nesting {
             doc.warnings()
                 .all(|w| !matches!(w.warning, WarningType::SectionHeadingLevelSkipped(..)))
         );
+    }
+
+    // Regression test for #754 — the contrapositive of the `fragment` test
+    // above, and the article counterpart of the book-specific `should warn if
+    // chapter title is out of sequence` test (which stays out of scope). It has
+    // no direct Ruby test in this suite. Without `fragment`, a top-level section
+    // that skips level 1 directly under the document title is reported as out of
+    // sequence.
+    #[test]
+    fn top_level_section_out_of_sequence_warns_without_fragment() {
+        let doc = Parser::default().parse("= Document Title\n\n=== First Section\n\ncontent\n");
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings[0].warning,
+            WarningType::SectionHeadingLevelSkipped(0, 2)
+        ));
     }
 
     #[test]
