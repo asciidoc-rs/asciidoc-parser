@@ -57,6 +57,7 @@ mod lists_test;
 mod logger_test;
 mod options_test;
 mod paragraphs_test;
+mod preamble_test;
 mod substitutions_test;
 mod tables_test;
 mod test_helper_test;
