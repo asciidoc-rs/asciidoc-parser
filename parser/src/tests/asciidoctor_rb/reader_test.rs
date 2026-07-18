@@ -78,22 +78,28 @@ use crate::{
 
 track_file!("ref/asciidoctor/test/reader_test.rb");
 
-/// A recorded `resolve_target` call: the `(source, target)` the parser handed
-/// to the [`IncludeFileHandler`].
-type RecordedInclude = (Option<String>, String);
+/// A recorded `resolve_target` call: the `(source, target, encoding)` the
+/// parser handed to the [`IncludeFileHandler`] — where `encoding` is the value
+/// of the directive's `encoding` attribute, if any.
+type RecordedInclude = (Option<String>, String, Option<String>);
 
-/// A mock [`IncludeFileHandler`] that records the `(source, target)` of every
-/// `resolve_target` call and returns the same fixed content for each.
+/// A mock [`IncludeFileHandler`] that records the `(source, target, encoding)`
+/// of every `resolve_target` call and returns the same fixed content for each.
 ///
-/// The real file-system lookup is downstream of this crate, but the parser is
-/// still responsible for the *plumbing*: resolving attribute references (and
-/// otherwise cleaning up) the directive's target, and naming the including file
-/// as `source`, before delegating. This handler lets a test assert exactly what
+/// The real file-system lookup (and any transcoding) is downstream of this
+/// crate, but the parser is still responsible for the *plumbing*: resolving
+/// attribute references (and otherwise cleaning up) the directive's target,
+/// naming the including file as `source`, and forwarding the `encoding`
+/// attribute — before delegating. This handler lets a test assert exactly what
 /// the parser hands off.
 #[derive(Clone, Debug)]
 struct RecordingIncludeFileHandler {
     calls: Rc<RefCell<Vec<RecordedInclude>>>,
     content: &'static str,
+    /// When `true`, content is returned via [`IncludeContent::transcoded`] (as
+    /// a handler that honored the `encoding` attribute would), suppressing
+    /// the non-UTF-8 include-encoding warning.
+    transcoded: bool,
 }
 
 impl RecordingIncludeFileHandler {
@@ -101,11 +107,23 @@ impl RecordingIncludeFileHandler {
         Self {
             calls: Rc::new(RefCell::new(Vec::new())),
             content,
+            transcoded: false,
         }
     }
 
-    /// The `(source, target)` of every recorded call, in order. A clone of the
-    /// handler shares this record with the copy handed to the parser.
+    /// Like [`new`](Self::new), but returns its content as
+    /// [`IncludeContent::transcoded`] — i.e. as a handler that read a non-UTF-8
+    /// file and reencoded it per the `encoding` attribute.
+    fn transcoding(content: &'static str) -> Self {
+        Self {
+            transcoded: true,
+            ..Self::new(content)
+        }
+    }
+
+    /// The `(source, target, encoding)` of every recorded call, in order. A
+    /// clone of the handler shares this record with the copy handed to the
+    /// parser.
     fn calls(&self) -> Vec<RecordedInclude> {
         self.calls.borrow().clone()
     }
@@ -116,13 +134,20 @@ impl IncludeFileHandler for RecordingIncludeFileHandler {
         &self,
         source: Option<&str>,
         target: &str,
-        _attrlist: &Attrlist<'src>,
+        attrlist: &Attrlist<'src>,
         _parser: &Parser,
     ) -> Option<IncludeContent> {
+        let encoding = attrlist
+            .named_attribute("encoding")
+            .map(|a| a.value().to_string());
         self.calls
             .borrow_mut()
-            .push((source.map(str::to_owned), target.to_owned()));
-        Some(IncludeContent::new(self.content))
+            .push((source.map(str::to_owned), target.to_owned(), encoding));
+        Some(if self.transcoded {
+            IncludeContent::transcoded(self.content)
+        } else {
+            IncludeContent::new(self.content)
+        })
     }
 }
 
@@ -1153,7 +1178,7 @@ fn include_directive_is_enabled_when_safe_mode_is_less_than_secure() {
     );
     assert_eq!(
         probe.calls(),
-        vec![(None, "fixtures/include-file.adoc".to_owned())]
+        vec![(None, "fixtures/include-file.adoc".to_owned(), None)]
     );
 }
 
@@ -1260,7 +1285,7 @@ fn include_directive_should_resolve_file_with_spaces_in_name() {
     );
     assert_eq!(
         probe.calls(),
-        vec![(None, "fixtures/include file.adoc".to_owned())]
+        vec![(None, "fixtures/include file.adoc".to_owned(), None)]
     );
 }
 
@@ -1305,7 +1330,7 @@ fn include_directive_should_resolve_file_with_sp_in_name() {
     );
     assert_eq!(
         probe.calls(),
-        vec![(None, "fixtures/include file.adoc".to_owned())]
+        vec![(None, "fixtures/include file.adoc".to_owned(), None)]
     );
 }
 
@@ -1529,8 +1554,15 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// The actual transcoding is the handler's job, but the parser must forward the
+// `encoding` attribute so the handler knows the source format. The mock records
+// that it received `encoding=iso-8859-1` and returns its (already UTF-8)
+// content via `IncludeContent::transcoded`; the parser merges it and — because
+// the handler honored the encoding — raises no non-UTF-8 warning.
+#[test]
+fn should_use_encoding_specified_by_encoding_attribute_when_reading_include_file() {
+    verifies!(
+        r#"
       test 'should use encoding specified by encoding attribute when reading include file' do
         input = <<~'EOS'
         ....
@@ -1544,7 +1576,34 @@ non_normative!(
         assert_equal ['Où est l\'hôpital ?'], doc.blocks[0].lines
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::transcoding("Où est l'hôpital ?");
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+
+    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/iso-8859-1.txt[encoding=iso-8859-1]",
+        &parser,
+    );
+    assert_eq!(output, "Où est l'hôpital ?\n");
+
+    // The `encoding` attribute was forwarded to the handler...
+    assert_eq!(
+        probe.calls(),
+        vec![(
+            None,
+            "fixtures/iso-8859-1.txt".to_owned(),
+            Some("iso-8859-1".to_owned())
+        )]
+    );
+
+    // ...and because the handler reported the content as transcoded, no
+    // non-UTF-8 include-encoding warning is raised.
+    assert!(warnings.is_empty());
+}
 
 non_normative!(
     r#"
