@@ -233,12 +233,14 @@ fn store_attribute_with_value() {
 "#
     );
 
-    let parser =
+    // Constructing the parser with the attribute makes it active for a parsed
+    // document: `foo` is present on the resulting `Document` and resolves when a
+    // `{foo}` reference is substituted.
+    let mut parser =
         Parser::default().with_intrinsic_attribute("foo", "bar", ModificationContext::Anywhere);
-    assert_eq!(
-        parser.attribute_value("foo"),
-        InterpretedValue::Value("bar")
-    );
+    let doc = parser.parse("{foo}");
+    assert_eq!(doc.attribute_value("foo"), InterpretedValue::Value("bar"));
+    assert_eq!(rendered_paragraphs(&doc), vec!["bar".to_string()]);
 }
 
 #[test]
@@ -257,13 +259,17 @@ fn store_attribute_with_negated_value() {
     );
 
     // A negated name (`foo!` or `!foo`) stores the attribute as unset; the API
-    // models this with `with_intrinsic_attribute_bool(name, false, ..)`.
-    let parser = Parser::default().with_intrinsic_attribute_bool(
+    // models this with `with_intrinsic_attribute_bool(name, false, ..)`. The
+    // unset value carries into a parsed document, and a `{foo}` reference
+    // resolves to nothing.
+    let mut parser = Parser::default().with_intrinsic_attribute_bool(
         "foo",
         false,
         ModificationContext::Anywhere,
     );
-    assert_eq!(parser.attribute_value("foo"), InterpretedValue::Unset);
+    let doc = parser.parse("{foo}");
+    assert_eq!(doc.attribute_value("foo"), InterpretedValue::Unset);
+    assert_eq!(rendered_paragraphs(&doc), vec![String::new()]);
 }
 
 #[test]
