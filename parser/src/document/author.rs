@@ -171,6 +171,19 @@ impl Author {
         }
     }
 
+    /// Overrides the author's email address, unless `email` is `None`.
+    ///
+    /// Used when an author is assembled from `author_N` document attributes,
+    /// where the name and the companion `email_N` attribute are parsed
+    /// separately.
+    pub(crate) fn with_email(mut self, email: Option<String>) -> Self {
+        if let Some(email) = email {
+            self.email = Some(email);
+        }
+
+        self
+    }
+
     /// Returns the full name of the author.
     ///
     /// The name includes the entire author declaration except for email.
