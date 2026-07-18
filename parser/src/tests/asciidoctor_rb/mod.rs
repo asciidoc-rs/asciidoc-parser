@@ -59,6 +59,7 @@ mod logger_test;
 mod manpage_test;
 mod options_test;
 mod paragraphs_test;
+mod parser_test;
 mod paths_test;
 mod preamble_test;
 mod substitutions_test;
