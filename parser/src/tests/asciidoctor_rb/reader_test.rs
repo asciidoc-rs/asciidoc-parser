@@ -68,9 +68,63 @@
 //! at the directive's own line, as Asciidoctor does only when `sourcemap` is
 //! enabled, because this crate always maintains a source map).
 
-use crate::tests::prelude::{inline_file_handler::InlineFileHandler, *};
+use std::{cell::RefCell, rc::Rc};
+
+use crate::{
+    attributes::Attrlist,
+    parser::{IncludeContent, IncludeFileHandler},
+    tests::prelude::{inline_file_handler::InlineFileHandler, *},
+};
 
 track_file!("ref/asciidoctor/test/reader_test.rb");
+
+/// A recorded `resolve_target` call: the `(source, target)` the parser handed
+/// to the [`IncludeFileHandler`].
+type RecordedInclude = (Option<String>, String);
+
+/// A mock [`IncludeFileHandler`] that records the `(source, target)` of every
+/// `resolve_target` call and returns the same fixed content for each.
+///
+/// The real file-system lookup is downstream of this crate, but the parser is
+/// still responsible for the *plumbing*: resolving attribute references (and
+/// otherwise cleaning up) the directive's target, and naming the including file
+/// as `source`, before delegating. This handler lets a test assert exactly what
+/// the parser hands off.
+#[derive(Clone, Debug)]
+struct RecordingIncludeFileHandler {
+    calls: Rc<RefCell<Vec<RecordedInclude>>>,
+    content: &'static str,
+}
+
+impl RecordingIncludeFileHandler {
+    fn new(content: &'static str) -> Self {
+        Self {
+            calls: Rc::new(RefCell::new(Vec::new())),
+            content,
+        }
+    }
+
+    /// The `(source, target)` of every recorded call, in order. A clone of the
+    /// handler shares this record with the copy handed to the parser.
+    fn calls(&self) -> Vec<RecordedInclude> {
+        self.calls.borrow().clone()
+    }
+}
+
+impl IncludeFileHandler for RecordingIncludeFileHandler {
+    fn resolve_target<'src>(
+        &self,
+        source: Option<&str>,
+        target: &str,
+        _attrlist: &Attrlist<'src>,
+        _parser: &Parser,
+    ) -> Option<IncludeContent> {
+        self.calls
+            .borrow_mut()
+            .push((source.map(str::to_owned), target.to_owned()));
+        Some(IncludeContent::new(self.content))
+    }
+}
 
 /// The crate's analog of Asciidoctor's `doc.reader.read`: run `input` through
 /// the preprocessor (include expansion + conditional directives) with `parser`
@@ -1068,8 +1122,15 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Below `SafeMode::Secure` the directive is *not* link-replaced (contrast the
+// default-safe-mode case above): the handler is consulted and its content is
+// merged in place. (The `doc.catalog[:includes]` assertion is the include
+// registry, tracked separately by
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/335.)
+#[test]
+fn include_directive_is_enabled_when_safe_mode_is_less_than_secure() {
+    verifies!(
+        r#"
       test 'include directive is enabled when safe mode is less than SECURE' do
         input = 'include::fixtures/include-file.adoc[]'
         doc = document_from_string input, safe: :safe, standalone: false, base_dir: DIRNAME
@@ -1078,7 +1139,23 @@ non_normative!(
         assert doc.catalog[:includes]['fixtures/include-file']
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new("included content");
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+
+    assert_eq!(
+        reader_read(&parser, "include::fixtures/include-file.adoc[]"),
+        "included content"
+    );
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include-file.adoc".to_owned())]
+    );
+}
 
 non_normative!(
     r#"
@@ -1147,8 +1224,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// The actual file lookup (here, a file whose name contains a space) is
+// downstream of this crate, so a mock handler stands in for it: the directive
+// is expanded with the handler's content, and the parser hands the handler the
+// verbatim target — spaces preserved.
+#[test]
+fn include_directive_should_resolve_file_with_spaces_in_name() {
+    verifies!(
+        r#"
       test 'include directive should resolve file with spaces in name' do
         input = 'include::fixtures/include file.adoc[]'
         include_file = File.join DIRNAME, 'fixtures', 'include-file.adoc'
@@ -1163,7 +1246,23 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new("included content");
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+
+    assert_eq!(
+        reader_read(&parser, "include::fixtures/include file.adoc[]"),
+        "included content"
+    );
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include file.adoc".to_owned())]
+    );
+}
 
 non_normative!(
     r#"
@@ -1171,8 +1270,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Same plumbing check, but the target contains a `{sp}` attribute reference:
+// the parser resolves it (to a space) before handing the target to the handler,
+// so the handler sees `fixtures/include file.adoc`.
+#[test]
+fn include_directive_should_resolve_file_with_sp_in_name() {
+    verifies!(
+        r#"
       test 'include directive should resolve file with {sp} in name' do
         input = 'include::fixtures/include{sp}file.adoc[]'
         include_file = File.join DIRNAME, 'fixtures', 'include-file.adoc'
@@ -1187,7 +1291,23 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new("included content");
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+
+    assert_eq!(
+        reader_read(&parser, "include::fixtures/include{sp}file.adoc[]"),
+        "included content"
+    );
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include file.adoc".to_owned())]
+    );
+}
 
 non_normative!(
     r#"
