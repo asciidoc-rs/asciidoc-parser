@@ -1123,6 +1123,9 @@ non_normative!(
 "#
 );
 
+// Out of scope for now: asserts on `doc.catalog[:includes]`, the include/link
+// registry. This crate does not yet maintain such a registry; it is tracked by
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/335.
 non_normative!(
     r#"
       test 'should not track include in catalog for non-AsciiDoc include files' do
