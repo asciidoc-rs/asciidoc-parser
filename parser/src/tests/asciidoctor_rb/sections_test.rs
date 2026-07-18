@@ -522,6 +522,8 @@ mod ids {
 "##
     );
 
+    // Same embedded-anchor gap as above (see #751): the reftext is captured, but
+    // the anchor is not adopted as the section ID.
     non_normative!(
         r##"
     test 'explicit id can be defined using an embedded anchor with reftext' do
@@ -560,6 +562,7 @@ mod ids {
         assert!(doc.catalog().get_ref("one").is_none());
     }
 
+    // Same embedded-anchor gap (see #751); here the reftext contains a comma.
     non_normative!(
         r##"
     test 'reftext in embedded anchor may contain comma' do
