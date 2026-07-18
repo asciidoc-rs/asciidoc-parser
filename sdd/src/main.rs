@@ -180,7 +180,11 @@ fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
             continue;
         }
 
-        if line.ends_with("r#\"") || line.ends_with("r##\"") {
+        // Opening delimiter of a reproduced Ruby block. We accept progressively
+        // longer hash guards (`r#"`, `r##"`, `r###"`) so a reproduced line may
+        // itself contain a shorter `"#`/`"##` sequence without prematurely
+        // closing the raw string (see `links_test.rb` line 664).
+        if line.ends_with("r#\"") || line.ends_with("r##\"") || line.ends_with("r###\"") {
             // println!("<<<");
             continue;
         }
