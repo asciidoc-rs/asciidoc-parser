@@ -1183,7 +1183,8 @@ fn extract_attributes_from_text<'src>(
     }
 }
 
-// Ruby CGI.escape allows A-Z a-z 0-9 *_.-
+// Ruby CGI.escape (Ruby 2.5+) leaves only A-Z a-z 0-9 _.-~ unescaped and
+// encodes everything else; notably `*` is escaped to `%2A` while `~` is not.
 // It encodes space as '+'. (We'll fix afterward.)
 // Start with the standard URL encoding set.
 const CGI_ESCAPE_SET: &AsciiSet = &CONTROLS
@@ -1197,6 +1198,7 @@ const CGI_ESCAPE_SET: &AsciiSet = &CONTROLS
     .add(b'\'')
     .add(b'(')
     .add(b')')
+    .add(b'*') // asterisk must be escaped (CGI.escape emits %2A)
     .add(b'+') // plus must be escaped
     .add(b',')
     .add(b'/')
@@ -1819,6 +1821,31 @@ mod tests {
 
     //! This test suite fills in a few coverage gaps after doing spec-driven
     //! development (SDD) for macro parsing.
+
+    mod encode_uri_component {
+        use super::super::encode_uri_component;
+
+        // Mirrors Asciidoctor's `Helpers.encode_uri_component`
+        // (helpers_test.rb, `context 'URI Encoding'`): non-word characters are
+        // percent-encoded, including `*` → `%2A`. `encode_uri_component` is
+        // private and reachable in production only via `mailto:` subject/body
+        // rendering, where the special-characters substitution rewrites the
+        // input first; this exercises the helper's contract directly.
+        #[test]
+        fn encodes_non_word_characters_generally() {
+            assert_eq!(
+                encode_uri_component(" !*/%&?\\="),
+                "%20%21%2A%2F%25%26%3F%5C%3D"
+            );
+        }
+
+        // `-` and `.` are left unencoded, as is `~` on Ruby 2.5+ (which this
+        // crate matches).
+        #[test]
+        fn leaves_select_non_word_characters_unencoded() {
+            assert_eq!(encode_uri_component("-.~"), "-.~");
+        }
+    }
 
     mod inline_link {
         use crate::tests::prelude::*;

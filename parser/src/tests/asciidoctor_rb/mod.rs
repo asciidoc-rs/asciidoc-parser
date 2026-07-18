@@ -46,10 +46,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+mod api_test;
 mod attribute_list_test;
 mod converter_test;
+mod extensions_test;
+mod helpers_test;
+mod invoker_test;
 mod links_test;
 mod lists_test;
+mod options_test;
 mod paragraphs_test;
 mod substitutions_test;
 mod tables_test;
+mod test_helper_test;
