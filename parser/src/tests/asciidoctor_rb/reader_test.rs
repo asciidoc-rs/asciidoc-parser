@@ -232,6 +232,60 @@ class Dog
 end
 #end::all[]";
 
+/// Verbatim copy of Asciidoctor's `test/fixtures/tagged-class.rb` (like
+/// [`TAGGED_CLASS_ENCLOSED_RB`], but with no enclosing `all` tag).
+const TAGGED_CLASS_RB: &str = "\
+class Dog
+  #tag::init[]
+  def initialize breed
+    @breed = breed
+  end
+  #end::init[]
+  #tag::bark[]
+
+  def bark
+    #tag::bark-beagle[]
+    if @breed == 'beagle'
+      'woof woof woof woof woof'
+    #end::bark-beagle[]
+    #tag::bark-other[]
+    else
+      'woof woof'
+    #end::bark-other[]
+    #tag::bark-all[]
+    end
+    #end::bark-all[]
+  end
+  #end::bark[]
+end";
+
+/// Verbatim copy of Asciidoctor's `test/fixtures/include-file.xml` — a tagged
+/// region delimited by XML circumfix comments.
+const INCLUDE_FILE_XML: &str = "\
+<root>
+  <!-- tag::snippet[] -->
+  <snippet>content</snippet>
+  <!-- end::snippet[] -->
+</root>";
+
+/// Verbatim copy of Asciidoctor's `test/fixtures/include-file.ml` — a tagged
+/// region delimited by OCaml circumfix comments.
+const INCLUDE_FILE_ML: &str = "\
+(* tag::snippet[] *)
+let s = SS.empty;;
+(* end::snippet[] *)";
+
+/// Verbatim copy of Asciidoctor's `test/fixtures/include-file.jsx`.
+const INCLUDE_FILE_JSX: &str = "\
+const element = (
+  <div>
+    <h1>Hello, Programmer!</h1>
+    <!-- tag::snippet[] -->
+    <p>Welcome to the club.</p>
+    <!-- end::snippet[] -->
+  </div>
+)";
+
 non_normative!(
     r#"
 # frozen_string_literal: true
@@ -2383,8 +2437,11 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// A single `tag=` selects only that region's content.
+#[test]
+fn include_directive_supports_selecting_lines_by_tag() {
+    verifies!(
+        r#"
       test 'include directive supports selecting lines by tag' do
         input = 'include::fixtures/include-file.adoc[tag=snippetA]'
         output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
@@ -2394,7 +2451,17 @@ non_normative!(
         refute_match(/included content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(&parser, "include::fixtures/include-file.adoc[tag=snippetA]"),
+        "snippetA content"
+    );
+}
 
 non_normative!(
     r#"
@@ -2402,8 +2469,11 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `tags=a;b` selects both regions.
+#[test]
+fn include_directive_supports_selecting_lines_by_tags() {
+    verifies!(
+        r#"
       test 'include directive supports selecting lines by tags' do
         input = 'include::fixtures/include-file.adoc[tags=snippetA;snippetB]'
         output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
@@ -2413,7 +2483,20 @@ non_normative!(
         refute_match(/included content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "include::fixtures/include-file.adoc[tags=snippetA;snippetB]"
+        ),
+        "snippetA content\nsnippetB content"
+    );
+}
 
 non_normative!(
     r#"
@@ -2421,8 +2504,12 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Tag directives are recognized inside circumfix comments (XML, OCaml, JSX),
+// and `indent=0` on the directive strips the region's indentation.
+#[test]
+fn include_directive_supports_selecting_lines_by_tag_in_language_that_uses_circumfix_comments() {
+    verifies!(
+        r#"
       test 'include directive supports selecting lines by tag in language that uses circumfix comments' do
         {
           'include-file.xml' => '<snippet>content</snippet>',
@@ -2441,7 +2528,32 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    for (content, input, expected) in [
+        (
+            INCLUDE_FILE_XML,
+            "[source,xml]\n----\ninclude::fixtures/include-file.xml[tag=snippet,indent=0]\n----",
+            "[source,xml]\n----\n<snippet>content</snippet>\n----",
+        ),
+        (
+            INCLUDE_FILE_ML,
+            "[source,xml]\n----\ninclude::fixtures/include-file.ml[tag=snippet,indent=0]\n----",
+            "[source,xml]\n----\nlet s = SS.empty;;\n----",
+        ),
+        (
+            INCLUDE_FILE_JSX,
+            "[source,xml]\n----\ninclude::fixtures/include-file.jsx[tag=snippet,indent=0]\n----",
+            "[source,xml]\n----\n<p>Welcome to the club.</p>\n----",
+        ),
+    ] {
+        let handler = RecordingIncludeFileHandler::new(content);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler);
+        assert_eq!(reader_read(&parser, input), expected);
+    }
+}
 
 non_normative!(
     r#"
@@ -2449,8 +2561,11 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Tag directives are matched even when the include file has CRLF endings.
+#[test]
+fn include_directive_supports_selecting_lines_by_tag_in_file_that_has_crlf_line_endings() {
+    verifies!(
+        r#"
       test 'include directive supports selecting lines by tag in file that has CRLF line endings' do
         begin
           tmp_include = Tempfile.new %w(include- .adoc)
@@ -2466,7 +2581,19 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(
+        "do not include\r\ntag::include-me[]\r\nincluded line\r\nend::include-me[]\r\ndo not include\r\n",
+    );
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(&parser, "include::fixtures/include.adoc[tag=include-me]"),
+        "included line"
+    );
+}
 
 non_normative!(
     r#"
@@ -2474,8 +2601,11 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// A closing tag on the final line (no trailing newline) is still recognized.
+#[test]
+fn include_directive_finds_closing_tag_on_last_line_of_file_without_a_trailing_newline() {
+    verifies!(
+        r#"
       test 'include directive finds closing tag on last line of file without a trailing newline' do
         begin
           tmp_include = Tempfile.new %w(include- .adoc)
@@ -2494,7 +2624,19 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(
+        "line not included\ntag::include-me[]\nline included\nend::include-me[]",
+    );
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(&parser, "include::fixtures/include.adoc[tag=include-me]"),
+        "line included"
+    );
+}
 
 non_normative!(
     r#"
@@ -2502,8 +2644,11 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// The tag-directive lines within a selected region are themselves dropped.
+#[test]
+fn include_directive_does_not_select_lines_containing_tag_directives_within_selected_tag_region() {
+    verifies!(
+        r#"
       test 'include directive does not select lines containing tag directives within selected tag region' do
         input = <<~'EOS'
         ++++
@@ -2522,7 +2667,20 @@ non_normative!(
         assert_equal expected, output
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "++++\ninclude::fixtures/include-file.adoc[tags=snippet]\n++++"
+        ),
+        "++++\nsnippetA content\n\nnon-tagged content\n\nsnippetB content\n++++"
+    );
+}
 
 non_normative!(
     r#"
@@ -2530,8 +2688,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_skips_lines_inside_tag_which_is_negated() {
+    verifies!(
+        r#"
       test 'include directive skips lines inside tag which is negated' do
         input = <<~'EOS'
         ----
@@ -2551,7 +2714,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_ENCLOSED_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class-enclosed.rb[tags=all;!bark]\n----"
+        ),
+        "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2559,8 +2735,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_without_a_tag_directive_when_value_is_double_asterisk() {
+    verifies!(
+        r#"
       test 'include directive selects all lines without a tag directive when value is double asterisk' do
         input = <<~'EOS'
         ----
@@ -2588,7 +2769,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=**]\n----"
+        ),
+        "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2596,8 +2790,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_except_lines_inside_tag_which_is_negated_when_value_starts_with_double_asterisk()
+ {
+    verifies!(
+        r#"
       test 'include directive selects all lines except lines inside tag which is negated when value starts with double asterisk' do
         input = <<~'EOS'
         ----
@@ -2617,7 +2817,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=**;!bark]\n----"
+        ),
+        "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2625,8 +2838,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_including_lines_inside_nested_tags_except_lines_inside_tag_which_is_negated_when_value_starts_with_double_asterisk()
+ {
+    verifies!(
+        r#"
       test 'include directive selects all lines, including lines inside nested tags, except lines inside tag which is negated when value starts with double asterisk' do
         input = <<~'EOS'
         ----
@@ -2651,7 +2870,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=**;!init]\n----"
+        ),
+        "----\nclass Dog\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2659,8 +2891,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_outside_of_tags_when_value_is_double_asterisk_followed_by_negated_wildcard()
+ {
+    verifies!(
+        r#"
       test 'include directive selects all lines outside of tags when value is double asterisk followed by negated wildcard' do
         input = <<~'EOS'
         ----
@@ -2676,7 +2914,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=**;!*]\n----"
+        ),
+        "----\nclass Dog\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2684,8 +2935,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_skips_all_tagged_regions_when_value_of_tags_attribute_is_negated_wildcard() {
+    verifies!(
+        r#"
       test 'include directive skips all tagged regions when value of tags attribute is negated wildcard' do
         input = <<~'EOS'
         ----
@@ -2698,7 +2954,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=!*]\n----"
+        ),
+        "----\nclass Dog\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2707,8 +2976,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_except_for_lines_containing_tag_directive_if_value_is_double_asterisk_followed_by_nested_tag_names()
+ {
+    verifies!(
+        r#"
       test 'include directive selects all lines except for lines containing tag directive if value is double asterisk followed by nested tag names' do
         input = <<~'EOS'
         ----
@@ -2736,7 +3011,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=**;bark-beagle;bark-all]\n----"
+        ),
+        "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2745,8 +3033,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_except_for_lines_containing_tag_directive_when_value_is_double_asterisk_followed_by_outer_tag_name()
+ {
+    verifies!(
+        r#"
       test 'include directive selects all lines except for lines containing tag directive when value is double asterisk followed by outer tag name' do
         input = <<~'EOS'
         ----
@@ -2774,7 +3068,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=**;bark]\n----"
+        ),
+        "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2782,8 +3089,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_inside_unspecified_tags_when_value_is_negated_double_asterisk_followed_by_negated_tags()
+ {
+    verifies!(
+        r#"
       test 'include directive selects all lines inside unspecified tags when value is negated double asterisk followed by negated tags' do
         input = <<~'EOS'
         ----
@@ -2804,7 +3117,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=!**;!init]\n----"
+        ),
+        "----\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2812,8 +3138,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_except_tag_which_is_negated_when_value_only_contains_negated_tag()
+ {
+    verifies!(
+        r#"
       test 'include directive selects all lines except tag which is negated when value only contains negated tag' do
         input = <<~'EOS'
         ----
@@ -2833,7 +3165,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tag=!bark]\n----"
+        ),
+        "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2841,8 +3186,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_all_lines_except_tags_which_are_negated_when_value_only_contains_negated_tags()
+ {
+    verifies!(
+        r#"
       test 'include directive selects all lines except tags which are negated when value only contains negated tags' do
         input = <<~'EOS'
         ----
@@ -2858,7 +3209,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=!bark;!init]\n----"
+        ),
+        "----\nclass Dog\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2866,8 +3230,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn should_recognize_tag_wildcard_if_not_at_start_of_tags_list() {
+    verifies!(
+        r#"
       test 'should recognize tag wildcard if not at start of tags list' do
         input = <<~'EOS'
         ----
@@ -2893,7 +3262,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=init;**;*;!bark-other]\n----"
+        ),
+        "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    end\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2901,8 +3283,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_lines_between_tags_when_value_of_tags_attribute_is_wildcard() {
+    verifies!(
+        r#"
       test 'include directive selects lines between tags when value of tags attribute is wildcard' do
         input = <<~'EOS'
         ----
@@ -2927,7 +3314,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=*]\n----"
+        ),
+        "----\n  def initialize breed\n    @breed = breed\n  end\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2935,8 +3335,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_lines_inside_tags_when_value_of_tags_attribute_is_wildcard_and_tag_surrounds_content()
+ {
+    verifies!(
+        r#"
       test 'include directive selects lines inside tags when value of tags attribute is wildcard and tag surrounds content' do
         input = <<~'EOS'
         ----
@@ -2964,7 +3370,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_ENCLOSED_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class-enclosed.rb[tags=*]\n----"
+        ),
+        "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -2972,8 +3391,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_lines_inside_all_tags_except_tag_which_is_negated_when_value_of_tags_attribute_is_wildcard_followed_by_negated_tag()
+ {
+    verifies!(
+        r#"
       test 'include directive selects lines inside all tags except tag which is negated when value of tags attribute is wildcard followed by negated tag' do
         input = <<~'EOS'
         ----
@@ -2998,7 +3423,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_ENCLOSED_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class-enclosed.rb[tags=*;!init]\n----"
+        ),
+        "----\nclass Dog\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -3006,8 +3444,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_skips_all_tagged_regions_except_ones_re_enabled_when_value_of_tags_attribute_is_negated_wildcard_followed_by_tag_name()
+ {
+    verifies!(
+        r#"
       test 'include directive skips all tagged regions except ones re-enabled when value of tags attribute is negated wildcard followed by tag name' do
         ['!*;init', '**;!*;init'].each do |pattern|
           input = <<~EOS
@@ -3029,7 +3473,22 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    for input in [
+        "----\ninclude::fixtures/tagged-class.rb[tags=!*;init]\n----",
+        "----\ninclude::fixtures/tagged-class.rb[tags=**;!*;init]\n----",
+    ] {
+        assert_eq!(
+            reader_read(&parser, input),
+            "----\nclass Dog\n  def initialize breed\n    @breed = breed\n  end\nend\n----"
+        );
+    }
+}
 
 non_normative!(
     r#"
@@ -3037,8 +3496,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_includes_regions_outside_tags_and_inside_specified_tags_when_value_begins_with_negated_wildcard()
+ {
+    verifies!(
+        r#"
       test 'include directive includes regions outside tags and inside specified tags when value begins with negated wildcard' do
         input = <<~'EOS'
         ----
@@ -3058,7 +3523,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=!*;bark]\n----"
+        ),
+        "----\nclass Dog\n\n  def bark\n  end\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -3066,8 +3544,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_includes_lines_inside_tag_except_for_lines_inside_nested_tags_when_tag_is_followed_by_negated_wildcard()
+ {
+    verifies!(
+        r#"
       test 'include directive includes lines inside tag except for lines inside nested tags when tag is followed by negated wildcard' do
         ['bark;!*', '!**;bark;!*', '!**;!*;bark'].each do |pattern|
           input = <<~EOS
@@ -3085,7 +3569,23 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    for input in [
+        "----\ninclude::fixtures/tagged-class.rb[tags=bark;!*]\n----",
+        "----\ninclude::fixtures/tagged-class.rb[tags=!**;bark;!*]\n----",
+        "----\ninclude::fixtures/tagged-class.rb[tags=!**;!*;bark]\n----",
+    ] {
+        assert_eq!(
+            reader_read(&parser, input),
+            "----\n\n  def bark\n  end\n----"
+        );
+    }
+}
 
 non_normative!(
     r#"
@@ -3093,8 +3593,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_selects_lines_inside_tag_except_for_lines_inside_nested_tags_when_tag_is_preceded_by_negated_double_asterisk_and_negated_wildcard()
+ {
+    verifies!(
+        r#"
       test 'include directive selects lines inside tag except for lines inside nested tags when tag is preceded by negated double asterisk and negated wildcard' do
         input = <<~'EOS'
         ----
@@ -3110,7 +3616,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=!**;!*;bark]\n----"
+        ),
+        "----\n\n  def bark\n  end\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -3118,8 +3637,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_does_not_select_lines_inside_tag_that_has_been_included_then_excluded() {
+    verifies!(
+        r#"
       test 'include directive does not select lines inside tag that has been included then excluded' do
         input = <<~'EOS'
         ----
@@ -3135,7 +3659,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "----\ninclude::fixtures/tagged-class.rb[tags=!*;init;!init]\n----"
+        ),
+        "----\nclass Dog\nend\n----"
+    );
+}
 
 non_normative!(
     r#"
@@ -3143,8 +3680,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+#[test]
+fn include_directive_only_selects_lines_inside_specified_tag_even_if_proceeded_by_negated_double_asterisk()
+ {
+    verifies!(
+        r#"
       test 'include directive only selects lines inside specified tag, even if proceeded by negated double asterisk' do
         ['bark', '!**;bark'].each do |pattern|
           input = <<~EOS
@@ -3167,7 +3710,22 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    for input in [
+        "----\ninclude::fixtures/tagged-class.rb[tags=bark]\n----",
+        "----\ninclude::fixtures/tagged-class.rb[tags=!**;bark]\n----",
+    ] {
+        assert_eq!(
+            reader_read(&parser, input),
+            "----\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    else\n      'woof woof'\n    end\n  end\n----"
+        );
+    }
+}
 
 non_normative!(
     r#"
@@ -3175,8 +3733,15 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `reader_read` is the raw preprocessed text, so it keeps the block
+// delimiters and any leading/trailing blank line that the enclosing block
+// trims when rendered; the tag *selection* is what is verified here.
+// (The block-level `[indent=0]` is applied when the listing block is
+// rendered, not by the preprocessor, so the raw text keeps its indentation.)
+#[test]
+fn include_directive_selects_lines_inside_specified_tag_and_ignores_lines_inside_a_negated_tag() {
+    verifies!(
+        r#"
       test 'include directive selects lines inside specified tag and ignores lines inside a negated tag' do
         input = <<~'EOS'
         [indent=0]
@@ -3197,7 +3762,20 @@ non_normative!(
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(TAGGED_CLASS_RB);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "[indent=0]\n----\ninclude::fixtures/tagged-class.rb[tags=bark;!bark-other]\n----"
+        ),
+        "[indent=0]\n----\n\n  def bark\n    if @breed == 'beagle'\n      'woof woof woof woof woof'\n    end\n  end\n----"
+    );
+}
 
 non_normative!(
     r#"
