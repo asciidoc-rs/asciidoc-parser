@@ -717,8 +717,9 @@ non_normative!(
 // Out of scope: YAML front matter (the `---` fence and `skip-front-matter`
 // attribute) is not handled by this crate — front matter must be stripped
 // before the source is handed to the parser (see the crate README and the
-// `document/header` spec notes). These also inspect `reader.peek_line` /
-// `reader.lineno`.
+// `document/header` spec notes). Dropping front matter is tracked by
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/745. These also inspect
+// `reader.peek_line` / `reader.lineno`.
 non_normative!(
     r#"
       test 'should not skip front matter by default' do
