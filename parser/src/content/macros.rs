@@ -1012,7 +1012,7 @@ static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
         :                       # Colon after macro name
 
         (?:                     # Non-capturing outer group
-            ().                 #   capture group 2: empty target
+            ()                  #   capture group 2: empty target
           | ([^:\s\[] [^\s\[]*) #   capture group 3: valid target (no colon/space/'[')
         )
 
@@ -1040,15 +1040,18 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             return;
         }
 
+        // The target is the (possibly empty) group 3; an empty `link:[…]` /
+        // `mailto:[…]` target leaves group 3 absent.
+        let target_str = caps.get(3).map_or("", |m| m.as_str());
+
         let (mailto, mailto_text, mut target) = if caps.get(1).is_some() {
-            let mailto_text = &caps[3];
             (
                 caps.get(1).map(|c| c.as_str()),
-                Some(mailto_text),
-                format!("mailto:{mailto_text}"),
+                Some(target_str),
+                format!("mailto:{target_str}"),
             )
         } else {
-            (None, None, caps[3].to_string())
+            (None, None, target_str.to_string())
         };
 
         let mut attrlist: Option<Attrlist<'_>> = None;
@@ -2453,7 +2456,7 @@ mod tests {
                                 col: 1,
                                 offset: 0,
                             },
-                            rendered: "mailto:[,Subscribe me]",
+                            rendered: "<a href=\"mailto:?subject=Subscribe%20me\"></a>",
                         },
                         source: Span {
                             data: "mailto:[,Subscribe me]",

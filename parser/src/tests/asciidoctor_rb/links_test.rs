@@ -334,11 +334,10 @@ fn qualified_url_with_label_containing_square_brackets_using_link_macro() {
     );
 }
 
-// Surfaced incompatibility: Asciidoctor renders `link:[this page]` as `<a
-// href="">this page</a>`; this crate leaves the empty-target link macro as
-// literal text.
-non_normative!(
-    r###"
+#[test]
+fn link_macro_with_empty_target() {
+    verifies!(
+        r###"
   test 'link macro with empty target' do
     input = 'Link to link:[this page].'
     output = convert_string_to_embedded input
@@ -347,7 +346,14 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse("Link to link:[this page].");
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"Link to <a href="">this page</a>."##
+    );
+}
 
 #[test]
 fn should_not_recognize_link_macro_with_double_colons() {
