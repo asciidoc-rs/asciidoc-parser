@@ -2697,7 +2697,9 @@ mod timing_report {
 
 // Computes `docdate`/`doctime`/`docdatetime`/`docyear` from `input_mtime`
 // and `SOURCE_DATE_EPOCH` — time-dependent document attributes not modeled
-// by this crate.
+// by this crate. Tracked (along with an injectable clock so test output can
+// be pinned to a fixed time) by
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/766.
 mod date_time_attributes {
     use crate::tests::prelude::*;
 
