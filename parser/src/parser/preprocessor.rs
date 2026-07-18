@@ -1237,7 +1237,18 @@ fn select_by_line_ranges(text: &str, spec: &str) -> String {
                 (n, Some(n))
             }
         })
+        // A reversed range (`from` past a concrete `to`, e.g. `10..5`) selects no
+        // lines, so it is dropped. If every range is invalid this way, the
+        // `lines` attribute is ignored entirely (see below), matching
+        // Asciidoctor.
+        .filter(|&(from, to)| to.is_none_or(|to| from <= to))
         .collect();
+
+    // With no valid range remaining, the `lines` attribute is ignored and the
+    // whole file is included (rather than nothing).
+    if ranges.is_empty() {
+        return text.to_string();
+    }
 
     let mut output = String::new();
     for (index, line) in text.lines().enumerate() {
