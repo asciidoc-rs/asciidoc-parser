@@ -39,7 +39,7 @@ _18 July 2026_
 
 ### Fixed
 
-* Warn on duplicate inline anchors ([#765](https://github.com/asciidoc-rs/asciidoc-parser/pull/765))
+* Warn on duplicate inline anchors ([#765](https://github.com/asciidoc-rs/asciidoc-parser/pull/765) by @pollychen-lab -- thank you!)
 * Strip trailing ` +` from single-line attribute values ([#709](https://github.com/asciidoc-rs/asciidoc-parser/pull/709))
 * Preserve hard line break marker in attribute entry values (close #307) ([#708](https://github.com/asciidoc-rs/asciidoc-parser/pull/708))
 * Support macros nested in link/xref text (close #305) ([#704](https://github.com/asciidoc-rs/asciidoc-parser/pull/704))
