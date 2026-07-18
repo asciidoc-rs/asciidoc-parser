@@ -2088,8 +2088,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Line selection: `lines=1;3..4;6..-1` keeps line 1, lines 3-4, and line 6
+// through the end of the file (the mock supplies the fixture text). The parser
+// applies the selection to the handler's content; the handler itself sees only
+// the resolved target.
+#[test]
+fn include_directive_supports_selecting_lines_by_line_number() {
+    verifies!(
+        r#"
       test 'include directive supports selecting lines by line number' do
         input = 'include::fixtures/include-file.adoc[lines=1;3..4;6..-1]'
         output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
@@ -2104,7 +2110,34 @@ non_normative!(
         assert_match(/last line of included content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+
+    let output = reader_read(
+        &parser,
+        "include::fixtures/include-file.adoc[lines=1;3..4;6..-1]",
+    );
+
+    assert!(output.contains("first line"));
+    assert!(!output.contains("second line"));
+    assert!(output.contains("third line"));
+    assert!(output.contains("fourth line"));
+    assert!(!output.contains("fifth line"));
+    assert!(output.contains("sixth line"));
+    assert!(output.contains("seventh line"));
+    assert!(output.contains("eighth line"));
+    assert!(output.contains("last line of included content"));
+
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include-file.adoc".to_owned(), None)]
+    );
+}
 
 non_normative!(
     r#"
