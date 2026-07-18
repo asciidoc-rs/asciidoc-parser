@@ -1945,10 +1945,11 @@ mod nesting {
         assert_eq!(nested.level(), 3);
     }
 
-    // NOTE: Out-of-sequence detection under a book document title (a level-2
-    // heading where a level-1 chapter is expected) is not modeled — the crate
-    // emits no warning here. Out of scope pending book chapter-sequence
-    // validation.
+    // NOTE: The crate does not warn when a top-level section skips level 1 (see
+    // #754), so a level-2 heading directly under the document title — here where
+    // a level-1 chapter is expected — emits no warning. The exact "expected
+    // levels 0 or 1" wording is book-specific (the book doctype is unsupported),
+    // so this test stays out of scope even once #754 is addressed.
     non_normative!(
         r##"
     test 'should warn if chapter title is out of sequence' do
