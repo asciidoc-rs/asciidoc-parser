@@ -2145,8 +2145,12 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// A quoted `lines` value may use commas between ranges (same selection as
+// the semicolon form).
+#[test]
+fn include_directive_supports_line_ranges_separated_by_commas_in_quoted_attribute_value() {
+    verifies!(
+        r#"
       test 'include directive supports line ranges separated by commas in quoted attribute value' do
         input = 'include::fixtures/include-file.adoc[lines="1,3..4,6..-1"]'
         output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
@@ -2161,7 +2165,31 @@ non_normative!(
         assert_match(/last line of included content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let output = reader_read(
+        &parser,
+        "include::fixtures/include-file.adoc[lines=\"1,3..4,6..-1\"]",
+    );
+    assert!(output.contains("first line"));
+    assert!(!output.contains("second line"));
+    assert!(output.contains("third line"));
+    assert!(output.contains("fourth line"));
+    assert!(!output.contains("fifth line"));
+    assert!(output.contains("sixth line"));
+    assert!(output.contains("seventh line"));
+    assert!(output.contains("eighth line"));
+    assert!(output.contains("last line of included content"));
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include-file.adoc".to_owned(), None)]
+    );
+}
 
 non_normative!(
     r#"
@@ -2169,8 +2197,11 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Spaces around the range separators and the `..` operator are ignored.
+#[test]
+fn include_directive_ignores_spaces_between_line_ranges_in_quoted_attribute_value() {
+    verifies!(
+        r#"
       test 'include directive ignores spaces between line ranges in quoted attribute value' do
         input = 'include::fixtures/include-file.adoc[lines="1, 3..4 , 6 .. -1"]'
         output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
@@ -2185,7 +2216,31 @@ non_normative!(
         assert_match(/last line of included content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let output = reader_read(
+        &parser,
+        "include::fixtures/include-file.adoc[lines=\"1, 3..4 , 6 .. -1\"]",
+    );
+    assert!(output.contains("first line"));
+    assert!(!output.contains("second line"));
+    assert!(output.contains("third line"));
+    assert!(output.contains("fourth line"));
+    assert!(!output.contains("fifth line"));
+    assert!(output.contains("sixth line"));
+    assert!(output.contains("seventh line"));
+    assert!(output.contains("eighth line"));
+    assert!(output.contains("last line of included content"));
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include-file.adoc".to_owned(), None)]
+    );
+}
 
 non_normative!(
     r#"
@@ -2193,8 +2248,11 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `6..` (no end) selects from line 6 to the end of the file.
+#[test]
+fn include_directive_supports_implicit_endless_range() {
+    verifies!(
+        r#"
       test 'include directive supports implicit endless range' do
         input = 'include::fixtures/include-file.adoc[lines=6..]'
         output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
@@ -2209,7 +2267,28 @@ non_normative!(
         assert_match(/last line of included content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let output = reader_read(&parser, "include::fixtures/include-file.adoc[lines=6..]");
+    assert!(!output.contains("first line"));
+    assert!(!output.contains("second line"));
+    assert!(!output.contains("third line"));
+    assert!(!output.contains("fourth line"));
+    assert!(!output.contains("fifth line"));
+    assert!(output.contains("sixth line"));
+    assert!(output.contains("seventh line"));
+    assert!(output.contains("eighth line"));
+    assert!(output.contains("last line of included content"));
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include-file.adoc".to_owned(), None)]
+    );
+}
 
 non_normative!(
     r#"
@@ -2217,8 +2296,11 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// An empty `lines=` applies no selection, so the whole file is included.
+#[test]
+fn include_directive_ignores_lines_attribute_if_empty() {
+    verifies!(
+        r#"
       test 'include directive ignores lines attribute if empty' do
         input = <<~'EOS'
         ++++
@@ -2231,7 +2313,24 @@ non_normative!(
         assert_includes output, 'last line of included content'
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let output = reader_read(
+        &parser,
+        "++++\ninclude::fixtures/include-file.adoc[lines=]\n++++",
+    );
+    assert!(output.contains("first line of included content"));
+    assert!(output.contains("last line of included content"));
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include-file.adoc".to_owned(), None)]
+    );
+}
 
 non_normative!(
     r#"
@@ -2239,8 +2338,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// A reversed range like `10..5` selects no lines, so it is treated as
+// invalid and the `lines` attribute is ignored — the whole file is
+// included. (This crate previously applied the reversed range and produced
+// empty output; it now matches Asciidoctor.)
+#[test]
+fn include_directive_ignores_lines_attribute_with_invalid_range() {
+    verifies!(
+        r#"
       test 'include directive ignores lines attribute with invalid range' do
         input = <<~'EOS'
         ++++
@@ -2253,7 +2358,24 @@ non_normative!(
         assert_includes output, 'last line of included content'
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let output = reader_read(
+        &parser,
+        "++++\ninclude::fixtures/include-file.adoc[lines=10..5]\n++++",
+    );
+    assert!(output.contains("first line of included content"));
+    assert!(output.contains("last line of included content"));
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include-file.adoc".to_owned(), None)]
+    );
+}
 
 non_normative!(
     r#"
