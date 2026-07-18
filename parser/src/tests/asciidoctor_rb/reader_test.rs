@@ -1590,7 +1590,7 @@ fn should_use_encoding_specified_by_encoding_attribute_when_reading_include_file
     );
     assert_eq!(output, "Où est l'hôpital ?\n");
 
-    // The `encoding` attribute was forwarded to the handler...
+    // The `encoding` attribute was forwarded to the handler ...
     assert_eq!(
         probe.calls(),
         vec![(
@@ -1600,7 +1600,7 @@ fn should_use_encoding_specified_by_encoding_attribute_when_reading_include_file
         )]
     );
 
-    // ...and because the handler reported the content as transcoded, no
+    // ... and because the handler reported the content as transcoded, no
     // non-UTF-8 include-encoding warning is raised.
     assert!(warnings.is_empty());
 }
