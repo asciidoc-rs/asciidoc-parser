@@ -993,9 +993,7 @@ mod structure {
     // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/716):
     // the sibling case (attribute defined *later* in the header) resolves
     // `doctitle` lazily in Asciidoctor to `ACME Docs`; asciidoc-parser leaves it
-    // unresolved. The remaining tests here recognize titles preceded by blank
-    // lines / preprocessor conditionals / include files and assert on standalone
-    // `#header`/`#content` markup, all conversion concerns.
+    // unresolved.
     non_normative!(
         r##"
 
@@ -1015,6 +1013,13 @@ mod structure {
       end
     end
 
+"##
+    );
+
+    #[test]
+    fn should_recognize_document_title_when_preceded_by_blank_lines() {
+        verifies!(
+            r##"
     test 'should recognize document title when preceded by blank lines' do
       input = <<~'EOS'
 
@@ -1031,6 +1036,19 @@ mod structure {
       assert_css '#content h1', output, 0
     end
 
+"##
+        );
+
+        let doc = Parser::default().parse("\n= Title\n\npreamble\n\n== Section 1\n\ntext");
+
+        assert_eq!(doc.doctitle(), Some("Title"));
+    }
+
+    #[test]
+    fn should_recognize_document_title_when_preceded_by_blank_lines_from_preprocessor_conditional()
+    {
+        verifies!(
+            r##"
     test 'should recognize document title when preceded by blank lines introduced by a preprocessor conditional' do
       input = <<~'EOS'
       ifdef::sectids[]
@@ -1050,6 +1068,20 @@ mod structure {
       assert_css '#content h1', output, 0
     end
 
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "ifdef::sectids[]\n\n:foo: bar\nendif::[]\n= Title\n\npreamble\n\n== Section 1\n\ntext",
+        );
+
+        assert_eq!(doc.doctitle(), Some("Title"));
+    }
+
+    #[test]
+    fn should_recognize_document_title_when_preceded_by_blank_lines_after_attribute_entry() {
+        verifies!(
+            r##"
     test 'should recognize document title when preceded by blank lines after an attribute entry' do
       input = <<~'EOS'
       :doctype: book
@@ -1067,6 +1099,17 @@ mod structure {
       assert_css '#content h1', output, 0
     end
 
+"##
+        );
+
+        let doc = Parser::default()
+            .parse(":doctype: book\n\n= Title\n\npreamble\n\n== Section 1\n\ntext");
+
+        assert_eq!(doc.doctitle(), Some("Title"));
+    }
+
+    to_do_verifies!(
+        r##"
     test 'should recognize document title in include file when preceded by blank lines' do
       input = <<~'EOS'
       include::fixtures/include-with-leading-blank-line.adoc[]
