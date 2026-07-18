@@ -1681,8 +1681,12 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Twin of the previous case with a concrete filename: an unresolvable
+// `opts=optional` include is dropped silently.
+#[test]
+fn should_skip_include_directive_that_references_missing_file_if_optional_option_is_set() {
+    verifies!(
+        r#"
       test 'should skip include directive that references missing file if optional option is set' do
         input = <<~'EOS'
         include::fixtures/no-such-file.adoc[opts=optional]
@@ -1702,7 +1706,24 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::missing();
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/no-such-file.adoc[opts=optional]\n\ntrailing content",
+        &parser,
+    );
+    assert_eq!(output, "\ntrailing content\n");
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/no-such-file.adoc".to_owned(), None)]
+    );
+    assert!(warnings.is_empty());
+}
 
 non_normative!(
     r#"
@@ -1710,8 +1731,14 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Without `optional`, an unresolvable include is replaced by an "Unresolved
+// directive" message and an `IncludeFileNotFound` warning. (Asciidoctor names
+// the including file `<stdin>`; with no primary file name this crate writes
+// `(root file)`.)
+#[test]
+fn should_replace_include_directive_that_references_missing_file_with_message() {
+    verifies!(
+        r#"
       test 'should replace include directive that references missing file with message' do
         input = <<~'EOS'
         include::fixtures/no-such-file.adoc[]
@@ -1732,7 +1759,31 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::missing();
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/no-such-file.adoc[]\n\ntrailing content",
+        &parser,
+    );
+    assert_eq!(
+        output,
+        "Unresolved directive in (root file) - include::fixtures/no-such-file.adoc[]\n\ntrailing content\n"
+    );
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/no-such-file.adoc".to_owned(), None)]
+    );
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::IncludeFileNotFound("fixtures/no-such-file.adoc".to_owned())
+    );
+}
 
 non_normative!(
     r#"
@@ -1740,8 +1791,15 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// This crate delegates file access to the handler, which signals both a
+// missing and an unreadable file the same way (by returning `None`), so an
+// unreadable target is reported with the same `IncludeFileNotFound` warning
+// as a missing one — it does not distinguish Asciidoctor's separate "include
+// file not readable" message.
+#[test]
+fn should_replace_include_directive_that_references_unreadable_file_with_message() {
+    verifies!(
+        r#"
       test 'should replace include directive that references unreadable file with message', unless: (windows? || Process.euid == 0) do
         include_file = File.join DIRNAME, 'fixtures', 'chapter-a.adoc'
         old_mode = (File.stat include_file).mode
@@ -1767,7 +1825,31 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::missing();
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/chapter-a.adoc[]\n\ntrailing content",
+        &parser,
+    );
+    assert_eq!(
+        output,
+        "Unresolved directive in (root file) - include::fixtures/chapter-a.adoc[]\n\ntrailing content\n"
+    );
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/chapter-a.adoc".to_owned(), None)]
+    );
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::IncludeFileNotFound("fixtures/chapter-a.adoc".to_owned())
+    );
+}
 
 non_normative!(
     r#"
@@ -1776,8 +1858,12 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// An absolute target is passed through to the handler verbatim (path
+// resolution is the handler's concern).
+#[test]
+fn can_resolve_include_directive_with_absolute_path() {
+    verifies!(
+        r#"
       test 'can resolve include directive with absolute path' do
         include_path = ::File.join DIRNAME, 'fixtures', 'chapter-a.adoc'
         input = %(include::#{include_path}[])
@@ -1788,7 +1874,22 @@ non_normative!(
         assert_equal 'Chapter A', result.doctitle
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new("= Chapter A");
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(&parser, "include::/abs/fixtures/chapter-a.adoc[]"),
+        "= Chapter A"
+    );
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "/abs/fixtures/chapter-a.adoc".to_owned(), None)]
+    );
+}
 
 non_normative!(
     r#"
@@ -3300,8 +3401,12 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// An empty `tag=` / `tags=` value applies no filtering, so the whole file —
+// including its tag-directive lines — is included.
+#[test]
+fn include_directive_ignores_tags_attribute_when_empty() {
+    verifies!(
+        r#"
       test 'include directive ignores tags attribute when empty' do
         ['tag', 'tags'].each do |attr_name|
           input = <<~EOS
@@ -3315,7 +3420,20 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new("// tag::a[]\nbody\n// end::a[]");
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    for attr_name in ["tag", "tags"] {
+        let input = format!("++++\ninclude::x.xml[{attr_name}=]\n++++");
+        assert_eq!(
+            reader_read(&parser, &input),
+            "++++\n// tag::a[]\nbody\n// end::a[]\n++++"
+        );
+    }
+}
 
 non_normative!(
     r#"
@@ -3323,8 +3441,12 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// When both are given, `lines` wins over `tags`: only the first line is
+// selected, not the `snippetA`/`snippetB` regions.
+#[test]
+fn lines_attribute_takes_precedence_over_tags_attribute_in_include_directive() {
+    verifies!(
+        r#"
       test 'lines attribute takes precedence over tags attribute in include directive' do
         input = 'include::fixtures/include-file.adoc[lines=1, tags=snippetA;snippetB]'
         output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
@@ -3333,7 +3455,20 @@ non_normative!(
         refute_match(/snippetB content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            "include::fixtures/include-file.adoc[lines=1, tags=snippetA;snippetB]"
+        ),
+        "first line of included content"
+    );
+}
 
 non_normative!(
     r#"
@@ -3364,8 +3499,12 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Attribute references in the attribute list are resolved too, so
+// `tag={name-of-tag}` selects the `snippetA` region.
+#[test]
+fn should_substitute_attribute_references_in_attrlist() {
+    verifies!(
+        r#"
       test 'should substitute attribute references in attrlist' do
         input = <<~'EOS'
         :name-of-tag: snippetA
@@ -3379,7 +3518,20 @@ non_normative!(
         refute_match(/included content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(INCLUDE_FILE_ADOC);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            ":name-of-tag: snippetA\ninclude::fixtures/include-file.adoc[tag={name-of-tag}]"
+        ),
+        ":name-of-tag: snippetA\nsnippetA content"
+    );
+}
 
 non_normative!(
     r#"
@@ -3449,8 +3601,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// Attribute references in the target are resolved before the handler is
+// consulted: `{fixturesdir}/include-file.{ext}` becomes
+// `fixtures/include-file.adoc`.
+#[test]
+fn attributes_are_substituted_in_target_of_include_directive() {
+    verifies!(
+        r#"
       test 'attributes are substituted in target of include directive' do
         input = <<~'EOS'
         :fixturesdir: fixtures
@@ -3464,7 +3621,25 @@ non_normative!(
         assert_match(/included content/, output)
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new("included content");
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    assert_eq!(
+        reader_read(
+            &parser,
+            ":fixturesdir: fixtures\n:ext: adoc\n\ninclude::{fixturesdir}/include-file.{ext}[]"
+        ),
+        ":fixturesdir: fixtures\n:ext: adoc\n\nincluded content"
+    );
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/include-file.adoc".to_owned(), None)]
+    );
+}
 
 non_normative!(
     r#"
