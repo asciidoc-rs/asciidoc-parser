@@ -1540,11 +1540,11 @@ mod assignment {
         //
         // Three rows still diverge from Asciidoctor's matrix (and are asserted
         // as this crate's actual behavior): the `toc2` alias is not recognized
-        // (it resolves to `Disabled`, not a left-placed TOC); `toc-class` is
-        // never switched to `toc2`; and a soft-unset `toc-placement!` (with
-        // `toc` set) resolves to `Auto` here rather than Asciidoctor's `macro`.
-        // The `toc toc-placement=macro` row, by contrast, now matches
-        // Asciidoctor (`macro`) since this crate honors an explicit
+        // (it resolves to `Disabled`, not a left-placed TOC — #748); `toc-class`
+        // is never switched to `toc2` (#749); and a soft-unset `toc-placement!`
+        // (with `toc` set) resolves to `Auto` here rather than Asciidoctor's
+        // `macro` (#750). The `toc toc-placement=macro` row, by contrast, now
+        // matches Asciidoctor (`macro`) since this crate honors an explicit
         // `toc-placement`.
         use crate::document::TocMode;
         // Each row is the raw attribute spec (as it appears in the vendored
@@ -1556,11 +1556,13 @@ mod assignment {
             ("toc=header", TocMode::Auto),
             ("toc=beeboo", TocMode::Auto),
             ("toc=left", TocMode::Left),
+            // `toc2` alias unrecognized (#748); Asciidoctor: left-placed TOC.
             ("toc2", TocMode::Disabled),
             ("toc=right", TocMode::Right),
             ("toc=preamble", TocMode::Preamble),
             ("toc=macro", TocMode::Macro),
             ("toc toc-placement=macro toc-position=left", TocMode::Macro),
+            // Soft-unset `toc-placement!` (#750); Asciidoctor: `macro`.
             ("toc toc-placement!", TocMode::Auto),
         ];
         for (spec, expected_mode) in rows {
@@ -1576,7 +1578,8 @@ mod assignment {
             }
             let doc = parser.parse("");
             assert_eq!(doc.toc_mode(), *expected_mode, "toc_mode for {spec:?}");
-            // `toc-class` is never materialized as `toc2`; it stays the default.
+            // `toc-class` is never switched to `toc2`; it stays the default
+            // (#749); Asciidoctor sets `toc2` for left/right placement.
             assert_eq!(doc.toc_class(), "toc", "toc_class for {spec:?}");
         }
     }
