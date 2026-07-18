@@ -1532,17 +1532,20 @@ mod assignment {
         // `Document::toc_*` accessors rather than materializing the
         // `toc-position` / `toc-placement` / `toc-class` document attributes
         // that Asciidoctor's matrix inspects. It also folds Asciidoctor's
-        // separate `toc-position` and `toc-placement` into a single `TocMode`
-        // that is resolved from the `toc` value alone. So each matrix row is
-        // exercised here through `toc_mode()` / `toc_class()`, asserting this
-        // crate's actual behavior.
+        // separate `toc-position` and `toc-placement` into a single `TocMode`,
+        // resolved from the `toc` value with a fallback to the `toc-placement`
+        // attribute when the `toc` value carries no placement keyword. So each
+        // matrix row is exercised here through `toc_mode()` / `toc_class()`,
+        // asserting this crate's actual behavior.
         //
-        // Three rows diverge from Asciidoctor's matrix (and are asserted as this
-        // crate's actual behavior): the `toc2` alias is not recognized (it
-        // resolves to `Disabled`, not a left-placed TOC); explicit
-        // `toc-placement` / `toc-position` attributes are not honored (only the
-        // `toc` value drives the mode); and `toc-class` is never switched to
-        // `toc2`.
+        // Three rows still diverge from Asciidoctor's matrix (and are asserted
+        // as this crate's actual behavior): the `toc2` alias is not recognized
+        // (it resolves to `Disabled`, not a left-placed TOC); `toc-class` is
+        // never switched to `toc2`; and a soft-unset `toc-placement!` (with
+        // `toc` set) resolves to `Auto` here rather than Asciidoctor's `macro`.
+        // The `toc toc-placement=macro` row, by contrast, now matches
+        // Asciidoctor (`macro`) since this crate honors an explicit
+        // `toc-placement`.
         use crate::document::TocMode;
         // Each row is the raw attribute spec (as it appears in the vendored
         // matrix, parsed the same way Ruby does — space-separated entries,
@@ -1557,7 +1560,7 @@ mod assignment {
             ("toc=right", TocMode::Right),
             ("toc=preamble", TocMode::Preamble),
             ("toc=macro", TocMode::Macro),
-            ("toc toc-placement=macro toc-position=left", TocMode::Auto),
+            ("toc toc-placement=macro toc-position=left", TocMode::Macro),
             ("toc toc-placement!", TocMode::Auto),
         ];
         for (spec, expected_mode) in rows {
