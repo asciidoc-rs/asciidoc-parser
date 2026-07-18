@@ -286,6 +286,14 @@ const element = (
   </div>
 )";
 
+/// Verbatim copy of Asciidoctor's `test/fixtures/basic-docinfo.xml` (the inner
+/// elements are indented, so an `indent=0` include can reset that indentation).
+const BASIC_DOCINFO_XML: &str = "\
+<copyright><!-- don't remove the indent! -->
+    <year>2013</year>
+    <holder>Acme\u{2122}, Inc.</holder>
+</copyright>";
+
 non_normative!(
     r#"
 # frozen_string_literal: true
@@ -4209,8 +4217,13 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// `indent=0` on the include directive strips the common indentation of the
+// selected lines. Here lines 2-3 are both indented four spaces, so the
+// preprocessor reindents them to column 0.
+#[test]
+fn indent_of_included_file_can_be_reset_to_size_of_indent_attribute() {
+    verifies!(
+        r#"
       test 'indent of included file can be reset to size of indent attribute' do
         input = <<~'EOS'
         [source, xml]
@@ -4224,7 +4237,21 @@ non_normative!(
         assert_equal "<year>2013</year>\n<holder>Acme™, Inc.</holder>", result
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new(BASIC_DOCINFO_XML);
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+
+    assert_eq!(
+        reader_read(
+            &parser,
+            "[source, xml]\n----\ninclude::fixtures/basic-docinfo.xml[lines=2..3, indent=0]\n----"
+        ),
+        "[source, xml]\n----\n<year>2013</year>\n<holder>Acme\u{2122}, Inc.</holder>\n----"
+    );
+}
 
 non_normative!(
     r#"
