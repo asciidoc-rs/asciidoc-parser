@@ -95,19 +95,18 @@ type RecordedInclude = (Option<String>, String, Option<String>);
 #[derive(Clone, Debug)]
 struct RecordingIncludeFileHandler {
     calls: Rc<RefCell<Vec<RecordedInclude>>>,
-    content: &'static str,
-    /// When `true`, content is returned via [`IncludeContent::transcoded`] (as
-    /// a handler that honored the `encoding` attribute would), suppressing
-    /// the non-UTF-8 include-encoding warning.
-    transcoded: bool,
+    /// What the handler returns from `resolve_target`: `Some((content,
+    /// transcoded))` for a resolved file (returned via
+    /// [`IncludeContent::transcoded`] when `transcoded` is set, otherwise
+    /// [`IncludeContent::new`]), or `None` for a file that could not be found.
+    result: Option<(&'static str, bool)>,
 }
 
 impl RecordingIncludeFileHandler {
     fn new(content: &'static str) -> Self {
         Self {
             calls: Rc::new(RefCell::new(Vec::new())),
-            content,
-            transcoded: false,
+            result: Some((content, false)),
         }
     }
 
@@ -116,8 +115,17 @@ impl RecordingIncludeFileHandler {
     /// file and reencoded it per the `encoding` attribute.
     fn transcoding(content: &'static str) -> Self {
         Self {
-            transcoded: true,
+            result: Some((content, true)),
             ..Self::new(content)
+        }
+    }
+
+    /// A handler that records the call but reports the file as not found
+    /// (returns `None`), as a real handler would for a missing target.
+    fn missing() -> Self {
+        Self {
+            result: None,
+            ..Self::new("")
         }
     }
 
@@ -143,10 +151,12 @@ impl IncludeFileHandler for RecordingIncludeFileHandler {
         self.calls
             .borrow_mut()
             .push((source.map(str::to_owned), target.to_owned(), encoding));
-        Some(if self.transcoded {
-            IncludeContent::transcoded(self.content)
-        } else {
-            IncludeContent::new(self.content)
+        self.result.map(|(content, transcoded)| {
+            if transcoded {
+                IncludeContent::transcoded(content)
+            } else {
+                IncludeContent::new(content)
+            }
         })
     }
 }
@@ -1611,8 +1621,15 @@ non_normative!(
 "#
 );
 
-non_normative!(
-    r#"
+// With `opts=optional`, a target the handler cannot resolve (here `None`) is
+// dropped silently — no "Unresolved directive" text and no warning — leaving
+// the following content in place. (Asciidoctor additionally logs an INFO-level
+// notice that the optional include was dropped; this crate's warning mechanism
+// is reserved for parse-affecting conditions and does not model that notice.)
+#[test]
+fn unresolved_target_referenced_by_include_directive_is_skipped_when_optional_option_is_set() {
+    verifies!(
+        r#"
       test 'unresolved target referenced by include directive is skipped when optional option is set' do
         input = <<~'EOS'
         include::fixtures/{no-such-file}[opts=optional]
@@ -1632,7 +1649,31 @@ non_normative!(
         end
       end
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::missing();
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+
+    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/{no-such-file}[opts=optional]\n\ntrailing content",
+        &parser,
+    );
+
+    // The unresolvable optional include leaves only the trailing content.
+    assert_eq!(output, "\ntrailing content\n");
+
+    // The handler was consulted (and reported the file missing) ...
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/{no-such-file}".to_owned(), None)]
+    );
+
+    // ... and because the option was `optional`, no warning was raised.
+    assert!(warnings.is_empty());
+}
 
 non_normative!(
     r#"
