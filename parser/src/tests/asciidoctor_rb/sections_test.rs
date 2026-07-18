@@ -490,8 +490,8 @@ mod ids {
     // `[[id]]` as an ordinary inline anchor (rendered `<a id="id"></a>`),
     // leaving the synthetic section ID in place. The three *positive*
     // embedded-anchor tests (which expect the anchor to become the section ID)
-    // are therefore out of scope; the two *negative* tests below — which only
-    // require that the anchor NOT be adopted as the ID — do pass.
+    // are therefore out of scope (see #751); the two *negative* tests below —
+    // which only require that the anchor NOT be adopted as the ID — do pass.
     non_normative!(
         r##"
     test 'explicit id can be defined using an embedded anchor' do
