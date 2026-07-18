@@ -60,3 +60,4 @@ mod reader_test;
 mod substitutions_test;
 mod tables_test;
 mod test_helper_test;
+mod text_test;
