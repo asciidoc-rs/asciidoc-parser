@@ -42,10 +42,16 @@ impl<'src> Break<'src> {
         _parser: &mut Parser,
     ) -> Option<MatchedItem<'src, Self>> {
         let line = metadata.block_start.take_normalized_line();
+        let data = line.item.data();
 
-        let type_ = match line.item.data() {
-            "'''" | "---" | "- - -" | "***" | "* * *" => BreakType::Thematic,
+        let type_ = match data {
+            "---" | "- - -" | "***" | "* * *" => BreakType::Thematic,
             "<<<" => BreakType::Page,
+            // A run of three or more apostrophes is a thematic break. The
+            // AsciiDoc language reference documents the canonical `'''` form,
+            // but Asciidoctor recognizes any longer run (`''''`, `'''''`, ...),
+            // and this crate matches that.
+            _ if data.len() >= 3 && data.bytes().all(|b| b == b'\'') => BreakType::Thematic,
             _ => {
                 return None;
             }
@@ -202,6 +208,23 @@ mod tests {
         assert!(mi.item.anchor_reftext().is_none());
         assert!(mi.item.attrlist().is_none());
         assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
+    }
+
+    #[test]
+    fn thematic_break_extended_apostrophes() {
+        // Asciidoctor recognizes a run of three or more apostrophes as a
+        // thematic break, not just the canonical `'''`.
+        for line in ["''''", "'''''", "''''''"] {
+            let mut parser = Parser::default();
+            let mi = crate::blocks::Break::parse(&BlockMetadata::new(line), &mut parser)
+                .unwrap_or_else(|| panic!("{line:?} should be a thematic break"));
+            assert_eq!(mi.item.type_(), BreakType::Thematic);
+            assert_eq!(mi.item.raw_context().deref(), "thematic_break");
+        }
+
+        // Fewer than three apostrophes is not a thematic break.
+        let mut parser = Parser::default();
+        assert!(crate::blocks::Break::parse(&BlockMetadata::new("''"), &mut parser).is_none());
     }
 
     #[test]

@@ -90,24 +90,10 @@ mod layout_breaks {
 "#
         );
 
-        // NOTE: Asciidoctor treats any run of three or more apostrophes as a
-        // thematic break; this crate matches only exactly `'''`. The longer
-        // runs are covered by `horizontal_rule_only_matches_exactly_three`
-        // below.
-        let doc = Parser::default().parse("'''");
-        assert_css(&doc, "hr", 1);
-    }
-
-    #[test]
-    fn horizontal_rule_only_matches_exactly_three() {
-        // NOTE: divergence from Asciidoctor surfaced by `horizontal_rule`: a
-        // run of four or more apostrophes is not recognized as a thematic
-        // break by this crate, so it renders as a paragraph.
-        let doc = Parser::default().parse("''''");
-        assert_css(&doc, "hr", 0);
-
-        let doc = Parser::default().parse("'''''");
-        assert_css(&doc, "hr", 0);
+        for line in ["'''", "''''", "'''''"] {
+            let doc = Parser::default().parse(line);
+            assert_css(&doc, "hr", 1);
+        }
     }
 
     #[test]
