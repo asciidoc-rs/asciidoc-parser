@@ -101,7 +101,13 @@ impl<'src> Header<'src> {
                 parser.set_attribute_by_value_from_header("title-separator", separator);
                 source = line_mi.after;
             } else if title.is_none() && line.starts_with("= ") {
-                let title_span = line.discard(2).discard_whitespace();
+                // Strip an optional symmetric close (a trailing ` =` matching the
+                // single opening marker), mirroring section titles.
+                let title_span = crate::blocks::strip_symmetric_title_close(
+                    line.discard(2).discard_whitespace(),
+                    '=',
+                    1,
+                );
                 let title_str = apply_header_subs(title_span.data(), parser);
 
                 parser.set_attribute_by_value_from_header("doctitle", &title_str);

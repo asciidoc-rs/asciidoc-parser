@@ -1105,9 +1105,22 @@ impl Parser {
         reftext: Option<&str>,
         ref_type: RefType,
     ) -> String {
+        // A synthetic ID that collides with an existing one is enumerated using
+        // the `idseparator` (e.g. `_section_one`, `_section_one_2`), matching
+        // Ruby Asciidoctor — not a hardcoded hyphen. Mirrors the separator
+        // resolution in `generate_section_id`.
+        let separator = self
+            .attribute_value("idseparator")
+            .as_maybe_str()
+            .unwrap_or_default()
+            .chars()
+            .next()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+
         self.catalog
             .borrow_mut()
-            .generate_and_register_unique_id(base_id, reftext, ref_type)
+            .generate_and_register_unique_id(base_id, reftext, ref_type, &separator)
     }
 
     /// Takes the catalog from the parser, transferring ownership and leaving an

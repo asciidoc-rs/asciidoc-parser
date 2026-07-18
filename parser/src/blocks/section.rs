@@ -438,6 +438,25 @@ impl std::fmt::Debug for SectionBlock<'_> {
 const MIN_SECTION_LEVEL: i32 = 1;
 const MAX_SECTION_LEVEL: i32 = 5;
 
+/// Strips an optional symmetric ATX title close from `title`: a trailing run of
+/// `marker` exactly `count` long, preceded by whitespace (e.g. the ` ==` in
+/// `== Title ==`). A run that does not match the opening marker (`== Title
+/// ===`) or is not preceded by whitespace (`== Title==`) is left intact, and a
+/// title consisting only of the close is left intact. Mirrors the trailing
+/// `(?: +\1)?` group of Asciidoctor's section-title regex.
+pub(crate) fn strip_symmetric_title_close(title: Span<'_>, marker: char, count: usize) -> Span<'_> {
+    let close = marker.to_string().repeat(count);
+    match title.data().strip_suffix(&close) {
+        Some(without_close)
+            if without_close.ends_with(char::is_whitespace)
+                && !without_close.trim_end().is_empty() =>
+        {
+            title.slice_to(..without_close.trim_end().len())
+        }
+        _ => title,
+    }
+}
+
 /// Parses a section title line, returning the section's *effective* level
 /// (with `offset`, the running `leveloffset`, already applied) and the span of
 /// the title text.
@@ -462,7 +481,9 @@ fn parse_title_line<'src>(
 
     let mut count = 0;
 
-    if line.starts_with('=') {
+    let marker_char = if line.starts_with('=') { '=' } else { '#' };
+
+    if marker_char == '=' {
         while let Some(mi) = line.take_prefix("=") {
             count += 1;
             line = mi.after;
@@ -516,6 +537,8 @@ fn parse_title_line<'src>(
     // `==x` is declined quietly, without a spurious out-of-range warning.
     let title = line.take_required_whitespace()?;
 
+    let title_span = strip_symmetric_title_close(title.after, marker_char, count);
+
     // A real section heading whose offset-adjusted level lands outside the
     // supported 1..=5 range is clamped into range and reported, rather than
     // producing an out-of-range (or, under a hostile offset, absurd) level.
@@ -544,7 +567,7 @@ fn parse_title_line<'src>(
     };
 
     Some(MatchedItem {
-        item: (level, title.after),
+        item: (level, title_span),
         after: mi.after,
     })
 }
@@ -661,7 +684,12 @@ fn generate_section_id(title: &str, parser: &Parser) -> String {
             gen_id.pop();
         }
 
-        if idprefix.is_empty() && gen_id.starts_with(&sep) {
+        // Strip a leading separator (e.g. from a title beginning with a space or
+        // hyphen) before the prefix is applied, matching Ruby Asciidoctor. This
+        // keeps a leading separator out of the final ID and avoids doubling it
+        // up against a non-empty `idprefix` (e.g. `=== {sp}Heading` → `_heading`,
+        // not `__heading`).
+        if gen_id.starts_with(&sep) {
             gen_id = gen_id[sep.len()..].to_string();
         }
     }

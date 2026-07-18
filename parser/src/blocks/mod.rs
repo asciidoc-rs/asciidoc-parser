@@ -72,6 +72,7 @@ mod raw_delimited;
 pub use raw_delimited::RawDelimitedBlock;
 
 mod section;
+pub(crate) use section::strip_symmetric_title_close;
 pub use section::{SectionBlock, SectionNumber, SectionType};
 
 mod simple;

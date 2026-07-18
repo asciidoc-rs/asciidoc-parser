@@ -374,7 +374,7 @@ The AsciiDoc processor builds an ID from the title using the following order of 
                         anchor_reftext: None,
                         attrlist: None,
                         section_type: SectionType::Normal,
-                        section_id: Some("_duplicate_title-2",),
+                        section_id: Some("_duplicate_title_2",),
                         caption: None,
                         section_number: None,
                     },),
@@ -390,9 +390,9 @@ The AsciiDoc processor builds an ID from the title using the following order of 
                 catalog: Catalog {
                     refs: HashMap::from([
                         (
-                            "_duplicate_title-2",
+                            "_duplicate_title_2",
                             RefEntry {
-                                id: "_duplicate_title-2",
+                                id: "_duplicate_title_2",
                                 reftext: Some("Duplicate Title",),
                                 ref_type: RefType::Section,
                             }
