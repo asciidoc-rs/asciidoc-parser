@@ -365,15 +365,20 @@ fn writes_message_prefixed_with_program_name_and_source_location_to_stderr() {
     //
     // The line differs by design: Asciidoctor anchors the message at the
     // block's first content line (line 5), whereas this crate anchors the
-    // warning at the block's metadata/anchor line (`[#first]`, line 4). As in
-    // the bibliography duplicate-id test (`lists_test.rs`), we assert the
-    // warning type rather than the reported line.
+    // warning at the block's metadata/anchor line (`[#first]`, line 4). We
+    // still assert that line so an *unrelated* span regression is caught —
+    // the divergence from Asciidoctor's reported line is the documented `4`
+    // vs `5`, not a licence to attach the warning to any span.
     let warnings: Vec<_> = doc.warnings().collect();
     assert_eq!(warnings.len(), 1);
     assert_eq!(
         warnings[0].warning,
         WarningType::DuplicateId("first".to_string())
     );
+
+    // The second `[#first]` anchor is on line 4 (Asciidoctor reports line 5;
+    // see above).
+    assert_eq!(warnings[0].source.line(), 4);
 }
 
 // Closing `end`s for `context 'Logging'` and the outer `context 'Logger'`.
