@@ -64,9 +64,13 @@
 //!   numbers the first author's attributes unsuffixed (`author`, not
 //!   `author_1`), so assertions on those are dropped. The Ruby `metadata.size`
 //!   (hash cardinality) has no crate analog and is likewise not asserted.
-//! * **`parse_header_metadata`** revision parsing — driven through
-//!   [`RevisionLine::parse`](crate::document::RevisionLine), asserting on
-//!   `revnumber()` / `revdate()` / `revremark()`.
+//! * **`parse_header_metadata`** revision parsing — driven through a full
+//!   [`Parser::parse`] over the header (title, author line, revision line) and
+//!   asserting on `doc.header().revision_line()`'s `revnumber()` / `revdate()`
+//!   / `revremark()`. Parsing the whole header (rather than calling
+//!   [`RevisionLine::parse`](crate::document::RevisionLine) on an
+//!   already-chosen string) also covers selection of the revision line as the
+//!   line after the author line.
 //! * A few header-structure tests (comment skipping, attribute-entry
 //!   interactions) are driven through a full [`Parser::parse`]. Because this
 //!   crate only recognizes an author/revision line when a document title is
@@ -159,11 +163,22 @@ fn parse_authors(line: &str) -> Vec<ParsedAuthor> {
         .collect()
 }
 
-/// The revision number / date / remark parsed from a raw revision line, as
-/// owned data.
-fn parse_rev(line: &str) -> (Option<String>, String, Option<String>) {
+/// Parse a full document header — `= Document Title`, the author line, and the
+/// revision line — and return the parsed revision line's number / date / remark
+/// as owned data. This drives the same header path Asciidoctor's
+/// `parse_header_metadata` exercises, including *selection* of the revision
+/// line as the line after the author line (not just parsing of an
+/// already-isolated revision string). A synthetic document title is prepended
+/// because this crate only recognizes an author/revision line when a title is
+/// present.
+fn header_rev(author_and_revision: &str) -> (Option<String>, String, Option<String>) {
+    let input = format!("= Document Title\n{author_and_revision}");
     let mut parser = Parser::default();
-    let rev = crate::document::RevisionLine::parse(crate::Span::new(line), &mut parser);
+    let doc = parser.parse(&input);
+    let rev = doc
+        .header()
+        .revision_line()
+        .expect("expected the header to yield a revision line");
     (
         rev.revnumber().map(str::to_string),
         rev.revdate().to_string(),
@@ -1282,7 +1297,7 @@ fn parse_rev_number_date_remark() {
     );
 
     let (revnumber, revdate, revremark) =
-        parse_rev("v0.0.7, 2013-12-18: The first release you can stand on");
+        header_rev("Ryan Waldron\nv0.0.7, 2013-12-18: The first release you can stand on");
     assert_eq!(revnumber.as_deref(), Some("0.0.7"));
     assert_eq!(revdate, "2013-12-18");
     assert_eq!(
@@ -1356,7 +1371,7 @@ fn parse_rev_date() {
 "#
     );
 
-    let (revnumber, revdate, revremark) = parse_rev("2013-12-18");
+    let (revnumber, revdate, revremark) = header_rev("Ryan Waldron\n2013-12-18");
     assert_eq!(revnumber, None);
     assert_eq!(revdate, "2013-12-18");
     assert_eq!(revremark, None);
@@ -1380,7 +1395,7 @@ fn parse_rev_number_with_trailing_comma() {
 "#
     );
 
-    let (revnumber, revdate, revremark) = parse_rev("v8.6.8,");
+    let (revnumber, revdate, revremark) = header_rev("Stuart Rackham\nv8.6.8,");
     assert_eq!(revnumber.as_deref(), Some("8.6.8"));
     // No date follows the trailing comma.
     assert_eq!(revdate, "");
@@ -1406,7 +1421,7 @@ fn parse_rev_number() {
 "#
     );
 
-    let (revnumber, revdate, revremark) = parse_rev("v8.6.8");
+    let (revnumber, revdate, revremark) = header_rev("Stuart Rackham\nv8.6.8");
     assert_eq!(revnumber.as_deref(), Some("8.6.8"));
     assert_eq!(revdate, "");
     assert_eq!(revremark, None);
@@ -1430,7 +1445,7 @@ fn treats_arbitrary_text_on_rev_line_as_revdate() {
 "#
     );
 
-    let (revnumber, revdate, revremark) = parse_rev("foobar");
+    let (revnumber, revdate, revremark) = header_rev("Ryan Waldron\nfoobar");
     assert_eq!(revnumber, None);
     assert_eq!(revdate, "foobar");
     assert_eq!(revremark, None);
@@ -1455,7 +1470,7 @@ fn parse_rev_date_remark() {
     );
 
     let (revnumber, revdate, revremark) =
-        parse_rev("2013-12-18:  The first release you can stand on");
+        header_rev("Ryan Waldron\n2013-12-18:  The first release you can stand on");
     assert_eq!(revnumber, None);
     assert_eq!(revdate, "2013-12-18");
     assert_eq!(
