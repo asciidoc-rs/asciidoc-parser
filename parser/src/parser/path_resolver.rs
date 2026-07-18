@@ -504,6 +504,23 @@ mod tests {
                 "file:///home/user/shared/doc.pdf"
             );
         }
+
+        #[test]
+        fn all_slash_target_collapses_to_root() {
+            // An all-slash web target normalizes to a single `/`. Ruby's
+            // `String#split('/')` drops *all* trailing empty fields, so
+            // `partition_path` yields no segments and the rooted path collapses
+            // to `/`. This guards the trailing-empty-segment stripping in
+            // `partition_path` against regressing to a one-shot pop (which would
+            // leave `//`, `///`, etc.).
+            let pr = PathResolver::default();
+
+            assert_eq!(pr.web_path("/", None), "/");
+            assert_eq!(pr.web_path("//", None), "/");
+            assert_eq!(pr.web_path("///", None), "/");
+            assert_eq!(pr.web_path("////", None), "/");
+            assert_eq!(pr.web_path("///", Some("assets")), "/");
+        }
     }
 
     #[test]
