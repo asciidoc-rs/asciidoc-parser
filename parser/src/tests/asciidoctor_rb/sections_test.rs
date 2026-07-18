@@ -2194,7 +2194,8 @@ mod markdown_style_headings {
 
     // NOTE: A Markdown-style `#` marker is not recognized as a *document* title
     // (only ATX `=` is), so `# Document Title` yields no document title. Section
-    // markers (`##`+) are recognized, as the next test verifies. Out of scope.
+    // markers (`##`+) are recognized, as the next test verifies. Out of scope
+    // (see #774).
     non_normative!(
         r##"
     test 'atx document title with leading marker' do
@@ -2208,7 +2209,7 @@ mod markdown_style_headings {
 
     // NOTE: As above, a Markdown-style `#` marker is not recognized as a
     // document title, so `# Document Title #` yields no document title
-    // regardless of the symmetric close. Out of scope.
+    // regardless of the symmetric close. Out of scope (see #774).
     non_normative!(
         r##"
     test 'atx document title with symmetric markers' do
