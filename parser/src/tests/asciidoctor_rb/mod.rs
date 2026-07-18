@@ -50,6 +50,7 @@ mod api_test;
 mod attribute_list_test;
 mod attributes_test;
 mod converter_test;
+mod document_test;
 mod extensions_test;
 mod helpers_test;
 mod invoker_test;
