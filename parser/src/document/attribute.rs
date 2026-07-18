@@ -200,8 +200,15 @@ impl InterpretedValue {
                         line
                     };
 
-                    if line.ends_with('+') {
-                        format!("{}\n", line.trim_end_matches('+').trim_end_matches(' '))
+                    // A hard line break marker (a space followed by `+`) before
+                    // a line continuation preserves the newline instead of
+                    // folding it into a space. The `+` itself is left in the
+                    // value verbatim: the post_replacements substitution step is
+                    // not applied to attribute entry values, so the `+` is only
+                    // interpreted as a line break later, when the value is used
+                    // in a block whose substitutions include post_replacements.
+                    if line.ends_with(" +") {
+                        format!("{line}\n")
                     } else if count < last_count {
                         format!("{line} ")
                     } else {
@@ -211,6 +218,21 @@ impl InterpretedValue {
                 .collect();
 
             content.rendered = CowStr::Boxed(value.join("").into_boxed_str());
+        } else if let Some(stripped) = data.strip_suffix(" +") {
+            // A single-line value ending in a bare hard line break marker (a
+            // space followed by a single `+`) has that marker stripped. This
+            // mirrors Asciidoctor, where ` +` at the end of an attribute value
+            // is treated as a legacy line-continuation marker: it is removed and
+            // the remaining value is right-trimmed. Contrast with a multi-line
+            // (continued) value, where the marker is preserved so it can drive
+            // post_replacements when the value is later used.
+            //
+            // Trim only ASCII whitespace (matching Ruby's `rstrip`, which
+            // Asciidoctor applies here); Unicode whitespace such as a
+            // non-breaking space is significant and must be preserved.
+            content.rendered = stripped
+                .trim_end_matches([' ', '\t', '\n', '\r', '\x0C', '\x0B'])
+                .into();
         }
 
         SubstitutionGroup::Header.apply(&mut content, parser, None);
@@ -628,7 +650,7 @@ mod tests {
                     col: 7,
                     offset: 6,
                 }),
-                value: InterpretedValue::Value("bar\nblah"),
+                value: InterpretedValue::Value("bar +\nblah"),
                 source: Span {
                     data: ":foo: bar + \\\n blah",
                     line: 1,
@@ -638,7 +660,7 @@ mod tests {
             }
         );
 
-        assert_eq!(mi.item.value(), InterpretedValue::Value("bar\nblah"));
+        assert_eq!(mi.item.value(), InterpretedValue::Value("bar +\nblah"));
 
         assert_eq!(
             mi.after,
@@ -648,6 +670,101 @@ mod tests {
                 col: 6,
                 offset: 19
             }
+        );
+    }
+
+    #[test]
+    fn single_line_trailing_hard_break_marker_is_stripped() {
+        // A single-line value ending in a bare hard line break marker (a space
+        // followed by a single `+`) has that marker stripped from the
+        // interpreted value, matching Asciidoctor. The raw `value_source` still
+        // contains the literal ` +`. Contrast with `value_with_hard_wrap`, where
+        // a ` +` on a *continued* (multi-line) value is preserved as a newline.
+        let mi = crate::document::Attribute::parse(
+            crate::Span::new(":foo: bar +\nblah"),
+            &Parser::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Attribute {
+                name: Span {
+                    data: "foo",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+                value_source: Some(Span {
+                    data: "bar +",
+                    line: 1,
+                    col: 7,
+                    offset: 6,
+                }),
+                value: InterpretedValue::Value("bar"),
+                source: Span {
+                    data: ":foo: bar +",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                }
+            }
+        );
+
+        assert_eq!(mi.item.value(), InterpretedValue::Value("bar"));
+
+        // `blah` is a separate line, not folded into the value (there is no line
+        // continuation).
+        assert_eq!(
+            mi.after,
+            Span {
+                data: "blah",
+                line: 2,
+                col: 1,
+                offset: 12
+            }
+        );
+    }
+
+    #[test]
+    fn single_line_hard_break_marker_edge_cases() {
+        // The marker is exactly a space followed by a single `+`. Any leading
+        // whitespace before the `+` (including tabs) is trimmed from the result,
+        // but only the single trailing ` +` is removed (not a repeated marker).
+        let value = |src| {
+            crate::document::Attribute::parse(crate::Span::new(src), &Parser::default())
+                .unwrap()
+                .item
+                .value()
+                .clone()
+        };
+
+        // Extra space(s) before the `+` are trimmed away with the marker.
+        assert_eq!(value(":foo: bar  +\nx"), InterpretedValue::Value("bar"));
+
+        // A tab preceding the marker's space is also trimmed.
+        assert_eq!(value(":foo: bar\t +\nx"), InterpretedValue::Value("bar"));
+
+        // `++` is not a hard line break marker; it is preserved verbatim.
+        assert_eq!(value(":foo: bar ++\nx"), InterpretedValue::Value("bar ++"));
+
+        // A `+` with no preceding space is a literal character.
+        assert_eq!(value(":foo: bar+\nx"), InterpretedValue::Value("bar+"));
+
+        // A tab (rather than a space) before the `+` does not form a marker.
+        assert_eq!(value(":foo: bar\t+\nx"), InterpretedValue::Value("bar\t+"));
+
+        // A lone `+` (nothing before the space) is preserved.
+        assert_eq!(value(":foo: +\nx"), InterpretedValue::Value("+"));
+
+        // Only the final ` +` is stripped; an earlier ` +` remains literal.
+        assert_eq!(value(":foo: bar + +\nx"), InterpretedValue::Value("bar +"));
+
+        // Trimming after the marker uses ASCII whitespace rules (Ruby `rstrip`);
+        // a preceding non-breaking space is significant and is preserved.
+        assert_eq!(
+            value(":foo: bar\u{00a0} +\nx"),
+            InterpretedValue::Value("bar\u{00a0}")
         );
     }
 
