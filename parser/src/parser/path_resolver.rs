@@ -70,7 +70,11 @@ impl PathResolver {
 
         let mut uri_prefix: Option<String> = None;
 
-        if !(start.is_none() || self.is_web_root(&target)) {
+        // Ruby treats a `nil` *or* empty `start` the same (`start.nil_or_empty?`):
+        // in both cases the target is used as-is, with no start path prepended.
+        let start_is_empty = start.as_deref().is_none_or(str::is_empty);
+
+        if !(start_is_empty || self.is_web_root(&target)) {
             (target, uri_prefix) = extract_uri_prefix(&format!(
                 "{start}{maybe_add_slash}{target}",
                 start = start.as_deref().unwrap_or_default(),
@@ -177,11 +181,20 @@ impl PathResolver {
             &posix_path
         };
 
-        let path_segments: Vec<String> = path_after_root
+        let mut path_segments: Vec<String> = path_after_root
             .split('/')
             .filter(|s| *s != ".")
             .map(|s| s.to_owned())
             .collect();
+
+        // Ruby builds these segments with `posix_path.split SLASH`, and Ruby's
+        // `String#split` drops trailing empty fields (e.g. `'a/b/'.split '/'` is
+        // `['a', 'b']`, and `''.split '/'` is `[]`). Rust's `str::split` keeps
+        // them, so strip trailing empties to match — otherwise a trailing slash
+        // would survive as a spurious empty final segment.
+        while path_segments.last().is_some_and(|s| s.is_empty()) {
+            path_segments.pop();
+        }
 
         (path_segments, root)
     }
@@ -464,9 +477,11 @@ mod tests {
                 "//cdn.example.com/assets/image.jpg"
             );
 
-            // Mixed scenarios.
-            assert_eq!(pr.web_path("", Some("docs/images")), "docs/images/");
-            assert_eq!(pr.web_path("", Some("")), "/");
+            // Mixed scenarios. (An empty target resolves to the start path with
+            // no spurious trailing slash, and an empty `start` is treated like
+            // `None` — matching Ruby's `web_path`; see `paths_test.rb`.)
+            assert_eq!(pr.web_path("", Some("docs/images")), "docs/images");
+            assert_eq!(pr.web_path("", Some("")), "");
             assert_eq!(pr.web_path("", None), "");
 
             // Complex URI scenarios.
