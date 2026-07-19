@@ -2669,6 +2669,33 @@ mod tests {
     }
 
     #[test]
+    fn include_target_with_brace_that_is_not_an_attribute_reference() {
+        // A `{` that doesn't open a well-formed attribute reference gets past
+        // the fast path but matches nothing, so the target is used verbatim —
+        // and it is not treated as a missing reference under any
+        // `attribute-missing` policy.
+        let source = "include::{}partial.adoc[]";
+
+        let handler =
+            InlineFileHandler::from_pairs([("{}partial.adoc", "Brace in the file name.")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_intrinsic_attribute(
+                "attribute-missing",
+                "drop-line",
+                ModificationContext::Anywhere,
+            )
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Brace in the file name.\n");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
     fn multiple_attribute_substitution_in_include_target() {
         let source = ":dir: chapters\n:filename: intro\n:extension: adoc\n\ninclude::{dir}/{filename}.{extension}[]";
 
