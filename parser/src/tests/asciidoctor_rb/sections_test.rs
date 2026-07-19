@@ -3092,11 +3092,11 @@ mod section_numbering {
     }
 
     // NOTE: The `numbered` legacy alias for `sectnums` is not honored by this
-    // crate (`:numbered:` produces no section numbers), and book *parts*
-    // (level-0 `=` headings under `:doctype: book`) are not modeled, nor is the
-    // rendering of `chapter-signifier` / `part-signifier` / `chapter-number`
-    // into the heading text. The tests below depend on those behaviors and are
-    // therefore out of scope.
+    // crate (`:numbered:` produces no section numbers; see #781), and book
+    // *parts* (level-0 `=` headings under `:doctype: book`) are not modeled, nor
+    // is the rendering of `chapter-signifier` / `part-signifier` /
+    // `chapter-number` into the heading text. The tests below depend on those
+    // behaviors and are therefore out of scope.
     non_normative!(
         r##"
     test 'should output section numbers when numbered attribute is set' do
@@ -3341,9 +3341,10 @@ mod section_numbering {
         assert_eq!(levels, vec![(1, "Section 1"), (2, "Section 1.1")]);
     }
 
-    // NOTE: The remaining tests all depend on the `numbered` alias (and, for the
-    // book examples, on book parts) that this crate does not model, plus the
-    // Ruby-internal `reindex_sections` / `numeral` object API. Out of scope.
+    // NOTE: The remaining tests all depend on the `numbered` alias (see #781;
+    // and, for the book examples, on book parts) that this crate does not model,
+    // plus the Ruby-internal `reindex_sections` / `numeral` object API. Out of
+    // scope.
     non_normative!(
         r##"
     test 'section numbers should not increment when numbered attribute is turned off within document' do
