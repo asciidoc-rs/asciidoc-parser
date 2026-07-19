@@ -232,6 +232,13 @@ pub enum WarningType {
     #[error("include file not found: {0}")]
     IncludeFileNotFound(String),
 
+    /// An include directive's target referenced a missing attribute while
+    /// `attribute-missing` was set to `warn`, so the directive was dropped
+    /// without being resolved. (Under `drop-line` the directive line is
+    /// removed silently instead.) The field is the directive as written.
+    #[error("include dropped due to missing attribute: {0}")]
+    IncludeDroppedDueToMissingAttribute(String),
+
     /// An include directive was not expanded because the file containing it
     /// already sits at the maximum include depth (the `max-include-depth`
     /// attribute, possibly lowered by an enclosing include directive's `depth`
@@ -463,6 +470,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::IncludeFileNotFound(target) => f
                 .debug_tuple("WarningType::IncludeFileNotFound")
                 .field(target)
+                .finish(),
+
+            WarningType::IncludeDroppedDueToMissingAttribute(directive) => f
+                .debug_tuple("WarningType::IncludeDroppedDueToMissingAttribute")
+                .field(directive)
                 .finish(),
 
             WarningType::MaxIncludeDepthExceeded(depth) => f
@@ -922,6 +934,20 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::IncludeFileNotFound(\"content.adoc\")"
+                );
+            }
+
+            #[test]
+            fn include_dropped_due_to_missing_attribute() {
+                let warning = WarningType::IncludeDroppedDueToMissingAttribute(
+                    "include::{foodir}/include-file.adoc[]".to_string(),
+                );
+
+                let debug_output = format!("{:?}", warning);
+
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeDroppedDueToMissingAttribute(\"include::{foodir}/include-file.adoc[]\")"
                 );
             }
 

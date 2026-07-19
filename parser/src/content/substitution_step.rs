@@ -476,7 +476,7 @@ static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AttributeMissing {
+pub(crate) enum AttributeMissing {
     /// Leave the reference in place (the default).
     Skip,
 
@@ -494,7 +494,7 @@ impl AttributeMissing {
     /// Resolves the `attribute-missing` setting from `parser`. An absent or
     /// unrecognized value falls back to [`Skip`](Self::Skip), matching
     /// Asciidoctor.
-    fn from_parser(parser: &Parser) -> Self {
+    pub(crate) fn from_parser(parser: &Parser) -> Self {
         match parser.attribute_value("attribute-missing").as_maybe_str() {
             Some("drop") => Self::Drop,
             Some("drop-line") => Self::DropLine,
