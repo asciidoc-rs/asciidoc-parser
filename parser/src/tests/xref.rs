@@ -712,10 +712,10 @@ mod unresolved_reference_warnings {
 
     #[test]
     fn reported_for_a_reference_inside_a_footnote() {
-        // A footnote's text is lifted out of the block it was written in and the
-        // footnote keeps no span of its own, so the warning is anchored at the
-        // document.
-        let doc = Parser::default().parse("Text.footnote:[See <<nope>>.]\n");
+        // A footnote's text is lifted out of the block it was written in, but the
+        // footnote records the location of its defining occurrence, so the
+        // warning is anchored at that content rather than at the whole document.
+        let doc = Parser::default().parse("Intro.\n\nText.footnote:[See <<nope>>.]\n");
 
         let warnings: Vec<_> = doc.warnings().collect();
         assert_eq!(warnings.len(), 1);
@@ -724,6 +724,59 @@ mod unresolved_reference_warnings {
             warnings[0].warning,
             WarningType::PossibleInvalidReference("nope".to_string())
         );
+
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    fn distinguishes_two_footnotes_by_location() {
+        // The whole point of #804: two unresolved references in two different
+        // footnotes must be distinguishable by location, so a host can point the
+        // author at the offending footnote.
+        let doc = Parser::default()
+            .parse("First.footnote:[See <<nope-a>>.]\n\nSecond.footnote:[See <<nope-b>>.]\n");
+
+        let mut warnings: Vec<_> = doc.warnings().collect();
+        warnings.sort_by_key(|w| w.source.line());
+        assert_eq!(warnings.len(), 2);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::PossibleInvalidReference("nope-a".to_string())
+        );
+        assert_eq!(warnings[0].source.line(), 1);
+
+        assert_eq!(
+            warnings[1].warning,
+            WarningType::PossibleInvalidReference("nope-b".to_string())
+        );
+        assert_eq!(warnings[1].source.line(), 3);
+    }
+
+    #[test]
+    fn reported_for_a_reference_inside_a_footnote_in_a_markdown_blockquote() {
+        // A footnote defined inside a Markdown-style blockquote indexes the
+        // quote's owned, `>`-stripped body, which is not contiguous in the
+        // document source, so no precise location is recorded and the warning
+        // falls back to the whole-document span rather than a misleading one.
+        //
+        // The footnote sits on a later line of the quote's owned body (offset > 0
+        // there); were that owned offset stored and applied to the document
+        // source it would resolve to some unrelated line, so asserting the
+        // fallback line 1 guards the owned-sub-source guard specifically.
+        let doc =
+            Parser::default().parse("Intro.\n\n> Line one.\n>\n> Text.footnote:[See <<nope>>.]\n");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::PossibleInvalidReference("nope".to_string())
+        );
+
+        // The fallback anchor is the whole document, which begins at line 1.
+        assert_eq!(warnings[0].source.line(), 1);
     }
 
     #[test]

@@ -197,6 +197,23 @@ pub struct Parser {
     /// each AsciiDoc cell, so it nests correctly.
     pub(crate) nested_document_depth: usize,
 
+    /// Number of privately-owned sub-sources currently being parsed in the call
+    /// stack.
+    ///
+    /// A Markdown-style blockquote and an AsciiDoc table cell parse their blocks
+    /// from an owned source string whose byte offsets do not map to the primary
+    /// document source. A footnote defined while such a sub-source is being
+    /// substituted therefore cannot record a document-relative location for its
+    /// cross-reference warning; `define_footnote` reads this counter to detect
+    /// that case and leave the location unset (see
+    /// [`Footnote::location`](crate::document::Footnote)). It is incremented and
+    /// decremented around each owned sub-source parse, so it nests correctly.
+    ///
+    /// Unlike [`nested_document_depth`](Self::nested_document_depth), this also
+    /// counts Markdown-style blockquotes (which are not nested documents), so
+    /// the two cannot be merged.
+    pub(crate) owned_subsource_depth: usize,
+
     /// Source map of the document currently being parsed, populated by
     /// [`Document::parse`] for the duration of the parse (and `None` outside
     /// it).
@@ -373,6 +390,7 @@ impl Default for Parser {
             counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
+            owned_subsource_depth: 0,
             source_map: None,
             owned_cell_source_maps: vec![],
             owned_cell_warnings: RefCell::new(vec![]),
@@ -975,12 +993,22 @@ impl Parser {
     /// registering the footnote in the current document's registry. Returns the
     /// number assigned to the footnote.
     ///
+    /// `source` is the span of the content the defining `footnote:[…]` macro
+    /// was written in; its offset into the document source is recorded so a
+    /// cross-reference warning can be anchored at the footnote rather than at
+    /// the whole document. When the footnote is defined while substituting a
+    /// privately-owned sub-source (a Markdown-style blockquote or an AsciiDoc
+    /// table cell — see [`owned_subsource_depth`](Self::owned_subsource_depth)),
+    /// that offset does not map to the document, so no location is recorded and
+    /// resolution falls back to the whole-document span.
+    ///
     /// Takes `&self` so it can be called from the macros substitution step.
     pub(crate) fn define_footnote(
         &self,
         id: Option<&str>,
         text: String,
         xrefs: Vec<crate::content::XrefSegment>,
+        source: crate::Span<'_>,
     ) -> String {
         // A footnote's text is extracted out of the block during macro
         // substitution, so any cross-reference inside it never reaches the
@@ -1006,6 +1034,17 @@ impl Parser {
         // (matching Asciidoctor); the value is therefore kept as a string.
         let index = self.counter("footnote-number", None);
 
+        // Record the defining occurrence's location only when it is locatable in
+        // the document source. A footnote defined inside an owned sub-source
+        // indexes that private source, whose offset would misplace the warning,
+        // so it is left unrecorded (resolution then falls back to the
+        // whole-document span).
+        let location = if self.owned_subsource_depth == 0 {
+            Some((source.byte_offset(), source.data().len()))
+        } else {
+            None
+        };
+
         self.catalog
             .borrow_mut()
             .register_footnote(crate::document::Footnote {
@@ -1013,6 +1052,7 @@ impl Parser {
                 id: id.map(|s| s.to_owned()),
                 text,
                 deferred,
+                location,
             });
 
         index
