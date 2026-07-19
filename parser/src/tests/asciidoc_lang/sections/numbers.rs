@@ -446,7 +446,7 @@ The section number does not increment in regions of the document where section n
                         anchor_reftext: None,
                         attrlist: None,
                         section_type: SectionType::Normal,
-                        section_id: Some("_unnumbered_section-2",),
+                        section_id: Some("_unnumbered_section_2",),
                         caption: None,
                         section_number: None,
                     },),],
@@ -462,7 +462,7 @@ The section number does not increment in regions of the document where section n
                     anchor_reftext: None,
                     attrlist: None,
                     section_type: SectionType::Normal,
-                    section_id: Some("_unnumbered_section-3",),
+                    section_id: Some("_unnumbered_section_3",),
                     caption: None,
                     section_number: None,
                 },),
@@ -490,7 +490,7 @@ The section number does not increment in regions of the document where section n
                     anchor_reftext: None,
                     attrlist: None,
                     section_type: SectionType::Normal,
-                    section_id: Some("_numbered_section-2",),
+                    section_id: Some("_numbered_section_2",),
                     caption: None,
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Normal,
@@ -517,9 +517,9 @@ The section number does not increment in regions of the document where section n
                         },
                     ),
                     (
-                        "_numbered_section-2",
+                        "_numbered_section_2",
                         RefEntry {
-                            id: "_numbered_section-2",
+                            id: "_numbered_section_2",
                             reftext: Some("Numbered Section",),
                             ref_type: RefType::Section,
                         },
@@ -533,17 +533,17 @@ The section number does not increment in regions of the document where section n
                         },
                     ),
                     (
-                        "_unnumbered_section-2",
+                        "_unnumbered_section_2",
                         RefEntry {
-                            id: "_unnumbered_section-2",
+                            id: "_unnumbered_section_2",
                             reftext: Some("Unnumbered Section",),
                             ref_type: RefType::Section,
                         },
                     ),
                     (
-                        "_unnumbered_section-3",
+                        "_unnumbered_section_3",
                         RefEntry {
-                            id: "_unnumbered_section-3",
+                            id: "_unnumbered_section_3",
                             reftext: Some("Unnumbered Section",),
                             ref_type: RefType::Section,
                         },

@@ -97,13 +97,14 @@ impl Catalog {
         base_id: &str,
         reftext: Option<&str>,
         ref_type: RefType,
+        separator: &str,
     ) -> String {
         let unique_id = if !self.contains_id(base_id) {
             base_id.to_string()
         } else {
             let mut counter = 2;
             loop {
-                let candidate = format!("{}-{}", base_id, counter);
+                let candidate = format!("{base_id}{separator}{counter}");
                 if !self.contains_id(&candidate) {
                     break candidate;
                 }
@@ -398,6 +399,7 @@ mod tests {
             "available",
             Some("Available Ref"),
             RefType::Anchor,
+            "-",
         );
         assert_eq!(id1, "available");
         assert!(catalog.contains_id("available"));
@@ -414,7 +416,7 @@ mod tests {
             .register_ref("taken-2", None, RefType::Anchor)
             .unwrap();
 
-        let id2 = catalog.generate_and_register_unique_id("taken", None, RefType::Section);
+        let id2 = catalog.generate_and_register_unique_id("taken", None, RefType::Section, "-");
         assert_eq!(id2, "taken-3");
         assert!(catalog.contains_id("taken-3"));
     }

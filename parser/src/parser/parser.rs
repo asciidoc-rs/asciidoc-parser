@@ -276,6 +276,20 @@ pub(crate) struct DeferredWarning {
     /// The type of warning, already carrying any owned data it needs (such as
     /// the missing attribute's name).
     pub(crate) warning: WarningType,
+
+    /// A pre-resolved originating `(file, line)` for this warning, carried
+    /// through to [`Warning::origin`].
+    ///
+    /// This is `None` for warnings that point at real (emitted) output: their
+    /// [`offset`](Self::offset)/[`len`](Self::len) span resolves the location
+    /// through the document source map. It is `Some` for a preprocessor
+    /// directive that produces no output of its own — a malformed or
+    /// unterminated conditional directive — where there is no output span to
+    /// resolve against, so the directive's own file and line are recorded here
+    /// directly (the `offset`/`len` span is then only a best-effort anchor).
+    ///
+    /// [`Warning::origin`]: crate::warnings::Warning::origin
+    pub(crate) origin: Option<SourceLine>,
 }
 
 /// A warning whose location is already resolved to an originating
@@ -1013,6 +1027,7 @@ impl Parser {
                 offset: source.byte_offset(),
                 len: source.len(),
                 warning,
+                origin: None,
             });
     }
 
@@ -1031,6 +1046,12 @@ impl Parser {
     /// entries.
     pub(crate) fn truncate_substitution_warnings(&self, len: usize) {
         self.substitution_warnings.borrow_mut().truncate(len);
+    }
+
+    /// Removes and returns any substitution warnings recorded since the buffer
+    /// held `len` entries.
+    pub(crate) fn drain_substitution_warnings_since(&self, len: usize) -> Vec<DeferredWarning> {
+        self.substitution_warnings.borrow_mut().split_off(len)
     }
 
     /// Takes the substitution warnings recorded during parsing, leaving the
@@ -1083,8 +1104,18 @@ impl Parser {
     /// mutability.
     ///
     /// [`take_owned_cell_warnings`]: Self::take_owned_cell_warnings
-    pub(crate) fn record_owned_cell_warning(&self, line: usize, warning: WarningType) {
-        if let Some(origin) = self.owned_cell_original_file_and_line(line) {
+    pub(crate) fn record_owned_cell_warning(
+        &self,
+        line: usize,
+        warning: WarningType,
+        origin_override: Option<SourceLine>,
+    ) {
+        // A no-output directive that originated in a file the cell *included*
+        // carries a true `(file, line)` origin already; prefer it. Otherwise
+        // resolve the cell's own directive line through the enclosing owned
+        // cell's source map.
+        let origin = origin_override.or_else(|| self.owned_cell_original_file_and_line(line));
+        if let Some(origin) = origin {
             self.owned_cell_warnings
                 .borrow_mut()
                 .push(ResolvedWarning { origin, warning });
@@ -1105,9 +1136,22 @@ impl Parser {
         reftext: Option<&str>,
         ref_type: RefType,
     ) -> String {
+        // A synthetic ID that collides with an existing one is enumerated using
+        // the `idseparator` (e.g. `_section_one`, `_section_one_2`), matching
+        // Ruby Asciidoctor — not a hardcoded hyphen. Mirrors the separator
+        // resolution in `generate_section_id`.
+        let separator = self
+            .attribute_value("idseparator")
+            .as_maybe_str()
+            .unwrap_or_default()
+            .chars()
+            .next()
+            .map(|c| c.to_string())
+            .unwrap_or_default();
+
         self.catalog
             .borrow_mut()
-            .generate_and_register_unique_id(base_id, reftext, ref_type)
+            .generate_and_register_unique_id(base_id, reftext, ref_type, &separator)
     }
 
     /// Takes the catalog from the parser, transferring ownership and leaving an
@@ -1853,8 +1897,27 @@ mod tests {
         // Outside an owned cell source there is no map to resolve against, so a
         // recorded warning has no origin and is dropped rather than queued.
         assert!(!p.is_in_owned_cell_source());
-        p.record_owned_cell_warning(1, WarningType::IncludeFileNotFound("x.adoc".to_owned()));
+        p.record_owned_cell_warning(
+            1,
+            WarningType::IncludeFileNotFound("x.adoc".to_owned()),
+            None,
+        );
         assert!(p.take_owned_cell_warnings().is_empty());
+
+        // An explicit origin override is queued even without a cell source map.
+        p.record_owned_cell_warning(
+            1,
+            WarningType::UnterminatedConditionalDirective("ifdef::foo[]".to_owned()),
+            Some(SourceLine(Some("inc.adoc".to_owned()), 3)),
+        );
+        let overridden = p.take_owned_cell_warnings();
+        let [overridden] = overridden.as_slice() else {
+            panic!("expected exactly one recorded warning, got {overridden:?}");
+        };
+        assert_eq!(
+            overridden.origin,
+            SourceLine(Some("inc.adoc".to_owned()), 3)
+        );
 
         // Publish a cell source map (output line 1 came from `cell.adoc` line 2,
         // the way the preprocessor would record an include-expanded cell).
@@ -1865,7 +1928,11 @@ mod tests {
 
         // Now the same call resolves the line to its origin and queues the
         // warning with that pre-resolved (file, line).
-        p.record_owned_cell_warning(1, WarningType::IncludeFileNotFound("y.adoc".to_owned()));
+        p.record_owned_cell_warning(
+            1,
+            WarningType::IncludeFileNotFound("y.adoc".to_owned()),
+            None,
+        );
         let recorded = p.take_owned_cell_warnings();
         let [recorded] = recorded.as_slice() else {
             panic!("expected exactly one recorded warning, got {recorded:?}");

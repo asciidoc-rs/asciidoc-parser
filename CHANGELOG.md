@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.23.4](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.23.3...v0.23.4)
+_18 July 2026_
+
+### Added
+
+* Track Asciidoctor's parser_test.rb via SDD ([#763](https://github.com/asciidoc-rs/asciidoc-parser/pull/763))
+* Track Asciidoctor's document_test.rb via SDD ([#715](https://github.com/asciidoc-rs/asciidoc-parser/pull/715))
+* Track Asciidoctor's paths_test.rb via SDD ([#755](https://github.com/asciidoc-rs/asciidoc-parser/pull/755))
+* Track Asciidoctor's syntax_highlighter_test.rb via SDD ([#764](https://github.com/asciidoc-rs/asciidoc-parser/pull/764))
+* Track Asciidoctor's manpage_test.rb via SDD ([#752](https://github.com/asciidoc-rs/asciidoc-parser/pull/752))
+* Track Asciidoctor's preamble_test.rb via SDD ([#742](https://github.com/asciidoc-rs/asciidoc-parser/pull/742))
+* Track Asciidoctor's logger_test.rb via SDD ([#741](https://github.com/asciidoc-rs/asciidoc-parser/pull/741))
+* Track Asciidoctor's text_test.rb via SDD ([#739](https://github.com/asciidoc-rs/asciidoc-parser/pull/739))
+* Track Asciidoctor's attributes_test.rb via SDD ([#722](https://github.com/asciidoc-rs/asciidoc-parser/pull/722))
+* Track Asciidoctor's api_test.rb via SDD (and resolve authors from attributes) ([#713](https://github.com/asciidoc-rs/asciidoc-parser/pull/713))
+* Track Asciidoctor's options_test.rb via SDD ([#740](https://github.com/asciidoc-rs/asciidoc-parser/pull/740))
+* Track Asciidoctor's test_helper.rb via SDD ([#712](https://github.com/asciidoc-rs/asciidoc-parser/pull/712))
+* Track Asciidoctor's helpers_test.rb via SDD ([#717](https://github.com/asciidoc-rs/asciidoc-parser/pull/717))
+* Track Asciidoctor's invoker_test.rb via SDD ([#714](https://github.com/asciidoc-rs/asciidoc-parser/pull/714))
+* Track Asciidoctor's extensions_test.rb via SDD ([#711](https://github.com/asciidoc-rs/asciidoc-parser/pull/711))
+* Track Asciidoctor's converter_test.rb via SDD ([#710](https://github.com/asciidoc-rs/asciidoc-parser/pull/710))
+* Track Asciidoctor's lists_test.rb via SDD ([#707](https://github.com/asciidoc-rs/asciidoc-parser/pull/707))
+* Track Asciidoctor's tables_test.rb via SDD ([#706](https://github.com/asciidoc-rs/asciidoc-parser/pull/706))
+* Track Asciidoctor's substitutions_test.rb via SDD ([#703](https://github.com/asciidoc-rs/asciidoc-parser/pull/703))
+
+### Documented
+
+* Resolve issue #146 — open blocks are delimited only by `--` (close #146) ([#702](https://github.com/asciidoc-rs/asciidoc-parser/pull/702))
+* Resolve spec question on delimited block marker char matching ([#145](https://github.com/asciidoc-rs/asciidoc-parser/pull/145)) ([#700](https://github.com/asciidoc-rs/asciidoc-parser/pull/700))
+
+### Fixed
+
+* Warn on duplicate inline anchors ([#765](https://github.com/asciidoc-rs/asciidoc-parser/pull/765) by @pollychen-lab -- thank you!)
+* Strip trailing ` +` from single-line attribute values ([#709](https://github.com/asciidoc-rs/asciidoc-parser/pull/709))
+* Preserve hard line break marker in attribute entry values (close #307) ([#708](https://github.com/asciidoc-rs/asciidoc-parser/pull/708))
+* Support macros nested in link/xref text (close #305) ([#704](https://github.com/asciidoc-rs/asciidoc-parser/pull/704))
+
 ## [0.23.3](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.23.2...v0.23.3)
 _16 July 2026_
 

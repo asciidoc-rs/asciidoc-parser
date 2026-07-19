@@ -108,6 +108,25 @@ impl<'src> Document<'src> {
                 warnings.append(&mut maw_blocks.warnings);
             }
 
+            // A top-level section that skips level 1 (e.g. a `= Document Title`
+            // followed directly by a level-2 heading) is out of sequence, but
+            // the section-child boundary check only sees sections nested under
+            // another section; flag the document-root case here.
+            //
+            // Skipped for a title-less document or when `fragment` is set — both
+            // are treated as section fragments with no level-0 root to sequence
+            // against — and when `leveloffset` is in effect, since a shifted (or
+            // clamped) effective level no longer reflects the authored level
+            // relationship and any degenerate offset is reported on its own.
+            if header.title_source().is_some()
+                && !parser.is_attribute_set("fragment")
+                && parser.level_offset() == 0
+            {
+                warnings.append(&mut crate::blocks::root_section_sequence_warnings(
+                    &maw_blocks.item.item,
+                ));
+            }
+
             // Warnings recorded while replacing attribute references (e.g. a
             // reference to a missing attribute under `attribute-missing=warn`)
             // are collected on the parser, where only owned offsets — not
@@ -121,7 +140,7 @@ impl<'src> Document<'src> {
                 warnings.push(Warning {
                     source: root.slice(pw.offset..pw.offset + pw.len),
                     warning: pw.warning,
-                    origin: None,
+                    origin: pw.origin,
                 });
             }
 

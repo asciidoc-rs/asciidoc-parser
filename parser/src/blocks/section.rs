@@ -438,6 +438,29 @@ impl std::fmt::Debug for SectionBlock<'_> {
 const MIN_SECTION_LEVEL: i32 = 1;
 const MAX_SECTION_LEVEL: i32 = 5;
 
+/// Strips an optional symmetric ATX title close from `title`: a trailing run of
+/// `marker` exactly `count` long, preceded by whitespace (e.g. the ` ==` in
+/// `== Title ==`). A run that does not match the opening marker (`== Title
+/// ===`) or is not preceded by whitespace (`== Title==`) is left intact, and a
+/// title consisting only of the close is left intact. Mirrors the trailing
+/// `(?: +\1)?` group of Asciidoctor's section-title regex.
+pub(crate) fn strip_symmetric_title_close(title: Span<'_>, marker: char, count: usize) -> Span<'_> {
+    // The close must be separated from the title by an ASCII blank (space or
+    // tab), matching Asciidoctor's `CG_BLANK` (`[ \t]`) — not arbitrary Unicode
+    // whitespace, so e.g. `== Title<NBSP>==` keeps its `==` as title text.
+    const BLANK: [char; 2] = [' ', '\t'];
+    let close = marker.to_string().repeat(count);
+    match title.data().strip_suffix(&close) {
+        Some(without_close)
+            if without_close.ends_with(BLANK)
+                && !without_close.trim_end_matches(BLANK).is_empty() =>
+        {
+            title.slice_to(..without_close.trim_end_matches(BLANK).len())
+        }
+        _ => title,
+    }
+}
+
 /// Parses a section title line, returning the section's *effective* level
 /// (with `offset`, the running `leveloffset`, already applied) and the span of
 /// the title text.
@@ -462,7 +485,9 @@ fn parse_title_line<'src>(
 
     let mut count = 0;
 
-    if line.starts_with('=') {
+    let marker_char = if line.starts_with('=') { '=' } else { '#' };
+
+    if marker_char == '=' {
         while let Some(mi) = line.take_prefix("=") {
             count += 1;
             line = mi.after;
@@ -516,6 +541,8 @@ fn parse_title_line<'src>(
     // `==x` is declined quietly, without a spurious out-of-range warning.
     let title = line.take_required_whitespace()?;
 
+    let title_span = strip_symmetric_title_close(title.after, marker_char, count);
+
     // A real section heading whose offset-adjusted level lands outside the
     // supported 1..=5 range is clamped into range and reported, rather than
     // producing an out-of-range (or, under a hostile offset, absurd) level.
@@ -544,7 +571,7 @@ fn parse_title_line<'src>(
     };
 
     Some(MatchedItem {
-        item: (level, title.after),
+        item: (level, title_span),
         after: mi.after,
     })
 }
@@ -607,6 +634,49 @@ fn peer_or_ancestor_section<'src>(
     }
 }
 
+/// Records a "section title out of sequence" warning for a *top-level* section
+/// whose level skips ahead of level 1 — the document root's expected first
+/// child level. The nested case (a section skipping a level under its *parent
+/// section*) is handled during parsing by [`peer_or_ancestor_section`]; this
+/// covers the document-root case (e.g. `= Doc` followed directly by `=== X`),
+/// which that boundary check never sees.
+///
+/// At most one such warning is possible: any later top-level section is a peer
+/// or ancestor of an earlier one (a deeper heading becomes a *child* instead),
+/// so it can never skip ahead of `most_recent_level + 1`.
+///
+/// Discrete headings are not part of the section sequence and are skipped. The
+/// caller restricts this to titled, non-`fragment` documents (a title-less
+/// document or a section fragment has no level-0 root to sequence against).
+pub(crate) fn root_section_sequence_warnings<'src>(blocks: &[Block<'src>]) -> Vec<Warning<'src>> {
+    let mut warnings = vec![];
+    let mut most_recent_level = 0;
+
+    for block in blocks {
+        let Block::Section(section) = block else {
+            continue;
+        };
+
+        if section.section_type() == SectionType::Discrete {
+            continue;
+        }
+
+        let found_level = section.level();
+
+        if found_level > most_recent_level + 1 {
+            warnings.push(Warning {
+                source: section.span().take_normalized_line().item,
+                warning: WarningType::SectionHeadingLevelSkipped(most_recent_level, found_level),
+                origin: None,
+            });
+        }
+
+        most_recent_level = found_level;
+    }
+
+    warnings
+}
+
 /// Propose a section ID from the section title.
 ///
 /// This function is called when (1) no `id` attribute is specified explicitly,
@@ -661,7 +731,12 @@ fn generate_section_id(title: &str, parser: &Parser) -> String {
             gen_id.pop();
         }
 
-        if idprefix.is_empty() && gen_id.starts_with(&sep) {
+        // Strip a leading separator (e.g. from a title beginning with a space or
+        // hyphen) before the prefix is applied, matching Ruby Asciidoctor. This
+        // keeps a leading separator out of the final ID and avoids doubling it
+        // up against a non-empty `idprefix` (e.g. `=== {sp}Heading` → `_heading`,
+        // not `__heading`).
+        if gen_id.starts_with(&sep) {
             gen_id = gen_id[sep.len()..].to_string();
         }
     }
