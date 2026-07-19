@@ -12,7 +12,7 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
-        ResolvedAttributes, SafeMode, SourceLine, SourceMap, SvgFileHandler,
+        ReferenceTime, ResolvedAttributes, SafeMode, SourceLine, SourceMap, SvgFileHandler,
         built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
         preprocessor::preprocess,
     },
@@ -274,6 +274,34 @@ pub struct Parser {
     /// hold), so the warnings can be turned into
     /// spanned [`Warning`]s once the document's owned source is available.
     substitution_warnings: RefCell<Vec<DeferredWarning>>,
+
+    /// An optional fixed reference time that pins the clock used to compute the
+    /// time-dependent document attributes (`docdate`, `doctime`, `docdatetime`,
+    /// `docyear`, and their `local*` siblings), for reproducible output.
+    ///
+    /// When set, it supersedes both the real wall clock and the
+    /// `SOURCE_DATE_EPOCH` environment variable as the value of "now" (which
+    /// drives the `local*` attributes and, absent an [`input_mtime`], the
+    /// `doc*` attributes too). See [`with_reference_time`] and
+    /// [`fill_datetime_attributes`].
+    ///
+    /// [`input_mtime`]: Self::input_mtime
+    /// [`with_reference_time`]: Self::with_reference_time
+    /// [`fill_datetime_attributes`]: Self::fill_datetime_attributes
+    reference_time: Option<ReferenceTime>,
+
+    /// An optional fixed modification time of the source document, pinning the
+    /// clock that drives the `doc*` attributes (`docdate`, `doctime`,
+    /// `docdatetime`, `docyear`) specifically.
+    ///
+    /// This mirrors Asciidoctor's `input_mtime` option: the `local*` attributes
+    /// continue to track "now", while the `doc*` attributes reflect this source
+    /// modification time. See [`with_input_mtime`] and
+    /// [`fill_datetime_attributes`].
+    ///
+    /// [`with_input_mtime`]: Self::with_input_mtime
+    /// [`fill_datetime_attributes`]: Self::fill_datetime_attributes
+    input_mtime: Option<ReferenceTime>,
 }
 
 /// A warning recorded in a form that does not borrow the source so it can live
@@ -378,6 +406,8 @@ impl Default for Parser {
             owned_cell_warnings: RefCell::new(vec![]),
             callouts: RefCell::new(CalloutCatalog::default()),
             substitution_warnings: RefCell::new(vec![]),
+            reference_time: None,
+            input_mtime: None,
         }
     }
 }
@@ -442,6 +472,14 @@ impl Parser {
     /// [`parse()`]: Self::parse
     /// [`catalog()`]: Document::catalog
     pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
+        // Compute the time-dependent document attributes (docdate, doctime,
+        // docdatetime, docyear, and their local* siblings) before preprocessing,
+        // so a directive such as `ifdef::docdate[]` and any `{docdate}` reference
+        // sees them. Only attributes still unset are filled, so an explicit
+        // value set via the API (or already carried over from a prior parse)
+        // wins.
+        self.fill_datetime_attributes();
+
         let (preprocessed_source, source_map, preprocessor_warnings) = preprocess(source, self);
 
         // NOTE: `Document::parse` will transfer the catalog to itself at the end of the
@@ -1309,6 +1347,199 @@ impl Parser {
         self
     }
 
+    /// Pins the reference time (the value of "now") used to compute the
+    /// time-dependent document attributes, for reproducible output.
+    ///
+    /// AsciiDoc derives `localdate`, `localtime`, `localdatetime`, and
+    /// `localyear` from the current wall-clock time, and `docdate`, `doctime`,
+    /// `docdatetime`, and `docyear` from the source file's modification time
+    /// (falling back to "now" when no modification time is known). Because
+    /// those values change from run to run, any output that embeds them is
+    /// not reproducible. Supplying a [`ReferenceTime`] pins "now" to a
+    /// fixed instant so the computed attributes are stable.
+    ///
+    /// This is the API counterpart of the `SOURCE_DATE_EPOCH` environment
+    /// variable; a value set here takes precedence over that variable. To pin
+    /// only the source-modification time that drives the `doc*` attributes
+    /// (leaving `local*` on the real clock), use [`with_input_mtime`] instead;
+    /// an [`with_input_mtime`] value takes precedence over this one for the
+    /// `doc*` attributes.
+    ///
+    /// A value set via the document header or body (e.g. an explicit
+    /// `:docdate:`) still wins over the computed default.
+    ///
+    /// [`with_input_mtime`]: Self::with_input_mtime
+    pub fn with_reference_time(mut self, reference_time: ReferenceTime) -> Self {
+        self.reference_time = Some(reference_time);
+        self
+    }
+
+    /// Pins the modification time of the source document, which drives the
+    /// `docdate`, `doctime`, `docdatetime`, and `docyear` attributes.
+    ///
+    /// This mirrors Asciidoctor's `input_mtime` option: the `local*` attributes
+    /// continue to reflect "now" (the real clock, a [`with_reference_time`]
+    /// value, or `SOURCE_DATE_EPOCH`), while the `doc*` attributes reflect the
+    /// supplied source modification time. A value set here takes precedence
+    /// over a [`with_reference_time`] value for the `doc*` attributes.
+    ///
+    /// A value set via the document header or body (e.g. an explicit
+    /// `:docdate:`) still wins over the computed default.
+    ///
+    /// [`with_reference_time`]: Self::with_reference_time
+    pub fn with_input_mtime(mut self, input_mtime: ReferenceTime) -> Self {
+        self.input_mtime = Some(input_mtime);
+        self
+    }
+
+    /// Computes the time-dependent document attributes and stores any that are
+    /// not already set.
+    ///
+    /// This ports Asciidoctor's `Document#fill_datetime_attributes`:
+    ///
+    /// * `localdate` / `localtime` / `localdatetime` / `localyear` are derived
+    ///   from "now".
+    /// * `docdate` / `doctime` / `docdatetime` / `docyear` are derived from the
+    ///   source document's modification time, defaulting to "now" when none is
+    ///   known.
+    /// * an explicit `docdate` / `doctime` (or `local*`) supplied via the API,
+    ///   header, or a prior parse is preserved, and the derived `docyear` /
+    ///   `docdatetime` are computed from it.
+    ///
+    /// "Now" resolves to, in order: the [`reference_time`] pinned on this
+    /// parser ([`with_reference_time`]), the `SOURCE_DATE_EPOCH`
+    /// environment variable (as seconds since the Unix epoch, read as UTC —
+    /// see the [reproducible builds specification]), or the real wall clock
+    /// (read as UTC, since this crate carries no timezone database). The
+    /// source modification time resolves to the [`input_mtime`] pinned on
+    /// this parser ([`with_input_mtime`]) or, absent that, to "now".
+    ///
+    /// Each attribute is filled only when it is not already set, so this is
+    /// idempotent across the parses of a reused parser and never overrides an
+    /// explicit value.
+    ///
+    /// [`reference_time`]: Self::reference_time
+    /// [`input_mtime`]: Self::input_mtime
+    /// [`with_reference_time`]: Self::with_reference_time
+    /// [`with_input_mtime`]: Self::with_input_mtime
+    /// [reproducible builds specification]: https://reproducible-builds.org/specs/source-date-epoch/
+    fn fill_datetime_attributes(&mut self) {
+        // "Now" drives the local* attributes: a pinned reference time wins, then
+        // SOURCE_DATE_EPOCH, then the real clock.
+        let now = self
+            .reference_time
+            .clone()
+            .or_else(source_date_epoch_from_env)
+            .unwrap_or_else(ReferenceTime::now);
+
+        let localdate = self.fill_date_and_year("localdate", "localyear", &now);
+        self.fill_time_and_datetime("localtime", "localdatetime", &localdate, &now);
+
+        // The doc* attributes reflect the source modification time, defaulting
+        // to "now" when none is pinned.
+        let doc_time = self.input_mtime.clone().unwrap_or(now);
+
+        let docdate = self.fill_date_and_year("docdate", "docyear", &doc_time);
+        self.fill_time_and_datetime("doctime", "docdatetime", &docdate, &doc_time);
+    }
+
+    /// Fills the date attribute `date_attr` (and derived year attribute
+    /// `year_attr`) for the `local*` / `doc*` family, returning the effective
+    /// date string.
+    ///
+    /// If `date_attr` is already set, its value is kept and `year_attr` is
+    /// derived from it (only when `year_attr` is itself unset, and only when
+    /// the date begins with a `YYYY-` prefix, matching Asciidoctor).
+    /// Otherwise both are filled from `reference_time`.
+    fn fill_date_and_year(
+        &mut self,
+        date_attr: &str,
+        year_attr: &str,
+        reference_time: &ReferenceTime,
+    ) -> String {
+        match self.explicit_attribute_string(date_attr) {
+            Some(date) => {
+                if !self.is_attribute_set(year_attr)
+                    && let Some(year) = year_from_date(&date)
+                {
+                    self.set_datetime_attribute(year_attr, year);
+                }
+                date
+            }
+            None => {
+                let date = reference_time.date();
+                self.set_datetime_attribute(date_attr, date.clone());
+                if !self.is_attribute_set(year_attr) {
+                    self.set_datetime_attribute(year_attr, reference_time.year_string());
+                }
+                date
+            }
+        }
+    }
+
+    /// Fills the time attribute `time_attr` (from `reference_time`, if unset)
+    /// and the datetime attribute `datetime_attr` (as `"{date} {time}"`, if
+    /// unset) for the `local*` / `doc*` family.
+    ///
+    /// An explicit `time_attr` is preserved and still feeds `datetime_attr`,
+    /// matching Asciidoctor's `attrs['docdatetime'] ||= %(#{docdate}
+    /// #{doctime})`.
+    fn fill_time_and_datetime(
+        &mut self,
+        time_attr: &str,
+        datetime_attr: &str,
+        date: &str,
+        reference_time: &ReferenceTime,
+    ) {
+        let time = match self.explicit_attribute_string(time_attr) {
+            Some(time) => time,
+            None => {
+                let time = reference_time.time();
+                self.set_datetime_attribute(time_attr, time.clone());
+                time
+            }
+        };
+
+        if !self.is_attribute_set(datetime_attr) {
+            self.set_datetime_attribute(datetime_attr, format!("{date} {time}"));
+        }
+    }
+
+    /// Returns the currently-set value of `name` as an owned string, treating a
+    /// value-less "set" as an empty string, and an unset attribute as `None`.
+    ///
+    /// This mirrors the Ruby truthiness the datetime computation relies on
+    /// (`attrs['docdate']`), where any present value — including an empty
+    /// string — counts as explicitly supplied.
+    fn explicit_attribute_string(&self, name: &str) -> Option<String> {
+        match self.attribute_value(name) {
+            InterpretedValue::Value(value) => Some(value),
+            InterpretedValue::Set => Some(String::new()),
+            InterpretedValue::Unset => None,
+        }
+    }
+
+    /// Stores a computed time-dependent attribute value, superseding any
+    /// like-named counter overlay (mirroring the other attribute setters).
+    ///
+    /// The value is stored as freely modifiable ([`Anywhere`]) so a later
+    /// header or body assignment (e.g. `:docdate:`) can still override it,
+    /// matching Asciidoctor, where these are ordinary document attributes.
+    ///
+    /// [`Anywhere`]: ModificationContext::Anywhere
+    fn set_datetime_attribute(&mut self, name: &str, value: String) {
+        self.counter_values.borrow_mut().remove(name);
+        Arc::make_mut(&mut self.attribute_values).insert(
+            name.to_string(),
+            AttributeValue {
+                allowable_value: AllowableValue::Any,
+                modification_context: ModificationContext::Anywhere,
+                silent_when_locked: false,
+                value: InterpretedValue::Value(value),
+            },
+        );
+    }
+
     /// Replace the default [`InlineSubstitutionRenderer`] for this parser.
     ///
     /// The default implementation of [`InlineSubstitutionRenderer`] that is
@@ -1771,6 +2002,43 @@ impl Parser {
 /// level.
 fn leveloffset_admits_any_heading(offset: i32) -> bool {
     (-4..=5).contains(&offset)
+}
+
+/// Reads the `SOURCE_DATE_EPOCH` environment variable as a fixed reference
+/// time, if it is set to a non-empty, valid integer count of seconds since the
+/// Unix epoch (interpreted as UTC), per the [reproducible builds
+/// specification].
+///
+/// Returns `None` when the variable is unset, empty, or malformed. Asciidoctor
+/// raises on a malformed value; this crate has no error channel at this point,
+/// so a malformed value is ignored and the clock falls back to the next source
+/// (a pinned reference time, or the real wall clock) rather than aborting the
+/// parse.
+///
+/// [reproducible builds specification]: https://reproducible-builds.org/specs/source-date-epoch/
+fn source_date_epoch_from_env() -> Option<ReferenceTime> {
+    let raw = std::env::var("SOURCE_DATE_EPOCH").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let secs = trimmed.parse::<i64>().ok()?;
+    Some(ReferenceTime::from_unix_timestamp(secs))
+}
+
+/// Derives the year from a `docdate` / `localdate` value, mirroring
+/// Asciidoctor's `(date.index '-') == 4 ? (date.slice 0, 4) : nil`.
+///
+/// Returns the four-character prefix only when the first `-` is at index 4 (a
+/// `YYYY-` prefix); any other shape yields `None`, leaving the year attribute
+/// unset.
+fn year_from_date(date: &str) -> Option<String> {
+    if date.find('-') == Some(4) {
+        date.get(..4).map(str::to_string)
+    } else {
+        None
+    }
 }
 
 /// Advances a counter value to the next value in its sequence, mirroring

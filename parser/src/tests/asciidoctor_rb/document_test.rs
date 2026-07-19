@@ -2695,16 +2695,26 @@ mod timing_report {
     );
 }
 
-// Computes `docdate`/`doctime`/`docdatetime`/`docyear` from `input_mtime`
-// and `SOURCE_DATE_EPOCH` — time-dependent document attributes not modeled
-// by this crate. Tracked (along with an injectable clock so test output can
-// be pinned to a fixed time) by
+// Computes `docdate`/`doctime`/`docdatetime`/`docyear` from the source
+// modification time (`Parser::with_input_mtime`, Asciidoctor's `input_mtime`)
+// or `SOURCE_DATE_EPOCH`, with an injectable clock
+// (`Parser::with_reference_time`) so test output can be pinned to a fixed
+// instant. Implemented for
 // https://github.com/asciidoc-rs/asciidoc-parser/issues/766.
+//
+// Ruby pins these attributes with `input_mtime:` / `SOURCE_DATE_EPOCH` and, for
+// the mtime cases, deletes `SOURCE_DATE_EPOCH` from the process environment so
+// it does not override the supplied mtime. The ports below instead pin the
+// clock through the parser API (`with_input_mtime` / `with_reference_time`),
+// which takes precedence over the ambient environment, so each test is
+// deterministic without mutating (process-global, racy) environment state.
 mod date_time_attributes {
-    use crate::tests::prelude::*;
+    use crate::{parser::ReferenceTime, tests::prelude::*};
 
-    non_normative!(
-        r##"
+    #[test]
+    fn should_compute_docyear_and_docdatetime_from_docdate_and_doctime() {
+        verifies!(
+            r##"
   context 'Date time attributes' do
     test 'should compute docyear and docdatetime from docdate and doctime' do
       doc = Asciidoctor::Document.new [], attributes: { 'docdate' => '2015-01-01', 'doctime' => '10:00:00-0700' }
@@ -2713,7 +2723,36 @@ mod date_time_attributes {
       assert_equal '10:00:00-0700', (doc.attr 'doctime')
       assert_equal '2015-01-01 10:00:00-0700', (doc.attr 'docdatetime')
     end
+"##
+        );
 
+        let doc = Parser::default()
+            .with_intrinsic_attribute("docdate", "2015-01-01", ModificationContext::ApiOrHeader)
+            .with_intrinsic_attribute("doctime", "10:00:00-0700", ModificationContext::ApiOrHeader)
+            .parse("");
+
+        assert_eq!(
+            doc.attribute_value("docdate"),
+            InterpretedValue::Value("2015-01-01")
+        );
+        assert_eq!(
+            doc.attribute_value("docyear"),
+            InterpretedValue::Value("2015")
+        );
+        assert_eq!(
+            doc.attribute_value("doctime"),
+            InterpretedValue::Value("10:00:00-0700")
+        );
+        assert_eq!(
+            doc.attribute_value("docdatetime"),
+            InterpretedValue::Value("2015-01-01 10:00:00-0700")
+        );
+    }
+
+    #[test]
+    fn should_allow_docdate_and_doctime_to_be_overridden() {
+        verifies!(
+            r##"
     test 'should allow docdate and doctime to be overridden' do
       doc = Asciidoctor::Document.new [], input_mtime: ::Time.now, attributes: { 'docdate' => '2015-01-01', 'doctime' => '10:00:00-0700' }
       assert_equal '2015-01-01', (doc.attr 'docdate')
@@ -2721,19 +2760,108 @@ mod date_time_attributes {
       assert_equal '10:00:00-0700', (doc.attr 'doctime')
       assert_equal '2015-01-01 10:00:00-0700', (doc.attr 'docdatetime')
     end
+"##
+        );
 
+        // An explicit docdate/doctime wins over the source modification time
+        // (here pinned to an arbitrary instant, standing in for `::Time.now`).
+        let doc = Parser::default()
+            .with_input_mtime(ReferenceTime::from_unix_timestamp(1_420_106_400))
+            .with_intrinsic_attribute("docdate", "2015-01-01", ModificationContext::ApiOrHeader)
+            .with_intrinsic_attribute("doctime", "10:00:00-0700", ModificationContext::ApiOrHeader)
+            .parse("");
+
+        assert_eq!(
+            doc.attribute_value("docdate"),
+            InterpretedValue::Value("2015-01-01")
+        );
+        assert_eq!(
+            doc.attribute_value("docyear"),
+            InterpretedValue::Value("2015")
+        );
+        assert_eq!(
+            doc.attribute_value("doctime"),
+            InterpretedValue::Value("10:00:00-0700")
+        );
+        assert_eq!(
+            doc.attribute_value("docdatetime"),
+            InterpretedValue::Value("2015-01-01 10:00:00-0700")
+        );
+    }
+
+    #[test]
+    fn should_compute_docdatetime_from_doctime() {
+        verifies!(
+            r##"
     test 'should compute docdatetime from doctime' do
       doc = Asciidoctor::Document.new [], attributes: { 'doctime' => '10:00:00-0700' }
       assert_equal '10:00:00-0700', (doc.attr 'doctime')
       assert (doc.attr 'docdatetime').end_with?(' 10:00:00-0700')
     end
+"##
+        );
 
+        // Ruby leaves docdate to `::Time.now`; here the clock is pinned to
+        // 2015-01-01T10:00:00Z so the computed docdate is deterministic. The
+        // explicit doctime still supplies the time portion of docdatetime.
+        let doc = Parser::default()
+            .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+            .with_intrinsic_attribute("doctime", "10:00:00-0700", ModificationContext::ApiOrHeader)
+            .parse("");
+
+        assert_eq!(
+            doc.attribute_value("doctime"),
+            InterpretedValue::Value("10:00:00-0700")
+        );
+
+        let crate::document::InterpretedValue::Value(docdatetime) =
+            doc.attribute_value("docdatetime")
+        else {
+            panic!("docdatetime was not computed");
+        };
+        assert!(docdatetime.ends_with(" 10:00:00-0700"));
+        assert_eq!(docdatetime, "2015-01-01 10:00:00-0700");
+    }
+
+    #[test]
+    fn should_compute_docyear_from_docdate() {
+        verifies!(
+            r##"
     test 'should compute docyear from docdate' do
       doc = Asciidoctor::Document.new [], attributes: { 'docdate' => '2015-01-01' }
       assert_equal '2015', (doc.attr 'docyear')
       assert (doc.attr 'docdatetime').start_with?('2015-01-01 ')
     end
+"##
+        );
 
+        // Ruby leaves doctime to `::Time.now`; here the clock is pinned to
+        // 2015-01-01T10:00:00Z so the computed doctime is deterministic. The
+        // explicit docdate still supplies the date portion of docdatetime and
+        // drives docyear.
+        let doc = Parser::default()
+            .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+            .with_intrinsic_attribute("docdate", "2015-01-01", ModificationContext::ApiOrHeader)
+            .parse("");
+
+        assert_eq!(
+            doc.attribute_value("docyear"),
+            InterpretedValue::Value("2015")
+        );
+
+        let crate::document::InterpretedValue::Value(docdatetime) =
+            doc.attribute_value("docdatetime")
+        else {
+            panic!("docdatetime was not computed");
+        };
+        assert!(docdatetime.starts_with("2015-01-01 "));
+        assert_eq!(docdatetime, "2015-01-01 10:00:00 UTC");
+    }
+
+    #[test]
+    fn should_allow_doctime_to_be_overridden() {
+        verifies!(
+            r##"
     test 'should allow doctime to be overridden' do
       old_source_date_epoch = ENV.delete 'SOURCE_DATE_EPOCH'
       begin
@@ -2746,7 +2874,38 @@ mod date_time_attributes {
         ENV['SOURCE_DATE_EPOCH'] = old_source_date_epoch if old_source_date_epoch
       end
     end
+"##
+        );
 
+        // docdate/docyear come from the source modification time; the explicit
+        // doctime overrides the mtime-derived time.
+        let doc = Parser::default()
+            .with_input_mtime(ReferenceTime::from_local(2019, 1, 2, 3, 4, 5, 6 * 3600))
+            .with_intrinsic_attribute("doctime", "10:00:00-0700", ModificationContext::ApiOrHeader)
+            .parse("");
+
+        assert_eq!(
+            doc.attribute_value("docdate"),
+            InterpretedValue::Value("2019-01-02")
+        );
+        assert_eq!(
+            doc.attribute_value("docyear"),
+            InterpretedValue::Value("2019")
+        );
+        assert_eq!(
+            doc.attribute_value("doctime"),
+            InterpretedValue::Value("10:00:00-0700")
+        );
+        assert_eq!(
+            doc.attribute_value("docdatetime"),
+            InterpretedValue::Value("2019-01-02 10:00:00-0700")
+        );
+    }
+
+    #[test]
+    fn should_allow_docdate_to_be_overridden() {
+        verifies!(
+            r##"
     test 'should allow docdate to be overridden' do
       old_source_date_epoch = ENV.delete 'SOURCE_DATE_EPOCH'
       begin
@@ -2760,7 +2919,57 @@ mod date_time_attributes {
     end
   end
 "##
-    );
+        );
+
+        // The explicit docdate overrides the mtime-derived date; doctime is
+        // still computed from the source modification time (`03:04:05 +0600`),
+        // so docdatetime combines the two.
+        let doc = Parser::default()
+            .with_input_mtime(ReferenceTime::from_local(2019, 1, 2, 3, 4, 5, 6 * 3600))
+            .with_intrinsic_attribute("docdate", "2015-01-01", ModificationContext::ApiOrHeader)
+            .parse("");
+
+        assert_eq!(
+            doc.attribute_value("docdate"),
+            InterpretedValue::Value("2015-01-01")
+        );
+        assert_eq!(
+            doc.attribute_value("docyear"),
+            InterpretedValue::Value("2015")
+        );
+        assert_eq!(
+            doc.attribute_value("docdatetime"),
+            InterpretedValue::Value("2015-01-01 03:04:05 +0600")
+        );
+    }
+
+    #[test]
+    fn should_pin_local_attributes_with_reference_time() {
+        // Not a direct Ruby port: exercises the injectable clock
+        // (`with_reference_time`, this crate's stable-output mechanism)
+        // pinning the `local*` attributes, which Asciidoctor derives from
+        // `::Time.now`.
+        let doc = Parser::default()
+            .with_reference_time(ReferenceTime::from_local(2019, 1, 2, 3, 4, 5, 6 * 3600))
+            .parse("");
+
+        assert_eq!(
+            doc.attribute_value("localdate"),
+            InterpretedValue::Value("2019-01-02")
+        );
+        assert_eq!(
+            doc.attribute_value("localyear"),
+            InterpretedValue::Value("2019")
+        );
+        assert_eq!(
+            doc.attribute_value("localtime"),
+            InterpretedValue::Value("03:04:05 +0600")
+        );
+        assert_eq!(
+            doc.attribute_value("localdatetime"),
+            InterpretedValue::Value("2019-01-02 03:04:05 +0600")
+        );
+    }
 }
 
 // `end` (closes `context 'Document'`)

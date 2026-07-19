@@ -657,7 +657,14 @@ To display the letters or symbols in front of a revision number, xref:revision-a
 "#
     );
 
-    let mut parser = Parser::default();
+    // The revision date here is a reference to `docdate`. Pin `docdate` to a
+    // fixed value so the resolved revision date is deterministic (it otherwise
+    // derives from the source file's modification time — see issue #766).
+    let mut parser = Parser::default().with_intrinsic_attribute(
+        "docdate",
+        "2020-01-29",
+        ModificationContext::ApiOrHeader,
+    );
     let doc = parser
         .parse("= The Intrepid Chronicles\nKismet Lee\nLPR55, {docdate}: A Special ⚄ Edition");
 
@@ -690,7 +697,7 @@ To display the letters or symbols in front of a revision number, xref:revision-a
                 },),
                 revision_line: Some(RevisionLine {
                     revnumber: Some("55",),
-                    revdate: "{docdate}",
+                    revdate: "2020-01-29",
                     revremark: Some("A Special ⚄ Edition",),
                     source: Span {
                         data: "LPR55, {docdate}: A Special ⚄ Edition",
