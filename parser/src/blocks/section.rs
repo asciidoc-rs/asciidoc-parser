@@ -445,13 +445,17 @@ const MAX_SECTION_LEVEL: i32 = 5;
 /// title consisting only of the close is left intact. Mirrors the trailing
 /// `(?: +\1)?` group of Asciidoctor's section-title regex.
 pub(crate) fn strip_symmetric_title_close(title: Span<'_>, marker: char, count: usize) -> Span<'_> {
+    // The close must be separated from the title by an ASCII blank (space or
+    // tab), matching Asciidoctor's `CG_BLANK` (`[ \t]`) — not arbitrary Unicode
+    // whitespace, so e.g. `== Title<NBSP>==` keeps its `==` as title text.
+    const BLANK: [char; 2] = [' ', '\t'];
     let close = marker.to_string().repeat(count);
     match title.data().strip_suffix(&close) {
         Some(without_close)
-            if without_close.ends_with(char::is_whitespace)
-                && !without_close.trim_end().is_empty() =>
+            if without_close.ends_with(BLANK)
+                && !without_close.trim_end_matches(BLANK).is_empty() =>
         {
-            title.slice_to(..without_close.trim_end().len())
+            title.slice_to(..without_close.trim_end_matches(BLANK).len())
         }
         _ => title,
     }

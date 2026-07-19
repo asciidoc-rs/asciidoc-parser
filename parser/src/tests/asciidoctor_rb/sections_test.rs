@@ -1509,6 +1509,22 @@ mod levels {
             assert_eq!(sec.section_title(), "My Title ===");
         }
 
+        // The symmetric close must be separated by an ASCII blank (space or
+        // tab), matching Asciidoctor's `CG_BLANK`; a non-breaking space (U+00A0)
+        // before the close is not a valid separator, so the `==` stays part of
+        // the title. (No Ruby counterpart.)
+        #[test]
+        fn symmetric_close_requires_ascii_blank_not_unicode_whitespace() {
+            let doc = Parser::default().parse("== My Title\u{a0}==");
+            let sec = first_section(&doc);
+            assert_eq!(sec.level(), 1);
+            assert!(
+                sec.section_title().ends_with("=="),
+                "expected the `==` to be retained, got {:?}",
+                sec.section_title()
+            );
+        }
+
         #[test]
         fn with_xml_entity() {
             verifies!(
@@ -2019,6 +2035,19 @@ mod nesting {
             warnings[0].warning,
             WarningType::SectionHeadingLevelSkipped(0, 2)
         ));
+    }
+
+    // A discrete (`[float]`) heading is not part of the section sequence, so a
+    // discrete heading at the document root does not trigger the out-of-sequence
+    // check even when its level skips ahead. (Also no Ruby counterpart.)
+    #[test]
+    fn discrete_heading_at_document_root_is_not_out_of_sequence() {
+        let doc = Parser::default().parse("= Document Title\n\n[float]\n=== Float Heading\n");
+        assert_eq!(first_section(&doc).section_type(), SectionType::Discrete);
+        assert!(
+            doc.warnings()
+                .all(|w| !matches!(w.warning, WarningType::SectionHeadingLevelSkipped(..)))
+        );
     }
 
     #[test]
