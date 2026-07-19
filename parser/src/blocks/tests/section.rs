@@ -513,6 +513,26 @@ fn discrete_heading_keeps_its_title() {
 }
 
 #[test]
+fn carried_title_does_not_escape_a_table_cell() {
+    // A titled empty section at the end of an AsciiDoc table cell leaves a
+    // block title pending. The cell is a nested standalone document, so that
+    // title must not leak out and be claimed by the next block in the enclosing
+    // document.
+    let doc = Parser::default().parse("|===\na|\n.Carried\n== Empty\n|===\n\nouter paragraph");
+
+    // The outer paragraph following the table must not have claimed the cell's
+    // carried title.
+    let Some(outer_paragraph) = doc.nested_blocks().find_map(|b| match b {
+        crate::blocks::Block::Simple(s) => Some(s),
+        _ => None,
+    }) else {
+        panic!("expected an outer paragraph after the table");
+    };
+
+    assert!(outer_paragraph.title().is_none());
+}
+
+#[test]
 fn warn_child_attrlist_has_extra_comma() {
     let mut parser = Parser::default();
 
