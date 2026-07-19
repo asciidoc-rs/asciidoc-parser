@@ -200,14 +200,16 @@ pub struct Parser {
     /// Number of privately-owned sub-sources currently being parsed in the call
     /// stack.
     ///
-    /// A Markdown-style blockquote and an AsciiDoc table cell parse their blocks
-    /// from an owned source string whose byte offsets do not map to the primary
-    /// document source. A footnote defined while such a sub-source is being
-    /// substituted therefore cannot record a document-relative location for its
-    /// cross-reference warning; `define_footnote` reads this counter to detect
-    /// that case and leave the location unset (see
-    /// [`Footnote::location`](crate::document::Footnote)). It is incremented and
-    /// decremented around each owned sub-source parse, so it nests correctly.
+    /// A Markdown-style blockquote and an AsciiDoc table cell parse their
+    /// blocks from an owned source string whose byte offsets do not map to
+    /// the primary document source. A footnote defined while such a
+    /// sub-source is being substituted therefore cannot record a
+    /// document-relative location for its cross-reference warning;
+    /// `define_footnote` reads this counter to detect that case and leave
+    /// the location unset (see
+    /// [`Footnote::location`](crate::document::Footnote)). It is incremented
+    /// and decremented around each owned sub-source parse, so it nests
+    /// correctly.
     ///
     /// Unlike [`nested_document_depth`](Self::nested_document_depth), this also
     /// counts Markdown-style blockquotes (which are not nested documents), so
@@ -998,8 +1000,9 @@ impl Parser {
     /// cross-reference warning can be anchored at the footnote rather than at
     /// the whole document. When the footnote is defined while substituting a
     /// privately-owned sub-source (a Markdown-style blockquote or an AsciiDoc
-    /// table cell — see [`owned_subsource_depth`](Self::owned_subsource_depth)),
-    /// that offset does not map to the document, so no location is recorded and
+    /// table cell — see
+    /// [`owned_subsource_depth`](Self::owned_subsource_depth)), that offset
+    /// does not map to the document, so no location is recorded and
     /// resolution falls back to the whole-document span.
     ///
     /// Takes `&self` so it can be called from the macros substitution step.
