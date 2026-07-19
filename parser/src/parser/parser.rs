@@ -1858,7 +1858,17 @@ fn string_succ(current: &str) -> String {
 }
 
 fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
-    let attr_name = raw_attr_name.as_ref().to_lowercase();
+    // Sanitize the name the way Asciidoctor's `sanitize_attribute_name` does:
+    // drop every character that is not a word character (ASCII letter, digit, or
+    // underscore) or a hyphen, then lower-case the result. This is what lets an
+    // attribute entry written as `:Author Initials:` set the `authorinitials`
+    // attribute, and `:Foo 3^ # - Bar[:` set `foo3-bar`.
+    let attr_name: String = raw_attr_name
+        .as_ref()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
 
     // Some attribute names have aliases. Remap to the primary name.
     //
