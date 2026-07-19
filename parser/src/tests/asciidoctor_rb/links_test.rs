@@ -1863,18 +1863,26 @@ non_normative!(
 "###
 );
 
-// Surfaced incompatibility: Asciidoctor does not register a bibliography anchor
-// (`[[[label]]]`) found in prose; this crate registers `label`. Tracked in
-// #769.
-non_normative!(
-    r###"
+#[test]
+fn does_not_match_bibliography_anchor_in_prose_when_scanning_for_inline_anchor() {
+    verifies!(
+        r###"
   test 'does not match bibliography anchor in prose when scanning for inline anchor' do
     doc = document_from_string 'Use [[[label]]] to assign a label to a bibliography entry, but not in a paragraph.'
     refute doc.catalog[:refs].key? 'label'
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse(
+        "Use [[[label]]] to assign a label to a bibliography entry, but not in a paragraph.",
+    );
+
+    // A bibliography anchor in prose (not the prefix of a bibliography list
+    // item) is rendered as an inline anchor but must not be cataloged. See #769.
+    assert!(!doc.catalog().contains_id("label"));
+}
 
 #[test]
 fn repeating_inline_anchor_macro_with_empty_reftext() {

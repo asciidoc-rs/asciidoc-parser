@@ -144,13 +144,18 @@ fn apply_macros_internal(
     }
 
     if (found_square_bracket && text.contains("[[")) || (found_macroish && text.contains("or:")) {
+        // The replacer inspects the byte preceding each match to detect a
+        // `[[id]]` shorthand that is really the inner part of a bibliography
+        // anchor (`[[[id]]]`), so it needs the haystack alongside the captures.
+        let haystack = content.rendered().to_string();
         let replacer = InlineAnchorReplacer {
             parser,
             source: content.original(),
             leading_anchor_registered,
+            haystack: &haystack,
         };
 
-        if let Cow::Owned(new_result) = INLINE_ANCHOR.replace_all(content.rendered(), replacer) {
+        if let Cow::Owned(new_result) = INLINE_ANCHOR.replace_all(&haystack, replacer) {
             content.rendered = new_result.into();
         }
     }
@@ -1433,13 +1438,17 @@ static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineAnchorReplacer<'p, 'src> {
+struct InlineAnchorReplacer<'p, 'src, 'h> {
     parser: &'p Parser,
     source: Span<'src>,
     leading_anchor_registered: bool,
+
+    /// The haystack `INLINE_ANCHOR` is scanned against, used to inspect the byte
+    /// preceding a match (see the bibliography-anchor note in `replace_append`).
+    haystack: &'h str,
 }
 
-impl Replacer for InlineAnchorReplacer<'_, '_> {
+impl Replacer for InlineAnchorReplacer<'_, '_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps.get(1).is_some() {
             dest.push_str(&caps[0][1..]);
@@ -1448,6 +1457,8 @@ impl Replacer for InlineAnchorReplacer<'_, '_> {
 
         // NOTE: reftext is only relevant for DocBook output;
         // in that case it is used as value of xreflabel attribute.
+
+        let shorthand = caps.get(2).is_some();
 
         let (id, reftext) = if let Some(id) = caps.get(2) {
             // Trailing whitespace is stripped from a shorthand reftext, so
@@ -1464,14 +1475,33 @@ impl Replacer for InlineAnchorReplacer<'_, '_> {
             )
         };
 
+        // A `[[id]]` shorthand that is immediately preceded by a `[` is the
+        // inner part of a bibliography anchor (`[[[id]]]`) appearing outside a
+        // bibliography list item — e.g. in ordinary prose. Asciidoctor renders
+        // the inner anchor but does *not* catalog it: its inline-anchor scan
+        // (`InlineAnchorScanRx`) requires the `[[` to be preceded by the start
+        // of the string or a character that is neither `\` nor `[`, whereas its
+        // substitution regex has no such guard. We mirror that split here by
+        // still rendering the anchor but skipping registration. The guard is
+        // limited to the shorthand form; the `anchor:id[]` macro form carries no
+        // equivalent exclusion in Asciidoctor. See #769.
+        let part_of_bibliography_anchor = shorthand
+            && caps.get(0).is_some_and(|m| {
+                m.start()
+                    .checked_sub(1)
+                    .and_then(|i| self.haystack.as_bytes().get(i))
+                    == Some(&b'[')
+            });
+
         // Register the inline anchor so that later cross-references can resolve
         // against it. A duplicate ID here is non-fatal (first registration
         // wins), but should still surface the same warning as block and section
         // duplicate IDs.
-        if self
-            .parser
-            .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor)
-            .is_err()
+        if !part_of_bibliography_anchor
+            && self
+                .parser
+                .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor)
+                .is_err()
             && !(self.leading_anchor_registered && caps.get(0).is_some_and(|m| m.start() == 0))
         {
             self.parser.record_substitution_warning(
@@ -3379,11 +3409,10 @@ mod tests {
             );
             assert!(!rendered.contains("<a id=\"mid\"></a>[mid]"));
 
-            // The entry is registered as a normal anchor, not a bibliography one.
-            assert_eq!(
-                doc.catalog().get_ref("mid").map(|e| e.ref_type.clone()),
-                Some(crate::document::RefType::Anchor)
-            );
+            // Although the inner anchor is rendered, it is *not* registered in
+            // the catalog: Asciidoctor's inline-anchor scan ignores a `[[id]]`
+            // that is the inner part of a surrounding `[[[id]]]`. See #769.
+            assert!(!doc.catalog().contains_id("mid"));
         }
 
         #[test]
