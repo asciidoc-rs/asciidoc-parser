@@ -343,6 +343,7 @@ impl Default for Parser {
             last_appendix_section_number: SectionNumber {
                 section_type: SectionType::Appendix,
                 components: vec![],
+                appendix_letter: None,
             },
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,

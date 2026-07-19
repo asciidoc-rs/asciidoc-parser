@@ -147,6 +147,7 @@ When `sectnums` is set, level 1 (`==`) through level 3 (`====`) section titles a
                         section_number: Some(SectionNumber {
                             section_type: SectionType::Normal,
                             components: &[1, 1, 1,],
+                            appendix_letter: None,
                         },),
                     },),],
                     source: Span {
@@ -166,6 +167,7 @@ When `sectnums` is set, level 1 (`==`) through level 3 (`====`) section titles a
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Normal,
                         components: &[1, 1,],
+                        appendix_letter: None,
                     },),
                 },),],
                 source: Span {
@@ -184,7 +186,8 @@ When `sectnums` is set, level 1 (`==`) through level 3 (`====`) section titles a
                 caption: None,
                 section_number: Some(SectionNumber {
                     section_type: SectionType::Normal,
-                    components: &[1,]
+                    components: &[1,],
+                    appendix_letter: None,
                 },),
             },),],
             source: Span {
@@ -365,7 +368,8 @@ The section number does not increment in regions of the document where section n
                     caption: None,
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Normal,
-                        components: &[1,]
+                        components: &[1,],
+                        appendix_letter: None,
                     },),
                 },),
                 Block::Section(SectionBlock {
@@ -494,7 +498,8 @@ The section number does not increment in regions of the document where section n
                     caption: None,
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Normal,
-                        components: &[2,]
+                        components: &[2,],
+                        appendix_letter: None,
                     },),
                 },),
             ],
@@ -600,7 +605,8 @@ If it is unset (`sectnums!`) on the command line or API, then the numbers are di
         sb.section_number().unwrap(),
         &SectionNumber {
             section_type: SectionType::Normal,
-            components: &[1]
+            components: &[1],
+            appendix_letter: None,
         }
     );
 
@@ -759,6 +765,7 @@ include::example$section.adoc[tag=sectnuml]
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Normal,
                         components: &[1, 1,],
+                        appendix_letter: None,
                     },),
                 },),],
                 source: Span {
@@ -777,7 +784,8 @@ include::example$section.adoc[tag=sectnuml]
                 caption: None,
                 section_number: Some(SectionNumber {
                     section_type: SectionType::Normal,
-                    components: &[1,]
+                    components: &[1,],
+                    appendix_letter: None,
                 },),
             },),],
             source: Span {
