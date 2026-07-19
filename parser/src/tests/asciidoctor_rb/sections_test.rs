@@ -3838,11 +3838,15 @@ mod special_sections {
         assert_eq!(sec.section_title(), "Attribute Options");
     }
 
-    // NOTE: The `appendix-number` attribute (to start appendix lettering at a
-    // custom value) is not honored — the crate always letters appendices A, B, …
-    // Out of scope (see #780).
-    non_normative!(
-        r##"
+    // The caption prefix is verified via `caption()` (see the note above about
+    // captions being computed on the AST). `decode_char 946` is β (U+03B2) and
+    // `decode_char 947` is γ (U+03B3): the `appendix-number` value is the letter
+    // *before* the first appendix, so `:appendix-number: α` letters the
+    // appendices β and γ.
+    #[test]
+    fn should_allow_appendix_number_to_be_controlled_using_appendix_number_attribute() {
+        verifies!(
+            r##"
     test 'should allow appendix number to be controlled using appendix-number attribute' do
       input = <<~'EOS'
       :appendix-number: α
@@ -3864,7 +3868,21 @@ mod special_sections {
     end
 
 "##
-    );
+        );
+
+        let doc = Parser::default().parse(
+            ":appendix-number: \u{3b1}\n\n[appendix]\n== Attribute Options\n\nDetails\n\n[appendix]\n== All the Other Stuff\n\nDetails\n",
+        );
+
+        let sections = all_sections(&doc);
+        assert_eq!(sections.len(), 2);
+
+        assert_eq!(sections[0].caption(), Some("Appendix \u{3b2}: "));
+        assert_eq!(sections[0].section_title(), "Attribute Options");
+
+        assert_eq!(sections[1].caption(), Some("Appendix \u{3b3}: "));
+        assert_eq!(sections[1].section_title(), "All the Other Stuff");
+    }
 
     #[test]
     fn should_use_style_from_last_block_attribute_line_above_section_that_defines_a_style() {
