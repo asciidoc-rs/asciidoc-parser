@@ -7884,11 +7884,6 @@ mod substitutions {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor. An empty `[subs=","]` list is not
-    // honored by this crate — a verbatim block keeps its default (Verbatim)
-    // substitution group rather than an empty list. Kept `#[ignore]`d.
-    // TODO(#784): honor an empty `subs` list.
-    #[ignore]
     #[test]
     fn processor_should_not_crash_if_subs_are_empty() {
         verifies!(

@@ -208,7 +208,7 @@ impl<'src> RawDelimitedBlock<'src> {
                 // `subs` override.
                 if context != "comment" {
                     substitution_group =
-                        substitution_group.override_via_attrlist(attrlist.as_ref());
+                        substitution_group.override_via_attrlist(attrlist.as_ref(), Some(parser));
                 }
 
                 substitution_group.apply(&mut content, parser, attrlist.as_ref());

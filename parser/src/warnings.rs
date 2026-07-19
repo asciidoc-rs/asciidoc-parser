@@ -139,6 +139,12 @@ pub enum WarningType {
     #[error("invalid substitution type for passthrough macro: {0}")]
     InvalidSubstitutionTypeForPassthroughMacro(String),
 
+    /// One or more unrecognized substitution names in a block's `subs`
+    /// attribute. The names are joined with `", "`; any recognized names in
+    /// the same list are still honored.
+    #[error("invalid substitution type for block: {0}")]
+    InvalidSubstitutionTypeForBlock(String),
+
     /// A footnote reference (`footnote:id[]`) names an ID that was never
     /// defined by an earlier footnote.
     #[error("invalid footnote reference: {0}")]
@@ -342,6 +348,11 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::InvalidSubstitutionTypeForPassthroughMacro(subs) => f
                 .debug_tuple("WarningType::InvalidSubstitutionTypeForPassthroughMacro")
+                .field(subs)
+                .finish(),
+
+            WarningType::InvalidSubstitutionTypeForBlock(subs) => f
+                .debug_tuple("WarningType::InvalidSubstitutionTypeForBlock")
                 .field(subs)
                 .finish(),
 
@@ -766,6 +777,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::InvalidSubstitutionTypeForPassthroughMacro(\"bogus\")"
+                );
+            }
+
+            #[test]
+            fn invalid_substitution_type_for_block() {
+                let warning = WarningType::InvalidSubstitutionTypeForBlock("bogus".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::InvalidSubstitutionTypeForBlock(\"bogus\")"
                 );
             }
 

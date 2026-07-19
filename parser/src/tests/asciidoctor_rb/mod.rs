@@ -55,6 +55,7 @@ mod document_test;
 mod extensions_test;
 mod helpers_test;
 mod invoker_test;
+mod links_test;
 mod lists_test;
 mod logger_test;
 mod manpage_test;
