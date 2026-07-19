@@ -201,8 +201,9 @@ This title label can be xref:customize-title-label.adoc[customized] or xref:turn
 "#
     );
 
-    // The two cross-references render as links to the sibling pages that cover
-    // customizing and deactivating the title label.
+    // The two cross-references render as inter-document links to the sibling
+    // pages that cover customizing and deactivating the title label: each
+    // target's `.adoc` extension is replaced by the output file suffix.
     let see_also = Parser::default().parse(
         "This title label can be xref:customize-title-label.adoc[customized] or xref:turn-off-title-label.adoc[deactivated].",
     );
@@ -211,6 +212,6 @@ This title label can be xref:customize-title-label.adoc[customized] or xref:turn
     };
     assert_eq!(
         para.content().rendered(),
-        "This title label can be <a href=\"#customize-title-label.adoc\">customized</a> or <a href=\"#turn-off-title-label.adoc\">deactivated</a>."
+        "This title label can be <a href=\"customize-title-label.html\">customized</a> or <a href=\"turn-off-title-label.html\">deactivated</a>."
     );
 }
