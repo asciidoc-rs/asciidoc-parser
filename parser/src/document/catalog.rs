@@ -251,17 +251,22 @@ pub struct Footnote {
 impl Footnote {
     /// Resolves any cross-references embedded in this footnote's text using
     /// `resolver`, then rebuilds [`text`](Self::text) from the resolved state.
-    /// Any unresolved target is reported in `warnings`.
+    /// Any unresolved target is reported in `warnings`, anchored at `source`.
+    ///
+    /// A footnote's text is extracted out of the block it was defined in and
+    /// the footnote itself keeps no span, so `source` is the enclosing
+    /// document's span rather than the reference's own location.
     ///
     /// A footnote with no cross-references is left untouched.
-    pub(crate) fn resolve_references(
+    pub(crate) fn resolve_references<'src>(
         &mut self,
         resolver: &dyn crate::parser::ReferenceResolver,
         renderer: &dyn crate::parser::InlineSubstitutionRenderer,
-        warnings: &mut Vec<crate::parser::ReferenceWarning>,
+        warnings: &mut crate::parser::ReferenceWarnings<'src>,
+        source: crate::Span<'src>,
     ) {
         if let Some(deferred) = self.deferred.as_mut() {
-            deferred.resolve(resolver, warnings);
+            deferred.resolve(resolver, warnings, source);
             self.text = deferred.render(renderer);
         }
     }

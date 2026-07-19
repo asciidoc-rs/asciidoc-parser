@@ -11,7 +11,7 @@ use crate::{
     },
     content::{Content, SubstitutionGroup},
     internal::debug::DebugSliceReference,
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning},
+    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -523,8 +523,10 @@ impl<'src> QuoteBlock<'src> {
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
-        warnings: &mut Vec<ReferenceWarning>,
+        warnings: &mut ReferenceWarnings<'src>,
     ) {
+        let source = self.source;
+
         // The owned store is shared behind an `Arc`, but references are resolved
         // immediately after parsing while the block is still its sole owner, so
         // `get_mut` succeeds.
@@ -532,9 +534,16 @@ impl<'src> QuoteBlock<'src> {
             && let Some(owned) = Arc::get_mut(owned)
         {
             owned.with_dependent_mut(|_, dependent| {
+                // These blocks borrow the quote's own owned source, so their
+                // warnings are collected separately and then re-anchored to the
+                // quote block's span in the document.
+                let mut owned_warnings = ReferenceWarnings::default();
+
                 for block in &mut dependent.blocks {
-                    block.resolve_references(resolver, renderer, warnings);
+                    block.resolve_references(resolver, renderer, &mut owned_warnings);
                 }
+
+                owned_warnings.rehome_into(warnings, source);
             });
         }
     }

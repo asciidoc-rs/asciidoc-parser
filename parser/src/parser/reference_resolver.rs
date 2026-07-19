@@ -11,7 +11,11 @@
 //! its own implementation (binding the "from" document when it constructs the
 //! resolver), and this crate makes no attempt to merge catalogs.
 
-use crate::document::Catalog;
+use crate::{
+    Span,
+    document::Catalog,
+    warnings::{Warning, WarningType},
+};
 
 /// The cross-reference text style selected by the `xrefstyle` attribute.
 ///
@@ -159,6 +163,61 @@ pub struct ReferenceWarning {
 pub enum ReferenceWarningKind {
     /// The target could not be resolved to any destination.
     Unresolved,
+}
+
+/// Accumulates what a cross-reference resolution sweep found, in the two forms
+/// the crate needs to report it.
+///
+/// Both lists describe the same conditions: [`host`](Self::host) is handed back
+/// to whoever drove the sweep (and is the crate's public resolution API), while
+/// [`doc`](Self::doc) is folded into the document's own
+/// [warnings](crate::Document::warnings) so an unresolved reference shows up
+/// alongside every other parse-time diagnostic.
+#[derive(Default)]
+pub(crate) struct ReferenceWarnings<'src> {
+    /// The warnings returned from the resolution pass.
+    pub(crate) host: Vec<ReferenceWarning>,
+
+    /// The same warnings, anchored to the source they were found in.
+    pub(crate) doc: Vec<Warning<'src>>,
+}
+
+impl<'src> ReferenceWarnings<'src> {
+    /// Records a target that `resolver` could not resolve, found within
+    /// `source`.
+    pub(crate) fn unresolved(&mut self, target: &str, source: Span<'src>) {
+        self.host.push(ReferenceWarning {
+            target: target.to_string(),
+            kind: ReferenceWarningKind::Unresolved,
+        });
+
+        self.doc.push(Warning {
+            source,
+            warning: WarningType::PossibleInvalidReference(target.to_string()),
+            origin: None,
+        });
+    }
+
+    /// Folds warnings gathered from a privately-owned sub-parse – the blocks of
+    /// a Markdown-style blockquote, or of an include-expanded AsciiDoc table
+    /// cell – into `dest`.
+    ///
+    /// Those blocks borrow their own owned source, so their spans cannot be
+    /// named in the enclosing document. Each document warning is re-anchored to
+    /// `anchor`, the enclosing element's span in the document.
+    pub(crate) fn rehome_into<'outer>(
+        self,
+        dest: &mut ReferenceWarnings<'outer>,
+        anchor: Span<'outer>,
+    ) {
+        dest.host.extend(self.host);
+
+        dest.doc.extend(self.doc.into_iter().map(|warning| Warning {
+            source: anchor,
+            warning: warning.warning,
+            origin: warning.origin,
+        }));
+    }
 }
 
 /// Describes a single cross-reference that needs to be resolved.

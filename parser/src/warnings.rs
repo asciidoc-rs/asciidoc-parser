@@ -229,6 +229,17 @@ pub enum WarningType {
         "abstract block cannot be used in a document without a doctitle when doctype is book. Excluding block content."
     )]
     AbstractBlockInBookWithoutDoctitle,
+
+    /// A cross-reference (`<<id>>` or `xref:id[…]`) named a target that the
+    /// resolution pass could not resolve. The reference still renders as the
+    /// unresolved fallback link (`<a href="#id">[id]</a>`). The field is the
+    /// target exactly as written in the source.
+    ///
+    /// Asciidoctor reports this only in verbose (pedantic) mode, since a
+    /// reference to an anchor that is not stored in the parse tree can be a
+    /// false positive.
+    #[error("possible invalid reference: {0}")]
+    PossibleInvalidReference(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -435,6 +446,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::AbstractBlockInBookWithoutDoctitle => {
                 write!(f, "WarningType::AbstractBlockInBookWithoutDoctitle")
             }
+
+            WarningType::PossibleInvalidReference(target) => f
+                .debug_tuple("WarningType::PossibleInvalidReference")
+                .field(target)
+                .finish(),
         }
     }
 }
@@ -943,6 +959,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::AbstractBlockInBookWithoutDoctitle"
+                );
+            }
+
+            #[test]
+            fn possible_invalid_reference() {
+                let warning = WarningType::PossibleInvalidReference("foobaz".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::PossibleInvalidReference(\"foobaz\")"
                 );
             }
         }

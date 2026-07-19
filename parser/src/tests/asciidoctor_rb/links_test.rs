@@ -2854,11 +2854,14 @@ non_normative!(
 "###
 );
 
-// Surfaced incompatibility: this crate creates the fallback link but does not
-// emit the `possible invalid reference` log message that this test also
-// asserts. Tracked in #772.
-non_normative!(
-    r###"
+// NOTE: Asciidoctor emits the `possible invalid reference` message only in
+// verbose (pedantic) mode. This crate has no such mode: an unresolved reference
+// is always reported as a `WarningType::PossibleInvalidReference` warning on
+// the document, which a host is free to ignore.
+#[test]
+fn should_warn_and_create_link_if_verbose_flag_is_set_and_reference_is_not_found() {
+    verifies!(
+        r###"
   test 'should warn and create link if verbose flag is set and reference is not found' do
     input = <<~'EOS'
     [#foobar]
@@ -2878,7 +2881,25 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse("[#foobar]\n== Foobar\n\n== Section B\n\nSee <<foobaz>>.\n");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#foobaz">[foobaz]</a>."##
+    );
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::PossibleInvalidReference("foobaz".to_string())
+    );
+
+    assert_eq!(warnings[0].source.line(), 6);
+}
 
 // Compat mode is out of scope for this crate.
 non_normative!(
@@ -2904,12 +2925,13 @@ non_normative!(
 "###
 );
 
-// Surfaced incompatibility: this crate creates the fallback link `<a
-// href="#foobaz">[foobaz]</a>` but does not emit the `possible invalid
-// reference` log message that this test also asserts (verbose logging). Tracked
-// in #772.
-non_normative!(
-    r###"
+// NOTE: As above, this crate always reports the unresolved reference rather
+// than gating it behind a verbose mode.
+#[test]
+fn should_warn_and_create_link_if_verbose_flag_is_set_and_reference_using_hash_notation_is_not_found()
+ {
+    verifies!(
+        r###"
   test 'should warn and create link if verbose flag is set and reference using # notation is not found' do
     input = <<~'EOS'
     [#foobar]
@@ -2929,7 +2951,25 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse("[#foobar]\n== Foobar\n\n== Section B\n\nSee <<#foobaz>>.\n");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#foobaz">[foobaz]</a>."##
+    );
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::PossibleInvalidReference("foobaz".to_string())
+    );
+
+    assert_eq!(warnings[0].source.line(), 6);
+}
 
 // Include processing / `catalog[:includes]` is out of scope for this crate.
 non_normative!(

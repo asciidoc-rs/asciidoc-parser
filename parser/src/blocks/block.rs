@@ -11,7 +11,7 @@ use crate::{
     },
     content::{Content, SubstitutionGroup},
     document::{Attribute, InterpretedValue, RefType},
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning, XrefSignifier},
+    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, XrefSignifier},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -785,7 +785,7 @@ impl<'src> Block<'src> {
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
-        warnings: &mut Vec<ReferenceWarning>,
+        warnings: &mut ReferenceWarnings<'src>,
     ) {
         if let Some(content) = self.content_mut() {
             content.resolve_references(resolver, renderer, warnings);
