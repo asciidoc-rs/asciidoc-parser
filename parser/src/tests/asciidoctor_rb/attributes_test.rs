@@ -2117,13 +2117,14 @@ mod interpolation {
 "#
         );
 
-        // Divergence: Asciidoctor treats the unterminated `////` as a comment
-        // block that swallows the rest of the header, so `:hey: there` is never
-        // applied. This crate instead applies `:hey: there`, so the attribute is
-        // set. (The unterminated-comment warning is also not modeled here.)
+        // As in Asciidoctor, the unterminated `////` opens a comment block that
+        // swallows the rest of the header, so `:hey: there` is never applied
+        // (see https://github.com/asciidoc-rs/asciidoc-parser/issues/760).
+        // Remaining divergence: the `unterminated comment block` warning is not
+        // yet modeled (tracked in #731).
         let doc =
             Parser::default().parse("= Document Title\n:foo: bar\n////\n:hey: there\n\ncontent");
-        assert_eq!(doc.attribute_value("hey"), InterpretedValue::Value("there"));
+        assert_eq!(doc.attribute_value("hey"), InterpretedValue::Unset);
     }
 
     #[test]
