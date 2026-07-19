@@ -700,6 +700,12 @@ fn strip_see_and_seealso(term: &str) -> String {
 // A stray `&gt;` with no matching `&lt;` (e.g. `https://example.org>;`) can then
 // only match the bare-link alternative, exactly as Ruby routes it. See #503.
 //
+// The blank alternative in the prefix (`[\ \t\p{Zs}]`) mirrors Asciidoctor's
+// `CG_BLANK` (`\p{Blank}`), which under Ruby's Unicode-aware engine treats any
+// space separator — including a no-break space (U+00A0) — as a boundary before
+// the scheme. A plain ASCII `[\ \t]` would leave such a URL as literal text
+// (see #768).
+//
 // `InlineLinkReplacer` normalizes the two capture-group sets into a single view
 // (see `NormalizedCaps`), so the numbering below is only referenced there.
 static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
@@ -719,7 +725,7 @@ static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
             )
           |
             #### NON-ANGLE branch: no `&gt;` alternative (unreachable without `&lt;`).
-            ( ^ | link: | [\ \t] | [>\(\)\[\];"'] )           # group 8: prefix
+            ( ^ | link: | [\ \t\p{Zs}] | [>\(\)\[\];"'] )     # group 8: prefix
             ( \\? (?: https? | file | ftp | irc ):// )        # group 9: scheme
             (?:
                 ( [^\s\[\]]+ )                                # group 10: target
