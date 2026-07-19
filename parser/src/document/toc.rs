@@ -4,12 +4,13 @@
 use crate::{Parser, document::InterpretedValue};
 
 /// Where (and whether) a document's table of contents (TOC) is generated,
-/// resolved from the [`toc` attribute].
+/// resolved from the [`toc` attribute] and, when `toc` carries no placement
+/// keyword, the `toc-placement` attribute.
 ///
-/// The `toc` attribute is header-only, so this value is fixed once a document's
-/// header has been processed. A nested [AsciiDoc table cell] behaves as its own
-/// standalone document and resolves its own [`TocMode`] independently — it does
-/// **not** inherit the parent document's setting.
+/// The `toc`/`toc-placement` attributes are header-only, so this value is fixed
+/// once a document's header has been processed. A nested [AsciiDoc table cell]
+/// behaves as its own standalone document and resolves its own [`TocMode`]
+/// independently — it does **not** inherit the parent document's setting.
 ///
 /// The `auto`, `left`, and `right` placements all render the TOC automatically
 /// near the top of the document; `left` and `right` additionally request a
@@ -37,12 +38,14 @@ pub enum TocMode {
     /// in standalone HTML, is rendered as a fixed right-hand side column.
     Right,
 
-    /// The `toc` attribute is set to `preamble`: the TOC is generated
-    /// immediately below the document's preamble.
+    /// The placement resolves to `preamble` (via `:toc: preamble` or
+    /// `:toc-placement: preamble`): the TOC is generated immediately below the
+    /// document's preamble.
     Preamble,
 
-    /// The `toc` attribute is set to `macro`: the table of contents is
-    /// generated only where a `toc::[]` block macro appears.
+    /// The placement resolves to `macro` (via `:toc: macro` or
+    /// `:toc-placement: macro`): the table of contents is generated only where
+    /// a `toc::[]` block macro appears.
     Macro,
 }
 
@@ -56,16 +59,29 @@ impl TocMode {
         }
 
         // `toc` has a built-in default of `auto`, so a bare `:toc:` resolves to
-        // `Value("auto")` (never `Set`). An explicit `auto`, or any other
-        // (unrecognized) value, is treated as an automatic placement, matching
-        // Asciidoctor (which renders an auto-placed TOC for any non-positional
-        // value).
+        // `Value("auto")` (never `Set`). A placement keyword in the `toc` value
+        // itself is a shorthand that wins outright. Otherwise (`auto`, empty, or
+        // any unrecognized value) the placement comes from the separate
+        // `toc-placement` attribute, matching Asciidoctor, which folds the `toc`
+        // shorthand into `toc-placement` and treats the latter as the source of
+        // truth. A bogus `toc-placement` — like a bogus `toc` — falls back to an
+        // automatic placement.
         match value.as_maybe_str().map(str::trim) {
             Some("macro") => Self::Macro,
             Some("left") => Self::Left,
             Some("right") => Self::Right,
             Some("preamble") => Self::Preamble,
-            _ => Self::Auto,
+            _ => match parser
+                .attribute_value("toc-placement")
+                .as_maybe_str()
+                .map(str::trim)
+            {
+                Some("macro") => Self::Macro,
+                Some("left") => Self::Left,
+                Some("right") => Self::Right,
+                Some("preamble") => Self::Preamble,
+                _ => Self::Auto,
+            },
         }
     }
 
@@ -212,6 +228,34 @@ mod tests {
     #[test]
     fn unrecognized_mode_is_treated_as_auto() {
         assert_eq!(doc_with(":toc: bogus").toc_mode(), TocMode::Auto);
+    }
+
+    #[test]
+    fn placement_falls_back_to_toc_placement_attribute() {
+        // When the `toc` value carries no placement keyword, the separate
+        // `toc-placement` attribute determines the placement.
+        assert_eq!(
+            doc_with(":toc:\n:toc-placement: preamble").toc_mode(),
+            TocMode::Preamble
+        );
+        assert_eq!(
+            doc_with(":toc:\n:toc-placement: macro").toc_mode(),
+            TocMode::Macro
+        );
+        assert_eq!(
+            doc_with(":toc: auto\n:toc-placement: preamble").toc_mode(),
+            TocMode::Preamble
+        );
+        // A placement keyword in the `toc` value wins over `toc-placement`.
+        assert_eq!(
+            doc_with(":toc: macro\n:toc-placement: preamble").toc_mode(),
+            TocMode::Macro
+        );
+        // A bogus `toc-placement` falls back to an automatic placement.
+        assert_eq!(
+            doc_with(":toc:\n:toc-placement: bogus").toc_mode(),
+            TocMode::Auto
+        );
     }
 
     #[test]

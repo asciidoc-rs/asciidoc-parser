@@ -17,6 +17,21 @@ use crate::{
 };
 
 pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
+    apply_macros_internal(content, parser, false);
+}
+
+pub(crate) fn apply_macros_with_leading_anchor_registered(
+    content: &mut Content<'_>,
+    parser: &Parser,
+) {
+    apply_macros_internal(content, parser, true);
+}
+
+fn apply_macros_internal(
+    content: &mut Content<'_>,
+    parser: &Parser,
+    leading_anchor_registered: bool,
+) {
     let /* mut */ text = content.rendered().to_string();
     let found_square_bracket = text.contains('[');
     let found_colon = text.contains(':');
@@ -123,7 +138,11 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
     }
 
     if (found_square_bracket && text.contains("[[")) || (found_macroish && text.contains("or:")) {
-        let replacer = InlineAnchorReplacer(parser);
+        let replacer = InlineAnchorReplacer {
+            parser,
+            source: content.original(),
+            leading_anchor_registered,
+        };
 
         if let Cow::Owned(new_result) = INLINE_ANCHOR.replace_all(content.rendered(), replacer) {
             content.rendered = new_result.into();
@@ -1386,9 +1405,13 @@ static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineAnchorReplacer<'p>(&'p Parser);
+struct InlineAnchorReplacer<'p, 'src> {
+    parser: &'p Parser,
+    source: Span<'src>,
+    leading_anchor_registered: bool,
+}
 
-impl Replacer for InlineAnchorReplacer<'_> {
+impl Replacer for InlineAnchorReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps.get(1).is_some() {
             dest.push_str(&caps[0][1..]);
@@ -1410,13 +1433,21 @@ impl Replacer for InlineAnchorReplacer<'_> {
 
         // Register the inline anchor so that later cross-references can resolve
         // against it. A duplicate ID here is non-fatal (first registration
-        // wins); block- and section-level registration paths surface duplicate
-        // warnings, so we don't double-report them for inline anchors.
-        let _ = self
-            .0
-            .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor);
+        // wins), but should still surface the same warning as block and section
+        // duplicate IDs.
+        if self
+            .parser
+            .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor)
+            .is_err()
+            && !(self.leading_anchor_registered && caps.get(0).is_some_and(|m| m.start() == 0))
+        {
+            self.parser.record_substitution_warning(
+                self.source,
+                crate::warnings::WarningType::DuplicateId(id.to_string()),
+            );
+        }
 
-        self.0.renderer.render_anchor(id, reftext, dest);
+        self.parser.renderer.render_anchor(id, reftext, dest);
     }
 }
 
@@ -2677,6 +2708,19 @@ mod tests {
                         reftext_to_id: HashMap::new(),
                     },
                 }
+            );
+        }
+
+        #[test]
+        fn duplicate_inline_anchor_records_warning() {
+            let doc = Parser::default()
+                .parse("[#in-use]\nA paragraph with an id.\n\nAnother paragraph\n[[in-use]]that uses an id\nwhich is already in use.\n");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings.first().unwrap().warning,
+                WarningType::DuplicateId("in-use".to_string())
             );
         }
 
