@@ -2221,12 +2221,10 @@ non_normative!(
 mod markdown_style_headings {
     use crate::tests::prelude::*;
 
-    // NOTE: A Markdown-style `#` marker is not recognized as a *document* title
-    // (only ATX `=` is), so `# Document Title` yields no document title. Section
-    // markers (`##`+) are recognized, as the next test verifies. Out of scope
-    // (see #774).
-    non_normative!(
-        r##"
+    #[test]
+    fn atx_document_title_with_leading_marker() {
+        verifies!(
+            r##"
     test 'atx document title with leading marker' do
       input = '# Document Title'
       output = convert_string input
@@ -2234,13 +2232,20 @@ mod markdown_style_headings {
     end
 
 "##
-    );
+        );
 
-    // NOTE: As above, a Markdown-style `#` marker is not recognized as a
-    // document title, so `# Document Title #` yields no document title
-    // regardless of the symmetric close. Out of scope (see #774).
-    non_normative!(
-        r##"
+        let doc = Parser::default().parse("# Document Title");
+        assert_eq!(doc.header().title(), Some("Document Title"));
+
+        // The title line is consumed by the header, not left behind as a
+        // paragraph in the body.
+        assert!(rendered_paragraphs(&doc).is_empty());
+    }
+
+    #[test]
+    fn atx_document_title_with_symmetric_markers() {
+        verifies!(
+            r##"
     test 'atx document title with symmetric markers' do
       input = '# Document Title #'
       output = convert_string input
@@ -2248,7 +2253,11 @@ mod markdown_style_headings {
     end
 
 "##
-    );
+        );
+
+        let doc = Parser::default().parse("# Document Title #");
+        assert_eq!(doc.header().title(), Some("Document Title"));
+    }
 
     #[test]
     fn atx_section_title_with_leading_marker() {
