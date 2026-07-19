@@ -772,6 +772,27 @@ mod tests {
             }
 
             #[test]
+            fn invalid_footnote_reference() {
+                let warning = WarningType::InvalidFootnoteReference("fn1".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::InvalidFootnoteReference(\"fn1\")"
+                );
+            }
+
+            #[test]
+            fn deprecated_footnoref_macro() {
+                let warning =
+                    WarningType::DeprecatedFootnorefMacro("footnoteref:[fn1]".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::DeprecatedFootnorefMacro(\"footnoteref:[fn1]\")"
+                );
+            }
+
+            #[test]
             fn include_file_not_found() {
                 let warning = WarningType::IncludeFileNotFound("content.adoc".to_string());
                 let debug_output = format!("{:?}", warning);
