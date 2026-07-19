@@ -7409,8 +7409,8 @@ mod abstract_and_part_intro {
     // warning. The `partintro` block style is out of scope for this crate: it
     // is meaningful only inside a book part, and the `book` doctype's part
     // structure (like the DocBook backend it is most often paired with) is not
-    // supported here. All `partintro` tests are therefore reproduced as
-    // `non_normative`.
+    // supported here (see #794 and #800). All `partintro` tests are therefore
+    // reproduced as `non_normative`.
 
     #[test]
     fn should_make_abstract_on_open_block_without_title_a_quote_block_for_article() {
@@ -7615,7 +7615,7 @@ mod abstract_and_part_intro {
     // The `partintro` block style is out of scope for this crate: it is only
     // meaningful as the first child of a book part, and neither the `book`
     // doctype's part structure nor the DocBook backend that the remaining
-    // variants target is supported here.
+    // variants target is supported here (see #794 and #800).
     non_normative!(
         r##"
     # TODO partintro shouldn't be recognized if doctype is not book, should be in proper place
