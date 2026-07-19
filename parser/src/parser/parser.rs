@@ -2018,6 +2018,54 @@ mod tests {
     }
 
     #[test]
+    fn asciidoc_parser_version_is_predefined() {
+        // The crate predefines `asciidoc-parser-version` with its own version
+        // (the parser-specific counterpart of Ruby Asciidoctor's
+        // `asciidoctor-version` intrinsic).
+        let mut parser = Parser::default();
+
+        assert_eq!(
+            parser.attribute_value("asciidoc-parser-version"),
+            InterpretedValue::Value(env!("CARGO_PKG_VERSION"))
+        );
+
+        // The value is available to attribute references and `ifeval`
+        // expressions in document content.
+        let doc = parser.parse(concat!(
+            "= Title\n",
+            "\n",
+            "ifeval::['{asciidoc-parser-version}' >= '0.1.0']\n",
+            "v{asciidoc-parser-version}\n",
+            "endif::[]\n",
+        ));
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec![format!("v{}", env!("CARGO_PKG_VERSION"))]
+        );
+    }
+
+    #[test]
+    fn asciidoc_parser_version_is_locked() {
+        // The parser version describes the processor itself, so a document
+        // assignment is rejected with a warning and the built-in value stays
+        // in place.
+        let mut parser = Parser::default();
+
+        let doc = parser.parse(":asciidoc-parser-version: 99.99.99");
+
+        assert_eq!(
+            doc.warnings().next().unwrap().warning,
+            WarningType::AttributeValueIsLocked("asciidoc-parser-version".to_owned())
+        );
+
+        assert_eq!(
+            parser.attribute_value("asciidoc-parser-version"),
+            InterpretedValue::Value(env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
     fn silently_locked_intrinsic_rejects_header_and_body_without_warning() {
         // A silently-locked `ApiOnly` intrinsic (as a converter would seed a
         // safe-mode-restricted attribute) rejects both a header assignment and a
