@@ -229,6 +229,14 @@ pub enum WarningType {
         "abstract block cannot be used in a document without a doctitle when doctype is book. Excluding block content."
     )]
     AbstractBlockInBookWithoutDoctitle,
+
+    /// A `[partintro]` block was found somewhere other than as a direct child
+    /// of a book part (a level-0 section under `doctype: book`). Asciidoctor
+    /// excludes such a block's content from the converted output.
+    #[error(
+        "partintro block can only be used when doctype is book and must be a child of a book part. Excluding block content."
+    )]
+    PartintroBlockOutsideOfBookPart,
 }
 
 impl std::fmt::Debug for WarningType {
@@ -434,6 +442,10 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::AbstractBlockInBookWithoutDoctitle => {
                 write!(f, "WarningType::AbstractBlockInBookWithoutDoctitle")
+            }
+
+            WarningType::PartintroBlockOutsideOfBookPart => {
+                write!(f, "WarningType::PartintroBlockOutsideOfBookPart")
             }
         }
     }
@@ -944,6 +956,13 @@ mod tests {
                     debug_output,
                     "WarningType::AbstractBlockInBookWithoutDoctitle"
                 );
+            }
+
+            #[test]
+            fn partintro_block_outside_of_book_part() {
+                let warning = WarningType::PartintroBlockOutsideOfBookPart;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::PartintroBlockOutsideOfBookPart");
             }
         }
     }

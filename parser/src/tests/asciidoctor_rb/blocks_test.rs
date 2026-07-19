@@ -7406,12 +7406,29 @@ mod abstract_and_part_intro {
     // block (or paragraph) resolves to the `open` context with the `abstract`
     // declared style, renders as `quoteblock.abstract`, and an abstract used as
     // a direct child of a doctitle-less book document is excluded with a
-    // warning. The `partintro` block style is still unmodeled: a `[partintro]`
-    // open block does not gain the `partintro` class, and its validation
-    // errors are not emitted; those tests are kept `#[ignore]`d with the
-    // Ruby-intended assertions. The DocBook variants are reproduced as
-    // `non_normative`.
-    // TODO: implement the partintro block style (#794).
+    // warning. The `partintro` block style (#794) is modeled the same way: a
+    // `[partintro]` open block (or paragraph) resolves to the `open` context
+    // with the `partintro` declared style, renders as `openblock.partintro`,
+    // and a partintro used as a direct child of the document – where it can
+    // never be the child of a book part – is excluded with a warning. Book
+    // parts themselves are not modeled yet, so a partintro below the top level
+    // is rendered without further placement checks. The DocBook variants are
+    // reproduced as `non_normative`.
+
+    /// Returns `true` if `doc` recorded a misplaced-partintro warning.
+    ///
+    /// A book part is a level-0 section, which this crate does not model yet,
+    /// so a document that places a partintro under a `= Part 1` heading
+    /// records the unrelated level-0 heading warning; only the partintro
+    /// warning is of interest here.
+    fn has_misplaced_partintro_warning(doc: &crate::Document<'_>) -> bool {
+        doc.warnings().any(|warning| {
+            matches!(
+                warning.warning,
+                WarningType::PartintroBlockOutsideOfBookPart
+            )
+        })
+    }
 
     #[test]
     fn should_make_abstract_on_open_block_without_title_a_quote_block_for_article() {
@@ -7613,7 +7630,6 @@ mod abstract_and_part_intro {
 "#
     );
 
-    #[ignore]
     #[test]
     fn should_accept_partintro_on_open_block_without_title() {
         verifies!(
@@ -7655,9 +7671,9 @@ mod abstract_and_part_intro {
         );
         assert_css(&doc, ".openblock.partintro", 1);
         assert_css(&doc, ".openblock .content", 1);
+        assert!(!has_misplaced_partintro_warning(&doc));
     }
 
-    #[ignore]
     #[test]
     fn should_accept_partintro_on_open_block_with_title() {
         verifies!(
@@ -7698,9 +7714,9 @@ mod abstract_and_part_intro {
         );
         assert_css(&doc, ".openblock.partintro", 1);
         assert_css(&doc, ".openblock .title", 1);
+        assert!(!has_misplaced_partintro_warning(&doc));
     }
 
-    #[ignore]
     #[test]
     fn should_exclude_partintro_if_not_a_child_of_part() {
         verifies!(
@@ -7725,9 +7741,15 @@ mod abstract_and_part_intro {
         let doc = Parser::default()
             .parse("= Book\n:doctype: book\n\n[partintro]\npart intro paragraph\n");
         assert_css(&doc, ".partintro", 0);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings[0].warning,
+            WarningType::PartintroBlockOutsideOfBookPart
+        ));
     }
 
-    #[ignore]
     #[test]
     fn should_not_allow_partintro_unless_doctype_is_book() {
         verifies!(
@@ -7748,6 +7770,13 @@ mod abstract_and_part_intro {
 
         let doc = Parser::default().parse("[partintro]\npart intro paragraph\n");
         assert_css(&doc, ".partintro", 0);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings[0].warning,
+            WarningType::PartintroBlockOutsideOfBookPart
+        ));
     }
 
     // The DocBook partintro variants are backend-specific and out of scope.

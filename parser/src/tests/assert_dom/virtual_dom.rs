@@ -632,9 +632,12 @@ impl ToVirtualDom for Document<'_> {
             InterpretedValue::Value(ref v) if v == "book"
         ) && self.doctitle().is_none();
 
-        // Add child blocks, including block titles as separate siblings.
+        // Add child blocks, including block titles as separate siblings. A
+        // partintro is only permitted as a direct child of a book part, so
+        // Asciidoctor's converter excludes every partintro found here (an error
+        // was recorded at parse time).
         for block in self.nested_blocks() {
-            if exclude_abstracts && is_abstract(block) {
+            if (exclude_abstracts && is_abstract(block)) || is_partintro(block) {
                 continue;
             }
             add_block_with_title(&mut node, block);
@@ -1666,6 +1669,12 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
 
     let mut node = VirtualNode::new("div").with_class(class);
 
+    // The `partintro` style specializes the open block rather than replacing
+    // it, so it rides along as a second class on `div.openblock`.
+    if is_partintro(compound) {
+        node = node.with_class("partintro");
+    }
+
     for role in compound.roles() {
         node = node.with_class(role);
     }
@@ -1702,6 +1711,12 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
 fn open_paragraph_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     let mut node = VirtualNode::new("div").with_class("openblock");
 
+    // The `partintro` style specializes the open block rather than replacing
+    // it, so it rides along as a second class on `div.openblock`.
+    if is_partintro(block) {
+        node = node.with_class("partintro");
+    }
+
     for role in block.roles() {
         node = node.with_class(role);
     }
@@ -1723,6 +1738,13 @@ fn open_paragraph_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     node.children.push(content);
 
     node
+}
+
+/// Returns `true` if `block` is a partintro block: the `--` structural
+/// container or a paragraph carrying the `partintro` style, both of which
+/// resolve to the `open` context with the `partintro` declared style.
+fn is_partintro<'src, B: IsBlock<'src>>(block: &'src B) -> bool {
+    block.declared_style() == Some("partintro") && block.resolved_context().as_ref() == "open"
 }
 
 /// Returns `true` if `block` is an abstract block: the `--` structural

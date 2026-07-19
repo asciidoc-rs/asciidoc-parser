@@ -207,6 +207,27 @@ impl<'src> Document<'src> {
                 }
             }
 
+            // A partintro block is only permitted as a direct child of a book
+            // part (a level-0 section under `doctype: book`), so no block at the
+            // document's top level qualifies. Asciidoctor's converter excludes
+            // such a block's content and logs an error; the parser keeps the
+            // block in the AST (as Asciidoctor does) and records the warning
+            // here, for a renderer to act on.
+            //
+            // Book parts are not modeled by this crate yet (a level-0 heading
+            // records its own warning and its content lands in the preamble), so
+            // a partintro nested below the top level is left alone rather than
+            // reported as misplaced.
+            for block in &blocks {
+                if is_partintro(block) {
+                    warnings.push(Warning {
+                        source: block.span(),
+                        warning: WarningType::PartintroBlockOutsideOfBookPart,
+                        origin: None,
+                    });
+                }
+            }
+
             // Under `doctype: inline`, only the first eligible block is converted,
             // as bare inline content, and everything after it is dropped (the
             // rendering lives on the embed path). A compound or empty candidate
@@ -564,6 +585,13 @@ impl std::fmt::Debug for Document<'_> {
             .field("catalog", &dependent.catalog)
             .finish()
     }
+}
+
+/// Returns `true` if `block` is a partintro block: the `--` structural
+/// container or a paragraph carrying the `partintro` style, both of which
+/// resolve to the `open` context with the `partintro` declared style.
+fn is_partintro(block: &Block<'_>) -> bool {
+    block.declared_style() == Some("partintro") && block.resolved_context().as_ref() == "open"
 }
 
 /// Returns the first block eligible to be the sole rendered block of an
