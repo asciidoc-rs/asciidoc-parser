@@ -1741,10 +1741,22 @@ fn process_content<'src>(
                 // each warning to it: its cursor then maps back to the
                 // directive's true (file, line) through the document source map.
                 for pw in preprocessor_warnings {
+                    // A no-output directive (a malformed/unterminated conditional
+                    // or a tag-filter diagnostic) carries a pre-resolved
+                    // `origin`. When it names a *different* file than the cell
+                    // came from, it originated in a file the cell's first line
+                    // *included*, and that origin is a true (file, line) worth
+                    // keeping. When it names the same file, its line is relative
+                    // to this inner preprocessing pass (not the document), so
+                    // drop it and let `directive_line` resolve the location
+                    // through the document source map instead.
+                    let origin = pw
+                        .origin
+                        .filter(|o| o.0.as_deref() != cell_origin_file.as_deref());
                     warnings.push(Warning {
                         source: directive_line,
                         warning: pw.warning,
-                        origin: None,
+                        origin,
                     });
                 }
             } else {
@@ -1753,9 +1765,16 @@ fn process_content<'src>(
                 // against the directive's line in that owned source instead;
                 // `record_owned_cell_warning` resolves it to the originating
                 // (file, line), and a document-level cell up the stack surfaces
-                // it with that pre-resolved origin (see below).
+                // it with that pre-resolved origin (see below). A no-output
+                // directive from an *included* file (a different origin file)
+                // already carries its true origin, so pass it through; one from
+                // the cell's own content has a pass-relative line and is left for
+                // the source map to resolve.
                 for pw in preprocessor_warnings {
-                    parser.record_owned_cell_warning(directive_line.line(), pw.warning);
+                    let origin = pw
+                        .origin
+                        .filter(|o| o.0.as_deref() != cell_origin_file.as_deref());
+                    parser.record_owned_cell_warning(directive_line.line(), pw.warning, origin);
                 }
             }
 

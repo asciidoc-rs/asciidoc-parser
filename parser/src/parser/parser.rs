@@ -1098,8 +1098,18 @@ impl Parser {
     /// mutability.
     ///
     /// [`take_owned_cell_warnings`]: Self::take_owned_cell_warnings
-    pub(crate) fn record_owned_cell_warning(&self, line: usize, warning: WarningType) {
-        if let Some(origin) = self.owned_cell_original_file_and_line(line) {
+    pub(crate) fn record_owned_cell_warning(
+        &self,
+        line: usize,
+        warning: WarningType,
+        origin_override: Option<SourceLine>,
+    ) {
+        // A no-output directive that originated in a file the cell *included*
+        // carries a true `(file, line)` origin already; prefer it. Otherwise
+        // resolve the cell's own directive line through the enclosing owned
+        // cell's source map.
+        let origin = origin_override.or_else(|| self.owned_cell_original_file_and_line(line));
+        if let Some(origin) = origin {
             self.owned_cell_warnings
                 .borrow_mut()
                 .push(ResolvedWarning { origin, warning });
@@ -1863,8 +1873,27 @@ mod tests {
         // Outside an owned cell source there is no map to resolve against, so a
         // recorded warning has no origin and is dropped rather than queued.
         assert!(!p.is_in_owned_cell_source());
-        p.record_owned_cell_warning(1, WarningType::IncludeFileNotFound("x.adoc".to_owned()));
+        p.record_owned_cell_warning(
+            1,
+            WarningType::IncludeFileNotFound("x.adoc".to_owned()),
+            None,
+        );
         assert!(p.take_owned_cell_warnings().is_empty());
+
+        // An explicit origin override is queued even without a cell source map.
+        p.record_owned_cell_warning(
+            1,
+            WarningType::UnterminatedConditionalDirective("ifdef::foo[]".to_owned()),
+            Some(SourceLine(Some("inc.adoc".to_owned()), 3)),
+        );
+        let overridden = p.take_owned_cell_warnings();
+        let [overridden] = overridden.as_slice() else {
+            panic!("expected exactly one recorded warning, got {overridden:?}");
+        };
+        assert_eq!(
+            overridden.origin,
+            SourceLine(Some("inc.adoc".to_owned()), 3)
+        );
 
         // Publish a cell source map (output line 1 came from `cell.adoc` line 2,
         // the way the preprocessor would record an include-expanded cell).
@@ -1875,7 +1904,11 @@ mod tests {
 
         // Now the same call resolves the line to its origin and queues the
         // warning with that pre-resolved (file, line).
-        p.record_owned_cell_warning(1, WarningType::IncludeFileNotFound("y.adoc".to_owned()));
+        p.record_owned_cell_warning(
+            1,
+            WarningType::IncludeFileNotFound("y.adoc".to_owned()),
+            None,
+        );
         let recorded = p.take_owned_cell_warnings();
         let [recorded] = recorded.as_slice() else {
             panic!("expected exactly one recorded warning, got {recorded:?}");
