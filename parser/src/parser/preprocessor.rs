@@ -1147,6 +1147,10 @@ fn coerce_unquoted(s: &str) -> Value {
 
 /// Parse the leading integer of a string, Ruby `String#to_i` style (a string
 /// with no leading numeric portion yields `0`).
+///
+/// Ruby's integers are unbounded; a value beyond the range of `i64` saturates
+/// to `i64::MIN`/`i64::MAX` (by sign) so that a very large magnitude is not
+/// mistaken for 0.
 fn ruby_to_i(s: &str) -> i64 {
     let mut digits = String::new();
 
@@ -1158,7 +1162,17 @@ fn ruby_to_i(s: &str) -> i64 {
         }
     }
 
-    digits.parse().unwrap_or(0)
+    digits.parse().unwrap_or_else(|_| {
+        if !digits.bytes().any(|b| b.is_ascii_digit()) {
+            // No numeric portion at all (empty, or a bare `+`/`-`): 0, as
+            // Ruby's `to_i` yields.
+            0
+        } else if digits.starts_with('-') {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    })
 }
 
 /// Parse the leading float of a string, Ruby `String#to_f` style (a string with
@@ -3412,47 +3426,68 @@ mod tests {
 
     #[test]
     fn huge_max_include_depth_acts_as_large_limit() {
-        // A positive `max-include-depth` too large to represent exactly (e.g.
-        // beyond `usize` on a 32-bit target) is a very large limit, not the
-        // 0 = disabled sentinel: an ordinary include still expands.
-        let handler = InlineFileHandler::from_pairs([("shared.adoc", "shared content")]);
+        // A positive `max-include-depth` too large to represent exactly —
+        // whether beyond `usize` on a 32-bit target or beyond `i64` entirely —
+        // is a very large limit, not the 0 = disabled sentinel: an ordinary
+        // include still expands. (Ruby's integers are unbounded, so
+        // Asciidoctor honors any such value.)
+        for value in ["9223372036854775807", "9223372036854775808"] {
+            let handler = InlineFileHandler::from_pairs([("shared.adoc", "shared content")]);
 
-        let parser = Parser::default()
-            .with_safe_mode(SafeMode::Server)
-            .with_intrinsic_attribute(
-                "max-include-depth",
-                "9223372036854775807",
-                ModificationContext::ApiOnly,
-            )
-            .with_include_file_handler(handler);
+            let parser = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("max-include-depth", value, ModificationContext::ApiOnly)
+                .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess("include::shared.adoc[]", &parser);
+            let (output, _source_map, warnings) = preprocess("include::shared.adoc[]", &parser);
 
-        assert_eq!(output, "shared content\n");
-        assert!(warnings.is_empty());
+            assert_eq!(output, "shared content\n");
+            assert!(warnings.is_empty());
+        }
     }
 
     #[test]
     fn huge_depth_request_is_clamped_not_wrapped() {
-        // A huge positive `depth` request is treated like any other
-        // greater-than-the-limit request — clamped to the absolute
-        // `max-include-depth` — rather than wrapping into a small (or zero)
-        // value that would restrict nesting further than asked.
-        let handler = InlineFileHandler::from_pairs([
-            ("a.adoc", "include::b.adoc[]"),
-            ("b.adoc", "content of b"),
-        ]);
+        // A huge positive `depth` request — again, whether beyond `usize` on a
+        // 32-bit target or beyond `i64` entirely — is treated like any other
+        // greater-than-the-limit request, clamped to the absolute
+        // `max-include-depth`, rather than wrapping or collapsing into a small
+        // (or zero) value that would restrict nesting further than asked.
+        for value in ["9223372036854775807", "9223372036854775808"] {
+            let handler = InlineFileHandler::from_pairs([
+                ("a.adoc", "include::b.adoc[]"),
+                ("b.adoc", "content of b"),
+            ]);
 
-        let parser = Parser::default()
-            .with_safe_mode(SafeMode::Server)
-            .with_intrinsic_attribute("max-include-depth", "1", ModificationContext::ApiOnly)
-            .with_include_file_handler(handler);
+            let parser = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("max-include-depth", "1", ModificationContext::ApiOnly)
+                .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) =
-            preprocess("include::a.adoc[depth=9223372036854775807]", &parser);
+            let (output, _source_map, warnings) =
+                preprocess(&format!("include::a.adoc[depth={value}]"), &parser);
 
-        assert_eq!(output, "include::b.adoc[]\n");
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].warning, WarningType::MaxIncludeDepthExceeded(1));
+            assert_eq!(output, "include::b.adoc[]\n");
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].warning, WarningType::MaxIncludeDepthExceeded(1));
+        }
+    }
+
+    #[test]
+    fn ruby_to_i_saturates_on_overflow() {
+        use super::ruby_to_i;
+
+        assert_eq!(ruby_to_i("42"), 42);
+        assert_eq!(ruby_to_i("42abc"), 42);
+
+        // Beyond `i64` in either direction saturates by sign (Ruby's unbounded
+        // integers keep the value's magnitude; 0 would invert its meaning).
+        assert_eq!(ruby_to_i("9223372036854775808"), i64::MAX);
+        assert_eq!(ruby_to_i("-9223372036854775809"), i64::MIN);
+
+        // No numeric portion at all still yields 0, as Ruby's `to_i` does.
+        assert_eq!(ruby_to_i("abc"), 0);
+        assert_eq!(ruby_to_i("-"), 0);
+        assert_eq!(ruby_to_i(""), 0);
     }
 }
