@@ -14,7 +14,7 @@ use crate::{
     internal::debug::DebugSliceReference,
     parser::{
         CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, ReferenceResolver,
-        ReferenceWarning, ResolvedAttributes, SourceMap,
+        ReferenceWarning, ReferenceWarnings, ResolvedAttributes, SourceMap,
     },
     strings::CowStr,
     warnings::{Warning, WarningType},
@@ -455,14 +455,21 @@ impl<'src> Document<'src> {
     /// own catalog) will re-report those now-unknown targets as unresolved.
     /// Multi-document pipelines should therefore start from
     /// [`Parser::parse_deferred`], which does not auto-resolve.
+    ///
+    /// Each unresolved target is also recorded on the document as a
+    /// [`WarningType::PossibleInvalidReference`] warning, so a host that reads
+    /// [`warnings()`](Self::warnings) sees it alongside every other parse-time
+    /// diagnostic. Because each sweep is independent, those warnings replace
+    /// (rather than accumulate on top of) any left by an earlier sweep.
     pub fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
     ) -> Vec<ReferenceWarning> {
-        let mut warnings = Vec::new();
-
         self.internal.with_dependent_mut(|_owner, dependent| {
+            let source = dependent.source;
+            let mut warnings = ReferenceWarnings::default();
+
             for block in dependent.blocks.iter_mut() {
                 block.resolve_references(resolver, renderer, &mut warnings);
             }
@@ -472,11 +479,13 @@ impl<'src> Document<'src> {
             // above. The host resolver does not alias the catalog, so the
             // footnotes can be borrowed mutably in place.
             for footnote in dependent.catalog.footnotes.iter_mut() {
-                footnote.resolve_references(resolver, renderer, &mut warnings);
+                footnote.resolve_references(resolver, renderer, &mut warnings, source);
             }
-        });
 
-        warnings
+            replace_reference_warnings(&mut dependent.warnings, &mut warnings.doc);
+
+            warnings.host
+        })
     }
 
     /// Resolve the document's deferred cross-references against its own
@@ -487,9 +496,10 @@ impl<'src> Document<'src> {
         &mut self,
         renderer: &dyn InlineSubstitutionRenderer,
     ) -> Vec<ReferenceWarning> {
-        let mut warnings = Vec::new();
-
         self.internal.with_dependent_mut(|_owner, dependent| {
+            let source = dependent.source;
+            let mut warnings = ReferenceWarnings::default();
+
             // The footnotes are moved out of the catalog so they can be resolved
             // mutably while the `CatalogResolver` borrows the (footnote-free)
             // catalog. Footnotes are never cross-reference *targets*, so their
@@ -505,14 +515,32 @@ impl<'src> Document<'src> {
             // cross-references are resolved here rather than by the block pass
             // above.
             for footnote in footnotes.iter_mut() {
-                footnote.resolve_references(&resolver, renderer, &mut warnings);
+                footnote.resolve_references(&resolver, renderer, &mut warnings, source);
             }
 
             dependent.catalog.restore_footnotes(footnotes);
-        });
 
-        warnings
+            replace_reference_warnings(&mut dependent.warnings, &mut warnings.doc);
+
+            warnings.host
+        })
     }
+}
+
+/// Folds the document warnings raised by a resolution sweep into the document's
+/// own warning list.
+///
+/// Each sweep is a full, independent pass, so any unresolved-reference warning
+/// left by an earlier sweep is discarded first; otherwise resolving a document
+/// twice would report every still-unresolved reference twice.
+fn replace_reference_warnings<'src>(
+    document_warnings: &mut Vec<Warning<'src>>,
+    sweep_warnings: &mut Vec<Warning<'src>>,
+) {
+    document_warnings
+        .retain(|warning| !matches!(warning.warning, WarningType::PossibleInvalidReference(_)));
+
+    document_warnings.append(sweep_warnings);
 }
 
 impl<'src> IsBlock<'src> for Document<'src> {

@@ -599,3 +599,85 @@ fn xref_escapes_author_supplied_window_and_role() {
         "expected escaped quotes in: {rendered}"
     );
 }
+
+/// Issue #772: an unresolved cross-reference is reported on the document
+/// alongside every other parse-time warning, not only through the resolution
+/// pass's own return value.
+mod unresolved_reference_warnings {
+    use crate::{
+        Parser,
+        parser::SafeMode,
+        tests::prelude::{inline_file_handler::InlineFileHandler, *},
+    };
+
+    #[test]
+    fn reported_against_the_referencing_block() {
+        let doc = Parser::default().parse("== Section\n\nSee <<nope>>.\n");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::PossibleInvalidReference("nope".to_string())
+        );
+
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    fn reported_for_a_reference_inside_a_footnote() {
+        // A footnote's text is lifted out of the block it was written in and the
+        // footnote keeps no span of its own, so the warning is anchored at the
+        // document.
+        let doc = Parser::default().parse("Text.footnote:[See <<nope>>.]\n");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::PossibleInvalidReference("nope".to_string())
+        );
+    }
+
+    #[test]
+    fn reported_for_a_reference_inside_a_markdown_blockquote() {
+        // A Markdown-style blockquote's blocks borrow the block's own owned
+        // source, so the warning is re-anchored to the blockquote in the
+        // document.
+        let doc = Parser::default().parse("Intro.\n\n> See <<nope>>.\n");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::PossibleInvalidReference("nope".to_string())
+        );
+
+        assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    fn reported_for_a_reference_inside_an_include_expanded_table_cell() {
+        // An include-expanded AsciiDoc table cell is parsed from its own owned
+        // source, so the warning is re-anchored to the cell in the document.
+        let handler = InlineFileHandler::from_pairs([("frag.adoc", "See <<nope>>.")]);
+
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler)
+            .parse("|===\na|include::frag.adoc[]\n|===");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::PossibleInvalidReference("nope".to_string())
+        );
+
+        assert_eq!(warnings[0].source.line(), 2);
+    }
+}

@@ -27,7 +27,7 @@ pub mod strings;
 #[cfg(test)]
 mod tests;
 
-mod warnings;
+pub mod warnings;
 
 // Use `pretty_assertion_sorted`'s version of `assert_eq` across the board.
 #[cfg(test)]

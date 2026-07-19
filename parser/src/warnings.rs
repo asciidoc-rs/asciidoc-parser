@@ -1,3 +1,10 @@
+//! Describes conditions where a parse result might be unexpected.
+//!
+//! Every UTF-8 string is a valid AsciiDoc document, so parsing never fails.
+//! Anything ambiguous or likely unintended is reported as a [`Warning`]
+//! instead, and a caller is advised to review the warnings a parse produced
+//! (see [`Document::warnings`](crate::Document::warnings)).
+
 use thiserror::Error;
 
 use crate::{Span, parser::SourceLine};
@@ -37,105 +44,170 @@ pub struct Warning<'src> {
 }
 
 /// Type of possible parse error that was detected.
+///
+/// This enum is `non_exhaustive`: new conditions are recognized as the parser
+/// grows, so a host matching on it needs a catch-all arm.
 #[derive(Clone, Eq, Error, PartialEq)]
+#[non_exhaustive]
 pub enum WarningType {
+    /// A quoted attribute value ran to the end of its line (or the end of the
+    /// attribute list) without a matching closing quote.
     #[error("An attribute value is missing its terminating quote")]
     AttributeValueMissingTerminatingQuote,
 
+    /// A document header was not followed by a blank line, so the line that
+    /// follows it can not be parsed as part of the header.
     #[error(
         "Document header wasn't terminated by a blank line (this line can't be parsed as part of a document header)"
     )]
     DocumentHeaderNotTerminated,
 
+    /// The `inline` doctype was requested for a document that holds no single
+    /// paragraph, verbatim, or raw block to convert.
     #[error(
         "no inline candidate; use the inline doctype to convert a single paragraph, verbatim, or raw block"
     )]
     NoInlineDoctypeCandidate,
 
+    /// An element attribute was written with a name and `=` but no value.
     #[error("An empty attribute value was detected")]
     EmptyAttributeValue,
 
+    /// A shorthand element attribute marker (`.` for a role, `#` for an ID, or
+    /// `%` for an option) was found with no name after it.
     #[error(
         "A shorthand element attribute marker ('.', '#', or '%') was found with no subsequent text"
     )]
     EmptyShorthandItem,
 
-    // TO DO BEFORE CHECKING IN TO MAIN: Review these error names and descriptions.
+    // TODO: Review the names and message strings of the variants that follow
+    // (#801).
+    /// The name in a block or inline macro is not a valid identifier.
     #[error("Macro name is not a valid identifier")]
     InvalidMacroName,
 
+    /// A media macro (`image::`, `video::`, or `audio::`) was written without
+    /// the target that names the media to embed.
     #[error("Media macro missing target")]
     MediaMacroMissingTarget,
 
+    /// A macro was written without the `[…]` attribute list that terminates it.
     #[error("Macro missing attribute list")]
     MacroMissingAttributeList,
 
+    /// A block macro was written without the `::` that separates its name from
+    /// its target.
     #[error("Macro missing :: separator")]
     MacroMissingDoubleColon,
 
+    /// A quoted attribute value in an attribute list was followed by something
+    /// other than the comma that separates it from the next attribute.
     #[error("Missing comma after quoted attribute value")]
     MissingCommaAfterQuotedAttributeValue,
 
+    /// A delimited block was opened but the matching closing delimiter was
+    /// never found, so the block runs to the end of the document.
     #[error("Closing marker for delimited block not found")]
     UnterminatedDelimitedBlock,
 
+    /// A block title (`.Title`) or attribute list (`[…]`) was found at the end
+    /// of the document or immediately before a blank line, with no block for it
+    /// to describe.
     #[error("A block title or attribute list was found without a subsequent block")]
     MissingBlockAfterTitleOrAttributeList,
 
+    /// A block anchor (`[[…]]`) was written with no name between its brackets.
     #[error("Block anchor name is empty")]
     EmptyBlockAnchorName,
 
+    /// A block anchor (`[[…]]`) names an ID containing characters that are not
+    /// permitted in a name.
     #[error("Block anchor name contains invalid name characters")]
     InvalidBlockAnchorName,
 
+    /// The document tried to set an attribute that the API caller locked when
+    /// it configured the parser. The field is the attribute name.
     #[error("Attribute {0:?} can not be modified by document")]
     AttributeValueIsLocked(String),
 
+    /// An ID was assigned to an element when an earlier element had already
+    /// registered it. The field is the duplicated ID.
     #[error("Duplicate ID: {0:?} is already registered")]
     DuplicateId(String),
 
+    /// A level-0 section heading (`= Title`) was found somewhere other than the
+    /// document header, where this crate does not support it.
     #[error("Level 0 section headings not supported")]
     Level0SectionHeadingNotSupported,
 
+    /// A section heading skipped one or more levels below its parent. The
+    /// fields are the expected level and the level actually found.
     #[error("Section heading level skipped (expected {0}, found {1})")]
     SectionHeadingLevelSkipped(usize, usize),
 
+    /// A section heading nests deeper than the deepest supported level. The
+    /// field is the level found.
     #[error("Section heading level exceeds maximum (maximum 5, found {0})")]
     SectionHeadingLevelExceedsMaximum(usize),
 
+    /// A `leveloffset` shifted a section heading outside the supported range,
+    /// so its level was clamped. The fields are the offset level and the level
+    /// it was clamped to.
     #[error("Section heading level {0} is outside the supported range 1-5; clamped to {1}")]
     SectionHeadingLevelOutOfRange(i32, usize),
 
+    /// A `leveloffset` is so large (or so negative) that no authored heading
+    /// level could land inside the supported range. The field is the offset.
     #[error("leveloffset {0} places every section heading outside the supported range 1-5")]
     LeveloffsetExcludesAllHeadingLevels(i32),
 
+    /// An explicitly-numbered list item does not continue the sequence its list
+    /// established. The fields are the expected and actual indexes.
     #[error("List item index: expected {0}, got {1}")]
     ListItemOutOfSequence(String, String),
 
+    /// A callout list item has no matching callout marker in the verbatim block
+    /// it annotates. The field is the callout number.
     #[error("No callout found for <{0}>")]
     NoCalloutFound(usize),
 
+    /// A callout list item does not continue the sequence its list established.
+    /// The fields are the expected and actual indexes.
     #[error("Callout list item index: expected {0}, got {1}")]
     CalloutListItemOutOfSequence(usize, usize),
 
+    /// A table row holds more cells than the table's column count allows; the
+    /// surplus cell is dropped.
     #[error("Dropping table cell because it exceeds the specified number of columns")]
     TableCellExceedsColumnCount,
 
+    /// A quoted field in a CSV-format table was never closed; the cell is set
+    /// to empty.
     #[error("Unclosed quote in CSV data; setting cell to empty")]
     TableCsvDataHasUnclosedQuote,
 
+    /// A table row does not begin with the cell separator its table uses;
+    /// parsing recovers by assuming one.
     #[error("Table is missing a leading separator; recovering automatically")]
     TableMissingLeadingSeparator,
 
+    /// A table ended part-way through a row; the cells of that partial row are
+    /// dropped.
     #[error("Dropping cells from incomplete row; detected end of table")]
     TableDroppingIncompleteRowAtEndOfTable,
 
+    /// An attribute reference (`{name}`) names an attribute that is not set,
+    /// under `attribute-missing=warn`. The field is the attribute name.
     #[error("skipping reference to missing attribute: {0}")]
     SkippingReferenceToMissingAttribute(String),
 
+    /// A `stem:` macro named a substitution type that is not recognized. The
+    /// field is the unrecognized name.
     #[error("invalid substitution type for stem macro: {0}")]
     InvalidSubstitutionTypeForStemMacro(String),
 
+    /// A passthrough macro (`pass:`) named a substitution type that is not
+    /// recognized. The field is the unrecognized name.
     #[error("invalid substitution type for passthrough macro: {0}")]
     InvalidSubstitutionTypeForPassthroughMacro(String),
 
@@ -155,8 +227,17 @@ pub enum WarningType {
     #[error("found deprecated footnoteref macro: {0}; use footnote macro with target instead")]
     DeprecatedFootnorefMacro(String),
 
+    /// An `include::` directive named a file that the configured include file
+    /// handler could not resolve. The field is the target as written.
     #[error("include file not found: {0}")]
     IncludeFileNotFound(String),
+
+    /// An include directive's target referenced a missing attribute while
+    /// `attribute-missing` was set to `warn`, so the directive was dropped
+    /// without being resolved. (Under `drop-line` the directive line is
+    /// removed silently instead.) The field is the directive as written.
+    #[error("include dropped due to missing attribute: {0}")]
+    IncludeDroppedDueToMissingAttribute(String),
 
     /// An include directive was not expanded because the file containing it
     /// already sits at the maximum include depth (the `max-include-depth`
@@ -229,6 +310,17 @@ pub enum WarningType {
         "abstract block cannot be used in a document without a doctitle when doctype is book. Excluding block content."
     )]
     AbstractBlockInBookWithoutDoctitle,
+
+    /// A cross-reference (`<<id>>` or `xref:id[…]`) named a target that the
+    /// resolution pass could not resolve. The reference still renders as the
+    /// unresolved fallback link (`<a href="#id">[id]</a>`). The field is the
+    /// target exactly as written in the source.
+    ///
+    /// Asciidoctor reports this only in verbose (pedantic) mode, since a
+    /// reference to an anchor that is not stored in the parse tree can be a
+    /// false positive.
+    #[error("possible invalid reference: {0}")]
+    PossibleInvalidReference(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -380,6 +472,11 @@ impl std::fmt::Debug for WarningType {
                 .field(target)
                 .finish(),
 
+            WarningType::IncludeDroppedDueToMissingAttribute(directive) => f
+                .debug_tuple("WarningType::IncludeDroppedDueToMissingAttribute")
+                .field(directive)
+                .finish(),
+
             WarningType::MaxIncludeDepthExceeded(depth) => f
                 .debug_tuple("WarningType::MaxIncludeDepthExceeded")
                 .field(depth)
@@ -435,6 +532,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::AbstractBlockInBookWithoutDoctitle => {
                 write!(f, "WarningType::AbstractBlockInBookWithoutDoctitle")
             }
+
+            WarningType::PossibleInvalidReference(target) => f
+                .debug_tuple("WarningType::PossibleInvalidReference")
+                .field(target)
+                .finish(),
         }
     }
 }
@@ -836,6 +938,20 @@ mod tests {
             }
 
             #[test]
+            fn include_dropped_due_to_missing_attribute() {
+                let warning = WarningType::IncludeDroppedDueToMissingAttribute(
+                    "include::{foodir}/include-file.adoc[]".to_string(),
+                );
+
+                let debug_output = format!("{:?}", warning);
+
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeDroppedDueToMissingAttribute(\"include::{foodir}/include-file.adoc[]\")"
+                );
+            }
+
+            #[test]
             fn max_include_depth_exceeded() {
                 let warning = WarningType::MaxIncludeDepthExceeded(64);
                 let debug_output = format!("{:?}", warning);
@@ -943,6 +1059,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::AbstractBlockInBookWithoutDoctitle"
+                );
+            }
+
+            #[test]
+            fn possible_invalid_reference() {
+                let warning = WarningType::PossibleInvalidReference("foobaz".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::PossibleInvalidReference(\"foobaz\")"
                 );
             }
         }

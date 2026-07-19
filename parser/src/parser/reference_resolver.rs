@@ -11,7 +11,11 @@
 //! its own implementation (binding the "from" document when it constructs the
 //! resolver), and this crate makes no attempt to merge catalogs.
 
-use crate::document::Catalog;
+use crate::{
+    Span,
+    document::Catalog,
+    warnings::{Warning, WarningType},
+};
 
 /// The cross-reference text style selected by the `xrefstyle` attribute.
 ///
@@ -161,6 +165,61 @@ pub enum ReferenceWarningKind {
     Unresolved,
 }
 
+/// Accumulates what a cross-reference resolution sweep found, in the two forms
+/// the crate needs to report it.
+///
+/// Both lists describe the same conditions: [`host`](Self::host) is handed back
+/// to whoever drove the sweep (and is the crate's public resolution API), while
+/// [`doc`](Self::doc) is folded into the document's own
+/// [warnings](crate::Document::warnings) so an unresolved reference shows up
+/// alongside every other parse-time diagnostic.
+#[derive(Default)]
+pub(crate) struct ReferenceWarnings<'src> {
+    /// The warnings returned from the resolution pass.
+    pub(crate) host: Vec<ReferenceWarning>,
+
+    /// The same warnings, anchored to the source they were found in.
+    pub(crate) doc: Vec<Warning<'src>>,
+}
+
+impl<'src> ReferenceWarnings<'src> {
+    /// Records a target that `resolver` could not resolve, found within
+    /// `source`.
+    pub(crate) fn unresolved(&mut self, target: &str, source: Span<'src>) {
+        self.host.push(ReferenceWarning {
+            target: target.to_string(),
+            kind: ReferenceWarningKind::Unresolved,
+        });
+
+        self.doc.push(Warning {
+            source,
+            warning: WarningType::PossibleInvalidReference(target.to_string()),
+            origin: None,
+        });
+    }
+
+    /// Folds warnings gathered from a privately-owned sub-parse – the blocks of
+    /// a Markdown-style blockquote, or of an include-expanded AsciiDoc table
+    /// cell – into `dest`.
+    ///
+    /// Those blocks borrow their own owned source, so their spans cannot be
+    /// named in the enclosing document. Each document warning is re-anchored to
+    /// `anchor`, the enclosing element's span in the document.
+    pub(crate) fn rehome_into<'outer>(
+        self,
+        dest: &mut ReferenceWarnings<'outer>,
+        anchor: Span<'outer>,
+    ) {
+        dest.host.extend(self.host);
+
+        dest.doc.extend(self.doc.into_iter().map(|warning| Warning {
+            source: anchor,
+            warning: warning.warning,
+            origin: warning.origin,
+        }));
+    }
+}
+
 /// Describes a single cross-reference that needs to be resolved.
 ///
 /// This carries only information the crate itself knows about the reference. A
@@ -195,7 +254,9 @@ pub trait ReferenceResolver {
 /// `#id` fragments. Targets that carry a path component (detected by the
 /// presence of `#`, e.g. `other-page.adoc#frag`) are treated as inter-document
 /// references and left unresolved — resolving those is the responsibility of a
-/// host-supplied resolver.
+/// host-supplied resolver. Only the first `#` is considered, and a `#` preceded
+/// by `&` is not a path separator, so a target carrying a numeric character
+/// reference (`Cub &#8658; Tiger`) still resolves as a same-document reference.
 #[derive(Clone, Copy, Debug)]
 pub struct CatalogResolver<'a> {
     catalog: &'a Catalog,
@@ -213,7 +274,7 @@ impl ReferenceResolver for CatalogResolver<'_> {
         let target = context.target;
 
         // Path-bearing (inter-document) targets are a host concern.
-        if target.contains('#') {
+        if has_path_component(target) {
             return None;
         }
 
@@ -231,6 +292,22 @@ impl ReferenceResolver for CatalogResolver<'_> {
         }
 
         None
+    }
+}
+
+/// Returns `true` if `target` names a document outside this one, i.e. it splits
+/// into a path and a fragment at a `#`.
+///
+/// By the time a cross-reference is resolved, the character-replacement
+/// substitution has already run over its target, so a target that contained
+/// `=>`, `->`, or `(C)` now carries a numeric character reference such as
+/// `&#8658;`. The `#` inside that entity is not a path separator, so only the
+/// *first* `#` is considered, and it is ignored when it is preceded by `&`
+/// (matching Asciidoctor's `refid[hash_idx - 1] != '&'` guard).
+fn has_path_component(target: &str) -> bool {
+    match target.find('#') {
+        Some(0) | None => false,
+        Some(index) => !target[..index].ends_with('&'),
     }
 }
 
@@ -307,5 +384,35 @@ mod tests {
                 })
                 .is_none()
         );
+    }
+
+    #[test]
+    fn numeric_character_reference_is_not_a_path_separator() {
+        let catalog = catalog_with("_cub_tiger", Some("Cub &#8658; Tiger"), RefType::Section);
+        let resolver = CatalogResolver::new(&catalog);
+
+        let resolved = resolver
+            .resolve(&ResolutionContext {
+                target: "Cub &#8658; Tiger",
+                provided_text: None,
+            })
+            .unwrap();
+
+        assert_eq!(resolved.href, "#_cub_tiger");
+        assert_eq!(resolved.text.as_deref(), Some("Cub &#8658; Tiger"));
+    }
+
+    #[test]
+    fn has_path_component_ignores_numeric_character_references() {
+        assert!(!has_path_component("plain-id"));
+        assert!(!has_path_component("Cub &#8658; Tiger"));
+        assert!(!has_path_component("C&#43;&#43;"));
+        assert!(!has_path_component("#frag"));
+        assert!(has_path_component("other-page.adoc#frag"));
+        assert!(has_path_component("other-page.adoc#"));
+
+        // Only the first `#` decides; a later path separator inside a target
+        // that opens with an entity is not reconsidered (matching Asciidoctor).
+        assert!(!has_path_component("&#43;.adoc#frag"));
     }
 }
