@@ -1048,6 +1048,12 @@ impl Parser {
         self.substitution_warnings.borrow_mut().truncate(len);
     }
 
+    /// Removes and returns any substitution warnings recorded since the buffer
+    /// held `len` entries.
+    pub(crate) fn drain_substitution_warnings_since(&self, len: usize) -> Vec<DeferredWarning> {
+        self.substitution_warnings.borrow_mut().split_off(len)
+    }
+
     /// Takes the substitution warnings recorded during parsing, leaving the
     /// buffer empty.
     pub(crate) fn take_substitution_warnings(&self) -> Vec<DeferredWarning> {
