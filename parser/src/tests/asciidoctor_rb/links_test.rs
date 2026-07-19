@@ -3521,11 +3521,10 @@ fn should_resolve_first_matching_natural_xref() {
     );
 }
 
-// Surfaced incompatibility: Asciidoctor resolves `<<Cub => Tiger>>` to the
-// section id `_cub_tiger`; this crate applies replacement subs to the target
-// and fails to match. Tracked in #771.
-non_normative!(
-    r###"
+#[test]
+fn should_not_match_numeric_character_references_while_searching_for_fragment_in_xref_target() {
+    verifies!(
+        r###"
   test 'should not match numeric character references while searching for fragment in xref target' do
     input = <<~'EOS'
     see <<Cub => Tiger>>
@@ -3538,7 +3537,14 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse("see <<Cub => Tiger>>\n\n== Cub => Tiger");
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"see <a href="#_cub_tiger">Cub &#8658; Tiger</a>"##
+    );
+}
 
 #[test]
 fn should_not_match_numeric_character_references_in_path_of_interdocument_xref() {
