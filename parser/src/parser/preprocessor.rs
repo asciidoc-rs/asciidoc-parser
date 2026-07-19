@@ -2669,6 +2669,30 @@ mod tests {
     }
 
     #[test]
+    fn dropped_include_attrlist_does_not_leak_counter_state() {
+        // Checking `opts=optional` on a directive that is about to be dropped
+        // means parsing its attribute list, which applies substitutions — so a
+        // stateful expression such as `{counter:n}` is evaluated there. It
+        // cannot be observed afterward: the preprocessor runs against a
+        // throwaway clone of the parser, so every attribute and counter it
+        // touches dies with that clone. The counter in the surviving paragraph
+        // is therefore the first value of the sequence.
+        let source = ":attribute-missing: warn\n\ninclude::{foodir}/partial.adoc[opts=optional,title={counter:n}]\n\nValue: {counter:n}.";
+
+        let mut parser = Parser::default();
+        let doc = parser.parse(source);
+
+        assert_eq!(parser.attribute_value("n"), InterpretedValue::Value("1"));
+
+        let rendered: Vec<_> = doc
+            .nested_blocks()
+            .filter_map(|b| b.rendered_content())
+            .collect();
+
+        assert_eq!(rendered, vec!["Value: 1."]);
+    }
+
+    #[test]
     fn include_target_with_brace_that_is_not_an_attribute_reference() {
         // A `{` that doesn't open a well-formed attribute reference gets past
         // the fast path but matches nothing, so the target is used verbatim —
