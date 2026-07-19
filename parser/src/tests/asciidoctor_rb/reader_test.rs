@@ -4075,6 +4075,7 @@ fn line_is_skipped_by_default_if_target_of_include_directive_resolves_to_empty()
 // and delegated to the handler, so the whole line is not dropped as Asciidoctor
 // does here. (A mock handler cannot reproduce this; it would require the
 // preprocessor to apply the attribute-missing policy to the include target.)
+// Tracked by https://github.com/asciidoc-rs/asciidoc-parser/issues/776.
 non_normative!(
     r#"
       test 'include is dropped if target contains missing attribute and attribute-missing is drop-line' do
