@@ -5643,7 +5643,7 @@ fn ifeval_running_invalid_operation_drops_content() {
     // number compared against a boolean.
     let parser = Parser::default().with_intrinsic_attribute(
         "asciidoctor-version",
-        "2.0.26",
+        ASCIIDOCTOR_VERSION,
         ModificationContext::Anywhere,
     );
     assert_eq!(
@@ -5792,7 +5792,7 @@ fn ifeval_comparing_attribute_to_lower_version_number_includes_content() {
 
     let parser = Parser::default().with_intrinsic_attribute(
         "asciidoctor-version",
-        "2.0.26",
+        ASCIIDOCTOR_VERSION,
         ModificationContext::Anywhere,
     );
     assert_eq!(
@@ -5866,7 +5866,7 @@ fn ifeval_arguments_can_be_transposed() {
 
     let parser = Parser::default().with_intrinsic_attribute(
         "asciidoctor-version",
-        "2.0.26",
+        ASCIIDOCTOR_VERSION,
         ModificationContext::Anywhere,
     );
     assert_eq!(

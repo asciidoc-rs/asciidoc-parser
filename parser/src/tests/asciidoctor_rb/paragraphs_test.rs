@@ -3215,7 +3215,7 @@ mod special {
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "asciidoctor-version",
-                "2.0",
+                ASCIIDOCTOR_VERSION,
                 ModificationContext::Anywhere,
             )
             .with_intrinsic_attribute("backend", "html5", ModificationContext::Anywhere)

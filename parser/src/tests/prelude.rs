@@ -13,6 +13,7 @@ pub(crate) use crate::{
     content::SubstitutionGroup,
     parser::ModificationContext,
     tests::{
+        ASCIIDOCTOR_VERSION,
         assert_dom::*,
         fixtures::{attributes::*, blocks::*, content::*, document::*, parser::*, warnings::*, *},
         sdd::*,
