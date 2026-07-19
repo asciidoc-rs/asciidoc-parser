@@ -92,10 +92,29 @@ impl SubstitutionGroup {
             return Some(Self::Verbatim);
         }
 
-        let mut steps: Vec<SubstitutionStep> = vec![];
+        // An entirely empty string is not a substitution list; leave it to the
+        // caller to decide what that means (warn for a pass macro, keep the
+        // default group for a block).
+        if custom.is_empty() {
+            return None;
+        }
 
-        for (count, mut step) in custom.split(",").enumerate() {
+        let mut steps: Vec<SubstitutionStep> = vec![];
+        let mut first = true;
+
+        for mut step in custom.split(",") {
             step = step.trim();
+
+            // An empty entry contributes nothing, so a list of only separators
+            // (e.g. `subs=","`) resolves to an empty substitution list. This
+            // matches Asciidoctor's `resolve_subs`, where `','.split(',')`
+            // yields no tokens.
+            if step.is_empty() {
+                continue;
+            }
+
+            let is_first = first;
+            first = false;
 
             // A group name (`normal`/`verbatim`) is expanded *in place*: its
             // constituent steps are appended to the running list rather than
@@ -142,7 +161,7 @@ impl SubstitutionGroup {
                 false
             };
 
-            if count == 0
+            if is_first
                 && let Some(start_from) = start_from
                 && (append || prepend || subtract)
             {
@@ -321,6 +340,49 @@ mod tests {
         #[test]
         fn empty() {
             assert_eq!(SubstitutionGroup::from_custom_string(None, ""), None);
+        }
+
+        #[test]
+        fn empty_entries() {
+            // A list containing only separators resolves to an empty
+            // substitution list (issue #784).
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(Some(&SubstitutionGroup::Verbatim), ","),
+                Some(SubstitutionGroup::Custom(vec![]))
+            );
+
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, " , ,"),
+                Some(SubstitutionGroup::Custom(vec![]))
+            );
+
+            // Empty entries elsewhere in the list are skipped.
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "quotes,"),
+                Some(SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]))
+            );
+
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "quotes,,macros"),
+                Some(SubstitutionGroup::Custom(vec![
+                    SubstitutionStep::Quotes,
+                    SubstitutionStep::Macros
+                ]))
+            );
+
+            // A leading empty entry doesn't count as the first token, so a
+            // modifier that follows it still starts from the base group.
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(
+                    Some(&SubstitutionGroup::Verbatim),
+                    ",+quotes"
+                ),
+                Some(SubstitutionGroup::Custom(vec![
+                    SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Callouts,
+                    SubstitutionStep::Quotes
+                ]))
+            );
         }
 
         #[test]
