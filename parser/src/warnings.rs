@@ -139,6 +139,12 @@ pub enum WarningType {
     #[error("invalid substitution type for passthrough macro: {0}")]
     InvalidSubstitutionTypeForPassthroughMacro(String),
 
+    /// One or more unrecognized substitution names in a block's `subs`
+    /// attribute. The names are joined with `", "`; any recognized names in
+    /// the same list are still honored.
+    #[error("invalid substitution type for block: {0}")]
+    InvalidSubstitutionTypeForBlock(String),
+
     /// A footnote reference (`footnote:id[]`) names an ID that was never
     /// defined by an earlier footnote.
     #[error("invalid footnote reference: {0}")]
@@ -206,6 +212,14 @@ pub enum WarningType {
     /// corresponding open region. The field is the unexpected tag name.
     #[error("unexpected end tag in include file: {0}")]
     IncludeTagUnexpectedEnd(String),
+
+    /// An `[abstract]` block was found as a direct child of a document without
+    /// a doctitle when the doctype is `book`. Asciidoctor excludes such a
+    /// block's content from the converted output.
+    #[error(
+        "abstract block cannot be used in a document without a doctitle when doctype is book. Excluding block content."
+    )]
+    AbstractBlockInBookWithoutDoctitle,
 }
 
 impl std::fmt::Debug for WarningType {
@@ -337,6 +351,11 @@ impl std::fmt::Debug for WarningType {
                 .field(subs)
                 .finish(),
 
+            WarningType::InvalidSubstitutionTypeForBlock(subs) => f
+                .debug_tuple("WarningType::InvalidSubstitutionTypeForBlock")
+                .field(subs)
+                .finish(),
+
             WarningType::InvalidFootnoteReference(id) => f
                 .debug_tuple("WarningType::InvalidFootnoteReference")
                 .field(id)
@@ -398,6 +417,10 @@ impl std::fmt::Debug for WarningType {
                 .debug_tuple("WarningType::IncludeTagUnexpectedEnd")
                 .field(tag)
                 .finish(),
+
+            WarningType::AbstractBlockInBookWithoutDoctitle => {
+                write!(f, "WarningType::AbstractBlockInBookWithoutDoctitle")
+            }
         }
     }
 }
@@ -758,6 +781,16 @@ mod tests {
             }
 
             #[test]
+            fn invalid_substitution_type_for_block() {
+                let warning = WarningType::InvalidSubstitutionTypeForBlock("bogus".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::InvalidSubstitutionTypeForBlock(\"bogus\")"
+                );
+            }
+
+            #[test]
             fn include_file_not_found() {
                 let warning = WarningType::IncludeFileNotFound("content.adoc".to_string());
                 let debug_output = format!("{:?}", warning);
@@ -858,6 +891,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::IncludeTagUnexpectedEnd(\"'a'\")"
+                );
+            }
+
+            #[test]
+            fn abstract_block_in_book_without_doctitle() {
+                let warning = WarningType::AbstractBlockInBookWithoutDoctitle;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::AbstractBlockInBookWithoutDoctitle"
                 );
             }
         }

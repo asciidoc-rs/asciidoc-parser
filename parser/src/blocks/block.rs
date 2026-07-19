@@ -241,6 +241,7 @@ impl<'src> Block<'src> {
             && !ListItemMarker::starts_with_marker(first_line)
             && !starts_with_admonition_label(first_line)
             && parent_list_markers.is_none()
+            && parser.pending_block_title.is_none()
             && let Some(MatchedItem {
                 item: simple_block,
                 after,
@@ -287,6 +288,17 @@ impl<'src> Block<'src> {
             item: mut metadata,
             mut warnings,
         } = BlockMetadata::parse(source, parser);
+
+        // A block title stashed by an enclosing section heading (see
+        // `SectionBlock::parse`) is claimed by the next block parsed — this
+        // one. A title of the block's own wins, discarding the carried title.
+        // The carried title has no source line adjacent to this block, so
+        // `title_source` stays `None` (the same shape as a `title=` attribute).
+        if let Some(pending_title) = parser.pending_block_title.take()
+            && metadata.title.is_none()
+        {
+            metadata.title = Some(pending_title);
+        }
 
         // Tolerate a blank line between a block's metadata (title, anchor, or
         // attribute list) and the block it decorates. Asciidoctor's

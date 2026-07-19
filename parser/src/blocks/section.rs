@@ -109,9 +109,19 @@ impl<'src> SectionBlock<'src> {
             || metadata.anchor_reftext.is_some();
 
         let (section_number, caption, xref_signifier) = if is_appendix_root {
+            // The appendix letter is resolved through the `appendix-number`
+            // counter (mirroring Ruby Asciidoctor's `Document#counter
+            // 'appendix-number', 'A'`): each appendix advances the counter, so
+            // a document-set `appendix-number` value is the letter *before* the
+            // first appendix (`:appendix-number: α` letters the appendices β,
+            // γ, …) and the attribute always reads back as the current letter.
+            let letter = parser.counter("appendix-number", Some("A"));
+
             parser
                 .last_appendix_section_number
                 .assign_next_number(level);
+            parser.last_appendix_section_number.appendix_letter = Some(letter);
+
             let number = parser.last_appendix_section_number.clone();
             let caption = appendix_caption(parser, &number);
 
@@ -190,6 +200,18 @@ impl<'src> SectionBlock<'src> {
         let previously_in_bibliography_section = parser.parsing_bibliography_section_body;
         parser.parsing_bibliography_section_body = is_bibliography_section;
 
+        // A block title above a section heading does not become the section's
+        // title; it is carried over to the first block inside the section
+        // (matching Asciidoctor). Stash it on the parser: the next block parsed
+        // claims it — usually the section's first child, or (when the section
+        // body is empty) the sibling section that follows, which re-stashes it
+        // for its own first block. A discrete heading is an ordinary block, not
+        // a section, so it keeps its title. See `Block::parse_internal` for the
+        // claiming side.
+        if !discrete && metadata.title.is_some() {
+            parser.pending_block_title = metadata.title.clone();
+        }
+
         let mut maw_blocks = parse_blocks_until(
             level_and_title.after,
             |i, parser| {
@@ -266,8 +288,19 @@ impl<'src> SectionBlock<'src> {
                 section_title,
                 blocks: blocks.item,
                 source: source.trim_trailing_whitespace(),
-                title_source: metadata.title_source,
-                title: metadata.title.clone(),
+
+                // A non-discrete section never keeps a block title; it was
+                // stashed above for the next block parsed to claim.
+                title_source: if discrete {
+                    metadata.title_source
+                } else {
+                    None
+                },
+                title: if discrete {
+                    metadata.title.clone()
+                } else {
+                    None
+                },
                 anchor: metadata.anchor,
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),
@@ -783,6 +816,13 @@ impl std::fmt::Debug for SectionType {
 pub struct SectionNumber {
     pub(crate) section_type: SectionType,
     pub(crate) components: Vec<usize>,
+
+    // The letter (or, more generally, counter value) assigned to the appendix
+    // this number belongs to, resolved from the `appendix-number` counter
+    // (e.g. `"A"`, or `"β"` when the document sets `:appendix-number: α`).
+    // Replaces the first component when the number is displayed. `None` for
+    // normal section numbers.
+    pub(crate) appendix_letter: Option<String>,
 }
 
 impl SectionNumber {
@@ -807,6 +847,15 @@ impl SectionNumber {
     pub fn components(&self) -> &[usize] {
         &self.components
     }
+
+    /// Return the letter (or, more generally, `appendix-number` counter value)
+    /// assigned to the appendix this number belongs to (e.g. `"A"`, or `"β"`
+    /// when the document sets `:appendix-number: α`).
+    ///
+    /// Returns `None` for normal section numbers.
+    pub fn appendix_letter(&self) -> Option<&str> {
+        self.appendix_letter.as_deref()
+    }
 }
 
 impl fmt::Display for SectionNumber {
@@ -818,9 +867,16 @@ impl fmt::Display for SectionNumber {
                 .enumerate()
                 .map(|(index, x)| {
                     if index == 0 && self.section_type == SectionType::Appendix {
-                        char::from_u32(b'A' as u32 + (x - 1) as u32)
-                            .unwrap_or('?')
-                            .to_string()
+                        // A parsed appendix number always carries its letter;
+                        // the A, B, … derivation covers directly-constructed
+                        // values that don't.
+                        if let Some(letter) = &self.appendix_letter {
+                            letter.clone()
+                        } else {
+                            char::from_u32(b'A' as u32 + (x - 1) as u32)
+                                .unwrap_or('?')
+                                .to_string()
+                        }
                     } else {
                         x.to_string()
                     }
@@ -836,6 +892,7 @@ impl fmt::Debug for SectionNumber {
         f.debug_struct("SectionNumber")
             .field("section_type", &self.section_type)
             .field("components", &DebugSliceReference(&self.components))
+            .field("appendix_letter", &self.appendix_letter)
             .finish()
     }
 }
@@ -3288,7 +3345,7 @@ mod tests {
                 assert_eq!(sn.to_string(), "");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Normal, components: &[] }"
+                    "SectionNumber { section_type: SectionType::Normal, components: &[], appendix_letter: None }"
                 );
             }
 
@@ -3300,7 +3357,7 @@ mod tests {
                 assert_eq!(sn.to_string(), "1");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Normal, components: &[1] }"
+                    "SectionNumber { section_type: SectionType::Normal, components: &[1], appendix_letter: None }"
                 );
             }
 
@@ -3312,7 +3369,7 @@ mod tests {
                 assert_eq!(sn.to_string(), "1.1.1");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Normal, components: &[1, 1, 1] }"
+                    "SectionNumber { section_type: SectionType::Normal, components: &[1, 1, 1], appendix_letter: None }"
                 );
             }
 
@@ -3325,7 +3382,7 @@ mod tests {
                 assert_eq!(sn.to_string(), "2");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Normal, components: &[2] }"
+                    "SectionNumber { section_type: SectionType::Normal, components: &[2], appendix_letter: None }"
                 );
             }
 
@@ -3339,7 +3396,7 @@ mod tests {
                 assert_eq!(sn.to_string(), "2.1");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Normal, components: &[2, 1] }"
+                    "SectionNumber { section_type: SectionType::Normal, components: &[2, 1], appendix_letter: None }"
                 );
             }
         }
@@ -3352,12 +3409,13 @@ mod tests {
                 let sn = SectionNumber {
                     section_type: SectionType::Appendix,
                     components: vec![],
+                    appendix_letter: None,
                 };
                 assert_eq!(sn.components(), []);
                 assert_eq!(sn.to_string(), "");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Appendix, components: &[] }"
+                    "SectionNumber { section_type: SectionType::Appendix, components: &[], appendix_letter: None }"
                 );
             }
 
@@ -3366,13 +3424,14 @@ mod tests {
                 let mut sn = SectionNumber {
                     section_type: SectionType::Appendix,
                     components: vec![],
+                    appendix_letter: None,
                 };
                 sn.assign_next_number(1);
                 assert_eq!(sn.components(), [1]);
                 assert_eq!(sn.to_string(), "A");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Appendix, components: &[1] }"
+                    "SectionNumber { section_type: SectionType::Appendix, components: &[1], appendix_letter: None }"
                 );
             }
 
@@ -3381,13 +3440,14 @@ mod tests {
                 let mut sn = SectionNumber {
                     section_type: SectionType::Appendix,
                     components: vec![],
+                    appendix_letter: None,
                 };
                 sn.assign_next_number(3);
                 assert_eq!(sn.components(), [1, 1, 1]);
                 assert_eq!(sn.to_string(), "A.1.1");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Appendix, components: &[1, 1, 1] }"
+                    "SectionNumber { section_type: SectionType::Appendix, components: &[1, 1, 1], appendix_letter: None }"
                 );
             }
 
@@ -3396,6 +3456,7 @@ mod tests {
                 let mut sn = SectionNumber {
                     section_type: SectionType::Appendix,
                     components: vec![],
+                    appendix_letter: None,
                 };
                 sn.assign_next_number(3);
                 sn.assign_next_number(1);
@@ -3403,7 +3464,7 @@ mod tests {
                 assert_eq!(sn.to_string(), "B");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Appendix, components: &[2] }"
+                    "SectionNumber { section_type: SectionType::Appendix, components: &[2], appendix_letter: None }"
                 );
             }
 
@@ -3412,6 +3473,7 @@ mod tests {
                 let mut sn = SectionNumber {
                     section_type: SectionType::Appendix,
                     components: vec![],
+                    appendix_letter: None,
                 };
                 sn.assign_next_number(3);
                 sn.assign_next_number(1);
@@ -3420,9 +3482,92 @@ mod tests {
                 assert_eq!(sn.to_string(), "B.1");
                 assert_eq!(
                     format!("{sn:?}"),
-                    "SectionNumber { section_type: SectionType::Appendix, components: &[2, 1] }"
+                    "SectionNumber { section_type: SectionType::Appendix, components: &[2, 1], appendix_letter: None }"
                 );
             }
+
+            #[test]
+            fn appendix_letter_overrides_first_component() {
+                let mut sn = SectionNumber {
+                    section_type: SectionType::Appendix,
+                    components: vec![],
+                    appendix_letter: Some("\u{3b2}".to_owned()),
+                };
+                sn.assign_next_number(1);
+                sn.assign_next_number(2);
+                assert_eq!(sn.components(), [1, 1]);
+                assert_eq!(sn.appendix_letter(), Some("\u{3b2}"));
+                assert_eq!(sn.to_string(), "\u{3b2}.1");
+                assert_eq!(
+                    format!("{sn:?}"),
+                    "SectionNumber { section_type: SectionType::Appendix, components: &[1, 1], appendix_letter: Some(\"\u{3b2}\") }"
+                );
+            }
+        }
+    }
+
+    mod appendix_number_attribute {
+        use crate::{blocks::Block, tests::prelude::*};
+
+        // The `appendix-number` attribute is resolved as a counter (mirroring
+        // Ruby Asciidoctor), so its value is the letter *before* the first
+        // appendix and each appendix advances it.
+
+        #[test]
+        fn seeds_lettering_from_the_attribute() {
+            let doc = Parser::default()
+                .parse(":appendix-number: M\n\n[appendix]\n== One\n\n[appendix]\n== Two\n");
+
+            let caps: Vec<Option<&str>> = all_sections(&doc).iter().map(|s| s.caption()).collect();
+            assert_eq!(caps, vec![Some("Appendix N: "), Some("Appendix O: ")]);
+        }
+
+        #[test]
+        fn increments_a_numeric_value_numerically() {
+            let doc = Parser::default()
+                .parse(":appendix-number: 9\n\n[appendix]\n== One\n\n[appendix]\n== Two\n");
+
+            let caps: Vec<Option<&str>> = all_sections(&doc).iter().map(|s| s.caption()).collect();
+            assert_eq!(caps, vec![Some("Appendix 10: "), Some("Appendix 11: ")]);
+        }
+
+        #[test]
+        fn bare_attribute_resolves_to_default_seed() {
+            // A bare `:appendix-number:` takes the built-in default `@`, the
+            // character before `A`, so lettering still starts at `A`.
+            let doc = Parser::default()
+                .parse(":appendix-number:\n\n[appendix]\n== One\n\n[appendix]\n== Two\n");
+
+            let caps: Vec<Option<&str>> = all_sections(&doc).iter().map(|s| s.caption()).collect();
+            assert_eq!(caps, vec![Some("Appendix A: "), Some("Appendix B: ")]);
+        }
+
+        #[test]
+        fn letters_section_numbers_of_appendix_and_subsections() {
+            let doc = Parser::default()
+                .parse(":sectnums:\n:appendix-number: \u{3b1}\n\n[appendix]\n== One\n\n=== Sub\n");
+
+            let nums: Vec<Option<String>> = all_sections(&doc)
+                .iter()
+                .map(|s| s.section_number().map(|n| n.to_string()))
+                .collect();
+            assert_eq!(
+                nums,
+                vec![Some("\u{3b2}".to_owned()), Some("\u{3b2}.1".to_owned())]
+            );
+        }
+
+        #[test]
+        fn attribute_reads_back_as_the_current_letter() {
+            // Advancing the counter stores the new value back into the
+            // attribute, so a reference inside the appendix sees its letter.
+            let doc = Parser::default().parse("[appendix]\n== One\n\nLetter {appendix-number}.\n");
+
+            let section = first_section(&doc);
+            let Some(Block::Simple(paragraph)) = section.nested_blocks().next() else {
+                panic!("expected a simple block");
+            };
+            assert_eq!(paragraph.content().rendered(), "Letter A.");
         }
     }
 

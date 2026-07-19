@@ -184,6 +184,29 @@ impl<'src> Document<'src> {
                 blocks = section_blocks;
             }
 
+            // An abstract block is not permitted as a direct child of a book
+            // document without a doctitle. Asciidoctor's converter excludes
+            // such a block's content and warns; the parser keeps the block in
+            // the AST (as Asciidoctor does) and records the warning here, for
+            // a renderer to act on.
+            if matches!(
+                parser.attribute_value("doctype"),
+                InterpretedValue::Value(ref v) if v == "book"
+            ) && header.title().is_none()
+            {
+                for block in &blocks {
+                    if block.declared_style() == Some("abstract")
+                        && block.resolved_context().as_ref() == "open"
+                    {
+                        warnings.push(Warning {
+                            source: block.span(),
+                            warning: WarningType::AbstractBlockInBookWithoutDoctitle,
+                            origin: None,
+                        });
+                    }
+                }
+            }
+
             // Under `doctype: inline`, only the first eligible block is converted,
             // as bare inline content, and everything after it is dropped (the
             // rendering lives on the embed path). A compound or empty candidate
