@@ -90,13 +90,24 @@ impl Passthroughs {
             return;
         }
 
-        let replacer = PassthroughRestoreReplacer(self, parser);
-
-        if let Cow::Owned(new_result) =
-            PASS_WITH_INDEX.replace_all(content.rendered().as_ref(), replacer)
-        {
+        if let Cow::Owned(new_result) = PASS_WITH_INDEX.replace_all(
+            content.rendered().as_ref(),
+            PassthroughRestoreReplacer(self, parser),
+        ) {
             content.rendered = new_result.into();
         }
+
+        // A deferred cross-reference's explicit text is pulled out of the main
+        // rendered string before this point, so any passthrough placeholder it
+        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too —
+        // otherwise the placeholder sentinels leak into the link text.
+        content.restore_deferred_xref_passthroughs(|text| {
+            if let Cow::Owned(restored) =
+                PASS_WITH_INDEX.replace_all(text, PassthroughRestoreReplacer(self, parser))
+            {
+                *text = restored;
+            }
+        });
     }
 
     pub(super) fn push(&mut self, passthrough: Passthrough, dest: &mut String) {
@@ -191,23 +202,25 @@ impl Replacer for InlinePassMacroReplacer<'_> {
             }
 
             // Resolve the substitution list. An explicit but unrecognized
-            // substitution name (e.g. `pass:bogus[…]`) is a warning and falls
-            // back to no substitutions, mirroring Asciidoctor's
-            // `Substitutors#extract_passthroughs`.
+            // substitution name (e.g. `pass:bogus[…]`) is warned about and
+            // skipped while any recognized names in the list are still
+            // honored, mirroring Asciidoctor's `resolve_subs`.
             let subs = match caps.get(14).map(|m| m.as_str()) {
                 None => SubstitutionGroup::None,
-                Some(subs_list) => match SubstitutionGroup::from_custom_string(None, subs_list) {
-                    Some(group) => group,
-                    None => {
+                Some(subs_list) => {
+                    let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
+
+                    if !invalid.is_empty() {
                         self.parser.record_substitution_warning(
                             self.source,
                             WarningType::InvalidSubstitutionTypeForPassthroughMacro(
-                                subs_list.to_string(),
+                                invalid.join(", "),
                             ),
                         );
-                        SubstitutionGroup::None
                     }
-                },
+
+                    group
+                }
             };
 
             let mut text = caps[15].to_string();
@@ -541,18 +554,23 @@ impl Replacer for InlineStemMacroReplacer<'_> {
 
         // Resolve the substitution group. When no explicit substitution list is
         // given, HTML output applies only the special characters substitution.
+        // An unrecognized substitution name is warned about and skipped while
+        // any recognized names in the list are still honored, mirroring
+        // Asciidoctor's `resolve_subs`.
         let subs = match caps.get(3).map(|m| m.as_str()) {
             None => SubstitutionGroup::Stem,
-            Some(subs_list) => match SubstitutionGroup::from_custom_string(None, subs_list) {
-                Some(group) => group,
-                None => {
+            Some(subs_list) => {
+                let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
+
+                if !invalid.is_empty() {
                     self.parser.record_substitution_warning(
                         self.source,
-                        WarningType::InvalidSubstitutionTypeForStemMacro(subs_list.to_string()),
+                        WarningType::InvalidSubstitutionTypeForStemMacro(invalid.join(", ")),
                     );
-                    SubstitutionGroup::None
                 }
-            },
+
+                group
+            }
         };
 
         self.passthroughs.push(

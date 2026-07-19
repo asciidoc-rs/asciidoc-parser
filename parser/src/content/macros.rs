@@ -903,7 +903,7 @@ impl Replacer for InlineLinkReplacer<'_> {
                 link_text = Some(attrlist.as_str().to_owned());
             }
         } else {
-            if prefix == "link" || prefix == "\"" || prefix == "'" {
+            if prefix == "link:" || prefix == "\"" || prefix == "'" {
                 // Note from the Ruby implementation which also applies to this if clause:
 
                 // Invalid macro syntax (link: prefix w/o trailing square brackets or URL
@@ -928,11 +928,23 @@ impl Replacer for InlineLinkReplacer<'_> {
                     suffix = format!("){suffix}");
                 }
             }
+
+            // A bare URI scheme with no body left after trimming (e.g. `http://;`
+            // or `file://:`) is not a link; Asciidoctor leaves it as literal
+            // text.
+            if target.ends_with("://") {
+                dest.push_str(&caps[0]);
+                return;
+            }
         }
 
         let mut bare = false;
 
-        let link_text_for_attrlist = link_text.clone().unwrap_or_default();
+        // When the wrapped link text is parsed as an attribute list, its lines
+        // are joined with a space (matching Asciidoctor), so
+        // `link[Foo\nBar,role=foobar]` yields the text `Foo Bar`. The attribute
+        // list is parsed from this newline-normalized form.
+        let link_text_for_attrlist = link_text.clone().unwrap_or_default().replace('\n', " ");
         let span_for_attrlist = Span::new(&link_text_for_attrlist);
         let mut window: Option<&'static str> = None;
 
@@ -942,8 +954,15 @@ impl Replacer for InlineLinkReplacer<'_> {
             if link_text.contains('=') {
                 let (lt, attrs) = extract_attributes_from_text(&span_for_attrlist, self.0, None);
 
-                link_text = lt.replace("\\\"", "\"");
-                attrlist = attrs; // ???
+                // Only adopt the parsed result when a real named attribute split
+                // off (the positional value differs from the whole text).
+                // Otherwise the `=` was incidental — e.g. `[What You Need\n=
+                // What You Get]` — and the original wrapped text, newline and
+                // all, is the link text.
+                if lt != link_text_for_attrlist {
+                    link_text = lt.replace("\\\"", "\"");
+                    attrlist = attrs;
+                }
             }
 
             if link_text.ends_with('^') {
@@ -1012,7 +1031,7 @@ static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
         :                       # Colon after macro name
 
         (?:                     # Non-capturing outer group
-            ().                 #   capture group 2: empty target
+            ()                  #   capture group 2: empty target
           | ([^:\s\[] [^\s\[]*) #   capture group 3: valid target (no colon/space/'[')
         )
 
@@ -1040,15 +1059,18 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             return;
         }
 
+        // The target is the (possibly empty) group 3; an empty `link:[…]` /
+        // `mailto:[…]` target leaves group 3 absent.
+        let target_str = caps.get(3).map_or("", |m| m.as_str());
+
         let (mailto, mailto_text, mut target) = if caps.get(1).is_some() {
-            let mailto_text = &caps[3];
             (
                 caps.get(1).map(|c| c.as_str()),
-                Some(mailto_text),
-                format!("mailto:{mailto_text}"),
+                Some(target_str),
+                format!("mailto:{target_str}"),
             )
         } else {
-            (None, None, caps[3].to_string())
+            (None, None, target_str.to_string())
         };
 
         let mut attrlist: Option<Attrlist<'_>> = None;
@@ -1422,7 +1444,12 @@ impl Replacer for InlineAnchorReplacer<'_, '_> {
         // in that case it is used as value of xreflabel attribute.
 
         let (id, reftext) = if let Some(id) = caps.get(2) {
-            (id.as_str(), caps.get(3).map(|m| m.as_str().to_string()))
+            // Trailing whitespace is stripped from a shorthand reftext, so
+            // `[[foo,[FOO] ]]` registers `[FOO]` (matching Asciidoctor).
+            (
+                id.as_str(),
+                caps.get(3).map(|m| m.as_str().trim_end().to_string()),
+            )
         } else {
             (
                 &caps[4],
@@ -1524,11 +1551,23 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
         let (target, provided_text) = if let Some(inner) = caps.get(2) {
             // Shorthand form: split an optional ", reftext" off the id. The id
             // is always treated as a same-document reference, even when it
-            // contains a dot.
-            match inner.as_str().split_once(',') {
-                Some((id, text)) => (id.trim().to_string(), Some(text.trim().to_string())),
-                None => (inner.as_str().trim().to_string(), None),
+            // contains a dot. A leading `#` explicitly marks a same-document
+            // reference and is dropped (mirroring the `xref:` macro form).
+            let (id, text) = match inner.as_str().split_once(',') {
+                Some((id, text)) => (id.trim(), Some(text.trim().to_string())),
+                None => (inner.as_str().trim(), None),
+            };
+
+            // A target that already contains rendered inline markup (a `<`, which
+            // can only come from an earlier-substituted macro such as a link) is
+            // not a valid reference id. Asciidoctor leaves such a shorthand
+            // untouched, e.g. `<<link:https://example.com[], Example>>`.
+            if id.contains('<') {
+                dest.push_str(&caps[0]);
+                return;
             }
+
+            (id.strip_prefix('#').unwrap_or(id).to_string(), text)
         } else {
             // `xref:` macro form. A target that begins with `#` is an explicit
             // same-document reference (the hash is dropped); any other target
@@ -2275,7 +2314,7 @@ mod tests {
                                 col: 1,
                                 offset: 26,
                             },
-                            rendered: "<a href=\"https://chat.asciidoc.org\" class=\"bare button\" target=\"_blank\" rel=\"nofollow\" noopener>chat.asciidoc.org</a>",
+                            rendered: "<a href=\"https://chat.asciidoc.org\" class=\"bare button\" target=\"_blank\" rel=\"nofollow noopener\">chat.asciidoc.org</a>",
                         },
                         source: Span {
                             data: "https://chat.asciidoc.org[role=button,window=_blank,opts=nofollow]",
@@ -2448,7 +2487,7 @@ mod tests {
                                 col: 1,
                                 offset: 0,
                             },
-                            rendered: "mailto:[,Subscribe me]",
+                            rendered: "<a href=\"mailto:?subject=Subscribe%20me\"></a>",
                         },
                         source: Span {
                             data: "mailto:[,Subscribe me]",
