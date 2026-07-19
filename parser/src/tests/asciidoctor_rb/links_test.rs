@@ -3403,13 +3403,11 @@ fn should_use_doctitle_of_root_document_as_fallback_link_text_for_inter_document
     assert_xpath(&doc, r##"//td//a[@href="#"][text()="Document Title"]"##, 1);
 }
 
-// Surfaced gap: this crate does not parse a block attribute line above the
-// document title, so `[reftext="Links and Stuff"]` is not read as document
-// metadata (and the title line is not recognized as a title). The equivalent
-// `:reftext:` header attribute *is* honored as the self-reference link text.
-// Tracked in #805.
-non_normative!(
-    r###"
+#[test]
+fn should_use_reftext_on_document_as_fallback_link_text_if_inter_document_xref_points_to_current_doc_and_no_link_text_is_provided()
+ {
+    verifies!(
+        r###"
   test 'should use reftext on document as fallback link text if inter-document xref points to current doc and no link text is provided' do
     input = <<~'EOS'
     [reftext="Links and Stuff"]
@@ -3422,15 +3420,26 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Surfaced gap: this crate does not parse a block attribute line above the
-// document title, so `[reftext="Links and Stuff"]` is not read as document
-// metadata. The equivalent `:reftext:` header attribute *is* honored as the
-// self-reference link text.
-// Tracked in #805.
-non_normative!(
-    r###"
+    // A `[reftext="…"]` block attribute above the document title sets the
+    // document's `reftext` (see #805), which names the self-reference in
+    // preference to the doctitle.
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("[reftext=\"Links and Stuff\"]\n= Links & Stuff\n\nSee xref:test.adoc[]");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#">Links and Stuff</a>"##
+    );
+}
+
+#[test]
+fn should_use_reftext_on_document_as_fallback_link_text_if_xref_points_to_empty_fragment_and_no_link_text_is_provided()
+ {
+    verifies!(
+        r###"
   test 'should use reftext on document as fallback link text if xref points to empty fragment and no link text is provided' do
     input = <<~'EOS'
     [reftext="Links and Stuff"]
@@ -3443,7 +3452,19 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    // An empty-fragment self-reference (`xref:#[]`) is named the same way as a
+    // reference back to the current document by path.
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("[reftext=\"Links and Stuff\"]\n= Links & Stuff\n\nSee xref:#[]");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#">Links and Stuff</a>"##
+    );
+}
 
 #[test]
 fn should_use_fallback_link_text_if_inter_document_xref_points_to_current_doc_without_header_and_no_link_text_is_provided()

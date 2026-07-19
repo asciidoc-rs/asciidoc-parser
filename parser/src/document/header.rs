@@ -19,6 +19,7 @@ pub struct Header<'src> {
     title: Option<String>,
     main_title: Option<String>,
     subtitle: Option<String>,
+    id: Option<String>,
     attributes: Vec<Attribute<'src>>,
     author_line: Option<AuthorLine<'src>>,
     authors: Vec<Author>,
@@ -36,6 +37,7 @@ impl<'src> Header<'src> {
 
         let mut title_source: Option<Span<'src>> = None;
         let mut title: Option<String> = None;
+        let mut id: Option<String> = None;
         let mut attributes: Vec<Attribute> = vec![];
         let mut author_line: Option<AuthorLine<'src>> = None;
         let mut author_attribute: Option<Author> = None;
@@ -109,20 +111,39 @@ impl<'src> Header<'src> {
                 && line.starts_with('[')
                 && line.ends_with(']')
                 && document_title_marker(line_mi.after.take_normalized_line().item).is_some()
-                && let Some((separator, separator_warnings)) =
-                    parse_separator_attribute(line, parser)
+                && let Some((metadata, metadata_warnings)) =
+                    parse_document_metadata_attrlist(line, parser)
             {
-                warnings.extend(separator_warnings);
-                // A `separator` block attribute directly above the document title
-                // sets the subtitle separator. It behaves exactly like assigning
-                // the `title-separator` document attribute at this point in the
-                // header, so both mechanisms share the same partitioning logic
-                // and follow document order when both are present.
+                warnings.extend(metadata_warnings);
+                // A block attribute line directly above the document title assigns
+                // metadata to the *document* — its `id`, `reftext`, `role`, and
+                // options — mirroring Asciidoctor's `parse_document_header`. Each
+                // recognized value folds into the document's attributes at this
+                // point in the header, so it follows document order alongside any
+                // equivalent header attribute entry (e.g. `:reftext:`).
+                //
+                // A `separator` sets the subtitle separator; it behaves exactly
+                // like assigning the `title-separator` document attribute here, so
+                // both mechanisms share the same partitioning logic.
                 //
                 // The line is only intercepted when a document title immediately
                 // follows; otherwise it is block metadata for the body (e.g. a
                 // table's `separator`) and is left for the block parser.
-                parser.set_attribute_by_value_from_header("title-separator", separator);
+                if let Some(doc_id) = metadata.id {
+                    id = Some(doc_id);
+                }
+                if let Some(separator) = metadata.separator {
+                    parser.set_attribute_by_value_from_header("title-separator", separator);
+                }
+                if let Some(reftext) = metadata.reftext {
+                    parser.set_attribute_by_value_from_header("reftext", reftext);
+                }
+                if let Some(role) = metadata.role {
+                    parser.set_attribute_by_value_from_header("role", role);
+                }
+                for option in metadata.options {
+                    parser.set_attribute_by_value_from_header(format!("{option}-option"), "");
+                }
                 source = line_mi.after;
             } else if title.is_none()
                 && let Some(marker) = document_title_marker(line)
@@ -186,6 +207,7 @@ impl<'src> Header<'src> {
                     title,
                     main_title,
                     subtitle,
+                    id,
                     attributes,
                     author_line,
                     authors,
@@ -238,6 +260,15 @@ impl<'src> Header<'src> {
     /// attribute. Returns `None` when the title has no subtitle.
     pub fn subtitle(&self) -> Option<&str> {
         self.subtitle.as_deref()
+    }
+
+    /// Return the document's ID, if one was assigned.
+    ///
+    /// A document ID is set with a block attribute line directly above the
+    /// document title, using either the shorthand (`[#id]`) or longhand
+    /// (`[id=id]`) syntax. Returns `None` when no such ID was given.
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_deref()
     }
 
     /// Return an iterator over the attributes in this header.
@@ -326,27 +357,43 @@ fn document_title_marker(line: Span<'_>) -> Option<char> {
     }
 }
 
-/// Extract the value of a `separator` attribute from a block attribute line
-/// (e.g. `[separator=::]`) appearing above the document title.
+/// Document metadata folded from a block attribute line appearing directly
+/// above the document title.
 ///
-/// The `line` is expected to begin with `[` and end with `]`. Returns the
-/// `separator` value together with any warnings raised while parsing the
-/// attribute list if the line is a well-formed block attribute list that
-/// contains a `separator`, and `None` otherwise (so the caller can fall through
-/// to its normal handling of the line). The warnings are only surfaced when the
-/// line is actually consumed as a separator; otherwise the line is left for the
+/// Each field holds an already-owned copy of a recognized value, so the caller
+/// can apply them without borrowing the (dropped) attribute list.
+struct DocumentMetadata {
+    id: Option<String>,
+    separator: Option<String>,
+    reftext: Option<String>,
+    role: Option<String>,
+    options: Vec<String>,
+}
+
+/// Parse a block attribute line (e.g. `[reftext="…"]`, `[#id]`, `[role=…]`,
+/// `[separator=::]`) appearing above the document title into [`DocumentMetadata`].
+///
+/// The `line` is expected to begin with `[` and end with `]`. Returns the folded
+/// metadata together with any warnings raised while parsing the attribute list
+/// when the line is a well-formed block attribute list, and `None` otherwise (so
+/// the caller can fall through to its normal handling of the line, which then
+/// terminates the header). The warnings are only surfaced when the line is
+/// actually consumed as document metadata; otherwise the line is left for the
 /// block parser, which reports them on its own path.
-fn parse_separator_attribute<'src>(
+fn parse_document_metadata_attrlist<'src>(
     line: Span<'src>,
     parser: &Parser,
-) -> Option<(String, Vec<Warning<'src>>)> {
+) -> Option<(DocumentMetadata, Vec<Warning<'src>>)> {
     // Drop the enclosing square brackets now that the caller has confirmed they
     // are present.
     let inner = line.slice(1..line.len() - 1);
 
     // Reject forms that are not block attribute lists, mirroring the checks used
     // when parsing block metadata elsewhere: a leading space or tab, an empty
-    // list, or a `[[anchor]]` block anchor.
+    // list, or a `[[anchor]]` block anchor. The legacy double-bracket anchor
+    // above the document title is left unsupported (it terminates the header, as
+    // before); the single-bracket `[#id]` shorthand is the supported way to set
+    // a document ID.
     if inner.is_empty()
         || inner.starts_with(' ')
         || inner.starts_with('\t')
@@ -363,11 +410,25 @@ fn parse_separator_attribute<'src>(
         warnings,
     } = Attrlist::parse(inner, parser, AttrlistContext::Block);
 
-    let separator = attrlist
-        .named_attribute("separator")
-        .map(|attr| attr.value().to_string())?;
+    let roles = attrlist.roles();
 
-    Some((separator, warnings))
+    let metadata = DocumentMetadata {
+        id: attrlist.id().map(str::to_string),
+        separator: attrlist
+            .named_attribute("separator")
+            .map(|attr| attr.value().to_string()),
+        reftext: attrlist
+            .named_attribute("reftext")
+            .map(|attr| attr.value().to_string()),
+        role: if roles.is_empty() {
+            None
+        } else {
+            Some(roles.join(" "))
+        },
+        options: attrlist.options().iter().map(|o| o.to_string()).collect(),
+    };
+
+    Some((metadata, warnings))
 }
 
 /// Partition a document title into its main title and optional subtitle.
@@ -471,6 +532,7 @@ impl std::fmt::Debug for Header<'_> {
             .field("title", &self.title)
             .field("main_title", &self.main_title)
             .field("subtitle", &self.subtitle)
+            .field("id", &self.id)
             .field("attributes", &DebugSliceReference(&self.attributes))
             .field("author_line", &self.author_line)
             .field("authors", &self.authors)
@@ -1006,6 +1068,7 @@ mod tests {
         "Example Title",
     ),
     subtitle: None,
+    id: None,
     attributes: &[],
     author_line: None,
     authors: [],
@@ -1097,14 +1160,86 @@ mod tests {
     }
 
     #[test]
-    fn non_separator_block_attribute_terminates_header() {
-        // A block attribute line above the title that isn't a `separator`
-        // terminates the header without a title, preserving prior behavior.
-        let doc = Parser::default().parse("[foo=bar]\n= Not A Header Title");
+    fn unrecognized_block_attribute_above_title_is_consumed() {
+        // A well-formed block attribute line above the document title is now
+        // parsed as document metadata, so the title that follows is recognized
+        // even when the line carries no attribute this crate folds. An
+        // unrecognized attribute (here `foo`) simply contributes no document
+        // metadata rather than terminating the header.
+        let doc = Parser::default().parse("[foo=bar]\n= A Header Title");
         let header = doc.header();
 
-        assert_eq!(header.title(), None);
+        assert_eq!(header.title(), Some("A Header Title"));
         assert_eq!(header.subtitle(), None);
+        assert_eq!(doc.attribute_value("foo"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn reftext_block_attribute_above_title() {
+        // A `[reftext="…"]` block attribute above the title recovers the title
+        // (previously lost) and folds the value into the document's `reftext`
+        // attribute, matching the `:reftext:` header attribute.
+        let doc =
+            Parser::default().parse("[reftext=\"Links and Stuff\"]\n= Links & Stuff\n\nBody.");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Links &amp; Stuff"));
+        assert_eq!(
+            doc.attribute_value("reftext"),
+            InterpretedValue::Value("Links and Stuff")
+        );
+        assert_eq!(rendered_paragraphs(&doc), vec!["Body."]);
+    }
+
+    #[test]
+    fn id_block_attribute_above_title() {
+        // The `[#id]` shorthand above the title assigns the document ID and
+        // still recovers the title.
+        let doc = Parser::default().parse("[#docid]\n= Document Title\n\nBody.");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Document Title"));
+        assert_eq!(header.id(), Some("docid"));
+        assert_eq!(doc.id(), Some("docid"));
+
+        // The longhand `[id=…]` form is equivalent.
+        let doc = Parser::default().parse("[id=docid]\n= Document Title");
+        assert_eq!(doc.header().id(), Some("docid"));
+    }
+
+    #[test]
+    fn role_block_attribute_above_title() {
+        // A `[role=…]` block attribute above the title folds into the document's
+        // `role` attribute; multiple roles are space-joined.
+        let doc = Parser::default().parse("[role=special]\n= Document Title\n\nBody.");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Document Title"));
+        assert_eq!(
+            doc.attribute_value("role"),
+            InterpretedValue::Value("special")
+        );
+
+        // The dot shorthand assigns roles too, and they combine.
+        let doc = Parser::default().parse("[.one.two]\n= Document Title");
+        assert_eq!(
+            doc.attribute_value("role"),
+            InterpretedValue::Value("one two")
+        );
+    }
+
+    #[test]
+    fn options_block_attribute_above_title() {
+        // A `[opts=…]` block attribute above the title sets a `<name>-option`
+        // document attribute for each option.
+        let doc = Parser::default().parse("[opts=\"noheader,autowidth\"]\n= Document Title");
+
+        assert!(doc.is_attribute_set("noheader-option"));
+        assert!(doc.is_attribute_set("autowidth-option"));
+
+        // The `%` shorthand is equivalent.
+        let doc = Parser::default().parse("[%hardbreaks]\n= Document Title");
+        assert!(doc.is_attribute_set("hardbreaks-option"));
     }
 
     #[test]
