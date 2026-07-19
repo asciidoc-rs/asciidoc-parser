@@ -674,17 +674,22 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
             Block::List(_) | Block::Table(_) | Block::Admonition(_) | Block::Quote(_)
         );
 
-    // Add title as a separate sibling element if the block doesn't handle it
-    // internally.
-    if !handles_title_internally && let Some(title) = block.title() {
-        // Add title as a separate div element with class="title".
-        let title_node = VirtualNode::new("div").with_class("title").with_text(title);
-        parent.children.push(title_node);
-    }
+    // Build the title as a separate div element with class="title" if the
+    // block doesn't handle it internally. Where it lands depends on the block
+    // type: inside the `div.paragraph` wrapper for a default paragraph
+    // (matching Asciidoctor), or as a preceding sibling otherwise.
+    let title_node = if handles_title_internally {
+        None
+    } else {
+        block
+            .title()
+            .map(|title| VirtualNode::new("div").with_class("title").with_text(title))
+    };
 
     // Check if this is a paragraph that needs to be wrapped in div.paragraph.
     // Asciidoctor wraps top-level paragraphs in <div
-    // class="paragraph"><p>...</p></div>.
+    // class="paragraph"><p>...</p></div>, with any block title as a
+    // `div.title` inside the wrapper, before the `<p>`.
     if let Block::Simple(simple) = block
         && simple.declared_style().is_none()
         && simple.style() == SimpleBlockStyle::Paragraph
@@ -698,9 +703,17 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
             wrapper.id = p_node.id.take();
         }
 
+        if let Some(title_node) = title_node {
+            wrapper.children.push(title_node);
+        }
+
         wrapper.children.push(p_node);
         parent.children.push(wrapper);
     } else {
+        if let Some(title_node) = title_node {
+            parent.children.push(title_node);
+        }
+
         // Add the block itself (which will handle its own title if applicable).
         parent.children.push(block.to_virtual_dom());
     }
