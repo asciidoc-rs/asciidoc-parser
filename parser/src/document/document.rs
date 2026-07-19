@@ -566,6 +566,12 @@ impl<'src> IsBlock<'src> for Document<'src> {
         None
     }
 
+    fn id(&'src self) -> Option<&'src str> {
+        // A document ID is assigned with a block attribute line above the
+        // document title and is reflected in the Header.
+        self.internal.borrow_dependent().header.id()
+    }
+
     fn anchor(&'src self) -> Option<Span<'src>> {
         None
     }
@@ -1518,6 +1524,7 @@ mod tests {
             "Example Title",
         ),
         subtitle: None,
+        id: None,
         attributes: &[],
         author_line: None,
         authors: [],
