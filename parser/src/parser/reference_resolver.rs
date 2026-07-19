@@ -142,6 +142,31 @@ impl ResolvedReference {
     }
 }
 
+/// The default destination of a cross-reference that names *another* document
+/// (an [inter-document cross reference]).
+///
+/// The parser recognizes such a target – one that carries a `#`, or (for the
+/// `xref:` macro form) a file extension – and rewrites its path to an output
+/// path using the `relfileprefix`, `relfilesuffix`, and `outfilesuffix`
+/// attributes in effect at the reference. A [`ReferenceResolver`] that knows
+/// better (an Antora-style host that resolves targets across a corpus) may
+/// still return its own [`ResolvedReference`], which takes precedence; this is
+/// what is used when it does not.
+///
+/// [inter-document cross reference]: https://docs.asciidoctor.org/asciidoc/latest/macros/inter-document-xref/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterdocumentReference {
+    /// The hyperlink destination: the rewritten output [`path`](Self::path)
+    /// followed by the target's fragment, if it had one (e.g.
+    /// `tigers.html#about`).
+    pub href: String,
+
+    /// The rewritten output path on its own (e.g. `tigers.html`). This is the
+    /// display text of a reference that supplied none, since the referenced
+    /// document's reference text is not available to a single-document parse.
+    pub path: String,
+}
+
 /// A warning produced while resolving cross-references.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReferenceWarning {
@@ -176,6 +201,13 @@ pub struct ResolutionContext<'a> {
 
     /// Explicit link text supplied in the cross-reference, if any.
     pub provided_text: Option<&'a str>,
+
+    /// The destination the parser derived for a target that names another
+    /// document, or `None` when the target is a same-document reference.
+    ///
+    /// A resolver that can do better is free to ignore this and return its own
+    /// [`ResolvedReference`]; returning `None` leaves this default in place.
+    pub inter_document: Option<&'a InterdocumentReference>,
 }
 
 /// Resolves cross-reference targets to their destinations.
@@ -192,10 +224,10 @@ pub trait ReferenceResolver {
 /// [`Catalog`].
 ///
 /// It resolves bare IDs and natural cross-references (by reference text) to
-/// `#id` fragments. Targets that carry a path component (detected by the
-/// presence of `#`, e.g. `other-page.adoc#frag`) are treated as inter-document
-/// references and left unresolved — resolving those is the responsibility of a
-/// host-supplied resolver.
+/// `#id` fragments. A target that names another document (e.g.
+/// `other-page.adoc#frag`) is left unresolved here, so it falls back to the
+/// [`InterdocumentReference`] the parser derived from the target's path; only a
+/// host-supplied resolver, which can see the other document, can do better.
 #[derive(Clone, Copy, Debug)]
 pub struct CatalogResolver<'a> {
     catalog: &'a Catalog,
@@ -212,8 +244,8 @@ impl ReferenceResolver for CatalogResolver<'_> {
     fn resolve(&self, context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
         let target = context.target;
 
-        // Path-bearing (inter-document) targets are a host concern.
-        if target.contains('#') {
+        // Targets that name another document are a host concern.
+        if context.inter_document.is_some() {
             return None;
         }
 
@@ -256,6 +288,7 @@ mod tests {
             .resolve(&ResolutionContext {
                 target: "later",
                 provided_text: None,
+                inter_document: None,
             })
             .unwrap();
 
@@ -272,6 +305,7 @@ mod tests {
             .resolve(&ResolutionContext {
                 target: "The Later Section",
                 provided_text: None,
+                inter_document: None,
             })
             .unwrap();
 
@@ -289,6 +323,7 @@ mod tests {
                 .resolve(&ResolutionContext {
                     target: "missing",
                     provided_text: None,
+                    inter_document: None,
                 })
                 .is_none()
         );
@@ -304,6 +339,10 @@ mod tests {
                 .resolve(&ResolutionContext {
                     target: "other-page.adoc#frag",
                     provided_text: None,
+                    inter_document: Some(&InterdocumentReference {
+                        href: "other-page.html#frag".to_string(),
+                        path: "other-page.html".to_string(),
+                    }),
                 })
                 .is_none()
         );

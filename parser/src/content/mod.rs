@@ -13,6 +13,8 @@ pub(crate) use content::{
 mod macros;
 pub(crate) use macros::apply_macros_with_leading_anchor_registered;
 
+mod xref_target;
+
 pub(crate) mod passthroughs;
 pub(crate) use passthroughs::Passthroughs;
 

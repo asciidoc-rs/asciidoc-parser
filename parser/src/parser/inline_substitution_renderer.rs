@@ -5,7 +5,7 @@ use regex::Regex;
 use crate::{
     Parser,
     attributes::Attrlist,
-    parser::{ResolvedReference, SafeMode, XrefSignifier, XrefStyle},
+    parser::{InterdocumentReference, ResolvedReference, SafeMode, XrefSignifier, XrefStyle},
 };
 
 /// An implementation of `InlineSubstitutionRenderer` is used when converting
@@ -455,6 +455,14 @@ pub struct XrefRenderParams<'a> {
     /// when `xrefstyle` is unset, in which case the target's reference text is
     /// used verbatim.
     pub xrefstyle: Option<XrefStyle>,
+
+    /// The destination derived from a target that names another document, or
+    /// `None` for a same-document reference.
+    ///
+    /// This is what the reference renders as when
+    /// [`resolved`](Self::resolved) is `None`: an inter-document target is not
+    /// unresolved, it simply resolves to another document's output path.
+    pub inter_document: Option<&'a InterdocumentReference>,
 
     /// The resolved destination, or `None` if the reference is unresolved.
     pub resolved: Option<&'a ResolvedReference>,
@@ -931,8 +939,8 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let constraint_attrs = xref_constraint_attrs(params.window);
 
-        match params.resolved {
-            Some(resolved) => {
+        match (params.resolved, params.inter_document) {
+            (Some(resolved), _) => {
                 // Explicit link text always wins; otherwise use the target's
                 // reference text, optionally reformatted by the `xrefstyle`.
                 // Empty explicit text (`<<id,>>`) is treated as absent, matching
@@ -954,7 +962,23 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 ));
             }
 
-            None => {
+            // A reference to another document, which no resolver claimed:
+            // link to that document's output path. Without the other document
+            // in hand there is no reference text to fall back on, so the path
+            // itself is the link text (matching Asciidoctor).
+            (None, Some(inter_document)) => {
+                let text = params
+                    .provided_text
+                    .map(str::to_string)
+                    .unwrap_or_else(|| inter_document.path.clone());
+
+                dest.push_str(&format!(
+                    r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
+                    href = inter_document.href
+                ));
+            }
+
+            (None, None) => {
                 // Unresolved: link to the raw target and show bracketed text,
                 // mirroring Asciidoctor's behavior for a missing reference.
                 let text = params

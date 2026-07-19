@@ -42,8 +42,8 @@ pub(crate) use resolved_attributes::ResolvedAttributes;
 
 mod reference_resolver;
 pub use reference_resolver::{
-    CatalogResolver, ReferenceResolver, ReferenceWarning, ReferenceWarningKind, ResolutionContext,
-    ResolvedReference, XrefSignifier, XrefStyle,
+    CatalogResolver, InterdocumentReference, ReferenceResolver, ReferenceWarning,
+    ReferenceWarningKind, ResolutionContext, ResolvedReference, XrefSignifier, XrefStyle,
 };
 
 mod source_map;

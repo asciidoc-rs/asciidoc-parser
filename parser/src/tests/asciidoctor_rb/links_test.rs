@@ -45,9 +45,10 @@
 //! * **Include processing** (`include::[]`, `catalog[:includes]`) and
 //!   Ruby-internal APIs (`doc.register`, `using_memory_logger`) — not modeled
 //!   the same way here.
-//! * **Inter-document xref path resolution** — the crate does not (yet) rewrite
-//!   an xref target such as `tigers#` or `tigers.adoc#` into a `tigers.html`
-//!   path; it treats every `<<..>>` / `xref:` target as an internal fragment.
+//! * **Inter-document self-xref fallback text** – a target that points back at
+//!   the current document (`xref:test.adoc[]` where `docname` is `test`) is
+//!   rewritten to that document's output path rather than collapsing to `#`
+//!   with the doctitle as its link text.
 //! * A number of **other surfaced incompatibilities**, each carrying a `//
 //!   NOTE:` describing how the crate diverges from Asciidoctor.
 
@@ -2165,24 +2166,30 @@ non_normative!(
 "###
 );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+#[test]
+fn xref_using_angled_bracket_syntax_with_path_sans_extension() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with path sans extension' do
     doc = document_from_string '<<tigers#>>', standalone: false
     assert_xpath '//a[@href="tigers.html"][text() = "tigers.html"]', doc.convert, 1
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse(r##"<<tigers#>>"##);
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="tigers.html">tigers.html</a>"##
+    );
+}
+
+#[test]
+fn inter_document_xref_shorthand_syntax_should_assume_asciidoc_extension_if_asciidoc_extension_not_present()
+ {
+    verifies!(
+        r###"
   test 'inter-document xref shorthand syntax should assume AsciiDoc extension if AsciiDoc extension not present' do
     {
       'using-.net-web-services#' => 'Using .NET web services',
@@ -2195,13 +2202,30 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    for (target, text) in [
+        ("using-.net-web-services#", "Using .NET web services"),
+        ("asciidoctor.1#", "Asciidoctor Manual"),
+        ("path/to/document#", "Document Title"),
+    ] {
+        let doc = Parser::default().parse(&format!("<<{target},{text}>>"));
+
+        assert_eq!(
+            rendered_paragraphs(&doc)[0],
+            format!(
+                r##"<a href="{path}.html">{text}</a>"##,
+                path = target.trim_end_matches('#')
+            )
+        );
+    }
+}
+
+#[test]
+fn xref_macro_with_explicit_inter_document_target_should_assume_implicit_asciidoc_file_extension_if_no_file_extension_is_present()
+ {
+    verifies!(
+        r###"
   test 'xref macro with explicit inter-document target should assume implicit AsciiDoc file extension if no file extension is present' do
     {
       'using-.net-web-services#' => 'Using .NET web services',
@@ -2221,13 +2245,48 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    // A target that already carries a file extension keeps it: the extension
+    // marks a file that is not AsciiDoc source, so no output suffix is added.
+    for (target, text) in [
+        ("using-.net-web-services#", "Using .NET web services"),
+        ("asciidoctor.1#", "Asciidoctor Manual"),
+    ] {
+        let doc = Parser::default().parse(&format!("xref:{target}[{text}]"));
+
+        assert_eq!(
+            rendered_paragraphs(&doc)[0],
+            format!(
+                r##"<a href="{path}">{text}</a>"##,
+                path = target.trim_end_matches('#')
+            )
+        );
+    }
+
+    // A target with no file extension (a period in an earlier path segment is
+    // not one) names an AsciiDoc document, so it takes the output suffix.
+    for (target, text) in [
+        ("document#", "Document Title"),
+        ("path/to/document#", "Document Title"),
+        ("include.d/document#", "Document Title"),
+    ] {
+        let doc = Parser::default().parse(&format!("xref:{target}[{text}]"));
+
+        assert_eq!(
+            rendered_paragraphs(&doc)[0],
+            format!(
+                r##"<a href="{path}.html">{text}</a>"##,
+                path = target.trim_end_matches('#')
+            )
+        );
+    }
+}
+
+#[test]
+fn xref_macro_with_implicit_inter_document_target_should_preserve_path_with_file_extension() {
+    verifies!(
+        r###"
   test 'xref macro with implicit inter-document target should preserve path with file extension' do
     {
       'refcard.pdf' => 'Refcard',
@@ -2245,26 +2304,56 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    for (path, text) in [
+        ("refcard.pdf", "Refcard"),
+        ("asciidoctor.1", "Asciidoctor Manual"),
+    ] {
+        let doc = Parser::default().parse(&format!("xref:{path}[{text}]"));
+
+        assert_eq!(
+            rendered_paragraphs(&doc)[0],
+            format!(r##"<a href="{path}">{text}</a>"##)
+        );
+    }
+
+    // The period here belongs to a directory name, not a file extension, so
+    // the target is read as an ID within this document.
+    let doc = Parser::default().parse(r##"xref:sections.d/first[First Section]"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="#sections.d/first">First Section</a>"##
+    );
+}
+
+#[test]
+fn inter_document_xref_should_only_remove_the_file_extension_part_if_the_path_contains_a_period_elsewhere()
+ {
+    verifies!(
+        r###"
   test 'inter-document xref should only remove the file extension part if the path contains a period elsewhere' do
     result = convert_string_to_embedded '<<using-.net-web-services.adoc#,Using .NET web services>>'
     assert_xpath '//a[@href="using-.net-web-services.html"][text() = "Using .NET web services"]', result, 1
   end
 
 "###
-);
+    );
 
-// Surfaced incompatibility (inter-document xref): Asciidoctor keeps
-// `xref:using-.net-web-services` as an external path; this crate rewrites it to
-// the internal fragment `#using-.net-web-services`. Tracked in #773.
-non_normative!(
-    r###"
+    let doc =
+        Parser::default().parse(r##"<<using-.net-web-services.adoc#,Using .NET web services>>"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="using-.net-web-services.html">Using .NET web services</a>"##
+    );
+}
+
+#[test]
+fn xref_macro_target_containing_dot_should_be_interpreted_as_a_path_unless_prefixed_by_hash() {
+    verifies!(
+        r###"
   test 'xref macro target containing dot should be interpreted as a path unless prefixed by #' do
     result = convert_string_to_embedded 'xref:using-.net-web-services[Using .NET web services]'
     assert_xpath '//a[@href="using-.net-web-services"][text() = "Using .NET web services"]', result, 1
@@ -2273,33 +2362,65 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse(r##"xref:using-.net-web-services[Using .NET web services]"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="using-.net-web-services">Using .NET web services</a>"##
+    );
+
+    let doc =
+        Parser::default().parse(r##"xref:#using-.net-web-services[Using .NET web services]"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="#using-.net-web-services">Using .NET web services</a>"##
+    );
+}
+
+#[test]
+fn should_not_interpret_double_underscore_in_target_of_xref_macro_if_sequence_is_preceded_by_a_backslash()
+ {
+    verifies!(
+        r###"
   test 'should not interpret double underscore in target of xref macro if sequence is preceded by a backslash' do
     result = convert_string_to_embedded 'xref:doc\__with_double__underscore.adoc[text]'
     assert_xpath '//a[@href="doc__with_double__underscore.html"][text() = "text"]', result, 1
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse(r##"xref:doc\__with_double__underscore.adoc[text]"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="doc__with_double__underscore.html">text</a>"##
+    );
+}
+
+#[test]
+fn should_not_interpret_double_underscore_in_target_of_xref_shorthand_if_sequence_is_preceded_by_a_backslash()
+ {
+    verifies!(
+        r###"
   test 'should not interpret double underscore in target of xref shorthand if sequence is preceded by a backslash' do
     result = convert_string_to_embedded '<<doc\__with_double__underscore.adoc#,text>>'
     assert_xpath '//a[@href="doc__with_double__underscore.html"][text() = "text"]', result, 1
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse(r##"<<doc\__with_double__underscore.adoc#,text>>"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="doc__with_double__underscore.html">text</a>"##
+    );
+}
 
 // Backend-specific test: DocBook output is out of scope for this crate.
 non_normative!(
@@ -2312,31 +2433,45 @@ non_normative!(
 "###
 );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+#[test]
+fn xref_using_angled_bracket_syntax_with_ancestor_path_sans_extension() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with ancestor path sans extension' do
     doc = document_from_string '<<../tigers#,tigers>>', standalone: false
     assert_xpath '//a[@href="../tigers.html"][text() = "tigers"]', doc.convert, 1
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse(r##"<<../tigers#,tigers>>"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="../tigers.html">tigers</a>"##
+    );
+}
+
+#[test]
+fn xref_using_angled_bracket_syntax_with_absolute_path_sans_extension() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with absolute path sans extension' do
     doc = document_from_string '<</path/to/tigers#,tigers>>', standalone: false
     assert_xpath '//a[@href="/path/to/tigers.html"][text() = "tigers"]', doc.convert, 1
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse(r##"<</path/to/tigers#,tigers>>"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="/path/to/tigers.html">tigers</a>"##
+    );
+}
 
 #[test]
 fn xref_using_angled_bracket_syntax_with_path_and_extension() {
@@ -2359,31 +2494,45 @@ fn xref_using_angled_bracket_syntax_with_path_and_extension() {
     );
 }
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+#[test]
+fn xref_using_angled_bracket_syntax_with_path_and_extension_with_hash() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with path and extension with hash' do
     doc = document_from_string '<<tigers.adoc#>>', standalone: false
     assert_xpath '//a[@href="tigers.html"][text() = "tigers.html"]', doc.convert, 1
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse(r##"<<tigers.adoc#>>"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="tigers.html">tigers.html</a>"##
+    );
+}
+
+#[test]
+fn xref_using_angled_bracket_syntax_with_path_and_extension_with_fragment() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with path and extension with fragment' do
     doc = document_from_string '<<tigers.adoc#id>>', standalone: false
     assert_xpath '//a[@href="tigers.html#id"][text() = "tigers.html"]', doc.convert, 1
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse(r##"<<tigers.adoc#id>>"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="tigers.html#id">tigers.html</a>"##
+    );
+}
 
 // Compat mode is out of scope for this crate.
 non_normative!(
@@ -2398,50 +2547,70 @@ non_normative!(
 "###
 );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+#[test]
+fn xref_using_macro_syntax_with_path_and_extension() {
+    verifies!(
+        r###"
   test 'xref using macro syntax with path and extension' do
     doc = document_from_string 'xref:tigers.adoc[]', standalone: false
     assert_xpath '//a[@href="tigers.html"][text() = "tigers.html"]', doc.convert, 1
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse(r##"xref:tigers.adoc[]"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="tigers.html">tigers.html</a>"##
+    );
+}
+
+#[test]
+fn xref_using_angled_bracket_syntax_with_path_and_fragment() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with path and fragment' do
     doc = document_from_string '<<tigers#about>>', standalone: false
     assert_xpath '//a[@href="tigers.html#about"][text() = "tigers.html"]', doc.convert, 1
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse(r##"<<tigers#about>>"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="tigers.html#about">tigers.html</a>"##
+    );
+}
+
+#[test]
+fn xref_using_angled_bracket_syntax_with_path_fragment_and_text() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with path, fragment and text' do
     doc = document_from_string '<<tigers#about,About Tigers>>', standalone: false
     assert_xpath '//a[@href="tigers.html#about"][text() = "About Tigers"]', doc.convert, 1
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse(r##"<<tigers#about,About Tigers>>"##);
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="tigers.html#about">About Tigers</a>"##
+    );
+}
+
+#[test]
+fn xref_using_angled_bracket_syntax_with_path_and_custom_relfilesuffix_and_outfilesuffix() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with path and custom relfilesuffix and outfilesuffix' do
     attributes = { 'relfileprefix' => '../', 'outfilesuffix' => '/' }
     doc = document_from_string '<<tigers#about,About Tigers>>', standalone: false, attributes: attributes
@@ -2449,13 +2618,24 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Inter-document xref path resolution is not implemented: this crate treats the
-// target as an internal fragment rather than rewriting it to a `*.html`-style
-// path. Tracked in #773.
-non_normative!(
-    r###"
+    // `relfilesuffix` is unset here, so it tracks `outfilesuffix`.
+    let doc = doc_with(
+        r##"<<tigers#about,About Tigers>>"##,
+        &[("relfileprefix", "../"), ("outfilesuffix", "/")],
+    );
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="../tigers/#about">About Tigers</a>"##
+    );
+}
+
+#[test]
+fn xref_using_angled_bracket_syntax_with_path_and_custom_relfilesuffix() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with path and custom relfilesuffix' do
     attributes = { 'relfilesuffix' => '/' }
     doc = document_from_string '<<tigers#about,About Tigers>>', standalone: false, attributes: attributes
@@ -2463,7 +2643,18 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    let doc = doc_with(
+        r##"<<tigers#about,About Tigers>>"##,
+        &[("relfilesuffix", "/")],
+    );
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="tigers/#about">About Tigers</a>"##
+    );
+}
 
 // Include processing / `catalog[:includes]` is out of scope for this crate.
 non_normative!(
@@ -2585,10 +2776,10 @@ fn xref_with_escaped_text() {
     );
 }
 
-// Inter-document xref path resolution (in a section title) is not implemented;
-// this crate emits an internal fragment. Tracked in #773.
-non_normative!(
-    r###"
+#[test]
+fn xref_with_target_that_begins_with_attribute_reference_in_title() {
+    verifies!(
+        r###"
   test 'xref with target that begins with attribute reference in title' do
     ['<<{lessonsdir}/lesson-1#,Lesson 1>>', 'xref:{lessonsdir}/lesson-1.adoc[Lesson 1]'].each do |xref|
       input = <<~EOS
@@ -2606,7 +2797,22 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    for xref in [
+        "<<{lessonsdir}/lesson-1#,Lesson 1>>",
+        "xref:{lessonsdir}/lesson-1.adoc[Lesson 1]",
+    ] {
+        let doc = Parser::default().parse(&format!(
+            ":lessonsdir: lessons\n\n[#lesson-1-listing]\n== {xref}\n\nA summary of the first lesson.\n"
+        ));
+
+        assert_eq!(
+            first_section(&doc).section_title(),
+            r##"<a href="lessons/lesson-1.html">Lesson 1</a>"##
+        );
+    }
+}
 
 // Ruby-internal API: manually seeds a ref via `doc.register` /
 // `Asciidoctor::Inline.new`, which this crate does not expose.

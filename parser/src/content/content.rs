@@ -108,6 +108,12 @@ pub(crate) struct XrefSegment {
     /// verbatim.
     pub(crate) xrefstyle: Option<crate::parser::XrefStyle>,
 
+    /// The destination derived from a target that names another document, or
+    /// `None` for a same-document reference. Computed during substitution,
+    /// since it depends on the path attributes in effect at the reference; it
+    /// is the fallback when [`resolved`](Self::resolved) is `None`.
+    pub(crate) inter_document: Option<crate::parser::InterdocumentReference>,
+
     /// The resolved destination, filled in by resolution; `None` until then.
     pub(crate) resolved: Option<crate::parser::ResolvedReference>,
 }
@@ -368,12 +374,19 @@ impl<'src> Content<'src> {
                 xref.resolved = resolver.resolve(&ResolutionContext {
                     target: &xref.target,
                     provided_text: xref.provided_text.as_deref(),
+                    inter_document: xref.inter_document.as_ref(),
                 });
 
                 // A reference whose placeholder is no longer in the template was
                 // re-homed into a footnote (see `rehome_xref_placeholders`); the
                 // footnote resolves and reports it, so it is not reported here.
-                if xref.resolved.is_none() && template.contains(&Content::xref_placeholder(index)) {
+                // A reference to another document is never reported: nothing in
+                // this document could have resolved it, and it still renders as
+                // a link to that document's output path.
+                if xref.resolved.is_none()
+                    && xref.inter_document.is_none()
+                    && template.contains(&Content::xref_placeholder(index))
+                {
                     warnings.push(ReferenceWarning {
                         target: xref.target.clone(),
                         kind: ReferenceWarningKind::Unresolved,
@@ -490,6 +503,7 @@ fn render_template(
                         window: xref.window.as_deref(),
                         roles: &xref.roles,
                         xrefstyle: xref.xrefstyle,
+                        inter_document: xref.inter_document.as_ref(),
                         resolved: xref.resolved.as_ref(),
                     },
                     &mut out,
@@ -559,9 +573,10 @@ impl FootnoteDeferred {
             xref.resolved = resolver.resolve(&ResolutionContext {
                 target: &xref.target,
                 provided_text: xref.provided_text.as_deref(),
+                inter_document: xref.inter_document.as_ref(),
             });
 
-            if xref.resolved.is_none() {
+            if xref.resolved.is_none() && xref.inter_document.is_none() {
                 warnings.push(ReferenceWarning {
                     target: xref.target.clone(),
                     kind: ReferenceWarningKind::Unresolved,
@@ -675,6 +690,7 @@ mod tests {
                 window: None,
                 roles: vec![],
                 xrefstyle: None,
+                inter_document: None,
                 resolved: None,
             }
         }
