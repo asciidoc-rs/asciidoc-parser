@@ -297,7 +297,7 @@ impl<'p> PreprocessorState<'p> {
             } else if line.starts_with("include::")
                 && let Some(caps) = INCLUDE_DIRECTIVE.captures(line.data())
             {
-                let target = self.substitute_attributes(&caps[1]);
+                let target = self.substitute_attributes(&caps[1], MissingAttribute::KeepLiteral);
 
                 if self.parser.safe >= SafeMode::Secure {
                     // The include directive is disabled at `SafeMode::Secure`
@@ -627,14 +627,15 @@ impl<'p> PreprocessorState<'p> {
     }
 
     /// Apply attribute substitution to a string, replacing {attribute-name}
-    /// patterns with their corresponding values from the parser.
-    fn substitute_attributes(&self, input: &str) -> String {
+    /// patterns with their corresponding values from the parser. A reference to
+    /// an unset attribute is handled per `missing`.
+    fn substitute_attributes(&self, input: &str, missing: MissingAttribute) -> String {
         if !input.contains('{') {
             return input.to_string();
         }
 
         #[derive(Debug)]
-        struct AttributeReplacer<'p>(&'p Parser);
+        struct AttributeReplacer<'p>(&'p Parser, MissingAttribute);
 
         impl Replacer for AttributeReplacer<'_> {
             fn replace_append(&mut self, caps: &regex::Captures<'_>, dest: &mut String) {
@@ -650,7 +651,9 @@ impl<'p> PreprocessorState<'p> {
                 }
 
                 if !self.0.has_attribute(attr_name) {
-                    dest.push_str(&caps[0]);
+                    if matches!(self.1, MissingAttribute::KeepLiteral) {
+                        dest.push_str(&caps[0]);
+                    }
                     return;
                 }
 
@@ -663,7 +666,7 @@ impl<'p> PreprocessorState<'p> {
         let result: Cow<'_, str> = input.into();
 
         if let Cow::Owned(new_result) =
-            ATTRIBUTE_REFERENCE.replace_all(&result, AttributeReplacer(self.parser))
+            ATTRIBUTE_REFERENCE.replace_all(&result, AttributeReplacer(self.parser, missing))
         {
             new_result
         } else {
@@ -1064,10 +1067,11 @@ impl<'p> PreprocessorState<'p> {
 
     /// Resolve one side of an `ifeval` expression to a typed [`Value`].
     ///
-    /// Attribute references are substituted first. A value enclosed in single
-    /// or double quotes is always a string; otherwise it is coerced per the
-    /// documented rules (empty → nil, `true`/`false` → boolean, a value with a
-    /// period → float, anything else → integer).
+    /// Attribute references are substituted first; a reference to an unset
+    /// attribute resolves to the empty string, as in Asciidoctor. A value
+    /// enclosed in single or double quotes is always a string; otherwise it is
+    /// coerced per the documented rules (empty → nil, `true`/`false` →
+    /// boolean, a value with a period → float, anything else → integer).
     fn resolve_expr_val(&self, raw: &str) -> Value {
         let raw = raw.trim();
 
@@ -1078,10 +1082,24 @@ impl<'p> PreprocessorState<'p> {
             .or_else(|| raw.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')));
 
         match quoted_inner {
-            Some(inner) => Value::Str(self.substitute_attributes(inner)),
-            None => coerce_unquoted(&self.substitute_attributes(raw)),
+            Some(inner) => Value::Str(self.substitute_attributes(inner, MissingAttribute::Drop)),
+            None => coerce_unquoted(&self.substitute_attributes(raw, MissingAttribute::Drop)),
         }
     }
+}
+
+/// How attribute substitution treats a reference to an unset attribute.
+#[derive(Clone, Copy, Debug)]
+enum MissingAttribute {
+    /// Leave the `{name}` reference in place unchanged, deferring to normal
+    /// content parsing (and its `attribute-missing` handling) downstream.
+    KeepLiteral,
+
+    /// Resolve the reference to the empty string. This mirrors Asciidoctor's
+    /// `attribute_missing: 'drop'` option, which its `ifeval` operand
+    /// resolution always applies regardless of the `attribute-missing`
+    /// document attribute (see issue #779).
+    Drop,
 }
 
 /// A value that one side of an `ifeval` expression has been coerced to.

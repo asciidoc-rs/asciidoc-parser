@@ -1947,6 +1947,15 @@ fn parse_asciidoc_cell_body<'src>(
     // numbering continues across the cell as Asciidoctor does.
     let saved_footnotes = parser.take_footnotes();
 
+    // A block title carried over from a section heading (see
+    // `SectionBlock::parse`) must not cross this nested-document boundary in
+    // either direction: a title left pending by the cell — e.g. a trailing
+    // titled empty section — must not leak out and be claimed by the enclosing
+    // document's next block, and (defensively) any parent-pending title must
+    // not be claimed by the cell's first block. Reset it to `None` for the cell
+    // and restore the parent's value afterward, like the footnote registry.
+    let saved_pending_block_title = parser.pending_block_title.take();
+
     // Mark that we are inside an AsciiDoc cell (a nested document) for the
     // duration of the parse, so a table found within defaults its cell separator
     // to `!` rather than `|` (matching Asciidoctor's `Document#nested?`).
@@ -1955,6 +1964,7 @@ fn parse_asciidoc_cell_body<'src>(
     parser.nested_document_depth -= 1;
     warnings.append(&mut maw.warnings);
 
+    parser.pending_block_title = saved_pending_block_title;
     parser.restore_footnotes(saved_footnotes);
 
     let inline = matches!(

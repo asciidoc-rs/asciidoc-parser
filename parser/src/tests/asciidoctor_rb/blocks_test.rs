@@ -4738,13 +4738,6 @@ mod metadata {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor. A block title placed above a section
-    // heading is not carried over to the first block inside that section by
-    // this crate, so the paragraph has no title. Kept `#[ignore]`d with the
-    // Ruby-intended assertions.
-    // TODO(#782): carry a block title above a section onto the section's first
-    // block.
-    #[ignore]
     #[test]
     fn block_title_above_section_gets_carried_over_to_first_block_in_section() {
         verifies!(
@@ -4775,17 +4768,19 @@ mod metadata {
         assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]", 1);
     }
 
-    // NOTE: divergence from Asciidoctor (block-title carryover; see
-    // `block_title_above_section_gets_carried_over_to_first_block_in_section`).
-    // The crate does emit the `Level0SectionHeadingNotSupported` warning at
-    // line 2 (matching the Ruby error), but the surrounding structure differs.
-    // TODO(#782): demote a document title to a section title when a block title
-    // precedes it.
-    #[ignore]
-    #[test]
-    fn block_title_above_document_title_demotes_document_title_to_a_section_title() {
-        verifies!(
-            r#"
+    // NOTE: out of scope. Both tests below depend on demoting a body-level
+    // document title (`= Title`) to a level-0 section — the "level 0 sections
+    // can only be used when doctype is book" behavior. This crate does not
+    // support level-0 sections in the document body (with or without
+    // `doctype: book`): a `=` heading in the body is declined as an unsupported
+    // level-0 heading rather than becoming a level-0 section, so the demoted
+    // `<h1>`/`.sect1` structure these tests assert is never produced. That is a
+    // deliberate divergence, not a deferral, so the tests are reproduced
+    // verbatim (`non_normative!`) rather than ported. The block-title carryover
+    // they also exercise is itself implemented (#782); see
+    // `block_title_above_section_gets_carried_over_to_first_block_in_section`.
+    non_normative!(
+        r#"
     test 'block title above document title demotes document title to a section title' do
       input = <<~'EOS'
       .Block title
@@ -4802,28 +4797,6 @@ mod metadata {
       assert_message @logger, :ERROR, '<stdin>: line 2: level 0 sections can only be used when doctype is book', Hash
     end
 
-"#
-        );
-
-        let doc = Parser::default().parse(".Block title\n= Section Title\n\nsection paragraph\n");
-        assert_xpath(&doc, "//*[@id=\"content\"]/h1[text()=\"Section Title\"]", 1);
-        assert_xpath(
-            &doc,
-            "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
-            1,
-        );
-    }
-
-    // NOTE: divergence from Asciidoctor (block-title carryover; see
-    // `block_title_above_section_gets_carried_over_to_first_block_in_section`).
-    // TODO(#782): carry a block title above a demoted document title onto the
-    // first section's first block.
-    #[ignore]
-    #[test]
-    fn block_title_above_document_title_gets_carried_over_to_first_block_in_first_section_if_no_preamble()
-     {
-        verifies!(
-            r#"
     test 'block title above document title gets carried over to first block in first section if no preamble' do
       input = <<~'EOS'
       :doctype: book
@@ -4842,17 +4815,7 @@ mod metadata {
     end
 
 "#
-        );
-
-        let doc = Parser::default().parse(
-            ":doctype: book\n.Block title\n= Document Title\n\n== First Section\n\nparagraph\n",
-        );
-        assert_xpath(
-            &doc,
-            "//*[@class=\"sect1\"]//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
-            1,
-        );
-    }
+    );
 
     // NOTE: divergence from Asciidoctor. This crate does not render a macro
     // link inside a block title (nor were the referenced attributes supplied),
@@ -7439,17 +7402,17 @@ mod abstract_and_part_intro {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor pervasive to this context. This crate
-    // does not model the `abstract` and `partintro` block styles: an
-    // `[abstract]` open block is not converted to a `quoteblock.abstract` (nor
-    // does an `[abstract]` paragraph gain the `abstract` class), a `[partintro]`
-    // open block does not gain the `partintro` class, and the associated
-    // validation warnings/errors are not emitted. The HTML tests are kept
-    // `#[ignore]`d with the Ruby-intended assertions; the DocBook variants are
-    // reproduced as `non_normative`.
-    // TODO: implement the abstract (#783) and partintro block styles.
+    // NOTE: the `abstract` block style (#783) is modeled: an `[abstract]` open
+    // block (or paragraph) resolves to the `open` context with the `abstract`
+    // declared style, renders as `quoteblock.abstract`, and an abstract used as
+    // a direct child of a doctitle-less book document is excluded with a
+    // warning. The `partintro` block style is still unmodeled: a `[partintro]`
+    // open block does not gain the `partintro` class, and its validation
+    // errors are not emitted; those tests are kept `#[ignore]`d with the
+    // Ruby-intended assertions. The DocBook variants are reproduced as
+    // `non_normative`.
+    // TODO: implement the partintro block style (#794).
 
-    #[ignore]
     #[test]
     fn should_make_abstract_on_open_block_without_title_a_quote_block_for_article() {
         verifies!(
@@ -7488,7 +7451,6 @@ mod abstract_and_part_intro {
         assert_css(&doc, ".quoteblock > blockquote > .paragraph", 2);
     }
 
-    #[ignore]
     #[test]
     fn should_make_abstract_on_open_block_with_title_a_quote_block_with_title_for_article() {
         verifies!(
@@ -7527,7 +7489,6 @@ mod abstract_and_part_intro {
         assert_css(&doc, ".quoteblock > .title", 1);
     }
 
-    #[ignore]
     #[test]
     fn should_allow_abstract_in_document_with_title_if_doctype_is_book() {
         verifies!(
@@ -7551,9 +7512,9 @@ mod abstract_and_part_intro {
         let doc = Parser::default()
             .parse("= Book\n:doctype: book\n\n[abstract]\nAbstract for book with title is valid\n");
         assert_css(&doc, ".abstract", 1);
+        assert!(doc.warnings().next().is_none());
     }
 
-    #[ignore]
     #[test]
     fn should_not_allow_abstract_as_direct_child_of_document_if_doctype_is_book() {
         verifies!(
@@ -7577,6 +7538,13 @@ mod abstract_and_part_intro {
         let doc = Parser::default()
             .parse(":doctype: book\n\n[abstract]\nAbstract for book without title is invalid.\n");
         assert_css(&doc, ".abstract", 0);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings[0].warning,
+            WarningType::AbstractBlockInBookWithoutDoctitle
+        ));
     }
 
     // The DocBook abstract variants are backend-specific and out of scope.
@@ -7879,11 +7847,6 @@ mod substitutions {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor. An empty `[subs=","]` list is not
-    // honored by this crate — a verbatim block keeps its default (Verbatim)
-    // substitution group rather than an empty list. Kept `#[ignore]`d.
-    // TODO(#784): honor an empty `subs` list.
-    #[ignore]
     #[test]
     fn processor_should_not_crash_if_subs_are_empty() {
         verifies!(

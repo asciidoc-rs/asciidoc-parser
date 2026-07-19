@@ -320,6 +320,25 @@ impl<'src> Content<'src> {
         self.rebuild_rendered(renderer);
     }
 
+    /// Applies `restore` to the explicit text of every deferred
+    /// cross-reference.
+    ///
+    /// A deferred reference's text is captured out of the main rendered string
+    /// during macro substitution, so passthrough placeholders inside it are not
+    /// reached by the ordinary restore pass. This lets that pass reach them.
+    pub(crate) fn restore_deferred_xref_passthroughs(
+        &mut self,
+        mut restore: impl FnMut(&mut String),
+    ) {
+        if let Some(deferred) = self.deferred.as_mut() {
+            for xref in &mut deferred.xrefs {
+                if let Some(text) = xref.provided_text.as_mut() {
+                    restore(text);
+                }
+            }
+        }
+    }
+
     /// Resolves any deferred cross-references using `resolver`, then rebuilds
     /// the rendered text.
     ///

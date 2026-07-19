@@ -6,6 +6,7 @@ use crate::{blocks::SectionType, internal::debug::DebugSliceReference};
 pub(crate) struct SectionNumber {
     pub section_type: SectionType,
     pub components: &'static [usize],
+    pub appendix_letter: Option<&'static str>,
 }
 
 impl fmt::Debug for SectionNumber {
@@ -13,6 +14,7 @@ impl fmt::Debug for SectionNumber {
         f.debug_struct("SectionNumber")
             .field("section_type", &self.section_type)
             .field("components", &DebugSliceReference(self.components))
+            .field("appendix_letter", &self.appendix_letter)
             .finish()
     }
 }
@@ -30,5 +32,7 @@ impl PartialEq<SectionNumber> for crate::blocks::SectionNumber {
 }
 
 fn fixture_eq_observed(fixture: &SectionNumber, observed: &crate::blocks::SectionNumber) -> bool {
-    fixture.section_type == observed.section_type && fixture.components == observed.components()
+    fixture.section_type == observed.section_type
+        && fixture.components == observed.components()
+        && fixture.appendix_letter == observed.appendix_letter()
 }

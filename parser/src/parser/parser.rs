@@ -133,6 +133,25 @@ pub struct Parser {
     /// substitution code paths hold only a shared reference to the parser.
     pub(crate) mark_footnote_spans: Cell<bool>,
 
+    /// A block title carried over from a section heading to the first block
+    /// parsed after it.
+    ///
+    /// A block title above a section heading does not title the section; it is
+    /// carried over to the first block inside the section (matching
+    /// Asciidoctor, where the block-attribute hash holding the title is passed
+    /// through to the section body's first block). `SectionBlock::parse`
+    /// stashes the rendered title here and the next block parsed claims it —
+    /// which may be a nested section, re-stashing it for *its* first block, or
+    /// (when the section body is empty) a sibling section reached after the
+    /// stashing section ends. A block with a title of its own wins over the
+    /// carried title, which is then discarded.
+    ///
+    /// Only the rendered title is carried (this struct is lifetime-free and
+    /// cannot hold the `.Title` line's source span), so a block claiming a
+    /// carried title has no `title_source` — the same shape as a title
+    /// supplied via a `title=` attribute.
+    pub(crate) pending_block_title: Option<String>,
+
     /// Live values of [counter] attributes, keyed by counter name (e.g.
     /// `index`, `example-number`, `table-number`).
     ///
@@ -343,12 +362,14 @@ impl Default for Parser {
             last_appendix_section_number: SectionNumber {
                 section_type: SectionType::Appendix,
                 components: vec![],
+                appendix_letter: None,
             },
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,
             parsing_bibliography_section_body: false,
             in_bibliography_list_item: Cell::new(false),
             mark_footnote_spans: Cell::new(false),
+            pending_block_title: None,
             counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
@@ -435,6 +456,10 @@ impl Parser {
 
         // Reset section numbering for each new document.
         self.last_section_number = SectionNumber::default();
+
+        // Start each parse with no block title carried over from a section
+        // heading.
+        self.pending_block_title = None;
 
         // Reset counter (and captioned-block) numbering for each new document.
         self.counter_values.borrow_mut().clear();
@@ -2015,6 +2040,54 @@ mod tests {
         );
 
         assert_eq!(parser.attribute_value("sp"), InterpretedValue::Value(" "));
+    }
+
+    #[test]
+    fn asciidoc_parser_version_is_predefined() {
+        // The crate predefines `asciidoc-parser-version` with its own version
+        // (the parser-specific counterpart of Ruby Asciidoctor's
+        // `asciidoctor-version` intrinsic).
+        let mut parser = Parser::default();
+
+        assert_eq!(
+            parser.attribute_value("asciidoc-parser-version"),
+            InterpretedValue::Value(env!("CARGO_PKG_VERSION"))
+        );
+
+        // The value is available to attribute references and `ifeval`
+        // expressions in document content.
+        let doc = parser.parse(concat!(
+            "= Title\n",
+            "\n",
+            "ifeval::['{asciidoc-parser-version}' >= '0.1.0']\n",
+            "v{asciidoc-parser-version}\n",
+            "endif::[]\n",
+        ));
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec![format!("v{}", env!("CARGO_PKG_VERSION"))]
+        );
+    }
+
+    #[test]
+    fn asciidoc_parser_version_is_locked() {
+        // The parser version describes the processor itself, so a document
+        // assignment is rejected with a warning and the built-in value stays
+        // in place.
+        let mut parser = Parser::default();
+
+        let doc = parser.parse(":asciidoc-parser-version: 99.99.99");
+
+        assert_eq!(
+            doc.warnings().next().unwrap().warning,
+            WarningType::AttributeValueIsLocked("asciidoc-parser-version".to_owned())
+        );
+
+        assert_eq!(
+            parser.attribute_value("asciidoc-parser-version"),
+            InterpretedValue::Value(env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]
