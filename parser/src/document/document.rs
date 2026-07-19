@@ -208,25 +208,33 @@ impl<'src> Document<'src> {
             }
 
             // A partintro block is only permitted as a direct child of a book
-            // part (a level-0 section under `doctype: book`), so no block at the
-            // document's top level qualifies. Asciidoctor's converter excludes
-            // such a block's content and logs an error; the parser keeps the
-            // block in the AST (as Asciidoctor does) and records the warning
-            // here, for a renderer to act on.
+            // part. Asciidoctor's converter excludes a misplaced block's content
+            // and logs an error; the parser keeps the block in the AST (as
+            // Asciidoctor does) and records the warning here, for a renderer to
+            // act on.
             //
-            // Book parts are not modeled by this crate yet (a level-0 heading
-            // records its own warning and its content lands in the preamble), so
-            // a partintro nested below the top level is left alone rather than
-            // reported as misplaced.
-            for block in &blocks {
-                if is_partintro(block) {
-                    warnings.push(Warning {
-                        source: block.span(),
-                        warning: WarningType::PartintroBlockOutsideOfBookPart,
-                        origin: None,
-                    });
-                }
-            }
+            // A book part is a level-0 section, which this crate does not model
+            // yet (#800): a `= Part` heading records its own warning and its
+            // content is folded into the document's preamble. Every position a
+            // partintro can occupy is therefore decidable except one – a direct
+            // child of a preamble that absorbed such a heading – and that one is
+            // left unreported. See [`partintro_placement_warnings`].
+            let doctype_is_book = matches!(
+                parser.attribute_value("doctype"),
+                InterpretedValue::Value(ref v) if v == "book"
+            );
+
+            let preamble_may_stand_in_for_part = doctype_is_book
+                && warnings
+                    .iter()
+                    .any(|w| w.warning == WarningType::Level0SectionHeadingNotSupported);
+
+            partintro_placement_warnings(
+                &mut blocks,
+                false,
+                preamble_may_stand_in_for_part,
+                &mut warnings,
+            );
 
             // Under `doctype: inline`, only the first eligible block is converted,
             // as bare inline content, and everything after it is dropped (the
@@ -592,6 +600,59 @@ impl std::fmt::Debug for Document<'_> {
 /// resolve to the `open` context with the `partintro` declared style.
 fn is_partintro(block: &Block<'_>) -> bool {
     block.declared_style() == Some("partintro") && block.resolved_context().as_ref() == "open"
+}
+
+/// Records a warning for every misplaced `[partintro]` block in `blocks` and,
+/// recursively, in their nested blocks.
+///
+/// Asciidoctor rejects a partintro unless its parent is a section, that section
+/// is level 0, and the doctype is `book` – in other words, unless it is a
+/// direct child of a book part. `parent_is_book_part` says whether the blocks
+/// at this level of the walk have such a parent.
+///
+/// Book parts are not modeled yet (#800), so `parent_is_book_part` is never
+/// `true` today. A `= Part` heading is dropped (with its own warning) and the
+/// blocks below it are folded into the document's preamble, which is why a
+/// preamble that absorbed such a heading is treated as *undecidable* rather
+/// than misplaced: `preamble_stands_in_for_part` suppresses the check for its
+/// direct children. Every other position – the document's top level, a level-1+
+/// section, any non-section container, and anything at all under a non-book
+/// doctype – is decided here exactly as Asciidoctor decides it.
+///
+/// The walk is read-only, but it descends through
+/// [`IsBlock::nested_blocks_mut`] (as [`Block::resolve_references`] does),
+/// since that is the accessor that preserves the `'src` lifetime of a child's
+/// span.
+fn partintro_placement_warnings<'src>(
+    blocks: &mut [Block<'src>],
+    parent_is_book_part: bool,
+    preamble_stands_in_for_part: bool,
+    warnings: &mut Vec<Warning<'src>>,
+) {
+    for block in blocks.iter_mut() {
+        if is_partintro(block) && !parent_is_book_part {
+            warnings.push(Warning {
+                source: block.span(),
+                warning: WarningType::PartintroBlockOutsideOfBookPart,
+                origin: None,
+            });
+        }
+
+        // A level-0 section is the only true book part; a preamble standing in
+        // for one that was dropped is the single undecidable case.
+        let child_parent_is_book_part = match block {
+            Block::Section(section) => section.level() == 0,
+            Block::Preamble(_) => preamble_stands_in_for_part,
+            _ => false,
+        };
+
+        partintro_placement_warnings(
+            block.nested_blocks_mut(),
+            child_parent_is_book_part,
+            preamble_stands_in_for_part,
+            warnings,
+        );
+    }
 }
 
 /// Returns the first block eligible to be the sole rendered block of an
@@ -1726,6 +1787,85 @@ mod tests {
                 doc.attribute_value("my-counter"),
                 InterpretedValue::Value("2".to_string())
             );
+        }
+    }
+
+    /// Placement checks for the `[partintro]` block style.
+    ///
+    /// A partintro is only permitted as a direct child of a book part.
+    /// Asciidoctor's own tests cover the document's top level (see
+    /// `blocks_test.rs`); these cover the positions that only this crate's
+    /// recursive walk decides.
+    mod partintro_placement {
+        use crate::tests::prelude::*;
+
+        /// Returns the misplaced-partintro warnings recorded for `doc`.
+        fn warnings<'src>(
+            doc: &'src crate::Document<'src>,
+        ) -> Vec<&'src crate::warnings::Warning<'src>> {
+            doc.warnings()
+                .filter(|w| w.warning == WarningType::PartintroBlockOutsideOfBookPart)
+                .collect()
+        }
+
+        #[test]
+        fn misplaced_in_chapter_of_book() {
+            // A chapter is a level-1 section, so a partintro inside it is not a
+            // child of a part, even though the doctype is book.
+            let doc = Parser::default()
+                .parse("= Book\n:doctype: book\n\n== Chapter 1\n\n[partintro]\n--\nintro\n--\n");
+
+            assert_eq!(warnings(&doc).len(), 1);
+            assert_css(&doc, ".partintro", 0);
+        }
+
+        #[test]
+        fn misplaced_in_section_of_article() {
+            // Without `doctype: book` there are no parts at all, so a partintro
+            // is misplaced wherever it appears.
+            let doc = Parser::default().parse("= Article\n\n== Section\n\n[partintro]\nintro\n");
+
+            assert_eq!(warnings(&doc).len(), 1);
+            assert_css(&doc, ".partintro", 0);
+        }
+
+        #[test]
+        fn misplaced_inside_another_block_below_a_part_heading() {
+            // The partintro's parent is a sidebar rather than the part itself,
+            // which Asciidoctor rejects (its parent's context is not a section).
+            let doc = Parser::default().parse(
+                "= Book\n:doctype: book\n\n= Part 1\n\n****\n[partintro]\nintro\n****\n\n== Chapter 1\n\ncontent\n",
+            );
+
+            assert_eq!(warnings(&doc).len(), 1);
+            assert_css(&doc, ".partintro", 0);
+        }
+
+        #[test]
+        fn not_reported_below_a_dropped_part_heading() {
+            // Book parts are not modeled yet (#800): a `= Part` heading is
+            // dropped and the blocks below it are folded into the preamble, so
+            // this is the one position that cannot be decided. The partintro is
+            // left unreported and renders as `openblock.partintro`.
+            let doc = Parser::default().parse(
+                "= Book\n:doctype: book\n\n= Part 1\n\n[partintro]\n--\nintro\n--\n\n== Chapter 1\n\ncontent\n",
+            );
+
+            assert!(warnings(&doc).is_empty());
+            assert_css(&doc, ".openblock.partintro", 1);
+        }
+
+        #[test]
+        fn reported_in_a_preamble_with_no_part_heading() {
+            // A preamble only stands in for a part when a `= Part` heading was
+            // actually dropped into it; without one, the partintro is decidably
+            // misplaced.
+            let doc = Parser::default().parse(
+                "= Book\n:doctype: book\n\n[partintro]\n--\nintro\n--\n\n== Chapter 1\n\ncontent\n",
+            );
+
+            assert_eq!(warnings(&doc).len(), 1);
+            assert_css(&doc, ".partintro", 0);
         }
     }
 }

@@ -7409,17 +7409,21 @@ mod abstract_and_part_intro {
     // warning. The `partintro` block style (#794) is modeled the same way: a
     // `[partintro]` open block (or paragraph) resolves to the `open` context
     // with the `partintro` declared style, renders as `openblock.partintro`,
-    // and a partintro used as a direct child of the document – where it can
-    // never be the child of a book part – is excluded with a warning. Book
-    // parts themselves are not modeled yet, so a partintro below the top level
-    // is rendered without further placement checks. The DocBook variants are
-    // reproduced as `non_normative`.
+    // and a partintro outside of a book part is excluded with a warning.
+    //
+    // Out of scope here: book parts are level-0 sections, which this crate does
+    // not model yet (#800), so the one placement that cannot be judged is a
+    // direct child of the preamble a dropped `= Part` heading collapses into –
+    // exactly where the two accepting tests below put their partintro. Every
+    // other placement is decided as Asciidoctor decides it; see
+    // `document::document::tests::partintro_placement`. The DocBook variants
+    // are backend-specific (this crate has no converters) and are reproduced as
+    // `non_normative`.
 
     /// Returns `true` if `doc` recorded a misplaced-partintro warning.
     ///
-    /// A book part is a level-0 section, which this crate does not model yet,
-    /// so a document that places a partintro under a `= Part 1` heading
-    /// records the unrelated level-0 heading warning; only the partintro
+    /// A document that places a partintro under a `= Part 1` heading also
+    /// records the unrelated level-0 heading warning (#800); only the partintro
     /// warning is of interest here.
     fn has_misplaced_partintro_warning(doc: &crate::Document<'_>) -> bool {
         doc.warnings().any(|warning| {

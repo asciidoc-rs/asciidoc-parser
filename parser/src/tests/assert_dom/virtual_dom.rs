@@ -22,6 +22,7 @@ use crate::{
         TableRow, VerticalAlignment,
     },
     document::{InterpretedValue, TocMode, first_inline_candidate},
+    warnings::WarningType,
 };
 
 /// The document-wide `icons` mode, which controls how callouts and callout
@@ -45,6 +46,40 @@ enum IconsMode {
 
 thread_local! {
     static ICONS_MODE: Cell<IconsMode> = const { Cell::new(IconsMode::None) };
+}
+
+thread_local! {
+    /// Whether a `[partintro]` block that is a direct child of the preamble
+    /// should be rendered rather than excluded.
+    ///
+    /// A partintro belongs to a book part, which this crate does not model yet
+    /// (#800); the blocks below a dropped `= Part` heading are folded into the
+    /// document's preamble, so a preamble in such a document is the one place a
+    /// partintro cannot be ruled misplaced. The virtual DOM builder has no
+    /// document context threaded through it, so the document stashes that fact
+    /// here for [`preamble_to_node`] to read.
+    static PARTINTRO_ALLOWED_IN_PREAMBLE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Restores a `bool` thread-local to its previous value when dropped, so a
+/// nested AsciiDoc cell can mask the enclosing document's value and reinstate
+/// it afterward.
+struct BoolScopeGuard {
+    key: &'static LocalKey<Cell<bool>>,
+    prev: bool,
+}
+
+impl Drop for BoolScopeGuard {
+    fn drop(&mut self) {
+        self.key.with(|c| c.set(self.prev));
+    }
+}
+
+/// Sets the `bool` thread-local `key` to `value` for the current scope,
+/// returning a guard that restores the previous value on drop.
+fn scoped_bool(key: &'static LocalKey<Cell<bool>>, value: bool) -> BoolScopeGuard {
+    let prev = key.with(|c| c.replace(value));
+    BoolScopeGuard { key, prev }
 }
 
 /// A fully resolved table of contents, ready to render: the prebuilt section
@@ -632,10 +667,24 @@ impl ToVirtualDom for Document<'_> {
             InterpretedValue::Value(ref v) if v == "book"
         ) && self.doctitle().is_none();
 
-        // Add child blocks, including block titles as separate siblings. A
-        // partintro is only permitted as a direct child of a book part, so
-        // Asciidoctor's converter excludes every partintro found here (an error
-        // was recorded at parse time).
+        // A partintro is only permitted as a direct child of a book part, and
+        // Asciidoctor's converter excludes a misplaced one's content (an error
+        // was recorded at parse time). Book parts are not modeled yet (#800), so
+        // the sole position this virtual DOM cannot rule out is a direct child
+        // of a preamble that absorbed a dropped `= Part` heading – which is
+        // where a real part intro lands today. That exemption is stashed for
+        // [`preamble_to_node`] to read; every other position is excluded.
+        let _partintro_scope = scoped_bool(
+            &PARTINTRO_ALLOWED_IN_PREAMBLE,
+            matches!(
+                self.attribute_value("doctype"),
+                InterpretedValue::Value(ref v) if v == "book"
+            ) && self
+                .warnings()
+                .any(|w| w.warning == WarningType::Level0SectionHeadingNotSupported),
+        );
+
+        // Add child blocks, including block titles as separate siblings.
         for block in self.nested_blocks() {
             if (exclude_abstracts && is_abstract(block)) || is_partintro(block) {
                 continue;
@@ -653,6 +702,15 @@ impl ToVirtualDom for Document<'_> {
 /// NOTE: Some block types (like lists) handle their titles internally, so we
 /// skip adding a separate title element for those.
 fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
+    // No parent that adds its children through this function is a book part: a
+    // part is a level-0 section, which this crate does not model yet (#800), and
+    // the preamble that stands in for one adds its own children (see
+    // [`preamble_to_node`]). A partintro reaching here is therefore misplaced,
+    // and its content and title alike are excluded.
+    if is_partintro(block) {
+        return;
+    }
+
     // A `toc::[]` macro renders the table of contents (when a `toc: macro` scope
     // is active) rather than a paragraph, and never carries a separate title.
     if is_toc_macro(block) {
@@ -2686,6 +2744,13 @@ fn preamble_to_node<'a>(preamble: &'a Preamble<'a>) -> VirtualNode {
     let mut node = VirtualNode::new("div").with_id("preamble");
 
     for child in preamble.nested_blocks() {
+        // A partintro is excluded unless this preamble stands in for a book part
+        // this crate does not model yet (#800), which is where a real part intro
+        // lands today.
+        if is_partintro(child) && !PARTINTRO_ALLOWED_IN_PREAMBLE.with(Cell::get) {
+            continue;
+        }
+
         // A `toc::[]` macro in the preamble renders the table of contents.
         if is_toc_macro(child) {
             if let Some(toc) = toc_macro_node(child) {
