@@ -5377,7 +5377,8 @@ fn escaped_ifdef_is_unescaped_and_ignored() {
 // Asciidoctor (the content is included). Matching Asciidoctor would require
 // resolving missing references to empty in `ifeval` *and* defining the
 // `asciidoctor-version` intrinsic that the sibling version-comparison cases
-// rely on — out of scope for this crate today.
+// rely on — out of scope for this crate today. Tracked by
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/779.
 non_normative!(
     r#"
       test 'ifeval comparing missing attribute to nil includes content' do
@@ -5400,10 +5401,10 @@ non_normative!(
 );
 
 // Divergent behavior — left non-normative, same root cause as the previous
-// case: an unset `{leveloffset}` stays literal, so `{leveloffset} == 0` coerces
-// `"{leveloffset}"` to the integer 0 and compares equal (content *included*),
-// whereas Asciidoctor resolves the missing reference to nil, which is not equal
-// to 0 (content dropped).
+// case (see issue #779): an unset `{leveloffset}` stays literal, so
+// `{leveloffset} == 0` coerces `"{leveloffset}"` to the integer 0 and compares
+// equal (content *included*), whereas Asciidoctor resolves the missing
+// reference to nil, which is not equal to 0 (content dropped).
 non_normative!(
     r#"
       test 'ifeval comparing missing attribute to 0 drops content' do
