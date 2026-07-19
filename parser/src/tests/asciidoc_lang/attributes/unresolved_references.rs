@@ -200,9 +200,37 @@ There are a few cases where the `attribute-missing` attribute is not strictly ho
 One of those cases is the include directive.
 If a missing attribute is found in the target of an include directive, the processor will issue a warning about the missing attribute and leave behind the same warning message in the converted document.
 
+"#
+);
+
+#[test]
+fn ifeval_ignores_attribute_missing() {
+    verifies!(
+        r#"
 Another case is the `ifeval` directive.
 A missing attribute reference can safely be used in the clause of the `ifeval` directive without any side effects (i.e., `drop`) since the purpose of that statement is to determine whether an attribute resolves to a value.
 
+"#
+    );
+
+    // A missing reference in an `ifeval` clause resolves to empty (`drop`)
+    // regardless of the `attribute-missing` setting: even with `drop-line`,
+    // the directive itself is not dropped — it evaluates normally.
+    for setting in ["skip", "drop", "drop-line", "warn"] {
+        let source = format!(
+            ":attribute-missing: {setting}\n\nifeval::['{{name}}' == '']\nIncluded.\nendif::[]"
+        );
+        let doc = Parser::default().parse(&source);
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec!["Included."],
+            "attribute-missing: {setting}"
+        );
+    }
+}
+
+non_normative!(
+    r#"
 === Forcing failure
 
 If you want the processor to fail when the document contains a missing attribute, set the `attribute-missing` attribute to `warn` and pass the `--failure-level=WARN` option to the CLI.

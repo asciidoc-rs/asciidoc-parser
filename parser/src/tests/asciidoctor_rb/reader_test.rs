@@ -5370,17 +5370,13 @@ fn escaped_ifdef_is_unescaped_and_ignored() {
     );
 }
 
-// Divergent behavior — left non-normative. In an `ifeval` expression this
-// crate keeps an *unset* attribute reference literal (`{foo}` stays `{foo}`),
-// whereas Asciidoctor resolves a missing reference to the empty string. So
-// `'{foo}' == ''` is false here (the content is dropped) but true in
-// Asciidoctor (the content is included). Matching Asciidoctor would require
-// resolving missing references to empty in `ifeval` *and* defining the
-// `asciidoctor-version` intrinsic that the sibling version-comparison cases
-// rely on — out of scope for this crate today. Tracked by
-// https://github.com/asciidoc-rs/asciidoc-parser/issues/779.
-non_normative!(
-    r#"
+// A reference to an unset attribute resolves to the empty string in an
+// `ifeval` operand (see issue #779), so `'{foo}' == ''` is true and the
+// content is included.
+#[test]
+fn ifeval_comparing_missing_attribute_to_nil_includes_content() {
+    verifies!(
+        r#"
       test 'ifeval comparing missing attribute to nil includes content' do
         input = <<~'EOS'
         ifeval::['{foo}' == '']
@@ -5398,15 +5394,24 @@ non_normative!(
       end
 
 "#
-);
+    );
 
-// Divergent behavior — left non-normative, same root cause as the previous
-// case (see issue #779): an unset `{leveloffset}` stays literal, so
-// `{leveloffset} == 0` coerces `"{leveloffset}"` to the integer 0 and compares
-// equal (content *included*), whereas Asciidoctor resolves the missing
-// reference to nil, which is not equal to 0 (content dropped).
-non_normative!(
-    r#"
+    let parser = Parser::default();
+    assert_eq!(
+        reader_read(
+            &parser,
+            "ifeval::['{foo}' == '']\nNo foo for you!\nendif::[]"
+        ),
+        "No foo for you!"
+    );
+}
+
+// The unset (and unquoted) `{leveloffset}` reference resolves to empty and
+// thus coerces to nil, which is not equal to 0, so the content is dropped.
+#[test]
+fn ifeval_comparing_missing_attribute_to_0_drops_content() {
+    verifies!(
+        r#"
       test 'ifeval comparing missing attribute to 0 drops content' do
         input = <<~'EOS'
         ifeval::[{leveloffset} == 0]
@@ -5424,7 +5429,17 @@ non_normative!(
       end
 
 "#
-);
+    );
+
+    let parser = Parser::default();
+    assert_eq!(
+        reader_read(
+            &parser,
+            "ifeval::[{leveloffset} == 0]\nI didn't make the cut!\nendif::[]"
+        ),
+        ""
+    );
+}
 
 #[test]
 fn ifeval_running_unsupported_operation_on_missing_attribute_drops_content() {
@@ -5482,7 +5497,14 @@ fn ifeval_running_invalid_operation_drops_content() {
 "#
     );
 
-    let parser = Parser::default();
+    // The test supplies the `asciidoctor-version` value this crate does not
+    // define (see issue #778) so that, as in Ruby, the invalid operation is a
+    // number compared against a boolean.
+    let parser = Parser::default().with_intrinsic_attribute(
+        "asciidoctor-version",
+        "2.0.26",
+        ModificationContext::Anywhere,
+    );
     assert_eq!(
         reader_read(
             &parser,
@@ -5600,9 +5622,10 @@ fn ifeval_comparing_quoted_attribute_to_non_matching_string_drops_content() {
     );
 }
 
-// (This crate does not define the `asciidoctor-version` intrinsic, so the
-// reference is compared as a literal string; the comparison holds either
-// way for these inputs.)
+// This crate does not define the `asciidoctor-version` intrinsic (see issue
+// #778), and a reference to an unset attribute resolves to empty in an
+// `ifeval` operand (see issue #779), so the test supplies a version value for
+// the comparison to hold against.
 #[test]
 fn ifeval_comparing_attribute_to_lower_version_number_includes_content() {
     verifies!(
@@ -5626,7 +5649,11 @@ fn ifeval_comparing_attribute_to_lower_version_number_includes_content() {
 "#
     );
 
-    let parser = Parser::default();
+    let parser = Parser::default().with_intrinsic_attribute(
+        "asciidoctor-version",
+        "2.0.26",
+        ModificationContext::Anywhere,
+    );
     assert_eq!(
         reader_read(
             &parser,
@@ -5636,7 +5663,8 @@ fn ifeval_comparing_attribute_to_lower_version_number_includes_content() {
     );
 }
 
-// A reference always equals itself, so the content is included.
+// A reference always equals itself, so the content is included. (Here the
+// attribute is unset, so both sides resolve to the empty string.)
 #[test]
 fn ifeval_comparing_attribute_to_self_includes_content() {
     verifies!(
@@ -5670,7 +5698,8 @@ fn ifeval_comparing_attribute_to_self_includes_content() {
     );
 }
 
-// The operands may be given in either order.
+// The operands may be given in either order. (As above, the test supplies the
+// `asciidoctor-version` value this crate does not define — see issue #778.)
 #[test]
 fn ifeval_arguments_can_be_transposed() {
     verifies!(
@@ -5694,7 +5723,11 @@ fn ifeval_arguments_can_be_transposed() {
 "#
     );
 
-    let parser = Parser::default();
+    let parser = Parser::default().with_intrinsic_attribute(
+        "asciidoctor-version",
+        "2.0.26",
+        ModificationContext::Anywhere,
+    );
     assert_eq!(
         reader_read(
             &parser,
