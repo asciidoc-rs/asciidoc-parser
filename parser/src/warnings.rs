@@ -80,7 +80,8 @@ pub enum WarningType {
     )]
     EmptyShorthandItem,
 
-    // TO DO BEFORE CHECKING IN TO MAIN: Review these error names and descriptions.
+    // TODO: Review the names and message strings of the variants that follow
+    // (#801).
     /// The name in a block or inline macro is not a valid identifier.
     #[error("Macro name is not a valid identifier")]
     InvalidMacroName,
