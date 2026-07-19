@@ -963,17 +963,23 @@ fn qualified_url_adjacent_to_text_in_round_brackets() {
     );
 }
 
-// Surfaced incompatibility: Asciidoctor recognizes a URL macro preceded by a
-// no-break space; this crate does not treat U+00A0 as a leading boundary and
-// leaves the macro as literal text. Tracked in #768.
-non_normative!(
-    r###"
+#[test]
+fn qualified_url_following_no_break_space() {
+    verifies!(
+        r###"
   test 'qualified url following no-break space' do
     assert_xpath '//a[@href="http://asciidoc.org"][text()="AsciiDoc"]', convert_string(%(#{[0xa0].pack 'U1'}http://asciidoc.org[AsciiDoc] project page.)), 1
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse("\u{a0}http://asciidoc.org[AsciiDoc] project page.");
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        "\u{a0}<a href=\"http://asciidoc.org\">AsciiDoc</a> project page."
+    );
+}
 
 #[test]
 fn qualified_url_following_smart_apostrophe() {
