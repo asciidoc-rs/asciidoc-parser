@@ -4738,13 +4738,6 @@ mod metadata {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor. A block title placed above a section
-    // heading is not carried over to the first block inside that section by
-    // this crate, so the paragraph has no title. Kept `#[ignore]`d with the
-    // Ruby-intended assertions.
-    // TODO(#782): carry a block title above a section onto the section's first
-    // block.
-    #[ignore]
     #[test]
     fn block_title_above_section_gets_carried_over_to_first_block_in_section() {
         verifies!(
@@ -4775,12 +4768,14 @@ mod metadata {
         assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]", 1);
     }
 
-    // NOTE: divergence from Asciidoctor (block-title carryover; see
-    // `block_title_above_section_gets_carried_over_to_first_block_in_section`).
-    // The crate does emit the `Level0SectionHeadingNotSupported` warning at
-    // line 2 (matching the Ruby error), but the surrounding structure differs.
-    // TODO(#782): demote a document title to a section title when a block title
-    // precedes it.
+    // NOTE: divergence from Asciidoctor. This crate does not demote a document
+    // title preceded by a block title to a level-0 section (it does not support
+    // level-0 sections in the document body at all), so no `<h1>` is rendered in
+    // the content. The crate does emit the `Level0SectionHeadingNotSupported`
+    // warning at line 2 (matching the Ruby error), but the surrounding structure
+    // differs. The block-title carryover itself is implemented (#782).
+    // TODO: support level-0 sections in the document body, demoting a document
+    // title preceded by a block title.
     #[ignore]
     #[test]
     fn block_title_above_document_title_demotes_document_title_to_a_section_title() {
@@ -4814,10 +4809,14 @@ mod metadata {
         );
     }
 
-    // NOTE: divergence from Asciidoctor (block-title carryover; see
-    // `block_title_above_section_gets_carried_over_to_first_block_in_section`).
-    // TODO(#782): carry a block title above a demoted document title onto the
-    // first section's first block.
+    // NOTE: divergence from Asciidoctor (doc-title demotion; see
+    // `block_title_above_document_title_demotes_document_title_to_a_section_title`).
+    // The block-title carryover itself is implemented (#782), but without
+    // level-0 section support the demoted document title is not parsed as a
+    // section, so the title is not carried into the first section's first
+    // block.
+    // TODO: support level-0 sections in the document body, demoting a document
+    // title preceded by a block title.
     #[ignore]
     #[test]
     fn block_title_above_document_title_gets_carried_over_to_first_block_in_first_section_if_no_preamble()

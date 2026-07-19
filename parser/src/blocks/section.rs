@@ -190,6 +190,18 @@ impl<'src> SectionBlock<'src> {
         let previously_in_bibliography_section = parser.parsing_bibliography_section_body;
         parser.parsing_bibliography_section_body = is_bibliography_section;
 
+        // A block title above a section heading does not become the section's
+        // title; it is carried over to the first block inside the section
+        // (matching Asciidoctor). Stash it on the parser: the next block parsed
+        // claims it — usually the section's first child, or (when the section
+        // body is empty) the sibling section that follows, which re-stashes it
+        // for its own first block. A discrete heading is an ordinary block, not
+        // a section, so it keeps its title. See `Block::parse_internal` for the
+        // claiming side.
+        if !discrete && metadata.title.is_some() {
+            parser.pending_block_title = metadata.title.clone();
+        }
+
         let mut maw_blocks = parse_blocks_until(
             level_and_title.after,
             |i, parser| {
@@ -266,8 +278,19 @@ impl<'src> SectionBlock<'src> {
                 section_title,
                 blocks: blocks.item,
                 source: source.trim_trailing_whitespace(),
-                title_source: metadata.title_source,
-                title: metadata.title.clone(),
+
+                // A non-discrete section never keeps a block title; it was
+                // stashed above for the next block parsed to claim.
+                title_source: if discrete {
+                    metadata.title_source
+                } else {
+                    None
+                },
+                title: if discrete {
+                    metadata.title.clone()
+                } else {
+                    None
+                },
                 anchor: metadata.anchor,
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),

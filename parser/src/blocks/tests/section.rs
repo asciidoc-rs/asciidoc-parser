@@ -281,6 +281,10 @@ fn has_child_block() {
 
 #[test]
 fn title() {
+    // A block title above a section heading does not title the section; it is
+    // carried over to the first block inside the section (matching
+    // Asciidoctor). The carried title has no source line adjacent to the
+    // claiming block, so that block's `title_source` is `None`.
     let mut parser = Parser::default();
 
     let mi = crate::blocks::Block::parse(
@@ -328,7 +332,7 @@ fn title() {
                 },
                 style: SimpleBlockStyle::Paragraph,
                 title_source: None,
-                title: None,
+                title: Some("other section title"),
                 caption: None,
                 number: None,
                 anchor: None,
@@ -341,13 +345,8 @@ fn title() {
                 col: 1,
                 offset: 0,
             },
-            title_source: Some(Span {
-                data: "other section title",
-                line: 1,
-                col: 2,
-                offset: 1,
-            },),
-            title: Some("other section title"),
+            title_source: None,
+            title: None,
             anchor: None,
             anchor_reftext: None,
             attrlist: None,
@@ -362,21 +361,8 @@ fn title() {
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
 
-    assert_eq!(
-        mi.item.title_source().unwrap(),
-        Span {
-            data: "other section title",
-            line: 1,
-            col: 2,
-            offset: 1,
-        }
-    );
-
-    assert_eq!(
-        mi.item.title_source().unwrap().data(),
-        "other section title"
-    );
-    assert_eq!(mi.item.title().unwrap(), "other section title");
+    assert!(mi.item.title_source().is_none());
+    assert!(mi.item.title().is_none());
 
     assert!(mi.item.anchor().is_none());
     assert!(mi.item.anchor_reftext().is_none());
@@ -404,7 +390,7 @@ fn title() {
             },
             style: SimpleBlockStyle::Paragraph,
             title_source: None,
-            title: None,
+            title: Some("other section title"),
             caption: None,
             number: None,
             anchor: None,
@@ -434,6 +420,96 @@ fn title() {
             offset: 42
         }
     );
+}
+
+#[test]
+fn title_carries_into_nested_section_first_block() {
+    // A carried block title passes through a nested section heading (which
+    // doesn't claim it) and lands on that section's first block.
+    let doc = Parser::default().parse(".carried title\n== Outer\n\n=== Inner\n\nparagraph");
+
+    let Some(crate::blocks::Block::Section(outer)) = doc.nested_blocks().next() else {
+        panic!("expected outer section");
+    };
+
+    assert!(outer.title().is_none());
+
+    let Some(crate::blocks::Block::Section(inner)) = outer.nested_blocks().next() else {
+        panic!("expected inner section");
+    };
+
+    assert!(inner.title().is_none());
+
+    let paragraph = inner.nested_blocks().next().unwrap();
+    assert_eq!(paragraph.title().unwrap(), "carried title");
+    assert!(paragraph.title_source().is_none());
+}
+
+#[test]
+fn own_title_wins_over_carried_title() {
+    // A block with a title of its own keeps it; the carried title is
+    // discarded rather than cascading to a later block.
+    let doc = Parser::default()
+        .parse(".carried title\n== Section\n\n.own title\nparagraph 1\n\nparagraph 2");
+
+    let Some(crate::blocks::Block::Section(section)) = doc.nested_blocks().next() else {
+        panic!("expected section");
+    };
+
+    assert!(section.title().is_none());
+
+    let mut blocks = section.nested_blocks();
+
+    let paragraph_1 = blocks.next().unwrap();
+    assert_eq!(paragraph_1.title().unwrap(), "own title");
+
+    let paragraph_2 = blocks.next().unwrap();
+    assert!(paragraph_2.title().is_none());
+}
+
+#[test]
+fn title_carries_across_empty_section() {
+    // When the titled section's body is empty, the carried title survives to
+    // the next sibling section and lands on its first block (matching
+    // Asciidoctor, where the block-attribute hash is passed along until a
+    // block claims it).
+    let doc = Parser::default().parse(".carried title\n== Empty\n\n== Sibling\n\nparagraph");
+
+    let mut blocks = doc.nested_blocks();
+
+    let Some(crate::blocks::Block::Section(empty)) = blocks.next() else {
+        panic!("expected first section");
+    };
+
+    assert!(empty.title().is_none());
+    assert!(empty.nested_blocks().next().is_none());
+
+    let Some(crate::blocks::Block::Section(sibling)) = blocks.next() else {
+        panic!("expected second section");
+    };
+
+    assert!(sibling.title().is_none());
+
+    let paragraph = sibling.nested_blocks().next().unwrap();
+    assert_eq!(paragraph.title().unwrap(), "carried title");
+}
+
+#[test]
+fn discrete_heading_keeps_its_title() {
+    // A discrete heading is an ordinary block, not a section, so a block
+    // title above it is not carried over.
+    let doc = Parser::default().parse("[discrete]\n.kept title\n== Heading\n\nparagraph");
+
+    let mut blocks = doc.nested_blocks();
+
+    let Some(crate::blocks::Block::Section(heading)) = blocks.next() else {
+        panic!("expected discrete heading");
+    };
+
+    assert_eq!(heading.title().unwrap(), "kept title");
+
+    let paragraph = blocks.next().unwrap();
+    assert!(paragraph.title().is_none());
 }
 
 #[test]
