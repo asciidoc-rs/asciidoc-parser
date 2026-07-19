@@ -206,6 +206,14 @@ pub enum WarningType {
     /// corresponding open region. The field is the unexpected tag name.
     #[error("unexpected end tag in include file: {0}")]
     IncludeTagUnexpectedEnd(String),
+
+    /// An `[abstract]` block was found as a direct child of a document without
+    /// a doctitle when the doctype is `book`. Asciidoctor excludes such a
+    /// block's content from the converted output.
+    #[error(
+        "abstract block cannot be used in a document without a doctitle when doctype is book. Excluding block content."
+    )]
+    AbstractBlockInBookWithoutDoctitle,
 }
 
 impl std::fmt::Debug for WarningType {
@@ -398,6 +406,10 @@ impl std::fmt::Debug for WarningType {
                 .debug_tuple("WarningType::IncludeTagUnexpectedEnd")
                 .field(tag)
                 .finish(),
+
+            WarningType::AbstractBlockInBookWithoutDoctitle => {
+                write!(f, "WarningType::AbstractBlockInBookWithoutDoctitle")
+            }
         }
     }
 }
@@ -858,6 +870,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::IncludeTagUnexpectedEnd(\"'a'\")"
+                );
+            }
+
+            #[test]
+            fn abstract_block_in_book_without_doctitle() {
+                let warning = WarningType::AbstractBlockInBookWithoutDoctitle;
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::AbstractBlockInBookWithoutDoctitle"
                 );
             }
         }
