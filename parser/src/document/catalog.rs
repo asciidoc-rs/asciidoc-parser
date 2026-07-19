@@ -255,7 +255,11 @@ impl Footnote {
     ///
     /// A footnote's text is extracted out of the block it was defined in and
     /// the footnote itself keeps no span, so `source` is the enclosing
-    /// document's span rather than the reference's own location.
+    /// document's span rather than the reference's own location. That makes two
+    /// bad references in two different footnotes indistinguishable by location;
+    /// narrowing it to the defining occurrence needs footnotes registered from
+    /// an owned sub-source (a Markdown blockquote, an include-expanded table
+    /// cell) to be re-homed first (#804).
     ///
     /// A footnote with no cross-references is left untouched.
     pub(crate) fn resolve_references<'src>(
