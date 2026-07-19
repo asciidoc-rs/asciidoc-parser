@@ -62,6 +62,7 @@ mod paragraphs_test;
 mod parser_test;
 mod paths_test;
 mod preamble_test;
+mod reader_test;
 mod sections_test;
 mod substitutions_test;
 mod syntax_highlighter_test;

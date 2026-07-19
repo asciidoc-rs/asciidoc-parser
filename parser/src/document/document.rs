@@ -140,7 +140,7 @@ impl<'src> Document<'src> {
                 warnings.push(Warning {
                     source: root.slice(pw.offset..pw.offset + pw.len),
                     warning: pw.warning,
-                    origin: None,
+                    origin: pw.origin,
                 });
             }
 
