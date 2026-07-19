@@ -6,8 +6,8 @@
 use crate::{
     Span,
     parser::{
-        InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarning, ReferenceWarningKind,
-        ResolutionContext, XrefRenderParams,
+        InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+        XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -351,8 +351,10 @@ impl<'src> Content<'src> {
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
-        warnings: &mut Vec<ReferenceWarning>,
+        warnings: &mut ReferenceWarnings<'src>,
     ) {
+        let source = self.original;
+
         if let Some(deferred) = self.deferred.as_mut() {
             let DeferredContent { template, xrefs } = deferred.as_mut();
 
@@ -374,10 +376,7 @@ impl<'src> Content<'src> {
                 // re-homed into a footnote (see `rehome_xref_placeholders`); the
                 // footnote resolves and reports it, so it is not reported here.
                 if xref.resolved.is_none() && template.contains(&Content::xref_placeholder(index)) {
-                    warnings.push(ReferenceWarning {
-                        target: xref.target.clone(),
-                        kind: ReferenceWarningKind::Unresolved,
-                    });
+                    warnings.unresolved(&xref.target, source);
                 }
             }
         }
@@ -548,12 +547,13 @@ impl FootnoteDeferred {
     }
 
     /// Resolves the footnote's cross-references using `resolver`, reporting any
-    /// unresolved target in `warnings`. Rendering the resolved text is left to
-    /// the caller (via [`render`](Self::render)).
-    pub(crate) fn resolve(
+    /// unresolved target in `warnings` against `source`. Rendering the resolved
+    /// text is left to the caller (via [`render`](Self::render)).
+    pub(crate) fn resolve<'src>(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        warnings: &mut Vec<ReferenceWarning>,
+        warnings: &mut ReferenceWarnings<'src>,
+        source: Span<'src>,
     ) {
         for xref in self.xrefs.iter_mut() {
             xref.resolved = resolver.resolve(&ResolutionContext {
@@ -562,10 +562,7 @@ impl FootnoteDeferred {
             });
 
             if xref.resolved.is_none() {
-                warnings.push(ReferenceWarning {
-                    target: xref.target.clone(),
-                    kind: ReferenceWarningKind::Unresolved,
-                });
+                warnings.unresolved(&xref.target, source);
             }
         }
     }
