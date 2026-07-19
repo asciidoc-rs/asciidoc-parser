@@ -152,6 +152,15 @@ pub enum WarningType {
     #[error("include file not found: {0}")]
     IncludeFileNotFound(String),
 
+    /// An include directive was not expanded because the file containing it
+    /// already sits at the maximum include depth (the `max-include-depth`
+    /// attribute, possibly lowered by an enclosing include directive's `depth`
+    /// attribute). The field is the relative maximum in effect — the number of
+    /// levels that were permitted below the file that established the limit —
+    /// matching the number Asciidoctor reports.
+    #[error("maximum include depth of {0} exceeded")]
+    MaxIncludeDepthExceeded(usize),
+
     /// An include directive specified an `encoding` attribute whose value is
     /// not UTF-8. The parser only handles UTF-8 content, so the requested
     /// encoding cannot be honored.
@@ -350,6 +359,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::IncludeFileNotFound(target) => f
                 .debug_tuple("WarningType::IncludeFileNotFound")
                 .field(target)
+                .finish(),
+
+            WarningType::MaxIncludeDepthExceeded(depth) => f
+                .debug_tuple("WarningType::MaxIncludeDepthExceeded")
+                .field(depth)
                 .finish(),
 
             WarningType::NonUtf8IncludeEncoding(encoding) => f
@@ -765,6 +779,13 @@ mod tests {
                     debug_output,
                     "WarningType::IncludeFileNotFound(\"content.adoc\")"
                 );
+            }
+
+            #[test]
+            fn max_include_depth_exceeded() {
+                let warning = WarningType::MaxIncludeDepthExceeded(64);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::MaxIncludeDepthExceeded(64)");
             }
 
             #[test]

@@ -92,6 +92,11 @@ struct PreprocessorState<'p> {
     source_map: SourceMap,
     warnings: Vec<DeferredWarning>,
 
+    /// The include-depth limit currently in effect, or `None` when
+    /// `max-include-depth` is 0 — which disables the include directive
+    /// entirely. See [`MaxIncludeDepth`].
+    max_include_depth: Option<MaxIncludeDepth>,
+
     /// Stack of open conditional preprocessor directives (`ifdef`, `ifndef`,
     /// `ifeval`). Each entry records whether the lines it encloses are
     /// currently being skipped. See [`process_conditional_directive`].
@@ -126,8 +131,54 @@ struct Conditional {
     source_line: usize,
 }
 
+/// The include-depth limit in effect, mirroring Asciidoctor's `@maxdepth`
+/// state. Depths count the number of open includes: a directive in the root
+/// file is at depth 0, one in a file it includes is at depth 1, and so on.
+#[derive(Clone, Copy, Debug)]
+struct MaxIncludeDepth {
+    /// The absolute limit set by the `max-include-depth` attribute. A `depth`
+    /// attribute on an include directive can never raise the effective limit
+    /// above this.
+    abs: usize,
+
+    /// The depth at which further include directives are refused, compared
+    /// against the depth of the file containing the directive. Initially equal
+    /// to [`abs`](Self::abs); an include directive's `depth` attribute lowers
+    /// it for the span of that include.
+    curr: usize,
+
+    /// The limit relative to the file that established it, reported in the
+    /// "maximum include depth of N exceeded" diagnostic (matching
+    /// Asciidoctor, which reports the requested relative depth rather than
+    /// the absolute nesting level).
+    rel: usize,
+}
+
 impl<'p> PreprocessorState<'p> {
     fn new(parser: &'p mut Parser) -> Self {
+        // Asciidoctor reads `max-include-depth` once, when the reader is
+        // constructed, so the value in effect at the start of preprocessing
+        // governs the entire pass. (The attribute is API-only — see
+        // `built_in_attrs.rs` — so the document cannot change it anyway.) The
+        // value is coerced as Ruby's `to_i` would; a non-positive result
+        // disables the include directive entirely.
+        let max_include_depth = match parser.attribute_value("max-include-depth") {
+            InterpretedValue::Value(value) => ruby_to_i(&value),
+            // Set with an empty value coerces to 0 (disabled); unset falls
+            // back to Asciidoctor's default of 64.
+            InterpretedValue::Set => 0,
+            InterpretedValue::Unset => 64,
+        };
+
+        let max_include_depth = usize::try_from(max_include_depth)
+            .ok()
+            .filter(|&depth| depth > 0)
+            .map(|depth| MaxIncludeDepth {
+                abs: depth,
+                curr: depth,
+                rel: depth,
+            });
+
         Self {
             parser,
             in_document_header: true,
@@ -137,6 +188,7 @@ impl<'p> PreprocessorState<'p> {
             output: String::new(),
             source_map: SourceMap::default(),
             warnings: vec![],
+            max_include_depth,
             conditional_stack: vec![],
         }
     }
@@ -276,6 +328,45 @@ impl<'p> PreprocessorState<'p> {
                     continue;
                 }
 
+                // `max-include-depth=0` disables the include directive
+                // entirely: the directive line is left in the output verbatim,
+                // with no diagnostic, and the include file handler is never
+                // consulted (matching Asciidoctor).
+                let Some(max_depth) = self.max_include_depth else {
+                    self.emit_line(
+                        line.data(),
+                        file_name,
+                        source_line_number,
+                        &mut has_reported_file,
+                    );
+                    continue;
+                };
+
+                // When the file containing the directive already sits at the
+                // maximum include depth, the directive is likewise left
+                // verbatim, and a "maximum include depth exceeded" error is
+                // recorded at the directive's own file and line (matching
+                // Asciidoctor). `include_depth` counts the current file as 1,
+                // so the containing file's depth — which the limit is compared
+                // against — is `include_depth - 1`, making the depth-exceeded
+                // condition `include_depth - 1 >= curr`, i.e.:
+                if self.include_depth > max_depth.curr {
+                    self.warnings.push(DeferredWarning {
+                        offset: self.output.len(),
+                        len: line.data().len(),
+                        warning: WarningType::MaxIncludeDepthExceeded(max_depth.rel),
+                        origin: None,
+                    });
+
+                    self.emit_line(
+                        line.data(),
+                        file_name,
+                        source_line_number,
+                        &mut has_reported_file,
+                    );
+                    continue;
+                }
+
                 let attrlist = caps
                     .get(2)
                     .map(|attrlist| {
@@ -378,10 +469,43 @@ impl<'p> PreprocessorState<'p> {
                     let content_start = self.output.len();
 
                     if is_asciidoc_file(&target) {
+                        // The directive's `depth` attribute lowers the maximum
+                        // include depth while the included file (and anything
+                        // it includes) is processed; the previous limit is
+                        // restored once the include has been merged. A positive
+                        // value permits that many more levels below the
+                        // included file, clamped to the absolute
+                        // `max-include-depth` limit; zero (or a value that
+                        // coerces to zero) permits none. `include_depth` here
+                        // is the containing file's depth plus one — i.e. the
+                        // depth of the included file itself.
+                        let saved_max_depth = self.max_include_depth;
+
+                        if let Some(depth_attr) = attrlist.named_attribute("depth")
+                            && let Some(max_depth) = self.max_include_depth.as_mut()
+                        {
+                            let rel = ruby_to_i(depth_attr.value());
+                            if rel > 0 {
+                                let mut rel = rel as usize;
+                                let mut curr = self.include_depth + rel;
+                                if curr > max_depth.abs {
+                                    curr = max_depth.abs;
+                                    rel = max_depth.abs;
+                                }
+                                max_depth.curr = curr;
+                                max_depth.rel = rel;
+                            } else {
+                                max_depth.curr = self.include_depth;
+                                max_depth.rel = 0;
+                            }
+                        }
+
                         // AsciiDoc files are run through the preprocessor, so the
                         // include (and other) directives they contain are
                         // interpreted.
                         self.process_adoc_include(&selected, Some(&target));
+
+                        self.max_include_depth = saved_max_depth;
                     } else {
                         // Non-AsciiDoc files are merged verbatim; the preprocessor
                         // does not interpret any AsciiDoc directives within them
@@ -3170,5 +3294,31 @@ mod tests {
         // Tabs expand to the tab stop; the common indent is zero (the middle line
         // is flush left), so no further indentation change is made.
         assert_eq!(output, "----\n    a\nno-tab\n    b\n----\n");
+    }
+
+    #[test]
+    fn cyclic_include_is_bounded_by_max_include_depth() {
+        // A file that includes itself would recurse without limit if the
+        // include depth were not enforced. The default `max-include-depth` of
+        // 64 bounds the expansion: the directive at the 64th nesting level is
+        // left verbatim, with a "maximum include depth exceeded" error.
+        let handler = InlineFileHandler::from_pairs([("loop.adoc", "include::loop.adoc[]")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess("include::loop.adoc[]", &parser);
+
+        // Each nesting level's only line is the directive itself, which
+        // expands to the next level (contributing no output of its own) until
+        // the limit is reached and the directive survives verbatim.
+        assert_eq!(output, "include::loop.adoc[]\n");
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::MaxIncludeDepthExceeded(64)
+        );
     }
 }
