@@ -7406,12 +7406,11 @@ mod abstract_and_part_intro {
     // block (or paragraph) resolves to the `open` context with the `abstract`
     // declared style, renders as `quoteblock.abstract`, and an abstract used as
     // a direct child of a doctitle-less book document is excluded with a
-    // warning. The `partintro` block style is still unmodeled: a `[partintro]`
-    // open block does not gain the `partintro` class, and its validation
-    // errors are not emitted; those tests are kept `#[ignore]`d with the
-    // Ruby-intended assertions. The DocBook variants are reproduced as
+    // warning. The `partintro` block style is out of scope for this crate: it
+    // is meaningful only inside a book part, and the `book` doctype's part
+    // structure (like the DocBook backend it is most often paired with) is not
+    // supported here. All `partintro` tests are therefore reproduced as
     // `non_normative`.
-    // TODO: implement the partintro block style (#794).
 
     #[test]
     fn should_make_abstract_on_open_block_without_title_a_quote_block_for_article() {
@@ -7613,11 +7612,12 @@ mod abstract_and_part_intro {
 "#
     );
 
-    #[ignore]
-    #[test]
-    fn should_accept_partintro_on_open_block_without_title() {
-        verifies!(
-            r##"
+    // The `partintro` block style is out of scope for this crate: it is only
+    // meaningful as the first child of a book part, and neither the `book`
+    // doctype's part structure nor the DocBook backend that the remaining
+    // variants target is supported here.
+    non_normative!(
+        r##"
     # TODO partintro shouldn't be recognized if doctype is not book, should be in proper place
     test 'should accept partintro on open block without title' do
       input = <<~'EOS'
@@ -7647,21 +7647,6 @@ mod abstract_and_part_intro {
       assert_xpath %(//*[#{contains_class(:openblock)}]/*[@class="content"]/*[@class="paragraph"]), output, 2
     end
 
-"##
-        );
-
-        let doc = Parser::default().parse(
-            "= Book\n:doctype: book\n\n= Part 1\n\n[partintro]\n--\nThis is a part intro.\n\nIt can have multiple paragraphs.\n--\n\n== Chapter 1\n\ncontent\n",
-        );
-        assert_css(&doc, ".openblock.partintro", 1);
-        assert_css(&doc, ".openblock .content", 1);
-    }
-
-    #[ignore]
-    #[test]
-    fn should_accept_partintro_on_open_block_with_title() {
-        verifies!(
-            r##"
     test 'should accept partintro on open block with title' do
       input = <<~'EOS'
       = Book
@@ -7690,21 +7675,6 @@ mod abstract_and_part_intro {
       assert_xpath %(//*[#{contains_class(:openblock)}]/*[@class="content"]/*[@class="paragraph"]), output, 1
     end
 
-"##
-        );
-
-        let doc = Parser::default().parse(
-            "= Book\n:doctype: book\n\n= Part 1\n\n.Intro title\n[partintro]\n--\nThis is a part intro with a title.\n--\n\n== Chapter 1\n\ncontent\n",
-        );
-        assert_css(&doc, ".openblock.partintro", 1);
-        assert_css(&doc, ".openblock .title", 1);
-    }
-
-    #[ignore]
-    #[test]
-    fn should_exclude_partintro_if_not_a_child_of_part() {
-        verifies!(
-            r#"
     test 'should exclude partintro if not a child of part' do
       input = <<~'EOS'
       = Book
@@ -7719,19 +7689,6 @@ mod abstract_and_part_intro {
       assert_message @logger, :ERROR, 'partintro block can only be used when doctype is book and must be a child of a book part. Excluding block content.'
     end
 
-"#
-        );
-
-        let doc = Parser::default()
-            .parse("= Book\n:doctype: book\n\n[partintro]\npart intro paragraph\n");
-        assert_css(&doc, ".partintro", 0);
-    }
-
-    #[ignore]
-    #[test]
-    fn should_not_allow_partintro_unless_doctype_is_book() {
-        verifies!(
-            r#"
     test 'should not allow partintro unless doctype is book' do
       input = <<~'EOS'
       [partintro]
@@ -7743,16 +7700,6 @@ mod abstract_and_part_intro {
       assert_message @logger, :ERROR, 'partintro block can only be used when doctype is book and must be a child of a book part. Excluding block content.'
     end
 
-"#
-        );
-
-        let doc = Parser::default().parse("[partintro]\npart intro paragraph\n");
-        assert_css(&doc, ".partintro", 0);
-    }
-
-    // The DocBook partintro variants are backend-specific and out of scope.
-    non_normative!(
-        r##"
     test 'should accept partintro on open block without title converted to DocBook' do
       input = <<~'EOS'
       = Book
