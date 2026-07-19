@@ -3334,6 +3334,7 @@ fn should_use_doctitle_of_root_document_as_fallback_link_text_for_inter_document
 // document title, so `[reftext="Links and Stuff"]` is not read as document
 // metadata (and the title line is not recognized as a title). The equivalent
 // `:reftext:` header attribute *is* honored as the self-reference link text.
+// Tracked in #805.
 non_normative!(
     r###"
   test 'should use reftext on document as fallback link text if inter-document xref points to current doc and no link text is provided' do
@@ -3354,6 +3355,7 @@ non_normative!(
 // document title, so `[reftext="Links and Stuff"]` is not read as document
 // metadata. The equivalent `:reftext:` header attribute *is* honored as the
 // self-reference link text.
+// Tracked in #805.
 non_normative!(
     r###"
   test 'should use reftext on document as fallback link text if xref points to empty fragment and no link text is provided' do
