@@ -52,40 +52,37 @@ impl<'src> Span<'src> {
         Some(self.into_parse_result(self.len()))
     }
 
-    /// Split the span, consuming a user-defined attribute name if found.
+    /// Split the span, consuming the raw name of an [attribute entry].
     ///
-    /// [User-defined attribute names] must:
+    /// The name of an attribute entry begins with a word character (`a`-`z`,
+    /// `A`-`Z`, `0`-`9`, or `_`) and runs up to — but not including — the
+    /// closing colon (`:`) that terminates it. Mirroring Asciidoctor's
+    /// `AttributeEntryRx` (whose capture is `!?\w.*?`), the characters after
+    /// the first are otherwise unconstrained: the raw name may contain spaces
+    /// and other characters that are not valid in a canonical attribute name
+    /// (e.g. `Author Initials` or `Foo 3^ # - Bar[`).
     ///
-    /// * be at least one character long,
-    /// * begin with a word character (`a`-`z`, `0`-`9`, or `_`), and
-    /// * only contain word characters and hyphens (`-`).
+    /// Returns `None` when the span is empty or does not begin with a word
+    /// character. When the span contains no colon, the whole span is consumed
+    /// as the name (the caller then fails to find the terminating colon).
     ///
-    /// A user-defined attribute name cannot contain dots (`.`) or spaces.
-    /// Although uppercase characters are permitted in an attribute name, the
-    /// name is converted to lowercase before being stored. For example,
-    /// `URL-REPO` and `URL-Repo` are treated as `url-repo` when a document is
-    /// loaded or converted. A best practice is to only use lowercase letters in
-    /// the name and avoid starting the name with a number.
+    /// IMPORTANT: This function performs no normalization. The captured name is
+    /// sanitized — lower-cased, with every character outside `[a-z0-9_-]`
+    /// stripped — before it is used as an attribute key, so `URL-Repo` becomes
+    /// `url-repo` and `Author Initials` becomes `authorinitials`. See
+    /// `remap_attr_name` in the parser.
     ///
-    /// IMPORTANT: This function does _not_ perform the lower-case normalization
-    /// defined above.
-    ///
-    /// [User-defined attribute names]: https://docs.asciidoctor.org/asciidoc/latest/attributes/names-and-values/#user-defined
+    /// [attribute entry]: https://docs.asciidoctor.org/asciidoc/latest/attributes/names-and-values/#user-defined
     pub(crate) fn take_user_attr_name(self) -> Option<MatchedItem<'src, Self>> {
-        let mut chars = self.data.char_indices();
-
-        let (_, c) = chars.next()?;
-        if !c.is_ascii_alphanumeric() && c != '_' {
+        let first = self.data.chars().next()?;
+        if !first.is_ascii_alphanumeric() && first != '_' {
             return None;
         }
 
-        for (index, c) in chars {
-            if !c.is_ascii_alphanumeric() && c != '_' && c != '-' {
-                return Some(self.into_parse_result(index));
-            }
+        match self.position(|c| c == ':') {
+            Some(index) => Some(self.into_parse_result(index)),
+            None => Some(self.into_parse_result(self.len())),
         }
-
-        Some(self.into_parse_result(self.len()))
     }
 
     /// Returns [`true`] if the span properly forms an [XML Name].
@@ -509,14 +506,14 @@ mod tests {
         }
 
         #[test]
-        fn stops_at_non_ident() {
-            let span = crate::Span::new("x#");
+        fn stops_at_colon() {
+            let span = crate::Span::new("foo: bar");
             let mi = span.take_user_attr_name().unwrap();
 
             assert_eq!(
                 mi.item,
                 Span {
-                    data: "x",
+                    data: "foo",
                     line: 1,
                     col: 1,
                     offset: 0
@@ -526,17 +523,46 @@ mod tests {
             assert_eq!(
                 mi.after,
                 Span {
-                    data: "#",
+                    data: ": bar",
                     line: 1,
-                    col: 2,
-                    offset: 1
+                    col: 4,
+                    offset: 3
+                }
+            );
+        }
+
+        #[test]
+        fn captures_non_word_chars() {
+            // The raw name runs up to the closing colon and may contain spaces
+            // and other characters that are not valid in a canonical attribute
+            // name; sanitization happens later (see `remap_attr_name`).
+            let span = crate::Span::new("Foo 3^ # - Bar[: x");
+            let mi = span.take_user_attr_name().unwrap();
+
+            assert_eq!(
+                mi.item,
+                Span {
+                    data: "Foo 3^ # - Bar[",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+
+            assert_eq!(
+                mi.after,
+                Span {
+                    data: ": x",
+                    line: 1,
+                    col: 16,
+                    offset: 15
                 }
             );
         }
 
         #[test]
         fn numeric() {
-            let span = crate::Span::new("94!");
+            let span = crate::Span::new("94: x");
             let mi = span.take_user_attr_name().unwrap();
 
             assert_eq!(
@@ -552,7 +578,7 @@ mod tests {
             assert_eq!(
                 mi.after,
                 Span {
-                    data: "!",
+                    data: ": x",
                     line: 1,
                     col: 3,
                     offset: 2
@@ -562,7 +588,7 @@ mod tests {
 
         #[test]
         fn contains_hyphens() {
-            let span = crate::Span::new("blah-blah-94 = foo");
+            let span = crate::Span::new("blah-blah-94: foo");
             let mi = span.take_user_attr_name().unwrap();
 
             assert_eq!(
@@ -578,7 +604,7 @@ mod tests {
             assert_eq!(
                 mi.after,
                 Span {
-                    data: " = foo",
+                    data: ": foo",
                     line: 1,
                     col: 13,
                     offset: 12

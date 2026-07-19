@@ -1672,10 +1672,9 @@ mod interpolation {
         assert_xpath(&doc, "//p[text()=\"R is for Ruby!\"]", 1);
     }
 
-    // Tracked in #726.
     #[test]
     fn collapses_spaces_in_attribute_names() {
-        non_normative!(
+        verifies!(
             r#"
     test "collapses spaces in attribute names" do
       input = <<~'EOS'
@@ -1692,12 +1691,13 @@ mod interpolation {
 "#
         );
 
-        // Divergence: this crate does not collapse spaces in attribute names, so
-        // `:My frog:` is not a valid attribute entry and `{myfrog}` is left
-        // unresolved.
+        // The attribute-entry name `My frog` is sanitized to `myfrog` (spaces
+        // dropped, lower-cased), so the `{myfrog}` reference resolves. See
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/761 (previously
+        // tracked as a divergence in #726).
         let doc = Parser::default()
             .parse("Main Header\n===========\n:My frog: Tanglefoot\n\nYo, {myfrog}!");
-        assert_xpath(&doc, "//p[text()=\"Yo, {myfrog}!\"]", 1);
+        assert_xpath(&doc, "//p[text()=\"Yo, Tanglefoot!\"]", 1);
     }
 
     #[test]

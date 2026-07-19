@@ -51,14 +51,21 @@ impl<'src> Attribute<'src> {
 
         let name = line.take_user_attr_name()?;
 
-        let line = if name.after.starts_with('!') && !unset {
+        // A trailing `!` on the name (immediately before the closing colon) is
+        // the postfix unset marker, e.g. `:foo!:`. It is stripped from the
+        // stored name. A name may not carry both a leading and a trailing `!`.
+        let (name_item, after_name) = if name.item.data().ends_with('!') {
+            if unset {
+                return None;
+            }
             unset = true;
-            name.after.slice_from(1..)
+            let len = name.item.data().len();
+            (name.item.slice_to(..len - 1), name.after)
         } else {
-            name.after
+            (name.item, name.after)
         };
 
-        let line = line.take_prefix(":")?;
+        let line = after_name.take_prefix(":")?;
 
         let (value, value_source) = if unset {
             // Ensure line is now empty except for comment.
@@ -76,7 +83,7 @@ impl<'src> Attribute<'src> {
         let source = source.trim_remainder(attr_line.after);
         Some(MatchedItem {
             item: Self {
-                name: name.item,
+                name: name_item,
                 value_source,
                 value,
                 source: source.trim_trailing_whitespace(),
@@ -494,13 +501,83 @@ mod tests {
     }
 
     #[test]
-    fn err_invalid_ident2() {
-        assert!(
-            crate::document::Attribute::parse(
-                crate::Span::new(":invalid@:\nblah"),
-                &Parser::default()
-            )
-            .is_none()
+    fn name_captures_trailing_non_word_char() {
+        // A name may contain (and end with) characters that are not valid in a
+        // canonical attribute name; the raw name runs up to the closing colon.
+        // The stray characters are dropped later, when the name is sanitized
+        // into an attribute key (`invalid@` becomes `invalid`).
+        let mi = crate::document::Attribute::parse(
+            crate::Span::new(":invalid@:\nblah"),
+            &Parser::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Attribute {
+                name: Span {
+                    data: "invalid@",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+                value_source: None,
+                value: InterpretedValue::Set,
+                source: Span {
+                    data: ":invalid@:",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                }
+            }
+        );
+
+        assert_eq!(
+            mi.after,
+            Span {
+                data: "blah",
+                line: 2,
+                col: 1,
+                offset: 11
+            }
+        );
+    }
+
+    #[test]
+    fn name_with_spaces() {
+        // A name containing spaces is captured verbatim up to the closing colon.
+        // It is sanitized to `authorinitials` before it is stored as an
+        // attribute (see the parser's `remap_attr_name`); here we only check
+        // that the entry parses and preserves the raw name span.
+        let mi = crate::document::Attribute::parse(
+            crate::Span::new(":Author Initials: SJR"),
+            &Parser::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Attribute {
+                name: Span {
+                    data: "Author Initials",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+                value_source: Some(Span {
+                    data: "SJR",
+                    line: 1,
+                    col: 19,
+                    offset: 18,
+                }),
+                value: InterpretedValue::Value("SJR"),
+                source: Span {
+                    data: ":Author Initials: SJR",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                }
+            }
         );
     }
 
