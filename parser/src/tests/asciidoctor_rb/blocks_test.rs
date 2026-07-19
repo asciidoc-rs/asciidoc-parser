@@ -4768,19 +4768,19 @@ mod metadata {
         assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]", 1);
     }
 
-    // NOTE: divergence from Asciidoctor. This crate does not demote a document
-    // title preceded by a block title to a level-0 section (it does not support
-    // level-0 sections in the document body at all), so no `<h1>` is rendered in
-    // the content. The crate does emit the `Level0SectionHeadingNotSupported`
-    // warning at line 2 (matching the Ruby error), but the surrounding structure
-    // differs. The block-title carryover itself is implemented (#782).
-    // TODO: support level-0 sections in the document body, demoting a document
-    // title preceded by a block title.
-    #[ignore]
-    #[test]
-    fn block_title_above_document_title_demotes_document_title_to_a_section_title() {
-        verifies!(
-            r#"
+    // NOTE: out of scope. Both tests below depend on demoting a body-level
+    // document title (`= Title`) to a level-0 section — the "level 0 sections
+    // can only be used when doctype is book" behavior. This crate does not
+    // support level-0 sections in the document body (with or without
+    // `doctype: book`): a `=` heading in the body is declined as an unsupported
+    // level-0 heading rather than becoming a level-0 section, so the demoted
+    // `<h1>`/`.sect1` structure these tests assert is never produced. That is a
+    // deliberate divergence, not a deferral, so the tests are reproduced
+    // verbatim (`non_normative!`) rather than ported. The block-title carryover
+    // they also exercise is itself implemented (#782); see
+    // `block_title_above_section_gets_carried_over_to_first_block_in_section`.
+    non_normative!(
+        r#"
     test 'block title above document title demotes document title to a section title' do
       input = <<~'EOS'
       .Block title
@@ -4797,32 +4797,6 @@ mod metadata {
       assert_message @logger, :ERROR, '<stdin>: line 2: level 0 sections can only be used when doctype is book', Hash
     end
 
-"#
-        );
-
-        let doc = Parser::default().parse(".Block title\n= Section Title\n\nsection paragraph\n");
-        assert_xpath(&doc, "//*[@id=\"content\"]/h1[text()=\"Section Title\"]", 1);
-        assert_xpath(
-            &doc,
-            "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
-            1,
-        );
-    }
-
-    // NOTE: divergence from Asciidoctor (doc-title demotion; see
-    // `block_title_above_document_title_demotes_document_title_to_a_section_title`).
-    // The block-title carryover itself is implemented (#782), but without
-    // level-0 section support the demoted document title is not parsed as a
-    // section, so the title is not carried into the first section's first
-    // block.
-    // TODO: support level-0 sections in the document body, demoting a document
-    // title preceded by a block title.
-    #[ignore]
-    #[test]
-    fn block_title_above_document_title_gets_carried_over_to_first_block_in_first_section_if_no_preamble()
-     {
-        verifies!(
-            r#"
     test 'block title above document title gets carried over to first block in first section if no preamble' do
       input = <<~'EOS'
       :doctype: book
@@ -4841,17 +4815,7 @@ mod metadata {
     end
 
 "#
-        );
-
-        let doc = Parser::default().parse(
-            ":doctype: book\n.Block title\n= Document Title\n\n== First Section\n\nparagraph\n",
-        );
-        assert_xpath(
-            &doc,
-            "//*[@class=\"sect1\"]//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
-            1,
-        );
-    }
+    );
 
     // NOTE: divergence from Asciidoctor. This crate does not render a macro
     // link inside a block title (nor were the referenced attributes supplied),
