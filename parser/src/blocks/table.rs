@@ -1803,7 +1803,11 @@ fn process_content<'src>(
                 let owned_root = Span::new(source);
                 for sw in parser.drain_substitution_warnings_since(substitution_warnings_mark) {
                     let warning_source = owned_root.slice(sw.offset..sw.offset + sw.len);
-                    parser.record_owned_cell_warning(warning_source.line(), sw.warning);
+                    // A substitution warning locates itself by offset into the
+                    // owned source, so it has no pre-resolved origin; resolve it
+                    // through this cell's source map (the directive-warning
+                    // override path does not apply).
+                    parser.record_owned_cell_warning(warning_source.line(), sw.warning, None);
                 }
                 parser.pop_owned_cell_source_map();
 
