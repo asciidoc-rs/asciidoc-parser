@@ -195,8 +195,9 @@ pub trait ReferenceResolver {
 /// `#id` fragments. Targets that carry a path component (detected by the
 /// presence of `#`, e.g. `other-page.adoc#frag`) are treated as inter-document
 /// references and left unresolved — resolving those is the responsibility of a
-/// host-supplied resolver. A `#` that introduces a numeric character reference
-/// (`&#8658;`) is not a path separator; see [`has_path_component`].
+/// host-supplied resolver. Only the first `#` is considered, and a `#` preceded
+/// by `&` is not a path separator, so a target carrying a numeric character
+/// reference (`Cub &#8658; Tiger`) still resolves as a same-document reference.
 #[derive(Clone, Copy, Debug)]
 pub struct CatalogResolver<'a> {
     catalog: &'a Catalog,
