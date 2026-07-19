@@ -7447,7 +7447,7 @@ mod abstract_and_part_intro {
     // validation warnings/errors are not emitted. The HTML tests are kept
     // `#[ignore]`d with the Ruby-intended assertions; the DocBook variants are
     // reproduced as `non_normative`.
-    // TODO: implement the abstract and partintro block styles.
+    // TODO: implement the abstract (#783) and partintro block styles.
 
     #[ignore]
     #[test]
@@ -7882,7 +7882,7 @@ mod substitutions {
     // NOTE: divergence from Asciidoctor. An empty `[subs=","]` list is not
     // honored by this crate — a verbatim block keeps its default (Verbatim)
     // substitution group rather than an empty list. Kept `#[ignore]`d.
-    // TODO: honor an empty `subs` list.
+    // TODO(#784): honor an empty `subs` list.
     #[ignore]
     #[test]
     fn processor_should_not_crash_if_subs_are_empty() {
