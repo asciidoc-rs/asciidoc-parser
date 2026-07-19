@@ -157,6 +157,55 @@ pub enum WarningType {
     /// encoding cannot be honored.
     #[error("include encoding is not supported (only UTF-8 is supported): {0}")]
     NonUtf8IncludeEncoding(String),
+
+    /// A conditional preprocessor directive (`ifdef`, `ifndef`, `ifeval`, or
+    /// `endif`) is malformed. The first field is the specific reason (e.g.
+    /// `missing target`, `target not permitted`, `missing expression`, `invalid
+    /// expression`, `text not permitted`); the second is the offending
+    /// directive as written.
+    #[error("malformed preprocessor directive - {0}: {1}")]
+    MalformedConditionalDirective(String, String),
+
+    /// An `endif` preprocessor directive was found with no matching open
+    /// conditional. The field is the offending directive as written.
+    #[error("unmatched preprocessor directive: {0}")]
+    UnmatchedConditionalDirective(String),
+
+    /// An `endif` preprocessor directive names a different target than the
+    /// conditional it would close. The field is the offending directive as
+    /// written.
+    #[error("mismatched preprocessor directive: {0}")]
+    MismatchedConditionalDirective(String),
+
+    /// A conditional preprocessor directive (`ifdef`, `ifndef`, or `ifeval`)
+    /// was opened but never closed by a matching `endif`. The field is the
+    /// opening directive as written.
+    #[error("detected unterminated preprocessor conditional directive: {0}")]
+    UnterminatedConditionalDirective(String),
+
+    /// One or more tags named by an include directive's `tag` / `tags`
+    /// attribute were never found in the include file. The field is the
+    /// pre-formatted, pluralized subject — `tag '<name>'` for a single missing
+    /// tag, or `tags '<name>, <name>'` (comma-joined, in the order specified)
+    /// for several.
+    #[error("{0} not found in include file")]
+    IncludeTagNotFound(String),
+
+    /// A tagged region in an include file was opened by a `tag::` directive but
+    /// never closed. The field is the unclosed tag name.
+    #[error("detected unclosed tag in include file: {0}")]
+    IncludeTagUnclosed(String),
+
+    /// An `end::` tag directive in an include file names a different tag than
+    /// the region currently open. The first field is the expected (open) tag,
+    /// the second is the tag actually found.
+    #[error("mismatched end tag in include file (expected {0} but found {1})")]
+    IncludeTagMismatchedEnd(String, String),
+
+    /// An `end::` tag directive in an include file was found with no
+    /// corresponding open region. The field is the unexpected tag name.
+    #[error("unexpected end tag in include file: {0}")]
+    IncludeTagUnexpectedEnd(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -306,6 +355,48 @@ impl std::fmt::Debug for WarningType {
             WarningType::NonUtf8IncludeEncoding(encoding) => f
                 .debug_tuple("WarningType::NonUtf8IncludeEncoding")
                 .field(encoding)
+                .finish(),
+
+            WarningType::MalformedConditionalDirective(reason, directive) => f
+                .debug_tuple("WarningType::MalformedConditionalDirective")
+                .field(reason)
+                .field(directive)
+                .finish(),
+
+            WarningType::UnmatchedConditionalDirective(directive) => f
+                .debug_tuple("WarningType::UnmatchedConditionalDirective")
+                .field(directive)
+                .finish(),
+
+            WarningType::MismatchedConditionalDirective(directive) => f
+                .debug_tuple("WarningType::MismatchedConditionalDirective")
+                .field(directive)
+                .finish(),
+
+            WarningType::UnterminatedConditionalDirective(directive) => f
+                .debug_tuple("WarningType::UnterminatedConditionalDirective")
+                .field(directive)
+                .finish(),
+
+            WarningType::IncludeTagNotFound(tag) => f
+                .debug_tuple("WarningType::IncludeTagNotFound")
+                .field(tag)
+                .finish(),
+
+            WarningType::IncludeTagUnclosed(tag) => f
+                .debug_tuple("WarningType::IncludeTagUnclosed")
+                .field(tag)
+                .finish(),
+
+            WarningType::IncludeTagMismatchedEnd(expected, found) => f
+                .debug_tuple("WarningType::IncludeTagMismatchedEnd")
+                .field(expected)
+                .field(found)
+                .finish(),
+
+            WarningType::IncludeTagUnexpectedEnd(tag) => f
+                .debug_tuple("WarningType::IncludeTagUnexpectedEnd")
+                .field(tag)
                 .finish(),
         }
     }
@@ -683,6 +774,90 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::NonUtf8IncludeEncoding(\"iso-8859-1\")"
+                );
+            }
+
+            #[test]
+            fn malformed_conditional_directive() {
+                let warning = WarningType::MalformedConditionalDirective(
+                    "missing target".to_string(),
+                    "ifdef::[]".to_string(),
+                );
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::MalformedConditionalDirective(\"missing target\", \"ifdef::[]\")"
+                );
+            }
+
+            #[test]
+            fn unmatched_conditional_directive() {
+                let warning =
+                    WarningType::UnmatchedConditionalDirective("endif::on-quest[]".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::UnmatchedConditionalDirective(\"endif::on-quest[]\")"
+                );
+            }
+
+            #[test]
+            fn mismatched_conditional_directive() {
+                let warning =
+                    WarningType::MismatchedConditionalDirective("endif::on-journey[]".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::MismatchedConditionalDirective(\"endif::on-journey[]\")"
+                );
+            }
+
+            #[test]
+            fn unterminated_conditional_directive() {
+                let warning =
+                    WarningType::UnterminatedConditionalDirective("ifdef::on-quest[]".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::UnterminatedConditionalDirective(\"ifdef::on-quest[]\")"
+                );
+            }
+
+            #[test]
+            fn include_tag_not_found() {
+                let warning = WarningType::IncludeTagNotFound("tag 'no-such-tag'".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeTagNotFound(\"tag 'no-such-tag'\")"
+                );
+            }
+
+            #[test]
+            fn include_tag_unclosed() {
+                let warning = WarningType::IncludeTagUnclosed("'a'".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::IncludeTagUnclosed(\"'a'\")");
+            }
+
+            #[test]
+            fn include_tag_mismatched_end() {
+                let warning =
+                    WarningType::IncludeTagMismatchedEnd("'b'".to_string(), "'a'".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeTagMismatchedEnd(\"'b'\", \"'a'\")"
+                );
+            }
+
+            #[test]
+            fn include_tag_unexpected_end() {
+                let warning = WarningType::IncludeTagUnexpectedEnd("'a'".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeTagUnexpectedEnd(\"'a'\")"
                 );
             }
         }

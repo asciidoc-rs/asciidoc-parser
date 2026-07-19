@@ -45,13 +45,21 @@ pub(crate) fn preprocess_with_initial_file_name(
     initial_file_name: Option<&str>,
 ) -> (String, SourceMap, Vec<DeferredWarning>) {
     // Short-circuit if the original source document has no pre-processor
-    // directives.
+    // directives. `if` covers `ifdef`/`ifndef`/`ifeval`; `endif` is checked
+    // separately because it does not share that prefix, and a stray `endif`
+    // (with no opening conditional) is itself a directive that must be
+    // processed — otherwise it would be emitted as literal content and its
+    // unmatched-directive diagnostic would be lost.
     if !source.starts_with("include::")
         && !source.starts_with("if")
+        && !source.starts_with("endif::")
         && !source.starts_with("\\if")
+        && !source.starts_with("\\endif::")
         && !source.contains("\ninclude::")
         && !source.contains("\nif")
+        && !source.contains("\nendif::")
         && !source.contains("\n\\if")
+        && !source.contains("\n\\endif::")
         && !source.starts_with("\\include::")
         && !source.contains("\n\\include::")
         && initial_file_name.is_none()
@@ -65,6 +73,10 @@ pub(crate) fn preprocess_with_initial_file_name(
     let mut temp_parser = parser.clone();
     let mut state = PreprocessorState::new(&mut temp_parser);
     state.process_adoc_include(source, initial_file_name);
+
+    // Any conditional directive still open once the whole source has been
+    // processed was never closed by a matching `endif`.
+    state.emit_unterminated_conditional_warnings();
 
     (state.output, state.source_map, state.warnings)
 }
@@ -100,6 +112,18 @@ struct Conditional {
     /// is cumulative: a conditional nested inside a skipped region is itself
     /// skipping, regardless of its own condition.
     skipping: bool,
+
+    /// The opening directive as written (e.g. `ifdef::on-quest[]`), used to
+    /// report it if it is never closed. See
+    /// [`emit_unterminated_conditional_warnings`].
+    ///
+    /// [`emit_unterminated_conditional_warnings`]: PreprocessorState::emit_unterminated_conditional_warnings
+    directive_text: String,
+
+    /// The originating file and 1-based line of the opening directive, used to
+    /// locate an "unterminated" warning at the directive's own line.
+    file_name: Option<String>,
+    source_line: usize,
 }
 
 impl<'p> PreprocessorState<'p> {
@@ -237,7 +261,14 @@ impl<'p> PreprocessorState<'p> {
                         );
                     }
 
-                    let replacement = format!("link:{target}[role=include]");
+                    // A target containing a space would break the link macro,
+                    // so it is wrapped in a `pass:c[…]` macro (matching
+                    // Asciidoctor).
+                    let replacement = if target.contains(' ') {
+                        format!("link:pass:c[{target}][role=include]")
+                    } else {
+                        format!("link:{target}[role=include]")
+                    };
                     self.output_line_number += 1;
                     self.output.push_str(&replacement);
                     self.output.push('\n');
@@ -282,8 +313,14 @@ impl<'p> PreprocessorState<'p> {
                     // Asciidoctor. Any nested include/conditional directives in an
                     // AsciiDoc include are therefore interpreted only on the
                     // selected, re-indented lines.
-                    let selected = select_included_lines(include_content.content(), &attrlist);
+                    let (selected, tag_diagnostics) =
+                        select_included_lines(include_content.content(), &attrlist);
                     let selected = reindent_included_lines(selected, &attrlist, self.parser);
+
+                    // A malformed or unmatched tag directive (or a requested tag
+                    // that was never found) is reported against the include
+                    // directive's own cursor.
+                    self.emit_tag_filter_warnings(&tag_diagnostics, file_name, source_line_number);
 
                     // The parser only handles UTF-8 content, so an `encoding`
                     // attribute requesting any other encoding cannot be honored
@@ -363,6 +400,7 @@ impl<'p> PreprocessorState<'p> {
                             offset: content_start,
                             len,
                             warning: WarningType::NonUtf8IncludeEncoding(encoding.to_string()),
+                            origin: None,
                         });
                     }
 
@@ -573,6 +611,7 @@ impl<'p> PreprocessorState<'p> {
             offset: self.output.len(),
             len: replacement.len(),
             warning: WarningType::IncludeFileNotFound(target),
+            origin: None,
         });
 
         self.output_line_number += 1;
@@ -600,27 +639,86 @@ impl<'p> PreprocessorState<'p> {
         source_line_number: usize,
         has_reported_file: &mut bool,
     ) {
+        let already_skipping = self.skipping();
+
         if keyword == "endif" {
             // `endif::[]` closes the most recently opened conditional;
             // `endif::name[]` must match that conditional's target. An `endif`
-            // with non-empty brackets (e.g. `endif::[<condition>]`) is malformed
-            // and closes nothing, and a mismatched or unmatched `endif` is
-            // ignored (Asciidoctor logs an error in each case).
-            if content.is_empty()
-                && let Some(top) = self.conditional_stack.last()
-                && (target.is_empty() || top.target.as_deref() == Some(target))
-            {
-                self.conditional_stack.pop();
+            // with non-empty brackets (e.g. `endif::name[text]`) is malformed
+            // and closes nothing; a mismatched or unmatched `endif` likewise
+            // closes nothing. Asciidoctor logs an error in each case (but stays
+            // silent while an enclosing conditional is already skipping — the
+            // stray `endif` is just discarded along with the skipped region).
+            if !content.is_empty() {
+                if !already_skipping {
+                    self.emit_conditional_warning(
+                        WarningType::MalformedConditionalDirective(
+                            "text not permitted".to_owned(),
+                            directive_text(keyword, target, content),
+                        ),
+                        file_name,
+                        source_line_number,
+                    );
+                }
+                return;
+            }
+
+            match self.conditional_stack.last() {
+                Some(top) if target.is_empty() || top.target.as_deref() == Some(target) => {
+                    self.conditional_stack.pop();
+                }
+                Some(_) => {
+                    if !already_skipping {
+                        self.emit_conditional_warning(
+                            WarningType::MismatchedConditionalDirective(directive_text(
+                                keyword, target, content,
+                            )),
+                            file_name,
+                            source_line_number,
+                        );
+                    }
+                }
+                None => {
+                    // The stack is empty, so nothing is skipping: always warn.
+                    self.emit_conditional_warning(
+                        WarningType::UnmatchedConditionalDirective(directive_text(
+                            keyword, target, content,
+                        )),
+                        file_name,
+                        source_line_number,
+                    );
+                }
             }
             return;
         }
 
-        let already_skipping = self.skipping();
-
         if keyword == "ifeval" {
-            // `ifeval` has no single-line or long-form variant and its target
-            // must be empty; it is always closed by an anonymous `endif::[]`.
-            if !target.is_empty() {
+            // `ifeval` has no single-line or long-form variant, its target must
+            // be empty, and its bracketed expression is required and must be a
+            // valid comparison. A malformed `ifeval` is dropped (it opens no
+            // conditional and does not enclose the lines that follow), with an
+            // error logged unless an enclosing conditional is already skipping.
+            let malformed_reason = if !target.is_empty() {
+                Some("target not permitted")
+            } else if content.trim().is_empty() {
+                Some("missing expression")
+            } else if !IFEVAL_EXPRESSION.is_match(content.trim()) {
+                Some("invalid expression")
+            } else {
+                None
+            };
+
+            if let Some(reason) = malformed_reason {
+                if !already_skipping {
+                    self.emit_conditional_warning(
+                        WarningType::MalformedConditionalDirective(
+                            reason.to_owned(),
+                            directive_text(keyword, target, content),
+                        ),
+                        file_name,
+                        source_line_number,
+                    );
+                }
                 return;
             }
 
@@ -628,13 +726,27 @@ impl<'p> PreprocessorState<'p> {
             self.conditional_stack.push(Conditional {
                 target: None,
                 skipping: already_skipping || !include,
+                directive_text: directive_text(keyword, target, content),
+                file_name: to_owned(file_name),
+                source_line: source_line_number,
             });
             return;
         }
 
         // `ifdef` / `ifndef`.
         if target.is_empty() {
-            // Malformed: a target (attribute name) is required.
+            // Malformed: a target (attribute name) is required. Dropped, with an
+            // error logged unless already skipping.
+            if !already_skipping {
+                self.emit_conditional_warning(
+                    WarningType::MalformedConditionalDirective(
+                        "missing target".to_owned(),
+                        directive_text(keyword, target, content),
+                    ),
+                    file_name,
+                    source_line_number,
+                );
+            }
             return;
         }
 
@@ -645,6 +757,9 @@ impl<'p> PreprocessorState<'p> {
             self.conditional_stack.push(Conditional {
                 target: Some(target.to_owned()),
                 skipping,
+                directive_text: directive_text(keyword, target, content),
+                file_name: to_owned(file_name),
+                source_line: source_line_number,
             });
         } else if !already_skipping && self.eval_ifdef(keyword, target) {
             // Single-line form: the bracketed content is included in place (with
@@ -655,6 +770,91 @@ impl<'p> PreprocessorState<'p> {
                 source_line_number,
                 has_reported_file,
             );
+        }
+    }
+
+    /// Record a warning for a conditional preprocessor directive.
+    ///
+    /// A conditional directive produces no output of its own, so there is no
+    /// output span to resolve the warning's location against. The directive's
+    /// originating file and line are therefore recorded on the warning directly
+    /// (via [`DeferredWarning::origin`]); the byte-offset span is a zero-length
+    /// best-effort anchor at the current output position.
+    ///
+    /// [`DeferredWarning::origin`]: crate::parser::DeferredWarning::origin
+    fn emit_conditional_warning(
+        &mut self,
+        warning: WarningType,
+        file_name: Option<&str>,
+        source_line_number: usize,
+    ) {
+        self.warnings.push(DeferredWarning {
+            offset: self.output.len(),
+            len: 0,
+            warning,
+            origin: Some(SourceLine(to_owned(file_name), source_line_number)),
+        });
+    }
+
+    /// Record a warning for each tag-filter diagnostic raised while resolving
+    /// an include directive's `tag(s)` selection.
+    ///
+    /// Each is located at the include directive's own cursor (its file and
+    /// line), matching Asciidoctor's `include_location`. The byte-offset span
+    /// is a zero-length best-effort anchor at the current output position.
+    fn emit_tag_filter_warnings(
+        &mut self,
+        diagnostics: &[TagFilterDiagnostic],
+        file_name: Option<&str>,
+        source_line_number: usize,
+    ) {
+        for diagnostic in diagnostics {
+            let warning = match diagnostic {
+                TagFilterDiagnostic::NotFound(names) => {
+                    let word = if names.len() > 1 { "tags" } else { "tag" };
+                    WarningType::IncludeTagNotFound(format!("{word} '{}'", names.join(", ")))
+                }
+                TagFilterDiagnostic::Unclosed(name) => {
+                    WarningType::IncludeTagUnclosed(format!("'{name}'"))
+                }
+                TagFilterDiagnostic::MismatchedEnd { expected, found } => {
+                    WarningType::IncludeTagMismatchedEnd(
+                        format!("'{expected}'"),
+                        format!("'{found}'"),
+                    )
+                }
+                TagFilterDiagnostic::UnexpectedEnd(name) => {
+                    WarningType::IncludeTagUnexpectedEnd(format!("'{name}'"))
+                }
+            };
+
+            self.warnings.push(DeferredWarning {
+                offset: self.output.len(),
+                len: 0,
+                warning,
+                origin: Some(SourceLine(to_owned(file_name), source_line_number)),
+            });
+        }
+    }
+
+    /// Emit an "unterminated" warning for each conditional directive still open
+    /// at the end of preprocessing (i.e. never closed by a matching `endif`).
+    ///
+    /// Directives are reported in the order they were opened, each located at
+    /// its own opening line. Asciidoctor reports an unterminated conditional at
+    /// the end of the reader by default, but at the opening directive's line
+    /// when `sourcemap` is enabled; this crate always maintains a source map,
+    /// so it always reports at the opening line.
+    fn emit_unterminated_conditional_warnings(&mut self) {
+        // Drain the stack so the directive text can be moved into each warning
+        // without cloning; the state is discarded after this call.
+        for conditional in std::mem::take(&mut self.conditional_stack) {
+            self.warnings.push(DeferredWarning {
+                offset: self.output.len(),
+                len: 0,
+                warning: WarningType::UnterminatedConditionalDirective(conditional.directive_text),
+                origin: Some(SourceLine(conditional.file_name, conditional.source_line)),
+            });
         }
     }
 
@@ -705,16 +905,17 @@ impl<'p> PreprocessorState<'p> {
     /// OR) or `+` (all are set — logical AND); the two combinators cannot be
     /// mixed. `ifndef` is the logical negation of `ifdef`.
     fn eval_ifdef(&self, keyword: &str, target: &str) -> bool {
+        // Attribute names are case-insensitive: the parser stores them
+        // lowercased, so the directive's target names are lowercased to match
+        // (`ifdef::showScript[]` resolves the `showscript` attribute).
+        let is_set = |name: &str| self.parser.is_attribute_set(name.to_lowercase());
+
         let defined = if target.contains(',') {
-            target
-                .split(',')
-                .any(|name| self.parser.is_attribute_set(name))
+            target.split(',').any(is_set)
         } else if target.contains('+') {
-            target
-                .split('+')
-                .all(|name| self.parser.is_attribute_set(name))
+            target.split('+').all(is_set)
         } else {
-            self.parser.is_attribute_set(target)
+            is_set(target)
         };
 
         if keyword == "ifndef" {
@@ -894,6 +1095,12 @@ fn to_owned(maybe_file_name: Option<&str>) -> Option<String> {
     maybe_file_name.map(|n| n.to_string())
 }
 
+/// Reconstruct a conditional preprocessor directive as written, for use in a
+/// diagnostic message (e.g. `endif::on-quest[]`, `ifeval::[1 | 2]`).
+fn directive_text(keyword: &str, target: &str, content: &str) -> String {
+    format!("{keyword}::{target}[{content}]")
+}
+
 /// Returns `true` if `target` names an AsciiDoc file, based on its extension.
 ///
 /// Per the [include directive] spec, a file is treated as AsciiDoc if it has
@@ -953,14 +1160,23 @@ fn split_delimited_value(value: &str) -> impl Iterator<Item = &str> {
 /// attribute takes precedence over `tag(s)` when both are given, matching
 /// Asciidoctor.
 ///
+/// The second element of the returned tuple carries any
+/// [`TagFilterDiagnostic`]s raised while resolving a `tag(s)` selection (a
+/// requested tag that was not found, or a malformed tag directive within the
+/// include file); the caller turns each into a warning located at the include
+/// directive.
+///
 /// See `include-lines.adoc` and `include-tagged-regions.adoc`.
-fn select_included_lines(text: &str, attrlist: &Attrlist<'_>) -> String {
+fn select_included_lines(
+    text: &str,
+    attrlist: &Attrlist<'_>,
+) -> (String, Vec<TagFilterDiagnostic>) {
     if let Some(lines) = attrlist
         .named_attribute("lines")
         .map(|a| a.value())
         .filter(|v| !v.is_empty())
     {
-        return select_by_line_ranges(text, lines);
+        return (select_by_line_ranges(text, lines), vec![]);
     }
 
     // `tag` (singular) and `tags` (plural) are equivalent; the singular form is
@@ -974,7 +1190,26 @@ fn select_included_lines(text: &str, attrlist: &Attrlist<'_>) -> String {
         return select_by_tags(text, tags);
     }
 
-    text.to_string()
+    (text.to_string(), vec![])
+}
+
+/// A problem detected while applying a `tag(s)` include selection, to be
+/// reported (by the caller) as a warning located at the include directive.
+#[derive(Debug)]
+enum TagFilterDiagnostic {
+    /// One or more requested (non-negated) tags were never found in the include
+    /// file. Carries the missing tag names in the order they were requested.
+    NotFound(Vec<String>),
+
+    /// A tagged region was opened but never closed before the end of the file.
+    Unclosed(String),
+
+    /// An `end::` directive named a tag other than the one currently open. The
+    /// fields are the expected (open) tag and the tag actually found.
+    MismatchedEnd { expected: String, found: String },
+
+    /// An `end::` directive was found with no corresponding open region.
+    UnexpectedEnd(String),
 }
 
 /// Select the lines of `text` that fall within any of the ranges named in the
@@ -1002,7 +1237,18 @@ fn select_by_line_ranges(text: &str, spec: &str) -> String {
                 (n, Some(n))
             }
         })
+        // A reversed range (`from` past a concrete `to`, e.g. `10..5`) selects no
+        // lines, so it is dropped. If every range is invalid this way, the
+        // `lines` attribute is ignored entirely (see below), matching
+        // Asciidoctor.
+        .filter(|&(from, to)| to.is_none_or(|to| from <= to))
         .collect();
+
+    // With no valid range remaining, the `lines` attribute is ignored and the
+    // whole file is included (rather than nothing).
+    if ranges.is_empty() {
+        return text.to_string();
+    }
 
     let mut output = String::new();
     for (index, line) in text.lines().enumerate() {
@@ -1022,7 +1268,9 @@ fn select_by_line_ranges(text: &str, spec: &str) -> String {
 /// `tag(s)` attribute value (`spec`), following the tag-filtering rules in
 /// `include-tagged-regions.adoc`. Lines that contain a tag directive are always
 /// discarded.
-fn select_by_tags(text: &str, spec: &str) -> String {
+fn select_by_tags(text: &str, spec: &str) -> (String, Vec<TagFilterDiagnostic>) {
+    let mut diagnostics: Vec<TagFilterDiagnostic> = vec![];
+
     // Build the ordered set of tag directives, mapping each name to whether it
     // is included (`true`) or excluded (`!name` -> `false`).
     let mut inc_tags: Vec<(String, bool)> = vec![];
@@ -1040,6 +1288,18 @@ fn select_by_tags(text: &str, spec: &str) -> String {
             None => inc_tags.push((name.to_string(), include)),
         }
     }
+
+    // The set of requested, non-negated tag names (excluding the `*`/`**`
+    // wildcards), in request order — used to report any that are never found.
+    let requested_named: Vec<String> = inc_tags
+        .iter()
+        .filter(|(name, include)| *include && name != "*" && name != "**")
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    // Every tag name opened by a `tag::` directive in the file, so a requested
+    // tag that does appear is not reported as missing.
+    let mut seen_tags: Vec<String> = vec![];
 
     // Resolve the base selection (whether lines outside any tag are kept) and
     // the wildcard (the default selection for an unnamed tagged region), then
@@ -1099,19 +1359,45 @@ fn select_by_tags(text: &str, spec: &str) -> String {
                             select = base_select;
                         }
                     }
-                }
-                // A mismatched or unknown end tag is ignored.
-            } else if let Some(named) = lookup(name) {
-                select = named;
-                tag_stack.push((name.to_string(), select));
-                active_tag = Some(name.to_string());
-            } else if let Some(wildcard) = wildcard {
-                // An unnamed region uses the wildcard default, unless we are
-                // already inside an unselected region (then it stays excluded).
-                select = if active_tag.is_some() && !select {
-                    false
+                } else if let Some(idx) = tag_stack.iter().rposition(|(n, _)| n == name) {
+                    // The named region is open, but it is not the innermost one:
+                    // an inner region was left unclosed. Report the mismatch and
+                    // close the named region (the still-open inner regions are
+                    // reported as unclosed at end of file). This matches
+                    // Asciidoctor, which removes the matched entry from the stack
+                    // while leaving the active (innermost) region in effect.
+                    diagnostics.push(TagFilterDiagnostic::MismatchedEnd {
+                        expected: active_tag.clone().unwrap_or_default(),
+                        found: name.to_string(),
+                    });
+                    tag_stack.remove(idx);
                 } else {
-                    wildcard
+                    // No open region for this tag at all.
+                    diagnostics.push(TagFilterDiagnostic::UnexpectedEnd(name.to_string()));
+                }
+            } else {
+                if !seen_tags.iter().any(|n| n == name) {
+                    seen_tags.push(name.to_string());
+                }
+                // Every tagged region is pushed onto the stack so its `end::`
+                // directive matches (and an unclosed region is detected),
+                // regardless of whether it is selected. Only the `select` state
+                // it carries depends on the request.
+                select = if let Some(named) = lookup(name) {
+                    named
+                } else if let Some(wildcard) = wildcard {
+                    // An unnamed region uses the wildcard default, unless we are
+                    // already inside an unselected region (then it stays excluded).
+                    if active_tag.is_some() && !select {
+                        false
+                    } else {
+                        wildcard
+                    }
+                } else {
+                    // A region that is neither requested nor covered by a
+                    // wildcard is tracked but leaves the current selection
+                    // unchanged (it inherits the enclosing region's state).
+                    select
                 };
                 tag_stack.push((name.to_string(), select));
                 active_tag = Some(name.to_string());
@@ -1123,7 +1409,22 @@ fn select_by_tags(text: &str, spec: &str) -> String {
         }
     }
 
-    output
+    // Any region still open at end of file was never closed.
+    for (name, _) in &tag_stack {
+        diagnostics.push(TagFilterDiagnostic::Unclosed(name.clone()));
+    }
+
+    // Any requested (non-negated) tag that never appeared as a directive is
+    // reported together, in the order the tags were requested.
+    let missing: Vec<String> = requested_named
+        .into_iter()
+        .filter(|name| !seen_tags.iter().any(|n| n == name))
+        .collect();
+    if !missing.is_empty() {
+        diagnostics.push(TagFilterDiagnostic::NotFound(missing));
+    }
+
+    (output, diagnostics)
 }
 
 /// Locate a tag directive (`tag::NAME[]` or `end::NAME[]`) within `line`.
@@ -2430,12 +2731,14 @@ mod tests {
     }
 
     #[test]
-    fn ifeval_malformed_expression_is_false() {
-        // An expression with no operator cannot be parsed, so the condition is
-        // false and the enclosed content is skipped.
+    fn ifeval_malformed_expression_is_dropped() {
+        // An expression with no comparison operator cannot be parsed, so the
+        // directive is malformed: it opens no conditional and the following
+        // lines are emitted unchanged (the stray `endif::[]` is then unmatched
+        // and simply discarded), matching Asciidoctor.
         assert_eq!(
-            conditional_output("ifeval::[nonsense]\ndropped\nendif::[]\n\ntail"),
-            "\ntail\n"
+            conditional_output("ifeval::[nonsense]\nkept\nendif::[]\n\ntail"),
+            "kept\n\ntail\n"
         );
     }
 
