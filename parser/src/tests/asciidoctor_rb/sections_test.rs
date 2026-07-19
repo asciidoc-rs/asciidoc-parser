@@ -3810,7 +3810,7 @@ mod special_sections {
 
     // NOTE: The `appendix-number` attribute (to start appendix lettering at a
     // custom value) is not honored — the crate always letters appendices A, B, …
-    // Out of scope.
+    // Out of scope (see #780).
     non_normative!(
         r##"
     test 'should allow appendix number to be controlled using appendix-number attribute' do
