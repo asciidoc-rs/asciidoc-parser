@@ -346,6 +346,13 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         set(ApiOnly, ASCIIDOCTOR_VERSION),
     );
 
+    // NOTE: The companion always-set `asciidoctor` flag is deliberately still
+    // *not* defined here. Defining it exposes a preprocessor bug – conditional
+    // directives are processed inside `////` comment blocks – that Asciidoctor's
+    // own `preprocessor directives should not be processed within comment block`
+    // tests catch via `ifdef::asciidoctor[////]`. See issue #810; the flag lands
+    // with that fix.
+
     // ### Safe-mode intrinsic attributes
     //
     // These describe the default safe mode (`SafeMode::Secure`).
