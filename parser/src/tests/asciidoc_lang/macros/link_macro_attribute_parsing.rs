@@ -447,7 +447,7 @@ https://chat.asciidoc.org[role=button,window=_blank,opts=nofollow]
                             col: 1,
                             offset: 0,
                         },
-                        rendered: "<a href=\"https://chat.asciidoc.org\" class=\"bare button\" target=\"_blank\" rel=\"nofollow\" noopener>https://chat.asciidoc.org</a>",
+                        rendered: "<a href=\"https://chat.asciidoc.org\" class=\"bare button\" target=\"_blank\" rel=\"nofollow noopener\">https://chat.asciidoc.org</a>",
                     },
                     source: Span {
                         data: "https://chat.asciidoc.org[role=button,window=_blank,opts=nofollow]",
@@ -851,7 +851,7 @@ https://asciidoctor.org[Asciidoctor,window=_blank,opts=nofollow]
                             col: 1,
                             offset: 0,
                         },
-                        rendered: "<a href=\"https://asciidoctor.org\" target=\"_blank\" rel=\"nofollow\" noopener>Asciidoctor</a>",
+                        rendered: "<a href=\"https://asciidoctor.org\" target=\"_blank\" rel=\"nofollow noopener\">Asciidoctor</a>",
                     },
                     source: Span {
                         data: "https://asciidoctor.org[Asciidoctor,window=_blank,opts=nofollow]",
@@ -924,7 +924,7 @@ https://asciidoctor.org[Asciidoctor,window=read-later,opts="noopener,nofollow"]
                             col: 1,
                             offset: 0,
                         },
-                        rendered: "<a href=\"https://asciidoctor.org\" target=\"read-later\" rel=\"nofollow\" noopener>Asciidoctor</a>",
+                        rendered: "<a href=\"https://asciidoctor.org\" target=\"read-later\" rel=\"nofollow noopener\">Asciidoctor</a>",
                     },
                     source: Span {
                         data: "https://asciidoctor.org[Asciidoctor,window=read-later,opts=\"noopener,nofollow\"]",

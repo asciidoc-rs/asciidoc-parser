@@ -879,7 +879,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         roles.append(&mut attrlist_roles);
 
         let link = format!(
-            r##"<a href="{target}"{id}{class}{link_constraint_attrs}>{link_text}</a>"##,
+            r##"<a href="{target}"{id}{class}{title}{link_constraint_attrs}>{link_text}</a>"##,
             target = params.target,
             id = if let Some(id) = id {
                 format!(r#" id="{id}""#)
@@ -891,8 +891,17 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             } else {
                 format!(r#" class="{roles}""#, roles = roles.join(" "))
             },
-            // title = %( title="#{node.attr 'title'}") if node.attr? 'title'
-            // Haven't seen this in the wild yet.
+            // Mirrors Asciidoctor's HTML5 converter: `title="#{node.attr 'title'}"`
+            // is emitted (after the class) when the link carries a `title`
+            // attribute.
+            title = if let Some(title) = params.attrlist.named_attribute("title") {
+                format!(
+                    r#" title="{title}""#,
+                    title = encode_attribute_value(title.value().to_owned())
+                )
+            } else {
+                "".to_owned()
+            },
             link_constraint_attrs = link_constraint_attrs(params.attrlist, params.window),
             link_text = params.link_text,
         );
@@ -926,9 +935,11 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             Some(resolved) => {
                 // Explicit link text always wins; otherwise use the target's
                 // reference text, optionally reformatted by the `xrefstyle`.
+                // Empty explicit text (`<<id,>>`) is treated as absent, matching
+                // Asciidoctor's fallback to the target's reference text.
                 let text = match params.provided_text {
-                    Some(provided) => provided.to_string(),
-                    None => {
+                    Some(provided) if !provided.is_empty() => provided.to_string(),
+                    _ => {
                         let base = resolved
                             .text
                             .clone()
@@ -1373,7 +1384,7 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) 
     {
         let rel_noopener = if window == "_blank" || attrlist.has_option("noopener") {
             if let Some(rel) = rel {
-                format!(r#" rel="{rel}" noopener"#)
+                format!(r#" rel="{rel} noopener""#)
             } else {
                 r#" rel="noopener""#.to_owned()
             }

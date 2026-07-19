@@ -121,6 +121,13 @@ fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
     let mut in_verifies_block = false;
     let mut expect_track_file_path = false;
 
+    // Number of `#` guards in the raw-string delimiter that opened the block we
+    // are currently inside (`Some(1)` for `r#"`, `Some(2)` for `r##"`, …), or
+    // `None` when not inside a reproduced Ruby block. The closing delimiter must
+    // match this length, so a reproduced line that merely starts with a shorter
+    // `"#` / `"##` sequence does not close the block early.
+    let mut raw_hashes: Option<usize> = None;
+
     for line in rs_file.lines() {
         let line = line.unwrap();
 
@@ -173,15 +180,35 @@ fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
             continue;
         }
 
-        if line.starts_with("\"#") {
-            // println!("QQQ");
-            in_non_normative_block = false;
-            in_verifies_block = false;
-            continue;
+        // Closing delimiter of the current block. It must match the hash length
+        // of the opener (`"#` for `r#"`, `"##` for `r##"`, …); a reproduced line
+        // that merely starts with a shorter guard is left as block content.
+        if let Some(hashes) = raw_hashes {
+            let closer = format!("\"{}", "#".repeat(hashes));
+            if line.trim_end() == closer {
+                // println!("QQQ");
+                in_non_normative_block = false;
+                in_verifies_block = false;
+                raw_hashes = None;
+                continue;
+            }
         }
 
-        if line.ends_with("r#\"") || line.ends_with("r##\"") {
-            // println!("<<<");
+        // Opening delimiter of a reproduced Ruby block. We accept progressively
+        // longer hash guards (`r#"`, `r##"`, `r###"`) so a reproduced line may
+        // itself contain a shorter `"#`/`"##` sequence without prematurely
+        // closing the raw string (see `links_test.rb` line 664). The matching
+        // closer length is remembered in `raw_hashes` (checked above).
+        if line.ends_with("r###\"") {
+            raw_hashes = Some(3);
+            continue;
+        }
+        if line.ends_with("r##\"") {
+            raw_hashes = Some(2);
+            continue;
+        }
+        if line.ends_with("r#\"") {
+            raw_hashes = Some(1);
             continue;
         }
 

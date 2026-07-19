@@ -90,13 +90,24 @@ impl Passthroughs {
             return;
         }
 
-        let replacer = PassthroughRestoreReplacer(self, parser);
-
-        if let Cow::Owned(new_result) =
-            PASS_WITH_INDEX.replace_all(content.rendered().as_ref(), replacer)
-        {
+        if let Cow::Owned(new_result) = PASS_WITH_INDEX.replace_all(
+            content.rendered().as_ref(),
+            PassthroughRestoreReplacer(self, parser),
+        ) {
             content.rendered = new_result.into();
         }
+
+        // A deferred cross-reference's explicit text is pulled out of the main
+        // rendered string before this point, so any passthrough placeholder it
+        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too —
+        // otherwise the placeholder sentinels leak into the link text.
+        content.restore_deferred_xref_passthroughs(|text| {
+            if let Cow::Owned(restored) =
+                PASS_WITH_INDEX.replace_all(text, PassthroughRestoreReplacer(self, parser))
+            {
+                *text = restored;
+            }
+        });
     }
 
     pub(super) fn push(&mut self, passthrough: Passthrough, dest: &mut String) {
