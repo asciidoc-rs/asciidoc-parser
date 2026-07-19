@@ -4685,9 +4685,8 @@ fn ifdef_with_defined_attribute_includes_text_in_brackets() {
     );
 }
 
-// Out of scope: gated on the `asciidoctor-version` intrinsic (which this crate
-// does not define), and asserts that the single-line form's bracketed content —
-// here an `include::` directive — is itself preprocessed. This crate emits
+// Out of scope: asserts that the single-line form's bracketed content — here an
+// `include::` directive — is itself preprocessed. This crate emits
 // single-line conditional content for normal parsing and does not recursively
 // run the preprocessor over it, so a nested include there is not expanded.
 non_normative!(
@@ -5694,17 +5693,11 @@ fn ifeval_running_invalid_operation_drops_content() {
 "#
     );
 
-    // The test supplies the `asciidoctor-version` value this crate does not
-    // define (see issue #778) so that, as in Ruby, the invalid operation is a
-    // number compared against a boolean.
-    let parser = Parser::default().with_intrinsic_attribute(
-        "asciidoctor-version",
-        ASCIIDOCTOR_VERSION,
-        ModificationContext::Anywhere,
-    );
+    // `asciidoctor-version` is predefined by this crate, so – as in Ruby – the
+    // invalid operation is a number compared against a boolean.
     assert_eq!(
         reader_read(
-            &parser,
+            &Parser::default(),
             "ifeval::[{asciidoctor-version} > true]\nI didn't make the cut!\nendif::[]"
         ),
         ""
@@ -5819,10 +5812,6 @@ fn ifeval_comparing_quoted_attribute_to_non_matching_string_drops_content() {
     );
 }
 
-// This crate does not define the `asciidoctor-version` intrinsic (see issue
-// #778), and a reference to an unset attribute resolves to empty in an
-// `ifeval` operand (see issue #779), so the test supplies a version value for
-// the comparison to hold against.
 #[test]
 fn ifeval_comparing_attribute_to_lower_version_number_includes_content() {
     verifies!(
@@ -5846,14 +5835,9 @@ fn ifeval_comparing_attribute_to_lower_version_number_includes_content() {
 "#
     );
 
-    let parser = Parser::default().with_intrinsic_attribute(
-        "asciidoctor-version",
-        ASCIIDOCTOR_VERSION,
-        ModificationContext::Anywhere,
-    );
     assert_eq!(
         reader_read(
-            &parser,
+            &Parser::default(),
             "ifeval::['{asciidoctor-version}' >= '0.1.0']\nThat version will do!\nendif::[]"
         ),
         "That version will do!"
@@ -5895,8 +5879,7 @@ fn ifeval_comparing_attribute_to_self_includes_content() {
     );
 }
 
-// The operands may be given in either order. (As above, the test supplies the
-// `asciidoctor-version` value this crate does not define — see issue #778.)
+// The operands may be given in either order.
 #[test]
 fn ifeval_arguments_can_be_transposed() {
     verifies!(
@@ -5920,14 +5903,9 @@ fn ifeval_arguments_can_be_transposed() {
 "#
     );
 
-    let parser = Parser::default().with_intrinsic_attribute(
-        "asciidoctor-version",
-        ASCIIDOCTOR_VERSION,
-        ModificationContext::Anywhere,
-    );
     assert_eq!(
         reader_read(
-            &parser,
+            &Parser::default(),
             "ifeval::['0.1.0' <= '{asciidoctor-version}']\nThat version will do!\nendif::[]"
         ),
         "That version will do!"
