@@ -4022,8 +4022,16 @@ fn attributes_are_substituted_in_target_of_include_directive() {
     );
 }
 
-non_normative!(
-    r#"
+// `{blank}` resolves to the empty string, so the directive's target is blank.
+// This crate hands even a blank target to the handler (a real handler reports
+// no such file by returning `None`), so the directive is replaced with the
+// "Unresolved directive" message and an `IncludeFileNotFound` warning — rather
+// than Asciidoctor's distinct "resolved target is blank" notice, and naming the
+// root as `(root file)` rather than `<stdin>`.
+#[test]
+fn line_is_skipped_by_default_if_target_of_include_directive_resolves_to_empty() {
+    verifies!(
+        r#"
       test 'line is skipped by default if target of include directive resolves to empty' do
         input = 'include::{blank}[]'
         using_memory_logger do |logger|
@@ -4036,8 +4044,37 @@ non_normative!(
       end
 
 "#
-);
+    );
 
+    let handler = RecordingIncludeFileHandler::missing();
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+
+    let (output, _source_map, warnings) =
+        crate::parser::preprocessor::preprocess("include::{blank}[]", &parser);
+
+    assert_eq!(
+        output,
+        "Unresolved directive in (root file) - include::{blank}[]\n"
+    );
+    // The blank target was still handed to the handler (as the empty string) ...
+    assert_eq!(probe.calls(), vec![(None, "".to_owned(), None)]);
+    // ... which reported no such file, yielding the not-found warning.
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::IncludeFileNotFound("".to_owned())
+    );
+}
+
+// Out of scope for now: this crate does not honor `attribute-missing=drop-line`
+// when substituting an include directive's target. A missing attribute
+// reference in the target is kept literal (as under the default `skip` mode)
+// and delegated to the handler, so the whole line is not dropped as Asciidoctor
+// does here. (A mock handler cannot reproduce this; it would require the
+// preprocessor to apply the attribute-missing policy to the include target.)
 non_normative!(
     r#"
       test 'include is dropped if target contains missing attribute and attribute-missing is drop-line' do
