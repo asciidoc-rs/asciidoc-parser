@@ -7439,17 +7439,17 @@ mod abstract_and_part_intro {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor pervasive to this context. This crate
-    // does not model the `abstract` and `partintro` block styles: an
-    // `[abstract]` open block is not converted to a `quoteblock.abstract` (nor
-    // does an `[abstract]` paragraph gain the `abstract` class), a `[partintro]`
-    // open block does not gain the `partintro` class, and the associated
-    // validation warnings/errors are not emitted. The HTML tests are kept
-    // `#[ignore]`d with the Ruby-intended assertions; the DocBook variants are
-    // reproduced as `non_normative`.
-    // TODO: implement the abstract (#783) and partintro block styles.
+    // NOTE: the `abstract` block style (#783) is modeled: an `[abstract]` open
+    // block (or paragraph) resolves to the `open` context with the `abstract`
+    // declared style, renders as `quoteblock.abstract`, and an abstract used as
+    // a direct child of a doctitle-less book document is excluded with a
+    // warning. The `partintro` block style is still unmodeled: a `[partintro]`
+    // open block does not gain the `partintro` class, and its validation
+    // errors are not emitted; those tests are kept `#[ignore]`d with the
+    // Ruby-intended assertions. The DocBook variants are reproduced as
+    // `non_normative`.
+    // TODO: implement the partintro block style (#794).
 
-    #[ignore]
     #[test]
     fn should_make_abstract_on_open_block_without_title_a_quote_block_for_article() {
         verifies!(
@@ -7488,7 +7488,6 @@ mod abstract_and_part_intro {
         assert_css(&doc, ".quoteblock > blockquote > .paragraph", 2);
     }
 
-    #[ignore]
     #[test]
     fn should_make_abstract_on_open_block_with_title_a_quote_block_with_title_for_article() {
         verifies!(
@@ -7527,7 +7526,6 @@ mod abstract_and_part_intro {
         assert_css(&doc, ".quoteblock > .title", 1);
     }
 
-    #[ignore]
     #[test]
     fn should_allow_abstract_in_document_with_title_if_doctype_is_book() {
         verifies!(
@@ -7551,9 +7549,9 @@ mod abstract_and_part_intro {
         let doc = Parser::default()
             .parse("= Book\n:doctype: book\n\n[abstract]\nAbstract for book with title is valid\n");
         assert_css(&doc, ".abstract", 1);
+        assert!(doc.warnings().next().is_none());
     }
 
-    #[ignore]
     #[test]
     fn should_not_allow_abstract_as_direct_child_of_document_if_doctype_is_book() {
         verifies!(
@@ -7577,6 +7575,13 @@ mod abstract_and_part_intro {
         let doc = Parser::default()
             .parse(":doctype: book\n\n[abstract]\nAbstract for book without title is invalid.\n");
         assert_css(&doc, ".abstract", 0);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(matches!(
+            warnings[0].warning,
+            WarningType::AbstractBlockInBookWithoutDoctitle
+        ));
     }
 
     // The DocBook abstract variants are backend-specific and out of scope.
@@ -7879,11 +7884,6 @@ mod substitutions {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor. An empty `[subs=","]` list is not
-    // honored by this crate — a verbatim block keeps its default (Verbatim)
-    // substitution group rather than an empty list. Kept `#[ignore]`d.
-    // TODO(#784): honor an empty `subs` list.
-    #[ignore]
     #[test]
     fn processor_should_not_crash_if_subs_are_empty() {
         verifies!(

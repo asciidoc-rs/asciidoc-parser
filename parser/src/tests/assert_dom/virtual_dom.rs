@@ -622,8 +622,21 @@ impl ToVirtualDom for Document<'_> {
             TocMode::Disabled => {}
         }
 
+        // An abstract block is not permitted as a direct child of a book
+        // document without a doctitle: Asciidoctor's converter excludes the
+        // block's content (a warning was recorded at parse time). With a
+        // doctitle, pre-section content lands inside the preamble instead, so
+        // this exclusion never applies.
+        let exclude_abstracts = matches!(
+            self.attribute_value("doctype"),
+            InterpretedValue::Value(ref v) if v == "book"
+        ) && self.doctitle().is_none();
+
         // Add child blocks, including block titles as separate siblings.
         for block in self.nested_blocks() {
+            if exclude_abstracts && is_abstract(block) {
+                continue;
+            }
             add_block_with_title(&mut node, block);
         }
 
@@ -714,6 +727,15 @@ impl ToVirtualDom for Block<'_> {
         // numbered caption preceding the content wrapper.
         if is_example(self) {
             return example_to_node(self);
+        }
+
+        // An `[abstract]` open block (the `--` structural container or the
+        // `[abstract]` paragraph style) renders as a quote block carrying the
+        // `abstract` class rather than as `div.openblock`. This check must
+        // precede the `is_open` routing below, since an abstract block also
+        // resolves to the `open` context.
+        if is_abstract(self) {
+            return abstract_to_node(self);
         }
 
         // An `[open]` styled paragraph renders as an open block
@@ -1690,6 +1712,65 @@ fn open_paragraph_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     node
 }
 
+/// Returns `true` if `block` is an abstract block: the `--` structural
+/// container or a paragraph carrying the `abstract` style, both of which
+/// resolve to the `open` context with the `abstract` declared style.
+fn is_abstract<'a>(block: &'a Block<'a>) -> bool {
+    block.declared_style() == Some("abstract") && block.resolved_context().as_ref() == "open"
+}
+
+/// Renders an abstract block, matching Asciidoctor's HTML output for the
+/// `abstract` style on an open block (`convert_open`).
+///
+/// The block renders as `div.quoteblock.abstract`, carrying the block's id and
+/// roles, with the body wrapped in a `<blockquote>`. A title, when present, is
+/// rendered as a `div.title` placed *before* the blockquote. The delimited `--`
+/// form encloses other blocks (rendered through [`add_block_with_title`] so
+/// their own titles and paragraph wrappers surface); the paragraph form holds
+/// inline content rendered directly inside the blockquote without a `<p>`
+/// wrapper.
+fn abstract_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
+    let mut node = VirtualNode::new("div")
+        .with_class("quoteblock")
+        .with_class("abstract");
+
+    for role in block.roles() {
+        node = node.with_class(role);
+    }
+
+    if let Some(id) = block.id() {
+        node = node.with_id(id);
+    }
+
+    // The title, when present, precedes the blockquote.
+    if let Some(title) = block.title() {
+        node.children
+            .push(VirtualNode::new("div").with_class("title").with_text(title));
+    }
+
+    let mut blockquote = VirtualNode::new("blockquote");
+
+    match block.content_model() {
+        // A delimited abstract encloses other blocks.
+        ContentModel::Compound => {
+            for child in block.nested_blocks() {
+                add_block_with_title(&mut blockquote, child);
+            }
+        }
+
+        // An abstract paragraph holds inline content, rendered directly inside
+        // the blockquote without a wrapping paragraph.
+        _ => {
+            if let Some(rendered) = block.rendered_content() {
+                blockquote = blockquote.with_html_content(rendered);
+            }
+        }
+    }
+
+    node.children.push(blockquote);
+    node
+}
+
 /// Returns `true` if `block` is a collapsible block: an example block (or
 /// example-styled paragraph) carrying the `collapsible` option.
 ///
@@ -1776,8 +1857,9 @@ fn is_sidebar<'a>(block: &'a Block<'a>) -> bool {
 /// [`compound_delimited_to_node`]; the paragraph form is a [`Block::Simple`]
 /// rendered by [`open_paragraph_to_node`]. Every masquerade style on a `--`
 /// block is intercepted earlier — by [`is_sidebar`], [`is_example`],
-/// `QuoteBlock`, `AdmonitionBlock`, or `RawDelimitedBlock` — so a
-/// `CompoundDelimited` block that reaches here always resolves to `open`. Like
+/// [`is_abstract`], `QuoteBlock`, `AdmonitionBlock`, or `RawDelimitedBlock` —
+/// so a `CompoundDelimited` block that reaches here always resolves to `open`
+/// with no abstract styling. Like
 /// a sidebar, an open block renders its own title (as a `div.title` before its
 /// content wrapper), so [`add_block_with_title`] must not also emit one.
 fn is_open<'a>(block: &'a Block<'a>) -> bool {

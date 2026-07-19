@@ -69,6 +69,16 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
             if declared_style == "source" {
                 return "listing".into();
             }
+
+            // The `abstract` style is not itself a context; it specializes the
+            // `open` context. Asciidoctor rebuilds an `[abstract]` paragraph as
+            // an open block (keeping the simple content model), so the style
+            // resolves a paragraph's context to `open`. On any other context
+            // (including the `--` delimited form, which is already `open`), the
+            // declared style is preserved without changing the context.
+            if declared_style == "abstract" && self.raw_context().as_ref() == "paragraph" {
+                return "open".into();
+            }
         }
 
         self.raw_context()
