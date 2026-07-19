@@ -4179,7 +4179,8 @@ fn include_directive_not_at_start_of_line_is_ignored() {
 
 // Out of scope: this crate does not implement the `max-include-depth`
 // attribute (nor the "maximum include depth exceeded" diagnostic), so it cannot
-// be used to disable or bound include expansion.
+// be used to disable or bound include expansion. Tracked by
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/777.
 non_normative!(
     r#"
       test 'include directive is disabled when max-include-depth attribute is 0' do
