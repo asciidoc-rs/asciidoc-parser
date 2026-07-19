@@ -1,7 +1,8 @@
 use crate::{
-    Parser,
+    HasSpan, Parser,
     attributes::Attrlist,
     content::{Content, Passthroughs, SubstitutionStep},
+    warnings::WarningType,
 };
 
 /// Each block and inline element has a default substitution group that is
@@ -72,73 +73,69 @@ pub enum SubstitutionGroup {
     Custom(Vec<SubstitutionStep>),
 }
 
+/// The substitution steps applied by the normal substitution group.
+const NORMAL_STEPS: &[SubstitutionStep] = &[
+    SubstitutionStep::SpecialCharacters,
+    SubstitutionStep::Quotes,
+    SubstitutionStep::AttributeReferences,
+    SubstitutionStep::CharacterReplacements,
+    SubstitutionStep::Macros,
+    SubstitutionStep::PostReplacement,
+];
+
+/// The substitution steps applied by the verbatim substitution group.
+const VERBATIM_STEPS: &[SubstitutionStep] = &[
+    SubstitutionStep::SpecialCharacters,
+    SubstitutionStep::Callouts,
+];
+
 impl SubstitutionGroup {
     /// Parse the custom substitution group syntax defined in [Custom
     /// substitutions].
     ///
+    /// Returns the resolved substitution group and the list of substitution
+    /// names that were not recognized. Mirroring Asciidoctor's `resolve_subs`,
+    /// an unrecognized name is skipped rather than invalidating the whole
+    /// list; callers that can record warnings should report the returned
+    /// invalid names.
+    ///
     /// [Custom substitutions]: https://docs.asciidoctor.org/asciidoc/latest/pass/pass-macro/#custom-substitutions
-    pub(crate) fn from_custom_string(start_from: Option<&Self>, mut custom: &str) -> Option<Self> {
+    pub(crate) fn from_custom_string(
+        start_from: Option<&Self>,
+        mut custom: &str,
+    ) -> (Self, Vec<String>) {
         custom = custom.trim();
 
         if custom == "none" {
-            return Some(Self::None);
+            return (Self::None, vec![]);
         }
 
         if custom == "n" || custom == "normal" {
-            return Some(Self::Normal);
+            return (Self::Normal, vec![]);
         }
 
         if custom == "v" || custom == "verbatim" {
-            return Some(Self::Verbatim);
+            return (Self::Verbatim, vec![]);
         }
 
-        // An entirely empty string is not a substitution list; leave it to the
-        // caller to decide what that means (warn for a pass macro, keep the
-        // default group for a block).
-        if custom.is_empty() {
-            return None;
+        let mut tokens: Vec<&str> = custom.split(',').map(str::trim).collect();
+
+        // Ruby's `split(',')` drops trailing empty entries, so an empty string
+        // or a list of only separators (e.g. `subs=","`) yields no tokens at
+        // all and resolves to an empty substitution list, matching
+        // Asciidoctor's `resolve_subs` (which returns no subs without warning
+        // in that case).
+        while tokens.last() == Some(&"") {
+            tokens.pop();
         }
 
         let mut steps: Vec<SubstitutionStep> = vec![];
+        let mut invalid: Vec<String> = vec![];
         let mut first = true;
 
-        for mut step in custom.split(",") {
-            step = step.trim();
-
-            // An empty entry contributes nothing, so a list of only separators
-            // (e.g. `subs=","`) resolves to an empty substitution list. This
-            // matches Asciidoctor's `resolve_subs`, where `','.split(',')`
-            // yields no tokens.
-            if step.is_empty() {
-                continue;
-            }
-
+        for mut step in tokens {
             let is_first = first;
             first = false;
-
-            // A group name (`normal`/`verbatim`) is expanded *in place*: its
-            // constituent steps are appended to the running list rather than
-            // replacing it. This matches Asciidoctor's `resolve_subs`, where a
-            // group name mid-list contributes its steps like any other token.
-            if step == "n" || step == "normal" {
-                steps.extend([
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences,
-                    SubstitutionStep::CharacterReplacements,
-                    SubstitutionStep::Macros,
-                    SubstitutionStep::PostReplacement,
-                ]);
-                continue;
-            }
-
-            if step == "v" || step == "verbatim" {
-                steps.extend([
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Callouts,
-                ]);
-                continue;
-            }
 
             let append = if step.starts_with('+') {
                 step = &step[1..];
@@ -168,27 +165,44 @@ impl SubstitutionGroup {
                 steps = start_from.steps().to_owned();
             }
 
-            let step = match step {
-                "c" | "specialcharacters" | "specialchars" => SubstitutionStep::SpecialCharacters,
-                "q" | "quotes" => SubstitutionStep::Quotes,
-                "a" | "attributes" => SubstitutionStep::AttributeReferences,
-                "r" | "replacements" => SubstitutionStep::CharacterReplacements,
-                "m" | "macros" => SubstitutionStep::Macros,
-                "p" | "post_replacements" => SubstitutionStep::PostReplacement,
-                "callouts" => SubstitutionStep::Callouts,
+            // Each name resolves to a list of steps, so a group name mid-list
+            // contributes its constituent steps like any other token. This
+            // matches Asciidoctor's `resolve_subs`, where every key resolves
+            // to an array of substitutions before the modifier is applied.
+            let resolved: &[SubstitutionStep] = match step {
+                "none" => &[],
+                "n" | "normal" => NORMAL_STEPS,
+                "v" | "verbatim" => VERBATIM_STEPS,
+                "c" | "specialcharacters" | "specialchars" => {
+                    &[SubstitutionStep::SpecialCharacters]
+                }
+                "q" | "quotes" => &[SubstitutionStep::Quotes],
+                "a" | "attributes" => &[SubstitutionStep::AttributeReferences],
+                "r" | "replacements" => &[SubstitutionStep::CharacterReplacements],
+                "m" | "macros" => &[SubstitutionStep::Macros],
+                "p" | "post_replacements" => &[SubstitutionStep::PostReplacement],
+                "callouts" => &[SubstitutionStep::Callouts],
                 _ => {
-                    return None;
+                    // Removing an unrecognized name is a no-op rather than an
+                    // error: in Asciidoctor's `resolve_subs`, a `-` modifier
+                    // never adds the name to the candidate list, so it is
+                    // never reported as invalid.
+                    if !subtract {
+                        invalid.push(step.to_owned());
+                    }
+
+                    continue;
                 }
             };
 
             if prepend {
-                steps.insert(0, step);
-            } else if append {
-                steps.push(step);
+                for (index, step) in resolved.iter().enumerate() {
+                    steps.insert(index, *step);
+                }
             } else if subtract {
-                steps.retain(|s| s != &step);
+                steps.retain(|s| !resolved.contains(s));
             } else {
-                steps.push(step);
+                steps.extend_from_slice(resolved);
             }
         }
 
@@ -203,7 +217,7 @@ impl SubstitutionGroup {
             }
         }
 
-        Some(Self::Custom(deduped))
+        (Self::Custom(deduped), invalid)
     }
 
     pub(crate) fn apply(
@@ -236,7 +250,18 @@ impl SubstitutionGroup {
         content.finalize_deferred(&*parser.renderer);
     }
 
-    pub(crate) fn override_via_attrlist(&self, attrlist: Option<&Attrlist>) -> Self {
+    /// Applies any block style masquerade and `subs` attribute override from
+    /// the block's attribute list.
+    ///
+    /// When `parser` is provided, unrecognized substitution names in the
+    /// `subs` attribute are recorded as warnings. Parse-time callers should
+    /// pass the parser; accessors that re-derive the group after parsing
+    /// should pass `None` so the warning is only recorded once.
+    pub(crate) fn override_via_attrlist(
+        &self,
+        attrlist: Option<&Attrlist>,
+        parser: Option<&Parser>,
+    ) -> Self {
         let mut result = self.clone();
 
         if let Some(attrlist) = attrlist {
@@ -266,11 +291,18 @@ impl SubstitutionGroup {
                 };
             }
 
-            if let Some(sub_group) = attrlist
-                .named_attribute("subs")
-                .map(|attr| attr.value())
-                .and_then(|s| Self::from_custom_string(Some(self), s))
-            {
+            if let Some(subs) = attrlist.named_attribute("subs").map(|attr| attr.value()) {
+                let (sub_group, invalid) = Self::from_custom_string(Some(self), subs);
+
+                if !invalid.is_empty()
+                    && let Some(parser) = parser
+                {
+                    parser.record_substitution_warning(
+                        attrlist.span(),
+                        WarningType::InvalidSubstitutionTypeForBlock(invalid.join(", ")),
+                    );
+                }
+
                 result = sub_group;
             }
         }
@@ -280,24 +312,14 @@ impl SubstitutionGroup {
 
     fn steps(&self) -> &[SubstitutionStep] {
         match self {
-            Self::Normal | Self::Title => &[
-                SubstitutionStep::SpecialCharacters,
-                SubstitutionStep::Quotes,
-                SubstitutionStep::AttributeReferences,
-                SubstitutionStep::CharacterReplacements,
-                SubstitutionStep::Macros,
-                SubstitutionStep::PostReplacement,
-            ],
+            Self::Normal | Self::Title => NORMAL_STEPS,
 
             Self::Header | Self::AttributeEntryValue => &[
                 SubstitutionStep::SpecialCharacters,
                 SubstitutionStep::AttributeReferences,
             ],
 
-            Self::Verbatim => &[
-                SubstitutionStep::SpecialCharacters,
-                SubstitutionStep::Callouts,
-            ],
+            Self::Verbatim => VERBATIM_STEPS,
 
             Self::Stem => &[SubstitutionStep::SpecialCharacters],
 
@@ -339,49 +361,116 @@ mod tests {
 
         #[test]
         fn empty() {
-            assert_eq!(SubstitutionGroup::from_custom_string(None, ""), None);
+            // An empty `subs` value resolves to an empty substitution list,
+            // matching Asciidoctor's `resolve_subs` (which returns no subs for
+            // a nil or empty string).
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, ""),
+                (SubstitutionGroup::Custom(vec![]), vec![])
+            );
         }
 
         #[test]
         fn empty_entries() {
             // A list containing only separators resolves to an empty
-            // substitution list (issue #784).
+            // substitution list, without reporting any invalid names: Ruby's
+            // `split(',')` drops trailing empty entries, so `","` yields no
+            // tokens at all (issue #784).
             assert_eq!(
                 SubstitutionGroup::from_custom_string(Some(&SubstitutionGroup::Verbatim), ","),
-                Some(SubstitutionGroup::Custom(vec![]))
+                (SubstitutionGroup::Custom(vec![]), vec![])
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, " , ,"),
-                Some(SubstitutionGroup::Custom(vec![]))
+                (SubstitutionGroup::Custom(vec![]), vec![])
             );
 
-            // Empty entries elsewhere in the list are skipped.
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "quotes,"),
-                Some(SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]),
+                    vec![]
+                )
             );
 
+            // A leading or interior empty entry is not dropped by Ruby's
+            // `split(',')`; it resolves like any other unrecognized name, so
+            // it is skipped and reported (with an empty name), matching
+            // Asciidoctor's `resolve_subs`.
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "quotes,,macros"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::Macros
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::Macros
+                    ]),
+                    vec!["".to_owned()]
+                )
             );
 
-            // A leading empty entry doesn't count as the first token, so a
-            // modifier that follows it still starts from the base group.
+            // A leading empty entry counts as a (failed) first token, so a
+            // modifier that follows it does not start from the base group,
+            // matching Asciidoctor (where the empty entry makes the candidate
+            // list non-nil before the modifier is seen).
             assert_eq!(
                 SubstitutionGroup::from_custom_string(
                     Some(&SubstitutionGroup::Verbatim),
                     ",+quotes"
                 ),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Callouts,
-                    SubstitutionStep::Quotes
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]),
+                    vec!["".to_owned()]
+                )
+            );
+        }
+
+        #[test]
+        fn invalid_names() {
+            // An unrecognized name is skipped and reported; recognized names
+            // in the same list are still honored.
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "bogus"),
+                (SubstitutionGroup::Custom(vec![]), vec!["bogus".to_owned()])
+            );
+
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "bogus,quotes"),
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]),
+                    vec!["bogus".to_owned()]
+                )
+            );
+
+            // An appended unrecognized name still seeds the list from the
+            // base group before being skipped, matching Asciidoctor.
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(
+                    Some(&SubstitutionGroup::Verbatim),
+                    "+bogus,quotes"
+                ),
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Callouts,
+                        SubstitutionStep::Quotes,
+                    ]),
+                    vec!["bogus".to_owned()]
+                )
+            );
+
+            // Removing an unrecognized name is a no-op, not an error: in
+            // Asciidoctor's `resolve_subs`, a `-` modifier never adds the
+            // name to the candidate list, so it is never reported as invalid.
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(Some(&SubstitutionGroup::Verbatim), "-bogus"),
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Callouts,
+                    ]),
+                    vec![]
+                )
             );
         }
 
@@ -389,42 +478,56 @@ mod tests {
         fn none() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "none"),
-                Some(SubstitutionGroup::None)
+                (SubstitutionGroup::None, vec![])
             );
 
-            assert_eq!(SubstitutionGroup::from_custom_string(None, "nermal"), None);
+            // `none` mid-list resolves to an empty step list, like
+            // Asciidoctor's `SUB_GROUPS[:none]`.
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "quotes,none"),
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]),
+                    vec![]
+                )
+            );
+
+            assert_eq!(
+                SubstitutionGroup::from_custom_string(None, "nermal"),
+                (SubstitutionGroup::Custom(vec![]), vec!["nermal".to_owned()])
+            );
         }
 
         #[test]
         fn normal() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "n"),
-                Some(SubstitutionGroup::Normal)
+                (SubstitutionGroup::Normal, vec![])
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "normal"),
-                Some(SubstitutionGroup::Normal)
+                (SubstitutionGroup::Normal, vec![])
             );
-
-            assert_eq!(SubstitutionGroup::from_custom_string(None, "nermal"), None);
         }
 
         #[test]
         fn verbatim() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "v"),
-                Some(SubstitutionGroup::Verbatim)
+                (SubstitutionGroup::Verbatim, vec![])
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "verbatim"),
-                Some(SubstitutionGroup::Verbatim)
+                (SubstitutionGroup::Verbatim, vec![])
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "verboten"),
-                None
+                (
+                    SubstitutionGroup::Custom(vec![]),
+                    vec!["verboten".to_owned()]
+                )
             );
         }
 
@@ -432,16 +535,18 @@ mod tests {
         fn special_chars() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "c"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "specialchars"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+                    vec![]
+                )
             );
         }
 
@@ -449,12 +554,18 @@ mod tests {
         fn quotes() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "q"),
-                Some(SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "quotes"),
-                Some(SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]),
+                    vec![]
+                )
             );
         }
 
@@ -462,16 +573,18 @@ mod tests {
         fn attributes() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "a"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::AttributeReferences
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::AttributeReferences]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "attributes"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::AttributeReferences
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::AttributeReferences]),
+                    vec![]
+                )
             );
         }
 
@@ -479,16 +592,18 @@ mod tests {
         fn replacements() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "r"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::CharacterReplacements
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "replacements"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::CharacterReplacements
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]),
+                    vec![]
+                )
             );
         }
 
@@ -496,12 +611,18 @@ mod tests {
         fn macros() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "m"),
-                Some(SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "macros"),
-                Some(SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]),
+                    vec![]
+                )
             );
         }
 
@@ -509,16 +630,18 @@ mod tests {
         fn post_replacements() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "p"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::PostReplacement
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::PostReplacement]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "post_replacements"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::PostReplacement
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::PostReplacement]),
+                    vec![]
+                )
             );
         }
 
@@ -526,31 +649,47 @@ mod tests {
         fn multiple() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "q,a"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "q, a"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "quotes,attributes"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "x,bogus,no such step"),
-                None
+                (
+                    SubstitutionGroup::Custom(vec![]),
+                    vec![
+                        "x".to_owned(),
+                        "bogus".to_owned(),
+                        "no such step".to_owned()
+                    ]
+                )
             );
         }
 
@@ -558,43 +697,56 @@ mod tests {
         fn subtraction() {
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "n,-r"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences,
-                    SubstitutionStep::Macros,
-                    SubstitutionStep::PostReplacement,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences,
+                        SubstitutionStep::Macros,
+                        SubstitutionStep::PostReplacement,
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "n,-r,-r,-m"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences,
-                    SubstitutionStep::PostReplacement,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences,
+                        SubstitutionStep::PostReplacement,
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "v,-r"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Callouts,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Callouts,
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "v,-c"),
-                Some(SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "v,-callouts"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters,]),
+                    vec![]
+                )
             );
         }
 
@@ -605,23 +757,29 @@ mod tests {
             // Asciidoctor.
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "n,r"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences,
-                    SubstitutionStep::CharacterReplacements,
-                    SubstitutionStep::Macros,
-                    SubstitutionStep::PostReplacement,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences,
+                        SubstitutionStep::CharacterReplacements,
+                        SubstitutionStep::Macros,
+                        SubstitutionStep::PostReplacement,
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "v,m"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Callouts,
-                    SubstitutionStep::Macros,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Callouts,
+                        SubstitutionStep::Macros,
+                    ]),
+                    vec![]
+                )
             );
         }
 
@@ -632,23 +790,29 @@ mod tests {
             // Asciidoctor.
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "n,r"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences,
-                    SubstitutionStep::CharacterReplacements,
-                    SubstitutionStep::Macros,
-                    SubstitutionStep::PostReplacement,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences,
+                        SubstitutionStep::CharacterReplacements,
+                        SubstitutionStep::Macros,
+                        SubstitutionStep::PostReplacement,
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "v,m"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Callouts,
-                    SubstitutionStep::Macros,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Callouts,
+                        SubstitutionStep::Macros,
+                    ]),
+                    vec![]
+                )
             );
         }
 
@@ -661,24 +825,30 @@ mod tests {
             // away, matching Asciidoctor's `resolve_subs`.
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "quotes,normal"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::AttributeReferences,
-                    SubstitutionStep::CharacterReplacements,
-                    SubstitutionStep::Macros,
-                    SubstitutionStep::PostReplacement,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::AttributeReferences,
+                        SubstitutionStep::CharacterReplacements,
+                        SubstitutionStep::Macros,
+                        SubstitutionStep::PostReplacement,
+                    ]),
+                    vec![]
+                )
             );
 
             // Same behavior for the shorthand `v` group name mid-list.
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "m,v"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Macros,
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Callouts,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::Macros,
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Callouts,
+                    ]),
+                    vec![]
+                )
             );
         }
 
@@ -689,18 +859,22 @@ mod tests {
                     Some(&SubstitutionGroup::Verbatim),
                     "attributes+"
                 ),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::AttributeReferences,
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Callouts,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::AttributeReferences,
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Callouts,
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "attributes+"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::AttributeReferences,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::AttributeReferences,]),
+                    vec![]
+                )
             );
         }
 
@@ -711,18 +885,22 @@ mod tests {
                     Some(&SubstitutionGroup::Verbatim),
                     "+attributes"
                 ),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Callouts,
-                    SubstitutionStep::AttributeReferences,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Callouts,
+                        SubstitutionStep::AttributeReferences,
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "attributes+"),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::AttributeReferences,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![SubstitutionStep::AttributeReferences,]),
+                    vec![]
+                )
             );
         }
 
@@ -733,24 +911,27 @@ mod tests {
                     Some(&SubstitutionGroup::Normal),
                     "-attributes"
                 ),
-                Some(SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::CharacterReplacements,
-                    SubstitutionStep::Macros,
-                    SubstitutionStep::PostReplacement,
-                ]))
+                (
+                    SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::CharacterReplacements,
+                        SubstitutionStep::Macros,
+                        SubstitutionStep::PostReplacement,
+                    ]),
+                    vec![]
+                )
             );
 
             assert_eq!(
                 SubstitutionGroup::from_custom_string(None, "-attributes"),
-                Some(SubstitutionGroup::Custom(vec![]))
+                (SubstitutionGroup::Custom(vec![]), vec![])
             );
         }
 
         #[test]
         fn custom_group_with_macros_preserves_passthroughs() {
-            let custom_group = SubstitutionGroup::from_custom_string(None, "q,m").unwrap();
+            let custom_group = SubstitutionGroup::from_custom_string(None, "q,m").0;
 
             let mut content = Content::from(crate::Span::new(
                 "Text with +++pass<through>+++ icon:github[] content.",
@@ -784,7 +965,7 @@ mod tests {
                 .item
                 .item;
 
-            base.override_via_attrlist(Some(&attrlist))
+            base.override_via_attrlist(Some(&attrlist), None)
         }
 
         #[test]
@@ -857,6 +1038,42 @@ mod tests {
                 resolve(SubstitutionGroup::Verbatim, "subs=none"),
                 SubstitutionGroup::None
             );
+        }
+
+        #[test]
+        fn warns_on_invalid_subs_name_and_honors_valid_names() {
+            // Verified against Asciidoctor 2.0.26: the unrecognized name is
+            // warned about and skipped, while the recognized `quotes` sub is
+            // still applied. The `&` is left unescaped because
+            // `specialchars` is not in the resolved list.
+            let mut p = Parser::default();
+            let doc = p.parse("[subs=\"bogus,quotes\"]\nabc *bold* &\ndef");
+
+            let block = doc.nested_blocks().next().unwrap();
+            assert_eq!(
+                block.rendered_content(),
+                Some("abc <strong>bold</strong> &\ndef")
+            );
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings.first().unwrap().warning,
+                crate::warnings::WarningType::InvalidSubstitutionTypeForBlock("bogus".to_owned())
+            );
+        }
+
+        #[test]
+        fn no_warning_for_empty_subs_list() {
+            // An empty list (`subs=","`) resolves to no substitutions without
+            // any warning, matching Asciidoctor (issue #784).
+            let mut p = Parser::default();
+            let doc = p.parse("[subs=\",\"]\n....\ncontent <here>\n....");
+
+            let block = doc.nested_blocks().next().unwrap();
+            assert_eq!(block.rendered_content(), Some("content <here>"));
+
+            assert_eq!(doc.warnings().count(), 0);
         }
     }
 

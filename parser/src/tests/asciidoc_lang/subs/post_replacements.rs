@@ -437,7 +437,11 @@ For blocks, the step's name, `post_replacements`, can be assigned to the xref:ap
 "#
         );
 
-        let doc = Parser::default().parse("[subs=post-replacements]\nabc *bold* +\ndef");
+        // The step's name uses an underscore (`post_replacements`). Since the
+        // `subs` value replaces the block's default substitution list, only
+        // the line-break post replacement is applied; the bold text is left
+        // as-is (verified against Asciidoctor 2.0.26).
+        let doc = Parser::default().parse("[subs=post_replacements]\nabc *bold* +\ndef");
 
         let block1 = doc.nested_blocks().next().unwrap();
 
@@ -445,10 +449,7 @@ For blocks, the step's name, `post_replacements`, can be assigned to the xref:ap
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(
-            block1.content().rendered(),
-            "abc <strong>bold</strong><br>\ndef"
-        );
+        assert_eq!(block1.content().rendered(), "abc *bold*<br>\ndef");
     }
 
     #[test]
