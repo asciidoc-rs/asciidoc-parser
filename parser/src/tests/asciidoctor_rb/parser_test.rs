@@ -1580,11 +1580,10 @@ fn skip_line_comments_before_author() {
     );
 }
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/760):
-// this crate does not skip a `////` block comment in the header ahead of the
-// author line; the `////` delimiter is instead taken as the author.
-non_normative!(
-    r#"
+#[test]
+fn skip_block_comment_before_author() {
+    verifies!(
+        r#"
   test "skip block comment before author" do
     input = <<~'EOS'
     ////
@@ -1603,13 +1602,34 @@ non_normative!(
   end
 
 "#
-);
+    );
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/760):
-// this crate does not skip a `////` block comment in the header ahead of the
-// revision line; the `////` delimiter is instead taken as the revision date.
-non_normative!(
-    r#"
+    // A `////` block comment preceding the author line is skipped in its
+    // entirety (synthetic title added so the author line is recognized).
+    let mut parser = Parser::default();
+    parser.parse("= Document Title\n////\nAsciidoctor\nrelease artist\n////\nRyan Waldron");
+    assert_eq!(
+        parser.attribute_value("author"),
+        InterpretedValue::Value("Ryan Waldron")
+    );
+    assert_eq!(
+        parser.attribute_value("firstname"),
+        InterpretedValue::Value("Ryan")
+    );
+    assert_eq!(
+        parser.attribute_value("lastname"),
+        InterpretedValue::Value("Waldron")
+    );
+    assert_eq!(
+        parser.attribute_value("authorinitials"),
+        InterpretedValue::Value("RW")
+    );
+}
+
+#[test]
+fn skip_block_comment_before_rev() {
+    verifies!(
+        r#"
   test "skip block comment before rev" do
     input = <<~'EOS'
     Ryan Waldron
@@ -1628,7 +1648,27 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // A `////` block comment between the author line and the revision line is
+    // skipped, so the revision line that follows it is parsed (synthetic title
+    // added so the author line is recognized).
+    let mut parser = Parser::default();
+    let doc = parser.parse(
+        "= Document Title\nRyan Waldron\n////\nAsciidoctor\nrelease info\n////\nv0.0.7, 2013-12-18",
+    );
+    assert_eq!(
+        parser.attribute_value("author"),
+        InterpretedValue::Value("Ryan Waldron")
+    );
+
+    let rev = doc
+        .header()
+        .revision_line()
+        .expect("expected a revision line");
+    assert_eq!(rev.revnumber(), Some("0.0.7"));
+    assert_eq!(rev.revdate(), "2013-12-18");
+}
 
 #[test]
 fn break_header_at_line_with_three_forward_slashes() {

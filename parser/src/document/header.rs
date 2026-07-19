@@ -57,6 +57,22 @@ impl<'src> Header<'src> {
             } else if line.starts_with("//") && !line.starts_with("///") {
                 comments.push(line);
                 source = line_mi.after;
+            } else if title.is_some()
+                && let Some(after) = skip_block_comment(line, line_mi.after)
+            {
+                // Once a title has been seen, a `////` block comment delimiter
+                // opens a comment block within the header. Skip every line
+                // through the matching closing delimiter (or to the end of the
+                // input if the block is never closed), retaining the whole block
+                // as a single comment so it is not mistaken for the author or
+                // revision line. Blank lines inside the block do not terminate
+                // the header.
+                //
+                // Before a title is seen there is no header author/revision
+                // context to protect, so a leading `////` is left for the block
+                // parser, which retains it as a body-level comment block.
+                comments.push(source.trim_remainder(after).trim_trailing_line_end());
+                source = after;
             } else if line.starts_with(':')
                 && let Some(attr) = Attribute::parse(source, parser)
             {
@@ -261,6 +277,36 @@ impl<'src> HasSpan<'src> for Header<'src> {
     fn span(&self) -> Span<'src> {
         self.source
     }
+}
+
+/// If `line` opens a `////` block comment, consume the comment block and
+/// return the source position immediately after its closing delimiter;
+/// otherwise return `None`.
+///
+/// A block comment delimiter is a line of four or more forward slashes and
+/// nothing else, matching Asciidoctor's comment-block delimiter (a line of
+/// exactly three slashes instead terminates the header and is handled by the
+/// caller). The closing delimiter must repeat the opening line exactly; when
+/// it is absent the block runs to the end of the input, mirroring
+/// Asciidoctor's `read_lines_until`.
+///
+/// `after` is the source immediately following `line` (the opening delimiter).
+fn skip_block_comment<'src>(line: Span<'src>, after: Span<'src>) -> Option<Span<'src>> {
+    let delimiter = line.data();
+    if delimiter.len() < 4 || !delimiter.bytes().all(|b| b == b'/') {
+        return None;
+    }
+
+    let mut next = after;
+    while !next.is_empty() {
+        let line_mi = next.take_normalized_line();
+        next = line_mi.after;
+        if line_mi.item.data() == delimiter {
+            break;
+        }
+    }
+
+    Some(next)
 }
 
 /// Returns the ATX marker character that introduces `line` as a document
@@ -1104,6 +1150,80 @@ mod tests {
 
         assert_eq!(header.main_title(), Some("Main Title"));
         assert_eq!(header.subtitle(), Some("Subtitle 1"));
+    }
+
+    #[test]
+    fn skips_block_comment_before_author() {
+        // A `////` block comment ahead of the author line is skipped and
+        // retained as a single header comment; the author line that follows it
+        // is parsed normally.
+        let doc = Parser::default()
+            .parse("= Title\n////\nAsciidoctor\nrelease artist\n////\nRyan Waldron");
+        let header = doc.header();
+
+        let author = header.authors().first().unwrap();
+        assert_eq!(author.name(), "Ryan Waldron");
+
+        assert_eq!(header.comments().count(), 1);
+        assert_eq!(
+            header.comments().next().unwrap().data(),
+            "////\nAsciidoctor\nrelease artist\n////"
+        );
+    }
+
+    #[test]
+    fn skips_block_comment_with_blank_lines() {
+        // Blank lines inside a header block comment do not terminate the header;
+        // the whole block is skipped and the author line is still recognized.
+        let doc = Parser::default().parse("= Title\n////\n\nAsciidoctor\n\n////\nRyan Waldron");
+        let header = doc.header();
+
+        assert_eq!(header.authors().first().unwrap().name(), "Ryan Waldron");
+        assert_eq!(header.comments().count(), 1);
+    }
+
+    #[test]
+    fn unterminated_block_comment_consumes_rest_of_header() {
+        // An unterminated `////` block comment runs to the end of the input,
+        // mirroring Asciidoctor; nothing after it is parsed as an author line.
+        let doc = Parser::default().parse("= Title\n////\nAsciidoctor\nRyan Waldron");
+        let header = doc.header();
+
+        assert!(header.authors().is_empty());
+        assert_eq!(header.comments().count(), 1);
+    }
+
+    #[test]
+    fn longer_block_comment_delimiter_requires_matching_close() {
+        // The closing delimiter must repeat the opening line exactly: a `////`
+        // line does not close a `/////` block, so the block runs on until the
+        // matching `/////` and the author line after it is recognized.
+        let doc = Parser::default()
+            .parse("= Title\n/////\nAsciidoctor\n////\nstill comment\n/////\nRyan Waldron");
+        let header = doc.header();
+
+        assert_eq!(header.authors().first().unwrap().name(), "Ryan Waldron");
+        assert_eq!(header.comments().count(), 1);
+    }
+
+    #[test]
+    fn three_slashes_is_not_a_block_comment() {
+        // A line of exactly three slashes is not a block comment delimiter
+        // (which requires four or more slashes), so it is not skipped: were it
+        // mistaken for an unterminated block comment it would swallow the rest
+        // of the header, but instead the author and revision lines before it
+        // are captured as before.
+        let mut parser = Parser::default();
+        parser.parse("= Title\nJoe Cool\nv1.0\n///\nstuff");
+
+        assert_eq!(
+            parser.attribute_value("author"),
+            InterpretedValue::Value("Joe Cool")
+        );
+        assert_eq!(
+            parser.attribute_value("revnumber"),
+            InterpretedValue::Value("1.0")
+        );
     }
 
     mod markdown_style_document_title {
