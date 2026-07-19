@@ -4,7 +4,7 @@ use regex::Regex;
 
 use crate::{
     HasSpan, Parser, Span,
-    content::{Content, SubstitutionStep},
+    content::{Content, SubstitutionStep, apply_macros_with_leading_anchor_registered},
     document::RefType,
     span::MatchedItem,
     warnings::{Warning, WarningType},
@@ -237,8 +237,10 @@ impl<'src> ListItemMarker<'src> {
             }
         }
 
-        // Apply macros substitution to render the inline anchor as HTML.
-        SubstitutionStep::Macros.apply(term, parser, None);
+        // Apply macros substitution to render the inline anchor as HTML. The
+        // leading anchor was already registered above, so suppress only that
+        // duplicate registration warning in the macro pass.
+        apply_macros_with_leading_anchor_registered(term, parser);
     }
 
     /// Return a mutable reference to the term content of a description-list
