@@ -127,17 +127,15 @@ fn strip_asciidoc_extension(path: &str, macro_form: bool) -> (&str, bool) {
             // file, not to an AsciiDoc source document.
             None => (path, !has_extension(path)),
         }
-    } else if ASCIIDOC_EXTENSIONS
-        .iter()
-        .any(|extension| path.ends_with(extension))
+    } else if let Some(index) = path.rfind('.')
+        && ASCIIDOC_EXTENSIONS.contains(&&path[index..])
     {
         // Only the extension itself is removed, so a path that contains a
         // period elsewhere (`using-.net-web-services.adoc`) keeps it.
-        match path.rfind('.') {
-            Some(index) => (&path[..index], true),
-            None => (path, true),
-        }
+        (&path[..index], true)
     } else {
+        // Every other path is an AsciiDoc document named without its
+        // extension, whatever it may contain.
         (path, true)
     }
 }
