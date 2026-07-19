@@ -3120,14 +3120,10 @@ mod section_numbering {
         );
     }
 
-    // NOTE: The `numbered` legacy alias for `sectnums` is not honored by this
-    // crate (`:numbered:` produces no section numbers; see #781), and book
-    // *parts* (level-0 `=` headings under `:doctype: book`) are not modeled, nor
-    // is the rendering of `chapter-signifier` / `part-signifier` /
-    // `chapter-number` into the heading text. The tests below depend on those
-    // behaviors and are therefore out of scope.
-    non_normative!(
-        r##"
+    #[test]
+    fn should_output_section_numbers_when_numbered_attribute_is_set() {
+        verifies!(
+            r##"
     test 'should output section numbers when numbered attribute is set' do
       input = <<~'EOS'
       = Title
@@ -3167,6 +3163,38 @@ mod section_numbering {
       assert_xpath '//h3[@id="_section_2_2"][starts-with(text(), "2.2. ")]', output, 1
     end
 
+"##
+        );
+
+        // `numbered` is a legacy alias for `sectnums`; the numbers are verified
+        // on the AST via `section_number()`, mirroring the `sectnums` analog
+        // above.
+        let doc = Parser::default().parse(
+            "= Title\n:numbered:\n\n== Section_1\n\ntext\n\n=== Section_1_1\n\ntext\n\n==== Section_1_1_1\n\ntext\n\n== Section_2\n\ntext\n\n=== Section_2_1\n\ntext\n\n=== Section_2_2\n\ntext\n",
+        );
+        let nums: Vec<(&str, Option<String>)> = all_sections(&doc)
+            .iter()
+            .map(|s| (s.section_title(), s.section_number().map(|n| n.to_string())))
+            .collect();
+        assert_eq!(
+            nums,
+            vec![
+                ("Section_1", Some("1".to_string())),
+                ("Section_1_1", Some("1.1".to_string())),
+                ("Section_1_1_1", Some("1.1.1".to_string())),
+                ("Section_2", Some("2".to_string())),
+                ("Section_2_1", Some("2.1".to_string())),
+                ("Section_2_2", Some("2.2".to_string())),
+            ]
+        );
+    }
+
+    // NOTE: The tests below depend on book *parts* (level-0 `=` headings under
+    // `:doctype: book`), which this crate does not model, and on the rendering
+    // of `chapter-signifier` / `part-signifier` / `chapter-number` into the
+    // heading text. They are therefore out of scope.
+    non_normative!(
+        r##"
     test 'should not crash if child section of part is out of sequence and part numbering is disabled' do
       input = <<~'EOS'
       = Document Title
@@ -3370,12 +3398,11 @@ mod section_numbering {
         assert_eq!(levels, vec![(1, "Section 1"), (2, "Section 1.1")]);
     }
 
-    // NOTE: The remaining tests all depend on the `numbered` alias (see #781;
-    // and, for the book examples, on book parts) that this crate does not model,
-    // plus the Ruby-internal `reindex_sections` / `numeral` object API. Out of
-    // scope.
-    non_normative!(
-        r##"
+    #[test]
+    fn section_numbers_should_not_increment_when_numbered_attribute_is_turned_off_within_document()
+    {
+        verifies!(
+            r##"
     test 'section numbers should not increment when numbered attribute is turned off within document' do
       input = <<~'EOS'
       = Document Title
@@ -3411,6 +3438,40 @@ mod section_numbering {
       assert_xpath '//h2[@id="_section_three"][text()="3. Section Three"]', output, 1
     end
 
+"##
+        );
+
+        // Verified on the AST via `section_number()`: sections in the
+        // `:numbered!:` region are unnumbered, and numbering resumes (continuing
+        // the sequence) after `:numbered:`.
+        let doc = Parser::default().parse(
+            "= Document Title\n:numbered:\n\n:numbered!:\n\n== Colophon Section\n\n== Another Colophon Section\n\n== Final Colophon Section\n\n:numbered:\n\n== Section One\n\n=== Section One Subsection\n\n== Section Two\n\n== Section Three\n",
+        );
+        let nums: Vec<(&str, Option<String>)> = all_sections(&doc)
+            .iter()
+            .map(|s| (s.section_title(), s.section_number().map(|n| n.to_string())))
+            .collect();
+        assert_eq!(
+            nums,
+            vec![
+                ("Colophon Section", None),
+                ("Another Colophon Section", None),
+                ("Final Colophon Section", None),
+                ("Section One", Some("1".to_string())),
+                ("Section One Subsection", Some("1.1".to_string())),
+                ("Section Two", Some("2".to_string())),
+                ("Section Three", Some("3".to_string())),
+            ]
+        );
+    }
+
+    // NOTE: These two tests additionally exercise Asciidoctor's API attribute
+    // soft-set / hard-lock semantics (`attributes: { 'numbered' => '' }` vs
+    // `{ 'numbered!' => '' }`) — beyond the `numbered` document alias — which
+    // this crate models via `with_intrinsic_attribute` on the raw name, so they
+    // are left out of scope here.
+    non_normative!(
+        r##"
     test 'section numbers can be toggled even if numbered attribute is enable via the API' do
       input = <<~'EOS'
       = Document Title
@@ -3479,6 +3540,13 @@ mod section_numbering {
       assert_xpath '//h2[@id="_section_three"][text()="Section Three"]', output, 1
     end
 
+"##
+    );
+
+    #[test]
+    fn section_numbers_should_not_increment_until_numbered_attribute_is_turned_back_on() {
+        verifies!(
+            r##"
     # NOTE AsciiDoc.py fails this test because it does not properly check for a None value when looking up the numbered attribute
     test 'section numbers should not increment until numbered attribute is turned back on' do
       input = <<~'EOS'
@@ -3513,6 +3581,35 @@ mod section_numbering {
       assert_xpath '//h2[@id="_section_three"][text()="3. Section Three"]', output, 1
     end
 
+"##
+        );
+
+        // Verified on the AST via `section_number()`.
+        let doc = Parser::default().parse(
+            "= Document Title\n:numbered!:\n\n== Colophon Section\n\n== Another Colophon Section\n\n== Final Colophon Section\n\n:numbered:\n\n== Section One\n\n=== Section One Subsection\n\n== Section Two\n\n== Section Three\n",
+        );
+        let nums: Vec<(&str, Option<String>)> = all_sections(&doc)
+            .iter()
+            .map(|s| (s.section_title(), s.section_number().map(|n| n.to_string())))
+            .collect();
+        assert_eq!(
+            nums,
+            vec![
+                ("Colophon Section", None),
+                ("Another Colophon Section", None),
+                ("Final Colophon Section", None),
+                ("Section One", Some("1".to_string())),
+                ("Section One Subsection", Some("1.1".to_string())),
+                ("Section Two", Some("2".to_string())),
+                ("Section Three", Some("3".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn table_with_asciidoc_content_should_not_disable_numbering_of_subsequent_sections() {
+        verifies!(
+            r##"
     test 'table with asciidoc content should not disable numbering of subsequent sections' do
       input = <<~'EOS'
       = Document Title
@@ -3538,6 +3635,31 @@ mod section_numbering {
       assert_xpath '//h2[@id="_section_two"][text()="2. Section Two"]', output, 1
     end
 
+"##
+        );
+
+        // Verified on the AST via `section_number()`: an AsciiDoc table cell
+        // between the two sections does not reset the section counter.
+        let doc = Parser::default().parse(
+            "= Document Title\n:numbered:\n\npreamble\n\n== Section One\n\n|===\na|content\n|===\n\n== Section Two\n\ncontent\n",
+        );
+        let nums: Vec<(&str, Option<String>)> = all_sections(&doc)
+            .iter()
+            .map(|s| (s.section_title(), s.section_number().map(|n| n.to_string())))
+            .collect();
+        assert_eq!(
+            nums,
+            vec![
+                ("Section One", Some("1".to_string())),
+                ("Section Two", Some("2".to_string())),
+            ]
+        );
+    }
+
+    // NOTE: The remaining tests depend on book *parts* (not modeled) and on the
+    // Ruby-internal `reindex_sections` / `numeral` object API. Out of scope.
+    non_normative!(
+        r##"
     test 'should not number parts when doctype is book' do
       input = <<~'EOS'
       = Document Title
@@ -4028,9 +4150,10 @@ mod special_sections {
         assert_eq!(caps, vec![Some("Appendix A: "), Some("Appendix B: ")]);
     }
 
-    // NOTE: The remaining tests depend on behaviors this crate does not model:
-    // the `numbered` alias for `sectnums`, appendix *subsection* numbering
-    // (A.1, …), `sectnumlevels`-limited numbering rendered into headings, book
+    // NOTE: The remaining tests assert on numbering rendered into heading text
+    // (this crate models section numbers on the AST, not as rendered `N.`
+    // prefixes) and on behaviors this crate does not model: appendix
+    // *subsection* numbering (A.1, …), `sectnumlevels`-limited numbering, book
     // parts and non-appendix special sections (preface / glossary / bibliography
     // / dedication / colophon / abstract / index / partintro), table-of-contents
     // rendering, and the DocBook backend. Out of scope.
@@ -4796,10 +4919,10 @@ mod table_of_contents {
     }
 
     // NOTE: The tests below depend on behaviors not modeled by the crate's
-    // embedded virtual DOM: the `numbered` alias (numbered TOC entries), the
-    // standalone `#header` / `<body class>` framing, `toc2` / `toc-position`
-    // side placement, book parts, and `toclevels: 0` part-only TOCs. Out of
-    // scope.
+    // embedded virtual DOM: numbered TOC entries (section numbers rendered into
+    // the TOC), the standalone `#header` / `<body class>` framing, `toc2` /
+    // `toc-position` side placement, book parts, and `toclevels: 0` part-only
+    // TOCs. Out of scope.
     non_normative!(
         r##"
     test 'should output numbered table of contents in header if toc and numbered attributes are set' do
