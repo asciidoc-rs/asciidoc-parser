@@ -481,7 +481,7 @@ fn parse_lines<'src>(
     let sub_group = if comment_style {
         SubstitutionGroup::None
     } else {
-        base_substitution_group(style).override_via_attrlist(attrlist.as_ref())
+        base_substitution_group(style).override_via_attrlist(attrlist.as_ref(), Some(parser))
     };
 
     sub_group.apply(&mut content, parser, attrlist.as_ref());
@@ -567,7 +567,7 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
         if is_comment_style(self.attrlist.as_ref()) {
             SubstitutionGroup::None
         } else {
-            base_substitution_group(self.style).override_via_attrlist(self.attrlist.as_ref())
+            base_substitution_group(self.style).override_via_attrlist(self.attrlist.as_ref(), None)
         }
     }
 }
