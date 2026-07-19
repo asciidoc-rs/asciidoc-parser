@@ -5,7 +5,7 @@ use regex::Regex;
 use crate::{
     Parser,
     attributes::Attrlist,
-    parser::{InterdocumentReference, ResolvedReference, SafeMode, XrefSignifier, XrefStyle},
+    parser::{DerivedReference, ResolvedReference, SafeMode, XrefSignifier, XrefStyle},
 };
 
 /// An implementation of `InlineSubstitutionRenderer` is used when converting
@@ -456,13 +456,14 @@ pub struct XrefRenderParams<'a> {
     /// used verbatim.
     pub xrefstyle: Option<XrefStyle>,
 
-    /// The destination derived from a target that names another document, or
-    /// `None` for a same-document reference.
+    /// The destination the parser derived from the target itself, for a
+    /// target that names a document; `None` for a reference to an element
+    /// within the current document.
     ///
     /// This is what the reference renders as when
-    /// [`resolved`](Self::resolved) is `None`: an inter-document target is not
-    /// unresolved, it simply resolves to another document's output path.
-    pub inter_document: Option<&'a InterdocumentReference>,
+    /// [`resolved`](Self::resolved) is `None`: such a target is not
+    /// unresolved, it simply resolves without the catalog's help.
+    pub derived: Option<&'a DerivedReference>,
 
     /// The resolved destination, or `None` if the reference is unresolved.
     pub resolved: Option<&'a ResolvedReference>,
@@ -939,7 +940,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let constraint_attrs = xref_constraint_attrs(params.window);
 
-        match (params.resolved, params.inter_document) {
+        match (params.resolved, params.derived) {
             (Some(resolved), _) => {
                 // Explicit link text always wins; otherwise use the target's
                 // reference text, optionally reformatted by the `xrefstyle`.
@@ -962,19 +963,17 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 ));
             }
 
-            // A reference to another document, which no resolver claimed:
-            // link to that document's output path. Without the other document
-            // in hand there is no reference text to fall back on, so the path
-            // itself is the link text (matching Asciidoctor).
-            (None, Some(inter_document)) => {
+            // A target that named a document, which no resolver claimed: use
+            // the destination derived from the target itself.
+            (None, Some(derived)) => {
                 let text = params
                     .provided_text
                     .map(str::to_string)
-                    .unwrap_or_else(|| inter_document.path.clone());
+                    .unwrap_or_else(|| derived.text.clone());
 
                 dest.push_str(&format!(
                     r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
-                    href = inter_document.href
+                    href = derived.href
                 ));
             }
 

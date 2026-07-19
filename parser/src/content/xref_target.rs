@@ -7,9 +7,14 @@
 //! whether it carries a `#`, whether it has a file extension, and – for the
 //! `xref:` macro form only – whether that extension is an AsciiDoc one.
 //!
+//! A target that names a document brings its own destination with it, built
+//! here from the path attributes in effect at the reference. That document may
+//! turn out to be the one being parsed, in which case the reference points at
+//! this document after all – see [`this_document_reference`].
+//!
 //! [inter-document cross reference]: https://docs.asciidoctor.org/asciidoc/latest/macros/inter-document-xref/
 
-use crate::{Parser, parser::InterdocumentReference};
+use crate::{Parser, parser::DerivedReference};
 
 /// The file extensions an AsciiDoc processor recognizes as AsciiDoc source.
 ///
@@ -147,18 +152,24 @@ fn has_extension(path: &str) -> bool {
     }
 }
 
-/// Builds the output-path destination of an inter-document cross reference.
+/// The link text used for a reference to the current document that supplied
+/// none and names no element within it, when the document has neither a
+/// `reftext` nor a title to name it by.
+const SELF_REFERENCE_FALLBACK_TEXT: &str = "[^top]";
+
+/// Builds the destination of a cross reference whose target names another
+/// document.
 ///
 /// The path is assembled from the document attributes in effect at the
 /// reference: `relfileprefix` is prepended, and – for a path that names an
 /// AsciiDoc source document – `relfilesuffix` (which falls back to
 /// `outfilesuffix`) is appended in place of the extension that was stripped.
-pub(crate) fn interdocument_reference(
+pub(crate) fn other_document_reference(
     parser: &Parser,
     path: &str,
     source: bool,
     fragment: Option<&str>,
-) -> InterdocumentReference {
+) -> DerivedReference {
     let prefix = parser
         .attribute_value("relfileprefix")
         .as_maybe_str()
@@ -182,12 +193,35 @@ pub(crate) fn interdocument_reference(
         None => path.clone(),
     };
 
-    InterdocumentReference { href, path }
+    DerivedReference { href, text: path }
+}
+
+/// Builds the destination of a cross reference to the current document as a
+/// whole: the top of this document, named by the document's `reftext` or, if it
+/// has none, its title.
+pub(crate) fn this_document_reference(parser: &Parser) -> DerivedReference {
+    let reftext = parser.attribute_value("reftext");
+    let doctitle = parser.attribute_value("doctitle");
+
+    // An empty `reftext` names nothing, so it falls through to the title just
+    // as an unset one does.
+    let text = reftext
+        .as_maybe_str()
+        .filter(|reftext| !reftext.is_empty())
+        .or_else(|| doctitle.as_maybe_str().filter(|title| !title.is_empty()))
+        .unwrap_or(SELF_REFERENCE_FALLBACK_TEXT)
+        .to_string();
+
+    DerivedReference {
+        href: "#".to_string(),
+        text,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{XrefTarget, interpret_xref_target};
+    use super::{XrefTarget, interpret_xref_target, this_document_reference};
+    use crate::{Parser, parser::ModificationContext};
 
     fn other(path: &str, source: bool, fragment: Option<&str>) -> XrefTarget {
         XrefTarget::OtherDocument {
@@ -299,5 +333,27 @@ mod tests {
             interpret_xref_target("C&#43;&#43;", true),
             XrefTarget::SameDocument("C&#43;&#43;".to_string())
         );
+    }
+
+    #[test]
+    fn this_document_is_named_by_its_reftext_then_its_title() {
+        // With neither, there is nothing to name the document by.
+        let parser = Parser::default();
+        assert_eq!(this_document_reference(&parser).href, "#");
+        assert_eq!(this_document_reference(&parser).text, "[^top]");
+
+        let parser =
+            parser.with_intrinsic_attribute("doctitle", "Doc Title", ModificationContext::Anywhere);
+
+        assert_eq!(this_document_reference(&parser).text, "Doc Title");
+
+        // An empty `reftext` names nothing, so the title still wins.
+        let parser = parser.with_intrinsic_attribute("reftext", "", ModificationContext::Anywhere);
+        assert_eq!(this_document_reference(&parser).text, "Doc Title");
+
+        let parser =
+            parser.with_intrinsic_attribute("reftext", "Ref Text", ModificationContext::Anywhere);
+
+        assert_eq!(this_document_reference(&parser).text, "Ref Text");
     }
 }

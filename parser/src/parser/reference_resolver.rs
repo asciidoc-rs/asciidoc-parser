@@ -142,29 +142,36 @@ impl ResolvedReference {
     }
 }
 
-/// The default destination of a cross-reference that names *another* document
-/// (an [inter-document cross reference]).
+/// The destination a cross-reference target resolves to on its own, without
+/// consulting any catalog.
 ///
-/// The parser recognizes such a target – one that carries a `#`, or (for the
-/// `xref:` macro form) a file extension – and rewrites its path to an output
-/// path using the `relfileprefix`, `relfilesuffix`, and `outfilesuffix`
-/// attributes in effect at the reference. A [`ReferenceResolver`] that knows
-/// better (an Antora-style host that resolves targets across a corpus) may
-/// still return its own [`ResolvedReference`], which takes precedence; this is
-/// what is used when it does not.
+/// A target that names a document — another one (an [inter-document cross
+/// reference]) or the current one — carries its own destination. The parser
+/// derives it while substituting the reference, rewriting the path with the
+/// `relfileprefix`, `relfilesuffix`, and `outfilesuffix` attributes in effect
+/// at that point in the document.
+///
+/// This is a *default*: a [`ReferenceResolver`] that knows better (an
+/// Antora-style host that resolves targets across a corpus) may still return
+/// its own [`ResolvedReference`], which takes precedence. This is what is used
+/// when it does not.
 ///
 /// [inter-document cross reference]: https://docs.asciidoctor.org/asciidoc/latest/macros/inter-document-xref/
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InterdocumentReference {
-    /// The hyperlink destination: the rewritten output [`path`](Self::path)
-    /// followed by the target's fragment, if it had one (e.g.
-    /// `tigers.html#about`).
+pub struct DerivedReference {
+    /// The hyperlink destination: the rewritten output path plus the target's
+    /// fragment, if it had one (e.g. `tigers.html#about`), or `#` for a
+    /// reference to the current document.
     pub href: String,
 
-    /// The rewritten output path on its own (e.g. `tigers.html`). This is the
-    /// display text of a reference that supplied none, since the referenced
-    /// document's reference text is not available to a single-document parse.
-    pub path: String,
+    /// The display text to use when the cross-reference did not supply its
+    /// own.
+    ///
+    /// For another document this is its output path (e.g. `tigers.html`),
+    /// since that document's reference text is not available to a
+    /// single-document parse. For the current document it is the document's
+    /// `reftext` or, failing that, its title.
+    pub text: String,
 }
 
 /// A warning produced while resolving cross-references.
@@ -202,12 +209,13 @@ pub struct ResolutionContext<'a> {
     /// Explicit link text supplied in the cross-reference, if any.
     pub provided_text: Option<&'a str>,
 
-    /// The destination the parser derived for a target that names another
-    /// document, or `None` when the target is a same-document reference.
+    /// The destination the parser derived from the target itself, for a
+    /// target that names a document; `None` for a reference to an element
+    /// within the current document.
     ///
     /// A resolver that can do better is free to ignore this and return its own
     /// [`ResolvedReference`]; returning `None` leaves this default in place.
-    pub inter_document: Option<&'a InterdocumentReference>,
+    pub derived: Option<&'a DerivedReference>,
 }
 
 /// Resolves cross-reference targets to their destinations.
@@ -224,9 +232,9 @@ pub trait ReferenceResolver {
 /// [`Catalog`].
 ///
 /// It resolves bare IDs and natural cross-references (by reference text) to
-/// `#id` fragments. A target that names another document (e.g.
+/// `#id` fragments. A target that names a document (e.g.
 /// `other-page.adoc#frag`) is left unresolved here, so it falls back to the
-/// [`InterdocumentReference`] the parser derived from the target's path; only a
+/// [`DerivedReference`] the parser built from the target's path; only a
 /// host-supplied resolver, which can see the other document, can do better.
 #[derive(Clone, Copy, Debug)]
 pub struct CatalogResolver<'a> {
@@ -244,8 +252,8 @@ impl ReferenceResolver for CatalogResolver<'_> {
     fn resolve(&self, context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
         let target = context.target;
 
-        // Targets that name another document are a host concern.
-        if context.inter_document.is_some() {
+        // A target that names a document already carries its destination.
+        if context.derived.is_some() {
             return None;
         }
 
@@ -288,7 +296,7 @@ mod tests {
             .resolve(&ResolutionContext {
                 target: "later",
                 provided_text: None,
-                inter_document: None,
+                derived: None,
             })
             .unwrap();
 
@@ -305,7 +313,7 @@ mod tests {
             .resolve(&ResolutionContext {
                 target: "The Later Section",
                 provided_text: None,
-                inter_document: None,
+                derived: None,
             })
             .unwrap();
 
@@ -323,7 +331,7 @@ mod tests {
                 .resolve(&ResolutionContext {
                     target: "missing",
                     provided_text: None,
-                    inter_document: None,
+                    derived: None,
                 })
                 .is_none()
         );
@@ -339,9 +347,9 @@ mod tests {
                 .resolve(&ResolutionContext {
                     target: "other-page.adoc#frag",
                     provided_text: None,
-                    inter_document: Some(&InterdocumentReference {
+                    derived: Some(&DerivedReference {
                         href: "other-page.html#frag".to_string(),
-                        path: "other-page.html".to_string(),
+                        text: "other-page.html".to_string(),
                     }),
                 })
                 .is_none()

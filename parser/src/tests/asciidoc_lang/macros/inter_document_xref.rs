@@ -72,9 +72,12 @@ If not, it will generate a link to [.path]_document-b.html_, intelligently subst
     );
 }
 
-// This crate parses one document at a time and does not track which files were
-// included into it, so a cross reference to an included document is not
-// collapsed to a same-document reference. Tracked in #773.
+// Include processing (`catalog[:includes]`) is out of scope for this crate, so
+// a cross reference to a document that was included into this one is not
+// collapsed to a same-document reference. A reference to the document being
+// parsed itself (by `docname`) *is* collapsed; see
+// `should_use_doctitle_as_fallback_link_text_if_inter_document_xref_points_to_current_doc_and_no_link_text_is_provided`
+// in the `links_test.rs` port.
 non_normative!(
     r##"
 If [.path]_document-b.adoc_ is included in the same document as [.path]_document-a.doc_, then the document will be dropped in the link target and look like the output of a normal cross reference:

@@ -45,10 +45,6 @@
 //! * **Include processing** (`include::[]`, `catalog[:includes]`) and
 //!   Ruby-internal APIs (`doc.register`, `using_memory_logger`) — not modeled
 //!   the same way here.
-//! * **Inter-document self-xref fallback text** – a target that points back at
-//!   the current document (`xref:test.adoc[]` where `docname` is `test`) is
-//!   rewritten to that document's output path rather than collapsing to `#`
-//!   with the doctitle as its link text.
 //! * A number of **other surfaced incompatibilities**, each carrying a `//
 //!   NOTE:` describing how the crate diverges from Asciidoctor.
 
@@ -3248,7 +3244,9 @@ non_normative!(
 "###
 );
 
-// Include processing / `catalog[:includes]` is out of scope for this crate.
+// Surfaced incompatibility: the link this crate creates matches
+// (`<a href="#foobaz">[foobaz]</a>`), but it does not emit the `possible
+// invalid reference` log message that this test also asserts. Tracked in #772.
 non_normative!(
     r###"
   test 'should warn and create link if debug mode is enabled, inter-document xref points to current doc, and reference not found' do
@@ -3272,10 +3270,11 @@ non_normative!(
 "###
 );
 
-// Inter-document self-xref fallback link text is not implemented here. Tracked
-// in #773.
-non_normative!(
-    r###"
+#[test]
+fn should_use_doctitle_as_fallback_link_text_if_inter_document_xref_points_to_current_doc_and_no_link_text_is_provided()
+ {
+    verifies!(
+        r###"
   test 'should use doctitle as fallback link text if inter-document xref points to current doc and no link text is provided' do
     input = <<~'EOS'
     = Links & Stuff at https://example.org
@@ -3287,12 +3286,25 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Inter-document xref fallback in an AsciiDoc table cell is out of scope here.
-// Tracked in #773.
-non_normative!(
-    r###"
+    // `docname` comes from the name of the file being parsed, so the target
+    // names this document; the reference collapses to the top of it.
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("= Links & Stuff at https://example.org\n\nSee xref:test.adoc[]");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#">Links &amp; Stuff at https://example.org</a>"##
+    );
+}
+
+#[test]
+fn should_use_doctitle_of_root_document_as_fallback_link_text_for_inter_document_xref_in_asciidoc_table_cell_that_resolves_to_current_doc()
+ {
+    verifies!(
+        r###"
   test 'should use doctitle of root document as fallback link text for inter-document xref in AsciiDoc table cell that resolves to current doc' do
     input = <<~'EOS'
     = Document Title
@@ -3306,10 +3318,22 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Inter-document self-xref fallback link text is not implemented here. Tracked
-// in #773.
+    // An AsciiDoc table cell is parsed as a nested document, but it inherits
+    // the root document's title, so a self-reference inside it is named the
+    // same way.
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("= Document Title\n\n|===\na|See xref:test.adoc[]\n|===\n");
+
+    assert_xpath(&doc, r##"//td//a[@href="#"][text()="Document Title"]"##, 1);
+}
+
+// Surfaced gap: this crate does not parse a block attribute line above the
+// document title, so `[reftext="Links and Stuff"]` is not read as document
+// metadata (and the title line is not recognized as a title). The equivalent
+// `:reftext:` header attribute *is* honored as the self-reference link text.
 non_normative!(
     r###"
   test 'should use reftext on document as fallback link text if inter-document xref points to current doc and no link text is provided' do
@@ -3326,8 +3350,10 @@ non_normative!(
 "###
 );
 
-// Inter-document self-xref fallback link text is not implemented here. Tracked
-// in #773.
+// Surfaced gap: this crate does not parse a block attribute line above the
+// document title, so `[reftext="Links and Stuff"]` is not read as document
+// metadata. The equivalent `:reftext:` header attribute *is* honored as the
+// self-reference link text.
 non_normative!(
     r###"
   test 'should use reftext on document as fallback link text if xref points to empty fragment and no link text is provided' do
@@ -3344,10 +3370,11 @@ non_normative!(
 "###
 );
 
-// Inter-document self-xref fallback link text is not implemented here. Tracked
-// in #773.
-non_normative!(
-    r###"
+#[test]
+fn should_use_fallback_link_text_if_inter_document_xref_points_to_current_doc_without_header_and_no_link_text_is_provided()
+ {
+    verifies!(
+        r###"
   test 'should use fallback link text if inter-document xref points to current doc without header and no link text is provided' do
     input = <<~'EOS'
     See xref:test.adoc[]
@@ -3357,12 +3384,23 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Inter-document self-xref fallback link text is not implemented here. Tracked
-// in #773.
-non_normative!(
-    r###"
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("See xref:test.adoc[]");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#">[^top]</a>"##
+    );
+}
+
+#[test]
+fn should_use_fallback_link_text_if_fragment_of_internal_xref_is_empty_and_no_link_text_is_provided()
+ {
+    verifies!(
+        r###"
   test 'should use fallback link text if fragment of internal xref is empty and no link text is provided' do
     input = <<~'EOS'
     See xref:#[]
@@ -3372,7 +3410,17 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("See xref:#[]");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#">[^top]</a>"##
+    );
+}
 
 // Backend-specific test: DocBook output is out of scope for this crate.
 non_normative!(

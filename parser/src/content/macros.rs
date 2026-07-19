@@ -9,7 +9,9 @@ use crate::{
     content::{
         Content,
         content::XrefSegment,
-        xref_target::{XrefTarget, interdocument_reference, interpret_xref_target},
+        xref_target::{
+            XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
+        },
     },
     document::InterpretedValue,
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
@@ -1618,22 +1620,42 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
             (raw_target, true, provided_text)
         };
 
-        // A target that names another document is rewritten to that document's
-        // output path here, while the path attributes in effect at this point
-        // in the document are known. Anything else is a reference within this
-        // document, to be resolved against its catalog later.
-        let (target, inter_document) = match interpret_xref_target(&raw_target, macro_form) {
+        // A target that names a document carries its own destination, derived
+        // here while the path attributes in effect at this point in the
+        // document are known. Anything else is a reference to an element of
+        // this document, to be resolved against its catalog later.
+        let (target, derived) = match interpret_xref_target(&raw_target, macro_form) {
+            // A target that names no element and no other document points at
+            // this document as a whole (`xref:#[]`).
+            XrefTarget::SameDocument(id) if id.is_empty() => {
+                (id, Some(this_document_reference(self.parser)))
+            }
+
             XrefTarget::SameDocument(id) => (id, None),
+
+            // A target that names *this* document is a reference within it
+            // after all: the element it names (if any) is in the catalog being
+            // built right now.
+            XrefTarget::OtherDocument {
+                path,
+                source,
+                fragment,
+            } if source && self.parser.docname().as_deref() == Some(path.as_str()) => {
+                match fragment {
+                    Some(fragment) => (fragment, None),
+                    None => (String::new(), Some(this_document_reference(self.parser))),
+                }
+            }
 
             XrefTarget::OtherDocument {
                 path,
                 source,
                 fragment,
             } => {
-                let inter_document =
-                    interdocument_reference(self.parser, &path, source, fragment.as_deref());
+                let derived =
+                    other_document_reference(self.parser, &path, source, fragment.as_deref());
 
-                (raw_target, Some(inter_document))
+                (raw_target, Some(derived))
             }
         };
 
@@ -1648,7 +1670,7 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
             window,
             roles,
             xrefstyle,
-            inter_document,
+            derived,
             resolved: None,
         });
 
