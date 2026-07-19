@@ -2096,6 +2096,74 @@ mod tests {
     }
 
     #[test]
+    fn asciidoctor_version_is_predefined() {
+        // The crate predefines `asciidoctor-version` with the Asciidoctor
+        // release whose behavior it implements, so documents written against
+        // Asciidoctor's own intrinsic behave the same here.
+        let mut parser = Parser::default();
+
+        assert_eq!(
+            parser.attribute_value("asciidoctor-version"),
+            InterpretedValue::Value(crate::ASCIIDOCTOR_VERSION)
+        );
+
+        // The value is available to `ifdef` gating and to attribute references
+        // and `ifeval` expressions in document content.
+        let doc = parser.parse(concat!(
+            "= Title\n",
+            "\n",
+            "ifdef::asciidoctor-version[]\n",
+            "ifeval::['{asciidoctor-version}' >= '0.1.0']\n",
+            "v{asciidoctor-version}\n",
+            "endif::[]\n",
+            "endif::[]\n",
+        ));
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec![format!("v{}", crate::ASCIIDOCTOR_VERSION)]
+        );
+    }
+
+    #[test]
+    fn asciidoctor_version_is_locked() {
+        // Like its `asciidoc-parser-version` companion, this describes the
+        // processor itself, so a document assignment is rejected with a warning
+        // and the built-in value stays in place.
+        let mut parser = Parser::default();
+
+        let doc = parser.parse(":asciidoctor-version: 99.99.99");
+
+        assert_eq!(
+            doc.warnings().next().unwrap().warning,
+            WarningType::AttributeValueIsLocked("asciidoctor-version".to_owned())
+        );
+
+        assert_eq!(
+            parser.attribute_value("asciidoctor-version"),
+            InterpretedValue::Value(crate::ASCIIDOCTOR_VERSION)
+        );
+    }
+
+    #[test]
+    fn asciidoc_parser_version_distinguishes_the_two_processors() {
+        // Both version intrinsics are defined, so a document tells the
+        // processors apart via `asciidoc-parser-version`, which Ruby
+        // Asciidoctor does not define.
+        let mut parser = Parser::default();
+
+        let doc = parser.parse(concat!(
+            "= Title\n",
+            "\n",
+            "ifdef::asciidoc-parser-version[]\n",
+            "This is asciidoc-parser.\n",
+            "endif::[]\n",
+        ));
+
+        assert_eq!(rendered_paragraphs(&doc), vec!["This is asciidoc-parser."]);
+    }
+
+    #[test]
     fn silently_locked_intrinsic_rejects_header_and_body_without_warning() {
         // A silently-locked `ApiOnly` intrinsic (as a converter would seed a
         // safe-mode-restricted attribute) rejects both a header assignment and a

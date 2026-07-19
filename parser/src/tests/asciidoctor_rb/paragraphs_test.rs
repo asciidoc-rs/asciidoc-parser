@@ -3210,14 +3210,10 @@ mod special {
 "#
         );
 
-        // `asciidoctor-version` and `backend` are not set by default in this
-        // crate, so they are supplied explicitly to mirror the Ruby environment.
+        // `asciidoctor-version` is predefined by this crate; `backend` is not
+        // set by default, so it is supplied explicitly to mirror the Ruby
+        // environment.
         let doc = Parser::default()
-            .with_intrinsic_attribute(
-                "asciidoctor-version",
-                "2.0",
-                ModificationContext::Anywhere,
-            )
             .with_intrinsic_attribute("backend", "html5", ModificationContext::Anywhere)
             .parse(
                 "ifdef::asciidoctor-version[]\n[sidebar]\nFirst line of sidebar.\nifdef::backend[The backend is {backend}.]\nLast line of sidebar.\nendif::[]",
