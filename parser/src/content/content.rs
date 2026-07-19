@@ -108,6 +108,12 @@ pub(crate) struct XrefSegment {
     /// verbatim.
     pub(crate) xrefstyle: Option<crate::parser::XrefStyle>,
 
+    /// The destination derived from the target itself, for a target that
+    /// names a document. Computed during substitution, since it depends on the
+    /// path attributes in effect at the reference; it is the fallback when
+    /// [`resolved`](Self::resolved) is `None`.
+    pub(crate) derived: Option<crate::parser::DerivedReference>,
+
     /// The resolved destination, filled in by resolution; `None` until then.
     pub(crate) resolved: Option<crate::parser::ResolvedReference>,
 }
@@ -370,12 +376,19 @@ impl<'src> Content<'src> {
                 xref.resolved = resolver.resolve(&ResolutionContext {
                     target: &xref.target,
                     provided_text: xref.provided_text.as_deref(),
+                    derived: xref.derived.as_ref(),
                 });
 
                 // A reference whose placeholder is no longer in the template was
                 // re-homed into a footnote (see `rehome_xref_placeholders`); the
                 // footnote resolves and reports it, so it is not reported here.
-                if xref.resolved.is_none() && template.contains(&Content::xref_placeholder(index)) {
+                // A target that names a document is never reported: it
+                // carries its own destination, so there was nothing here to
+                // resolve.
+                if xref.resolved.is_none()
+                    && xref.derived.is_none()
+                    && template.contains(&Content::xref_placeholder(index))
+                {
                     warnings.unresolved(&xref.target, source);
                 }
             }
@@ -489,6 +502,7 @@ fn render_template(
                         window: xref.window.as_deref(),
                         roles: &xref.roles,
                         xrefstyle: xref.xrefstyle,
+                        derived: xref.derived.as_ref(),
                         resolved: xref.resolved.as_ref(),
                     },
                     &mut out,
@@ -559,9 +573,10 @@ impl FootnoteDeferred {
             xref.resolved = resolver.resolve(&ResolutionContext {
                 target: &xref.target,
                 provided_text: xref.provided_text.as_deref(),
+                derived: xref.derived.as_ref(),
             });
 
-            if xref.resolved.is_none() {
+            if xref.resolved.is_none() && xref.derived.is_none() {
                 warnings.unresolved(&xref.target, source);
             }
         }
@@ -672,6 +687,7 @@ mod tests {
                 window: None,
                 roles: vec![],
                 xrefstyle: None,
+                derived: None,
                 resolved: None,
             }
         }

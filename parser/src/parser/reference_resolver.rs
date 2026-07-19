@@ -146,6 +146,38 @@ impl ResolvedReference {
     }
 }
 
+/// The destination a cross-reference target resolves to on its own, without
+/// consulting any catalog.
+///
+/// A target that names a document — another one (an [inter-document cross
+/// reference]) or the current one — carries its own destination. The parser
+/// derives it while substituting the reference, rewriting the path with the
+/// `relfileprefix`, `relfilesuffix`, and `outfilesuffix` attributes in effect
+/// at that point in the document.
+///
+/// This is a *default*: a [`ReferenceResolver`] that knows better (an
+/// Antora-style host that resolves targets across a corpus) may still return
+/// its own [`ResolvedReference`], which takes precedence. This is what is used
+/// when it does not.
+///
+/// [inter-document cross reference]: https://docs.asciidoctor.org/asciidoc/latest/macros/inter-document-xref/
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DerivedReference {
+    /// The hyperlink destination: the rewritten output path plus the target's
+    /// fragment, if it had one (e.g. `tigers.html#about`), or `#` for a
+    /// reference to the current document.
+    pub href: String,
+
+    /// The display text to use when the cross-reference did not supply its
+    /// own.
+    ///
+    /// For another document this is its output path (e.g. `tigers.html`),
+    /// since that document's reference text is not available to a
+    /// single-document parse. For the current document it is the document's
+    /// `reftext` or, failing that, its title.
+    pub text: String,
+}
+
 /// A warning produced while resolving cross-references.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReferenceWarning {
@@ -235,6 +267,14 @@ pub struct ResolutionContext<'a> {
 
     /// Explicit link text supplied in the cross-reference, if any.
     pub provided_text: Option<&'a str>,
+
+    /// The destination the parser derived from the target itself, for a
+    /// target that names a document; `None` for a reference to an element
+    /// within the current document.
+    ///
+    /// A resolver that can do better is free to ignore this and return its own
+    /// [`ResolvedReference`]; returning `None` leaves this default in place.
+    pub derived: Option<&'a DerivedReference>,
 }
 
 /// Resolves cross-reference targets to their destinations.
@@ -251,12 +291,10 @@ pub trait ReferenceResolver {
 /// [`Catalog`].
 ///
 /// It resolves bare IDs and natural cross-references (by reference text) to
-/// `#id` fragments. Targets that carry a path component (detected by the
-/// presence of `#`, e.g. `other-page.adoc#frag`) are treated as inter-document
-/// references and left unresolved — resolving those is the responsibility of a
-/// host-supplied resolver. Only the first `#` is considered, and a `#` preceded
-/// by `&` is not a path separator, so a target carrying a numeric character
-/// reference (`Cub &#8658; Tiger`) still resolves as a same-document reference.
+/// `#id` fragments. A target that names a document (e.g.
+/// `other-page.adoc#frag`) is left unresolved here, so it falls back to the
+/// [`DerivedReference`] the parser built from the target's path; only a
+/// host-supplied resolver, which can see the other document, can do better.
 #[derive(Clone, Copy, Debug)]
 pub struct CatalogResolver<'a> {
     catalog: &'a Catalog,
@@ -273,8 +311,8 @@ impl ReferenceResolver for CatalogResolver<'_> {
     fn resolve(&self, context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
         let target = context.target;
 
-        // Path-bearing (inter-document) targets are a host concern.
-        if has_path_component(target) {
+        // A target that names a document already carries its destination.
+        if context.derived.is_some() {
             return None;
         }
 
@@ -292,22 +330,6 @@ impl ReferenceResolver for CatalogResolver<'_> {
         }
 
         None
-    }
-}
-
-/// Returns `true` if `target` names a document outside this one, i.e. it splits
-/// into a path and a fragment at a `#`.
-///
-/// By the time a cross-reference is resolved, the character-replacement
-/// substitution has already run over its target, so a target that contained
-/// `=>`, `->`, or `(C)` now carries a numeric character reference such as
-/// `&#8658;`. The `#` inside that entity is not a path separator, so only the
-/// *first* `#` is considered, and it is ignored when it is preceded by `&`
-/// (matching Asciidoctor's `refid[hash_idx - 1] != '&'` guard).
-fn has_path_component(target: &str) -> bool {
-    match target.find('#') {
-        Some(0) | None => false,
-        Some(index) => !target[..index].ends_with('&'),
     }
 }
 
@@ -333,6 +355,7 @@ mod tests {
             .resolve(&ResolutionContext {
                 target: "later",
                 provided_text: None,
+                derived: None,
             })
             .unwrap();
 
@@ -349,6 +372,7 @@ mod tests {
             .resolve(&ResolutionContext {
                 target: "The Later Section",
                 provided_text: None,
+                derived: None,
             })
             .unwrap();
 
@@ -366,6 +390,7 @@ mod tests {
                 .resolve(&ResolutionContext {
                     target: "missing",
                     provided_text: None,
+                    derived: None,
                 })
                 .is_none()
         );
@@ -381,6 +406,10 @@ mod tests {
                 .resolve(&ResolutionContext {
                     target: "other-page.adoc#frag",
                     provided_text: None,
+                    derived: Some(&DerivedReference {
+                        href: "other-page.html#frag".to_string(),
+                        text: "other-page.html".to_string(),
+                    }),
                 })
                 .is_none()
         );
@@ -395,24 +424,11 @@ mod tests {
             .resolve(&ResolutionContext {
                 target: "Cub &#8658; Tiger",
                 provided_text: None,
+                derived: None,
             })
             .unwrap();
 
         assert_eq!(resolved.href, "#_cub_tiger");
         assert_eq!(resolved.text.as_deref(), Some("Cub &#8658; Tiger"));
-    }
-
-    #[test]
-    fn has_path_component_ignores_numeric_character_references() {
-        assert!(!has_path_component("plain-id"));
-        assert!(!has_path_component("Cub &#8658; Tiger"));
-        assert!(!has_path_component("C&#43;&#43;"));
-        assert!(!has_path_component("#frag"));
-        assert!(has_path_component("other-page.adoc#frag"));
-        assert!(has_path_component("other-page.adoc#"));
-
-        // Only the first `#` decides; a later path separator inside a target
-        // that opens with an entity is not reconsidered (matching Asciidoctor).
-        assert!(!has_path_component("&#43;.adoc#frag"));
     }
 }

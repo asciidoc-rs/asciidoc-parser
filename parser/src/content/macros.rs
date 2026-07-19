@@ -6,7 +6,13 @@ use regex::{Captures, Match, Regex, Replacer};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{Content, content::XrefSegment},
+    content::{
+        Content,
+        content::XrefSegment,
+        xref_target::{
+            XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
+        },
+    },
     document::InterpretedValue,
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
@@ -1548,11 +1554,8 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
         // document-wide `xrefstyle` for this one reference.
         let mut xrefstyle_override: Option<XrefStyle> = None;
 
-        let (target, provided_text) = if let Some(inner) = caps.get(2) {
-            // Shorthand form: split an optional ", reftext" off the id. The id
-            // is always treated as a same-document reference, even when it
-            // contains a dot. A leading `#` explicitly marks a same-document
-            // reference and is dropped (mirroring the `xref:` macro form).
+        let (raw_target, macro_form, provided_text) = if let Some(inner) = caps.get(2) {
+            // Shorthand form: split an optional ", reftext" off the target.
             let (id, text) = match inner.as_str().split_once(',') {
                 Some((id, text)) => (id.trim(), Some(text.trim().to_string())),
                 None => (inner.as_str().trim(), None),
@@ -1567,17 +1570,11 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
                 return;
             }
 
-            (id.strip_prefix('#').unwrap_or(id).to_string(), text)
+            (id.to_string(), false, text)
         } else {
-            // `xref:` macro form. A target that begins with `#` is an explicit
-            // same-document reference (the hash is dropped); any other target
-            // that contains a dot is treated as an inter-document reference and
-            // left for a host-supplied resolver to interpret.
-            let raw_target = &caps[3];
-            let target = raw_target
-                .strip_prefix('#')
-                .unwrap_or(raw_target)
-                .to_string();
+            // `xref:` macro form: the target is everything between `xref:` and
+            // the opening bracket.
+            let raw_target = caps[3].to_string();
 
             // The bracketed text is parsed as an attribute list when it contains
             // an `=` (mirroring the link macro): the first positional attribute
@@ -1620,7 +1617,46 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
                 Some(raw_text.replace("\\]", "]"))
             };
 
-            (target, provided_text)
+            (raw_target, true, provided_text)
+        };
+
+        // A target that names a document carries its own destination, derived
+        // here while the path attributes in effect at this point in the
+        // document are known. Anything else is a reference to an element of
+        // this document, to be resolved against its catalog later.
+        let (target, derived) = match interpret_xref_target(&raw_target, macro_form) {
+            // A target that names no element and no other document points at
+            // this document as a whole (`xref:#[]`).
+            XrefTarget::SameDocument(id) if id.is_empty() => {
+                (id, Some(this_document_reference(self.parser)))
+            }
+
+            XrefTarget::SameDocument(id) => (id, None),
+
+            // A target that names *this* document is a reference within it
+            // after all: the element it names (if any) is in the catalog being
+            // built right now.
+            XrefTarget::OtherDocument {
+                path,
+                source,
+                fragment,
+            } if source && self.parser.docname().as_deref() == Some(path.as_str()) => {
+                match fragment {
+                    Some(fragment) => (fragment, None),
+                    None => (String::new(), Some(this_document_reference(self.parser))),
+                }
+            }
+
+            XrefTarget::OtherDocument {
+                path,
+                source,
+                fragment,
+            } => {
+                let derived =
+                    other_document_reference(self.parser, &path, source, fragment.as_deref());
+
+                (raw_target, Some(derived))
+            }
         };
 
         // The effective style is the macro-level override if present, otherwise
@@ -1634,6 +1670,7 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
             window,
             roles,
             xrefstyle,
+            derived,
             resolved: None,
         });
 

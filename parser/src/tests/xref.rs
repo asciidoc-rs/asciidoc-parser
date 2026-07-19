@@ -348,6 +348,76 @@ fn host_resolver_can_attach_signifier() {
 }
 
 #[test]
+fn reference_to_this_document_by_name_resolves_within_it() {
+    // A target that names the document being parsed is a reference *into* this
+    // document after all, so its fragment resolves against this document's own
+    // catalog — even though the target was written in inter-document form.
+    let mut doc = Parser::default()
+        .with_primary_file_name("guide.adoc")
+        .parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
+
+    // The fragment names a section parsed after the reference, so it is pending
+    // until resolution, exactly like a plain forward reference.
+    assert!(first_simple(&doc).content().has_unresolved_refs());
+
+    let catalog = doc.catalog().clone();
+    let resolver = CatalogResolver::new(&catalog);
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+
+    assert!(warnings.is_empty());
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#install\">Installation</a>."
+    );
+}
+
+#[test]
+fn host_resolver_can_override_a_derived_destination() {
+    // The destination the parser derives for a target that names a document is
+    // only a default: it is offered to the resolver (as
+    // `ResolutionContext::derived`) rather than imposed, so a host that resolves
+    // targets across a corpus can answer with its own.
+    let mut doc = Parser::default().parse_deferred("See <<tigers#about,About Tigers>>.\n");
+
+    // Until a resolver has run, the derived destination is what renders.
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"tigers.html#about\">About Tigers</a>."
+    );
+
+    let resolver = DerivedRewritingResolver;
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+
+    assert!(warnings.is_empty());
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"/en/tigers.html#about\">About Tigers</a>."
+    );
+}
+
+#[test]
+fn derived_destination_stands_when_the_resolver_declines() {
+    // A resolver that returns `None` for a target that names another document
+    // leaves the derived destination in place, and — unlike a target it could
+    // not resolve — that is not reported as an unresolved reference.
+    let mut doc = Parser::default().parse_deferred("See <<tigers#about>> and <<nope>>.\n");
+
+    let catalog = doc.catalog().clone();
+    let resolver = CatalogResolver::new(&catalog);
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].target, "nope");
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"tigers.html#about\">tigers.html</a> and <a href=\"#nope\">[nope]</a>."
+    );
+}
+
+#[test]
 fn escaped_reference_is_not_a_cross_reference() {
     // A backslash-escaped shorthand is emitted literally and is not deferred.
     let doc = Parser::default().parse("See \\<<later>>.\n\n[#later]\n== Later\n");
@@ -598,6 +668,21 @@ fn xref_escapes_author_supplied_window_and_role() {
         rendered.contains("&quot;"),
         "expected escaped quotes in: {rendered}"
     );
+}
+
+/// A resolver that rewrites the destination the parser derived for a target
+/// naming another document, the way a host with its own site layout would.
+struct DerivedRewritingResolver;
+
+impl ReferenceResolver for DerivedRewritingResolver {
+    fn resolve(&self, context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
+        let derived = context.derived?;
+
+        Some(ResolvedReference::new(
+            format!("/en/{href}", href = derived.href),
+            Some(derived.text.clone()),
+        ))
+    }
 }
 
 /// Issue #772: an unresolved cross-reference is reported on the document

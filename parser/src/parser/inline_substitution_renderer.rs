@@ -5,7 +5,7 @@ use regex::Regex;
 use crate::{
     Parser,
     attributes::Attrlist,
-    parser::{ResolvedReference, SafeMode, XrefSignifier, XrefStyle},
+    parser::{DerivedReference, ResolvedReference, SafeMode, XrefSignifier, XrefStyle},
 };
 
 /// An implementation of `InlineSubstitutionRenderer` is used when converting
@@ -455,6 +455,15 @@ pub struct XrefRenderParams<'a> {
     /// when `xrefstyle` is unset, in which case the target's reference text is
     /// used verbatim.
     pub xrefstyle: Option<XrefStyle>,
+
+    /// The destination the parser derived from the target itself, for a
+    /// target that names a document; `None` for a reference to an element
+    /// within the current document.
+    ///
+    /// This is what the reference renders as when
+    /// [`resolved`](Self::resolved) is `None`: such a target is not
+    /// unresolved, it simply resolves without the catalog's help.
+    pub derived: Option<&'a DerivedReference>,
 
     /// The resolved destination, or `None` if the reference is unresolved.
     pub resolved: Option<&'a ResolvedReference>,
@@ -931,8 +940,8 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let constraint_attrs = xref_constraint_attrs(params.window);
 
-        match params.resolved {
-            Some(resolved) => {
+        match (params.resolved, params.derived) {
+            (Some(resolved), _) => {
                 // Explicit link text always wins; otherwise use the target's
                 // reference text, optionally reformatted by the `xrefstyle`.
                 // Empty explicit text (`<<id,>>`) is treated as absent, matching
@@ -954,7 +963,21 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 ));
             }
 
-            None => {
+            // A target that named a document, which no resolver claimed: use
+            // the destination derived from the target itself.
+            (None, Some(derived)) => {
+                let text = params
+                    .provided_text
+                    .map(str::to_string)
+                    .unwrap_or_else(|| derived.text.clone());
+
+                dest.push_str(&format!(
+                    r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
+                    href = derived.href
+                ));
+            }
+
+            (None, None) => {
                 // Unresolved: link to the raw target and show bracketed text,
                 // mirroring Asciidoctor's behavior for a missing reference.
                 let text = params
