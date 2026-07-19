@@ -3321,4 +3321,65 @@ mod tests {
             WarningType::MaxIncludeDepthExceeded(64)
         );
     }
+
+    #[test]
+    fn max_include_depth_set_with_no_value_disables_includes() {
+        // `max-include-depth` set as a boolean (no value) coerces like an
+        // empty string in Ruby (`''.to_i == 0`), so it disables the include
+        // directive just as an explicit 0 does: the directive is left
+        // verbatim, silently, and the handler is never consulted.
+        let handler = InlineFileHandler::from_pairs([("shared.adoc", "shared content")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute_bool("max-include-depth", true, ModificationContext::ApiOnly)
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess("include::shared.adoc[]", &parser);
+
+        assert_eq!(output, "include::shared.adoc[]\n");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn max_include_depth_unset_falls_back_to_default() {
+        // With `max-include-depth` explicitly unset via the API, the
+        // preprocessor falls back to Asciidoctor's default of 64, so an
+        // ordinary include still expands.
+        let handler = InlineFileHandler::from_pairs([("shared.adoc", "shared content")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute_bool("max-include-depth", false, ModificationContext::ApiOnly)
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess("include::shared.adoc[]", &parser);
+
+        assert_eq!(output, "shared content\n");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn depth_request_exceeding_max_include_depth_is_clamped() {
+        // A `depth` request larger than the absolute `max-include-depth` limit
+        // is clamped to it: with a limit of 2, `depth=10` still refuses the
+        // third nesting level, and the diagnostic reports the clamped limit
+        // (2), not the requested relative depth (10) — matching Asciidoctor.
+        let handler = InlineFileHandler::from_pairs([
+            ("a.adoc", "include::b.adoc[]"),
+            ("b.adoc", "include::c.adoc[]"),
+            ("c.adoc", "content of c"),
+        ]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute("max-include-depth", "2", ModificationContext::ApiOnly)
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess("include::a.adoc[depth=10]", &parser);
+
+        assert_eq!(output, "include::c.adoc[]\n");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].warning, WarningType::MaxIncludeDepthExceeded(2));
+    }
 }
