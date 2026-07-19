@@ -170,14 +170,19 @@ impl<'p> PreprocessorState<'p> {
             InterpretedValue::Unset => 64,
         };
 
-        let max_include_depth = usize::try_from(max_include_depth)
-            .ok()
-            .filter(|&depth| depth > 0)
-            .map(|depth| MaxIncludeDepth {
+        // A positive value too large for `usize` (possible on 32-bit targets)
+        // saturates to an effectively unlimited depth rather than failing the
+        // conversion, which would otherwise be mistaken for the "disabled"
+        // sentinel. (Ruby's integers are unbounded, so Asciidoctor simply
+        // honors such a value as a very large limit.)
+        let max_include_depth = (max_include_depth > 0).then(|| {
+            let depth = usize::try_from(max_include_depth).unwrap_or(usize::MAX);
+            MaxIncludeDepth {
                 abs: depth,
                 curr: depth,
                 rel: depth,
-            });
+            }
+        });
 
         Self {
             parser,
@@ -486,8 +491,12 @@ impl<'p> PreprocessorState<'p> {
                         {
                             let rel = ruby_to_i(depth_attr.value());
                             if rel > 0 {
-                                let mut rel = rel as usize;
-                                let mut curr = self.include_depth + rel;
+                                // A request too large for `usize` (possible on
+                                // 32-bit targets) saturates rather than
+                                // wrapping into a restrictive value; the clamp
+                                // below then reduces it to the absolute limit.
+                                let mut rel = usize::try_from(rel).unwrap_or(usize::MAX);
+                                let mut curr = self.include_depth.saturating_add(rel);
                                 if curr > max_depth.abs {
                                     curr = max_depth.abs;
                                     rel = max_depth.abs;
@@ -3399,5 +3408,51 @@ mod tests {
         assert_eq!(output, "include::c.adoc[]\n");
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].warning, WarningType::MaxIncludeDepthExceeded(2));
+    }
+
+    #[test]
+    fn huge_max_include_depth_acts_as_large_limit() {
+        // A positive `max-include-depth` too large to represent exactly (e.g.
+        // beyond `usize` on a 32-bit target) is a very large limit, not the
+        // 0 = disabled sentinel: an ordinary include still expands.
+        let handler = InlineFileHandler::from_pairs([("shared.adoc", "shared content")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute(
+                "max-include-depth",
+                "9223372036854775807",
+                ModificationContext::ApiOnly,
+            )
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) = preprocess("include::shared.adoc[]", &parser);
+
+        assert_eq!(output, "shared content\n");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn huge_depth_request_is_clamped_not_wrapped() {
+        // A huge positive `depth` request is treated like any other
+        // greater-than-the-limit request — clamped to the absolute
+        // `max-include-depth` — rather than wrapping into a small (or zero)
+        // value that would restrict nesting further than asked.
+        let handler = InlineFileHandler::from_pairs([
+            ("a.adoc", "include::b.adoc[]"),
+            ("b.adoc", "content of b"),
+        ]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute("max-include-depth", "1", ModificationContext::ApiOnly)
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, warnings) =
+            preprocess("include::a.adoc[depth=9223372036854775807]", &parser);
+
+        assert_eq!(output, "include::b.adoc[]\n");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].warning, WarningType::MaxIncludeDepthExceeded(1));
     }
 }
