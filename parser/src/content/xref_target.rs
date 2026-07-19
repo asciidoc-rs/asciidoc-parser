@@ -327,9 +327,24 @@ mod tests {
 
     #[test]
     fn hash_in_numeric_character_reference_is_not_a_separator() {
+        // The character-replacement substitution runs before macros, so a
+        // target written as `C++` arrives here carrying numeric character
+        // references.
         assert_eq!(
             interpret_xref_target("C&#43;&#43;", true),
             XrefTarget::SameDocument("C&#43;&#43;".to_string())
+        );
+
+        assert_eq!(
+            interpret_xref_target("Cub &#8658; Tiger", false),
+            XrefTarget::SameDocument("Cub &#8658; Tiger".to_string())
+        );
+
+        // Only the first `#` decides: a later separator in a target that opens
+        // with an entity is not reconsidered (matching Asciidoctor).
+        assert_eq!(
+            interpret_xref_target("&#43;.adoc#frag", false),
+            XrefTarget::SameDocument("&#43;.adoc#frag".to_string())
         );
     }
 

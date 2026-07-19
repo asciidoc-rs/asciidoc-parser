@@ -3284,11 +3284,15 @@ non_normative!(
 "###
 );
 
-// Surfaced incompatibility: the link this crate creates matches
-// (`<a href="#foobaz">[foobaz]</a>`), but it does not emit the `possible
-// invalid reference` log message that this test also asserts. Tracked in #772.
-non_normative!(
-    r###"
+// NOTE: Asciidoctor emits the `possible invalid reference` message only in
+// verbose (pedantic) mode. This crate has no such mode: an unresolved reference
+// is always reported as a `WarningType::PossibleInvalidReference` warning on
+// the document, which a host is free to ignore.
+#[test]
+fn should_warn_and_create_link_if_debug_mode_is_enabled_inter_document_xref_points_to_current_doc_and_reference_not_found()
+ {
+    verifies!(
+        r###"
   test 'should warn and create link if debug mode is enabled, inter-document xref points to current doc, and reference not found' do
     input = <<~'EOS'
     [#foobar]
@@ -3308,7 +3312,30 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    // The target names the document being parsed (its `docname` is the stem of
+    // the file name), so the reference is an internal one and its fragment is
+    // looked for in this document's catalog — where it is missing.
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("[#foobar]\n== Foobar\n\n== Section B\n\nSee <<test.adoc#foobaz>>.\n");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#foobaz">[foobaz]</a>."##
+    );
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::PossibleInvalidReference("foobaz".to_string())
+    );
+
+    assert_eq!(warnings[0].source.line(), 6);
+}
 
 #[test]
 fn should_use_doctitle_as_fallback_link_text_if_inter_document_xref_points_to_current_doc_and_no_link_text_is_provided()
