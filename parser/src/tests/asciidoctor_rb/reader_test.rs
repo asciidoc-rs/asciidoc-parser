@@ -1061,9 +1061,8 @@ non_normative!(
 // `uri:classloader:` and remote (URL) includes; the `doc.catalog[:includes]`
 // registry; filesystem-relative / absolute-path / spaces-in-filename resolution
 // and the `base_dir` sandbox; non-UTF-8 `encoding` handling; the
-// `max-include-depth` bound; the `attribute-missing` / blank-target reader
-// diagnostics; and the Reader-object APIs (`read_lines_until`,
-// `skip_comment_lines`).
+// `attribute-missing` / blank-target reader diagnostics; and the Reader-object
+// APIs (`read_lines_until`, `skip_comment_lines`).
 
 // At the default safe mode (secure) the include directive is not expanded;
 // it is replaced with a link to the target carrying the `include` role.
@@ -4177,12 +4176,13 @@ fn include_directive_not_at_start_of_line_is_ignored() {
     );
 }
 
-// Out of scope: this crate does not implement the `max-include-depth`
-// attribute (nor the "maximum include depth exceeded" diagnostic), so it cannot
-// be used to disable or bound include expansion. Tracked by
-// https://github.com/asciidoc-rs/asciidoc-parser/issues/777.
-non_normative!(
-    r#"
+// `max-include-depth=0` disables the include directive entirely: the directive
+// line is left in the output verbatim, with no diagnostic, and the include
+// file handler is never consulted.
+#[test]
+fn include_directive_is_disabled_when_max_include_depth_attribute_is_0() {
+    verifies!(
+        r#"
       test 'include directive is disabled when max-include-depth attribute is 0' do
         input = 'include::include-file.adoc[]'
         para = block_from_string input, safe: :safe, attributes: { 'max-include-depth' => 0 }
@@ -4191,10 +4191,30 @@ non_normative!(
       end
 
 "#
-);
+    );
 
-non_normative!(
-    r#"
+    let handler = RecordingIncludeFileHandler::new("included content");
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_intrinsic_attribute("max-include-depth", "0", ModificationContext::ApiOnly)
+        .with_include_file_handler(handler);
+
+    let (output, _source_map, warnings) =
+        crate::parser::preprocessor::preprocess("include::include-file.adoc[]", &parser);
+
+    assert_eq!(output, "include::include-file.adoc[]\n");
+    assert!(probe.calls().is_empty());
+    assert!(warnings.is_empty());
+}
+
+// `max-include-depth` is an API-only attribute (see `built_in_attrs.rs`), so
+// the document's attempt to raise it to 1 is ignored and the API-set value of
+// 0 still disables the include directive.
+#[test]
+fn max_include_depth_cannot_be_set_by_document() {
+    verifies!(
+        r#"
       test 'max-include-depth cannot be set by document' do
         input = <<~'EOS'
         :max-include-depth: 1
@@ -4207,10 +4227,57 @@ non_normative!(
       end
 
 "#
-);
+    );
 
-non_normative!(
-    r#"
+    let handler = RecordingIncludeFileHandler::new("included content");
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_intrinsic_attribute("max-include-depth", "0", ModificationContext::ApiOnly)
+        .with_include_file_handler(handler);
+
+    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+        ":max-include-depth: 1\n\ninclude::include-file.adoc[]",
+        &parser,
+    );
+
+    assert_eq!(
+        output,
+        ":max-include-depth: 1\n\ninclude::include-file.adoc[]\n"
+    );
+    assert!(probe.calls().is_empty());
+    assert!(warnings.is_empty());
+}
+
+/// Verbatim copy of Asciidoctor's `test/fixtures/parent-include.adoc`.
+const PARENT_INCLUDE_ADOC: &str =
+    "first line of parent\n\ninclude::child-include.adoc[]\n\nlast line of parent\n";
+
+/// Verbatim copy of Asciidoctor's
+/// `test/fixtures/parent-include-restricted.adoc`.
+const PARENT_INCLUDE_RESTRICTED_ADOC: &str =
+    "first line of parent\n\ninclude::child-include.adoc[depth=0]\n\nlast line of parent\n";
+
+/// Verbatim copy of Asciidoctor's `test/fixtures/child-include.adoc`.
+const CHILD_INCLUDE_ADOC: &str =
+    "first line of child\n\ninclude::grandchild-include.adoc[]\n\nlast line of child\n";
+
+/// Verbatim copy of Asciidoctor's `test/fixtures/grandchild-include.adoc`.
+const GRANDCHILD_INCLUDE_ADOC: &str = "first line of grandchild\n\nlast line of grandchild\n";
+
+// The `depth` attribute on an include directive bounds how many further levels
+// of include nesting are permitted beneath the included file. An include
+// directive in a file that already sits at the limit is left verbatim, with a
+// "maximum include depth exceeded" error at the directive's own file and line.
+//
+// (Asciidoctor resolves each nested target against the including file's
+// directory, so its message names `fixtures/child-include.adoc`; this crate
+// delegates path resolution to the include file handler and names the target
+// as written, `child-include.adoc`.)
+#[test]
+fn include_directive_should_be_disabled_if_max_include_depth_has_been_exceeded() {
+    verifies!(
+        r#"
       test 'include directive should be disabled if max include depth has been exceeded' do
         input = 'include::fixtures/parent-include.adoc[depth=1]'
         using_memory_logger do |logger|
@@ -4224,10 +4291,59 @@ non_normative!(
       end
 
 "#
-);
+    );
 
-non_normative!(
-    r#"
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(InlineFileHandler::from_pairs([
+            ("fixtures/parent-include.adoc", PARENT_INCLUDE_ADOC),
+            ("child-include.adoc", CHILD_INCLUDE_ADOC),
+            ("grandchild-include.adoc", GRANDCHILD_INCLUDE_ADOC),
+        ]));
+
+    let (output, source_map, warnings) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/parent-include.adoc[depth=1]",
+        &parser,
+    );
+
+    assert_eq!(
+        output,
+        "first line of parent\n\nfirst line of child\n\ninclude::grandchild-include.adoc[]\n\nlast line of child\n\nlast line of parent\n"
+    );
+
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].warning, WarningType::MaxIncludeDepthExceeded(1));
+
+    // The warning's span covers the verbatim directive line, which the source
+    // map places at line 3 of `child-include.adoc`.
+    assert_eq!(
+        &output[warnings[0].offset..(warnings[0].offset + warnings[0].len)],
+        "include::grandchild-include.adoc[]"
+    );
+
+    let output_line = output[..warnings[0].offset]
+        .bytes()
+        .filter(|&b| b == b'\n')
+        .count()
+        + 1;
+    assert_eq!(
+        source_map.original_file_and_line(output_line),
+        Some(crate::parser::SourceLine(
+            Some("child-include.adoc".to_owned()),
+            3
+        ))
+    );
+}
+
+// A `depth` limit established by a nested include directive (here `depth=0` on
+// the child include) is enforced within that include even though the outer
+// directive permitted more nesting, and is restored once the include has been
+// merged (so `last line of parent` still follows).
+#[test]
+fn include_directive_should_be_disabled_if_max_include_depth_set_in_nested_context_has_been_exceeded()
+ {
+    verifies!(
+        r#"
       test 'include directive should be disabled if max include depth set in nested context has been exceeded' do
         input = 'include::fixtures/parent-include-restricted.adoc[depth=3]'
         using_memory_logger do |logger|
@@ -4242,7 +4358,32 @@ non_normative!(
       end
 
 "#
-);
+    );
+
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(InlineFileHandler::from_pairs([
+            (
+                "fixtures/parent-include-restricted.adoc",
+                PARENT_INCLUDE_RESTRICTED_ADOC,
+            ),
+            ("child-include.adoc", CHILD_INCLUDE_ADOC),
+            ("grandchild-include.adoc", GRANDCHILD_INCLUDE_ADOC),
+        ]));
+
+    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/parent-include-restricted.adoc[depth=3]",
+        &parser,
+    );
+
+    assert_eq!(
+        output,
+        "first line of parent\n\nfirst line of child\n\ninclude::grandchild-include.adoc[]\n\nlast line of child\n\nlast line of parent\n"
+    );
+
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].warning, WarningType::MaxIncludeDepthExceeded(0));
+}
 
 non_normative!(
     r#"
