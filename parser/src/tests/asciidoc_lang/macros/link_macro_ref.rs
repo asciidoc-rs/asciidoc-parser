@@ -192,7 +192,7 @@ fn title() {
                         col: 1,
                         offset: 0,
                     },
-                    rendered: "<a href=\"https://asciidoctor.org\">Home</a>",
+                    rendered: "<a href=\"https://asciidoctor.org\" title=\"Project home page\">Home</a>",
                 },
                 source: Span {
                     data: "https://asciidoctor.org[Home,title=Project home page]",
