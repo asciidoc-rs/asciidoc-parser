@@ -1060,9 +1060,9 @@ non_normative!(
 // for the reasons noted inline or here: compat mode; UTF-8 BOM stripping;
 // `uri:classloader:` and remote (URL) includes; the `doc.catalog[:includes]`
 // registry; filesystem-relative / absolute-path / spaces-in-filename resolution
-// and the `base_dir` sandbox; non-UTF-8 `encoding` handling; the
-// `attribute-missing` / blank-target reader diagnostics; and the Reader-object
-// APIs (`read_lines_until`, `skip_comment_lines`).
+// and the `base_dir` sandbox; non-UTF-8 `encoding` handling; the blank-target
+// reader diagnostic; and the Reader-object APIs (`read_lines_until`,
+// `skip_comment_lines`).
 
 // At the default safe mode (secure) the include directive is not expanded;
 // it is replaced with a link to the target carrying the `include` role.
@@ -4068,15 +4068,15 @@ fn line_is_skipped_by_default_if_target_of_include_directive_resolves_to_empty()
     );
 }
 
-// Out of scope for now: this crate does not honor `attribute-missing=drop-line`
-// when substituting an include directive's target. A missing attribute
-// reference in the target is kept literal (as under the default `skip` mode)
-// and delegated to the handler, so the whole line is not dropped as Asciidoctor
-// does here. (A mock handler cannot reproduce this; it would require the
-// preprocessor to apply the attribute-missing policy to the include target.)
-// Tracked by https://github.com/asciidoc-rs/asciidoc-parser/issues/776.
-non_normative!(
-    r#"
+// Under `attribute-missing=drop-line`, a missing attribute reference in an
+// include target drops the entire directive line: nothing is emitted in its
+// place and the include file handler is never consulted. Asciidoctor logs both
+// of its messages here at INFO level; this crate has no INFO channel, so — as
+// everywhere else `drop-line` applies — the line is dropped silently.
+#[test]
+fn include_is_dropped_if_target_contains_missing_attribute_and_attribute_missing_is_drop_line() {
+    verifies!(
+        r#"
       test 'include is dropped if target contains missing attribute and attribute-missing is drop-line' do
         input = 'include::{foodir}/include-file.adoc[]'
         using_memory_logger Logger::INFO do |logger|
@@ -4092,10 +4092,36 @@ non_normative!(
       end
 
 "#
-);
+    );
 
-non_normative!(
-    r#"
+    let handler = RecordingIncludeFileHandler::new("included content");
+    let probe = handler.clone();
+
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_intrinsic_attribute(
+            "attribute-missing",
+            "drop-line",
+            ModificationContext::Anywhere,
+        )
+        .with_include_file_handler(handler);
+
+    let (output, _source_map, warnings) =
+        crate::parser::preprocessor::preprocess("include::{foodir}/include-file.adoc[]", &parser);
+
+    assert_eq!(output, "");
+    assert!(warnings.is_empty());
+    assert!(probe.calls().is_empty());
+}
+
+// The directive line is dropped on its own: the line that follows it survives.
+// Under `attribute-missing=warn` the dropped directive leaves the "Unresolved
+// directive" message in its place (naming the root as `(root file)` rather than
+// `<stdin>`) together with a single warning naming the whole directive.
+#[test]
+fn line_following_dropped_include_is_not_dropped() {
+    verifies!(
+        r#"
       test 'line following dropped include is not dropped' do
         input = <<~'EOS'
         include::{foodir}/include-file.adoc[]
@@ -4117,7 +4143,37 @@ non_normative!(
       end
 
 "#
-);
+    );
+
+    let handler = RecordingIncludeFileHandler::new("included content");
+    let probe = handler.clone();
+
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_intrinsic_attribute("attribute-missing", "warn", ModificationContext::Anywhere)
+        .with_include_file_handler(handler);
+
+    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+        "include::{foodir}/include-file.adoc[]\nyo",
+        &parser,
+    );
+
+    assert_eq!(
+        output,
+        "Unresolved directive in (root file) - include::{foodir}/include-file.adoc[]\nyo\n"
+    );
+
+    assert!(probe.calls().is_empty());
+
+    assert_eq!(warnings.len(), 1);
+
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::IncludeDroppedDueToMissingAttribute(
+            "include::{foodir}/include-file.adoc[]".to_owned()
+        )
+    );
+}
 
 // A backslash-escaped include directive keeps its place with the backslash
 // removed and is not expanded; an unrelated leading backslash is preserved.
