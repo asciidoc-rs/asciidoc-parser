@@ -121,6 +121,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                         section_number: Some(SectionNumber {
                             section_type: SectionType::Normal,
                             components: &[1, 1,],
+                            appendix_letter: None,
                         },),
                     },),],
                     source: Span {
@@ -140,6 +141,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Normal,
                         components: &[1,],
+                        appendix_letter: None,
                     },),
                 },),
                 Block::Section(SectionBlock {
@@ -183,6 +185,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                             section_number: Some(SectionNumber {
                                 section_type: SectionType::Appendix,
                                 components: &[1, 1,],
+                                appendix_letter: Some("A"),
                             },),
                         },),
                         Block::Section(SectionBlock {
@@ -214,6 +217,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                             section_number: Some(SectionNumber {
                                 section_type: SectionType::Appendix,
                                 components: &[1, 2,],
+                                appendix_letter: Some("A"),
                             },),
                         },),
                     ],
@@ -247,6 +251,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Appendix,
                         components: &[1,],
+                        appendix_letter: Some("A"),
                     },),
                 },),
                 Block::Section(SectionBlock {
@@ -291,6 +296,7 @@ include::example$appendix.adoc[tag=appx-article-out]
                     section_number: Some(SectionNumber {
                         section_type: SectionType::Appendix,
                         components: &[2,],
+                        appendix_letter: Some("B"),
                     },),
                 },),
             ],
