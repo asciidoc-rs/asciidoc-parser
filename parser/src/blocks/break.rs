@@ -216,9 +216,12 @@ mod tests {
         // thematic break, not just the canonical `'''`.
         for line in ["''''", "'''''", "''''''"] {
             let mut parser = Parser::default();
-            let mi = crate::blocks::Break::parse(&BlockMetadata::new(line), &mut parser)
-                .unwrap_or_else(|| panic!("{line:?} should be a thematic break"));
-            assert_eq!(mi.item.type_(), BreakType::Thematic);
+            let mi = crate::blocks::Break::parse(&BlockMetadata::new(line), &mut parser).unwrap();
+            assert_eq!(
+                mi.item.type_(),
+                BreakType::Thematic,
+                "{line:?} should be a thematic break"
+            );
             assert_eq!(mi.item.raw_context().deref(), "thematic_break");
         }
 
