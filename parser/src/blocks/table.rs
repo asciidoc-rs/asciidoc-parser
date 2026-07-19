@@ -13,7 +13,7 @@ use crate::{
     document::{InterpretedValue, TocConfig, TocMode},
     parser::{
         AttributeValue, InlineSubstitutionRenderer, ModificationContext, ReferenceResolver,
-        ReferenceWarning, ResolvedAttributes, SourceLine, built_in_attr, built_in_attrs_iter,
+        ReferenceWarnings, ResolvedAttributes, SourceLine, built_in_attr, built_in_attrs_iter,
         preprocessor::preprocess_with_initial_file_name,
     },
     span::MatchedItem,
@@ -510,7 +510,7 @@ impl<'src> TableBlock<'src> {
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
-        warnings: &mut Vec<ReferenceWarning>,
+        warnings: &mut ReferenceWarnings<'src>,
     ) {
         let rows = self
             .header_row
@@ -2229,14 +2229,16 @@ impl<'src> TableCell<'src> {
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
-        warnings: &mut Vec<ReferenceWarning>,
+        warnings: &mut ReferenceWarnings<'src>,
     ) {
+        let source = self.source;
+
         match &mut self.content {
             TableCellContent::Simple(content) => {
                 content.resolve_references(resolver, renderer, warnings);
             }
             TableCellContent::AsciiDoc(cell) => {
-                cell.resolve_references(resolver, renderer, warnings);
+                cell.resolve_references(resolver, renderer, warnings, source);
             }
         }
     }
@@ -2411,12 +2413,15 @@ impl<'src> AsciiDocCell<'src> {
         }
     }
 
-    /// Resolves any deferred cross-references in the cell's blocks.
+    /// Resolves any deferred cross-references in the cell's blocks. `source` is
+    /// the enclosing cell's span, used to anchor warnings raised from an
+    /// [owned](Self::Owned) cell's private source.
     fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
-        warnings: &mut Vec<ReferenceWarning>,
+        warnings: &mut ReferenceWarnings<'src>,
+        source: Span<'src>,
     ) {
         match self {
             Self::Borrowed(cell) => {
@@ -2431,9 +2436,16 @@ impl<'src> AsciiDocCell<'src> {
             Self::Owned(cell) => {
                 if let Some(cell) = Arc::get_mut(cell) {
                     cell.with_dependent_mut(|_, dependent| {
+                        // These blocks borrow the cell's own owned source, so
+                        // their warnings are collected separately and then
+                        // re-anchored to the cell's span in the document.
+                        let mut owned_warnings = ReferenceWarnings::default();
+
                         for block in &mut dependent.blocks {
-                            block.resolve_references(resolver, renderer, warnings);
+                            block.resolve_references(resolver, renderer, &mut owned_warnings);
                         }
+
+                        owned_warnings.rehome_into(warnings, source);
                     });
                 }
             }
@@ -3122,9 +3134,12 @@ mod tests {
         AsciiDocCell, OwnedCell, OwnedCellInner, ResolvedAttributes, TocConfig,
         absolute_cell_directive_origin,
     };
-    use crate::parser::{
-        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
-        SourceLine,
+    use crate::{
+        Span,
+        parser::{
+            HtmlSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+            ResolvedReference, SourceLine,
+        },
     };
 
     #[test]
@@ -3205,12 +3220,19 @@ mod tests {
         // Hold a second reference to the same store so `Arc::get_mut` fails.
         let shared = cell.clone();
 
-        let mut warnings = vec![];
-        cell.resolve_references(&NoopResolver, &HtmlSubstitutionRenderer {}, &mut warnings);
+        let mut warnings = ReferenceWarnings::default();
+
+        cell.resolve_references(
+            &NoopResolver,
+            &HtmlSubstitutionRenderer {},
+            &mut warnings,
+            Span::new(""),
+        );
 
         // Resolution was skipped silently: no warnings, and the two references
         // still describe the same (unmodified) cell.
-        assert!(warnings.is_empty());
+        assert!(warnings.host.is_empty());
+        assert!(warnings.doc.is_empty());
         assert_eq!(cell, shared);
     }
 

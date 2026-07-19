@@ -53,6 +53,22 @@ See <<foobar>>.
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "foobar");
+
+    // The same condition is folded into the document's own warnings, so a host
+    // that does not drive resolution itself still sees it.
+    let doc_warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(doc_warnings.len(), 1);
+
+    assert_eq!(
+        doc_warnings[0].warning,
+        WarningType::PossibleInvalidReference("foobar".to_string())
+    );
+
+    // Resolution is repeatable: a second sweep replaces the first sweep's
+    // warnings rather than accumulating a duplicate.
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(doc.warnings().count(), 1);
 }
 
 non_normative!(

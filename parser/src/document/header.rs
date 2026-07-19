@@ -92,7 +92,7 @@ impl<'src> Header<'src> {
             } else if title.is_none()
                 && line.starts_with('[')
                 && line.ends_with(']')
-                && line_mi.after.take_normalized_line().item.starts_with("= ")
+                && document_title_marker(line_mi.after.take_normalized_line().item).is_some()
                 && let Some((separator, separator_warnings)) =
                     parse_separator_attribute(line, parser)
             {
@@ -108,12 +108,14 @@ impl<'src> Header<'src> {
                 // table's `separator`) and is left for the block parser.
                 parser.set_attribute_by_value_from_header("title-separator", separator);
                 source = line_mi.after;
-            } else if title.is_none() && line.starts_with("= ") {
-                // Strip an optional symmetric close (a trailing ` =` matching the
-                // single opening marker), mirroring section titles.
+            } else if title.is_none()
+                && let Some(marker) = document_title_marker(line)
+            {
+                // Strip an optional symmetric close (a trailing ` =` or ` #`
+                // matching the single opening marker), mirroring section titles.
                 let title_span = crate::blocks::strip_symmetric_title_close(
                     line.discard(2).discard_whitespace(),
-                    '=',
+                    marker,
                     1,
                 );
                 let title_str = apply_header_subs(title_span.data(), parser);
@@ -258,6 +260,23 @@ impl<'src> Header<'src> {
 impl<'src> HasSpan<'src> for Header<'src> {
     fn span(&self) -> Span<'src> {
         self.source
+    }
+}
+
+/// Returns the ATX marker character that introduces `line` as a document
+/// title, or `None` if the line is not a document title.
+///
+/// Both the AsciiDoc marker (`=`) and the Markdown-style marker (`#`) are
+/// accepted, mirroring the alternation at the head of Asciidoctor's
+/// section-title regex. The marker character is returned so the caller can
+/// require a symmetric close to use the same marker.
+fn document_title_marker(line: Span<'_>) -> Option<char> {
+    if line.starts_with("= ") {
+        Some('=')
+    } else if line.starts_with("# ") {
+        Some('#')
+    } else {
+        None
     }
 }
 
@@ -1085,5 +1104,124 @@ mod tests {
 
         assert_eq!(header.main_title(), Some("Main Title"));
         assert_eq!(header.subtitle(), Some("Subtitle 1"));
+    }
+
+    mod markdown_style_document_title {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn hash_marker_is_a_document_title() {
+            let mut parser = Parser::default();
+            let mi =
+                crate::document::Header::parse(crate::Span::new("# Just the Title"), &mut parser)
+                    .unwrap_if_no_warnings();
+
+            assert_eq!(
+                mi.item,
+                Header {
+                    title_source: Some(Span {
+                        data: "Just the Title",
+                        line: 1,
+                        col: 3,
+                        offset: 2,
+                    }),
+                    title: Some("Just the Title"),
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "# Just the Title",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    }
+                }
+            );
+
+            assert_eq!(
+                mi.after,
+                Span {
+                    data: "",
+                    line: 1,
+                    col: 17,
+                    offset: 16
+                }
+            );
+        }
+
+        #[test]
+        fn sets_doctitle_attribute() {
+            let doc = Parser::default().parse("# Doc Title\n\n{doctitle}");
+            assert_eq!(doc.header().title(), Some("Doc Title"));
+            assert_eq!(rendered_paragraphs(&doc), vec!["Doc Title"]);
+        }
+
+        #[test]
+        fn strips_symmetric_close() {
+            let doc = Parser::default().parse("# Doc Title #");
+            assert_eq!(doc.header().title(), Some("Doc Title"));
+        }
+
+        #[test]
+        fn does_not_strip_mismatched_close() {
+            // The close must repeat the opening marker, so a trailing `=` after
+            // a `#` title is title text.
+            let doc = Parser::default().parse("# Doc Title =");
+            assert_eq!(doc.header().title(), Some("Doc Title ="));
+        }
+
+        #[test]
+        fn requires_whitespace_after_marker() {
+            let doc = Parser::default().parse("#Doc Title");
+
+            assert_eq!(doc.header().title(), None);
+            assert_eq!(rendered_paragraphs(&doc), vec!["#Doc Title"]);
+        }
+
+        #[test]
+        fn carries_the_rest_of_the_header() {
+            // Everything that may follow an `=` title — attribute entries, the
+            // author line, the revision line — follows a `#` title too.
+            let doc = Parser::default()
+                .parse("# Doc Title\n:foo: bar\nKismet R. Lee <kismet@asciidoctor.org>\nv1.0\n");
+            let header = doc.header();
+
+            assert_eq!(header.title(), Some("Doc Title"));
+            assert_eq!(header.authors().first().unwrap().firstname(), "Kismet");
+            assert_eq!(header.revision_line().unwrap().revnumber().unwrap(), "1.0");
+        }
+
+        #[test]
+        fn partitions_subtitle() {
+            let doc = Parser::default().parse("# Main Title: Subtitle");
+            let header = doc.header();
+
+            assert_eq!(header.main_title(), Some("Main Title"));
+            assert_eq!(header.subtitle(), Some("Subtitle"));
+        }
+
+        #[test]
+        fn separator_block_attribute_above_title() {
+            // The `[separator=…]` line is only intercepted when a document title
+            // follows it; a `#` title qualifies just as an `=` title does.
+            let doc = Parser::default().parse("[separator=::]\n# Main Title:: Subtitle");
+            let header = doc.header();
+
+            assert_eq!(header.main_title(), Some("Main Title"));
+            assert_eq!(header.subtitle(), Some("Subtitle"));
+        }
+
+        #[test]
+        fn markdown_title_followed_by_markdown_sections() {
+            let doc = Parser::default().parse("# Doc Title\n\n## Section One\n\nblah blah\n");
+
+            assert_eq!(doc.header().title(), Some("Doc Title"));
+
+            let section = first_section(&doc);
+
+            assert_eq!(section.level(), 1);
+            assert_eq!(section.section_title(), "Section One");
+        }
     }
 }

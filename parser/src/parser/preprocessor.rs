@@ -1,10 +1,11 @@
 use std::{borrow::Cow, sync::LazyLock};
 
-use regex::{Regex, Replacer};
+use regex::{Captures, Regex, Replacer};
 
 use crate::{
     HasSpan, Parser, SafeMode, Span,
     attributes::{Attrlist, AttrlistContext},
+    content::AttributeMissing,
     document::{Attribute, InterpretedValue},
     parser::{DeferredWarning, SourceLine, SourceMap},
     span::MatchedItem,
@@ -302,7 +303,60 @@ impl<'p> PreprocessorState<'p> {
             } else if line.starts_with("include::")
                 && let Some(caps) = INCLUDE_DIRECTIVE.captures(line.data())
             {
-                let target = self.substitute_attributes(&caps[1], MissingAttribute::KeepLiteral);
+                // Asciidoctor substitutes attributes into an include target
+                // using the `attribute-missing` policy in effect, except that
+                // `warn` is mapped to `drop-line`: a warning here names the
+                // whole directive, not the individual reference. Under either
+                // of those policies a reference to a missing attribute empties
+                // the entire target, and the directive is dropped before the
+                // include file handler is ever consulted. See issue #776.
+                let attribute_missing = AttributeMissing::from_parser(self.parser);
+
+                let missing_policy = match attribute_missing {
+                    AttributeMissing::Skip => MissingAttribute::KeepLiteral,
+                    AttributeMissing::Drop => MissingAttribute::Drop,
+                    AttributeMissing::DropLine | AttributeMissing::Warn => {
+                        MissingAttribute::DropLine
+                    }
+                };
+
+                let (target, missing_reference) =
+                    self.substitute_attributes_tracking(&caps[1], missing_policy);
+
+                if missing_reference
+                    && matches!(
+                        attribute_missing,
+                        AttributeMissing::DropLine | AttributeMissing::Warn
+                    )
+                {
+                    // Under `drop-line` (and for an include marked
+                    // `opts=optional`) the directive line is removed with no
+                    // replacement text. Asciidoctor logs this at INFO level;
+                    // this crate has no INFO channel, so — as everywhere else
+                    // `drop-line` applies — the line is dropped silently.
+                    // Re-anchor the source map so the lines that follow map
+                    // back to their correct original line numbers.
+                    if attribute_missing == AttributeMissing::DropLine
+                        || parse_attrlist(&caps, self.parser).has_option("optional")
+                    {
+                        has_reported_file = false;
+                        continue;
+                    }
+
+                    // Under `warn` the directive is replaced by an "Unresolved
+                    // directive" message, as it is for a target that could not
+                    // be resolved, and a warning naming the whole directive is
+                    // recorded.
+                    self.emit_unresolved_directive(
+                        line.data(),
+                        WarningType::IncludeDroppedDueToMissingAttribute(line.data().to_owned()),
+                        file_name,
+                        source_line_number,
+                        &mut has_reported_file,
+                    );
+
+                    continue;
+                }
 
                 if self.parser.safe >= SafeMode::Secure {
                     // The include directive is disabled at `SafeMode::Secure`
@@ -372,15 +426,7 @@ impl<'p> PreprocessorState<'p> {
                     continue;
                 }
 
-                let attrlist = caps
-                    .get(2)
-                    .map(|attrlist| {
-                        let span = Span::new(attrlist.as_str());
-                        Attrlist::parse(span, self.parser, AttrlistContext::Inline)
-                            .item
-                            .item
-                    })
-                    .unwrap_or_default();
+                let attrlist = parse_attrlist(&caps, self.parser);
 
                 // A URI target is only honored when the URI read permission has
                 // been granted (`allow-uri-read`). This is disabled by default,
@@ -391,7 +437,7 @@ impl<'p> PreprocessorState<'p> {
                 if is_uri(&target) && !self.parser.is_attribute_set("allow-uri-read") {
                     self.emit_unresolved_directive(
                         line.data(),
-                        target,
+                        WarningType::IncludeFileNotFound(target),
                         file_name,
                         source_line_number,
                         &mut has_reported_file,
@@ -563,7 +609,7 @@ impl<'p> PreprocessorState<'p> {
                     // an "Unresolved directive" message and record a warning.
                     self.emit_unresolved_directive(
                         line.data(),
-                        target,
+                        WarningType::IncludeFileNotFound(target),
                         file_name,
                         source_line_number,
                         &mut has_reported_file,
@@ -639,12 +685,34 @@ impl<'p> PreprocessorState<'p> {
     /// patterns with their corresponding values from the parser. A reference to
     /// an unset attribute is handled per `missing`.
     fn substitute_attributes(&self, input: &str, missing: MissingAttribute) -> String {
+        self.substitute_attributes_tracking(input, missing).0
+    }
+
+    /// Apply attribute substitution as [`substitute_attributes`] does, also
+    /// reporting whether a (non-escaped) reference to an unset attribute was
+    /// found. In [`MissingAttribute::DropLine`] mode the substituted text is
+    /// meaningless once that flag is set — the caller drops the line it came
+    /// from.
+    ///
+    /// [`substitute_attributes`]: Self::substitute_attributes
+    fn substitute_attributes_tracking(
+        &self,
+        input: &str,
+        missing: MissingAttribute,
+    ) -> (String, bool) {
         if !input.contains('{') {
-            return input.to_string();
+            return (input.to_string(), false);
         }
 
         #[derive(Debug)]
-        struct AttributeReplacer<'p>(&'p Parser, MissingAttribute);
+        struct AttributeReplacer<'p> {
+            parser: &'p Parser,
+            missing: MissingAttribute,
+
+            /// Set to `true` when a (non-escaped) reference to an unset
+            /// attribute is encountered.
+            missing_reference: bool,
+        }
 
         impl Replacer for AttributeReplacer<'_> {
             fn replace_append(&mut self, caps: &regex::Captures<'_>, dest: &mut String) {
@@ -659,14 +727,16 @@ impl<'p> PreprocessorState<'p> {
                     return;
                 }
 
-                if !self.0.has_attribute(attr_name) {
-                    if matches!(self.1, MissingAttribute::KeepLiteral) {
+                if !self.parser.has_attribute(attr_name) {
+                    self.missing_reference = true;
+
+                    if matches!(self.missing, MissingAttribute::KeepLiteral) {
                         dest.push_str(&caps[0]);
                     }
                     return;
                 }
 
-                if let InterpretedValue::Value(value) = self.0.attribute_value(attr_name) {
+                if let InterpretedValue::Value(value) = self.parser.attribute_value(attr_name) {
                     dest.push_str(value.as_ref());
                 }
             }
@@ -674,13 +744,20 @@ impl<'p> PreprocessorState<'p> {
 
         let result: Cow<'_, str> = input.into();
 
-        if let Cow::Owned(new_result) =
-            ATTRIBUTE_REFERENCE.replace_all(&result, AttributeReplacer(self.parser, missing))
-        {
-            new_result
-        } else {
-            input.to_string()
-        }
+        let mut replacer = AttributeReplacer {
+            parser: self.parser,
+            missing,
+            missing_reference: false,
+        };
+
+        let replaced = ATTRIBUTE_REFERENCE.replace_all(&result, replacer.by_ref());
+
+        let text = match replaced {
+            Cow::Owned(new_result) => new_result,
+            Cow::Borrowed(_) => input.to_string(),
+        };
+
+        (text, replacer.missing_reference)
     }
 
     /// Emit a single line of text to the output, updating the source map and
@@ -716,8 +793,8 @@ impl<'p> PreprocessorState<'p> {
     }
 
     /// Replace an include directive that could not be resolved with an
-    /// "Unresolved directive" message (as Asciidoctor does) and record a
-    /// warning pointing at that message. The warning is located by byte
+    /// "Unresolved directive" message (as Asciidoctor does) and record
+    /// `warning` pointing at that message. The warning is located by byte
     /// offset because the output it refers to is not yet owned;
     /// `Document::parse` reconstitutes it into a spanned [`Warning`].
     ///
@@ -725,7 +802,7 @@ impl<'p> PreprocessorState<'p> {
     fn emit_unresolved_directive(
         &mut self,
         directive_line: &str,
-        target: String,
+        warning: WarningType,
         file_name: Option<&str>,
         source_line_number: usize,
         has_reported_file: &mut bool,
@@ -746,7 +823,7 @@ impl<'p> PreprocessorState<'p> {
         self.warnings.push(DeferredWarning {
             offset: self.output.len(),
             len: replacement.len(),
-            warning: WarningType::IncludeFileNotFound(target),
+            warning,
             origin: None,
         });
 
@@ -1109,6 +1186,14 @@ enum MissingAttribute {
     /// resolution always applies regardless of the `attribute-missing`
     /// document attribute (see issue #779).
     Drop,
+
+    /// Discard the text the reference occurs in entirely. The substituted text
+    /// is still produced (minus the reference), but the caller is expected to
+    /// throw it away once
+    /// [`substitute_attributes_tracking`](PreprocessorState::substitute_attributes_tracking)
+    /// reports a missing reference. This mirrors Asciidoctor's
+    /// `attribute_missing: 'drop-line'` option.
+    DropLine,
 }
 
 /// A value that one side of an `ifeval` expression has been coerced to.
@@ -1258,6 +1343,21 @@ fn has_conditional_prefix(line: &str) -> bool {
 
 fn to_owned(maybe_file_name: Option<&str>) -> Option<String> {
     maybe_file_name.map(|n| n.to_string())
+}
+
+/// Parse the attribute list of an `include::` directive from the directive's
+/// [`INCLUDE_DIRECTIVE`] captures. Group 2 is the text between the brackets; a
+/// directive with no bracketed text yields an empty attribute list.
+fn parse_attrlist<'src>(caps: &Captures<'src>, parser: &Parser) -> Attrlist<'src> {
+    caps.get(2)
+        .map(|attrlist| {
+            let span = Span::new(attrlist.as_str());
+
+            Attrlist::parse(span, parser, AttrlistContext::Inline)
+                .item
+                .item
+        })
+        .unwrap_or_default()
 }
 
 /// Reconstruct a conditional preprocessor directive as written, for use in a
@@ -2311,6 +2411,141 @@ mod tests {
         );
     }
 
+    /// A parser that resolves `partial.adoc` (and nothing else) with
+    /// `attribute-missing` set to `mode`.
+    fn parser_with_attribute_missing(mode: &str) -> Parser {
+        Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_intrinsic_attribute("attribute-missing", mode, ModificationContext::Anywhere)
+            .with_include_file_handler(InlineFileHandler::from_pairs([(
+                "partial.adoc",
+                "Included content.",
+            )]))
+    }
+
+    #[test]
+    fn include_target_with_missing_attribute_is_skipped_by_default() {
+        // The default `attribute-missing=skip` mode keeps the reference literal
+        // and still consults the include file handler, which reports no such
+        // file.
+        let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
+
+        let (processed_source, _source_map, warnings) =
+            preprocess(source, &parser_with_attribute_missing("skip"));
+
+        assert_eq!(
+            processed_source,
+            "Before.\n\nUnresolved directive in main.adoc - include::{foodir}/partial.adoc[]\n\nAfter.\n"
+        );
+
+        assert_eq!(warnings.len(), 1);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeFileNotFound("{foodir}/partial.adoc".to_owned())
+        );
+    }
+
+    #[test]
+    fn include_target_with_missing_attribute_is_dropped_under_drop_line() {
+        // `attribute-missing=drop-line` drops the entire directive line: nothing
+        // is emitted in its place, no warning is recorded, and the include file
+        // handler is never consulted. The source map stays aligned for the lines
+        // that follow. See issue #776.
+        let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
+
+        let (processed_source, source_map, warnings) =
+            preprocess(source, &parser_with_attribute_missing("drop-line"));
+
+        assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
+        assert!(warnings.is_empty());
+
+        assert_eq!(
+            source_map.original_file_and_line(1),
+            Some(SourceLine(Some("main.adoc".to_owned()), 1)) // Before.
+        );
+
+        assert_eq!(
+            source_map.original_file_and_line(4),
+            Some(SourceLine(Some("main.adoc".to_owned()), 5)) // After.
+        );
+    }
+
+    #[test]
+    fn include_target_with_missing_attribute_is_dropped_at_secure_safe_mode() {
+        // The `attribute-missing` policy is applied before the safe-mode link
+        // conversion, so a dropped directive does not become a link either
+        // (matching Asciidoctor).
+        let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
+
+        let parser = Parser::default()
+            .with_primary_file_name("main.adoc")
+            .with_intrinsic_attribute(
+                "attribute-missing",
+                "drop-line",
+                ModificationContext::Anywhere,
+            );
+
+        let (processed_source, _source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn include_target_with_missing_attribute_warns_under_warn() {
+        // `attribute-missing=warn` leaves the "Unresolved directive" message in
+        // place of the directive and records a warning naming the whole
+        // directive (Asciidoctor maps `warn` to `drop-line` when substituting an
+        // include target, so the target is emptied and never resolved).
+        let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
+
+        let (processed_source, _source_map, warnings) =
+            preprocess(source, &parser_with_attribute_missing("warn"));
+
+        assert_eq!(
+            processed_source,
+            "Before.\n\nUnresolved directive in main.adoc - include::{foodir}/partial.adoc[]\n\nAfter.\n"
+        );
+
+        assert_eq!(warnings.len(), 1);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::IncludeDroppedDueToMissingAttribute(
+                "include::{foodir}/partial.adoc[]".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn optional_include_target_with_missing_attribute_is_dropped_silently_under_warn() {
+        // `opts=optional` suppresses the "Unresolved directive" text and the
+        // warning that `warn` would otherwise produce for a dropped directive.
+        let source = "Before.\n\ninclude::{foodir}/partial.adoc[opts=optional]\n\nAfter.";
+
+        let (processed_source, _source_map, warnings) =
+            preprocess(source, &parser_with_attribute_missing("warn"));
+
+        assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn include_target_with_missing_attribute_is_still_resolved_under_drop() {
+        // `attribute-missing=drop` removes only the reference, so a target that
+        // is otherwise complete still resolves and the include is expanded.
+        let source = "Before.\n\ninclude::{foodir}partial.adoc[]\n\nAfter.";
+
+        let (processed_source, _source_map, warnings) =
+            preprocess(source, &parser_with_attribute_missing("drop"));
+
+        assert_eq!(processed_source, "Before.\n\nIncluded content.\n\nAfter.\n");
+
+        assert!(warnings.is_empty());
+    }
+
     #[test]
     fn escaped_include_directive() {
         // An escaped include directive is not processed. The leading backslash is
@@ -2431,6 +2666,57 @@ mod tests {
             source_map.original_file_and_line(4),
             Some(SourceLine(Some("fixtures/include-file.adoc".to_owned()), 1))
         );
+    }
+
+    #[test]
+    fn dropped_include_attrlist_does_not_leak_counter_state() {
+        // Checking `opts=optional` on a directive that is about to be dropped
+        // means parsing its attribute list, which applies substitutions — so a
+        // stateful expression such as `{counter:n}` is evaluated there. It
+        // cannot be observed afterward: the preprocessor runs against a
+        // throwaway clone of the parser, so every attribute and counter it
+        // touches dies with that clone. The counter in the surviving paragraph
+        // is therefore the first value of the sequence.
+        let source = ":attribute-missing: warn\n\ninclude::{foodir}/partial.adoc[opts=optional,title={counter:n}]\n\nValue: {counter:n}.";
+
+        let mut parser = Parser::default();
+        let doc = parser.parse(source);
+
+        assert_eq!(parser.attribute_value("n"), InterpretedValue::Value("1"));
+
+        let rendered: Vec<_> = doc
+            .nested_blocks()
+            .filter_map(|b| b.rendered_content())
+            .collect();
+
+        assert_eq!(rendered, vec!["Value: 1."]);
+    }
+
+    #[test]
+    fn include_target_with_brace_that_is_not_an_attribute_reference() {
+        // A `{` that doesn't open a well-formed attribute reference gets past
+        // the fast path but matches nothing, so the target is used verbatim —
+        // and it is not treated as a missing reference under any
+        // `attribute-missing` policy.
+        let source = "include::{}partial.adoc[]";
+
+        let handler =
+            InlineFileHandler::from_pairs([("{}partial.adoc", "Brace in the file name.")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_intrinsic_attribute(
+                "attribute-missing",
+                "drop-line",
+                ModificationContext::Anywhere,
+            )
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, warnings) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Brace in the file name.\n");
+        assert!(warnings.is_empty());
     }
 
     #[test]
