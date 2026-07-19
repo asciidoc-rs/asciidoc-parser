@@ -13,13 +13,45 @@ use crate::{
     document::{InterpretedValue, TocConfig, TocMode},
     parser::{
         AttributeValue, InlineSubstitutionRenderer, ModificationContext, ReferenceResolver,
-        ReferenceWarning, ResolvedAttributes, built_in_attr, built_in_attrs_iter,
+        ReferenceWarning, ResolvedAttributes, SourceLine, built_in_attr, built_in_attrs_iter,
         preprocessor::preprocess_with_initial_file_name,
     },
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
+
+/// Resolve the absolute originating `(file, line)` for a no-output
+/// preprocessor-directive warning (a malformed/unterminated conditional or a
+/// tag-filter diagnostic) raised while expanding a table cell.
+///
+/// The warning's deferred `origin` carries a line relative to the cell's inner
+/// preprocessing pass — `1` is the cell's first content line. `cell_origin` is
+/// that first line's already-resolved location.
+///
+/// * A `None` deferred origin (e.g. an unresolved include target, located by
+///   span instead) stays `None`.
+/// * A deferred origin naming a *different* file than the cell came from
+///   originated in a file the cell *included*; its line is already absolute
+///   within that file, so it is kept unchanged.
+/// * A deferred origin naming the cell's own origin file has a pass-relative
+///   line, translated to the cell's absolute location by offsetting from
+///   `cell_origin` (line `N` is `N - 1` lines past the cell's first line). This
+///   preserves the real line of a directive on a later cell line rather than
+///   collapsing it onto the cell's opening line.
+fn absolute_cell_directive_origin(
+    deferred: Option<SourceLine>,
+    cell_origin: Option<&SourceLine>,
+) -> Option<SourceLine> {
+    let deferred = deferred?;
+    match cell_origin {
+        Some(cell_origin) if deferred.0.as_deref() == cell_origin.0.as_deref() => Some(SourceLine(
+            cell_origin.0.clone(),
+            cell_origin.1 + deferred.1.saturating_sub(1),
+        )),
+        _ => Some(deferred),
+    }
+}
 
 /// Attributes that an AsciiDoc table cell may modify even when they are set in
 /// the parent document.
@@ -1742,17 +1774,12 @@ fn process_content<'src>(
                 // directive's true (file, line) through the document source map.
                 for pw in preprocessor_warnings {
                     // A no-output directive (a malformed/unterminated conditional
-                    // or a tag-filter diagnostic) carries a pre-resolved
-                    // `origin`. When it names a *different* file than the cell
-                    // came from, it originated in a file the cell's first line
-                    // *included*, and that origin is a true (file, line) worth
-                    // keeping. When it names the same file, its line is relative
-                    // to this inner preprocessing pass (not the document), so
-                    // drop it and let `directive_line` resolve the location
-                    // through the document source map instead.
-                    let origin = pw
-                        .origin
-                        .filter(|o| o.0.as_deref() != cell_origin_file.as_deref());
+                    // or a tag-filter diagnostic) carries a pre-resolved `origin`;
+                    // resolve it to an absolute location (see
+                    // `absolute_cell_directive_origin`). Warnings without an
+                    // `origin` (e.g. an unresolved include target) keep
+                    // `directive_line` as their only anchor.
+                    let origin = absolute_cell_directive_origin(pw.origin, cell_origin.as_ref());
                     warnings.push(Warning {
                         source: directive_line,
                         warning: pw.warning,
@@ -1766,14 +1793,10 @@ fn process_content<'src>(
                 // `record_owned_cell_warning` resolves it to the originating
                 // (file, line), and a document-level cell up the stack surfaces
                 // it with that pre-resolved origin (see below). A no-output
-                // directive from an *included* file (a different origin file)
-                // already carries its true origin, so pass it through; one from
-                // the cell's own content has a pass-relative line and is left for
-                // the source map to resolve.
+                // directive already carries an `origin`, so resolve it to an
+                // absolute location and pass it through as the override.
                 for pw in preprocessor_warnings {
-                    let origin = pw
-                        .origin
-                        .filter(|o| o.0.as_deref() != cell_origin_file.as_deref());
+                    let origin = absolute_cell_directive_origin(pw.origin, cell_origin.as_ref());
                     parser.record_owned_cell_warning(directive_line.line(), pw.warning, origin);
                 }
             }
@@ -3085,10 +3108,61 @@ fn line_has_unclosed_quote(line: &str) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use super::{AsciiDocCell, OwnedCell, OwnedCellInner, ResolvedAttributes, TocConfig};
+    use super::{
+        AsciiDocCell, OwnedCell, OwnedCellInner, ResolvedAttributes, TocConfig,
+        absolute_cell_directive_origin,
+    };
     use crate::parser::{
         HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+        SourceLine,
     };
+
+    #[test]
+    fn absolute_cell_directive_origin_resolves_locations() {
+        let cell_origin = SourceLine(Some("outer.adoc".to_owned()), 5);
+
+        // No deferred origin (e.g. an unresolved include target): stays None.
+        assert_eq!(
+            absolute_cell_directive_origin(None, Some(&cell_origin)),
+            None
+        );
+
+        // A different file (included content): kept as-is — its line is already
+        // absolute within that file.
+        assert_eq!(
+            absolute_cell_directive_origin(
+                Some(SourceLine(Some("inc.adoc".to_owned()), 3)),
+                Some(&cell_origin)
+            ),
+            Some(SourceLine(Some("inc.adoc".to_owned()), 3))
+        );
+
+        // The cell's own file, first line (pass-relative line 1): resolves to the
+        // cell's own location.
+        assert_eq!(
+            absolute_cell_directive_origin(
+                Some(SourceLine(Some("outer.adoc".to_owned()), 1)),
+                Some(&cell_origin)
+            ),
+            Some(SourceLine(Some("outer.adoc".to_owned()), 5))
+        );
+
+        // The cell's own file, a later line (pass-relative line 3): translated to
+        // two lines past the cell's first line — not collapsed onto line 5.
+        assert_eq!(
+            absolute_cell_directive_origin(
+                Some(SourceLine(Some("outer.adoc".to_owned()), 3)),
+                Some(&cell_origin)
+            ),
+            Some(SourceLine(Some("outer.adoc".to_owned()), 7))
+        );
+
+        // With no resolved cell origin, the deferred origin is kept unchanged.
+        assert_eq!(
+            absolute_cell_directive_origin(Some(SourceLine(None, 2)), None),
+            Some(SourceLine(None, 2))
+        );
+    }
 
     /// A resolver that resolves nothing; the owned-cell resolution path under
     /// test carries no references, so it is never actually consulted.
