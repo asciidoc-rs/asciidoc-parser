@@ -11,11 +11,18 @@ on:
   push:
     branches: main
 
+# Every job below is gated on the same condition: run automatically for
+# pushes, for pull requests whose head branch lives in this repository
+# (pushing a branch here already requires write access, so those are
+# trusted – this covers Claude Code and other agent-authored PRs), and for
+# maintainer- or dependabot-authored PRs. Pull requests from forks await a
+# human adding the "safe to test" label.
 jobs:
   tests:
     name: Unit tests
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -57,6 +64,7 @@ jobs:
       - name: Upload code coverage results
         if: |
           github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository ||
           github.event.pull_request.author_association == 'OWNER' ||
           github.event.pull_request.author_association == 'COLLABORATOR' ||
           github.event.pull_request.author_association == 'MEMBER' ||
@@ -72,6 +80,7 @@ jobs:
     name: Unit tests with minimum versions of direct dependencies
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -102,6 +111,7 @@ jobs:
     name: Preflight crate publish
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -136,6 +146,7 @@ jobs:
     name: Clippy
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -163,6 +174,7 @@ jobs:
     name: Enforce Rust code format
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -187,6 +199,7 @@ jobs:
     name: Enforce TOML format
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -211,6 +224,7 @@ jobs:
     name: Preflight docs.rs build
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -243,6 +257,7 @@ jobs:
     name: Verify internal crate documentation
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -267,6 +282,7 @@ jobs:
     name: License / vulnerability audit
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -298,6 +314,7 @@ jobs:
     name: Check for unused dependencies
     if: |
       github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       github.event.pull_request.author_association == 'OWNER' ||
       github.event.pull_request.author_association == 'COLLABORATOR' ||
       github.event.pull_request.author_association == 'MEMBER' ||
@@ -323,6 +340,14 @@ jobs:
 
   benchmarks:
     name: Test performance on benchmarks
+    if: |
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      github.event.pull_request.author_association == 'OWNER' ||
+      github.event.pull_request.author_association == 'COLLABORATOR' ||
+      github.event.pull_request.author_association == 'MEMBER' ||
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     permissions:
       contents: read
@@ -351,6 +376,15 @@ jobs:
 
   spec-coverage:
     name: Generate spec coverage
+    if: |
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      github.event.pull_request.author_association == 'OWNER' ||
+      github.event.pull_request.author_association == 'COLLABORATOR' ||
+      github.event.pull_request.author_association == 'MEMBER' ||
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      contains(github.event.pull_request.labels.*.name, 'safe to test')
+
     runs-on: ubuntu-latest
 
     steps:
@@ -370,7 +404,16 @@ jobs:
       - name: Generate spec coverage
         run: cd sdd && cargo run > spec-coverage.json
 
+      # Tokens aren't available for PRs originating from forks,
+      # so we don't attempt to upload spec coverage in that case.
       - name: Upload code coverage results
+        if: |
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository ||
+          github.event.pull_request.author_association == 'OWNER' ||
+          github.event.pull_request.author_association == 'COLLABORATOR' ||
+          github.event.pull_request.author_association == 'MEMBER' ||
+          github.event.pull_request.user.login == 'dependabot[bot]'
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
