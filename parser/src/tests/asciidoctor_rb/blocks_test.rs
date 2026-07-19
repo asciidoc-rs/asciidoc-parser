@@ -4742,7 +4742,8 @@ mod metadata {
     // heading is not carried over to the first block inside that section by
     // this crate, so the paragraph has no title. Kept `#[ignore]`d with the
     // Ruby-intended assertions.
-    // TODO: carry a block title above a section onto the section's first block.
+    // TODO(#782): carry a block title above a section onto the section's first
+    // block.
     #[ignore]
     #[test]
     fn block_title_above_section_gets_carried_over_to_first_block_in_section() {
@@ -4778,7 +4779,7 @@ mod metadata {
     // `block_title_above_section_gets_carried_over_to_first_block_in_section`).
     // The crate does emit the `Level0SectionHeadingNotSupported` warning at
     // line 2 (matching the Ruby error), but the surrounding structure differs.
-    // TODO: demote a document title to a section title when a block title
+    // TODO(#782): demote a document title to a section title when a block title
     // precedes it.
     #[ignore]
     #[test]
@@ -4815,8 +4816,8 @@ mod metadata {
 
     // NOTE: divergence from Asciidoctor (block-title carryover; see
     // `block_title_above_section_gets_carried_over_to_first_block_in_section`).
-    // TODO: carry a block title above a demoted document title onto the first
-    // section's first block.
+    // TODO(#782): carry a block title above a demoted document title onto the
+    // first section's first block.
     #[ignore]
     #[test]
     fn block_title_above_document_title_gets_carried_over_to_first_block_in_first_section_if_no_preamble()
