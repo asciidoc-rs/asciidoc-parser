@@ -321,6 +321,20 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ### Security attributes
     attrs.insert("max-include-depth".to_owned(), set(ApiOnly, "64"));
 
+    // ### Parser intrinsic attributes
+    //
+    // The version of this crate, so documents can reference the parser version
+    // (e.g. in `ifeval` expressions). This is the parser-specific counterpart
+    // of Ruby Asciidoctor's `asciidoctor-version` intrinsic; that name (and the
+    // companion `asciidoctor` flag) is intentionally *not* defined, so
+    // documents can distinguish the two processors. Like the safe-mode
+    // intrinsics below, it describes the processor itself, so it is locked
+    // against document assignment (`ApiOnly`).
+    attrs.insert(
+        "asciidoc-parser-version".to_owned(),
+        set(ApiOnly, env!("CARGO_PKG_VERSION")),
+    );
+
     // ### Safe-mode intrinsic attributes
     //
     // These describe the default safe mode (`SafeMode::Secure`).
