@@ -7448,7 +7448,7 @@ mod abstract_and_part_intro {
     // errors are not emitted; those tests are kept `#[ignore]`d with the
     // Ruby-intended assertions. The DocBook variants are reproduced as
     // `non_normative`.
-    // TODO: implement the partintro block style.
+    // TODO: implement the partintro block style (#794).
 
     #[test]
     fn should_make_abstract_on_open_block_without_title_a_quote_block_for_article() {
