@@ -457,7 +457,7 @@ impl<'src> Document<'src> {
     /// [`Parser::parse_deferred`], which does not auto-resolve.
     ///
     /// Each unresolved target is also recorded on the document as a
-    /// `WarningType::PossibleInvalidReference` warning, so a host that reads
+    /// [`WarningType::PossibleInvalidReference`] warning, so a host that reads
     /// [`warnings()`](Self::warnings) sees it alongside every other parse-time
     /// diagnostic. Because each sweep is independent, those warnings replace
     /// (rather than accumulate on top of) any left by an earlier sweep.
