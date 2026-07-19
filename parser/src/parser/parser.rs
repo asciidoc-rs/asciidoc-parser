@@ -1792,8 +1792,13 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
     let attr_name = raw_attr_name.as_ref().to_lowercase();
 
     // Some attribute names have aliases. Remap to the primary name.
+    //
+    // `numbered` is a legacy alias for `sectnums`, so setting `numbered` sets
+    // `sectnums` (and `numbered!` unsets it). Mirrors Asciidoctor's
+    // `Parser.store_attribute`, which renames the attribute before storing it.
     match attr_name.as_str() {
         "hardbreaks" => "hardbreaks-option".to_string(),
+        "numbered" => "sectnums".to_string(),
         _ => attr_name,
     }
 }

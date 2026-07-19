@@ -3102,6 +3102,75 @@ mod tests {
         }
 
         #[test]
+        fn numbered_alias_enables_numbering() {
+            // `numbered` is a legacy alias for `sectnums`: setting it numbers
+            // sections just as `sectnums` would, and `is_attribute_set` reports
+            // the primary name, mirroring Asciidoctor.
+            let input = ":numbered:\n\n== First Section\n\n== Second Section";
+            let mut parser = Parser::default();
+            let document = parser.parse(input);
+
+            assert!(parser.is_attribute_set("sectnums"));
+
+            let mut sections = document.nested_blocks().filter_map(|block| {
+                if let Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            });
+
+            assert_eq!(
+                sections
+                    .next()
+                    .unwrap()
+                    .section_number()
+                    .unwrap()
+                    .to_string(),
+                "1"
+            );
+            assert_eq!(
+                sections
+                    .next()
+                    .unwrap()
+                    .section_number()
+                    .unwrap()
+                    .to_string(),
+                "2"
+            );
+        }
+
+        #[test]
+        fn numbered_alias_can_be_toggled_off_within_document() {
+            // `numbered!` unsets the alias mid-document; sections after the
+            // toggle are not numbered.
+            let input =
+                ":numbered:\n\n== Numbered\n\n:numbered!:\n\n== Unnumbered\n\n== Also Unnumbered";
+            let mut parser = Parser::default();
+            let document = parser.parse(input);
+
+            let mut sections = document.nested_blocks().filter_map(|block| {
+                if let Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            });
+
+            assert_eq!(
+                sections
+                    .next()
+                    .unwrap()
+                    .section_number()
+                    .unwrap()
+                    .to_string(),
+                "1"
+            );
+            assert!(sections.next().unwrap().section_number().is_none());
+            assert!(sections.next().unwrap().section_number().is_none());
+        }
+
+        #[test]
         fn deep_nesting() {
             let input = ":sectnums:\n:sectnumlevels: 5\n\n== Level 1\n\n=== Level 2\n\n==== Level 3\n\n===== Level 4\n\n====== Level 5";
             let document = Parser::default().parse(input);
