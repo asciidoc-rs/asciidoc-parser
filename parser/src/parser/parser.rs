@@ -14,7 +14,10 @@ use crate::{
         HtmlSubstitutionRenderer, IncludeFileHandler, InlineSubstitutionRenderer,
         ModificationContext, PathResolver, ReferenceTime, ResolvedAttributes, SafeMode, SourceLine,
         SourceMap, SvgFileHandler,
-        built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
+        built_in_attrs::{
+            built_in_attr, built_in_default_values, derived_backend_value,
+            is_derived_backend_value, synthesized_attr,
+        },
         is_datetime_attribute,
         preprocessor::preprocess,
     },
@@ -606,6 +609,13 @@ impl Parser {
             return self.attribute_value("outfilesuffix");
         }
 
+        // `basebackend` / `filetype` are derived on the fly from the current
+        // `backend` (see [`derived_backend_value`]) rather than stored; they are
+        // read-only intrinsics, so no per-parser entry ever shadows this.
+        if let Some(value) = derived_backend_value(name, &self.attribute_values) {
+            return value;
+        }
+
         match self.effective_attribute(name) {
             Some(av) => {
                 if let InterpretedValue::Set = av.value
@@ -678,6 +688,9 @@ impl Parser {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
+        if is_derived_backend_value(name) {
+            return true;
+        }
         self.effective_attribute(name).is_some() || self.resolve_datetime_attribute(name).is_some()
     }
 
@@ -696,6 +709,12 @@ impl Parser {
 
         if self.tracks_outfilesuffix(name) {
             return self.is_attribute_set("outfilesuffix");
+        }
+
+        // A derived `basebackend` / `filetype` always holds a concrete (set)
+        // value.
+        if is_derived_backend_value(name) {
+            return true;
         }
 
         self.effective_attribute(name)
@@ -1737,10 +1756,10 @@ impl Parser {
     ) {
         let attr_name = remap_attr_name(attr.name().data());
 
-        // The `backend-html5-doctype-*` namespace is a read-only synthesized
+        // The derived backend-family namespace is a read-only synthesized
         // intrinsic; a document must not write any of it (see
-        // [`is_reserved_doctype_derived_attr`]).
-        if is_reserved_doctype_derived_attr(&attr_name) {
+        // [`is_reserved_derived_attr`]).
+        if is_reserved_derived_attr(&attr_name) {
             return;
         }
 
@@ -1887,10 +1906,10 @@ impl Parser {
     ) {
         let attr_name = remap_attr_name(attr.name().data());
 
-        // The `backend-html5-doctype-*` namespace is a read-only synthesized
+        // The derived backend-family namespace is a read-only synthesized
         // intrinsic; a document must not write any of it (see
-        // [`is_reserved_doctype_derived_attr`]).
-        if is_reserved_doctype_derived_attr(&attr_name) {
+        // [`is_reserved_derived_attr`]).
+        if is_reserved_derived_attr(&attr_name) {
             return;
         }
 
@@ -2133,9 +2152,11 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
     }
 }
 
-/// Returns `true` if `name` belongs to the reserved `backend-html5-doctype-*`
-/// namespace, which is a read-only synthesized intrinsic keyed on the active
-/// `doctype` (see [`synthesized_attr`]).
+/// Returns `true` if `name` belongs to the reserved derived backend-family
+/// namespace — the `basebackend` / `filetype` values and the
+/// `backend-*` / `basebackend-*` / `filetype-*` / `doctype-*` flags — each a
+/// read-only synthesized intrinsic keyed on the active `backend` / `doctype`
+/// (see [`synthesized_attr`] and [`derived_backend_value`]).
 ///
 /// A document header or body assignment to any such name is rejected — not only
 /// the flag that is active when the assignment is parsed. Otherwise a name that
@@ -2144,8 +2165,16 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
 /// permission check, and be stored as a per-parser override that then shadows
 /// the intrinsic once the doctype switches to that value (e.g. in an AsciiDoc
 /// table cell that resets, then changes, its doctype).
-fn is_reserved_doctype_derived_attr(name: &str) -> bool {
-    name.starts_with("backend-html5-doctype-")
+///
+/// The settable roots `backend` and `doctype` (bare, with no suffix) are
+/// deliberately *not* reserved: they are the inputs the derived family is
+/// computed from.
+fn is_reserved_derived_attr(name: &str) -> bool {
+    is_derived_backend_value(name)
+        || name.starts_with("backend-")
+        || name.starts_with("basebackend-")
+        || name.starts_with("filetype-")
+        || name.starts_with("doctype-")
 }
 
 #[cfg(test)]
@@ -2835,7 +2864,7 @@ mod tests {
         }
     }
 
-    mod derived_doctype_attr {
+    mod derived_backend_family_attrs {
         use crate::{
             document::InterpretedValue,
             parser::{AllowableValue, AttributeValue, ModificationContext, Parser},
@@ -2910,6 +2939,91 @@ mod tests {
             assert_eq!(
                 parser.attribute_value("backend-html5-doctype-book"),
                 InterpretedValue::Unset
+            );
+        }
+
+        #[test]
+        fn default_backend_family_is_materialized() {
+            let parser = Parser::default();
+
+            // The default backend is `html5`; its whole derived family resolves
+            // to queryable document attributes (empty-valued flags plus the
+            // `backend` / `basebackend` / `filetype` values).
+            for (name, value) in [
+                ("backend", "html5"),
+                ("backend-html5", ""),
+                ("basebackend", "html"),
+                ("basebackend-html", ""),
+                ("filetype", "html"),
+                ("filetype-html", ""),
+                ("doctype-article", ""),
+                ("backend-html5-doctype-article", ""),
+                ("basebackend-html-doctype-article", ""),
+            ] {
+                assert!(parser.has_attribute(name), "missing {name:?}");
+                assert!(parser.is_attribute_set(name), "not set: {name:?}");
+                assert_eq!(
+                    parser.attribute_value(name),
+                    InterpretedValue::Value(value.to_string()),
+                    "unexpected value for {name:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn family_tracks_a_non_html_backend() {
+            // Setting a different backend re-derives the whole family from it
+            // (basebackend strips the trailing digits, filetype maps through the
+            // Asciidoctor extension table), and the inactive `html5` flags fall
+            // away.
+            let doc = Parser::default().parse(":backend: docbook5\n\nbody");
+
+            assert_eq!(
+                doc.attribute_value("backend"),
+                InterpretedValue::Value("docbook5".to_string())
+            );
+            assert_eq!(
+                doc.attribute_value("basebackend"),
+                InterpretedValue::Value("docbook".to_string())
+            );
+            assert_eq!(
+                doc.attribute_value("filetype"),
+                InterpretedValue::Value("xml".to_string())
+            );
+            assert!(doc.has_attribute("backend-docbook5"));
+            assert!(doc.has_attribute("basebackend-docbook"));
+            assert!(doc.has_attribute("backend-docbook5-doctype-article"));
+
+            // The html5 flags are no longer active.
+            assert!(!doc.has_attribute("backend-html5"));
+            assert!(!doc.has_attribute("basebackend-html"));
+            assert!(!doc.has_attribute("backend-html5-doctype-article"));
+        }
+
+        #[test]
+        fn derived_value_and_flag_attributes_are_read_only() {
+            // `basebackend` / `filetype` and the derived flag namespace are
+            // read-only intrinsics; a document assignment is silently ignored and
+            // the synthesized value stands.
+            let doc = Parser::default().parse(
+                ":basebackend: custom\n:filetype: custom\n:backend-html5: custom\n:doctype-article: custom\n\nbody",
+            );
+
+            assert_eq!(
+                doc.attribute_value("basebackend"),
+                InterpretedValue::Value("html".to_string())
+            );
+            assert_eq!(
+                doc.attribute_value("filetype"),
+                InterpretedValue::Value("html".to_string())
+            );
+            assert_eq!(
+                doc.attribute_value("backend-html5"),
+                InterpretedValue::Value(String::new())
+            );
+            assert_eq!(
+                doc.attribute_value("doctype-article"),
+                InterpretedValue::Value(String::new())
             );
         }
     }

@@ -33,23 +33,26 @@ pub(crate) const DEFAULT_ICONSDIR: &str = "./images/icons";
 static BUILT_IN_ATTRS: LazyLock<HashMap<String, AttributeValue>> =
     LazyLock::new(build_built_in_attrs);
 
-/// The synthesized `backend-html5-doctype-{doctype}` attribute, which is
-/// defined (with an empty value) only for the document's active doctype. It is
-/// resolved on the fly from the current `doctype` rather than materialized, so
-/// it lives here as a single shared value that lookups can hand out by
-/// reference. See [`synthesized_attr`].
+/// The shared value handed out for every synthesized *backend-family flag* —
+/// `backend-{backend}`, `basebackend-{basebackend}`, `filetype-{filetype}`,
+/// `doctype-{doctype}`, `backend-{backend}-doctype-{doctype}`, and
+/// `basebackend-{basebackend}-doctype-{doctype}`. Each is defined (with an empty
+/// value) only while its `{...}` component matches the document's active
+/// backend / basebackend / filetype / doctype, so they are resolved on the fly
+/// rather than materialized, and every active flag can hand out this one shared
+/// value by reference. See [`synthesized_attr`].
 ///
-/// It is a read-only intrinsic: it tracks `doctype` automatically, so a
-/// document header or body assignment to it (e.g.
+/// They are read-only intrinsics: a flag tracks the `backend` / `doctype` state
+/// automatically, so a document header or body assignment to one (e.g.
 /// `:backend-html5-doctype-article: x`) is silently ignored ([`ApiOnly`] +
 /// [`silent_when_locked`]) rather than being allowed to shadow the intrinsic
 /// empty value. This self-protection replaces the previous scheme
 /// (materialize-and-lock inside an AsciiDoc table cell), which could not follow
-/// the cell's dynamically-changing doctype.
+/// a cell's dynamically-changing doctype.
 ///
 /// [`ApiOnly`]: ModificationContext::ApiOnly
 /// [`silent_when_locked`]: AttributeValue::silent_when_locked
-static DERIVED_DOCTYPE_ATTR: LazyLock<AttributeValue> = LazyLock::new(|| AttributeValue {
+static DERIVED_FAMILY_FLAG: LazyLock<AttributeValue> = LazyLock::new(|| AttributeValue {
     allowable_value: AllowableValue::Any,
     modification_context: ModificationContext::ApiOnly,
     silent_when_locked: true,
@@ -86,41 +89,117 @@ pub(crate) fn built_in_attrs_iter()
     BUILT_IN_ATTRS.iter()
 }
 
+/// Strips the trailing version digits from a backend name to yield its
+/// *basebackend* (e.g. `html5` &rarr; `html`, `docbook45` &rarr; `docbook`),
+/// matching Asciidoctor's `TrailingDigitsRx` derivation.
+pub(crate) fn basebackend_of(backend: &str) -> &str {
+    backend.trim_end_matches(|c: char| c.is_ascii_digit())
+}
+
+/// Derives the output *filetype* from a backend name, matching Asciidoctor's
+/// `DEFAULT_EXTENSIONS` table (keyed on the basebackend): a recognized
+/// basebackend maps to its file type (`docbook` &rarr; `xml`, `manpage` &rarr;
+/// `man`, `asciidoc` &rarr; `adoc`), and any other basebackend is its own
+/// filetype (`html` &rarr; `html`, `pdf` &rarr; `pdf`, `epub` &rarr; `epub`).
+pub(crate) fn filetype_of(backend: &str) -> String {
+    match basebackend_of(backend) {
+        "docbook" => "xml".to_owned(),
+        "manpage" => "man".to_owned(),
+        "asciidoc" => "adoc".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+/// Reports whether `name` is a derived backend-family *value* attribute
+/// (`basebackend` or `filetype`), resolved on the fly from the current
+/// `backend` rather than stored in either attribute table (see
+/// [`derived_backend_value`]).
+pub(crate) fn is_derived_backend_value(name: &str) -> bool {
+    matches!(name, "basebackend" | "filetype")
+}
+
+/// Reads the effective plain value of a *stored* attribute `key` (a per-parser
+/// entry layered over the shared built-in default), or `None` if it is absent,
+/// unset, or value-less.
+fn stored_value(key: &str, overrides: &HashMap<String, AttributeValue>) -> Option<String> {
+    overrides
+        .get(key)
+        .or_else(|| BUILT_IN_ATTRS.get(key))
+        .and_then(|av| match &av.value {
+            InterpretedValue::Value(v) => Some(v.clone()),
+            _ => None,
+        })
+}
+
+/// Resolves a derived backend-family *value* attribute (`basebackend` or
+/// `filetype`) from the current `backend`, mirroring Asciidoctor's
+/// backend-trait derivation. Returns `None` for any other name.
+///
+/// `overrides` is the caller's per-parser attribute map; layered over the
+/// shared built-in defaults it determines the active `backend`.
+pub(crate) fn derived_backend_value(
+    name: &str,
+    overrides: &HashMap<String, AttributeValue>,
+) -> Option<InterpretedValue> {
+    let backend = stored_value("backend", overrides).unwrap_or_default();
+    match name {
+        "basebackend" => Some(InterpretedValue::Value(basebackend_of(&backend).to_owned())),
+        "filetype" => Some(InterpretedValue::Value(filetype_of(&backend))),
+        _ => None,
+    }
+}
+
 /// Resolves a *synthesized* attribute — one computed from other state rather
 /// than stored in either attribute table — for the active document state:
 ///
-/// * `backend-html5-doctype-{doctype}` is defined (empty) only for the active
-///   `doctype`.
+/// * The backend-family flags `backend-{backend}`, `basebackend-{basebackend}`,
+///   `filetype-{filetype}`, `doctype-{doctype}`,
+///   `backend-{backend}-doctype-{doctype}`, and
+///   `basebackend-{basebackend}-doctype-{doctype}` are each defined (empty) only
+///   while their `{...}` component matches the active `backend` / `doctype`.
 /// * `safe-mode-{name}` is defined (empty) only for the active safe mode (as
 ///   reported by `safe-mode-name`).
 ///
 /// `overrides` is the caller's per-parser attribute map; its entries (layered
-/// over the shared built-in defaults) determine the active doctype / safe mode.
-/// Returns `None` for any name that is not a currently-active synthesized
-/// attribute (so the inactive doctype/safe-mode flags stay absent, matching
+/// over the shared built-in defaults) determine the active backend / doctype /
+/// safe mode. Returns `None` for any name that is not a currently-active
+/// synthesized attribute (so the inactive flags stay absent, matching
 /// Asciidoctor).
 pub(crate) fn synthesized_attr(
     name: &str,
     overrides: &HashMap<String, AttributeValue>,
 ) -> Option<&'static AttributeValue> {
-    // Reports whether the *stored* attribute `key` (never itself a synthesized
-    // one) currently resolves to the plain value `expected`, letting a per-parser
-    // entry shadow the built-in default.
-    let has_value = |key: &str, expected: &str| -> bool {
-        overrides
-            .get(key)
-            .or_else(|| BUILT_IN_ATTRS.get(key))
-            .is_some_and(|av| matches!(&av.value, InterpretedValue::Value(v) if v == expected))
-    };
+    // The derived backend-family flags are all empty-valued and defined only for
+    // the *active* backend / basebackend / filetype / doctype. Rather than parse
+    // the queried name, compute the six flag names that are currently active and
+    // compare — unambiguous even where the components overlap.
+    if name.starts_with("backend-")
+        || name.starts_with("basebackend-")
+        || name.starts_with("filetype-")
+        || name.starts_with("doctype-")
+    {
+        let backend = stored_value("backend", overrides).unwrap_or_default();
+        let doctype = stored_value("doctype", overrides).unwrap_or_default();
+        let basebackend = basebackend_of(&backend);
+        let filetype = filetype_of(&backend);
 
-    if let Some(suffix) = name.strip_prefix("backend-html5-doctype-") {
-        return has_value("doctype", suffix).then(|| &*DERIVED_DOCTYPE_ATTR);
+        let is_active = name == format!("backend-{backend}")
+            || name == format!("basebackend-{basebackend}")
+            || name == format!("filetype-{filetype}")
+            || name == format!("doctype-{doctype}")
+            || name == format!("backend-{backend}-doctype-{doctype}")
+            || name == format!("basebackend-{basebackend}-doctype-{doctype}");
+
+        if is_active {
+            return Some(&*DERIVED_FAMILY_FLAG);
+        }
     }
 
     if let Some(suffix) = name.strip_prefix("safe-mode-")
         && matches!(suffix, "unsafe" | "safe" | "server" | "secure")
     {
-        return has_value("safe-mode-name", suffix).then(|| &*SAFE_MODE_ACTIVE_FLAG);
+        let active = stored_value("safe-mode-name", overrides).as_deref() == Some(suffix);
+        return active.then(|| &*SAFE_MODE_ACTIVE_FLAG);
     }
 
     None
@@ -275,10 +354,21 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
 
     // ### General content and formatting attributes
     //
+    // The active backend defaults to `html5` (the only backend this crate
+    // renders). It is a normal, unlocked attribute — settable in the header, the
+    // body, or via the API, matching Asciidoctor, where `{backend}` reflects the
+    // latest assignment — so its default context is `Anywhere`; an API caller
+    // that wants to pin it uses `ApiOnly`. Its derived family —
+    // `backend-{backend}`, `basebackend`, `basebackend-{basebackend}`,
+    // `filetype`, `filetype-{filetype}`, and the `*-doctype-{doctype}` flags —
+    // is synthesized on the fly from this value (see [`synthesized_attr`] and
+    // [`derived_backend_value`]), so it is never materialized or kept in sync
+    // when `backend` changes.
+    attrs.insert("backend".to_owned(), any(Anywhere, Value("html5".into())));
+
     // The document type defaults to `article` and may be set in the header or
-    // via the API. The derived `backend-html5-doctype-{doctype}` attribute
-    // (defined below) is kept in sync by `Parser::refresh_doctype_derived_attr`
-    // whenever `doctype` changes.
+    // via the API. The derived `*-doctype-{doctype}` flags (see
+    // [`synthesized_attr`]) track this value automatically.
     attrs.insert(
         "doctype".to_owned(),
         any(ApiOrHeader, Value("article".into())),
@@ -370,11 +460,13 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         any(ApiOnly, Value("secure".into())),
     );
 
-    // NOTE: The derived `backend-html5-doctype-{doctype}` attribute (see
-    // `doctype` above) is *not* registered here. It is synthesized on the fly
-    // for the active doctype by `Parser::attribute_value` (via
-    // [`derived_doctype_attr`]), so it never needs to be materialized or kept in
-    // sync when `doctype` changes.
+    // NOTE: The derived backend-family flags (`backend-{backend}`,
+    // `basebackend-{basebackend}`, `filetype-{filetype}`, `doctype-{doctype}`,
+    // and the `*-doctype-*` combinations) are *not* registered here, nor are the
+    // derived `basebackend` / `filetype` values. They are synthesized on the fly
+    // for the active `backend` / `doctype` by `Parser::attribute_value` (via
+    // [`synthesized_attr`] and [`derived_backend_value`]), so they never need to
+    // be materialized or kept in sync when `backend` or `doctype` changes.
 
     attrs
 }
