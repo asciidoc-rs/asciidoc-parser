@@ -3684,19 +3684,10 @@ fn should_not_fail_to_resolve_broken_xref_in_section_title() {
     assert_eq!(sections[1].section_title(), r##"<a href="#s1">[DNE]</a>"##);
 }
 
-// Partially resolved (#770): a cross-reference in a section title now resolves
-// to the target section's title (with nested anchors dropped), so the first
-// heading matches Asciidoctor exactly — `<h2 id="a">A <a href="#b">B [a]</a>`.
-// The second heading still diverges: Asciidoctor renders `<a href="#a">[a]</a>`,
-// while this crate renders `<a href="#a">A [b]</a>`. Asciidoctor converts and
-// caches each section title once, in document order, so `b`'s title is frozen
-// mid-cycle (while `a` is still being resolved) and its back-reference to `a`
-// falls back to `[a]`. This crate resolves every title independently, so `b`'s
-// reference to `a` sees `a`'s fully-resolved reference text. Matching the cached
-// value byte-for-byte would require a document-order, memoized title-resolution
-// pass; left as follow-up.
-non_normative!(
-    r###"
+#[test]
+fn should_break_circular_xref_reference_in_section_title() {
+    verifies!(
+        r###"
   test 'should break circular xref reference in section title' do
     input = <<~'EOS'
     [#a]
@@ -3712,7 +3703,25 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse("[#a]\n== A <<b>>\n\n[#b]\n== B <<a>>");
+    let sections = all_sections(&doc);
+
+    // `a`'s title references `b`; `b`'s reference text is its own title
+    // (`B <<a>>`), which references `a` back. Titles are resolved once, in
+    // document order: while `a` is being resolved, `b`'s reference to `a` sees
+    // `a` mid-resolution and breaks the cycle with the bracketed `[a]`
+    // fallback. So `b`'s reference text is `B [a]` (nested anchor dropped) and
+    // `a`'s title becomes `A <a href="#b">B [a]</a>`.
+    assert_eq!(sections[0].id().unwrap(), "a");
+    assert_eq!(sections[0].section_title(), r##"A <a href="#b">B [a]</a>"##);
+
+    // `b`'s title is the value frozen mid-cycle: its own reference to `a`
+    // resolved to the `[a]` fallback.
+    assert_eq!(sections[1].id().unwrap(), "b");
+    assert_eq!(sections[1].section_title(), r##"B <a href="#a">[a]</a>"##);
+}
 
 #[test]
 fn should_drop_nested_anchor_in_xreftext() {

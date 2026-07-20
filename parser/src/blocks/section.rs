@@ -8,7 +8,7 @@ use crate::{
     blocks::{
         Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
-    content::{Content, SubstitutionGroup, strip_footnote_marker_spans},
+    content::{Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans},
     document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
     parser::XrefSignifier,
@@ -353,6 +353,56 @@ impl<'src> SectionBlock<'src> {
     /// Return the section number assigned to this section, if any.
     pub fn section_number(&'src self) -> Option<&'src SectionNumber> {
         self.section_number.as_ref()
+    }
+
+    /// Returns the section title's deferred cross-reference template and
+    /// segments, if the title contains any cross-references.
+    ///
+    /// Used by the document-order title resolution pass (see
+    /// [`Document::resolve_references`]).
+    ///
+    /// [`Document::resolve_references`]: crate::Document::resolve_references
+    pub(crate) fn section_title_deferred_parts(&self) -> Option<(&str, &[XrefSegment])> {
+        self.section_title.deferred_parts()
+    }
+
+    /// Overwrites the rendered section title, used by the document-order title
+    /// resolution pass to install a title whose cross-references were resolved
+    /// with cross-title coordination.
+    pub(crate) fn set_section_title_rendered(&mut self, rendered: String) {
+        self.section_title.set_rendered(rendered);
+    }
+
+    /// Returns the ID under which this section is registered in the catalog, if
+    /// any, as an owned string.
+    ///
+    /// Mirrors the effective-ID precedence of [`IsBlock::id`] (explicit anchor,
+    /// then attribute-list ID, then the auto-generated section ID) but without
+    /// the `&'src self` borrow, so the document-order title resolution pass can
+    /// key titles by ID while walking `&mut` blocks.
+    pub(crate) fn reference_id(&self) -> Option<String> {
+        self.anchor
+            .map(|a| a.data().to_string())
+            .or_else(|| {
+                self.attrlist
+                    .as_ref()
+                    .and_then(|attrlist| attrlist.id())
+                    .map(str::to_string)
+            })
+            .or_else(|| self.section_id.clone())
+    }
+
+    /// Returns `true` when the section's reference text comes from an explicit
+    /// `reftext` attribute or a `[[id,reftext]]` anchor reftext, rather than
+    /// from its title. Such a section's reference text does not change when its
+    /// title's cross-references resolve, so the title resolution pass does not
+    /// treat it as a recomputable target.
+    pub(crate) fn has_explicit_reftext(&self) -> bool {
+        self.attrlist
+            .as_ref()
+            .and_then(|attrlist| attrlist.named_attribute("reftext"))
+            .is_some()
+            || self.anchor_reftext.is_some()
     }
 }
 

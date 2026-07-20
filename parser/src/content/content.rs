@@ -267,6 +267,31 @@ impl<'src> Content<'src> {
         }
     }
 
+    /// Returns the deferred cross-reference template and segments, if this
+    /// content carries any.
+    ///
+    /// The template is the placeholder-bearing text captured by
+    /// [`finalize_deferred`](Self::finalize_deferred); the segments are the
+    /// cross-references in placeholder order. Used by the document-order title
+    /// resolution pass, which re-renders a title's cross-references with
+    /// cross-title (including circular) coordination that the per-content
+    /// [`resolve_references`](Self::resolve_references) cannot provide.
+    pub(crate) fn deferred_parts(&self) -> Option<(&str, &[XrefSegment])> {
+        self.deferred
+            .as_ref()
+            .map(|d| (d.template.as_str(), d.xrefs.as_slice()))
+    }
+
+    /// Overwrites the rendered text directly.
+    ///
+    /// Used by the document-order title resolution pass, which computes a
+    /// title's final rendering (coordinating cross-title references) and
+    /// installs it here, in place of the per-content resolution that cannot see
+    /// other titles.
+    pub(crate) fn set_rendered(&mut self, rendered: String) {
+        self.rendered = rendered.into();
+    }
+
     /// Returns `true` if this content contains one or more cross-references
     /// that have not yet been resolved to a destination.
     pub fn has_unresolved_refs(&self) -> bool {
@@ -463,6 +488,21 @@ pub(crate) fn rehome_xref_placeholders(
 
     out.push_str(rest);
     (out, local)
+}
+
+/// Splices resolved (or fallback) cross-reference renderings into a placeholder
+/// template, producing the final rendered text.
+///
+/// This is the seam used by the document-order title resolution pass: it hands
+/// in a title's captured template together with a set of [`XrefSegment`]s whose
+/// [`resolved`](XrefSegment::resolved) fields it has filled in with cross-title
+/// (including circular) coordination, and receives the final rendered title.
+pub(crate) fn render_xref_template(
+    template: &str,
+    xrefs: &[XrefSegment],
+    renderer: &dyn InlineSubstitutionRenderer,
+) -> String {
+    render_template(template, xrefs, renderer)
 }
 
 /// Splices resolved (or fallback) cross-reference renderings into a placeholder

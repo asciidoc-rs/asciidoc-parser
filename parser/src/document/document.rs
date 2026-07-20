@@ -474,6 +474,17 @@ impl<'src> Document<'src> {
                 block.resolve_references(resolver, renderer, &mut warnings);
             }
 
+            // Section titles are resolved separately, in document order, so
+            // cross-references between titles (forward and circular) coordinate
+            // the way Asciidoctor's converts-once-and-caches model does.
+            crate::document::title_refs::resolve_title_references(
+                &mut dependent.blocks,
+                &dependent.catalog,
+                resolver,
+                renderer,
+                &mut warnings,
+            );
+
             // Footnote text is extracted out of block content, so its
             // cross-references are resolved here rather than by the block pass
             // above. The host resolver does not alias the catalog, so the
@@ -510,6 +521,17 @@ impl<'src> Document<'src> {
             for block in dependent.blocks.iter_mut() {
                 block.resolve_references(&resolver, renderer, &mut warnings);
             }
+
+            // Section titles are resolved separately, in document order, so
+            // cross-references between titles (forward and circular) coordinate
+            // the way Asciidoctor's converts-once-and-caches model does.
+            crate::document::title_refs::resolve_title_references(
+                &mut dependent.blocks,
+                &dependent.catalog,
+                &resolver,
+                renderer,
+                &mut warnings,
+            );
 
             // Footnote text is extracted out of block content, so its
             // cross-references are resolved here rather than by the block pass

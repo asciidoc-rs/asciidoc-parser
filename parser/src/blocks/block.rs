@@ -787,7 +787,16 @@ impl<'src> Block<'src> {
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
     ) {
-        if let Some(content) = self.content_mut() {
+        // A section's resolvable content is its title, which is resolved
+        // instead by the document-order title pass
+        // (`title_refs::resolve_title_references`): that pass coordinates
+        // cross-references *between* titles (forward and circular), which
+        // per-content resolution cannot see. Resolving it here too would
+        // overwrite that result with an isolated, catalog-reftext-based
+        // rendering, so section content is skipped here.
+        if !matches!(self, Self::Section(_))
+            && let Some(content) = self.content_mut()
+        {
             content.resolve_references(resolver, renderer, warnings);
         }
 
