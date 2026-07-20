@@ -441,10 +441,11 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
         ContentModel::Compound
     }
 
-    fn content_mut(&mut self) -> Option<&mut Content<'src>> {
-        // The section title is the section's own resolvable content.
-        Some(&mut self.section_title)
-    }
+    // `content_mut` keeps the default `None`: the section's own resolvable
+    // content is its heading, which is resolved by the document-order title
+    // pass (see `document::title_refs`) rather than the per-content pass —
+    // that pass coordinates cross-references *between* titles (forward and
+    // circular), which per-content resolution cannot see.
 
     fn raw_context(&self) -> CowStr<'src> {
         "section".into()

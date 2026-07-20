@@ -792,16 +792,13 @@ impl<'src> Block<'src> {
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
     ) {
-        // A section's resolvable content is its title, which is resolved
-        // instead by the document-order title pass
-        // (`title_refs::resolve_title_references`): that pass coordinates
-        // cross-references *between* titles (forward and circular), which
-        // per-content resolution cannot see. Resolving it here too would
-        // overwrite that result with an isolated, catalog-reftext-based
-        // rendering, so section content is skipped here.
-        if !matches!(self, Self::Section(_))
-            && let Some(content) = self.content_mut()
-        {
+        // A section is not resolved here: its resolvable content is its
+        // heading, which `content_mut` deliberately does not expose (see
+        // `SectionBlock`). Headings are resolved by the document-order title
+        // pass (`title_refs::resolve_title_references`), which coordinates
+        // cross-references *between* titles (forward and circular) — something
+        // per-content resolution cannot see.
+        if let Some(content) = self.content_mut() {
             content.resolve_references(resolver, renderer, warnings);
         }
 
@@ -846,26 +843,23 @@ impl<'src> Block<'src> {
         }
     }
 
-    /// Overwrites this block's *block title* rendered text, used by the
+    /// The mutable counterpart of [`block_title_content`], used by the
     /// document-order title resolution pass to install a title whose
-    /// cross-references have been resolved. A no-op on a block that has no
-    /// title.
-    pub(crate) fn set_block_title_rendered(&mut self, rendered: String) {
-        let title = match self {
-            Self::Simple(b) => &mut b.title,
-            Self::Media(b) => &mut b.title,
-            Self::List(b) => &mut b.title,
-            Self::RawDelimited(b) => &mut b.title,
-            Self::CompoundDelimited(b) => &mut b.title,
-            Self::Admonition(b) => &mut b.title,
-            Self::Quote(b) => &mut b.title,
-            Self::Table(b) => &mut b.title,
-            Self::Break(b) => &mut b.title,
-            _ => return,
-        };
-
-        if let Some(content) = title {
-            content.set_rendered(rendered);
+    /// cross-references have been resolved.
+    ///
+    /// [`block_title_content`]: Self::block_title_content
+    pub(crate) fn block_title_content_mut(&mut self) -> Option<&mut Content<'src>> {
+        match self {
+            Self::Simple(b) => b.title.as_mut(),
+            Self::Media(b) => b.title.as_mut(),
+            Self::List(b) => b.title.as_mut(),
+            Self::RawDelimited(b) => b.title.as_mut(),
+            Self::CompoundDelimited(b) => b.title.as_mut(),
+            Self::Admonition(b) => b.title.as_mut(),
+            Self::Quote(b) => b.title.as_mut(),
+            Self::Table(b) => b.title.as_mut(),
+            Self::Break(b) => b.title.as_mut(),
+            _ => None,
         }
     }
 }

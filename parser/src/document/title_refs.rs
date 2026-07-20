@@ -74,22 +74,24 @@ pub(crate) fn resolve_title_references<'src>(
     }
 
     // Referenceable titles, keyed by ID (first registration wins, mirroring the
-    // catalog's own duplicate handling).
-    let mut id_to_index: HashMap<&str, usize> = HashMap::new();
+    // catalog's own duplicate handling). Each entry carries the node itself
+    // alongside its index, so the recursion in `compute` never has to look a
+    // node up by index.
+    let mut id_to_node: HashMap<&str, (usize, &TitleNode<'src>)> = HashMap::new();
     for (index, node) in nodes.iter().enumerate() {
         if let Some(id) = &node.map_id {
-            id_to_index.entry(id.as_str()).or_insert(index);
+            id_to_node.entry(id.as_str()).or_insert((index, node));
         }
     }
 
     let mut memo: Vec<Option<String>> = vec![None; nodes.len()];
     let mut in_progress: Vec<bool> = vec![false; nodes.len()];
 
-    for index in 0..nodes.len() {
+    for (index, node) in nodes.iter().enumerate() {
         compute(
             index,
-            &nodes,
-            &id_to_index,
+            node,
+            &id_to_node,
             catalog,
             resolver,
             renderer,
@@ -156,13 +158,11 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<String>], index: 
                 }
                 *index += 1;
             }
-        } else if block
-            .block_title_content()
-            .and_then(Content::deferred_parts)
-            .is_some()
+        } else if let Some(title) = block.block_title_content_mut()
+            && title.deferred_parts().is_some()
         {
             if let Some(rendered) = memo.get(*index).and_then(Option::as_ref) {
-                block.set_block_title_rendered(rendered.clone());
+                title.set_rendered(rendered.clone());
             }
             *index += 1;
         }
@@ -182,8 +182,8 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<String>], index: 
 #[allow(clippy::too_many_arguments)]
 fn compute<'src>(
     index: usize,
-    nodes: &[TitleNode<'src>],
-    id_to_index: &HashMap<&str, usize>,
+    node: &TitleNode<'src>,
+    id_to_node: &HashMap<&str, (usize, &TitleNode<'src>)>,
     catalog: &Catalog,
     resolver: &dyn ReferenceResolver,
     renderer: &dyn InlineSubstitutionRenderer,
@@ -194,10 +194,6 @@ fn compute<'src>(
     if let Some(Some(rendered)) = memo.get(index) {
         return rendered.clone();
     }
-
-    let Some(node) = nodes.get(index) else {
-        return String::new();
-    };
 
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = true;
@@ -219,7 +215,7 @@ fn compute<'src>(
 
         if !has_explicit_text
             && let Some(target_id) = lookup_id(catalog, &xref.target)
-            && let Some(&target_index) = id_to_index.get(target_id.as_str())
+            && let Some(&(target_index, target_node)) = id_to_node.get(target_id.as_str())
         {
             // The target's reference text is its own (resolved) title. Recurse,
             // unless the target is mid-computation — a cycle — in which case its
@@ -230,8 +226,8 @@ fn compute<'src>(
             } else {
                 Some(compute(
                     target_index,
-                    nodes,
-                    id_to_index,
+                    target_node,
+                    id_to_node,
                     catalog,
                     resolver,
                     renderer,

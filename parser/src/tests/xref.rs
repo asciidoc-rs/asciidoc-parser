@@ -766,3 +766,152 @@ mod unresolved_reference_warnings {
         assert_eq!(warnings[0].source.line(), 2);
     }
 }
+
+/// Cross-references embedded in section headings and block titles resolve to
+/// the target's reference text via the document-order title resolution pass
+/// (issue #770). These exercise the pass across the block types that carry a
+/// title, plus the corners of how a title maps (or does not map) to a
+/// referenceable target.
+mod xrefs_in_titles {
+    use crate::{Parser, blocks::IsBlock};
+
+    /// Collects `(context, title)` for every titled block in the document, in
+    /// document order.
+    fn titled_blocks(doc: &crate::Document<'_>) -> Vec<(String, String)> {
+        fn walk(block: &crate::blocks::Block<'_>, out: &mut Vec<(String, String)>) {
+            if let Some(title) = block.title() {
+                out.push((block.raw_context().to_string(), title.to_string()));
+            }
+            for child in block.nested_blocks() {
+                walk(child, out);
+            }
+        }
+
+        let mut out = vec![];
+        for block in doc.nested_blocks() {
+            walk(block, &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn resolves_xref_in_title_of_every_titled_block_type() {
+        // One document exercising an xref title on each block type that can
+        // carry a `.Title`: paragraph, image (media), list, listing (raw
+        // delimited), example (compound delimited), admonition, quote, table,
+        // and thematic break. Every title resolves to the target section's
+        // reference text.
+        // The final paragraph's title has no cross-reference; it must pass
+        // through the resolution pass untouched.
+        let doc = Parser::default().parse(
+            ".<<goal>>\npara\n\n\
+             .<<goal>>\nimage::a.png[]\n\n\
+             .<<goal>>\n* item\n\n\
+             .<<goal>>\n----\ncode\n----\n\n\
+             .<<goal>>\n====\nexample\n====\n\n\
+             .<<goal>>\nNOTE: note\n\n\
+             .<<goal>>\n[quote]\nquoted\n\n\
+             .<<goal>>\n|===\n|cell\n|===\n\n\
+             .<<goal>>\n'''\n\n\
+             .Plain title\nplain para\n\n\
+             [#goal]\n== Goal",
+        );
+
+        let mut titles = titled_blocks(&doc);
+
+        // The xref-free title is untouched by the pass; the remaining titles
+        // all resolve.
+        let plain_position = titles
+            .iter()
+            .position(|(_, title)| title == "Plain title")
+            .expect("expected the xref-free title to be present and untouched");
+        titles.remove(plain_position);
+
+        let resolved = r##"<a href="#goal">Goal</a>"##;
+
+        let expected_contexts = [
+            "paragraph",
+            "image",
+            "list",
+            "listing",
+            "example",
+            "admonition",
+            "quote",
+            "thematic_break",
+        ];
+
+        // The table's context is checked separately below; contexts here are
+        // asserted as a set because the exact list is not the point — each
+        // titled block resolving its title is.
+        assert_eq!(titles.len(), 9, "titles were: {titles:?}");
+
+        for (context, title) in &titles {
+            assert_eq!(
+                title, resolved,
+                "block with context {context} did not resolve its title"
+            );
+        }
+
+        for context in expected_contexts {
+            assert!(
+                titles.iter().any(|(c, _)| c == context),
+                "no titled block with context {context}; titles were: {titles:?}"
+            );
+        }
+
+        assert!(
+            titles.iter().any(|(c, _)| c == "table"),
+            "no titled table; titles were: {titles:?}"
+        );
+    }
+
+    #[test]
+    fn section_with_explicit_reftext_still_resolves_its_own_title_xref() {
+        // Section `a` carries an explicit `reftext`, so a reference *to* it
+        // renders that reftext — not its (xref-bearing) title. The xref inside
+        // `a`'s own title still resolves normally.
+        let doc = Parser::default()
+            .parse("[reftext=Custom Text]\n[#a]\n== A <<b>>\n\n[#b]\n== B\n\npara with <<a>>");
+
+        let sections: Vec<_> = doc
+            .nested_blocks()
+            .filter_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(sections[0].section_title(), r##"A <a href="#b">B</a>"##);
+
+        // The paragraph reference to `a` uses the explicit reftext.
+        let para = super::first_paragraph(&doc);
+        assert_eq!(para, r##"para with <a href="#a">Custom Text</a>"##);
+    }
+
+    #[test]
+    fn section_with_double_bracket_anchor_is_a_recomputable_target() {
+        // The section's ID comes from a `[[a]]` block anchor (rather than a
+        // `[#a]` attribute), and a forward reference to it from another title
+        // renders its resolved title.
+        let doc = Parser::default().parse("== See <<a>>\n\n[[a]]\n== A <<b>>\n\n[#b]\n== B");
+
+        let sections: Vec<_> = doc
+            .nested_blocks()
+            .filter_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // `a`'s resolved title (`A <a href="#b">B</a>`) is spliced into the
+        // first heading's reference with the nested anchor dropped.
+        assert_eq!(sections[0].section_title(), r##"See <a href="#a">A B</a>"##);
+        assert_eq!(sections[1].section_title(), r##"A <a href="#b">B</a>"##);
+    }
+}
