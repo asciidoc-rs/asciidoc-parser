@@ -297,7 +297,13 @@ impl<'src> Block<'src> {
         if let Some(pending_title) = parser.pending_block_title.take()
             && metadata.title.is_none()
         {
-            metadata.title = Some(pending_title);
+            // The carried title arrives as an owned snapshot; rebuild it as a
+            // `Content` anchored at the block's start, restoring any deferred
+            // cross-references so the title pass can still resolve them.
+            metadata.title = Some(crate::content::Content::from_owned_title(
+                metadata.block_start,
+                pending_title,
+            ));
         }
 
         // Tolerate a blank line between a block's metadata (title, anchor, or
@@ -787,6 +793,12 @@ impl<'src> Block<'src> {
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
     ) {
+        // A section is not resolved here: its resolvable content is its
+        // heading, which `content_mut` deliberately does not expose (see
+        // `SectionBlock`). Headings are resolved by the document-order title
+        // pass (`title_refs::resolve_title_references`), which coordinates
+        // cross-references *between* titles (forward and circular) — something
+        // per-content resolution cannot see.
         if let Some(content) = self.content_mut() {
             content.resolve_references(resolver, renderer, warnings);
         }
@@ -806,6 +818,29 @@ impl<'src> Block<'src> {
 
         for child in self.nested_blocks_mut() {
             child.resolve_references(resolver, renderer, warnings);
+        }
+    }
+
+    /// Returns this block's *block title* (`.Title`) as a mutable [`Content`],
+    /// when the block has one.
+    ///
+    /// This is the decorative title carried above a block, distinct from a
+    /// section's heading. Used only by the document-order title resolution
+    /// pass, which reads a title's deferred cross-references and installs the
+    /// re-rendered title once they are resolved. Blocks that never carry a
+    /// title return `None`.
+    pub(crate) fn block_title_content_mut(&mut self) -> Option<&mut Content<'src>> {
+        match self {
+            Self::Simple(b) => b.title_content_mut(),
+            Self::Media(b) => b.title_content_mut(),
+            Self::List(b) => b.title_content_mut(),
+            Self::RawDelimited(b) => b.title_content_mut(),
+            Self::CompoundDelimited(b) => b.title_content_mut(),
+            Self::Admonition(b) => b.title_content_mut(),
+            Self::Quote(b) => b.title_content_mut(),
+            Self::Table(b) => b.title_content_mut(),
+            Self::Break(b) => b.title_content_mut(),
+            _ => None,
         }
     }
 }

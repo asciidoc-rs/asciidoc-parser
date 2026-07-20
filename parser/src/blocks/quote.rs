@@ -101,13 +101,24 @@ pub struct QuoteBlock<'src> {
     citetitle: Option<String>,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    title: Option<String>,
+    title: Option<Content<'src>>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
 }
 
 impl<'src> QuoteBlock<'src> {
+    /// Returns the block's title as a mutable [`Content`], if the block has
+    /// one.
+    ///
+    /// This narrow seam exists for the document-order title resolution pass
+    /// (see `document::title_refs`), which installs the re-rendered title
+    /// after resolving any cross-references embedded in it. All other access
+    /// goes through the read-only [`IsBlock::title`] accessor.
+    pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
+        self.title.as_mut()
+    }
+
     /// Parse a blockquote, if the given metadata and content describe one.
     ///
     /// Returns `None` (without consuming the block) when the content is not a
@@ -770,7 +781,7 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
     }
 
     fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+        self.title.as_ref().map(Content::rendered_str)
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {

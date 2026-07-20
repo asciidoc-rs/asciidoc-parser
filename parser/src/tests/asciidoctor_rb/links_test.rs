@@ -3826,11 +3826,10 @@ fn should_not_fail_to_resolve_broken_xref_in_title_of_block_with_id() {
     );
 }
 
-// Surfaced incompatibility: Asciidoctor resolves the forward xref in a block
-// title to the target title (`Conclusion`); this crate leaves it unresolved
-// (`[conclusion]`). Tracked in #770.
-non_normative!(
-    r###"
+#[test]
+fn should_resolve_forward_xref_in_title_of_block_with_id() {
+    verifies!(
+        r###"
   test 'should resolve forward xref in title of block with ID' do
     input = <<~'EOS'
     [#p1]
@@ -3846,13 +3845,24 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Surfaced incompatibility: Asciidoctor resolves `<<s1>>` to section s1's own
-// xreflabel; this crate leaves the sibling xref unresolved (`[s1]`). Tracked in
-// #770.
-non_normative!(
-    r###"
+    // A block title is retained as a `Content`, so the forward cross-reference
+    // in `p1`'s title resolves to the target section's reference text
+    // (`Conclusion`) once the catalog is complete.
+    let doc = Parser::default()
+        .parse("[#p1]\n.<<conclusion>>\nparagraph text\n\n[#conclusion]\n== Conclusion");
+    let blocks = top_blocks(&doc);
+    assert_eq!(
+        blocks[0].title(),
+        Some(r##"<a href="#conclusion">Conclusion</a>"##)
+    );
+}
+
+#[test]
+fn should_not_fail_to_resolve_broken_xref_in_section_title() {
+    verifies!(
+        r###"
   test 'should not fail to resolve broken xref in section title' do
     input = <<~'EOS'
     [#s1]
@@ -3867,13 +3877,26 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Surfaced incompatibility: Asciidoctor resolves an xref in a section title to
-// the target section's title; this crate leaves it unresolved (`[b]`/`[a]`).
-// Tracked in #770.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse("[#s1]\n== <<DNE>>\n\n== <<s1>>");
+    let sections = all_sections(&doc);
+
+    // `s1`'s own title holds a broken cross-reference (`DNE` is never defined):
+    // it stays a bracketed fallback, still linked to the raw target.
+    assert_eq!(sections[0].id().unwrap(), "s1");
+    assert_eq!(sections[0].section_title(), r##"<a href="#DNE">[DNE]</a>"##);
+
+    // The following section references `s1`, whose reference text *is* that
+    // broken-xref rendering. An anchor cannot nest inside another, so the inner
+    // anchor tags are dropped, leaving `[DNE]` as the link text.
+    assert_eq!(sections[1].section_title(), r##"<a href="#s1">[DNE]</a>"##);
+}
+
+#[test]
+fn should_break_circular_xref_reference_in_section_title() {
+    verifies!(
+        r###"
   test 'should break circular xref reference in section title' do
     input = <<~'EOS'
     [#a]
@@ -3889,13 +3912,30 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Surfaced incompatibility: same section-title xref resolution gap —
-// Asciidoctor renders the target section's title (with the nested anchor
-// dropped); this crate leaves `[b]` unresolved. Tracked in #770.
-non_normative!(
-    r###"
+    let doc = Parser::default().parse("[#a]\n== A <<b>>\n\n[#b]\n== B <<a>>");
+    let sections = all_sections(&doc);
+
+    // `a`'s title references `b`; `b`'s reference text is its own title
+    // (`B <<a>>`), which references `a` back. Titles are resolved once, in
+    // document order: while `a` is being resolved, `b`'s reference to `a` sees
+    // `a` mid-resolution and breaks the cycle with the bracketed `[a]`
+    // fallback. So `b`'s reference text is `B [a]` (nested anchor dropped) and
+    // `a`'s title becomes `A <a href="#b">B [a]</a>`.
+    assert_eq!(sections[0].id().unwrap(), "a");
+    assert_eq!(sections[0].section_title(), r##"A <a href="#b">B [a]</a>"##);
+
+    // `b`'s title is the value frozen mid-cycle: its own reference to `a`
+    // resolved to the `[a]` fallback.
+    assert_eq!(sections[1].id().unwrap(), "b");
+    assert_eq!(sections[1].section_title(), r##"B <a href="#a">[a]</a>"##);
+}
+
+#[test]
+fn should_drop_nested_anchor_in_xreftext() {
+    verifies!(
+        r###"
   test 'should drop nested anchor in xreftext' do
     input = <<~'EOS'
     [#a]
@@ -3910,7 +3950,21 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default()
+        .parse("[#a]\n== See <<b>>\n\n[#b]\n== Consult https://google.com[Google]");
+    let sections = all_sections(&doc);
+
+    // `a`'s title cross-references `b`, whose reference text is its own title:
+    // `Consult <a href="https://google.com">Google</a>`. Splicing that in as the
+    // link text of `a`'s cross-reference would nest an anchor inside another, so
+    // the inner link's tags are dropped, leaving `Consult Google`.
+    assert_eq!(
+        sections[0].section_title(),
+        r##"See <a href="#b">Consult Google</a>"##
+    );
+}
 
 #[test]
 fn should_not_resolve_forward_xref_evaluated_during_parsing() {
