@@ -963,17 +963,23 @@ fn qualified_url_adjacent_to_text_in_round_brackets() {
     );
 }
 
-// Surfaced incompatibility: Asciidoctor recognizes a URL macro preceded by a
-// no-break space; this crate does not treat U+00A0 as a leading boundary and
-// leaves the macro as literal text. Tracked in #768.
-non_normative!(
-    r###"
+#[test]
+fn qualified_url_following_no_break_space() {
+    verifies!(
+        r###"
   test 'qualified url following no-break space' do
     assert_xpath '//a[@href="http://asciidoc.org"][text()="AsciiDoc"]', convert_string(%(#{[0xa0].pack 'U1'}http://asciidoc.org[AsciiDoc] project page.)), 1
   end
 
 "###
-);
+    );
+
+    let doc = Parser::default().parse("\u{a0}http://asciidoc.org[AsciiDoc] project page.");
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        "\u{a0}<a href=\"http://asciidoc.org\">AsciiDoc</a> project page."
+    );
+}
 
 #[test]
 fn qualified_url_following_smart_apostrophe() {
@@ -1863,18 +1869,31 @@ non_normative!(
 "###
 );
 
-// Surfaced incompatibility: Asciidoctor does not register a bibliography anchor
-// (`[[[label]]]`) found in prose; this crate registers `label`. Tracked in
-// #769.
-non_normative!(
-    r###"
+#[test]
+fn does_not_match_bibliography_anchor_in_prose_when_scanning_for_inline_anchor() {
+    verifies!(
+        r###"
   test 'does not match bibliography anchor in prose when scanning for inline anchor' do
     doc = document_from_string 'Use [[[label]]] to assign a label to a bibliography entry, but not in a paragraph.'
     refute doc.catalog[:refs].key? 'label'
   end
 
 "###
-);
+    );
+
+    // A bibliography-style anchor (`[[[label]]]`) in ordinary prose (not as the
+    // prefix of a bibliography list item) is rendered like Asciidoctor — the
+    // inner `[[label]]` becomes an empty anchor, leaving a literal `[]` — but the
+    // id is *not* registered in the catalog. See #769.
+    let doc = Parser::default().parse(
+        "Use [[[label]]] to assign a label to a bibliography entry, but not in a paragraph.",
+    );
+    assert!(doc.catalog().get_ref("label").is_none());
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"Use [<a id="label"></a>] to assign a label to a bibliography entry, but not in a paragraph."##
+    );
+}
 
 #[test]
 fn repeating_inline_anchor_macro_with_empty_reftext() {
@@ -3397,13 +3416,11 @@ fn should_use_doctitle_of_root_document_as_fallback_link_text_for_inter_document
     assert_xpath(&doc, r##"//td//a[@href="#"][text()="Document Title"]"##, 1);
 }
 
-// Surfaced gap: this crate does not parse a block attribute line above the
-// document title, so `[reftext="Links and Stuff"]` is not read as document
-// metadata (and the title line is not recognized as a title). The equivalent
-// `:reftext:` header attribute *is* honored as the self-reference link text.
-// Tracked in #805.
-non_normative!(
-    r###"
+#[test]
+fn should_use_reftext_on_document_as_fallback_link_text_if_inter_document_xref_points_to_current_doc_and_no_link_text_is_provided()
+ {
+    verifies!(
+        r###"
   test 'should use reftext on document as fallback link text if inter-document xref points to current doc and no link text is provided' do
     input = <<~'EOS'
     [reftext="Links and Stuff"]
@@ -3416,15 +3433,26 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Surfaced gap: this crate does not parse a block attribute line above the
-// document title, so `[reftext="Links and Stuff"]` is not read as document
-// metadata. The equivalent `:reftext:` header attribute *is* honored as the
-// self-reference link text.
-// Tracked in #805.
-non_normative!(
-    r###"
+    // A `[reftext="…"]` block attribute above the document title sets the
+    // document's `reftext` (see #805), which names the self-reference in
+    // preference to the doctitle.
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("[reftext=\"Links and Stuff\"]\n= Links & Stuff\n\nSee xref:test.adoc[]");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#">Links and Stuff</a>"##
+    );
+}
+
+#[test]
+fn should_use_reftext_on_document_as_fallback_link_text_if_xref_points_to_empty_fragment_and_no_link_text_is_provided()
+ {
+    verifies!(
+        r###"
   test 'should use reftext on document as fallback link text if xref points to empty fragment and no link text is provided' do
     input = <<~'EOS'
     [reftext="Links and Stuff"]
@@ -3437,7 +3465,19 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    // An empty-fragment self-reference (`xref:#[]`) is named the same way as a
+    // reference back to the current document by path.
+    let doc = Parser::default()
+        .with_primary_file_name("test.adoc")
+        .parse("[reftext=\"Links and Stuff\"]\n= Links & Stuff\n\nSee xref:#[]");
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#">Links and Stuff</a>"##
+    );
+}
 
 #[test]
 fn should_use_fallback_link_text_if_inter_document_xref_points_to_current_doc_without_header_and_no_link_text_is_provided()

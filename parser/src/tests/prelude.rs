@@ -5,7 +5,7 @@
 pub(crate) use std::collections::HashMap;
 
 pub(crate) use crate::{
-    HasSpan, Parser, SafeMode,
+    ASCIIDOCTOR_VERSION, HasSpan, Parser, SafeMode,
     blocks::{
         AdmonitionVariant, ColumnStyle, ContentModel, Frame, Grid, HorizontalAlignment, IsBlock,
         QuoteType, SectionType, SimpleBlockStyle, Stripes, VerticalAlignment,

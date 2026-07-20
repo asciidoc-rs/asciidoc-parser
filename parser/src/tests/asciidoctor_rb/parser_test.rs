@@ -36,10 +36,9 @@
 //! This crate does not expose those helpers by name, but most of the *behavior*
 //! they implement is observable through the public API, so those tests are
 //! `verifies!` and driven through the real path. The helpers with no public
-//! analog at all (`is_section_title?`, `sanitize_attribute_name` as a function,
-//! `adjust_indentation!`) stay `non_normative!`: the Ruby lines are reproduced
-//! verbatim to keep the `sdd` coverage tool aligned, but no crate behavior is
-//! asserted against them.
+//! analog at all (`is_section_title?`, `adjust_indentation!`) stay
+//! `non_normative!`: the Ruby lines are reproduced verbatim to keep the `sdd`
+//! coverage tool aligned, but no crate behavior is asserted against them.
 //!
 //! The `verifies!` mappings:
 //!
@@ -50,6 +49,10 @@
 //!   [`ModificationContext`](crate::parser::ModificationContext) — `Anywhere`
 //!   is accessible, `ApiOnly` is inaccessible (a rejected override is reported
 //!   as [`WarningType::AttributeValueIsLocked`]).
+//! * **`sanitize_attribute_name`** — an attribute entry is stored under its
+//!   sanitized name (lower-cased, characters outside `[a-z0-9_-]` dropped), so
+//!   the tests define a `:Raw Name:` entry and read it back through
+//!   [`Parser::attribute_value`] under its sanitized key.
 //! * **`parse_style_attribute`** — the shorthand `style#id.role%opt` parsing is
 //!   exactly what [`Attrlist`](crate::attributes::Attrlist) does, so those
 //!   tests drive [`Attrlist::parse`] in a block context and assert on
@@ -93,8 +96,6 @@
 //!   document attributes are stored pre-substitution (issue #759).
 //! * Block comments (`////`) in the header are not skipped ahead of the author
 //!   or revision line (issue #760).
-//! * A `:Author Initials:` attribute entry is not sanitized to `authorinitials`
-//!   and so does not override the generated initials (issue #761).
 //! * A duplicate id introduced by an *inline* anchor (`[[id]]`) does not emit a
 //!   `DuplicateId` warning (the error is discarded on the inline path), unlike
 //!   a duplicate block anchor (issue #762).
@@ -163,6 +164,16 @@ fn parse_authors(line: &str) -> Vec<ParsedAuthor> {
         .collect()
 }
 
+/// Define a document attribute entry whose raw (as-written) name is `raw_name`
+/// and return the value stored under the canonical name `canonical`. This
+/// drives Asciidoctor's `sanitize_attribute_name` through the public
+/// attribute-entry path: the entry is only observable under its sanitized name.
+fn entry_value_under(raw_name: &str, canonical: &str) -> crate::document::InterpretedValue {
+    let mut parser = Parser::default();
+    let _doc = parser.parse(&format!(":{raw_name}: sentinel"));
+    parser.attribute_value(canonical)
+}
+
 /// Parse a full document header — `= Document Title`, the author line, and the
 /// revision line — and return the parsed revision line's number / date / remark
 /// as owned data. This drives the same header path Asciidoctor's
@@ -210,10 +221,14 @@ non_normative!(
 );
 
 // `sanitize_attribute_name` is an internal static helper not exposed by this
-// crate. The underlying gap (attribute-entry names are not sanitized) is
-// tracked in https://github.com/asciidoc-rs/asciidoc-parser/issues/761.
-non_normative!(
-    r#"
+// crate by name, but its behavior is observable: an attribute entry is stored
+// under its sanitized name, so a `:Raw Name:` entry is only reachable through
+// the sanitized key. See
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/761.
+#[test]
+fn sanitize_attribute_name() {
+    verifies!(
+        r#"
   test 'sanitize attribute name' do
     assert_equal 'foobar', Asciidoctor::Parser.sanitize_attribute_name("Foo Bar")
     assert_equal 'foo', Asciidoctor::Parser.sanitize_attribute_name("foo")
@@ -221,7 +236,26 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // `Foo Bar` -> `foobar`
+    assert_eq!(
+        entry_value_under("Foo Bar", "foobar"),
+        InterpretedValue::Value("sentinel")
+    );
+
+    // `foo` -> `foo`
+    assert_eq!(
+        entry_value_under("foo", "foo"),
+        InterpretedValue::Value("sentinel")
+    );
+
+    // `Foo 3^ # - Bar[` -> `foo3-bar`
+    assert_eq!(
+        entry_value_under("Foo 3^ # - Bar[", "foo3-bar"),
+        InterpretedValue::Value("sentinel")
+    );
+}
 
 // The `store_attribute` group tests the internal static helper that stores an
 // attribute (optionally on a document). This crate exposes the same behavior
@@ -1580,11 +1614,10 @@ fn skip_line_comments_before_author() {
     );
 }
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/760):
-// this crate does not skip a `////` block comment in the header ahead of the
-// author line; the `////` delimiter is instead taken as the author.
-non_normative!(
-    r#"
+#[test]
+fn skip_block_comment_before_author() {
+    verifies!(
+        r#"
   test "skip block comment before author" do
     input = <<~'EOS'
     ////
@@ -1603,13 +1636,34 @@ non_normative!(
   end
 
 "#
-);
+    );
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/760):
-// this crate does not skip a `////` block comment in the header ahead of the
-// revision line; the `////` delimiter is instead taken as the revision date.
-non_normative!(
-    r#"
+    // A `////` block comment preceding the author line is skipped in its
+    // entirety (synthetic title added so the author line is recognized).
+    let mut parser = Parser::default();
+    parser.parse("= Document Title\n////\nAsciidoctor\nrelease artist\n////\nRyan Waldron");
+    assert_eq!(
+        parser.attribute_value("author"),
+        InterpretedValue::Value("Ryan Waldron")
+    );
+    assert_eq!(
+        parser.attribute_value("firstname"),
+        InterpretedValue::Value("Ryan")
+    );
+    assert_eq!(
+        parser.attribute_value("lastname"),
+        InterpretedValue::Value("Waldron")
+    );
+    assert_eq!(
+        parser.attribute_value("authorinitials"),
+        InterpretedValue::Value("RW")
+    );
+}
+
+#[test]
+fn skip_block_comment_before_rev() {
+    verifies!(
+        r#"
   test "skip block comment before rev" do
     input = <<~'EOS'
     Ryan Waldron
@@ -1628,7 +1682,27 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // A `////` block comment between the author line and the revision line is
+    // skipped, so the revision line that follows it is parsed (synthetic title
+    // added so the author line is recognized).
+    let mut parser = Parser::default();
+    let doc = parser.parse(
+        "= Document Title\nRyan Waldron\n////\nAsciidoctor\nrelease info\n////\nv0.0.7, 2013-12-18",
+    );
+    assert_eq!(
+        parser.attribute_value("author"),
+        InterpretedValue::Value("Ryan Waldron")
+    );
+
+    let rev = doc
+        .header()
+        .revision_line()
+        .expect("expected a revision line");
+    assert_eq!(rev.revnumber(), Some("0.0.7"));
+    assert_eq!(rev.revdate(), "2013-12-18");
+}
 
 #[test]
 fn break_header_at_line_with_three_forward_slashes() {
@@ -1665,12 +1739,15 @@ fn break_header_at_line_with_three_forward_slashes() {
     );
 }
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/761):
-// a `:Author Initials:` attribute entry is not sanitized to the
-// `authorinitials` attribute name, so it does not override the initials
-// generated from the author line (this crate keeps the generated `SR`).
-non_normative!(
-    r#"
+// This crate has no separate `metadata` hash: the author line's generated
+// initials and a later `:Author Initials:` override both write the one
+// `authorinitials` document attribute. So the generated value (`SR`) is
+// asserted on the parsed author, and the override (`SJR`) on the resolved
+// attribute.
+#[test]
+fn attribute_entry_overrides_generated_author_initials() {
+    verifies!(
+        r#"
   test 'attribute entry overrides generated author initials' do
     doc = empty_document
     metadata, _ = parse_header_metadata %(Stuart Rackham <founder@asciidoc.org>\n:Author Initials: SJR), doc
@@ -1679,7 +1756,25 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // The author line on its own generates the initials `SR`.
+    let a = parse_authors("Stuart Rackham <founder@asciidoc.org>");
+    assert_eq!(a.len(), 1);
+    assert_eq!(a[0].initials, "SR");
+
+    // A `:Author Initials: SJR` entry below the author line is sanitized to the
+    // `authorinitials` attribute name and overrides the generated value. (A
+    // synthetic title is required because this crate only recognizes an author
+    // line when a document title is present.)
+    let mut parser = Parser::default();
+    let _doc = parser
+        .parse("= Document Title\nStuart Rackham <founder@asciidoc.org>\n:Author Initials: SJR");
+    assert_eq!(
+        parser.attribute_value("authorinitials"),
+        InterpretedValue::Value("SJR")
+    );
+}
 
 // The `adjust_indentation!` group tests an internal static helper (with
 // explicit indent/tab-size arguments) that this crate does not expose. Verbatim

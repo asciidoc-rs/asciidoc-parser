@@ -1858,7 +1858,17 @@ fn string_succ(current: &str) -> String {
 }
 
 fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
-    let attr_name = raw_attr_name.as_ref().to_lowercase();
+    // Sanitize the name the way Asciidoctor's `sanitize_attribute_name` does:
+    // drop every character that is not a word character (ASCII letter, digit, or
+    // underscore) or a hyphen, then lower-case the result. This is what lets an
+    // attribute entry written as `:Author Initials:` set the `authorinitials`
+    // attribute, and `:Foo 3^ # - Bar[:` set `foo3-bar`.
+    let attr_name: String = raw_attr_name
+        .as_ref()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
 
     // Some attribute names have aliases. Remap to the primary name.
     //
@@ -2093,6 +2103,74 @@ mod tests {
             parser.attribute_value("asciidoc-parser-version"),
             InterpretedValue::Value(env!("CARGO_PKG_VERSION"))
         );
+    }
+
+    #[test]
+    fn asciidoctor_version_is_predefined() {
+        // The crate predefines `asciidoctor-version` with the Asciidoctor
+        // release whose behavior it implements, so documents written against
+        // Asciidoctor's own intrinsic behave the same here.
+        let mut parser = Parser::default();
+
+        assert_eq!(
+            parser.attribute_value("asciidoctor-version"),
+            InterpretedValue::Value(crate::ASCIIDOCTOR_VERSION)
+        );
+
+        // The value is available to `ifdef` gating and to attribute references
+        // and `ifeval` expressions in document content.
+        let doc = parser.parse(concat!(
+            "= Title\n",
+            "\n",
+            "ifdef::asciidoctor-version[]\n",
+            "ifeval::['{asciidoctor-version}' >= '0.1.0']\n",
+            "v{asciidoctor-version}\n",
+            "endif::[]\n",
+            "endif::[]\n",
+        ));
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec![format!("v{}", crate::ASCIIDOCTOR_VERSION)]
+        );
+    }
+
+    #[test]
+    fn asciidoctor_version_is_locked() {
+        // Like its `asciidoc-parser-version` companion, this describes the
+        // processor itself, so a document assignment is rejected with a warning
+        // and the built-in value stays in place.
+        let mut parser = Parser::default();
+
+        let doc = parser.parse(":asciidoctor-version: 99.99.99");
+
+        assert_eq!(
+            doc.warnings().next().unwrap().warning,
+            WarningType::AttributeValueIsLocked("asciidoctor-version".to_owned())
+        );
+
+        assert_eq!(
+            parser.attribute_value("asciidoctor-version"),
+            InterpretedValue::Value(crate::ASCIIDOCTOR_VERSION)
+        );
+    }
+
+    #[test]
+    fn asciidoc_parser_version_distinguishes_the_two_processors() {
+        // Both version intrinsics are defined, so a document tells the
+        // processors apart via `asciidoc-parser-version`, which Ruby
+        // Asciidoctor does not define.
+        let mut parser = Parser::default();
+
+        let doc = parser.parse(concat!(
+            "= Title\n",
+            "\n",
+            "ifdef::asciidoc-parser-version[]\n",
+            "This is asciidoc-parser.\n",
+            "endif::[]\n",
+        ));
+
+        assert_eq!(rendered_paragraphs(&doc), vec!["This is asciidoc-parser."]);
     }
 
     #[test]

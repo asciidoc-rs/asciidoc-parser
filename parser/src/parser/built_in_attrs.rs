@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::{
+    ASCIIDOCTOR_VERSION,
     document::InterpretedValue,
     parser::{AllowableValue, AttributeValue, ModificationContext},
 };
@@ -325,15 +326,32 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     //
     // The version of this crate, so documents can reference the parser version
     // (e.g. in `ifeval` expressions). This is the parser-specific counterpart
-    // of Ruby Asciidoctor's `asciidoctor-version` intrinsic; that name (and the
-    // companion `asciidoctor` flag) is intentionally *not* defined, so
-    // documents can distinguish the two processors. Like the safe-mode
+    // of Ruby Asciidoctor's `asciidoctor-version` intrinsic. Like the safe-mode
     // intrinsics below, it describes the processor itself, so it is locked
     // against document assignment (`ApiOnly`).
     attrs.insert(
         "asciidoc-parser-version".to_owned(),
         set(ApiOnly, env!("CARGO_PKG_VERSION")),
     );
+
+    // The version of Ruby Asciidoctor whose behavior this crate implements, so
+    // that documents written against Asciidoctor's own intrinsic (e.g.
+    // `ifdef::asciidoctor-version[]` or an `ifeval` version comparison) behave
+    // here as they do there. A document that needs to tell the two processors
+    // apart can test `asciidoc-parser-version` above, which Asciidoctor does
+    // not define. Locked against document assignment (`ApiOnly`) for the same
+    // reason as its companion.
+    attrs.insert(
+        "asciidoctor-version".to_owned(),
+        set(ApiOnly, ASCIIDOCTOR_VERSION),
+    );
+
+    // NOTE: The companion always-set `asciidoctor` flag is deliberately still
+    // *not* defined here. Defining it exposes a preprocessor bug – conditional
+    // directives are processed inside `////` comment blocks – that Asciidoctor's
+    // own `preprocessor directives should not be processed within comment block`
+    // tests catch via `ifdef::asciidoctor[////]`. See issue #810; the flag lands
+    // with that fix.
 
     // ### Safe-mode intrinsic attributes
     //
