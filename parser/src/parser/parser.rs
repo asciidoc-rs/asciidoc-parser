@@ -2407,6 +2407,63 @@ mod tests {
     }
 
     #[test]
+    fn asciidoctor_flag_is_predefined() {
+        // The crate predefines the always-set `asciidoctor` boolean flag, so a
+        // document guarding Asciidoctor-only content with `ifdef::asciidoctor[]`
+        // behaves the same here. A `////` comment block containing a directive
+        // that would corrupt it once the flag is defined must stay untouched
+        // (see issue #810).
+        let mut parser = Parser::default();
+
+        assert_eq!(
+            parser.attribute_value("asciidoctor"),
+            InterpretedValue::Set
+        );
+
+        let doc = parser.parse(concat!(
+            "= Title\n",
+            "\n",
+            "ifdef::asciidoctor[]\n",
+            "shown when asciidoctor is set\n",
+            "endif::[]\n",
+            "\n",
+            "////\n",
+            "ifdef::asciidoctor[////]\n",
+            "////\n",
+            "\n",
+            "line after comment block\n",
+        ));
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec![
+                "shown when asciidoctor is set".to_owned(),
+                "line after comment block".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn asciidoctor_flag_is_locked() {
+        // Like the version intrinsics, the flag describes the processor itself,
+        // so a document assignment is rejected with a warning and the built-in
+        // value stays in place.
+        let mut parser = Parser::default();
+
+        let doc = parser.parse(":asciidoctor: 99.99.99");
+
+        assert_eq!(
+            doc.warnings().next().unwrap().warning,
+            WarningType::AttributeValueIsLocked("asciidoctor".to_owned())
+        );
+
+        assert_eq!(
+            parser.attribute_value("asciidoctor"),
+            InterpretedValue::Set
+        );
+    }
+
+    #[test]
     fn asciidoc_parser_version_distinguishes_the_two_processors() {
         // Both version intrinsics are defined, so a document tells the
         // processors apart via `asciidoc-parser-version`, which Ruby

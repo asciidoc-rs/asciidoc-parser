@@ -240,6 +240,21 @@ impl<'p> PreprocessorState<'p> {
         let mut has_reported_file = file_name.is_none();
         let mut source_span = Span::new(source);
 
+        // Comment-block tracking. Asciidoctor's `PreprocessorReader` never
+        // processes preprocessor directives inside a comment block: the parser
+        // reads the block's content with line processing disabled. This crate
+        // preprocesses in a separate pass, so it tracks that state here. See
+        // issue #810.
+        //
+        // `comment_block_delimiter` is the closing delimiter of the comment
+        // block currently open (a `////` run, or the `--` of a `[comment]` open
+        // block); `in_comment_paragraph` is set while inside the raw portion of
+        // a `[comment]` paragraph; `after_comment_style` records that the line
+        // just emitted was a `[comment]` block-attribute line.
+        let mut comment_block_delimiter: Option<String> = None;
+        let mut in_comment_paragraph = false;
+        let mut after_comment_style = false;
+
         while !source_span.is_empty() {
             let original_source = source_span;
 
@@ -247,6 +262,44 @@ impl<'p> PreprocessorState<'p> {
             source_span = after;
 
             let source_line_number = line.line();
+
+            // Inside a comment block, every line is raw: emit it verbatim, with
+            // no directive or include processing, until the closing delimiter.
+            if let Some(delimiter) = &comment_block_delimiter {
+                let closes = line.data() == delimiter;
+                self.emit_line(
+                    line.data(),
+                    file_name,
+                    source_line_number,
+                    &mut has_reported_file,
+                );
+                if closes {
+                    comment_block_delimiter = None;
+                }
+                continue;
+            }
+
+            // The lines of a `[comment]` paragraph after its first are likewise
+            // raw, up to the blank line that ends the paragraph. (Its first line
+            // is still processed, matching Asciidoctor's one-line look-ahead: by
+            // the time a paragraph is recognized as a comment, the reader has
+            // already visited that line.)
+            if in_comment_paragraph {
+                if line.data().is_empty() {
+                    in_comment_paragraph = false;
+                }
+                self.emit_line(
+                    line.data(),
+                    file_name,
+                    source_line_number,
+                    &mut has_reported_file,
+                );
+                continue;
+            }
+
+            // Whether the line just emitted was a `[comment]` block-attribute
+            // line (consumed below when classifying the block it introduces).
+            let was_comment_style = std::mem::take(&mut after_comment_style);
 
             // Conditional preprocessor directives (`ifdef`, `ifndef`, `ifeval`,
             // `endif`) are handled before anything else so they take effect even
@@ -292,6 +345,42 @@ impl<'p> PreprocessorState<'p> {
             if self.skipping() {
                 has_reported_file = false;
                 continue;
+            }
+
+            // A `////` line (four or more slashes, nothing else) opens a comment
+            // block. Its content is raw, so it is emitted verbatim and no
+            // directive within it is processed until the matching closing
+            // delimiter. See issue #810.
+            if is_comment_block_delimiter(line.data()) {
+                comment_block_delimiter = Some(line.data().to_owned());
+                self.emit_line(
+                    line.data(),
+                    file_name,
+                    source_line_number,
+                    &mut has_reported_file,
+                );
+                continue;
+            }
+
+            // A `[comment]` block-attribute line turns the block it introduces
+            // into a comment. When that block is an open block (`--`), its
+            // content is raw up to the closing `--`; otherwise it is a comment
+            // paragraph, whose lines after the first are raw (see above).
+            if was_comment_style {
+                if line.data() == "--" {
+                    comment_block_delimiter = Some("--".to_owned());
+                    self.emit_line(
+                        line.data(),
+                        file_name,
+                        source_line_number,
+                        &mut has_reported_file,
+                    );
+                    continue;
+                }
+
+                if !line.data().is_empty() {
+                    in_comment_paragraph = true;
+                }
             }
 
             if self.can_have_attribute
@@ -694,6 +783,12 @@ impl<'p> PreprocessorState<'p> {
                     source_line_number,
                     &mut has_reported_file,
                 );
+
+                // Remember a `[comment]` block-attribute line so the next
+                // iteration can classify the block it introduces as a comment.
+                if line_text == "[comment]" {
+                    after_comment_style = true;
+                }
             }
         }
 
@@ -1400,6 +1495,14 @@ fn has_conditional_prefix(line: &str) -> bool {
 
 fn to_owned(maybe_file_name: Option<&str>) -> Option<String> {
     maybe_file_name.map(|n| n.to_string())
+}
+
+/// Returns `true` if `line` is a `////` comment-block delimiter: a run of four
+/// or more slashes and nothing else. A shorter run (`//`, `///`) is a line
+/// comment, not a delimiter. This mirrors the comment case of
+/// [`RawDelimitedBlock::is_valid_delimiter`](crate::blocks::RawDelimitedBlock).
+fn is_comment_block_delimiter(line: &str) -> bool {
+    line.len() >= 4 && line.bytes().all(|b| b == b'/')
 }
 
 /// Parse the attribute list of an `include::` directive from the directive's
@@ -3096,6 +3199,64 @@ mod tests {
         assert_eq!(
             conditional_output("head\n\nifdef::foo[dropped]\n\ntail"),
             "head\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_block_suppresses_conditional_directive() {
+        // A conditional directive inside a `////` comment block is not
+        // processed: the block's content is emitted verbatim so it parses as a
+        // comment (see issue #810). `foo` is unset, so were the directive
+        // processed, `hidden` would be dropped and the block corrupted.
+        assert_eq!(
+            conditional_output("////\nifdef::foo[]\nhidden\nendif::[]\n////\n\ntail"),
+            "////\nifdef::foo[]\nhidden\nendif::[]\n////\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn longer_comment_delimiter_closes_only_on_exact_match() {
+        // A comment block closes on a line matching its opening delimiter
+        // exactly; a shorter run of slashes inside it is ordinary content.
+        assert_eq!(
+            conditional_output("/////\nifdef::foo[x]\n////\nstill in comment\n/////\ntail"),
+            "/////\nifdef::foo[x]\n////\nstill in comment\n/////\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_block_suppresses_include_expansion() {
+        // An include directive inside a comment block is likewise left
+        // untouched rather than expanded.
+        let source = "////\ninclude::sub.adoc[]\n////\n\ntail";
+        let handler = InlineFileHandler::from_pairs([("sub.adoc", "Included.")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
+        assert_eq!(output, "////\ninclude::sub.adoc[]\n////\n\ntail\n");
+    }
+
+    #[test]
+    fn comment_open_block_suppresses_conditional_directive() {
+        // A `[comment]`-styled open block (`--`) is a comment block: a directive
+        // within it is emitted verbatim.
+        assert_eq!(
+            conditional_output("[comment]\n--\nfirst\nifdef::foo[dropped]\nlast\n--\n\ntail"),
+            "[comment]\n--\nfirst\nifdef::foo[dropped]\nlast\n--\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_paragraph_suppresses_directive_after_first_line() {
+        // In a `[comment]` paragraph the first line is still processed, but its
+        // subsequent lines are raw (matching Asciidoctor's one-line
+        // look-ahead). The directive on the second line is left untouched.
+        assert_eq!(
+            conditional_output("[comment]\nfirst line\nifdef::foo[dropped]\n\ntail"),
+            "[comment]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
         );
     }
 
