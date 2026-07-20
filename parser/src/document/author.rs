@@ -56,8 +56,6 @@ impl Author {
         } else if let Some(captures) = AUTHOR.captures(source) {
             // Raw input matches author pattern: Extract components then apply
             // substitutions.
-            let name_without_email = source.split_once('<').unwrap_or((source, "")).0.trim();
-            let name = replace_underscores_with_spaces(name_without_email.to_string());
 
             // Extract raw components first.
             let firstname =
@@ -77,6 +75,11 @@ impl Author {
                 middlename = None;
             }
 
+            // Reconstruct the full name from its parsed parts so that any interior
+            // whitespace that appeared between the names in the source is condensed
+            // to a single space (matching Asciidoctor).
+            let name = join_name_parts(&firstname, middlename.as_deref(), lastname.as_deref());
+
             Some(Self {
                 name,
                 firstname,
@@ -91,13 +94,6 @@ impl Author {
 
             if let Some(captures) = AUTHOR.captures(&expanded_source) {
                 // After expansion, it matches the pattern: Parse normally.
-                let name_without_email = expanded_source
-                    .split_once('<')
-                    .unwrap_or((&expanded_source, ""))
-                    .0
-                    .trim();
-                let name = replace_underscores_with_spaces(name_without_email.to_string());
-
                 let firstname = replace_underscores_with_spaces(captures[1].to_string());
                 let mut middlename = captures
                     .get(2)
@@ -111,6 +107,10 @@ impl Author {
                     lastname = middlename;
                     middlename = None;
                 }
+
+                // Reconstruct the full name from its parsed parts so interior
+                // whitespace between the names is condensed (matching Asciidoctor).
+                let name = join_name_parts(&firstname, middlename.as_deref(), lastname.as_deref());
 
                 Some(Self {
                     name,
@@ -144,26 +144,13 @@ impl Author {
                 })
             }
         } else {
-            // Input doesn't contain attributes and doesn't match pattern: Treat as single
-            // name.
-            let mut name = source.to_string();
-
-            // Apply HTML encoding for unparseable patterns that contain angle brackets.
-            if name.contains('<') && name.contains('>') {
-                let span = crate::Span::new(&name);
-                let mut content = crate::content::Content::from(span);
-                crate::content::SubstitutionStep::SpecialCharacters.apply(
-                    &mut content,
-                    parser,
-                    None,
-                );
-                name = content.rendered().to_string();
-            }
-
-            let name_with_spaces = replace_underscores_with_spaces(name);
+            // Input doesn't contain attributes and doesn't match the author pattern.
+            // Asciidoctor stores the whole line as the author, condensing interior
+            // whitespace and keeping any angle brackets literal.
+            let name = replace_underscores_with_spaces(condense_whitespace(source));
             Some(Self {
-                name: name_with_spaces.clone(),
-                firstname: name_with_spaces,
+                name: name.clone(),
+                firstname: name,
                 middlename: None,
                 lastname: None,
                 email: None,
@@ -250,6 +237,49 @@ fn opt_first_char_or_empty_string(s: Option<&str>) -> String {
 /// Replace underscores with spaces in a name component.
 fn replace_underscores_with_spaces(name: String) -> String {
     name.replace('_', " ")
+}
+
+/// Join an author's parsed name parts with a single space.
+///
+/// Asciidoctor reconstructs the full name from its partitioned parts, which
+/// condenses any interior whitespace that appeared between the names in the
+/// source down to a single space.
+fn join_name_parts(firstname: &str, middlename: Option<&str>, lastname: Option<&str>) -> String {
+    let mut name = String::from(firstname);
+
+    if let Some(middlename) = middlename {
+        name.push(' ');
+        name.push_str(middlename);
+    }
+
+    if let Some(lastname) = lastname {
+        name.push(' ');
+        name.push_str(lastname);
+    }
+
+    name
+}
+
+/// Condense runs of spaces into a single space, mirroring Ruby's
+/// `String#tr_s(' ', ' ')`, which Asciidoctor applies to an author line that
+/// does not match the author pattern.
+fn condense_whitespace(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut prev_was_space = false;
+
+    for c in s.chars() {
+        if c == ' ' {
+            if !prev_was_space {
+                result.push(' ');
+            }
+            prev_was_space = true;
+        } else {
+            result.push(c);
+            prev_was_space = false;
+        }
+    }
+
+    result
 }
 
 static AUTHOR: LazyLock<Regex> = LazyLock::new(|| {

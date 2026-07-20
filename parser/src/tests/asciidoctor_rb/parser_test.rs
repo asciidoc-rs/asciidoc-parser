@@ -985,12 +985,10 @@ fn parse_ideographic_author_names() {
     assert_eq!(a[0].initials, "李四");
 }
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/756):
-// Asciidoctor condenses the interior whitespace of the author name
-// (`Stuart Rackham`); this crate preserves it verbatim in the
-// `name`/`firstname` fields. The parsed name parts and initials still match.
-non_normative!(
-    r#"
+#[test]
+fn parse_author_condenses_whitespace() {
+    verifies!(
+        r#"
   test "parse author condenses whitespace" do
     metadata, _ = parse_header_metadata 'Stuart       Rackham     <founder@asciidoc.org>'
     assert_equal 7, metadata.size
@@ -1004,16 +1002,24 @@ non_normative!(
   end
 
 "#
-);
+    );
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/756):
-// when the author line doesn't match the author regex (here because of the
-// embedded comma), Asciidoctor condenses whitespace and keeps the angle
-// brackets literal, storing the whole line as the author. This crate preserves
-// the interior whitespace and HTML-encodes the angle brackets, so
-// `author`/`firstname` differ (the `S` initial still matches).
-non_normative!(
-    r#"
+    // This crate does not derive the `authors` or `authorcount` attributes, so we
+    // assert on the parsed author directly. The interior whitespace between the
+    // names is condensed to a single space (matching `metadata['author']`).
+    let a = parse_authors("Stuart       Rackham     <founder@asciidoc.org>");
+    assert_eq!(a.len(), 1);
+    assert_eq!(a[0].name, "Stuart Rackham");
+    assert_eq!(a[0].firstname, "Stuart");
+    assert_eq!(a[0].lastname.as_deref(), Some("Rackham"));
+    assert_eq!(a[0].email.as_deref(), Some("founder@asciidoc.org"));
+    assert_eq!(a[0].initials, "SR");
+}
+
+#[test]
+fn parse_invalid_author_line_becomes_author() {
+    verifies!(
+        r#"
   test "parse invalid author line becomes author" do
     metadata, _ = parse_header_metadata '   Stuart       Rackham, founder of AsciiDoc   <founder@asciidoc.org>'
     assert_equal 5, metadata.size
@@ -1025,7 +1031,26 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // The author line doesn't match the author pattern (because of the embedded
+    // comma), so Asciidoctor condenses the interior whitespace and stores the whole
+    // line verbatim as the author, keeping the angle brackets literal.
+    let a = parse_authors("   Stuart       Rackham, founder of AsciiDoc   <founder@asciidoc.org>");
+    assert_eq!(a.len(), 1);
+    assert_eq!(
+        a[0].name,
+        "Stuart Rackham, founder of AsciiDoc <founder@asciidoc.org>"
+    );
+    assert_eq!(
+        a[0].firstname,
+        "Stuart Rackham, founder of AsciiDoc <founder@asciidoc.org>"
+    );
+    assert_eq!(a[0].middlename, None);
+    assert_eq!(a[0].lastname, None);
+    assert_eq!(a[0].email, None);
+    assert_eq!(a[0].initials, "S");
+}
 
 #[test]
 fn parse_multiple_authors() {

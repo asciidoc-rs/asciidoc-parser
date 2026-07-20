@@ -231,8 +231,8 @@ mod tests {
             al,
             AuthorLine {
                 authors: &[Author {
-                    name: "Four Names Not Supported &lt;doc@example.com&gt;",
-                    firstname: "Four Names Not Supported &lt;doc@example.com&gt;",
+                    name: "Four Names Not Supported <doc@example.com>",
+                    firstname: "Four Names Not Supported <doc@example.com>",
                     middlename: None,
                     lastname: None,
                     email: None,
