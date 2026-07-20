@@ -26,25 +26,38 @@ use crate::{
 ///
 /// [include file]: https://docs.asciidoctor.org/asciidoc/latest/directives/include/
 /// [conditional]: https://docs.asciidoctor.org/asciidoc/latest/directives/conditionals/
+///
+/// Thin wrapper retaining the three-value shape used throughout the
+/// preprocessor's own tests, which do not exercise the include registry (the
+/// fourth value). Production parsing calls
+/// [`preprocess_with_initial_file_name`] directly.
+#[cfg(test)]
 pub(crate) fn preprocess(
     source: &str,
     parser: &Parser,
 ) -> (String, SourceMap, Vec<DeferredWarning>) {
-    preprocess_with_initial_file_name(source, parser, parser.primary_file_name.as_deref())
+    let (output, source_map, warnings, _includes) =
+        preprocess_with_initial_file_name(source, parser, parser.primary_file_name.as_deref());
+    (output, source_map, warnings)
 }
 
-/// Like [`preprocess`], but treats `initial_file_name` (rather than the
-/// parser's `primary_file_name`) as the file the top-level `source` came from.
+/// Like `preprocess`, but treats `initial_file_name` (rather than the parser's
+/// `primary_file_name`) as the file the top-level `source` came from.
 ///
 /// This is used to preprocess the content of an AsciiDoc table cell, which the
 /// cell reached from some enclosing file: naming that file lets an unresolved
 /// `include::` directive inside the cell report the correct originating file in
 /// its "Unresolved directive in …" replacement, matching Asciidoctor.
+///
+/// The fourth returned value lists the AsciiDoc files this pass included, each
+/// paired with whether it was included in full; see the `includes` field of
+/// [`PreprocessorState`]. `Parser::parse_deferred` folds these into the
+/// document's [`Catalog`](crate::document::Catalog).
 pub(crate) fn preprocess_with_initial_file_name(
     source: &str,
     parser: &Parser,
     initial_file_name: Option<&str>,
-) -> (String, SourceMap, Vec<DeferredWarning>) {
+) -> (String, SourceMap, Vec<DeferredWarning>, Vec<(String, bool)>) {
     // Short-circuit if the original source document has no pre-processor
     // directives. `if` covers `ifdef`/`ifndef`/`ifeval`; `endif` is checked
     // separately because it does not share that prefix, and a stray `endif`
@@ -65,7 +78,7 @@ pub(crate) fn preprocess_with_initial_file_name(
         && !source.contains("\n\\include::")
         && initial_file_name.is_none()
     {
-        return (source.to_owned(), SourceMap::default(), vec![]);
+        return (source.to_owned(), SourceMap::default(), vec![], vec![]);
     }
 
     // We use a temporary clone of the parser to track document attribute values
@@ -79,7 +92,12 @@ pub(crate) fn preprocess_with_initial_file_name(
     // processed was never closed by a matching `endif`.
     state.emit_unterminated_conditional_warnings();
 
-    (state.output, state.source_map, state.warnings)
+    (
+        state.output,
+        state.source_map,
+        state.warnings,
+        state.includes,
+    )
 }
 
 #[derive(Debug)]
@@ -92,6 +110,18 @@ struct PreprocessorState<'p> {
     output: String,
     source_map: SourceMap,
     warnings: Vec<DeferredWarning>,
+
+    /// AsciiDoc files included while expanding this document, in the order the
+    /// `include::` directives were processed. Each entry pairs the include
+    /// target (relative to the outermost document, AsciiDoc extension removed)
+    /// with whether that directive merged the file *in full* (`true`) or only a
+    /// `lines`/`tag(s)` portion of it (`false`); the same file may appear more
+    /// than once. `Parser::parse_deferred` replays these through
+    /// [`Catalog::register_include`](crate::document::Catalog::register_include),
+    /// which resolves the full/partial value (a full include wins), so an
+    /// inter-document cross reference to an included file can collapse to a
+    /// same-document one.
+    includes: Vec<(String, bool)>,
 
     /// The include-depth limit currently in effect, or `None` when
     /// `max-include-depth` is 0 — which disables the include directive
@@ -194,6 +224,7 @@ impl<'p> PreprocessorState<'p> {
             output: String::new(),
             source_map: SourceMap::default(),
             warnings: vec![],
+            includes: vec![],
             max_include_depth,
             conditional_stack: vec![],
         }
@@ -520,6 +551,22 @@ impl<'p> PreprocessorState<'p> {
                     let content_start = self.output.len();
 
                     if is_asciidoc_file(&target) {
+                        // Register the included AsciiDoc file so an
+                        // inter-document cross reference whose target names it
+                        // can later collapse to a same-document reference (its
+                        // anchors are now part of this document). A `lines` or
+                        // partial `tag(s)` selection records a *partial* include,
+                        // which does not collapse the reference. A file
+                        // included both fully and partially resolves to full;
+                        // that merge is applied by
+                        // [`Catalog::register_include`] when these entries are
+                        // replayed into the catalog.
+                        //
+                        // [`Catalog::register_include`]: crate::document::Catalog::register_include
+                        let full = is_full_include(&attrlist);
+                        self.includes
+                            .push((include_catalog_key(&target).to_string(), full));
+
                         // The directive's `depth` attribute lowers the maximum
                         // include depth while the included file (and anything
                         // it includes) is processed; the previous limit is
@@ -1383,6 +1430,56 @@ fn is_asciidoc_file(target: &str) -> bool {
         // A leading dot (e.g. `.adoc`) denotes a hidden file with no extension.
         Some((stem, ext)) if !stem.is_empty() => ASCIIDOC_EXTENSIONS.contains(&ext),
         _ => false,
+    }
+}
+
+/// The [`Catalog`](crate::document::Catalog) include-registry key for an
+/// AsciiDoc include `target`: the target with its AsciiDoc file extension
+/// removed, matching the path an inter-document xref target interprets to (see
+/// [`interpret_xref_target`](crate::content)). `target` must name an AsciiDoc
+/// file (see [`is_asciidoc_file`]).
+///
+/// The key is the target as written in the `include::` directive, so for an
+/// include in the outermost document it is relative to that document — the
+/// coordinate system an inter-document xref target uses. (A nested include's
+/// target is relative to the file that includes it rather than the outermost
+/// document; the common single-level case, which every collapse test exercises,
+/// is exact.)
+fn include_catalog_key(target: &str) -> &str {
+    // `target` names an AsciiDoc file, so its final `.`-delimited segment is the
+    // extension to strip; only the trailing extension is removed, so a path that
+    // contains a period elsewhere (`using-.net-web-services.adoc`) keeps it.
+    match target.rsplit_once('.') {
+        Some((stem, _ext)) if !stem.is_empty() => stem,
+        _ => target,
+    }
+}
+
+/// Reports whether an `include::` directive with the given attributes merges
+/// the file *in full*, as opposed to selecting only a portion of it.
+///
+/// A `lines` selection is always partial. A `tag(s)` selection is partial too,
+/// except for the `**` wildcard, which selects every line of the file (both
+/// tagged and untagged regions) and so is a full include — matching
+/// Asciidoctor's `catalog[:includes]` bookkeeping.
+fn is_full_include(attrlist: &Attrlist<'_>) -> bool {
+    if attrlist
+        .named_attribute("lines")
+        .map(|a| a.value())
+        .is_some_and(|v| !v.is_empty())
+    {
+        return false;
+    }
+
+    match attrlist
+        .named_attribute("tags")
+        .or_else(|| attrlist.named_attribute("tag"))
+        .map(|a| a.value())
+        .filter(|v| !v.is_empty())
+    {
+        // `tags=**` selects the whole file; any other selection is partial.
+        Some(tags) => tags.trim() == "**",
+        None => true,
     }
 }
 
@@ -3775,5 +3872,70 @@ mod tests {
         assert_eq!(ruby_to_i("abc"), 0);
         assert_eq!(ruby_to_i("-"), 0);
         assert_eq!(ruby_to_i(""), 0);
+    }
+
+    mod include_registry {
+        use super::super::{include_catalog_key, is_full_include};
+        use crate::{
+            Span,
+            attributes::{Attrlist, AttrlistContext},
+            tests::prelude::*,
+        };
+
+        #[test]
+        fn catalog_key_strips_the_asciidoc_extension() {
+            assert_eq!(include_catalog_key("other-chapters.adoc"), "other-chapters");
+            assert_eq!(include_catalog_key("part1/tigers.adoc"), "part1/tigers");
+            assert_eq!(include_catalog_key("../section-a.adoc"), "../section-a");
+            assert_eq!(include_catalog_key("notes.txt"), "notes");
+
+            // Only the trailing extension is removed, so a period elsewhere in
+            // the name is kept.
+            assert_eq!(
+                include_catalog_key("using-.net-web-services.adoc"),
+                "using-.net-web-services"
+            );
+        }
+
+        fn is_full(attrlist_text: &str) -> bool {
+            let parser = Parser::default();
+            let span = Span::new(attrlist_text);
+            let attrlist = Attrlist::parse(span, &parser, AttrlistContext::Inline)
+                .item
+                .item;
+            is_full_include(&attrlist)
+        }
+
+        #[test]
+        fn an_unfiltered_include_is_full() {
+            assert!(is_full(""));
+        }
+
+        #[test]
+        fn a_lines_selection_is_partial() {
+            assert!(!is_full("lines=1..5"));
+
+            // An empty `lines` value selects nothing in particular, so it does
+            // not make the include partial on its own.
+            assert!(is_full("lines="));
+        }
+
+        #[test]
+        fn a_tag_selection_is_partial_unless_it_selects_everything() {
+            assert!(!is_full("tags=ch2"));
+            assert!(!is_full("tag=ch2"));
+            assert!(!is_full("tags=ch2;ch3"));
+
+            // The `**` wildcard selects every line, so it is a full include.
+            assert!(is_full("tags=**"));
+            assert!(is_full("tag=**"));
+        }
+
+        #[test]
+        fn lines_takes_precedence_over_a_whole_file_tag_selection() {
+            // A `lines` selection is partial even when `tags=**` is also present
+            // (`lines` wins, matching the selection the preprocessor applies).
+            assert!(!is_full("lines=1..2,tags=**"));
+        }
     }
 }

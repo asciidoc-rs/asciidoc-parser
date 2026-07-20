@@ -1750,7 +1750,10 @@ fn process_content<'src>(
             // resulting source map: while this cell's owned source is parsed it
             // lets a directive buried deeper (e.g. in a nested table cell) map
             // its position back to the file and line it originally came from.
-            let (expanded, cell_source_map, preprocessor_warnings) =
+            // An AsciiDoc table cell is a nested document with its own catalog,
+            // so any files it includes are not registered on the enclosing
+            // document's include registry (the fourth element is dropped).
+            let (expanded, cell_source_map, preprocessor_warnings, _cell_includes) =
                 preprocess_with_initial_file_name(
                     trimmed.data(),
                     parser,

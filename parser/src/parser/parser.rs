@@ -14,7 +14,7 @@ use crate::{
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
         ResolvedAttributes, SafeMode, SourceLine, SourceMap, SvgFileHandler,
         built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
-        preprocessor::preprocess,
+        preprocessor::preprocess_with_initial_file_name,
     },
     warnings::{Warning, WarningType},
 };
@@ -442,11 +442,24 @@ impl Parser {
     /// [`parse()`]: Self::parse
     /// [`catalog()`]: Document::catalog
     pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
-        let (preprocessed_source, source_map, preprocessor_warnings) = preprocess(source, self);
+        let (preprocessed_source, source_map, preprocessor_warnings, includes) =
+            preprocess_with_initial_file_name(source, self, self.primary_file_name.as_deref());
 
         // NOTE: `Document::parse` will transfer the catalog to itself at the end of the
         // parsing operation. Start each parse with a fresh catalog.
         *self.catalog.borrow_mut() = Catalog::new();
+
+        // Seed the fresh catalog with the files the preprocessor just expanded,
+        // so an inter-document cross reference to an included file can resolve
+        // to an internal anchor while the document is parsed. Replaying each
+        // event lets the catalog resolve a file that was included both fully and
+        // partially to a full include.
+        {
+            let mut catalog = self.catalog.borrow_mut();
+            for (key, full) in includes {
+                catalog.register_include(&key, full);
+            }
+        }
 
         // Start each parse with an empty callout catalog.
         *self.callouts.borrow_mut() = CalloutCatalog::default();
@@ -1474,6 +1487,20 @@ impl Parser {
         } else {
             Some(stem.to_string())
         }
+    }
+
+    /// Returns `true` if the AsciiDoc file named by `key` (an inter-document
+    /// xref path — relative to this document, AsciiDoc extension removed) was
+    /// included into this document *in full* by the preprocessor.
+    ///
+    /// A cross reference to such a file collapses to a same-document reference,
+    /// since the file's anchors are now part of this document. Takes `&self` so
+    /// it can be called from an inline-substitution
+    /// [`Replacer`](regex::Replacer) that holds only a shared reference to
+    /// the parser. See
+    /// [`Catalog::include_is_full`](crate::document::Catalog::include_is_full).
+    pub(crate) fn catalog_include_is_full(&self, key: &str) -> bool {
+        self.catalog.borrow().include_is_full(key)
     }
 
     /// Called from [`Header::parse()`] to accept or reject an attribute value.

@@ -42,9 +42,13 @@
 //!
 //! * **DocBook backend** output — out of scope for this parser crate.
 //! * **Compat mode** — disregarded per the porting conventions.
-//! * **Include processing** (`include::[]`, `catalog[:includes]`) and
-//!   Ruby-internal APIs (`doc.register`, `using_memory_logger`) — not modeled
-//!   the same way here.
+//! * **Ruby-internal APIs** (`doc.register`, `using_memory_logger`) — not
+//!   modeled the same way here.
+//!
+//! The inter-document-xref-to-included-file tests (`catalog[:includes]`) *are*
+//! ported (issue #808): the Ruby suite reads the included files from
+//! `fixturedir`, while these ports serve the same content through an
+//! [`InlineFileHandler`](crate::tests::fixtures::inline_file_handler::InlineFileHandler).
 //! * A number of **other surfaced incompatibilities**, each carrying a `//
 //!   NOTE:` describing how the crate diverges from Asciidoctor.
 
@@ -60,6 +64,27 @@ fn doc_with(src: &str, attrs: &[(&str, &str)]) -> crate::Document<'static> {
     }
     parser.parse(src)
 }
+
+/// Parses `src` with an include handler serving `files`, so an `include::`
+/// directive resolves to inline content. This is the crate's stand-in for
+/// Asciidoctor's `base_dir: fixturedir`, where the Ruby suite reads the same
+/// content from files on disk. `SafeMode::Server` keeps the include directive
+/// enabled (it is disabled at `Secure` and above).
+fn doc_with_includes<const N: usize>(
+    src: &str,
+    files: [(&'static str, &'static str); N],
+) -> crate::Document<'static> {
+    Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(inline_file_handler::InlineFileHandler::from_pairs(files))
+        .parse(src)
+}
+
+/// The `other-chapters.adoc` include used by the inter-document-xref collapse
+/// tests. It defines the `ch2` section (so a full include registers that
+/// anchor) and carries `ch2` and `ch2-noid` tagged regions so a partial include
+/// can select a portion of it.
+const OTHER_CHAPTERS: &str = "[#ch2]\n== Chapter 2\n\n// tag::ch2[]\nThe second chapter.\n// end::ch2[]\n\n// tag::ch2-noid[]\nAn extra note.\n// end::ch2-noid[]\n";
 
 non_normative!(
     r###"
@@ -2658,9 +2683,10 @@ fn xref_using_angled_bracket_syntax_with_path_and_custom_relfilesuffix() {
     );
 }
 
-// Include processing / `catalog[:includes]` is out of scope for this crate.
-non_normative!(
-    r###"
+#[test]
+fn xref_with_path_which_has_been_included_in_this_document() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with path which has been included in this document' do
     using_memory_logger do |logger|
       in_verbose_mode do
@@ -2674,11 +2700,38 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Include processing / `catalog[:includes]` is out of scope for this crate.
-non_normative!(
-    r###"
+    // The Ruby test seeds `catalog[:includes]['tigers']` directly through the
+    // API. This crate populates that registry only from real `include::`
+    // directives, so the equivalent state is reached by actually including
+    // `tigers.adoc` in full — the file does not define the `about` anchor, so
+    // the collapsed reference is still an unresolved (`possible invalid
+    // reference`) one, exactly as in the Ruby test.
+    let doc = doc_with_includes(
+        "<<tigers#about,About Tigers>>\n\ninclude::tigers.adoc[]\n",
+        [("tigers.adoc", "Tigers are big cats.\n")],
+    );
+
+    assert!(doc.catalog().include_is_full("tigers"));
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="#about">About Tigers</a>"##
+    );
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::PossibleInvalidReference("about".to_string())
+    );
+}
+
+#[test]
+fn xref_with_nested_path_which_has_been_included_in_this_document() {
+    verifies!(
+        r###"
   test 'xref using angled bracket syntax with nested path which has been included in this document' do
     using_memory_logger do |logger|
       in_verbose_mode do
@@ -2692,7 +2745,30 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    // As above, the seeded registry entry is reached by a real include; the
+    // nested path is registered under the target as written (`part1/tigers`),
+    // which the inter-document target interprets to the same key.
+    let doc = doc_with_includes(
+        "<<part1/tigers#about,About Tigers>>\n\ninclude::part1/tigers.adoc[]\n",
+        [("part1/tigers.adoc", "Tigers are big cats.\n")],
+    );
+
+    assert!(doc.catalog().include_is_full("part1/tigers"));
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"<a href="#about">About Tigers</a>"##
+    );
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::PossibleInvalidReference("about".to_string())
+    );
+}
 
 #[test]
 fn xref_using_angled_bracket_syntax_inline_with_text() {
@@ -3179,9 +3255,10 @@ fn should_warn_and_create_link_if_verbose_flag_is_set_and_reference_using_hash_n
     assert_eq!(warnings[0].source.line(), 6);
 }
 
-// Include processing / `catalog[:includes]` is out of scope for this crate.
-non_normative!(
-    r###"
+#[test]
+fn internal_anchor_from_inter_document_xref_to_included_file() {
+    verifies!(
+        r###"
   test 'should produce an internal anchor from an inter-document xref to file included into current file' do
     input = <<~'EOS'
     = Book Title
@@ -3205,11 +3282,30 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Include processing / `catalog[:includes]` is out of scope for this crate.
-non_normative!(
-    r###"
+    // The Ruby suite reads `other-chapters.adoc` from `fixturedir`; here the
+    // include handler serves the same content inline.
+    let doc = doc_with_includes(
+        "= Book Title\n:doctype: book\n\n[#ch1]\n== Chapter 1\n\nSo it begins.\n\nRead <<other-chapters.adoc#ch2>> to find out what happens next!\n\ninclude::other-chapters.adoc[]\n",
+        [("other-chapters.adoc", OTHER_CHAPTERS)],
+    );
+
+    // The file was included in full, so it registers as a full include.
+    assert!(doc.catalog().was_included("other-chapters"));
+    assert!(doc.catalog().include_is_full("other-chapters"));
+
+    // The inter-document reference collapses to an internal anchor.
+    assert_eq!(
+        rendered_paragraphs(&doc)[1],
+        r##"Read <a href="#ch2">Chapter 2</a> to find out what happens next!"##
+    );
+}
+
+#[test]
+fn internal_anchor_from_inter_document_xref_to_file_included_entirely_using_tags() {
+    verifies!(
+        r###"
   test 'should produce an internal anchor from an inter-document xref to file included entirely into current file using tags' do
     input = <<~'EOS'
     = Book Title
@@ -3230,11 +3326,26 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Include processing / `catalog[:includes]` is out of scope for this crate.
-non_normative!(
-    r###"
+    // `tags=**` selects every line of the file, so it is a full include.
+    let doc = doc_with_includes(
+        "= Book Title\n:doctype: book\n\n[#ch1]\n== Chapter 1\n\nSo it begins.\n\nRead <<other-chapters.adoc#ch2>> to find out what happens next!\n\ninclude::other-chapters.adoc[tags=**]\n",
+        [("other-chapters.adoc", OTHER_CHAPTERS)],
+    );
+
+    assert!(doc.catalog().include_is_full("other-chapters"));
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[1],
+        r##"Read <a href="#ch2">Chapter 2</a> to find out what happens next!"##
+    );
+}
+
+#[test]
+fn no_internal_anchor_for_inter_document_xref_to_partially_included_file() {
+    verifies!(
+        r###"
   test 'should not produce an internal anchor for inter-document xref to file partially included into current file' do
     input = <<~'EOS'
     = Book Title
@@ -3258,11 +3369,29 @@ non_normative!(
   end
 
 "###
-);
+    );
 
-// Include processing / `catalog[:includes]` is out of scope for this crate.
-non_normative!(
-    r###"
+    // Only the `ch2` region is selected, so the file registers as a *partial*
+    // include and the reference is not collapsed: its derived output path
+    // stands.
+    let doc = doc_with_includes(
+        "= Book Title\n:doctype: book\n\n[#ch1]\n== Chapter 1\n\nSo it begins.\n\nRead <<other-chapters.adoc#ch2,the next chapter>> to find out what happens next!\n\ninclude::other-chapters.adoc[tags=ch2]\n",
+        [("other-chapters.adoc", OTHER_CHAPTERS)],
+    );
+
+    assert!(doc.catalog().was_included("other-chapters"));
+    assert!(!doc.catalog().include_is_full("other-chapters"));
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[1],
+        r##"Read <a href="other-chapters.html#ch2">the next chapter</a> to find out what happens next!"##
+    );
+}
+
+#[test]
+fn internal_anchor_for_inter_document_xref_to_file_included_fully_and_partially() {
+    verifies!(
+        r###"
   test 'should produce an internal anchor for inter-document xref to file included fully and partially' do
     input = <<~'EOS'
     = Book Title
@@ -3288,7 +3417,22 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    // The file is included once in full and once partially (`tag=ch2-noid`);
+    // the full include wins, so the reference collapses to an internal anchor.
+    let doc = doc_with_includes(
+        "= Book Title\n:doctype: book\n\n[#ch1]\n== Chapter 1\n\nSo it begins.\n\nRead <<other-chapters.adoc#ch2,the next chapter>> to find out what happens next!\n\ninclude::other-chapters.adoc[]\n\ninclude::other-chapters.adoc[tag=ch2-noid]\n",
+        [("other-chapters.adoc", OTHER_CHAPTERS)],
+    );
+
+    assert!(doc.catalog().include_is_full("other-chapters"));
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[1],
+        r##"Read <a href="#ch2">the next chapter</a> to find out what happens next!"##
+    );
+}
 
 // NOTE: Asciidoctor emits the `possible invalid reference` message only in
 // verbose (pedantic) mode. This crate has no such mode: an unresolved reference
@@ -3555,9 +3699,10 @@ non_normative!(
 "###
 );
 
-// Include processing / `catalog[:includes]` is out of scope for this crate.
-non_normative!(
-    r###"
+#[test]
+fn internal_anchor_for_inter_document_xref_to_file_outside_base_directory() {
+    verifies!(
+        r###"
   test 'should produce an internal anchor for inter-document xref to file outside of base directory' do
     input = <<~'EOS'
     = Document Title
@@ -3574,7 +3719,24 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    // A file included from outside the base directory registers under the target
+    // as written (`../section-a`), and the reference to it collapses just the
+    // same.
+    let doc = doc_with_includes(
+        "= Document Title\n\nSee <<../section-a.adoc#section-a>>.\n\ninclude::../section-a.adoc[]\n",
+        [("../section-a.adoc", "[#section-a]\n== Section A\n")],
+    );
+
+    assert!(doc.catalog().was_included("../section-a"));
+    assert!(doc.catalog().include_is_full("../section-a"));
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"See <a href="#section-a">Section A</a>."##
+    );
+}
 
 #[test]
 fn xref_uses_title_of_target_as_label_for_forward_and_backward_references_in_html_output() {
