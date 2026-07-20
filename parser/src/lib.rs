@@ -26,7 +26,7 @@ pub use document::Document;
 pub(crate) mod internal;
 
 pub mod parser;
-pub use parser::{Parser, SafeMode};
+pub use parser::{Parser, ReferenceTime, SafeMode};
 
 mod span;
 pub use span::{HasSpan, Span};
