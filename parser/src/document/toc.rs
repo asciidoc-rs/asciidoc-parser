@@ -71,17 +71,32 @@ impl TocMode {
             Some("left") => Self::Left,
             Some("right") => Self::Right,
             Some("preamble") => Self::Preamble,
-            _ => match parser
-                .attribute_value("toc-placement")
-                .as_maybe_str()
-                .map(str::trim)
-            {
-                Some("macro") => Self::Macro,
-                Some("left") => Self::Left,
-                Some("right") => Self::Right,
-                Some("preamble") => Self::Preamble,
-                _ => Self::Auto,
-            },
+            _ => {
+                let placement = parser.attribute_value("toc-placement");
+                match placement.as_maybe_str().map(str::trim) {
+                    Some("macro") => Self::Macro,
+                    Some("left") => Self::Left,
+                    Some("right") => Self::Right,
+                    Some("preamble") => Self::Preamble,
+                    // `toc-placement` carries no recognized placement keyword.
+                    // When it has been *explicitly unset* (via `:toc-placement!:`
+                    // or an API unset) while `toc` is enabled, Asciidoctor's
+                    // placement lookup falls through its `auto` default to a
+                    // `macro` fetch fallback, so the TOC defers to a `toc::[]`
+                    // block macro. (Asciidoctor deletes the attribute's default;
+                    // this crate records the unset as an `Unset` tombstone, which
+                    // `has_attribute` still reports as present — distinguishing it
+                    // from a `toc-placement` that was never set.) A `toc-placement`
+                    // that was never set, or set to any other (bogus) value, falls
+                    // back to an automatic placement.
+                    _ if placement == InterpretedValue::Unset
+                        && parser.has_attribute("toc-placement") =>
+                    {
+                        Self::Macro
+                    }
+                    _ => Self::Auto,
+                }
+            }
         }
     }
 
@@ -255,6 +270,28 @@ mod tests {
         assert_eq!(
             doc_with(":toc:\n:toc-placement: bogus").toc_mode(),
             TocMode::Auto
+        );
+    }
+
+    #[test]
+    fn soft_unset_toc_placement_resolves_to_macro() {
+        // With `toc` enabled, explicitly unsetting `toc-placement` defers the
+        // TOC to a `toc::[]` block macro (Asciidoctor's `macro` fetch fallback),
+        // whereas a `toc-placement` that was never set stays automatic.
+        assert_eq!(doc_with(":toc:").toc_mode(), TocMode::Auto);
+        assert_eq!(
+            doc_with(":toc:\n:toc-placement!:").toc_mode(),
+            TocMode::Macro
+        );
+        assert_eq!(
+            doc_with(":toc:\n:!toc-placement:").toc_mode(),
+            TocMode::Macro
+        );
+        // A placement keyword in the `toc` value still wins over an unset
+        // `toc-placement`.
+        assert_eq!(
+            doc_with(":toc: preamble\n:toc-placement!:").toc_mode(),
+            TocMode::Preamble
         );
     }
 

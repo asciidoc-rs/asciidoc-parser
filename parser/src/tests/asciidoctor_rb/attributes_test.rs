@@ -1538,14 +1538,14 @@ mod assignment {
         // matrix row is exercised here through `toc_mode()` / `toc_class()`,
         // asserting this crate's actual behavior.
         //
-        // Three rows still diverge from Asciidoctor's matrix (and are asserted
+        // Two rows still diverge from Asciidoctor's matrix (and are asserted
         // as this crate's actual behavior): the `toc2` alias is not recognized
-        // (it resolves to `Disabled`, not a left-placed TOC — #748); `toc-class`
-        // is never switched to `toc2` (#749); and a soft-unset `toc-placement!`
-        // (with `toc` set) resolves to `Auto` here rather than Asciidoctor's
-        // `macro` (#750). The `toc toc-placement=macro` row, by contrast, now
-        // matches Asciidoctor (`macro`) since this crate honors an explicit
-        // `toc-placement`.
+        // (it resolves to `Disabled`, not a left-placed TOC — #748) and
+        // `toc-class` is never switched to `toc2` (#749). The
+        // `toc toc-placement=macro` and `toc toc-placement!` rows now match
+        // Asciidoctor (`macro`): this crate honors an explicit `toc-placement`,
+        // and a soft-unset `toc-placement!` with `toc` set defers the TOC to a
+        // `toc::[]` block macro.
         use crate::document::TocMode;
         // Each row is the raw attribute spec (as it appears in the vendored
         // matrix, parsed the same way Ruby does — space-separated entries,
@@ -1562,8 +1562,9 @@ mod assignment {
             ("toc=preamble", TocMode::Preamble),
             ("toc=macro", TocMode::Macro),
             ("toc toc-placement=macro toc-position=left", TocMode::Macro),
-            // Soft-unset `toc-placement!` (#750); Asciidoctor: `macro`.
-            ("toc toc-placement!", TocMode::Auto),
+            // Soft-unset `toc-placement!` with `toc` set defers to a `toc::[]`
+            // macro, matching Asciidoctor (#750).
+            ("toc toc-placement!", TocMode::Macro),
         ];
         for (spec, expected_mode) in rows {
             let mut parser = Parser::default();
