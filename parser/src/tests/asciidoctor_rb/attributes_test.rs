@@ -65,8 +65,7 @@
 //! * Multi-line attribute values fuse only the modern backslash continuation,
 //!   not the legacy `+`, so a legacy `+`-continued value keeps only its first
 //!   line.
-//! * Non-ASCII attribute names, names with spaces, and named tokens beginning
-//!   with `_` or containing `.` are not accepted.
+//! * Non-ASCII attribute names and names with spaces are not accepted.
 //! * A counter modifies a locked (API-set or built-in) attribute rather than
 //!   leaving it unchanged.
 //! * The derived `backend*` / `basebackend*` / `filetype*` / `outfilesuffix` /
@@ -3212,10 +3211,9 @@ mod block_attributes {
             .map(|a| a.value())
     }
 
-    // Tracked in #727.
     #[test]
     fn parses_attribute_names_as_name_token() {
-        non_normative!(
+        verifies!(
             r#"
     test 'parses attribute names as name token' do
       input = <<~'EOS'
@@ -3237,16 +3235,12 @@ mod block_attributes {
         let doc = Parser::default().parse(
             "[normal,foo=\"bar\",_foo=\"_bar\",foo1=\"bar1\",foo-foo=\"bar-bar\",foo.foo=\"bar.bar\"]\ncontent",
         );
-        // Divergence: this crate does not accept attribute names that begin with
-        // `_` or contain `.` (`_foo`, `foo.foo`) as named tokens, so those
-        // entries are not recognized. `foo`, `foo1`, and `foo-foo` parse as
-        // expected.
         let block = first_block(&doc);
         assert_eq!(named(block, "foo"), Some("bar"));
+        assert_eq!(named(block, "_foo"), Some("_bar"));
         assert_eq!(named(block, "foo1"), Some("bar1"));
         assert_eq!(named(block, "foo-foo"), Some("bar-bar"));
-        assert_eq!(named(block, "_foo"), None);
-        assert_eq!(named(block, "foo.foo"), None);
+        assert_eq!(named(block, "foo.foo"), Some("bar.bar"));
     }
 
     #[test]
