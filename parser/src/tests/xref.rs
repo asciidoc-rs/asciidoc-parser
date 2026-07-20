@@ -1169,11 +1169,10 @@ mod xrefs_in_titles {
 
     #[test]
     fn resolver_chosen_text_wins_over_the_local_title() {
-        // A caller-supplied resolver (e.g. a multi-document index) may map a
-        // target to its own destination *and* display text, even when this
-        // document also has a title under that ID. The resolver's choice wins;
-        // the locally computed title only replaces text that echoes the
-        // catalog's frozen reference text.
+        // A caller-supplied resolver may resolve a target to its local `#id`
+        // destination while choosing its own display text (e.g. a curated
+        // index label). The resolver's choice wins; the locally computed title
+        // only replaces text that echoes the catalog's frozen reference text.
         struct BespokeResolver;
 
         impl crate::parser::ReferenceResolver for BespokeResolver {
@@ -1183,7 +1182,7 @@ mod xrefs_in_titles {
             ) -> Option<crate::parser::ResolvedReference> {
                 (context.target == "b").then(|| {
                     crate::parser::ResolvedReference::new(
-                        "other-doc.html#b".to_string(),
+                        "#b".to_string(),
                         Some("Bespoke Text".to_string()),
                     )
                 })
@@ -1210,7 +1209,7 @@ mod xrefs_in_titles {
 
         assert_eq!(
             sections[0].section_title(),
-            r##"See <a href="other-doc.html#b">Bespoke Text</a>"##
+            r##"See <a href="#b">Bespoke Text</a>"##
         );
     }
 
@@ -1253,5 +1252,64 @@ mod xrefs_in_titles {
         let mut targets: Vec<_> = warnings.iter().map(|w| w.target.as_str()).collect();
         targets.sort_unstable();
         assert_eq!(targets, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn external_href_with_coinciding_text_is_not_given_the_local_title() {
+        // A resolver may map a target to an *external* destination while
+        // choosing display text that happens to equal this document's frozen
+        // reference text for the same ID. Resolver ownership cannot be
+        // inferred from text equality; the local title applies only when the
+        // reference's destination is the local target itself, so the external
+        // reference is kept exactly as the resolver returned it.
+        struct ExternalResolver;
+
+        impl crate::parser::ReferenceResolver for ExternalResolver {
+            fn resolve(
+                &self,
+                context: &crate::parser::ResolutionContext<'_>,
+            ) -> Option<crate::parser::ResolvedReference> {
+                match context.target {
+                    // The external destination, with text that coincides with
+                    // this document's frozen (parse-time) reftext for `b`.
+                    "b" => Some(crate::parser::ResolvedReference::new(
+                        "other.html#b".to_string(),
+                        Some(r##"B <a href="#c">[c]</a>"##.to_string()),
+                    )),
+                    "c" => Some(crate::parser::ResolvedReference::new(
+                        "#c".to_string(),
+                        Some("C".to_string()),
+                    )),
+                    _ => None,
+                }
+            }
+        }
+
+        let mut doc =
+            Parser::default().parse_deferred("== See <<b>>\n\n[#b]\n== B <<c>>\n\n[#c]\n== C");
+
+        doc.resolve_references(
+            &ExternalResolver,
+            &crate::parser::HtmlSubstitutionRenderer {},
+        );
+
+        let sections: Vec<_> = doc
+            .nested_blocks()
+            .filter_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // The resolver's text is kept (nested anchors dropped at render time);
+        // had the local title been spliced in, the link text would instead be
+        // the freshly computed `B C`.
+        assert_eq!(
+            sections[0].section_title(),
+            r##"See <a href="other.html#b">B [c]</a>"##
+        );
     }
 }

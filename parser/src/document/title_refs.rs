@@ -217,16 +217,22 @@ fn compute<'src>(
         let has_explicit_text = xref.provided_text.as_deref().is_some_and(|t| !t.is_empty());
 
         // The resolver is authoritative: only a reference it resolved is
-        // eligible for local title text, and a display text the resolver chose
-        // itself (e.g. an Antora-style resolver mapping the target to another
-        // document) is kept. The locally computed title only replaces text
-        // that is absent or that merely echoes the catalog's frozen
+        // eligible for local title text, and then only when its destination is
+        // the local target itself (the `#id` fragment). A resolver that mapped
+        // the target anywhere else — e.g. an Antora-style resolver pointing at
+        // another document — keeps its result untouched, even when its display
+        // text happens to coincide with this document's reference text.
+        //
+        // For a locally-resolved reference, a display text the resolver chose
+        // itself is likewise kept; the locally computed title only replaces
+        // text that is absent or that merely echoes the catalog's frozen
         // (parse-time) reference text — the stale value this pass exists to
         // correct.
         if !has_explicit_text
             && let Some(reference) = resolved.as_mut()
             && let Some(target_id) = lookup_id(catalog, &xref.target)
             && let Some(&(target_index, target_node)) = id_to_node.get(target_id.as_str())
+            && reference.href.strip_prefix('#') == Some(target_id.as_str())
         {
             let catalog_reftext = catalog
                 .get_ref(&target_id)
