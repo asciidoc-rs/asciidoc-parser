@@ -112,46 +112,53 @@ impl<'src> Header<'src> {
             } else if title.is_none()
                 && line.starts_with('[')
                 && line.ends_with(']')
-                && document_title_marker(line_mi.after.take_normalized_line().item).is_some()
-                && let Some((metadata, metadata_warnings)) =
-                    parse_document_metadata_attrlist(line, parser)
+                && let Some((after_metadata, metadata_list, metadata_warnings)) =
+                    collect_document_metadata_lines(line, line_mi.after, parser)
             {
                 warnings.extend(metadata_warnings);
-                // A block attribute line directly above the document title assigns
-                // metadata to the *document* — its `id`, `reftext`, `role`, and
-                // options — mirroring Asciidoctor's `parse_document_header`. Each
-                // recognized value folds into the document's attributes at this
-                // point in the header, so it follows document order alongside any
-                // equivalent header attribute entry (e.g. `:reftext:`).
+                // One or more consecutive block attribute lines directly above the
+                // document title assign metadata to the *document* — its `id`,
+                // `reftext`, `role`, and options — mirroring Asciidoctor's
+                // `parse_block_metadata_lines`, which accumulates every such line
+                // above the doctitle. Each recognized value folds into the
+                // document's attributes at this point in the header, in document
+                // order, alongside any equivalent header attribute entry (e.g.
+                // `:reftext:`).
                 //
                 // A `separator` sets the subtitle separator; it behaves exactly
                 // like assigning the `title-separator` document attribute here, so
                 // both mechanisms share the same partitioning logic.
                 //
-                // The line is only intercepted when a document title immediately
-                // follows; otherwise it is block metadata for the body (e.g. a
-                // table's `separator`) and is left for the block parser.
-                if let Some(doc_id) = metadata.id {
-                    id = Some(doc_id);
+                // The run is only intercepted when a document title eventually
+                // follows it; otherwise the lines are block metadata for the body
+                // (e.g. a table's `separator`) and are left for the block parser.
+                // When several lines set the same value, the later line wins
+                // (document order); options accumulate across the run.
+                for metadata in metadata_list {
+                    if let Some(doc_id) = metadata.id {
+                        id = Some(doc_id);
+                    }
+                    if let Some(separator) = metadata.separator {
+                        parser.set_attribute_by_value_from_header("title-separator", separator);
+                    }
+                    if let Some(reftext) = metadata.reftext {
+                        parser.set_attribute_by_value_from_header("reftext", reftext);
+                    }
+                    if !metadata.roles.is_empty() {
+                        // Fold the role(s) into the `role` document attribute
+                        // (space-joined, as Asciidoctor stores `attributes['role']`)
+                        // and also retain them on the header so `Document::roles()`
+                        // agrees with the document attribute (see #820). A later
+                        // line's roles replace an earlier line's, matching the
+                        // last-wins document order used for the other values.
+                        parser.set_attribute_by_value_from_header("role", metadata.roles.join(" "));
+                        roles = metadata.roles;
+                    }
+                    for option in metadata.options {
+                        parser.set_attribute_by_value_from_header(format!("{option}-option"), "");
+                    }
                 }
-                if let Some(separator) = metadata.separator {
-                    parser.set_attribute_by_value_from_header("title-separator", separator);
-                }
-                if let Some(reftext) = metadata.reftext {
-                    parser.set_attribute_by_value_from_header("reftext", reftext);
-                }
-                if !metadata.roles.is_empty() {
-                    // Fold the role(s) into the `role` document attribute
-                    // (space-joined, as Asciidoctor stores `attributes['role']`)
-                    // and also retain them on the header so `Document::roles()`
-                    // agrees with the document attribute (see #820).
-                    parser.set_attribute_by_value_from_header("role", metadata.roles.join(" "));
-                    roles = metadata.roles;
-                }
-                for option in metadata.options {
-                    parser.set_attribute_by_value_from_header(format!("{option}-option"), "");
-                }
-                source = line_mi.after;
+                source = after_metadata;
             } else if title.is_none()
                 && let Some(marker) = document_title_marker(line)
             {
@@ -388,6 +395,78 @@ struct DocumentMetadata {
     reftext: Option<String>,
     roles: Vec<String>,
     options: Vec<String>,
+}
+
+/// Collect the run of consecutive block attribute lines that sits directly
+/// above the document title, folding each line into [`DocumentMetadata`].
+///
+/// `first_line` is the block attribute line the caller has already matched (it
+/// begins with `[` and ends with `]`); `after_first` is the source immediately
+/// following it. Subsequent lines are consumed as long as each is itself a
+/// well-formed block attribute list, mirroring Asciidoctor's
+/// `parse_block_metadata_lines`, which accumulates every metadata line above
+/// the doctitle.
+///
+/// Returns `Some((after_metadata, metadata_list, warnings))` — where
+/// `after_metadata` is the source positioned at the document title line (the
+/// title itself is left for the caller to parse) and `metadata_list` holds one
+/// entry per line in document order — only when a document title eventually
+/// follows the run. Returns `None` when any line in the run is not a
+/// well-formed block attribute list (e.g. a `[[anchor]]` or a leading-space
+/// form) or when the run is not followed by a document title, so the caller
+/// falls through to its normal handling (which then terminates the header or
+/// leaves the lines for the block parser).
+fn collect_document_metadata_lines<'src>(
+    first_line: Span<'src>,
+    after_first: Span<'src>,
+    parser: &Parser,
+) -> Option<(Span<'src>, Vec<DocumentMetadata>, Vec<Warning<'src>>)> {
+    // First scan forward over the run of consecutive `[…]` lines *without*
+    // parsing their attribute lists. Parsing evaluates substitutions (a value
+    // may contain a `{counter:…}` reference, for instance), so it must not
+    // happen until a document title is known to close the run; a run that is
+    // not terminated by a title is block metadata for the body and is left
+    // untouched for the block parser.
+    let mut candidate_lines: Vec<Span<'src>> = vec![first_line];
+    let mut rest = after_first;
+
+    loop {
+        let next_mi = rest.take_normalized_line();
+        let next_line = next_mi.item;
+
+        if document_title_marker(next_line).is_some() {
+            // A document title closes the run; `rest` points at the title line.
+            break;
+        }
+
+        if next_line.starts_with('[') && next_line.ends_with(']') {
+            // Another block attribute line stacks above the title; fold it too.
+            candidate_lines.push(next_line);
+            rest = next_mi.after;
+            continue;
+        }
+
+        // The run is followed by neither another block attribute line nor a
+        // document title, so it is not document metadata.
+        return None;
+    }
+
+    // A document title closes the run: now parse each collected line into
+    // metadata. If any line is not a well-formed block attribute list (e.g. a
+    // `[[anchor]]` or a leading-space form), the whole run is rejected and the
+    // caller falls through, terminating the header as before.
+    let mut metadata_list: Vec<DocumentMetadata> = vec![];
+    let mut warnings: Vec<Warning<'src>> = vec![];
+
+    for line in candidate_lines {
+        let (metadata, mut line_warnings) = parse_document_metadata_attrlist(line, parser)?;
+        metadata_list.push(metadata);
+        warnings.append(&mut line_warnings);
+    }
+
+    // `rest` is positioned at the document title line; leave it for the caller
+    // to parse on the next iteration of the header loop.
+    Some((rest, metadata_list, warnings))
 }
 
 /// Parse a block attribute line (e.g. `[reftext="…"]`, `[#id]`, `[role=…]`,
@@ -1222,6 +1301,65 @@ mod tests {
         // The longhand `[id=…]` form is equivalent.
         let doc = Parser::default().parse("[id=docid]\n= Document Title");
         assert_eq!(doc.header().id(), Some("docid"));
+    }
+
+    #[test]
+    fn stacked_block_attributes_above_title() {
+        // Several consecutive block attribute lines above the document title are
+        // all folded into document metadata (matching Asciidoctor's
+        // `parse_block_metadata_lines`), and the title that follows the run is
+        // still recognized rather than lost.
+        let doc = Parser::default()
+            .parse("[#docid]\n[reftext=\"Links and Stuff\"]\n= Links & Stuff\n\nBody.");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Links &amp; Stuff"));
+        assert_eq!(header.id(), Some("docid"));
+        assert_eq!(doc.id(), Some("docid"));
+        assert_eq!(
+            doc.attribute_value("reftext"),
+            InterpretedValue::Value("Links and Stuff")
+        );
+        assert_eq!(rendered_paragraphs(&doc), vec!["Body."]);
+    }
+
+    #[test]
+    fn stacked_block_attributes_accumulate_options() {
+        // Options accumulate across every block attribute line in the run above
+        // the title, while a repeated single-valued attribute (here the ID)
+        // takes its last-specified value in document order.
+        let doc = Parser::default().parse("[%noheader]\n[#final]\n[%autowidth]\n= Document Title");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Document Title"));
+        assert_eq!(header.id(), Some("final"));
+        assert!(doc.is_attribute_set("noheader-option"));
+        assert!(doc.is_attribute_set("autowidth-option"));
+    }
+
+    #[test]
+    fn stacked_block_attributes_without_title_terminate_header() {
+        // A run of block attribute lines that is *not* followed by a document
+        // title is not folded as document metadata: the header terminates and no
+        // title is recognized, mirroring the single-line behavior.
+        let doc = Parser::default().parse("[#docid]\n[reftext=\"X\"]\n\nBody.");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.id(), None);
+        assert_eq!(doc.attribute_value("reftext"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn stacked_block_attributes_reject_embedded_anchor() {
+        // A legacy `[[anchor]]` embedded in the run is not a well-formed block
+        // attribute list above the title, so the whole run is rejected and the
+        // header terminates without recovering the title.
+        let doc = Parser::default().parse("[#docid]\n[[anchor]]\n= Document Title");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.id(), None);
     }
 
     #[test]
