@@ -209,10 +209,10 @@ impl<'src> SectionBlock<'src> {
         // a section, so it keeps its title. See `Block::parse_internal` for the
         // claiming side.
         if !discrete && let Some(title) = metadata.title.as_ref() {
-            // The carried title is stashed as its already-rendered string; a
-            // cross-reference in a title carried across a section heading is not
-            // re-resolved for the claiming block (a rare corner).
-            parser.pending_block_title = Some(title.rendered_str().to_string());
+            // The carried title travels as an owned snapshot, keeping any
+            // deferred cross-references so an embedded `<<id>>` still resolves
+            // for the claiming block once the catalog is complete.
+            parser.pending_block_title = Some(title.to_owned_title());
         }
 
         let mut maw_blocks = parse_blocks_until(

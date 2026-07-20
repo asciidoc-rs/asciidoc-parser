@@ -297,9 +297,10 @@ impl<'src> Block<'src> {
         if let Some(pending_title) = parser.pending_block_title.take()
             && metadata.title.is_none()
         {
-            // The carried title arrives already rendered; wrap it as a
-            // cross-reference-free `Content` anchored at the block's start.
-            metadata.title = Some(crate::content::Content::from_filtered(
+            // The carried title arrives as an owned snapshot; rebuild it as a
+            // `Content` anchored at the block's start, restoring any deferred
+            // cross-references so the title pass can still resolve them.
+            metadata.title = Some(crate::content::Content::from_owned_title(
                 metadata.block_start,
                 pending_title,
             ));

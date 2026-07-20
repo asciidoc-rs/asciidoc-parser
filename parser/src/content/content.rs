@@ -165,6 +165,27 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     out
 }
 
+/// A fully-owned snapshot of a rendered title, including any deferred
+/// cross-references it carries.
+///
+/// A block title stashed across a section heading (see
+/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] — the
+/// parser it rides on has no `'src` lifetime — so the title travels in this
+/// owned form and is rebuilt into a [`Content`] (via
+/// [`Content::from_owned_title`]) when the next block claims it. Carrying the
+/// deferred template and cross-references along means an embedded `<<id>>`
+/// still resolves once the catalog is complete.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct OwnedTitle {
+    /// The rendered title text (the unresolved-fallback rendering when
+    /// cross-references are present).
+    rendered: String,
+
+    /// The placeholder template and cross-references, when the title carries
+    /// any; `None` for the (overwhelmingly common) cross-reference-free title.
+    deferred: Option<(String, Vec<XrefSegment>)>,
+}
+
 impl<'src> Content<'src> {
     /// Constructs a `Content` from a source `Span` and a potentially-filtered
     /// view of that source text.
@@ -174,6 +195,33 @@ impl<'src> Content<'src> {
             rendered: filtered.as_ref().to_string().into(),
             source_lines: None,
             deferred: None,
+        }
+    }
+
+    /// Returns a fully-owned snapshot of this content's rendered text and
+    /// deferred cross-references, for a title that must outlive its source
+    /// borrow (see [`OwnedTitle`]).
+    pub(crate) fn to_owned_title(&self) -> OwnedTitle {
+        OwnedTitle {
+            rendered: self.rendered.as_ref().to_string(),
+            deferred: self
+                .deferred
+                .as_ref()
+                .map(|d| (d.template.clone(), d.xrefs.clone())),
+        }
+    }
+
+    /// Reconstitutes a [`Content`] from an [`OwnedTitle`] snapshot, anchored at
+    /// `span`. The deferred cross-references (when present) are restored, so
+    /// the document-order title pass can still resolve them.
+    pub(crate) fn from_owned_title(span: Span<'src>, title: OwnedTitle) -> Self {
+        Self {
+            original: span,
+            rendered: title.rendered.into(),
+            source_lines: None,
+            deferred: title
+                .deferred
+                .map(|(template, xrefs)| Box::new(DeferredContent { template, xrefs })),
         }
     }
 

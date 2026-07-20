@@ -146,11 +146,13 @@ pub struct Parser {
     /// stashing section ends. A block with a title of its own wins over the
     /// carried title, which is then discarded.
     ///
-    /// Only the rendered title is carried (this struct is lifetime-free and
-    /// cannot hold the `.Title` line's source span), so a block claiming a
+    /// The title is carried as an owned snapshot (this struct is lifetime-free
+    /// and cannot hold the `.Title` line's source span), so a block claiming a
     /// carried title has no `title_source` — the same shape as a title
-    /// supplied via a `title=` attribute.
-    pub(crate) pending_block_title: Option<String>,
+    /// supplied via a `title=` attribute. The snapshot keeps any deferred
+    /// cross-references, so an embedded `<<id>>` in a carried title still
+    /// resolves once the catalog is complete.
+    pub(crate) pending_block_title: Option<crate::content::OwnedTitle>,
 
     /// Live values of [counter] attributes, keyed by counter name (e.g.
     /// `index`, `example-number`, `table-number`).

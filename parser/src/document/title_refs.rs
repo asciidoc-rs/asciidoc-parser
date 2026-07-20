@@ -27,10 +27,7 @@ use crate::{
     blocks::{Block, IsBlock},
     content::{XrefSegment, render_xref_template},
     document::Catalog,
-    parser::{
-        InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
-        ResolvedReference,
-    },
+    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext},
 };
 
 /// One title carrying cross-references, captured for the resolution pass.
@@ -219,35 +216,48 @@ fn compute<'src>(
         // cycle). Empty explicit text (`<<id,>>`) is treated as absent.
         let has_explicit_text = xref.provided_text.as_deref().is_some_and(|t| !t.is_empty());
 
+        // The resolver is authoritative: only a reference it resolved is
+        // eligible for local title text, and a display text the resolver chose
+        // itself (e.g. an Antora-style resolver mapping the target to another
+        // document) is kept. The locally computed title only replaces text
+        // that is absent or that merely echoes the catalog's frozen
+        // (parse-time) reference text — the stale value this pass exists to
+        // correct.
         if !has_explicit_text
+            && let Some(reference) = resolved.as_mut()
             && let Some(target_id) = lookup_id(catalog, &xref.target)
             && let Some(&(target_index, target_node)) = id_to_node.get(target_id.as_str())
         {
-            // The target's reference text is its own (resolved) title. Recurse,
-            // unless the target is mid-computation — a cycle — in which case its
-            // link text is the bracketed fallback.
-            let target_in_progress = in_progress.get(target_index).copied().unwrap_or(false);
-            let text = if target_in_progress {
-                None
-            } else {
-                Some(compute(
-                    target_index,
-                    target_node,
-                    id_to_node,
-                    catalog,
-                    resolver,
-                    renderer,
-                    memo,
-                    in_progress,
-                    warnings,
-                ))
-            };
+            let catalog_reftext = catalog
+                .get_ref(&target_id)
+                .and_then(|entry| entry.reftext.as_deref());
 
-            let mut reference = resolved
-                .take()
-                .unwrap_or_else(|| ResolvedReference::new(format!("#{target_id}"), None));
-            reference.text = text;
-            resolved = Some(reference);
+            let resolver_chose_text = reference
+                .text
+                .as_deref()
+                .is_some_and(|text| Some(text) != catalog_reftext);
+
+            if !resolver_chose_text {
+                // The target's reference text is its own (resolved) title.
+                // Recurse, unless the target is mid-computation — a cycle — in
+                // which case its link text is the bracketed fallback.
+                let target_in_progress = in_progress.get(target_index).copied().unwrap_or(false);
+                reference.text = if target_in_progress {
+                    None
+                } else {
+                    Some(compute(
+                        target_index,
+                        target_node,
+                        id_to_node,
+                        catalog,
+                        resolver,
+                        renderer,
+                        memo,
+                        in_progress,
+                        warnings,
+                    ))
+                };
+            }
         }
 
         // A target that resolved to nothing — and did not carry its own derived

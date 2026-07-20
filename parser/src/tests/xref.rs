@@ -1149,4 +1149,109 @@ mod xrefs_in_titles {
         assert_eq!(sections[0].section_title(), r##"See <a href="#a">A B</a>"##);
         assert_eq!(sections[1].section_title(), r##"A <a href="#b">B</a>"##);
     }
+
+    #[test]
+    fn title_carried_across_a_section_heading_still_resolves_its_xref() {
+        // A `.Title` above a section heading does not become the section's
+        // title; it is carried to the section's first child block. The carried
+        // title keeps its deferred cross-reference, so the forward reference
+        // still resolves once `goal` is defined.
+        let doc = Parser::default().parse(".See <<goal>>\n== Section\n\npara\n\n[#goal]\n== Goal");
+
+        let section = crate::tests::prelude::first_section(&doc);
+        let para = section
+            .nested_blocks()
+            .next()
+            .expect("expected the section's first child block");
+
+        assert_eq!(para.title(), Some(r##"See <a href="#goal">Goal</a>"##));
+    }
+
+    #[test]
+    fn resolver_chosen_text_wins_over_the_local_title() {
+        // A caller-supplied resolver (e.g. a multi-document index) may map a
+        // target to its own destination *and* display text, even when this
+        // document also has a title under that ID. The resolver's choice wins;
+        // the locally computed title only replaces text that echoes the
+        // catalog's frozen reference text.
+        struct BespokeResolver;
+
+        impl crate::parser::ReferenceResolver for BespokeResolver {
+            fn resolve(
+                &self,
+                context: &crate::parser::ResolutionContext<'_>,
+            ) -> Option<crate::parser::ResolvedReference> {
+                (context.target == "b").then(|| {
+                    crate::parser::ResolvedReference::new(
+                        "other-doc.html#b".to_string(),
+                        Some("Bespoke Text".to_string()),
+                    )
+                })
+            }
+        }
+
+        let mut doc = Parser::default().parse_deferred("== See <<b>>\n\n[#b]\n== B <<missing>>");
+
+        doc.resolve_references(
+            &BespokeResolver,
+            &crate::parser::HtmlSubstitutionRenderer {},
+        );
+
+        let sections: Vec<_> = doc
+            .nested_blocks()
+            .filter_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(
+            sections[0].section_title(),
+            r##"See <a href="other-doc.html#b">Bespoke Text</a>"##
+        );
+    }
+
+    #[test]
+    fn a_target_the_resolver_does_not_know_stays_unresolved_in_a_title() {
+        // When a caller-supplied resolver cannot resolve a target, the title's
+        // reference stays a bracketed fallback and is reported — even though
+        // this document's own catalog knows the ID. The resolver is
+        // authoritative, matching how body content is resolved.
+        struct KnowsNothing;
+
+        impl crate::parser::ReferenceResolver for KnowsNothing {
+            fn resolve(
+                &self,
+                _context: &crate::parser::ResolutionContext<'_>,
+            ) -> Option<crate::parser::ResolvedReference> {
+                None
+            }
+        }
+
+        let mut doc = Parser::default().parse_deferred("== See <<b>>\n\n[#b]\n== B <<c>>");
+
+        let warnings =
+            doc.resolve_references(&KnowsNothing, &crate::parser::HtmlSubstitutionRenderer {});
+
+        let sections: Vec<_> = doc
+            .nested_blocks()
+            .filter_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(sections[0].section_title(), r##"See <a href="#b">[b]</a>"##);
+
+        // Both title references (`b` and `c`) are reported unresolved.
+        let mut targets: Vec<_> = warnings.iter().map(|w| w.target.as_str()).collect();
+        targets.sort_unstable();
+        assert_eq!(targets, vec!["b", "c"]);
+    }
 }
