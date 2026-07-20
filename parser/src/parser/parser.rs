@@ -1503,6 +1503,19 @@ impl Parser {
         self.catalog.borrow().include_is_full(key)
     }
 
+    /// Records an included AsciiDoc file in the document catalog's include
+    /// registry, mid-parse.
+    ///
+    /// `Parser::parse_deferred` seeds the registry with the outermost
+    /// document's own includes before parsing begins; this entry point is for
+    /// an include performed while a nested scope with a shared catalog — an
+    /// AsciiDoc table cell — is parsed. Takes `&self` for the same reason as
+    /// [`catalog_include_is_full`](Self::catalog_include_is_full). See
+    /// [`Catalog::register_include`](crate::document::Catalog::register_include).
+    pub(crate) fn register_include(&self, key: &str, full: bool) {
+        self.catalog.borrow_mut().register_include(key, full);
+    }
+
     /// Called from [`Header::parse()`] to accept or reject an attribute value.
     ///
     /// [`Header::parse()`]: crate::document::Header::parse

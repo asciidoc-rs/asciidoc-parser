@@ -103,16 +103,22 @@ struct PreprocessorState<'p> {
     source_map: SourceMap,
     warnings: Vec<DeferredWarning>,
 
-    /// AsciiDoc files included while expanding this document, in the order the
-    /// `include::` directives were processed. Each entry pairs the include
-    /// target (relative to the outermost document, AsciiDoc extension removed)
-    /// with whether that directive merged the file *in full* (`true`) or only a
-    /// `lines`/`tag(s)` portion of it (`false`); the same file may appear more
-    /// than once. `Parser::parse_deferred` replays these through
+    /// AsciiDoc files included by directives written in the outermost document,
+    /// in the order the `include::` directives were processed. Each entry pairs
+    /// the include target (relative to the outermost document, AsciiDoc
+    /// extension removed) with whether that directive merged the file *in full*
+    /// (`true`) or only a `lines`/`tag(s)` portion of it (`false`); the same
+    /// file may appear more than once. `Parser::parse_deferred` replays these
+    /// through
     /// [`Catalog::register_include`](crate::document::Catalog::register_include),
     /// which resolves the full/partial value (a full include wins), so an
     /// inter-document cross reference to an included file can collapse to a
     /// same-document one.
+    ///
+    /// A directive in a *nested* include (depth 2 and below) is not recorded:
+    /// its target is relative to the file containing it, not the outermost
+    /// document, so registering it as written could falsely collapse a
+    /// root-relative xref that names a different file.
     includes: Vec<(String, bool)>,
 
     /// The include-depth limit currently in effect, or `None` when
@@ -554,10 +560,22 @@ impl<'p> PreprocessorState<'p> {
                         // [`Catalog::register_include`] when these entries are
                         // replayed into the catalog.
                         //
+                        // Only a directive written in the *outermost* document
+                        // (depth 1) is recorded: its target is already in the
+                        // coordinate system an inter-document xref target uses.
+                        // A nested include's target is relative to the file
+                        // containing it, so registering it as written could
+                        // collide with — and falsely collapse — a root-relative
+                        // xref that names a different file. A nested include is
+                        // therefore not recorded at all: an xref to it keeps
+                        // its ordinary inter-document destination.
+                        //
                         // [`Catalog::register_include`]: crate::document::Catalog::register_include
-                        let full = is_full_include(&attrlist);
-                        self.includes
-                            .push((include_catalog_key(&target).to_string(), full));
+                        if self.include_depth == 1 {
+                            let full = is_full_include(&attrlist);
+                            self.includes
+                                .push((include_catalog_key(&target).to_string(), full));
+                        }
 
                         // The directive's `depth` attribute lowers the maximum
                         // include depth while the included file (and anything
@@ -1431,12 +1449,10 @@ fn is_asciidoc_file(target: &str) -> bool {
 /// [`interpret_xref_target`](crate::content)). `target` must name an AsciiDoc
 /// file (see [`is_asciidoc_file`]).
 ///
-/// The key is the target as written in the `include::` directive, so for an
-/// include in the outermost document it is relative to that document — the
-/// coordinate system an inter-document xref target uses. (A nested include's
-/// target is relative to the file that includes it rather than the outermost
-/// document; the common single-level case, which every collapse test exercises,
-/// is exact.)
+/// The key is the target as written in the `include::` directive. Only
+/// directives written in the outermost document are registered (see the
+/// `includes` field of [`PreprocessorState`]), so the key is always relative to
+/// that document — the coordinate system an inter-document xref target uses.
 fn include_catalog_key(target: &str) -> &str {
     // `target` names an AsciiDoc file, so its final `.`-delimited segment is the
     // extension to strip; only the trailing extension is removed, so a path that

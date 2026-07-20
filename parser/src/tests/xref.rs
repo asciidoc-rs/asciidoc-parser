@@ -888,4 +888,63 @@ mod included_file_collapses_to_internal_anchor {
             r#"Read <a href="other-chapters.html#ch2">the next chapter</a> next!"#
         );
     }
+
+    #[test]
+    fn a_nested_include_does_not_register_and_cannot_falsely_collapse() {
+        // The root document includes `part1/chapters.adoc`, which itself
+        // includes `intro.adoc` — a target relative to *that* file, i.e.
+        // `part1/intro.adoc` on disk. Registering it under the key `intro`
+        // would collide with the root-relative path of a *different* file, so
+        // a root-level `<<intro.adoc#…>>` would falsely collapse to an
+        // internal anchor. A nested include is therefore not registered at
+        // all, and the reference keeps its inter-document output path.
+        let handler = InlineFileHandler::from_pairs([
+            (
+                "part1/chapters.adoc",
+                "== Chapters\n\ninclude::intro.adoc[]\n",
+            ),
+            ("intro.adoc", "[#nested-intro]\n== Nested Intro\n"),
+        ]);
+
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler)
+            .parse("See <<intro.adoc#other,text>>.\n\ninclude::part1/chapters.adoc[]\n");
+
+        // The outermost include registers; the nested one does not.
+        assert!(doc.catalog().was_included("part1/chapters"));
+        assert!(!doc.catalog().was_included("intro"));
+
+        assert_eq!(
+            first_paragraph(&doc),
+            r#"See <a href="intro.html#other">text</a>."#
+        );
+    }
+
+    #[test]
+    fn an_include_inside_a_table_cell_registers_and_collapses() {
+        // An AsciiDoc table cell shares the enclosing document's catalog, so a
+        // file the cell includes in full registers on the document's include
+        // registry (as in Asciidoctor, where the cell's nested document shares
+        // the parent's `catalog[:includes]`) and an inter-document reference in
+        // that cell collapses to an internal anchor.
+        let handler =
+            InlineFileHandler::from_pairs([("chapter.adoc", "[#target]\n== Chapter\n\nBody.\n")]);
+
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler)
+            .parse("|===\na|See xref:chapter.adoc#target[].\n\ninclude::chapter.adoc[]\n|===\n");
+
+        assert!(doc.catalog().include_is_full("chapter"));
+
+        // The cell's blocks live in the cell's own owned sub-document, so the
+        // rendered link is asserted through the converted output.
+        crate::tests::assert_dom::assert_xpath(&doc, r##"//a[@href="#target"]"##, 1);
+        crate::tests::assert_dom::assert_xpath(
+            &doc,
+            r##"//a[@href="#target"][text()="Chapter"]"##,
+            1,
+        );
+    }
 }
