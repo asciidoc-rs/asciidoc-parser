@@ -72,14 +72,10 @@ If not, it will generate a link to [.path]_document-b.html_, intelligently subst
     );
 }
 
-// Include processing (`catalog[:includes]`) is out of scope for this crate, so
-// a cross reference to a document that was included into this one is not
-// collapsed to a same-document reference. A reference to the document being
-// parsed itself (by `docname`) *is* collapsed; see
-// `should_use_doctitle_as_fallback_link_text_if_inter_document_xref_points_to_current_doc_and_no_link_text_is_provided`
-// in the `links_test.rs` port.
-non_normative!(
-    r##"
+#[test]
+fn collapses_to_an_internal_anchor_when_the_target_was_included() {
+    verifies!(
+        r##"
 If [.path]_document-b.adoc_ is included in the same document as [.path]_document-a.doc_, then the document will be dropped in the link target and look like the output of a normal cross reference:
 
 [source,html]
@@ -90,7 +86,30 @@ If [.path]_document-b.adoc_ is included in the same document as [.path]_document
 Now you can create inter-document cross references without the headache.
 
 "##
-);
+    );
+
+    // `document-b.adoc` is included into this document in full, so its
+    // `section-b` anchor is now part of this document and the inter-document
+    // reference to it collapses to a same-document one (issue #808). The Ruby
+    // suite reads the included file from disk; here an include handler serves it
+    // inline.
+    let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(inline_file_handler::InlineFileHandler::from_pairs([(
+            "document-b.adoc",
+            "[#section-b]\n== Section B\n",
+        )]))
+        .parse(
+            "Refer to xref:document-b.adoc#section-b[Section B].\n\ninclude::document-b.adoc[]\n",
+        );
+
+    assert!(doc.catalog().include_is_full("document-b"));
+
+    assert_eq!(
+        rendered_paragraphs(&doc)[0],
+        r##"Refer to <a href="#section-b">Section B</a>."##
+    );
+}
 
 non_normative!(
     r##"
