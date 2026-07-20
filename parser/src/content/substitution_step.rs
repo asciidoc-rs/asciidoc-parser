@@ -897,8 +897,7 @@ pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> Stri
 /// in a block ID (`[#install-{platform-id}]`) or a `reftext=` attribute are
 /// resolved when the attribute list is parsed, so the reftext is registered in
 /// the catalog with its attributes already expanded and a cross reference by
-/// that text resolves. See
-/// <https://github.com/asciidoc-rs/asciidoc-parser/issues/753>.
+/// that text resolves.
 ///
 /// The borrowed source text is returned unchanged when it holds no attribute
 /// reference, avoiding an allocation in the common case.

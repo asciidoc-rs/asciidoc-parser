@@ -139,7 +139,7 @@ impl<'src> SectionBlock<'src> {
         // attributes in effect at the anchor's location — captured here, before
         // the section body is parsed and can itself redefine those attributes —
         // mirroring how the anchor ID and a `reftext=` attribute are already
-        // substituted when the attribute list is parsed. See issue #753.
+        // substituted when the attribute list is parsed.
         let anchor_reftext = metadata
             .anchor_reftext
             .as_ref()

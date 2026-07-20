@@ -107,7 +107,7 @@ fn natural_reference_by_reftext() {
 fn block_anchor_reftext_substitutes_attributes() {
     // A `[[id,reftext]]` block anchor may carry attribute references in its
     // reftext. They are resolved before the reftext is registered, so a natural
-    // cross reference matches — and renders — the substituted text. See #753.
+    // cross reference matches — and renders — the substituted text.
     let doc = Parser::default().parse(concat!(
         ":os: Linux\n",
         "\n",

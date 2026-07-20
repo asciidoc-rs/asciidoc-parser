@@ -735,9 +735,8 @@ impl<'src> Block<'src> {
     /// Attribute references in a `[[id,reftext]]` anchor reftext are resolved
     /// against the attributes in effect when the block is registered, matching
     /// how the anchor ID and a `reftext=` attribute (both substituted when the
-    /// attribute list is parsed) are handled. See issue #753. The `reftext=`
-    /// and title branches are already substituted, so only the anchor branch is
-    /// resolved here.
+    /// attribute list is parsed) are handled. The `reftext=` and title branches
+    /// are already substituted, so only the anchor branch is resolved here.
     fn block_reftext<'a>(block: &'a Block<'a>, parser: &Parser) -> Option<CowStr<'a>> {
         if let Some(attr) = block
             .attrlist()
