@@ -3895,6 +3895,13 @@ mod tests {
                 include_catalog_key("using-.net-web-services.adoc"),
                 "using-.net-web-services"
             );
+
+            // Defensive fallback: production only reaches this function for a
+            // target `is_asciidoc_file` accepted (a dotted name with a
+            // non-empty stem), but a target without one is returned whole
+            // rather than truncated.
+            assert_eq!(include_catalog_key("no-extension"), "no-extension");
+            assert_eq!(include_catalog_key(".adoc"), ".adoc");
         }
 
         fn is_full(attrlist_text: &str) -> bool {
