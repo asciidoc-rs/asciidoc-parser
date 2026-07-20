@@ -13,7 +13,7 @@ pub struct Break<'src> {
     type_: BreakType,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    pub(crate) title: Option<Content<'src>>,
+    title: Option<Content<'src>>,
     anchor: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
 }
@@ -38,6 +38,17 @@ impl std::fmt::Debug for BreakType {
 }
 
 impl<'src> Break<'src> {
+    /// Returns the block's title as a mutable [`Content`], if the block has
+    /// one.
+    ///
+    /// This narrow seam exists for the document-order title resolution pass
+    /// (see `document::title_refs`), which installs the re-rendered title
+    /// after resolving any cross-references embedded in it. All other access
+    /// goes through the read-only [`IsBlock::title`] accessor.
+    pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
+        self.title.as_mut()
+    }
+
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         _parser: &mut Parser,

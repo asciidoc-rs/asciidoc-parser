@@ -28,7 +28,7 @@ pub struct SectionBlock<'src> {
     blocks: Vec<Block<'src>>,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    pub(crate) title: Option<Content<'src>>,
+    title: Option<Content<'src>>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,

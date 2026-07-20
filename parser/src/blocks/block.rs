@@ -820,45 +820,25 @@ impl<'src> Block<'src> {
         }
     }
 
-    /// Returns this block's *block title* (`.Title`) as a [`Content`], when the
-    /// block has one.
+    /// Returns this block's *block title* (`.Title`) as a mutable [`Content`],
+    /// when the block has one.
     ///
     /// This is the decorative title carried above a block, distinct from a
-    /// section's heading (which is exposed through
-    /// [`content_mut`](Self::content_mut)). Used by the document-order title
-    /// resolution pass to resolve a cross-reference embedded in a block title.
-    /// Blocks that never carry a title return `None`.
-    pub(crate) fn block_title_content(&self) -> Option<&Content<'src>> {
-        match self {
-            Self::Simple(b) => b.title.as_ref(),
-            Self::Media(b) => b.title.as_ref(),
-            Self::List(b) => b.title.as_ref(),
-            Self::RawDelimited(b) => b.title.as_ref(),
-            Self::CompoundDelimited(b) => b.title.as_ref(),
-            Self::Admonition(b) => b.title.as_ref(),
-            Self::Quote(b) => b.title.as_ref(),
-            Self::Table(b) => b.title.as_ref(),
-            Self::Break(b) => b.title.as_ref(),
-            _ => None,
-        }
-    }
-
-    /// The mutable counterpart of [`block_title_content`], used by the
-    /// document-order title resolution pass to install a title whose
-    /// cross-references have been resolved.
-    ///
-    /// [`block_title_content`]: Self::block_title_content
+    /// section's heading. Used only by the document-order title resolution
+    /// pass, which reads a title's deferred cross-references and installs the
+    /// re-rendered title once they are resolved. Blocks that never carry a
+    /// title return `None`.
     pub(crate) fn block_title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         match self {
-            Self::Simple(b) => b.title.as_mut(),
-            Self::Media(b) => b.title.as_mut(),
-            Self::List(b) => b.title.as_mut(),
-            Self::RawDelimited(b) => b.title.as_mut(),
-            Self::CompoundDelimited(b) => b.title.as_mut(),
-            Self::Admonition(b) => b.title.as_mut(),
-            Self::Quote(b) => b.title.as_mut(),
-            Self::Table(b) => b.title.as_mut(),
-            Self::Break(b) => b.title.as_mut(),
+            Self::Simple(b) => b.title_content_mut(),
+            Self::Media(b) => b.title_content_mut(),
+            Self::List(b) => b.title_content_mut(),
+            Self::RawDelimited(b) => b.title_content_mut(),
+            Self::CompoundDelimited(b) => b.title_content_mut(),
+            Self::Admonition(b) => b.title_content_mut(),
+            Self::Quote(b) => b.title_content_mut(),
+            Self::Table(b) => b.title_content_mut(),
+            Self::Break(b) => b.title_content_mut(),
             _ => None,
         }
     }

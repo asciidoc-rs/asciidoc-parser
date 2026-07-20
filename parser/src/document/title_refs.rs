@@ -4,9 +4,9 @@
 //! reference text as its link text. When targets reference each other — a
 //! forward reference, or a circular one — the reference text of one title
 //! depends on another, so the per-content resolution pass (which resolves each
-//! [`Content`] in isolation) cannot get this right on its own: it would
-//! resolve every title's cross-references independently, against each target's
-//! *parse-time* reference text.
+//! [`Content`](crate::content::Content) in isolation) cannot get this right on
+//! its own: it would resolve every title's cross-references independently,
+//! against each target's *parse-time* reference text.
 //!
 //! This pass mirrors Asciidoctor, which converts each title exactly once, in
 //! document order, and caches the result. While a title is being converted, a
@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{Content, XrefSegment, render_xref_template},
+    content::{XrefSegment, render_xref_template},
     document::Catalog,
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
@@ -126,22 +126,27 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
                     source: section.section_title_source(),
                 });
             }
-        } else if let Some((template, xrefs)) = block
-            .block_title_content()
-            .and_then(Content::deferred_parts)
-        {
+        } else {
             // A non-section block's `.Title` decoration. A block title is not
             // treated as a recomputable reference target (`map_id` is `None`):
             // its own cross-references are resolved, but a reference *to* the
             // block still uses the block's parse-time reference text.
-            let (template, xrefs) = (template.to_string(), xrefs.to_vec());
+            //
+            // The span is taken before the title borrow: `block` stays
+            // mutably borrowed while the template is in scope.
             let source = block.span();
-            nodes.push(TitleNode {
-                template,
-                xrefs,
-                map_id: None,
-                source,
-            });
+
+            if let Some((template, xrefs)) = block
+                .block_title_content_mut()
+                .and_then(|title| title.deferred_parts())
+            {
+                nodes.push(TitleNode {
+                    template: template.to_string(),
+                    xrefs: xrefs.to_vec(),
+                    map_id: None,
+                    source,
+                });
+            }
         }
 
         collect(block.nested_blocks_mut(), nodes);

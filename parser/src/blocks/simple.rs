@@ -53,7 +53,7 @@ pub struct SimpleBlock<'src> {
     source: Span<'src>,
     style: SimpleBlockStyle,
     title_source: Option<Span<'src>>,
-    pub(crate) title: Option<Content<'src>>,
+    title: Option<Content<'src>>,
     caption: Option<String>,
     number: Option<usize>,
     anchor: Option<Span<'src>>,
@@ -62,6 +62,17 @@ pub struct SimpleBlock<'src> {
 }
 
 impl<'src> SimpleBlock<'src> {
+    /// Returns the block's title as a mutable [`Content`], if the block has
+    /// one.
+    ///
+    /// This narrow seam exists for the document-order title resolution pass
+    /// (see `document::title_refs`), which installs the re-rendered title
+    /// after resolving any cross-references embedded in it. All other access
+    /// goes through the read-only [`IsBlock::title`] accessor.
+    pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
+        self.title.as_mut()
+    }
+
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,
