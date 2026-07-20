@@ -554,6 +554,29 @@ mod ids {
     }
 
     #[test]
+    fn reftext_in_embedded_anchor_substitutes_attributes() {
+        // Attribute references in an embedded-anchor reftext are resolved (with
+        // the value in effect at the section title), just as they are for a
+        // `[[id,reftext]]` block anchor above the heading.
+        let doc = Parser::default().parse(
+            ":platform-name: Linux\n\n== Install [[install,Install on {platform-name}]] ==\n\ncontent\n",
+        );
+        let sec = first_section(&doc);
+        assert_eq!(sec.id(), Some("install"));
+        assert_eq!(sec.section_title(), "Install");
+        assert_eq!(
+            doc.catalog()
+                .get_ref("install")
+                .and_then(|r| r.reftext.as_deref()),
+            Some("Install on Linux")
+        );
+        assert_eq!(
+            doc.catalog().resolve_id("Install on Linux"),
+            Some("install".to_string())
+        );
+    }
+
+    #[test]
     fn id_and_reftext_in_embedded_anchor_cannot_be_quoted() {
         verifies!(
             r##"
