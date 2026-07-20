@@ -720,6 +720,57 @@ impl Parser {
         }
     }
 
+    /// Returns the effective `max-attribute-value-size`: the byte limit applied
+    /// to a resolved attribute-entry value, or `None` when no limit is in force.
+    ///
+    /// The value is coerced as Ruby's `String#to_i` would (matching
+    /// Asciidoctor); a non-positive result — including an explicit unset or `0`
+    /// — disables the limit. The `4096` default only exists under
+    /// `SafeMode::Secure` (see
+    /// [`apply_safe_mode_attributes`](Self::apply_safe_mode_attributes)), so in
+    /// a relaxed safe mode this resolves to `None` unless the caller sets an
+    /// explicit positive value.
+    fn max_attribute_value_size(&self) -> Option<usize> {
+        match self.attribute_value("max-attribute-value-size") {
+            InterpretedValue::Value(value) => {
+                let size = super::preprocessor::ruby_to_i(&value);
+                (size > 0).then(|| usize::try_from(size).unwrap_or(usize::MAX))
+            }
+            _ => None,
+        }
+    }
+
+    /// Applies the [`max-attribute-value-size`](Self::max_attribute_value_size)
+    /// limit to a freshly resolved attribute-entry `value`, truncating it (on a
+    /// character boundary, so a multibyte character is never split) when it
+    /// exceeds the limit. Values that already fit, and non-`Value` variants, are
+    /// returned unchanged.
+    fn limit_attribute_value_size(&self, value: InterpretedValue) -> InterpretedValue {
+        let Some(max) = self.max_attribute_value_size() else {
+            return value;
+        };
+
+        let InterpretedValue::Value(text) = value else {
+            return value;
+        };
+
+        if text.len() <= max {
+            return InterpretedValue::Value(text);
+        }
+
+        // Back up to the nearest character boundary at or below `max` so a
+        // multibyte character straddling the limit is dropped whole rather than
+        // split (which would otherwise yield invalid UTF-8).
+        let mut end = max;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        let mut text = text;
+        text.truncate(end);
+        InterpretedValue::Value(text)
+    }
+
     /// Resolves a `leveloffset` assignment value, converting a relative form
     /// (`+N` / `-N`) into the absolute value it produces given the
     /// `leveloffset` currently in effect. Absolute values, and values that
@@ -1662,6 +1713,20 @@ impl Parser {
             "safe-mode-name".to_string(),
             intrinsic(InterpretedValue::Value(self.safe.name().to_string())),
         );
+
+        // The `max-attribute-value-size` default (`4096`) applies only under
+        // `SafeMode::Secure`. The built-in table carries that default (so a
+        // pristine, Secure parser sees it); when the caller relaxes the mode we
+        // shadow it with an explicit unset, and when they select Secure we drop
+        // any such shadow so the built-in default shows through again.
+        if self.safe == SafeMode::Secure {
+            attrs.remove("max-attribute-value-size");
+        } else {
+            attrs.insert(
+                "max-attribute-value-size".to_string(),
+                intrinsic(InterpretedValue::Unset),
+            );
+        }
     }
 
     /// Returns the [`SafeMode`] under which this parser operates.
@@ -1778,6 +1843,10 @@ impl Parser {
         if attr_name == "leveloffset" {
             value = self.resolve_leveloffset_and_warn(value, attr.span(), warnings);
         }
+
+        // Cap the resolved value at `max-attribute-value-size` bytes (a no-op
+        // unless that limit is in force — by default, only under Secure).
+        value = self.limit_attribute_value_size(value);
 
         // `notitle` and `showtitle` are inverse spellings of one title-
         // visibility toggle; keep the partner in sync (see
@@ -1929,6 +1998,10 @@ impl Parser {
         if attr_name == "leveloffset" {
             value = self.resolve_leveloffset_and_warn(value, attr.span(), warnings);
         }
+
+        // Cap the resolved value at `max-attribute-value-size` bytes (a no-op
+        // unless that limit is in force — by default, only under Secure).
+        value = self.limit_attribute_value_size(value);
 
         // `notitle` and `showtitle` are inverse spellings of one title-
         // visibility toggle; keep the partner in sync (see

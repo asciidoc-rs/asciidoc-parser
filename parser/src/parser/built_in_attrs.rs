@@ -322,6 +322,15 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ### Security attributes
     attrs.insert("max-include-depth".to_owned(), set(ApiOnly, "64"));
 
+    // `max-attribute-value-size` caps the byte length of a resolved attribute
+    // value (see `Parser::set_attribute_from_header`/`set_attribute_from_body`).
+    // Its `4096` default is only in effect under `SafeMode::Secure` — the
+    // default mode — so it is registered here (where a pristine, Secure parser
+    // resolves it) and shadowed with an explicit unset for any relaxed mode by
+    // `Parser::apply_safe_mode_attributes`. It is API/CLI-only (`ApiOnly`), like
+    // the other security attributes.
+    attrs.insert("max-attribute-value-size".to_owned(), set(ApiOnly, "4096"));
+
     // ### Parser intrinsic attributes
     //
     // The version of this crate, so documents can reference the parser version
