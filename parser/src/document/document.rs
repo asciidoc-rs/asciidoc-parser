@@ -594,6 +594,13 @@ impl<'src> IsBlock<'src> for Document<'src> {
         self.internal.borrow_dependent().header.id()
     }
 
+    fn roles(&'src self) -> Vec<&'src str> {
+        // Document role(s) are assigned with a block attribute line above the
+        // document title and are reflected in the Header (the default
+        // implementation reads `attrlist()`, which a document does not have).
+        self.internal.borrow_dependent().header.roles()
+    }
+
     fn anchor(&'src self) -> Option<Span<'src>> {
         None
     }
@@ -1547,6 +1554,7 @@ mod tests {
         ),
         subtitle: None,
         id: None,
+        roles: [],
         attributes: &[],
         author_line: None,
         authors: [],
