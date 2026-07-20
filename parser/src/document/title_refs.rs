@@ -22,9 +22,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    Span,
+    HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{XrefSegment, render_xref_template},
+    content::{Content, XrefSegment, render_xref_template},
     document::Catalog,
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
@@ -51,14 +51,14 @@ struct TitleNode<'src> {
     source: Span<'src>,
 }
 
-/// Resolves the cross-references embedded in every section title in `blocks`,
-/// in document order, coordinating references between titles (including
-/// circular ones) the way Asciidoctor does.
+/// Resolves the cross-references embedded in every section heading and block
+/// title in `blocks`, in document order, coordinating references between titles
+/// (including circular ones) the way Asciidoctor does.
 ///
-/// The per-content pass skips section titles (see
-/// [`Block::resolve_references`]); this pass owns them. It installs each
-/// title's final rendering directly and reports any unresolved target in
-/// `warnings`.
+/// The per-content pass skips section headings (see
+/// [`Block::resolve_references`]) and never resolved block titles at all; this
+/// pass owns both. It installs each title's final rendering directly and
+/// reports any unresolved target in `warnings`.
 pub(crate) fn resolve_title_references<'src>(
     blocks: &mut [Block<'src>],
     catalog: &Catalog,
@@ -103,24 +103,41 @@ pub(crate) fn resolve_title_references<'src>(
     write_back(blocks, &memo, &mut index);
 }
 
-/// Walks `blocks` in document order, collecting each section title that carries
-/// cross-references.
+/// Walks `blocks` in document order, collecting each section heading and block
+/// title that carries cross-references.
 fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
     for block in blocks.iter_mut() {
-        if let Block::Section(section) = block
-            && let Some((template, xrefs)) = section.section_title_deferred_parts()
-        {
-            let map_id = if section.has_explicit_reftext() {
-                None
-            } else {
-                section.reference_id()
-            };
+        if let Block::Section(section) = block {
+            // A section's resolvable title is its heading.
+            if let Some((template, xrefs)) = section.section_title_deferred_parts() {
+                let map_id = if section.has_explicit_reftext() {
+                    None
+                } else {
+                    section.reference_id()
+                };
 
+                nodes.push(TitleNode {
+                    template: template.to_string(),
+                    xrefs: xrefs.to_vec(),
+                    map_id,
+                    source: section.section_title_source(),
+                });
+            }
+        } else if let Some((template, xrefs)) = block
+            .block_title_content()
+            .and_then(Content::deferred_parts)
+        {
+            // A non-section block's `.Title` decoration. A block title is not
+            // treated as a recomputable reference target (`map_id` is `None`):
+            // its own cross-references are resolved, but a reference *to* the
+            // block still uses the block's parse-time reference text.
+            let (template, xrefs) = (template.to_string(), xrefs.to_vec());
+            let source = block.span();
             nodes.push(TitleNode {
-                template: template.to_string(),
-                xrefs: xrefs.to_vec(),
-                map_id,
-                source: section.section_title_source(),
+                template,
+                xrefs,
+                map_id: None,
+                source,
             });
         }
 
@@ -132,11 +149,20 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
 /// in the same document order as [`collect`] so `index` stays aligned.
 fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<String>], index: &mut usize) {
     for block in blocks.iter_mut() {
-        if let Block::Section(section) = block
-            && section.section_title_deferred_parts().is_some()
+        if let Block::Section(section) = block {
+            if section.section_title_deferred_parts().is_some() {
+                if let Some(rendered) = memo.get(*index).and_then(Option::as_ref) {
+                    section.set_section_title_rendered(rendered.clone());
+                }
+                *index += 1;
+            }
+        } else if block
+            .block_title_content()
+            .and_then(Content::deferred_parts)
+            .is_some()
         {
             if let Some(rendered) = memo.get(*index).and_then(Option::as_ref) {
-                section.set_section_title_rendered(rendered.clone());
+                block.set_block_title_rendered(rendered.clone());
             }
             *index += 1;
         }

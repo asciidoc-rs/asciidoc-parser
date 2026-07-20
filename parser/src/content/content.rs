@@ -226,6 +226,17 @@ impl<'src> Content<'src> {
         self.rendered.as_ref()
     }
 
+    /// Returns the final rendered text, borrowed for the duration of `&self`
+    /// rather than for `'src`.
+    ///
+    /// [`rendered`](Self::rendered) ties its result to `'src`, which a block's
+    /// `title(&self)` accessor cannot provide. This shorter-lived borrow lets a
+    /// block expose its title `Content`'s rendered text through the `&self`
+    /// accessor.
+    pub(crate) fn rendered_str(&self) -> &str {
+        self.rendered.as_ref()
+    }
+
     /// Returns an owned copy of the final text after all substitutions have
     /// been applied.
     ///

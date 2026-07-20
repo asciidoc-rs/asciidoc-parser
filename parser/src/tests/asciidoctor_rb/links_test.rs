@@ -3624,15 +3624,10 @@ fn should_not_fail_to_resolve_broken_xref_in_title_of_block_with_id() {
     );
 }
 
-// Surfaced incompatibility (#770): Asciidoctor resolves the forward xref in a
-// block title to the target title (`Conclusion`); this crate leaves it
-// unresolved (`[conclusion]`). Unlike a section title — whose cross-references
-// now resolve — a block title is flattened to a plain `String` at parse time
-// (see `blocks::metadata`), discarding the deferred-cross-reference state, so
-// there is nothing left to resolve once the target is known. Retaining the
-// title's `Content` through resolution is left as follow-up.
-non_normative!(
-    r###"
+#[test]
+fn should_resolve_forward_xref_in_title_of_block_with_id() {
+    verifies!(
+        r###"
   test 'should resolve forward xref in title of block with ID' do
     input = <<~'EOS'
     [#p1]
@@ -3648,7 +3643,19 @@ non_normative!(
   end
 
 "###
-);
+    );
+
+    // A block title is retained as a `Content`, so the forward cross-reference
+    // in `p1`'s title resolves to the target section's reference text
+    // (`Conclusion`) once the catalog is complete.
+    let doc = Parser::default()
+        .parse("[#p1]\n.<<conclusion>>\nparagraph text\n\n[#conclusion]\n== Conclusion");
+    let blocks = top_blocks(&doc);
+    assert_eq!(
+        blocks[0].title(),
+        Some(r##"<a href="#conclusion">Conclusion</a>"##)
+    );
+}
 
 #[test]
 fn should_not_fail_to_resolve_broken_xref_in_section_title() {

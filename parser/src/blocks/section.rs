@@ -28,7 +28,7 @@ pub struct SectionBlock<'src> {
     blocks: Vec<Block<'src>>,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    title: Option<String>,
+    pub(crate) title: Option<Content<'src>>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -208,8 +208,11 @@ impl<'src> SectionBlock<'src> {
         // for its own first block. A discrete heading is an ordinary block, not
         // a section, so it keeps its title. See `Block::parse_internal` for the
         // claiming side.
-        if !discrete && metadata.title.is_some() {
-            parser.pending_block_title = metadata.title.clone();
+        if !discrete && let Some(title) = metadata.title.as_ref() {
+            // The carried title is stashed as its already-rendered string; a
+            // cross-reference in a title carried across a section heading is not
+            // re-resolved for the claiming block (a rare corner).
+            parser.pending_block_title = Some(title.rendered_str().to_string());
         }
 
         let mut maw_blocks = parse_blocks_until(
@@ -460,7 +463,7 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
     }
 
     fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+        self.title.as_ref().map(Content::rendered_str)
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {

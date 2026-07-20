@@ -7,6 +7,7 @@ use crate::{
         Block, ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata,
         parse_utils::parse_blocks_until,
     },
+    content::Content,
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     strings::CowStr,
@@ -33,7 +34,7 @@ pub struct CompoundDelimitedBlock<'src> {
     context: CowStr<'src>,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    title: Option<String>,
+    pub(crate) title: Option<Content<'src>>,
     caption: Option<String>,
     number: Option<usize>,
     anchor: Option<Span<'src>>,
@@ -214,7 +215,7 @@ impl<'src> IsBlock<'src> for CompoundDelimitedBlock<'src> {
     }
 
     fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+        self.title.as_ref().map(Content::rendered_str)
     }
 
     fn caption(&self) -> Option<&str> {

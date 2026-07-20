@@ -2,7 +2,7 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     blocks::{ContentModel, IsBlock, caption, metadata::BlockMetadata},
-    content::substitute_attributes_in_macro_target,
+    content::{Content, substitute_attributes_in_macro_target},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -17,7 +17,7 @@ pub struct MediaBlock<'src> {
     macro_attrlist: Attrlist<'src>,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    title: Option<String>,
+    pub(crate) title: Option<Content<'src>>,
     caption: Option<String>,
     number: Option<usize>,
     anchor: Option<Span<'src>>,
@@ -290,7 +290,7 @@ impl<'src> IsBlock<'src> for MediaBlock<'src> {
     }
 
     fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+        self.title.as_ref().map(Content::rendered_str)
     }
 
     fn caption(&self) -> Option<&str> {

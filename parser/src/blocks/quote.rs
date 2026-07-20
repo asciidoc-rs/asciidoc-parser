@@ -101,7 +101,7 @@ pub struct QuoteBlock<'src> {
     citetitle: Option<String>,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    title: Option<String>,
+    pub(crate) title: Option<Content<'src>>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -765,7 +765,7 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
     }
 
     fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+        self.title.as_ref().map(Content::rendered_str)
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {

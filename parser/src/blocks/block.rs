@@ -297,7 +297,12 @@ impl<'src> Block<'src> {
         if let Some(pending_title) = parser.pending_block_title.take()
             && metadata.title.is_none()
         {
-            metadata.title = Some(pending_title);
+            // The carried title arrives already rendered; wrap it as a
+            // cross-reference-free `Content` anchored at the block's start.
+            metadata.title = Some(crate::content::Content::from_filtered(
+                metadata.block_start,
+                pending_title,
+            ));
         }
 
         // Tolerate a blank line between a block's metadata (title, anchor, or
@@ -815,6 +820,52 @@ impl<'src> Block<'src> {
 
         for child in self.nested_blocks_mut() {
             child.resolve_references(resolver, renderer, warnings);
+        }
+    }
+
+    /// Returns this block's *block title* (`.Title`) as a [`Content`], when the
+    /// block has one.
+    ///
+    /// This is the decorative title carried above a block, distinct from a
+    /// section's heading (which is exposed through
+    /// [`content_mut`](Self::content_mut)). Used by the document-order title
+    /// resolution pass to resolve a cross-reference embedded in a block title.
+    /// Blocks that never carry a title return `None`.
+    pub(crate) fn block_title_content(&self) -> Option<&Content<'src>> {
+        match self {
+            Self::Simple(b) => b.title.as_ref(),
+            Self::Media(b) => b.title.as_ref(),
+            Self::List(b) => b.title.as_ref(),
+            Self::RawDelimited(b) => b.title.as_ref(),
+            Self::CompoundDelimited(b) => b.title.as_ref(),
+            Self::Admonition(b) => b.title.as_ref(),
+            Self::Quote(b) => b.title.as_ref(),
+            Self::Table(b) => b.title.as_ref(),
+            Self::Break(b) => b.title.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Overwrites this block's *block title* rendered text, used by the
+    /// document-order title resolution pass to install a title whose
+    /// cross-references have been resolved. A no-op on a block that has no
+    /// title.
+    pub(crate) fn set_block_title_rendered(&mut self, rendered: String) {
+        let title = match self {
+            Self::Simple(b) => &mut b.title,
+            Self::Media(b) => &mut b.title,
+            Self::List(b) => &mut b.title,
+            Self::RawDelimited(b) => &mut b.title,
+            Self::CompoundDelimited(b) => &mut b.title,
+            Self::Admonition(b) => &mut b.title,
+            Self::Quote(b) => &mut b.title,
+            Self::Table(b) => &mut b.title,
+            Self::Break(b) => &mut b.title,
+            _ => return,
+        };
+
+        if let Some(content) = title {
+            content.set_rendered(rendered);
         }
     }
 }

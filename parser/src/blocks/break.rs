@@ -2,6 +2,7 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
+    content::Content,
     span::MatchedItem,
     strings::CowStr,
 };
@@ -12,7 +13,7 @@ pub struct Break<'src> {
     type_: BreakType,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    title: Option<String>,
+    pub(crate) title: Option<Content<'src>>,
     anchor: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
 }
@@ -98,7 +99,7 @@ impl<'src> IsBlock<'src> for Break<'src> {
     }
 
     fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+        self.title.as_ref().map(Content::rendered_str)
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {

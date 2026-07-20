@@ -16,8 +16,11 @@ pub(crate) struct BlockMetadata<'src> {
     /// The block's raw title, if any.
     pub(crate) title_source: Option<Span<'src>>,
 
-    /// The block's rendered title, if any.
-    pub(crate) title: Option<String>,
+    /// The block's title, if any, retained as a [`Content`] so a cross-reference
+    /// embedded in the title can be resolved once the catalog is complete (by
+    /// the document-order title pass). Its rendered text is the block's title
+    /// string.
+    pub(crate) title: Option<Content<'src>>,
 
     /// The block's anchor, if any. The span does not include the opening or
     /// closing square brace pair, nor reftext if it exists.
@@ -161,11 +164,11 @@ impl<'src> BlockMetadata<'src> {
         // Determine the block title. A `.Title` line takes precedence; failing
         // that, a `title=` attribute in the block's attribute list supplies the
         // title (Asciidoctor treats the two as equivalent).
-        let title = match title_source.as_ref() {
+        let title: Option<Content<'src>> = match title_source.as_ref() {
             Some(span) => {
                 let mut content = Content::from(*span);
                 SubstitutionGroup::Normal.apply(&mut content, parser, None);
-                Some(content.rendered.into_string())
+                Some(content)
             }
             None => attrlist.as_ref().and_then(Attrlist::title_attribute).map(
                 |(value, value_is_substituted)| {
@@ -177,13 +180,21 @@ impl<'src> BlockMetadata<'src> {
                     // substitutions now, matching a `.Title` line. (Attribute
                     // references in the value were resolved when the attribute
                     // list was parsed, so they are not re-evaluated here.)
-                    if value_is_substituted {
+                    //
+                    // A `title=` value's rendered text is anchored at the block's
+                    // source (rather than at the attribute value, which is
+                    // borrowed from `attrlist` and would outlive this borrow):
+                    // any cross-reference in it is rendered to its fallback here
+                    // and not re-resolved later, matching the pre-existing
+                    // treatment of a substituted value.
+                    let rendered = if value_is_substituted {
                         value.to_string()
                     } else {
                         let mut content = Content::from(Span::new(value));
                         SubstitutionGroup::Normal.apply(&mut content, parser, None);
                         content.rendered.into_string()
-                    }
+                    };
+                    Content::from_filtered(source, rendered)
                 },
             ),
         };
@@ -200,6 +211,12 @@ impl<'src> BlockMetadata<'src> {
             },
             warnings,
         }
+    }
+
+    /// Returns the block's rendered title text, if any.
+    #[cfg(test)]
+    pub(crate) fn title_str(&self) -> Option<&str> {
+        self.title.as_ref().map(Content::rendered_str)
     }
 
     /// Return `true` if title, anchor, and attrlist are all empty.
@@ -323,7 +340,7 @@ mod tests {
         let input = ".My Title\n[[my-anchor]]\n[role=\"example\"]\nContent\n";
         let metadata = super::BlockMetadata::new(input);
 
-        assert_eq!(metadata.title.as_deref(), Some("My Title"));
+        assert_eq!(metadata.title_str(), Some("My Title"));
         assert_eq!(
             metadata.anchor.unwrap(),
             Span {
@@ -341,7 +358,7 @@ mod tests {
         let input = "[[another-anchor]]\n.Another Title\n[role=\"sidebar\"]\nContent\n";
         let metadata = super::BlockMetadata::new(input);
 
-        assert_eq!(metadata.title.as_deref(), Some("Another Title"));
+        assert_eq!(metadata.title_str(), Some("Another Title"));
         assert_eq!(
             metadata.anchor.unwrap(),
             Span {
@@ -359,7 +376,7 @@ mod tests {
         let input = "[role=\"note\"]\n.Third Title\n[[third-anchor]]\nContent\n";
         let metadata = super::BlockMetadata::new(input);
 
-        assert_eq!(metadata.title.as_deref(), Some("Third Title"));
+        assert_eq!(metadata.title_str(), Some("Third Title"));
         assert_eq!(
             metadata.anchor.unwrap(),
             Span {
@@ -377,7 +394,7 @@ mod tests {
         let input = "[[fourth-anchor]]\n[role=\"warning\"]\n.Fourth Title\nContent\n";
         let metadata = super::BlockMetadata::new(input);
 
-        assert_eq!(metadata.title.as_deref(), Some("Fourth Title"));
+        assert_eq!(metadata.title_str(), Some("Fourth Title"));
         assert_eq!(
             metadata.anchor.unwrap(),
             Span {
@@ -395,7 +412,7 @@ mod tests {
         let input = ".Just Title\n[role=\"tip\"]\nContent\n";
         let metadata = super::BlockMetadata::new(input);
 
-        assert_eq!(metadata.title.as_deref(), Some("Just Title"));
+        assert_eq!(metadata.title_str(), Some("Just Title"));
         assert!(metadata.anchor.is_none());
         assert!(metadata.attrlist.is_some());
     }
@@ -584,7 +601,7 @@ mod tests {
                 "[foo=bar]\n.My Title\n[baz=qux]\ncontent\n",
             );
 
-            assert_eq!(metadata.title.as_deref(), Some("My Title"));
+            assert_eq!(metadata.title_str(), Some("My Title"));
 
             let attrlist = metadata.attrlist.as_ref().unwrap();
             assert_eq!(attrlist.named_attribute("foo").unwrap().value(), "bar");
@@ -694,7 +711,7 @@ mod tests {
                 "[#id1]\n.Title\n[.r1.r2]\n[foo=bar]\ncontent\n",
             );
 
-            assert_eq!(metadata.title.as_deref(), Some("Title"));
+            assert_eq!(metadata.title_str(), Some("Title"));
 
             let attrlist = metadata.attrlist.as_ref().unwrap();
             assert_eq!(attrlist.id().unwrap(), "id1");
@@ -713,7 +730,7 @@ mod tests {
             let metadata =
                 crate::blocks::metadata::BlockMetadata::new("[title=\"My Title\"]\ncontent\n");
 
-            assert_eq!(metadata.title.as_deref(), Some("My Title"));
+            assert_eq!(metadata.title_str(), Some("My Title"));
 
             // A title supplied through an attribute has no `.Title` source line.
             assert!(metadata.title_source.is_none());
@@ -727,7 +744,7 @@ mod tests {
                 ".Line Title\n[title=\"Attr Title\"]\ncontent\n",
             );
 
-            assert_eq!(metadata.title.as_deref(), Some("Line Title"));
+            assert_eq!(metadata.title_str(), Some("Line Title"));
             assert!(metadata.title_source.is_some());
         }
 
@@ -739,7 +756,7 @@ mod tests {
             let metadata =
                 crate::blocks::metadata::BlockMetadata::new("[title=\"a > b\"]\ncontent\n");
 
-            assert_eq!(metadata.title.as_deref(), Some("a &gt; b"));
+            assert_eq!(metadata.title_str(), Some("a &gt; b"));
         }
 
         #[test]
@@ -751,7 +768,7 @@ mod tests {
             let metadata =
                 crate::blocks::metadata::BlockMetadata::new("[title='a > b']\ncontent\n");
 
-            assert_eq!(metadata.title.as_deref(), Some("a &gt; b"));
+            assert_eq!(metadata.title_str(), Some("a &gt; b"));
         }
 
         #[test]
@@ -762,7 +779,7 @@ mod tests {
             let metadata =
                 crate::blocks::metadata::BlockMetadata::new("[title='*bold*']\ncontent\n");
 
-            assert_eq!(metadata.title.as_deref(), Some("<strong>bold</strong>"));
+            assert_eq!(metadata.title_str(), Some("<strong>bold</strong>"));
         }
 
         #[test]
@@ -771,7 +788,7 @@ mod tests {
             // mirroring `.{empty}`.
             let metadata = crate::blocks::metadata::BlockMetadata::new("[title=]\ncontent\n");
 
-            assert_eq!(metadata.title.as_deref(), Some(""));
+            assert_eq!(metadata.title_str(), Some(""));
         }
 
         #[test]
@@ -795,7 +812,7 @@ mod tests {
                 "[title=\"Merged Title\"]\n[sidebar]\ncontent\n",
             );
 
-            assert_eq!(metadata.title.as_deref(), Some("Merged Title"));
+            assert_eq!(metadata.title_str(), Some("Merged Title"));
 
             let attrlist = metadata.attrlist.as_ref().unwrap();
             assert_eq!(attrlist.block_style().unwrap(), "sidebar");
