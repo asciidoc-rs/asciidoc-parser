@@ -144,13 +144,20 @@ fn apply_macros_internal(
     }
 
     if (found_square_bracket && text.contains("[[")) || (found_macroish && text.contains("or:")) {
+        // The haystack is captured so the replacer can inspect the character
+        // immediately preceding each match (see `InlineAnchorReplacer`); prior
+        // passes above may have mutated the rendered text, so the initial `text`
+        // snapshot cannot be reused here.
+        let haystack = content.rendered().to_string();
+
         let replacer = InlineAnchorReplacer {
             parser,
             source: content.original(),
             leading_anchor_registered,
+            haystack: &haystack,
         };
 
-        if let Cow::Owned(new_result) = INLINE_ANCHOR.replace_all(content.rendered(), replacer) {
+        if let Cow::Owned(new_result) = INLINE_ANCHOR.replace_all(&haystack, replacer) {
             content.rendered = new_result.into();
         }
     }
@@ -1439,13 +1446,17 @@ static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineAnchorReplacer<'p, 'src> {
+struct InlineAnchorReplacer<'p, 'src, 'h> {
     parser: &'p Parser,
     source: Span<'src>,
     leading_anchor_registered: bool,
+
+    /// The text being scanned, retained so the shorthand form can be tested for
+    /// a preceding `[` (see the bibliography-anchor note in `replace_append`).
+    haystack: &'h str,
 }
 
-impl Replacer for InlineAnchorReplacer<'_, '_> {
+impl Replacer for InlineAnchorReplacer<'_, '_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps.get(1).is_some() {
             dest.push_str(&caps[0][1..]);
@@ -1470,14 +1481,32 @@ impl Replacer for InlineAnchorReplacer<'_, '_> {
             )
         };
 
+        // A shorthand anchor (`[[id]]`) immediately preceded by a `[` is the
+        // inner anchor of a bibliography-style `[[[id]]]` sequence appearing
+        // outside a bibliography list item (a genuine bibliography anchor is
+        // consumed by the earlier `INLINE_BIBLIO_ANCHOR` pass). Asciidoctor's
+        // inline-anchor *scan* (`InlineAnchorScanRx`) excludes a `[[id]]`
+        // preceded by a `[`, so it renders the anchor but never catalogs the id.
+        // We match that: render below, but skip registration here. This applies
+        // only to the shorthand form (capture group 2), not the `anchor:id[]`
+        // macro form. See #769.
+        let is_bibliography_inner = caps.get(2).is_some()
+            && caps.get(0).is_some_and(|m| {
+                m.start()
+                    .checked_sub(1)
+                    .and_then(|i| self.haystack.as_bytes().get(i))
+                    == Some(&b'[')
+            });
+
         // Register the inline anchor so that later cross-references can resolve
         // against it. A duplicate ID here is non-fatal (first registration
         // wins), but should still surface the same warning as block and section
         // duplicate IDs.
-        if self
-            .parser
-            .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor)
-            .is_err()
+        if !is_bibliography_inner
+            && self
+                .parser
+                .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor)
+                .is_err()
             && !(self.leading_anchor_registered && caps.get(0).is_some_and(|m| m.start() == 0))
         {
             self.parser.record_substitution_warning(
@@ -3393,11 +3422,11 @@ mod tests {
             );
             assert!(!rendered.contains("<a id=\"mid\"></a>[mid]"));
 
-            // The entry is registered as a normal anchor, not a bibliography one.
-            assert_eq!(
-                doc.catalog().get_ref("mid").map(|e| e.ref_type.clone()),
-                Some(crate::document::RefType::Anchor)
-            );
+            // The inner `[[mid]]` is preceded by a `[`, so — like Asciidoctor's
+            // inline-anchor scan (`InlineAnchorScanRx`) — the id is rendered but
+            // not registered in the catalog, neither as a bibliography anchor nor
+            // as a normal one. See #769.
+            assert!(doc.catalog().get_ref("mid").is_none());
         }
 
         #[test]
