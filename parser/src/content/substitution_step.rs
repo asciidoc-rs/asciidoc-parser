@@ -891,6 +891,29 @@ pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> Stri
     out
 }
 
+/// Substitutes attribute references in a block anchor's reftext
+/// (`[[id,reftext]]`) against the attributes in effect where the anchor
+/// appears, returning the resolved text. This mirrors how attribute references
+/// in a block ID (`[#install-{platform-id}]`) or a `reftext=` attribute are
+/// resolved when the attribute list is parsed, so the reftext is registered in
+/// the catalog with its attributes already expanded and a cross reference by
+/// that text resolves.
+///
+/// The borrowed source text is returned unchanged when it holds no attribute
+/// reference, avoiding an allocation in the common case.
+pub(crate) fn substitute_attributes_in_reftext<'src>(
+    reftext: Span<'src>,
+    parser: &Parser,
+) -> CowStr<'src> {
+    if !reftext.data().contains('{') {
+        return reftext.data().into();
+    }
+
+    let mut content = Content::from(reftext);
+    SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+    CowStr::from(content.rendered.to_string())
+}
+
 fn apply_character_replacements(
     content: &mut Content<'_>,
     renderer: &dyn InlineSubstitutionRenderer,

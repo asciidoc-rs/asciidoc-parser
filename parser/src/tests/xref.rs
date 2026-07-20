@@ -104,6 +104,57 @@ fn natural_reference_by_reftext() {
 }
 
 #[test]
+fn block_anchor_reftext_substitutes_attributes() {
+    // A `[[id,reftext]]` block anchor may carry attribute references in its
+    // reftext. They are resolved before the reftext is registered, so a natural
+    // cross reference matches — and renders — the substituted text.
+    let doc = Parser::default().parse(concat!(
+        ":os: Linux\n",
+        "\n",
+        "See <<Notes for Linux>>.\n",
+        "\n",
+        "[[notes,Notes for {os}]]\n",
+        "Some notes.\n",
+    ));
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#notes\">Notes for Linux</a>."
+    );
+    assert_eq!(
+        doc.catalog().get_ref("notes").unwrap().reftext.as_deref(),
+        Some("Notes for Linux")
+    );
+}
+
+#[test]
+fn block_anchor_reftext_uses_attributes_at_anchor_not_after_body() {
+    // The anchor reftext is resolved against the attributes in effect where the
+    // anchor appears, not after the block's body is parsed. Here the example
+    // block's body redefines `os`, but the reftext must still register with the
+    // value at the anchor (`Linux`).
+    let doc = Parser::default().parse(concat!(
+        ":os: Linux\n",
+        "\n",
+        "[[notes,Notes for {os}]]\n",
+        "====\n",
+        ":os: Windows\n",
+        "\n",
+        "Body.\n",
+        "====\n",
+        "\n",
+        "See <<Notes for Linux>>.\n",
+    ));
+    assert_eq!(
+        doc.catalog().get_ref("notes").unwrap().reftext.as_deref(),
+        Some("Notes for Linux")
+    );
+    assert_eq!(
+        doc.catalog().resolve_id("Notes for Linux"),
+        Some("notes".to_string())
+    );
+}
+
+#[test]
 fn xref_macro_form_resolves() {
     let doc = Parser::default().parse("See xref:later[].\n\n[#later]\n== Later\n");
     assert_eq!(first_paragraph(&doc), "See <a href=\"#later\">Later</a>.");

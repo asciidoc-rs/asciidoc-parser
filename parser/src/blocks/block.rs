@@ -9,7 +9,7 @@ use crate::{
         SimpleBlock, TableBlock, media::TargetResolution, metadata::BlockMetadata,
         starts_with_admonition_label,
     },
-    content::{Content, SubstitutionGroup},
+    content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{Attribute, InterpretedValue, RefType},
     parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, XrefSignifier},
     span::MatchedItem,
@@ -250,9 +250,11 @@ impl<'src> Block<'src> {
             let mut warnings = vec![];
             let block = Self::Simple(simple_block);
 
+            // This fast path only handles a metadata-free simple block, so there
+            // is no `[[id,reftext]]` anchor reftext to resolve.
             Self::register_block_id(
                 block.id(),
-                Self::block_reftext(&block),
+                Self::block_reftext(&block, None).as_deref(),
                 Self::block_signifier(&block, parser),
                 block.span(),
                 parser,
@@ -327,6 +329,16 @@ impl<'src> Block<'src> {
             }
         }
 
+        // Resolve attribute references in a `[[id,reftext]]` anchor reftext now,
+        // while the parser still holds the attributes in effect where the anchor
+        // appears. A compound block's body (parsed below) can redefine those
+        // attributes, so deferring this to registration — after the body — would
+        // record the wrong value. The result is threaded into `block_reftext`.
+        let anchor_reftext = metadata
+            .anchor_reftext
+            .as_ref()
+            .map(|span| substitute_attributes_in_reftext(*span, parser));
+
         // The `[literal]` block style normally marks a literal *paragraph*,
         // which is handled directly as a simple (literal) block below, bypassing
         // the delimited-block parsers. The exception is when `[literal]` is set
@@ -362,7 +374,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, anchor_reftext.as_deref()).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -389,7 +401,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, anchor_reftext.as_deref()).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -416,7 +428,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, anchor_reftext.as_deref()).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -443,7 +455,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, anchor_reftext.as_deref()).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -470,7 +482,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, anchor_reftext.as_deref()).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -522,7 +534,7 @@ impl<'src> Block<'src> {
 
                     Self::register_block_id(
                         block.id(),
-                        Self::block_reftext(&block),
+                        Self::block_reftext(&block, anchor_reftext.as_deref()).as_deref(),
                         Self::block_signifier(&block, parser),
                         block.span(),
                         parser,
@@ -651,7 +663,7 @@ impl<'src> Block<'src> {
         if let BlockParseOutcome::Parsed(ref matched_item) = result.item {
             Self::register_block_id(
                 matched_item.item.id(),
-                Self::block_reftext(&matched_item.item),
+                Self::block_reftext(&matched_item.item, anchor_reftext.as_deref()).as_deref(),
                 Self::block_signifier(&matched_item.item, parser),
                 matched_item.item.span(),
                 parser,
@@ -731,13 +743,28 @@ impl<'src> Block<'src> {
     /// block is the target of a cross reference. Asciidoctor's precedence is:
     /// an explicit `reftext` attribute, then the reftext supplied with a
     /// block anchor (`[[id,reftext]]`), and finally the block title.
-    fn block_reftext<'a>(block: &'a Block<'a>) -> Option<&'a str> {
-        block
+    ///
+    /// `anchor_reftext` is the block's `[[id,reftext]]` anchor reftext with its
+    /// attribute references already resolved (by the caller, against the
+    /// attributes in effect where the anchor appears — captured before the
+    /// block's body is parsed, since a compound block's body may itself
+    /// redefine those attributes). This matches how the anchor ID and a
+    /// `reftext=` attribute (both substituted when the attribute list is
+    /// parsed) are handled; the `reftext=` and title branches are already
+    /// substituted.
+    fn block_reftext<'a>(block: &'a Block<'a>, anchor_reftext: Option<&str>) -> Option<CowStr<'a>> {
+        if let Some(attr) = block
             .attrlist()
             .and_then(|attrlist| attrlist.named_attribute("reftext"))
-            .map(|attr| attr.value())
-            .or_else(|| block.anchor_reftext().map(|span| span.data()))
-            .or_else(|| block.title())
+        {
+            return Some(CowStr::from(attr.value()));
+        }
+
+        if let Some(anchor_reftext) = anchor_reftext {
+            return Some(CowStr::from(anchor_reftext.to_string()));
+        }
+
+        block.title().map(CowStr::from)
     }
 
     /// Register a block's ID with the catalog if the block has an ID.

@@ -8,7 +8,10 @@ use crate::{
     blocks::{
         Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
-    content::{Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans},
+    content::{
+        Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans,
+        substitute_attributes_in_reftext,
+    },
     document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
     parser::XrefSignifier,
@@ -130,6 +133,21 @@ impl<'src> SectionBlock<'src> {
             .is_some()
             || metadata.anchor_reftext.is_some()
             || embedded_reftext.is_some();
+
+        // An anchor reftext can carry attribute references (`[[install,install
+        // on {platform-name}]]`), whether the anchor sits above the heading
+        // (`metadata.anchor_reftext`) or is embedded in the title
+        // (`embedded_reftext`). Resolve them against the attributes in effect at
+        // the anchor's location — captured here, before the section body is
+        // parsed and can itself redefine those attributes — mirroring how the
+        // anchor ID and a `reftext=` attribute are already substituted when the
+        // attribute list is parsed.
+        let anchor_reftext = metadata
+            .anchor_reftext
+            .as_ref()
+            .map(|span| substitute_attributes_in_reftext(*span, parser));
+        let embedded_reftext =
+            embedded_reftext.map(|span| substitute_attributes_in_reftext(span, parser));
 
         let (section_number, caption, xref_signifier) = if is_appendix_root {
             // The appendix letter is resolved through the `appendix-number`
@@ -260,19 +278,23 @@ impl<'src> SectionBlock<'src> {
 
         // Reftext precedence mirrors `Block::block_reftext`: an explicit
         // `reftext` attribute, then a `[[id,reftext]]` block-anchor reftext, then
-        // an embedded-anchor reftext, then the section title.
-        let reftext = metadata
+        // an embedded-anchor reftext (both with their attribute references
+        // already resolved above), then the section title.
+        let reftext: CowStr<'_> = metadata
             .attrlist
             .as_ref()
-            .and_then(|a| a.named_attribute("reftext").map(|a| a.value()))
-            .or_else(|| metadata.anchor_reftext.as_ref().map(|span| span.data()))
-            .or(embedded_reftext)
-            .unwrap_or(&title_reftext);
+            .and_then(|a| {
+                a.named_attribute("reftext")
+                    .map(|a| CowStr::from(a.value()))
+            })
+            .or_else(|| anchor_reftext.clone())
+            .or_else(|| embedded_reftext.clone())
+            .unwrap_or_else(|| CowStr::from(title_reftext.as_str()));
 
         let section_id = if sectids && manual_id.is_none() {
             let id = parser.generate_and_register_unique_id(
                 &proposed_base_id,
-                Some(reftext),
+                Some(&reftext),
                 RefType::Section,
             );
             if let Some(signifier) = xref_signifier {
@@ -281,7 +303,7 @@ impl<'src> SectionBlock<'src> {
             Some(id)
         } else {
             if let Some(manual_id) = manual_id {
-                match parser.register_ref(manual_id, Some(reftext), RefType::Section) {
+                match parser.register_ref(manual_id, Some(&reftext), RefType::Section) {
                     Ok(()) => {
                         if let Some(signifier) = xref_signifier {
                             parser.set_ref_signifier(manual_id, signifier);
@@ -609,7 +631,7 @@ static EMBEDDED_SECTION_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 /// substitution can unescape it — mirroring Ruby Asciidoctor.
 fn match_embedded_section_anchor<'src>(
     title: Span<'src>,
-) -> (Span<'src>, Option<&'src str>, Option<&'src str>) {
+) -> (Span<'src>, Option<&'src str>, Option<Span<'src>>) {
     // A quick reject avoids running the regex on the common no-anchor title.
     if !title.data().ends_with("]]") {
         return (title, None, None);
@@ -628,8 +650,12 @@ fn match_embedded_section_anchor<'src>(
     let id = caps.get(3).map(|m| m.as_str());
 
     // Trailing whitespace is trimmed from the reftext, matching the inline-anchor
-    // substitution's handling of a shorthand `[[id,reftext]]`.
-    let reftext = caps.get(4).map(|m| m.as_str().trim_end());
+    // substitution's handling of a shorthand `[[id,reftext]]`. The reftext is
+    // returned as a source span (rather than a `&str`) so its attribute
+    // references can be resolved against the document source at the caller.
+    let reftext = caps
+        .get(4)
+        .map(|m| title.slice(m.start()..m.end()).trim_trailing_whitespace());
 
     (title.slice_to(..title_text.len()), id, reftext)
 }
