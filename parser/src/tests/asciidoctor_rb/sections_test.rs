@@ -485,15 +485,10 @@ mod ids {
         assert_eq!(first_section(&doc).id(), Some("one"));
     }
 
-    // NOTE: Defining a section's ID via an anchor embedded in its title
-    // (`== Title [[id]] ==`) is not implemented. The crate instead treats
-    // `[[id]]` as an ordinary inline anchor (rendered `<a id="id"></a>`),
-    // leaving the synthetic section ID in place. The three *positive*
-    // embedded-anchor tests (which expect the anchor to become the section ID)
-    // are therefore out of scope (see #751); the two *negative* tests below —
-    // which only require that the anchor NOT be adopted as the ID — do pass.
-    non_normative!(
-        r##"
+    #[test]
+    fn explicit_id_can_be_defined_using_an_embedded_anchor() {
+        verifies!(
+            r##"
     test 'explicit id can be defined using an embedded anchor' do
       sec = block_from_string("== Section One [[one]] ==")
       assert_equal 'one', sec.id
@@ -501,7 +496,15 @@ mod ids {
     end
 
 "##
-    );
+        );
+
+        // The embedded anchor is consumed to set the section ID and removed from
+        // the rendered title.
+        let doc = Parser::default().parse("== Section One [[one]] ==");
+        let sec = first_section(&doc);
+        assert_eq!(sec.id(), Some("one"));
+        assert_eq!(sec.section_title(), "Section One");
+    }
 
     // NOTE: Setext (two-line, underlined) section titles are not implemented
     // (`parse_title_line` recognizes only ATX `=`/`#` markers), so this test —
@@ -522,10 +525,10 @@ mod ids {
 "##
     );
 
-    // Same embedded-anchor gap as above (see #751): the reftext is captured, but
-    // the anchor is not adopted as the section ID.
-    non_normative!(
-        r##"
+    #[test]
+    fn explicit_id_can_be_defined_using_an_embedded_anchor_with_reftext() {
+        verifies!(
+            r##"
     test 'explicit id can be defined using an embedded anchor with reftext' do
       sec = block_from_string("== Section One [[one,Section Uno]] ==")
       assert_equal 'one', sec.id
@@ -534,7 +537,21 @@ mod ids {
     end
 
 "##
-    );
+        );
+
+        // The reftext after the comma is captured and registered as the section
+        // reference's reftext; the anchor is removed from the rendered title.
+        let doc = Parser::default().parse("== Section One [[one,Section Uno]] ==");
+        let sec = first_section(&doc);
+        assert_eq!(sec.id(), Some("one"));
+        assert_eq!(sec.section_title(), "Section One");
+        assert_eq!(
+            doc.catalog()
+                .get_ref("one")
+                .and_then(|r| r.reftext.as_deref()),
+            Some("Section Uno")
+        );
+    }
 
     #[test]
     fn id_and_reftext_in_embedded_anchor_cannot_be_quoted() {
@@ -562,9 +579,10 @@ mod ids {
         assert!(doc.catalog().get_ref("one").is_none());
     }
 
-    // Same embedded-anchor gap (see #751); here the reftext contains a comma.
-    non_normative!(
-        r##"
+    #[test]
+    fn reftext_in_embedded_anchor_may_contain_comma() {
+        verifies!(
+            r##"
     test 'reftext in embedded anchor may contain comma' do
       sec = block_from_string(%(== Section One [[one, Section,Uno]] ==))
       assert_equal 'one', sec.id
@@ -573,7 +591,22 @@ mod ids {
     end
 
 "##
-    );
+        );
+
+        // Only the first comma separates the ID from the reftext; any further
+        // commas belong to the reftext, and the blank after the first comma is
+        // trimmed.
+        let doc = Parser::default().parse("== Section One [[one, Section,Uno]] ==");
+        let sec = first_section(&doc);
+        assert_eq!(sec.id(), Some("one"));
+        assert_eq!(sec.section_title(), "Section One");
+        assert_eq!(
+            doc.catalog()
+                .get_ref("one")
+                .and_then(|r| r.reftext.as_deref()),
+            Some("Section,Uno")
+        );
+    }
 
     #[test]
     fn should_unescape_but_not_process_inline_anchor() {
