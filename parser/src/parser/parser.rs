@@ -14,7 +14,7 @@ use crate::{
         IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
         ResolvedAttributes, SafeMode, SourceLine, SourceMap, SvgFileHandler,
         built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
-        preprocessor::preprocess_with_initial_file_name,
+        preprocessor::preprocess,
     },
     warnings::{Warning, WarningType},
 };
@@ -443,7 +443,7 @@ impl Parser {
     /// [`catalog()`]: Document::catalog
     pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
         let (preprocessed_source, source_map, preprocessor_warnings, includes) =
-            preprocess_with_initial_file_name(source, self, self.primary_file_name.as_deref());
+            preprocess(source, self);
 
         // NOTE: `Document::parse` will transfer the catalog to itself at the end of the
         // parsing operation. Start each parse with a fresh catalog.
