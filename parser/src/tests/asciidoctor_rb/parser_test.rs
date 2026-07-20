@@ -1067,21 +1067,16 @@ fn should_not_parse_multiple_authors_if_semi_colon_is_not_followed_by_space() {
 "#
     );
 
-    // Authors are split on `"; "` (semicolon + space) only, so this is one
-    // author.
+    // A semicolon separates authors only when followed by a space or the end of
+    // the line, so a semicolon glued to the next name keeps this as one author.
     let a = parse_authors("Joe Doe;Smith Johnson");
     assert_eq!(a.len(), 1);
 }
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/757):
-// Asciidoctor splits the implicit author line on `;` and trims each entry, so
-// the trailing bare `;` and the blank middle entry are dropped, yielding
-// `John Smith` as the second author. This crate splits on `"; "` only, so the
-// trailing `;` stays attached to the final entry (breaking its email match and
-// HTML-encoding the angle brackets). The blank middle entry is dropped as
-// expected.
-non_normative!(
-    r#"
+#[test]
+fn skips_blank_author_entries_in_implicit_author_line() {
+    verifies!(
+        r#"
   test 'skips blank author entries in implicit author line' do
     metadata, _ = parse_header_metadata 'Doc Writer; ; John Smith <john.smith@asciidoc.org>;'
     assert_equal 2, metadata['authorcount']
@@ -1090,7 +1085,18 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // This crate splits the implicit author line on a semicolon that is followed
+    // by a space or the end of the line (see issue #757), then drops any blank
+    // entry. So the empty middle entry and the trailing bare `;` are both
+    // dropped, and the trailing `;` no longer clings to the final author's name.
+    let a = parse_authors("Doc Writer; ; John Smith <john.smith@asciidoc.org>;");
+    assert_eq!(a.len(), 2);
+    assert_eq!(a[0].name, "Doc Writer");
+    assert_eq!(a[1].name, "John Smith");
+    assert_eq!(a[1].email.as_deref(), Some("john.smith@asciidoc.org"));
+}
 
 // Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/758):
 // the `:author:` attribute-entry path in this crate does not partition a

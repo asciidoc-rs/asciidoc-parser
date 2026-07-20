@@ -1,4 +1,6 @@
-use std::slice::Iter;
+use std::{slice::Iter, sync::LazyLock};
+
+use regex::Regex;
 
 use crate::{HasSpan, Parser, Span, document::Author};
 
@@ -13,9 +15,8 @@ pub struct AuthorLine<'src> {
 
 impl<'src> AuthorLine<'src> {
     pub(crate) fn parse(source: Span<'src>, parser: &mut Parser) -> Self {
-        let authors: Vec<Author> = source
-            .data()
-            .split("; ")
+        let authors: Vec<Author> = split_authors(source.data())
+            .into_iter()
             .filter_map(|raw_author| Author::parse(raw_author, parser))
             .collect();
 
@@ -44,6 +45,60 @@ impl<'src> AuthorLine<'src> {
     pub fn authors(&'src self) -> Iter<'src, Author> {
         self.authors.iter()
     }
+}
+
+/// Matches an HTML character reference (named, decimal, or hexadecimal, such as
+/// `&reg;`, `&#174;`, or `&#xAE;`). The terminating semicolon of such a
+/// reference must never be treated as an author separator.
+static CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);").unwrap()
+});
+
+/// Split the implicit author line into raw author entries.
+///
+/// Following Asciidoctor, a semicolon separates authors only when it is
+/// immediately followed by a space or the end of the line. A semicolon that is
+/// followed by any other character (as in `Joe Doe;Smith Johnson`) is part of a
+/// single author's name. Blank entries — produced by a trailing separator or an
+/// empty middle entry — are left in place; [`Author::parse`] trims each entry
+/// and discards the empty ones.
+///
+/// Semicolons that terminate an HTML character reference (such as `&#174;`) are
+/// never treated as separators, even when followed by a space, so a name like
+/// `AsciiDoc&#174; WG` is not split apart.
+fn split_authors(data: &str) -> Vec<&str> {
+    // Byte offsets of the semicolons that terminate a character reference; these
+    // are excluded from consideration as separators.
+    let char_ref_terminators: Vec<usize> = CHARACTER_REFERENCE
+        .find_iter(data)
+        .map(|m| m.end() - 1)
+        .collect();
+
+    let bytes = data.as_bytes();
+    let mut authors: Vec<&str> = Vec::new();
+    let mut start = 0;
+
+    for (index, c) in data.char_indices() {
+        if c != ';' || char_ref_terminators.contains(&index) {
+            continue;
+        }
+
+        // A semicolon is a separator only when followed by a space or the end of
+        // the line.
+        let is_separator = match bytes.get(index + 1) {
+            Some(next) => *next == b' ',
+            None => true,
+        };
+
+        if is_separator {
+            authors.push(&data[start..index]);
+            start = index + 1;
+        }
+    }
+
+    authors.push(&data[start..]);
+    authors
 }
 
 fn set_nth_attribute<V: AsRef<str>>(parser: &mut Parser, name: &str, index: usize, value: V) {
@@ -865,6 +920,103 @@ mod tests {
                 ],
                 source: Span {
                     data: "AsciiDoc&#174;{empty} WG; Another Author",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn skips_blank_and_trailing_author_entries() {
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/757: the author
+        // line is split on a semicolon followed by a space or the end of the
+        // line, so the blank middle entry and the trailing bare `;` are both
+        // dropped instead of leaving the trailing `;` attached to the last
+        // author.
+        let mut parser = Parser::default();
+
+        let al = crate::document::AuthorLine::parse(
+            crate::Span::new("Doc Writer; ; John Smith <john.smith@asciidoc.org>;"),
+            &mut parser,
+        );
+
+        assert_eq!(
+            al,
+            AuthorLine {
+                authors: &[
+                    Author {
+                        name: "Doc Writer",
+                        firstname: "Doc",
+                        middlename: None,
+                        lastname: Some("Writer"),
+                        email: None,
+                    },
+                    Author {
+                        name: "John Smith",
+                        firstname: "John",
+                        middlename: None,
+                        lastname: Some("Smith"),
+                        email: Some("john.smith@asciidoc.org"),
+                    },
+                ],
+                source: Span {
+                    data: "Doc Writer; ; John Smith <john.smith@asciidoc.org>;",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn semicolon_not_followed_by_space_is_single_author() {
+        // A semicolon that is not followed by a space (or end of line) does not
+        // separate authors.
+        let mut parser = Parser::default();
+
+        let al = crate::document::AuthorLine::parse(
+            crate::Span::new("Joe Doe;Smith Johnson"),
+            &mut parser,
+        );
+
+        assert_eq!(al.authors().len(), 1);
+    }
+
+    #[test]
+    fn character_reference_followed_by_space_not_treated_as_separator() {
+        // The terminating `;` of a character reference must not split the author
+        // even when it is followed by a space.
+        let mut parser = Parser::default();
+
+        let al = crate::document::AuthorLine::parse(
+            crate::Span::new("AsciiDoc&#174; WG; Another Author"),
+            &mut parser,
+        );
+
+        assert_eq!(
+            al,
+            AuthorLine {
+                authors: &[
+                    Author {
+                        name: "AsciiDoc&#174; WG",
+                        firstname: "AsciiDoc&#174;",
+                        middlename: None,
+                        lastname: Some("WG"),
+                        email: None,
+                    },
+                    Author {
+                        name: "Another Author",
+                        firstname: "Another",
+                        middlename: None,
+                        lastname: Some("Author"),
+                        email: None,
+                    },
+                ],
+                source: Span {
+                    data: "AsciiDoc&#174; WG; Another Author",
                     line: 1,
                     col: 1,
                     offset: 0,
