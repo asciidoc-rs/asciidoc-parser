@@ -108,11 +108,32 @@ impl ResolvedAttributes {
     /// [`Parser::attribute_value`](crate::Parser::attribute_value). Returns
     /// `None` for any other name.
     ///
+    /// An explicit value stored during parsing still wins, since the readers
+    /// consult [`effective_attribute`](Self::effective_attribute) first.
+    ///
+    /// # Consistency of an unpinned clock
+    ///
     /// The reference instant is captured per call (these attributes are read
     /// rarely from a snapshot) rather than cached; within a single call it is
-    /// consistent. An explicit value stored during parsing still wins, since
-    /// the readers consult
-    /// [`effective_attribute`](Self::effective_attribute) first.
+    /// consistent. When the clock is *pinned* — a
+    /// [`reference_time`](crate::Parser::with_reference_time), an
+    /// [`input_mtime`](crate::Parser::with_input_mtime), or `SOURCE_DATE_EPOCH`
+    /// — every capture yields the same instant, so a snapshot lookup always
+    /// agrees with the value substituted into content during parsing. This is
+    /// the reproducible-build path and the intended way to consume these
+    /// attributes.
+    ///
+    /// When the clock is *not* pinned, each capture reads the real wall clock
+    /// (or a since-changed `SOURCE_DATE_EPOCH`) afresh, so a post-parse lookup
+    /// can disagree with content the parser already rendered — e.g. `{docdate}`
+    /// substituted just before midnight, then read back just after. The
+    /// snapshot deliberately does *not* freeze the parser's capture here: doing
+    /// so would either make snapshot equality depend on a wall-clock reading or
+    /// require the parser to capture (a clock/environment read plus an
+    /// allocation) on *every* parse, defeating the laziness that keeps a parse
+    /// which never references one of these attributes free of that cost. The
+    /// unpinned clock is inherently non-reproducible, so pin it (or set
+    /// `SOURCE_DATE_EPOCH`) whenever stable, self-consistent output matters.
     fn resolve_datetime_attribute(&self, name: &str) -> Option<InterpretedValue> {
         if !is_datetime_attribute(name) {
             return None;
@@ -120,6 +141,8 @@ impl ResolvedAttributes {
 
         // Absent any pinned clock the inputs box is `None`; capture from the
         // defaults (SOURCE_DATE_EPOCH, then the real wall clock) in that case.
+        // See the doc comment above on why an unpinned capture is intentionally
+        // taken fresh here rather than frozen from the parse.
         let context = match &self.datetime_inputs {
             Some(inputs) => inputs.capture(),
             None => DatetimeContext::capture(None, None),
