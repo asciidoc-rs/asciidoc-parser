@@ -134,7 +134,7 @@ impl<'src> SectionBlock<'src> {
             || metadata.anchor_reftext.is_some()
             || embedded_reftext.is_some();
 
-        // A `[[id,reftext]]` anchor reftext can carry attribute references
+        // An `[[id,reftext]]` anchor reftext can carry attribute references
         // (`[[install,install on {platform-name}]]`); resolve them against the
         // attributes in effect at the anchor's location — captured here, before
         // the section body is parsed and can itself redefine those attributes —
