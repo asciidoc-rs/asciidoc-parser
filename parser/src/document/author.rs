@@ -146,8 +146,10 @@ impl Author {
         } else {
             // Input doesn't contain attributes and doesn't match the author pattern.
             // Asciidoctor stores the whole line as the author, condensing interior
-            // whitespace and keeping any angle brackets literal.
-            let name = replace_underscores_with_spaces(condense_whitespace(source));
+            // whitespace and keeping any angle brackets literal. Underscores are left
+            // literal here: Asciidoctor only converts underscore-joined names while
+            // partitioning a *matching* line, not in this fallback.
+            let name = condense_whitespace(source);
             Some(Self {
                 name: name.clone(),
                 firstname: name,

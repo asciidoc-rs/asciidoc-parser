@@ -248,6 +248,37 @@ mod tests {
     }
 
     #[test]
+    fn fallback_condenses_whitespace_and_keeps_underscores_literal() {
+        // A line that does not match the author pattern (here because of the comma)
+        // is stored verbatim as the author with runs of spaces condensed. Unlike the
+        // matching path, underscores are left literal rather than replaced with
+        // spaces (matching Asciidoctor's `tr_s ' ', ' '` fallback).
+        let mut parser = Parser::default();
+
+        let al =
+            crate::document::AuthorLine::parse(crate::Span::new("Jane_    Q, Doe"), &mut parser);
+
+        assert_eq!(
+            al,
+            AuthorLine {
+                authors: &[Author {
+                    name: "Jane_ Q, Doe",
+                    firstname: "Jane_ Q, Doe",
+                    middlename: None,
+                    lastname: None,
+                    email: None,
+                },],
+                source: Span {
+                    data: "Jane_    Q, Doe",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+            }
+        );
+    }
+
+    #[test]
     fn one_name() {
         let mut parser = Parser::default();
 
