@@ -584,8 +584,10 @@ struct AttributeReplacer<'p> {
     match_index: usize,
 
     /// Set to `true` when a (non-escaped) reference to a missing attribute is
-    /// encountered, so the caller can drop the whole line in
-    /// [`AttributeMissing::DropLine`] mode.
+    /// dropped, under either [`AttributeMissing::Drop`] or
+    /// [`AttributeMissing::DropLine`], so the caller can drop the line: the
+    /// whole line in `drop-line` mode, or a line the dropped reference left
+    /// empty in `drop` mode (Asciidoctor's `reject_if_empty`).
     missing_on_line: bool,
 }
 
@@ -696,6 +698,10 @@ impl Replacer for AttributeReplacer<'_> {
                 AttributeMissing::Skip => dest.push_str(&caps[0]),
                 AttributeMissing::Drop => {
                     // Drop the reference, leaving the rest of the line intact.
+                    // Flag that a missing reference was dropped here so the
+                    // caller can remove the line if the drop emptied it
+                    // (Asciidoctor's `reject_if_empty`).
+                    self.missing_on_line = true;
                 }
                 AttributeMissing::DropLine => {
                     // Mark the line for removal; whatever is written to `dest`
@@ -770,8 +776,14 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 
-        if replacer.missing_on_line && mode == AttributeMissing::DropLine {
-            // Drop the entire line, including its line break.
+        if replacer.missing_on_line
+            && (mode == AttributeMissing::DropLine
+                || (mode == AttributeMissing::Drop && replaced.is_empty()))
+        {
+            // Drop the entire line, including its line break: unconditionally
+            // in `drop-line` mode, or in `drop` mode when the dropped
+            // reference was all the line contained (Asciidoctor's
+            // `reject_if_empty`).
             changed = true;
             continue;
         }
@@ -876,8 +888,14 @@ pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> Stri
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 
-        if replacer.missing_on_line && mode == AttributeMissing::DropLine {
-            // Drop the entire line, including its line break.
+        if replacer.missing_on_line
+            && (mode == AttributeMissing::DropLine
+                || (mode == AttributeMissing::Drop && replaced.is_empty()))
+        {
+            // Drop the entire line, including its line break: unconditionally
+            // in `drop-line` mode, or in `drop` mode when the dropped
+            // reference was all the line contained (Asciidoctor's
+            // `reject_if_empty`).
             continue;
         }
 
@@ -1698,6 +1716,48 @@ mod tests {
             fn drop_keeps_resolvable_references() {
                 let p = parser_with_mode("drop");
                 assert_eq!(render("a {sp}b {missing} c", &p), "a  b  c");
+            }
+
+            #[test]
+            fn drop_removes_line_that_only_contained_the_reference() {
+                // A line consisting solely of an unresolved reference is
+                // dropped entirely, not left as a blank line (issue #730).
+                let p = parser_with_mode("drop");
+                assert_eq!(render("Line 1\n{missing}\nLine 2", &p), "Line 1\nLine 2");
+            }
+
+            #[test]
+            fn drop_keeps_a_line_the_reference_did_not_empty() {
+                // The line still has other content after the reference is
+                // dropped, so it survives (only the reference is removed).
+                let p = parser_with_mode("drop");
+                assert_eq!(
+                    render("Line 1\ntext {missing}\nLine 2", &p),
+                    "Line 1\ntext \nLine 2"
+                );
+            }
+
+            #[test]
+            fn drop_removes_a_leading_or_trailing_reference_only_line() {
+                let p = parser_with_mode("drop");
+                assert_eq!(render("{missing}\nLine 2", &p), "Line 2");
+                assert_eq!(render("Line 1\n{missing}", &p), "Line 1");
+            }
+
+            #[test]
+            fn drop_can_empty_the_content() {
+                // A single line that is only an unresolved reference drops to
+                // empty content, mirroring `drop-line`.
+                let p = parser_with_mode("drop");
+                assert_eq!(render("{missing}", &p), "");
+            }
+
+            #[test]
+            fn drop_keeps_a_line_emptied_by_a_resolvable_reference() {
+                // The line becomes empty, but not because a *missing* reference
+                // was dropped, so it is retained.
+                let p = parser_with_mode("drop");
+                assert_eq!(render("Line 1\n{empty}\nLine 2", &p), "Line 1\n\nLine 2");
             }
 
             #[test]
