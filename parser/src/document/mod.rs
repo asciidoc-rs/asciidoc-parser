@@ -5,6 +5,7 @@ pub use attribute::{Attribute, InterpretedValue};
 
 mod author;
 pub use author::Author;
+pub(crate) use author::matches_author_pattern;
 
 mod author_line;
 pub use author_line::AuthorLine;

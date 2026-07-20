@@ -26,7 +26,17 @@ pub struct Author {
 }
 
 impl Author {
-    pub(crate) fn parse(source: &str, parser: &Parser) -> Option<Self> {
+    /// Parse a single author from `source`.
+    ///
+    /// `names_only` distinguishes the two contexts in which Asciidoctor parses
+    /// an author. The implicit author line (`names_only == false`) recognizes
+    /// at most three space-separated names via the [`AUTHOR`] pattern and,
+    /// failing that, stores the whole line as the author. An author
+    /// supplied through an attribute entry such as `:author:` (`names_only
+    /// == true`) is instead partitioned by splitting on whitespace into at
+    /// most three parts, so a name with four or more parts still assigns
+    /// its trailing parts to `lastname` (see issue #758).
+    pub(crate) fn parse(source: &str, parser: &Parser, names_only: bool) -> Option<Self> {
         let source = source.trim();
         if source.is_empty() {
             return None;
@@ -143,6 +153,13 @@ impl Author {
                     email: None,
                 })
             }
+        } else if names_only {
+            // Input comes from an attribute entry (e.g. `:author:`) and does not
+            // match the author pattern — typically a name with four or more parts
+            // or one containing punctuation such as a comma. Asciidoctor still
+            // partitions it by splitting on whitespace into at most three parts,
+            // assigning any trailing parts to `lastname`.
+            Some(partition_names_only(source))
         } else {
             // Input doesn't contain attributes and doesn't match the author pattern.
             // Asciidoctor stores the whole line as the author, condensing interior
@@ -262,6 +279,71 @@ fn join_name_parts(firstname: &str, middlename: Option<&str>, lastname: Option<&
     name
 }
 
+/// Partition an attribute-entry author value (e.g. the value of `:author:`)
+/// that does not match the [`AUTHOR`] pattern.
+///
+/// Mirroring Asciidoctor's `names_only` path in `process_authors`, the value is
+/// split on whitespace into at most three segments (Ruby's `String#split(nil,
+/// 3)`, which also drops leading whitespace). The trailing segment retains its
+/// interior text — so a four-plus-part name keeps its later parts in
+/// `lastname` — but has repeating spaces condensed to a single space. Each
+/// segment then has underscore joiners replaced with spaces.
+fn partition_names_only(source: &str) -> Author {
+    let mut segments = split_whitespace_max3(source);
+
+    let firstname = replace_underscores_with_spaces(segments.remove(0));
+    let (middlename, lastname) = match segments.len() {
+        0 => (None, None),
+        1 => (
+            None,
+            Some(replace_underscores_with_spaces(segments.remove(0))),
+        ),
+        _ => (
+            Some(replace_underscores_with_spaces(segments.remove(0))),
+            Some(replace_underscores_with_spaces(segments.remove(0))),
+        ),
+    };
+
+    let name = join_name_parts(&firstname, middlename.as_deref(), lastname.as_deref());
+
+    Author {
+        name,
+        firstname,
+        middlename,
+        lastname,
+        email: None,
+    }
+}
+
+/// Split `source` on runs of whitespace into at most three segments, mirroring
+/// Ruby's `String#split(nil, 3)`. Leading whitespace is dropped and the first
+/// two whitespace runs delimit the first two segments; the remainder becomes
+/// the third segment, with its repeating spaces condensed to a single space
+/// (Ruby's `String#squeeze ' '`). The returned vector always has at least one
+/// element because the caller has already rejected empty input.
+fn split_whitespace_max3(source: &str) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::with_capacity(3);
+    let mut rest = source;
+
+    for _ in 0..2 {
+        rest = rest.trim_start();
+        match rest.find(char::is_whitespace) {
+            Some(index) => {
+                segments.push(rest[..index].to_string());
+                rest = &rest[index..];
+            }
+            None => break,
+        }
+    }
+
+    rest = rest.trim_start();
+    if !rest.is_empty() {
+        segments.push(condense_whitespace(rest));
+    }
+
+    segments
+}
+
 /// Condense runs of spaces into a single space, mirroring Ruby's
 /// `String#tr_s(' ', ' ')`, which Asciidoctor applies to an author line that
 /// does not match the author pattern.
@@ -307,6 +389,18 @@ static AUTHOR: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+
+/// Returns whether `source` matches the author pattern — at most three
+/// space-separated names with an optional trailing `<email>`.
+///
+/// The `:author:` attribute-entry path uses this to tell whether a plain-name
+/// value was partitioned by the fallback whitespace split (a name with four or
+/// more parts, or one containing punctuation such as a comma) rather than by
+/// the pattern. Only in the fallback case is the stored `author` value replaced
+/// with the reconstructed, whitespace-condensed name (issue #758).
+pub(crate) fn matches_author_pattern(source: &str) -> bool {
+    AUTHOR.is_match(source.trim())
+}
 
 fn apply_author_subs(source: &str, parser: &Parser) -> String {
     let span = Span::new(source);
