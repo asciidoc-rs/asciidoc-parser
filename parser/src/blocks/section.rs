@@ -8,7 +8,7 @@ use crate::{
     blocks::{
         Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
-    content::{Content, SubstitutionGroup, strip_footnote_marker_spans},
+    content::{Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans},
     document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
     parser::XrefSignifier,
@@ -28,7 +28,7 @@ pub struct SectionBlock<'src> {
     blocks: Vec<Block<'src>>,
     source: Span<'src>,
     title_source: Option<Span<'src>>,
-    title: Option<String>,
+    title: Option<Content<'src>>,
     anchor: Option<Span<'src>>,
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
@@ -208,8 +208,11 @@ impl<'src> SectionBlock<'src> {
         // for its own first block. A discrete heading is an ordinary block, not
         // a section, so it keeps its title. See `Block::parse_internal` for the
         // claiming side.
-        if !discrete && metadata.title.is_some() {
-            parser.pending_block_title = metadata.title.clone();
+        if !discrete && let Some(title) = metadata.title.as_ref() {
+            // The carried title travels as an owned snapshot, keeping any
+            // deferred cross-references so an embedded `<<id>>` still resolves
+            // for the claiming block once the catalog is complete.
+            parser.pending_block_title = Some(title.to_owned_title());
         }
 
         let mut maw_blocks = parse_blocks_until(
@@ -354,6 +357,56 @@ impl<'src> SectionBlock<'src> {
     pub fn section_number(&'src self) -> Option<&'src SectionNumber> {
         self.section_number.as_ref()
     }
+
+    /// Returns the section title's deferred cross-reference template and
+    /// segments, if the title contains any cross-references.
+    ///
+    /// Used by the document-order title resolution pass (see
+    /// [`Document::resolve_references`]).
+    ///
+    /// [`Document::resolve_references`]: crate::Document::resolve_references
+    pub(crate) fn section_title_deferred_parts(&self) -> Option<(&str, &[XrefSegment])> {
+        self.section_title.deferred_parts()
+    }
+
+    /// Overwrites the rendered section title, used by the document-order title
+    /// resolution pass to install a title whose cross-references were resolved
+    /// with cross-title coordination.
+    pub(crate) fn set_section_title_rendered(&mut self, rendered: String) {
+        self.section_title.set_rendered(rendered);
+    }
+
+    /// Returns the ID under which this section is registered in the catalog, if
+    /// any, as an owned string.
+    ///
+    /// Mirrors the effective-ID precedence of [`IsBlock::id`] (explicit anchor,
+    /// then attribute-list ID, then the auto-generated section ID) but without
+    /// the `&'src self` borrow, so the document-order title resolution pass can
+    /// key titles by ID while walking `&mut` blocks.
+    pub(crate) fn reference_id(&self) -> Option<String> {
+        self.anchor
+            .map(|a| a.data().to_string())
+            .or_else(|| {
+                self.attrlist
+                    .as_ref()
+                    .and_then(|attrlist| attrlist.id())
+                    .map(str::to_string)
+            })
+            .or_else(|| self.section_id.clone())
+    }
+
+    /// Returns `true` when the section's reference text comes from an explicit
+    /// `reftext` attribute or a `[[id,reftext]]` anchor reftext, rather than
+    /// from its title. Such a section's reference text does not change when its
+    /// title's cross-references resolve, so the title resolution pass does not
+    /// treat it as a recomputable target.
+    pub(crate) fn has_explicit_reftext(&self) -> bool {
+        self.attrlist
+            .as_ref()
+            .and_then(|attrlist| attrlist.named_attribute("reftext"))
+            .is_some()
+            || self.anchor_reftext.is_some()
+    }
 }
 
 /// Builds the appendix title prefix (caption) for an appendix root section.
@@ -388,10 +441,11 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
         ContentModel::Compound
     }
 
-    fn content_mut(&mut self) -> Option<&mut Content<'src>> {
-        // The section title is the section's own resolvable content.
-        Some(&mut self.section_title)
-    }
+    // `content_mut` keeps the default `None`: the section's own resolvable
+    // content is its heading, which is resolved by the document-order title
+    // pass (see `document::title_refs`) rather than the per-content pass —
+    // that pass coordinates cross-references *between* titles (forward and
+    // circular), which per-content resolution cannot see.
 
     fn raw_context(&self) -> CowStr<'src> {
         "section".into()
@@ -410,7 +464,7 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
     }
 
     fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+        self.title.as_ref().map(Content::rendered_str)
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {

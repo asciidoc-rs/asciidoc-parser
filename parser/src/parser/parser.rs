@@ -10,10 +10,12 @@ use crate::{
     blocks::{SectionNumber, SectionType},
     document::{Attribute, Catalog, InterpretedValue, RefType},
     parser::{
-        AllowableValue, AttributeValue, DocinfoFileHandler, HtmlSubstitutionRenderer,
-        IncludeFileHandler, InlineSubstitutionRenderer, ModificationContext, PathResolver,
-        ResolvedAttributes, SafeMode, SourceLine, SourceMap, SvgFileHandler,
+        AllowableValue, AttributeValue, DatetimeContext, DocinfoFileHandler,
+        HtmlSubstitutionRenderer, IncludeFileHandler, InlineSubstitutionRenderer,
+        ModificationContext, PathResolver, ReferenceTime, ResolvedAttributes, SafeMode, SourceLine,
+        SourceMap, SvgFileHandler,
         built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
+        is_datetime_attribute,
         preprocessor::preprocess,
     },
     warnings::{Warning, WarningType},
@@ -146,11 +148,13 @@ pub struct Parser {
     /// stashing section ends. A block with a title of its own wins over the
     /// carried title, which is then discarded.
     ///
-    /// Only the rendered title is carried (this struct is lifetime-free and
-    /// cannot hold the `.Title` line's source span), so a block claiming a
+    /// The title is carried as an owned snapshot (this struct is lifetime-free
+    /// and cannot hold the `.Title` line's source span), so a block claiming a
     /// carried title has no `title_source` — the same shape as a title
-    /// supplied via a `title=` attribute.
-    pub(crate) pending_block_title: Option<String>,
+    /// supplied via a `title=` attribute. The snapshot keeps any deferred
+    /// cross-references, so an embedded `<<id>>` in a carried title still
+    /// resolves once the catalog is complete.
+    pub(crate) pending_block_title: Option<crate::content::OwnedTitle>,
 
     /// Live values of [counter] attributes, keyed by counter name (e.g.
     /// `index`, `example-number`, `table-number`).
@@ -293,6 +297,51 @@ pub struct Parser {
     /// hold), so the warnings can be turned into
     /// spanned [`Warning`]s once the document's owned source is available.
     substitution_warnings: RefCell<Vec<DeferredWarning>>,
+
+    /// An optional fixed reference time that pins the clock used to compute the
+    /// time-dependent document attributes (`docdate`, `doctime`, `docdatetime`,
+    /// `docyear`, and their `local*` siblings), for reproducible output.
+    ///
+    /// When set, it supersedes both the real wall clock and the
+    /// `SOURCE_DATE_EPOCH` environment variable as the value of "now" (which
+    /// drives the `local*` attributes and, absent an [`input_mtime`], the
+    /// `doc*` attributes too). See [`with_reference_time`] and
+    /// [`resolve_datetime_attribute`].
+    ///
+    /// [`input_mtime`]: Self::input_mtime
+    /// [`with_reference_time`]: Self::with_reference_time
+    /// [`resolve_datetime_attribute`]: Self::resolve_datetime_attribute
+    reference_time: Option<ReferenceTime>,
+
+    /// An optional fixed modification time of the source document, pinning the
+    /// clock that drives the `doc*` attributes (`docdate`, `doctime`,
+    /// `docdatetime`, `docyear`) specifically.
+    ///
+    /// This mirrors Asciidoctor's `input_mtime` option: the `local*` attributes
+    /// continue to track "now", while the `doc*` attributes reflect this source
+    /// modification time. See [`with_input_mtime`] and
+    /// [`resolve_datetime_attribute`].
+    ///
+    /// [`with_input_mtime`]: Self::with_input_mtime
+    /// [`resolve_datetime_attribute`]: Self::resolve_datetime_attribute
+    input_mtime: Option<ReferenceTime>,
+
+    /// The reference instants used to compute the time-dependent document
+    /// attributes, captured lazily the first time one of those attributes is
+    /// read during a parse (and reset at the start of each parse).
+    ///
+    /// The time-dependent attributes are *not* materialized into
+    /// [`attribute_values`](Self::attribute_values); instead they are resolved
+    /// on demand from this context (see
+    /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute)). A
+    /// parse that never references one therefore does no clock, environment, or
+    /// allocation work for them, and repeated reads within a parse observe a
+    /// single consistent instant.
+    ///
+    /// Wrapped in a [`RefCell`] because the capture happens through the shared
+    /// `&Parser` attribute readers (which the substitution code paths reach
+    /// with only a shared reference).
+    datetime_context: RefCell<Option<DatetimeContext>>,
 }
 
 /// A warning recorded in a form that does not borrow the source so it can live
@@ -398,6 +447,9 @@ impl Default for Parser {
             owned_cell_warnings: RefCell::new(vec![]),
             callouts: RefCell::new(CalloutCatalog::default()),
             substitution_warnings: RefCell::new(vec![]),
+            reference_time: None,
+            input_mtime: None,
+            datetime_context: RefCell::new(None),
         }
     }
 }
@@ -462,6 +514,13 @@ impl Parser {
     /// [`parse()`]: Self::parse
     /// [`catalog()`]: Document::catalog
     pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
+        // The time-dependent document attributes (docdate, doctime, docdatetime,
+        // docyear, and their local* siblings) are resolved lazily from a
+        // reference instant captured the first time one is read (see
+        // `resolve_datetime_attribute`). Reset that capture so each parse sees a
+        // fresh "now"; a parse that never references one does no datetime work.
+        *self.datetime_context.borrow_mut() = None;
+
         let (preprocessed_source, source_map, preprocessor_warnings, includes) =
             preprocess(source, self);
 
@@ -557,7 +616,11 @@ impl Parser {
                     av.value.clone()
                 }
             }
-            None => InterpretedValue::Unset,
+            // A time-dependent attribute is not materialized in either table; it
+            // is resolved on demand from the captured reference instant.
+            None => self
+                .resolve_datetime_attribute(name)
+                .unwrap_or(InterpretedValue::Unset),
         }
     }
 
@@ -615,7 +678,7 @@ impl Parser {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
-        self.effective_attribute(name).is_some()
+        self.effective_attribute(name).is_some() || self.resolve_datetime_attribute(name).is_some()
     }
 
     /// Returns `true` if the parser has a [document attribute] by this name
@@ -637,7 +700,7 @@ impl Parser {
 
         self.effective_attribute(name)
             .map(|a| a.value != InterpretedValue::Unset)
-            .unwrap_or(false)
+            .unwrap_or_else(|| self.resolve_datetime_attribute(name).is_some())
     }
 
     /// Returns the current `leveloffset` document attribute as a signed
@@ -739,7 +802,9 @@ impl Parser {
     ///
     /// This shares the parser's attribute tables by [`Arc`] rather than copying
     /// them, so it is cheap to take on every parse (the large built-in table is
-    /// never deep-cloned). See [`ResolvedAttributes`].
+    /// never deep-cloned). The time-dependent attributes are not materialized;
+    /// the snapshot carries the reference-time configuration so it can resolve
+    /// them on demand exactly as the parser does. See [`ResolvedAttributes`].
     ///
     /// [`Document`]: crate::Document
     /// [`attribute_value`]: Self::attribute_value
@@ -750,6 +815,8 @@ impl Parser {
             Arc::clone(&self.attribute_values),
             Arc::clone(&self.default_attribute_values),
             self.counter_values.borrow().clone(),
+            self.reference_time.clone(),
+            self.input_mtime.clone(),
         )
     }
 
@@ -1363,6 +1430,107 @@ impl Parser {
         self.apply_title_visibility_linkage(&name, &value, modification_context, true);
 
         self
+    }
+
+    /// Pins the reference time (the value of "now") used to compute the
+    /// time-dependent document attributes, for reproducible output.
+    ///
+    /// AsciiDoc derives `localdate`, `localtime`, `localdatetime`, and
+    /// `localyear` from the current wall-clock time, and `docdate`, `doctime`,
+    /// `docdatetime`, and `docyear` from the source file's modification time
+    /// (falling back to "now" when no modification time is known). Because
+    /// those values change from run to run, any output that embeds them is
+    /// not reproducible. Supplying a [`ReferenceTime`] pins "now" to a
+    /// fixed instant so the computed attributes are stable.
+    ///
+    /// This is the API counterpart of the `SOURCE_DATE_EPOCH` environment
+    /// variable; a value set here takes precedence over that variable. To pin
+    /// only the source-modification time that drives the `doc*` attributes
+    /// (leaving `local*` on the real clock), use [`with_input_mtime`] instead;
+    /// an [`with_input_mtime`] value takes precedence over this one for the
+    /// `doc*` attributes.
+    ///
+    /// A value set via the document header or body (e.g. an explicit
+    /// `:docdate:`) still wins over the computed default.
+    ///
+    /// [`with_input_mtime`]: Self::with_input_mtime
+    pub fn with_reference_time(mut self, reference_time: ReferenceTime) -> Self {
+        self.reference_time = Some(reference_time);
+        self
+    }
+
+    /// Pins the modification time of the source document, which drives the
+    /// `docdate`, `doctime`, `docdatetime`, and `docyear` attributes.
+    ///
+    /// This mirrors Asciidoctor's `input_mtime` option: the `local*` attributes
+    /// continue to reflect "now" (the real clock, a [`with_reference_time`]
+    /// value, or `SOURCE_DATE_EPOCH`), while the `doc*` attributes reflect the
+    /// supplied source modification time. A value set here takes precedence
+    /// over a [`with_reference_time`] value for the `doc*` attributes.
+    ///
+    /// A value set via the document header or body (e.g. an explicit
+    /// `:docdate:`) still wins over the computed default.
+    ///
+    /// [`with_reference_time`]: Self::with_reference_time
+    pub fn with_input_mtime(mut self, input_mtime: ReferenceTime) -> Self {
+        self.input_mtime = Some(input_mtime);
+        self
+    }
+
+    /// Resolves a time-dependent document attribute (`docdate`, `doctime`,
+    /// `docdatetime`, `docyear`, or a `local*` sibling) on demand, returning
+    /// `None` for any other name (or when the attribute resolves to no value,
+    /// as `docyear` / `localyear` do for an explicit date without a `YYYY-`
+    /// prefix).
+    ///
+    /// The reference instant is captured lazily on the first such read of a
+    /// parse and cached (see [`datetime_context`](Self::datetime_context)), so
+    /// a parse that never references a time-dependent attribute does no
+    /// clock, environment, or allocation work, and repeated reads observe
+    /// one consistent instant. An explicit value assigned via the API,
+    /// header, or body always wins; the derived `*year` / `*datetime` are
+    /// computed from whichever value each sibling resolves to. See
+    /// [`DatetimeContext`].
+    ///
+    /// Takes `&self` so it can be called from the shared-reference attribute
+    /// readers (which the substitution code paths reach with only a `&Parser`);
+    /// the lazy capture goes through the [`RefCell`].
+    fn resolve_datetime_attribute(&self, name: &str) -> Option<InterpretedValue> {
+        if !is_datetime_attribute(name) {
+            return None;
+        }
+
+        let context = {
+            let mut slot = self.datetime_context.borrow_mut();
+            slot.get_or_insert_with(|| {
+                DatetimeContext::capture(self.reference_time.as_ref(), self.input_mtime.as_ref())
+            })
+            .clone()
+        };
+
+        context
+            .resolve(name, |sibling| self.stored_datetime_override(sibling))
+            .map(InterpretedValue::Value)
+    }
+
+    /// Returns the *explicitly-set* value of `name` from the per-parser
+    /// attribute map, as an owned string (a value-less "set" reads as an empty
+    /// string), or `None` when it has no such entry.
+    ///
+    /// This reads only the stored overrides — never the on-the-fly datetime
+    /// resolution — so it can supply the explicit sibling values
+    /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute) needs
+    /// without recursing. It mirrors the Ruby truthiness the datetime
+    /// computation relies on (`attrs['docdate']`), where any present value —
+    /// including an empty string — counts as explicitly supplied.
+    fn stored_datetime_override(&self, name: &str) -> Option<String> {
+        self.attribute_values
+            .get(name)
+            .and_then(|av| match &av.value {
+                InterpretedValue::Value(value) => Some(value.clone()),
+                InterpretedValue::Set => Some(String::new()),
+                InterpretedValue::Unset => None,
+            })
     }
 
     /// Replace the default [`InlineSubstitutionRenderer`] for this parser.
@@ -2899,6 +3067,136 @@ mod tests {
         fn counter_empty_seed_falls_back_to_one() {
             let p = Parser::default();
             assert_eq!(p.counter("c", Some("")), "1");
+        }
+    }
+
+    /// Coverage for the time-dependent document attributes (`docdate`,
+    /// `doctime`, `docdatetime`, `docyear`, and their `local*` siblings) that
+    /// is *not* a direct port of Asciidoctor's Ruby tests: the injectable
+    /// clock ([`Parser::with_reference_time`] /
+    /// [`Parser::with_input_mtime`]), and resolution *during* a parse (a
+    /// `{docdate}` reference or an `ifdef::docdate[]` directive) rather
+    /// than off the finished document.
+    ///
+    /// The direct Ruby ports live alongside the vendored suite in
+    /// `tests/asciidoctor_rb/document_test.rs`.
+    mod datetime_attributes {
+        use crate::{parser::ReferenceTime, tests::prelude::*};
+
+        #[test]
+        fn pins_local_attributes_with_reference_time() {
+            // The injectable clock (this crate's stable-output mechanism) pins
+            // the `local*` attributes, which Asciidoctor derives from
+            // `::Time.now`.
+            let doc = Parser::default()
+                .with_reference_time(ReferenceTime::from_local(2019, 1, 2, 3, 4, 5, 6 * 3600))
+                .parse("");
+
+            assert_eq!(
+                doc.attribute_value("localdate"),
+                InterpretedValue::Value("2019-01-02")
+            );
+            assert_eq!(
+                doc.attribute_value("localyear"),
+                InterpretedValue::Value("2019")
+            );
+            assert_eq!(
+                doc.attribute_value("localtime"),
+                InterpretedValue::Value("03:04:05 +0600")
+            );
+            assert_eq!(
+                doc.attribute_value("localdatetime"),
+                InterpretedValue::Value("2019-01-02 03:04:05 +0600")
+            );
+        }
+
+        #[test]
+        fn resolves_date_attributes_referenced_in_the_document_body() {
+            // A `{docdate}` reference resolves the attribute on demand through
+            // the parser (during substitution), not off the finished document
+            // snapshot.
+            let doc = Parser::default()
+                .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+                .parse("docdate={docdate} docyear={docyear} docdatetime={docdatetime}");
+
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                vec![
+                    "docdate=2015-01-01 docyear=2015 docdatetime=2015-01-01 10:00:00 UTC"
+                        .to_string()
+                ]
+            );
+        }
+
+        #[test]
+        fn conditional_directive_sees_a_computed_date_attribute() {
+            // `ifdef` queries `is_attribute_set`, which must report the computed
+            // `docdate` as set.
+            let doc = Parser::default()
+                .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+                .parse("ifdef::docdate[present]");
+
+            assert_eq!(rendered_paragraphs(&doc), vec!["present".to_string()]);
+        }
+
+        #[test]
+        fn an_explicit_doctime_feeds_the_computed_docdatetime() {
+            // An explicit `doctime` (a stored value) supplies the time portion
+            // of the computed `docdatetime`, both when referenced in the body
+            // and when read off the document.
+            let mut parser = Parser::default()
+                .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+                .with_intrinsic_attribute(
+                    "doctime",
+                    "09:09:09-0500",
+                    ModificationContext::ApiOrHeader,
+                );
+            let doc = parser.parse("at {docdatetime}");
+
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                vec!["at 2015-01-01 09:09:09-0500".to_string()]
+            );
+            assert_eq!(
+                doc.attribute_value("docdatetime"),
+                InterpretedValue::Value("2015-01-01 09:09:09-0500")
+            );
+        }
+
+        #[test]
+        fn an_unset_doctime_falls_back_to_the_reference_time() {
+            // An explicitly unset `doctime` is treated as absent, so
+            // `docdatetime` falls back to the reference instant's time.
+            let mut parser = Parser::default()
+                .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+                .with_intrinsic_attribute_bool("doctime", false, ModificationContext::ApiOrHeader);
+            let doc = parser.parse("at {docdatetime}");
+
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                vec!["at 2015-01-01 10:00:00 UTC".to_string()]
+            );
+            assert_eq!(
+                doc.attribute_value("docdatetime"),
+                InterpretedValue::Value("2015-01-01 10:00:00 UTC")
+            );
+        }
+
+        #[test]
+        fn a_value_less_doctime_reads_as_an_empty_time() {
+            // A value-less `doctime` (set, but with no value) contributes an
+            // empty time, leaving a trailing space in the computed
+            // `docdatetime`.
+            let mut parser = Parser::default()
+                .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+                .with_intrinsic_attribute_bool("doctime", true, ModificationContext::ApiOrHeader);
+            let doc = parser.parse("x{docdatetime}x");
+
+            assert_eq!(rendered_paragraphs(&doc), vec!["x2015-01-01 x".to_string()]);
+            assert_eq!(
+                doc.attribute_value("docdatetime"),
+                InterpretedValue::Value("2015-01-01 ")
+            );
         }
     }
 }

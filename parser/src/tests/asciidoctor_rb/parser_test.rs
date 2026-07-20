@@ -91,9 +91,6 @@
 //!   trailing bare `;` mangles the final author (issue #757).
 //! * The `:author:` attribute-entry path does not partition a 4+-part name
 //!   (issue #758).
-//! * A revision number written purely as an attribute reference
-//!   (`v{project-version}`) is stripped to the empty string, and the revision
-//!   document attributes are stored pre-substitution (issue #759).
 //! * Block comments (`////`) in the header are not skipped ahead of the author
 //!   or revision line (issue #760).
 //! * A duplicate id introduced by an *inline* anchor (`[[id]]`) does not emit a
@@ -985,12 +982,10 @@ fn parse_ideographic_author_names() {
     assert_eq!(a[0].initials, "李四");
 }
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/756):
-// Asciidoctor condenses the interior whitespace of the author name
-// (`Stuart Rackham`); this crate preserves it verbatim in the
-// `name`/`firstname` fields. The parsed name parts and initials still match.
-non_normative!(
-    r#"
+#[test]
+fn parse_author_condenses_whitespace() {
+    verifies!(
+        r#"
   test "parse author condenses whitespace" do
     metadata, _ = parse_header_metadata 'Stuart       Rackham     <founder@asciidoc.org>'
     assert_equal 7, metadata.size
@@ -1004,16 +999,24 @@ non_normative!(
   end
 
 "#
-);
+    );
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/756):
-// when the author line doesn't match the author regex (here because of the
-// embedded comma), Asciidoctor condenses whitespace and keeps the angle
-// brackets literal, storing the whole line as the author. This crate preserves
-// the interior whitespace and HTML-encodes the angle brackets, so
-// `author`/`firstname` differ (the `S` initial still matches).
-non_normative!(
-    r#"
+    // This crate does not derive the `authors` or `authorcount` attributes, so we
+    // assert on the parsed author directly. The interior whitespace between the
+    // names is condensed to a single space (matching `metadata['author']`).
+    let a = parse_authors("Stuart       Rackham     <founder@asciidoc.org>");
+    assert_eq!(a.len(), 1);
+    assert_eq!(a[0].name, "Stuart Rackham");
+    assert_eq!(a[0].firstname, "Stuart");
+    assert_eq!(a[0].lastname.as_deref(), Some("Rackham"));
+    assert_eq!(a[0].email.as_deref(), Some("founder@asciidoc.org"));
+    assert_eq!(a[0].initials, "SR");
+}
+
+#[test]
+fn parse_invalid_author_line_becomes_author() {
+    verifies!(
+        r#"
   test "parse invalid author line becomes author" do
     metadata, _ = parse_header_metadata '   Stuart       Rackham, founder of AsciiDoc   <founder@asciidoc.org>'
     assert_equal 5, metadata.size
@@ -1025,7 +1028,26 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // The author line doesn't match the author pattern (because of the embedded
+    // comma), so Asciidoctor condenses the interior whitespace and stores the whole
+    // line verbatim as the author, keeping the angle brackets literal.
+    let a = parse_authors("   Stuart       Rackham, founder of AsciiDoc   <founder@asciidoc.org>");
+    assert_eq!(a.len(), 1);
+    assert_eq!(
+        a[0].name,
+        "Stuart Rackham, founder of AsciiDoc <founder@asciidoc.org>"
+    );
+    assert_eq!(
+        a[0].firstname,
+        "Stuart Rackham, founder of AsciiDoc <founder@asciidoc.org>"
+    );
+    assert_eq!(a[0].middlename, None);
+    assert_eq!(a[0].lastname, None);
+    assert_eq!(a[0].email, None);
+    assert_eq!(a[0].initials, "S");
+}
 
 #[test]
 fn parse_multiple_authors() {
@@ -1340,13 +1362,10 @@ fn parse_rev_number_date_remark() {
     );
 }
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/759):
-// a revision number written purely as an attribute reference
-// (`v{project-version}`) is stripped to the empty string by this crate's
-// non-numeric-prefix removal (it runs before substitution and finds no digit),
-// so `revnumber` does not survive as `{project-version}`.
-non_normative!(
-    r#"
+#[test]
+fn parse_rev_number_date_and_remark_as_attribute_references() {
+    verifies!(
+        r#"
   test 'parse rev number, data, and remark as attribute references' do
     input = <<~'EOS'
     Author Name
@@ -1360,15 +1379,24 @@ non_normative!(
   end
 
 "#
-);
+    );
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/759):
-// this crate stores the `revnumber`/`revdate`/`revremark` document attributes
-// from the *raw* (pre-substitution) revision line, and the `revnumber` is
-// additionally stripped to the empty string (see above), so the resolved
-// attribute references are not reflected in `doc.attr`.
-non_normative!(
-    r#"
+    // With none of the referenced attributes defined, the references survive
+    // verbatim: the `v` prefix is stripped from the revision number, but
+    // `{project-version}` is preserved rather than dropped for lack of a literal
+    // digit. (This crate does not surface the full header-metadata hash, so the
+    // `metadata.size` assertion is not modeled.)
+    let (revnumber, revdate, revremark) =
+        header_rev("Author Name\nv{project-version}, {release-date}: {release-summary}");
+    assert_eq!(revnumber.as_deref(), Some("{project-version}"));
+    assert_eq!(revdate, "{release-date}");
+    assert_eq!(revremark.as_deref(), Some("{release-summary}"));
+}
+
+#[test]
+fn should_resolve_attribute_references_in_rev_number_date_and_remark() {
+    verifies!(
+        r#"
   test 'should resolve attribute references in rev number, data, and remark' do
     input = <<~'EOS'
     = Document Title
@@ -1386,7 +1414,37 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // The referenced attributes are resolved before the built-in revision
+    // document attributes are recorded, so `doc.attr` holds the substituted
+    // values rather than the raw `{...}` references.
+    let mut parser = Parser::default()
+        .with_intrinsic_attribute("project-version", "1.0.1", ModificationContext::Anywhere)
+        .with_intrinsic_attribute("release-date", "2018-05-15", ModificationContext::Anywhere)
+        .with_intrinsic_attribute(
+            "release-summary",
+            "The one you can count on!",
+            ModificationContext::Anywhere,
+        );
+
+    let _doc = parser.parse(
+        "= Document Title\nAuthor Name\n{project-version}, {release-date}: {release-summary}",
+    );
+
+    assert_eq!(
+        parser.attribute_value("revnumber").as_maybe_str(),
+        Some("1.0.1")
+    );
+    assert_eq!(
+        parser.attribute_value("revdate").as_maybe_str(),
+        Some("2018-05-15")
+    );
+    assert_eq!(
+        parser.attribute_value("revremark").as_maybe_str(),
+        Some("The one you can count on!")
+    );
+}
 
 #[test]
 fn parse_rev_date() {

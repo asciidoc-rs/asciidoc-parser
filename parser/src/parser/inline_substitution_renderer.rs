@@ -949,9 +949,19 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 let text = match params.provided_text {
                     Some(provided) if !provided.is_empty() => provided.to_string(),
                     _ => {
+                        // The target's reference text becomes this reference's
+                        // link text. When that reftext is itself a title
+                        // containing a cross-reference (or an inline link), it
+                        // carries a nested `<a>…</a>`; an anchor cannot legally
+                        // nest inside another, so the inner anchor tags are
+                        // dropped (keeping their text), mirroring Asciidoctor's
+                        // `DropAnchorRx`. The bracketed fallback (`[id]`) has no
+                        // anchors, so stripping only applies to a resolved
+                        // reftext.
                         let base = resolved
                             .text
-                            .clone()
+                            .as_deref()
+                            .map(drop_anchor_tags)
                             .unwrap_or_else(|| format!("[{target}]", target = params.target));
                         apply_xrefstyle(params.xrefstyle, resolved.signifier.as_ref(), base)
                     }
@@ -1338,6 +1348,28 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// Removes the anchor (`<a …>` / `</a>`) tags from `text`, keeping everything
+/// between them.
+///
+/// Used when a cross-reference's link text is drawn from its target's reference
+/// text and that reftext itself contains an anchor — an inline link, or a
+/// cross-reference embedded in the target's title. HTML forbids nesting an
+/// `<a>` inside another, so the inner anchor tags are stripped, leaving their
+/// text in place. Mirrors Asciidoctor's `DropAnchorRx = /<(?:a\b[^>]*|\/a)>/`.
+fn drop_anchor_tags(text: &str) -> String {
+    // The common case — a reftext with no anchor at all — allocates a plain
+    // copy and does no scanning.
+    if !text.contains("<a") {
+        return text.to_string();
+    }
+
+    #[allow(clippy::unwrap_used)]
+    static DROP_ANCHOR_RX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"<(?:a\b[^>]*|/a)>").unwrap());
+
+    DROP_ANCHOR_RX.replace_all(text, "").into_owned()
+}
+
 /// Builds the display text for a resolved cross-reference under the selected
 /// [`XrefStyle`].
 ///
@@ -1425,7 +1457,7 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) 
 
 #[cfg(test)]
 mod tests {
-    use super::encode_html_attribute;
+    use super::{drop_anchor_tags, encode_html_attribute};
 
     #[test]
     fn encode_html_attribute_escapes_special_characters() {
@@ -1437,5 +1469,33 @@ mod tests {
             "a&amp;b&quot;c&lt;d&gt;e"
         );
         assert_eq!(encode_html_attribute("plain"), "plain");
+    }
+
+    #[test]
+    fn drop_anchor_tags_strips_anchor_markup_keeping_text() {
+        // Anchor-free text is returned unchanged.
+        assert_eq!(drop_anchor_tags("plain text"), "plain text");
+
+        // A single anchor's tags are removed, keeping the link text.
+        assert_eq!(
+            drop_anchor_tags(r#"Consult <a href="https://google.com">Google</a>"#),
+            "Consult Google"
+        );
+
+        // A bracketed cross-reference fallback embedded in a reftext.
+        assert_eq!(drop_anchor_tags(r##"B <a href="#a">[a]</a>"##), "B [a]");
+
+        // Multiple anchors are all stripped.
+        assert_eq!(
+            drop_anchor_tags(r##"<a href="#x">X</a> and <a href="#y">Y</a>"##),
+            "X and Y"
+        );
+
+        // A `<article>` tag is not an anchor and must be left intact (the `\b`
+        // word boundary in the pattern keeps `<a` from matching `<article>`).
+        assert_eq!(
+            drop_anchor_tags("<article>text</article>"),
+            "<article>text</article>"
+        );
     }
 }

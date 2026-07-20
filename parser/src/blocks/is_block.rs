@@ -145,10 +145,12 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     }
 
     /// Returns a mutable reference to this block's own resolvable content — its
-    /// body, section title, or description-list term — if any.
+    /// body or description-list term — if any.
     ///
     /// The default returns `None`; content-bearing blocks override it. This is
-    /// used by in-place passes such as cross-reference resolution.
+    /// used by in-place passes such as cross-reference resolution. A section
+    /// keeps the default: its heading is resolved by the document-order title
+    /// pass, not the per-content pass.
     fn content_mut(&mut self) -> Option<&mut Content<'src>> {
         None
     }

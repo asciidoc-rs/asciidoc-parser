@@ -165,6 +165,27 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     out
 }
 
+/// A fully-owned snapshot of a rendered title, including any deferred
+/// cross-references it carries.
+///
+/// A block title stashed across a section heading (see
+/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] — the
+/// parser it rides on has no `'src` lifetime — so the title travels in this
+/// owned form and is rebuilt into a [`Content`] (via
+/// [`Content::from_owned_title`]) when the next block claims it. Carrying the
+/// deferred template and cross-references along means an embedded `<<id>>`
+/// still resolves once the catalog is complete.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct OwnedTitle {
+    /// The rendered title text (the unresolved-fallback rendering when
+    /// cross-references are present).
+    rendered: String,
+
+    /// The placeholder template and cross-references, when the title carries
+    /// any; `None` for the (overwhelmingly common) cross-reference-free title.
+    deferred: Option<(String, Vec<XrefSegment>)>,
+}
+
 impl<'src> Content<'src> {
     /// Constructs a `Content` from a source `Span` and a potentially-filtered
     /// view of that source text.
@@ -174,6 +195,33 @@ impl<'src> Content<'src> {
             rendered: filtered.as_ref().to_string().into(),
             source_lines: None,
             deferred: None,
+        }
+    }
+
+    /// Returns a fully-owned snapshot of this content's rendered text and
+    /// deferred cross-references, for a title that must outlive its source
+    /// borrow (see [`OwnedTitle`]).
+    pub(crate) fn to_owned_title(&self) -> OwnedTitle {
+        OwnedTitle {
+            rendered: self.rendered.as_ref().to_string(),
+            deferred: self
+                .deferred
+                .as_ref()
+                .map(|d| (d.template.clone(), d.xrefs.clone())),
+        }
+    }
+
+    /// Reconstitutes a [`Content`] from an [`OwnedTitle`] snapshot, anchored at
+    /// `span`. The deferred cross-references (when present) are restored, so
+    /// the document-order title pass can still resolve them.
+    pub(crate) fn from_owned_title(span: Span<'src>, title: OwnedTitle) -> Self {
+        Self {
+            original: span,
+            rendered: title.rendered.into(),
+            source_lines: None,
+            deferred: title
+                .deferred
+                .map(|(template, xrefs)| Box::new(DeferredContent { template, xrefs })),
         }
     }
 
@@ -226,6 +274,17 @@ impl<'src> Content<'src> {
         self.rendered.as_ref()
     }
 
+    /// Returns the final rendered text, borrowed for the duration of `&self`
+    /// rather than for `'src`.
+    ///
+    /// [`rendered`](Self::rendered) ties its result to `'src`, which a block's
+    /// `title(&self)` accessor cannot provide. This shorter-lived borrow lets a
+    /// block expose its title `Content`'s rendered text through the `&self`
+    /// accessor.
+    pub(crate) fn rendered_str(&self) -> &str {
+        self.rendered.as_ref()
+    }
+
     /// Returns an owned copy of the final text after all substitutions have
     /// been applied.
     ///
@@ -265,6 +324,31 @@ impl<'src> Content<'src> {
                 .template
                 .replace([FOOTNOTE_MARKER_START, FOOTNOTE_MARKER_END], "");
         }
+    }
+
+    /// Returns the deferred cross-reference template and segments, if this
+    /// content carries any.
+    ///
+    /// The template is the placeholder-bearing text captured by
+    /// [`finalize_deferred`](Self::finalize_deferred); the segments are the
+    /// cross-references in placeholder order. Used by the document-order title
+    /// resolution pass, which re-renders a title's cross-references with
+    /// cross-title (including circular) coordination that the per-content
+    /// [`resolve_references`](Self::resolve_references) cannot provide.
+    pub(crate) fn deferred_parts(&self) -> Option<(&str, &[XrefSegment])> {
+        self.deferred
+            .as_ref()
+            .map(|d| (d.template.as_str(), d.xrefs.as_slice()))
+    }
+
+    /// Overwrites the rendered text directly.
+    ///
+    /// Used by the document-order title resolution pass, which computes a
+    /// title's final rendering (coordinating cross-title references) and
+    /// installs it here, in place of the per-content resolution that cannot see
+    /// other titles.
+    pub(crate) fn set_rendered(&mut self, rendered: String) {
+        self.rendered = rendered.into();
     }
 
     /// Returns `true` if this content contains one or more cross-references
@@ -463,6 +547,21 @@ pub(crate) fn rehome_xref_placeholders(
 
     out.push_str(rest);
     (out, local)
+}
+
+/// Splices resolved (or fallback) cross-reference renderings into a placeholder
+/// template, producing the final rendered text.
+///
+/// This is the seam used by the document-order title resolution pass: it hands
+/// in a title's captured template together with a set of [`XrefSegment`]s whose
+/// [`resolved`](XrefSegment::resolved) fields it has filled in with cross-title
+/// (including circular) coordination, and receives the final rendered title.
+pub(crate) fn render_xref_template(
+    template: &str,
+    xrefs: &[XrefSegment],
+    renderer: &dyn InlineSubstitutionRenderer,
+) -> String {
+    render_template(template, xrefs, renderer)
 }
 
 /// Splices resolved (or fallback) cross-reference renderings into a placeholder

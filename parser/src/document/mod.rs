@@ -29,6 +29,8 @@ pub use header::Header;
 mod revision_line;
 pub use revision_line::RevisionLine;
 
+mod title_refs;
+
 mod toc;
 pub(crate) use toc::TocConfig;
 pub use toc::TocMode;
