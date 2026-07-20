@@ -24,6 +24,25 @@ pub struct Catalog {
     /// A nested document (an AsciiDoc table cell) keeps its own footnote list:
     /// footnotes defined inside a cell are *not* shared with the main document.
     pub(crate) footnotes: Vec<Footnote>,
+
+    /// AsciiDoc files that were included into this document, keyed by the
+    /// include target relative to the outermost document with its AsciiDoc
+    /// extension removed (e.g. `other-chapters` for
+    /// `include::other-chapters.adoc[]`). The value records whether the file
+    /// was ever included *in full*: `true` when at least one include merged the
+    /// whole file, `false` when every include of it selected only a
+    /// `lines`/`tag(s)` portion.
+    ///
+    /// The preprocessor records each include while it expands `include::`
+    /// directives (before parsing); `Parser::parse_deferred` folds those into
+    /// this map via [`register_include`](Self::register_include), and it
+    /// survives into the document's catalog. It lets an
+    /// inter-document cross reference whose target names an included file
+    /// collapse to a same-document reference — the target's anchors are now
+    /// part of *this* document — but only when the file was included in
+    /// full, since a partial include may not have carried the referenced
+    /// anchor across. See [`interpret_xref_target`](crate::content).
+    pub(crate) includes: HashMap<String, bool>,
 }
 
 impl Default for Catalog {
@@ -38,6 +57,7 @@ impl Catalog {
             refs: HashMap::new(),
             reftext_to_id: HashMap::new(),
             footnotes: Vec::new(),
+            includes: HashMap::new(),
         }
     }
 
@@ -200,6 +220,43 @@ impl Catalog {
         self.footnotes.iter().find(|f| f.id.as_deref() == Some(id))
     }
 
+    /// Records that the AsciiDoc file named by `key` was included into this
+    /// document.
+    ///
+    /// `key` is the include target relative to the outermost document, with its
+    /// AsciiDoc extension removed (e.g. `other-chapters`). `full` is `true`
+    /// when the entire file was included and `false` when only a
+    /// `lines`/`tag(s)` selection of it was.
+    ///
+    /// A file included in full at least once is recorded as full even if it was
+    /// also included partially (a full include always carries every anchor
+    /// across), matching Asciidoctor.
+    pub(crate) fn register_include(&mut self, key: &str, full: bool) {
+        self.includes
+            .entry(key.to_string())
+            .and_modify(|existing| *existing |= full)
+            .or_insert(full);
+    }
+
+    /// Returns `true` if the file named by `key` (an include target relative to
+    /// the outermost document, without its AsciiDoc extension) was included
+    /// into this document *in full* — i.e. at least one `include::`
+    /// directive merged the whole file, rather than only a `lines`/`tag(s)`
+    /// portion of it.
+    ///
+    /// Returns `false` if the file was only ever partially included, or was not
+    /// included at all.
+    pub fn include_is_full(&self, key: &str) -> bool {
+        self.includes.get(key).copied().unwrap_or(false)
+    }
+
+    /// Returns `true` if the file named by `key` (an include target relative to
+    /// the outermost document, without its AsciiDoc extension) was included
+    /// into this document, whether in full or only partially.
+    pub fn was_included(&self, key: &str) -> bool {
+        self.includes.contains_key(key)
+    }
+
     /// Removes and returns the current footnote list, leaving an empty list
     /// behind. Used to give a nested document (an AsciiDoc table cell) its own
     /// footnote registry so its footnotes are not shared with the enclosing
@@ -246,20 +303,35 @@ pub struct Footnote {
     /// resolution. `None` for the common case of a footnote with no
     /// cross-references.
     pub(crate) deferred: Option<Box<FootnoteDeferred>>,
+
+    /// The location of this footnote's defining occurrence, as a
+    /// `(byte offset, byte length)` pair into the document source, used to
+    /// anchor a cross-reference warning at the footnote rather than at the
+    /// whole document. The range spans the enclosing content the footnote was
+    /// written in (paragraph granularity, matching how a non-footnote
+    /// reference is anchored at its `Content`).
+    ///
+    /// `None` when the defining occurrence is not locatable in the document
+    /// source: a footnote defined while substituting a privately-owned
+    /// sub-source (a Markdown-style blockquote, an AsciiDoc table cell) indexes
+    /// that owned source, which is not contiguous in the document, so storing
+    /// its offset would misplace the warning. Resolution falls back to the
+    /// whole-document span in that case.
+    pub(crate) location: Option<(usize, usize)>,
 }
 
 impl Footnote {
     /// Resolves any cross-references embedded in this footnote's text using
     /// `resolver`, then rebuilds [`text`](Self::text) from the resolved state.
-    /// Any unresolved target is reported in `warnings`, anchored at `source`.
+    /// Any unresolved target is reported in `warnings`.
     ///
-    /// A footnote's text is extracted out of the block it was defined in and
-    /// the footnote itself keeps no span, so `source` is the enclosing
-    /// document's span rather than the reference's own location. That makes two
-    /// bad references in two different footnotes indistinguishable by location;
-    /// narrowing it to the defining occurrence needs footnotes registered from
-    /// an owned sub-source (a Markdown blockquote, an include-expanded table
-    /// cell) to be re-homed first (#804).
+    /// A footnote's text is extracted out of the block it was defined in, so
+    /// the warning is anchored using the footnote's recorded
+    /// [`location`](Self::location) — the enclosing content it was written in —
+    /// reconstructed as a sub-span of `document_source`. When no location was
+    /// recorded (a footnote defined inside an owned sub-source, whose offset
+    /// does not map to the document), the warning falls back to the whole
+    /// `document_source` span.
     ///
     /// A footnote with no cross-references is left untouched.
     pub(crate) fn resolve_references<'src>(
@@ -267,9 +339,13 @@ impl Footnote {
         resolver: &dyn crate::parser::ReferenceResolver,
         renderer: &dyn crate::parser::InlineSubstitutionRenderer,
         warnings: &mut crate::parser::ReferenceWarnings<'src>,
-        source: crate::Span<'src>,
+        document_source: crate::Span<'src>,
     ) {
         if let Some(deferred) = self.deferred.as_mut() {
+            let source = match self.location {
+                Some((offset, len)) => document_source.slice(offset..offset + len),
+                None => document_source,
+            };
             deferred.resolve(resolver, warnings, source);
             self.text = deferred.render(renderer);
         }
@@ -300,6 +376,7 @@ impl std::fmt::Debug for Catalog {
             .field("refs", &DebugHashMapFrom(&self.refs))
             .field("reftext_to_id", &DebugHashMapFrom(&self.reftext_to_id))
             .field("footnotes", &self.footnotes)
+            .field("includes", &DebugHashMapFrom(&self.includes))
             .finish()
     }
 }
@@ -514,6 +591,45 @@ mod tests {
             .unwrap();
 
         assert_eq!(catalog.resolve_id("Same Text"), Some("first".to_string()));
+    }
+
+    #[test]
+    fn register_include_records_full_and_partial() {
+        let mut catalog = Catalog::new();
+
+        // An unregistered file is neither included nor full.
+        assert!(!catalog.was_included("tigers"));
+        assert!(!catalog.include_is_full("tigers"));
+
+        catalog.register_include("tigers", false);
+        assert!(catalog.was_included("tigers"));
+        assert!(!catalog.include_is_full("tigers"));
+
+        catalog.register_include("lions", true);
+        assert!(catalog.was_included("lions"));
+        assert!(catalog.include_is_full("lions"));
+    }
+
+    #[test]
+    fn a_full_include_wins_over_a_partial_one_in_either_order() {
+        // partial then full → full
+        let mut catalog = Catalog::new();
+        catalog.register_include("tigers", false);
+        catalog.register_include("tigers", true);
+        assert!(catalog.include_is_full("tigers"));
+
+        // full then partial → still full
+        let mut catalog = Catalog::new();
+        catalog.register_include("tigers", true);
+        catalog.register_include("tigers", false);
+        assert!(catalog.include_is_full("tigers"));
+
+        // partial then partial → partial
+        let mut catalog = Catalog::new();
+        catalog.register_include("tigers", false);
+        catalog.register_include("tigers", false);
+        assert!(catalog.was_included("tigers"));
+        assert!(!catalog.include_is_full("tigers"));
     }
 
     #[test]

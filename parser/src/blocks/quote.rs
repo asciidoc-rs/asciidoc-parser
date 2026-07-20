@@ -443,7 +443,12 @@ impl<'src> QuoteBlock<'src> {
         // must not be lost.
         let mut nested_warning_types: Vec<WarningType> = vec![];
         let owned = OwnedQuoteBlocks::new(body, |source| {
+            // The blocks parse from `source`, an owned copy that does not map to
+            // the document. Mark that so a footnote defined inside records no
+            // (misleading) document location; see `Parser::owned_subsource_depth`.
+            parser.owned_subsource_depth += 1;
             let mut maw = parse_blocks_until(Span::new(source), |_, _| false, parser);
+            parser.owned_subsource_depth -= 1;
             nested_warning_types.extend(maw.warnings.drain(..).map(|w| w.warning));
             OwnedQuoteBlocksInner {
                 blocks: maw.item.item,

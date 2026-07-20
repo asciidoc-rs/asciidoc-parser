@@ -1627,6 +1627,7 @@ mod tests {
         refs: HashMap::from([]),
         reftext_to_id: HashMap::from([]),
         footnotes: [],
+        includes: HashMap::from([]),
     },
 }"#
         );
