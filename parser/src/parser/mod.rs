@@ -49,6 +49,7 @@ pub use reference_resolver::{
 
 mod reference_time;
 pub use reference_time::ReferenceTime;
+pub(crate) use reference_time::{DatetimeContext, DatetimeInputs, is_datetime_attribute};
 
 mod source_map;
 pub use source_map::{SourceLine, SourceMap};

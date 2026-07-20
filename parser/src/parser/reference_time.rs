@@ -163,6 +163,254 @@ impl ReferenceTime {
     }
 }
 
+/// The eight time-dependent document attributes computed by
+/// [`DatetimeContext`], in a fixed order (the `local*` family followed by the
+/// `doc*` family).
+pub(crate) const DATETIME_ATTRIBUTE_NAMES: [&str; 8] = [
+    "localdate",
+    "localtime",
+    "localdatetime",
+    "localyear",
+    "docdate",
+    "doctime",
+    "docdatetime",
+    "docyear",
+];
+
+/// Returns `true` if `name` is one of the time-dependent document attributes
+/// resolved by [`DatetimeContext::resolve`].
+pub(crate) fn is_datetime_attribute(name: &str) -> bool {
+    DATETIME_ATTRIBUTE_NAMES.contains(&name)
+}
+
+/// The parser's pinned reference-time configuration: an optional reference time
+/// (the value of "now") and an optional source modification time.
+///
+/// This is the deterministic *input* to the time-dependent attributes, retained
+/// on a [`ResolvedAttributes`](crate::parser::ResolvedAttributes) snapshot so
+/// it can resolve them on demand. Both fields are commonly `None` (no clock
+/// pinned), so a snapshot stores this behind a single `Option<Box<…>>` that
+/// adds only a pointer and allocates nothing in the common case.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DatetimeInputs {
+    /// The pinned reference time (`Parser::with_reference_time`), if any.
+    pub(crate) reference_time: Option<ReferenceTime>,
+
+    /// The pinned source modification time (`Parser::with_input_mtime`), if
+    /// any.
+    pub(crate) input_mtime: Option<ReferenceTime>,
+}
+
+impl DatetimeInputs {
+    /// Builds the inputs from the two optional pinned times, returning `None`
+    /// when neither is set (so the snapshot stores nothing).
+    pub(crate) fn new(
+        reference_time: Option<ReferenceTime>,
+        input_mtime: Option<ReferenceTime>,
+    ) -> Option<Box<Self>> {
+        if reference_time.is_none() && input_mtime.is_none() {
+            None
+        } else {
+            Some(Box::new(Self {
+                reference_time,
+                input_mtime,
+            }))
+        }
+    }
+
+    /// Captures the reference instants from these inputs (see
+    /// [`DatetimeContext::capture`]).
+    pub(crate) fn capture(&self) -> DatetimeContext {
+        DatetimeContext::capture(self.reference_time.as_ref(), self.input_mtime.as_ref())
+    }
+}
+
+/// The reference instants from which the time-dependent document attributes are
+/// computed: `now` drives the `local*` family, and `doc` (the source document's
+/// modification time, defaulting to `now`) drives the `doc*` family.
+///
+/// This is captured once — lazily, the first time a time-dependent attribute is
+/// read — so that a parse which never references one does no clock,
+/// environment, or allocation work, and so that repeated reads within one parse
+/// observe a single, consistent instant. It ports Asciidoctor's
+/// `Document#fill_datetime_attributes`, but resolves each attribute on demand
+/// rather than materializing all eight up front.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DatetimeContext {
+    /// Drives the `local*` attributes.
+    now: ReferenceTime,
+
+    /// Drives the `doc*` attributes.
+    doc: ReferenceTime,
+}
+
+impl DatetimeContext {
+    /// Captures the reference instants from the parser's configuration.
+    ///
+    /// `now` resolves to, in order: the pinned `reference_time`
+    /// ([`Parser::with_reference_time`]), the `SOURCE_DATE_EPOCH` environment
+    /// variable, or the real wall clock (read as UTC). The `doc` instant
+    /// resolves to the pinned `input_mtime` ([`Parser::with_input_mtime`]) or,
+    /// absent that, to `now`.
+    ///
+    /// [`Parser::with_reference_time`]: crate::Parser::with_reference_time
+    /// [`Parser::with_input_mtime`]: crate::Parser::with_input_mtime
+    pub(crate) fn capture(
+        reference_time: Option<&ReferenceTime>,
+        input_mtime: Option<&ReferenceTime>,
+    ) -> Self {
+        let now = reference_time
+            .cloned()
+            .or_else(source_date_epoch_from_env)
+            .unwrap_or_else(ReferenceTime::now);
+
+        let doc = input_mtime.cloned().unwrap_or_else(|| now.clone());
+
+        Self { now, doc }
+    }
+
+    /// Resolves the time-dependent attribute `name` to its computed value, or
+    /// `None` when `name` is not a time-dependent attribute (or resolves to no
+    /// value, as `docyear` / `localyear` do for an explicit date without a
+    /// `YYYY-` prefix).
+    ///
+    /// `explicit` returns the *explicitly-set* value of a sibling attribute (an
+    /// API/header/body assignment), treating a value-less "set" as an empty
+    /// string and an unset/absent attribute as `None`. An explicit value always
+    /// wins over the computed one, and the derived `*year` / `*datetime` are
+    /// built from whichever value (explicit or computed) each sibling resolves
+    /// to — mirroring Asciidoctor's `||=` semantics.
+    pub(crate) fn resolve<F>(&self, name: &str, explicit: F) -> Option<String>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        match name {
+            "localdate" => Some(self.date("localdate", &self.now, &explicit)),
+            "localtime" => Some(self.time("localtime", &self.now, &explicit)),
+            "localyear" => self.year("localyear", "localdate", &self.now, &explicit),
+            "localdatetime" => Some(self.datetime(
+                "localdatetime",
+                "localdate",
+                "localtime",
+                &self.now,
+                &explicit,
+            )),
+            "docdate" => Some(self.date("docdate", &self.doc, &explicit)),
+            "doctime" => Some(self.time("doctime", &self.doc, &explicit)),
+            "docyear" => self.year("docyear", "docdate", &self.doc, &explicit),
+            "docdatetime" => {
+                Some(self.datetime("docdatetime", "docdate", "doctime", &self.doc, &explicit))
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolves a date attribute (`localdate` / `docdate`): an explicit value,
+    /// else the reference instant's date.
+    fn date<F: Fn(&str) -> Option<String>>(
+        &self,
+        attr: &str,
+        instant: &ReferenceTime,
+        explicit: &F,
+    ) -> String {
+        explicit(attr).unwrap_or_else(|| instant.date())
+    }
+
+    /// Resolves a time attribute (`localtime` / `doctime`): an explicit value,
+    /// else the reference instant's time.
+    fn time<F: Fn(&str) -> Option<String>>(
+        &self,
+        attr: &str,
+        instant: &ReferenceTime,
+        explicit: &F,
+    ) -> String {
+        explicit(attr).unwrap_or_else(|| instant.time())
+    }
+
+    /// Resolves a year attribute (`localyear` / `docyear`): an explicit value,
+    /// else derived from the date — the reference instant's year when the date
+    /// is computed, or the `YYYY-` prefix of an explicit date (which may yield
+    /// no value).
+    fn year<F: Fn(&str) -> Option<String>>(
+        &self,
+        year_attr: &str,
+        date_attr: &str,
+        instant: &ReferenceTime,
+        explicit: &F,
+    ) -> Option<String> {
+        if let Some(year) = explicit(year_attr) {
+            return Some(year);
+        }
+        match explicit(date_attr) {
+            Some(date) => year_from_date(&date),
+            None => Some(instant.year_string()),
+        }
+    }
+
+    /// Resolves a datetime attribute (`localdatetime` / `docdatetime`): an
+    /// explicit value, else `"{date} {time}"` built from the resolved date and
+    /// time siblings.
+    fn datetime<F: Fn(&str) -> Option<String>>(
+        &self,
+        datetime_attr: &str,
+        date_attr: &str,
+        time_attr: &str,
+        instant: &ReferenceTime,
+        explicit: &F,
+    ) -> String {
+        explicit(datetime_attr).unwrap_or_else(|| {
+            let date = self.date(date_attr, instant, explicit);
+            let time = self.time(time_attr, instant, explicit);
+            format!("{date} {time}")
+        })
+    }
+}
+
+/// Reads the `SOURCE_DATE_EPOCH` environment variable as a fixed reference
+/// time, if it is set to a non-empty, valid integer count of seconds since the
+/// Unix epoch (interpreted as UTC), per the [reproducible builds
+/// specification].
+///
+/// Returns `None` when the variable is unset, empty, or malformed. Asciidoctor
+/// raises on a malformed value; this crate has no error channel at this point,
+/// so a malformed value is ignored and the clock falls back to the next source
+/// (a pinned reference time, or the real wall clock) rather than aborting the
+/// parse.
+///
+/// [reproducible builds specification]: https://reproducible-builds.org/specs/source-date-epoch/
+fn source_date_epoch_from_env() -> Option<ReferenceTime> {
+    let raw = std::env::var("SOURCE_DATE_EPOCH").ok()?;
+    parse_source_date_epoch(&raw)
+}
+
+/// Parses a `SOURCE_DATE_EPOCH` string into a reference time, returning `None`
+/// when it is empty or not a valid integer. Split out from
+/// [`source_date_epoch_from_env`] so the parsing rules can be tested without
+/// touching the process environment.
+fn parse_source_date_epoch(raw: &str) -> Option<ReferenceTime> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let secs = trimmed.parse::<i64>().ok()?;
+    Some(ReferenceTime::from_unix_timestamp(secs))
+}
+
+/// Derives the year from a `docdate` / `localdate` value, mirroring
+/// Asciidoctor's `(date.index '-') == 4 ? (date.slice 0, 4) : nil`.
+///
+/// Returns the four-character prefix only when the first `-` is at index 4 (a
+/// `YYYY-` prefix); any other shape yields `None`, leaving the year attribute
+/// unset.
+fn year_from_date(date: &str) -> Option<String> {
+    if date.find('-') == Some(4) {
+        date.get(..4).map(str::to_string)
+    } else {
+        None
+    }
+}
+
 /// Converts a count of days since the Unix epoch to a `(year, month, day)`
 /// civil date, using Howard Hinnant's `civil_from_days` algorithm (valid for
 /// the full range of a proleptic Gregorian calendar).
@@ -184,6 +432,8 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     #[test]
@@ -244,5 +494,125 @@ mod tests {
     fn from_local_zero_offset_prints_utc() {
         let t = ReferenceTime::from_local(2019, 1, 2, 3, 4, 5, 0);
         assert_eq!(t.time(), "03:04:05 UTC");
+    }
+
+    #[test]
+    fn parse_source_date_epoch_valid() {
+        let t = parse_source_date_epoch("1420106400").expect("valid epoch");
+        assert_eq!(t.date(), "2015-01-01");
+        assert_eq!(t.time(), "10:00:00 UTC");
+    }
+
+    #[test]
+    fn parse_source_date_epoch_trims_whitespace() {
+        assert!(parse_source_date_epoch("  1420106400  ").is_some());
+    }
+
+    #[test]
+    fn parse_source_date_epoch_rejects_empty_and_malformed() {
+        assert!(parse_source_date_epoch("").is_none());
+        assert!(parse_source_date_epoch("   ").is_none());
+        assert!(parse_source_date_epoch("not-a-number").is_none());
+        assert!(parse_source_date_epoch("12.5").is_none());
+    }
+
+    #[test]
+    fn year_from_date_extracts_yyyy_prefix() {
+        assert_eq!(year_from_date("2015-01-01").as_deref(), Some("2015"));
+        assert_eq!(year_from_date("2015-1-1").as_deref(), Some("2015"));
+    }
+
+    #[test]
+    fn year_from_date_rejects_other_shapes() {
+        assert_eq!(year_from_date("2015"), None); // no `-`
+        assert_eq!(year_from_date("20-15-01"), None); // first `-` not at index 4
+        assert_eq!(year_from_date("January 1, 2015"), None);
+        assert_eq!(year_from_date(""), None);
+    }
+
+    #[test]
+    fn is_datetime_attribute_recognizes_the_family() {
+        for name in DATETIME_ATTRIBUTE_NAMES {
+            assert!(is_datetime_attribute(name), "{name} should be recognized");
+        }
+        assert!(!is_datetime_attribute("docfile"));
+        assert!(!is_datetime_attribute("frog"));
+    }
+
+    /// A resolver with no explicit overrides, driven by a fixed instant.
+    fn ctx() -> DatetimeContext {
+        // now: 2015-01-01T10:00:00Z; doc: 2019-01-02 03:04:05 +0600.
+        DatetimeContext {
+            now: ReferenceTime::from_unix_timestamp(1_420_106_400),
+            doc: ReferenceTime::from_local(2019, 1, 2, 3, 4, 5, 6 * 3600),
+        }
+    }
+
+    #[test]
+    fn resolve_computes_the_family_from_instants() {
+        let ctx = ctx();
+        let none = |_: &str| None;
+
+        assert_eq!(
+            ctx.resolve("localdate", none).as_deref(),
+            Some("2015-01-01")
+        );
+        assert_eq!(
+            ctx.resolve("localtime", none).as_deref(),
+            Some("10:00:00 UTC")
+        );
+        assert_eq!(ctx.resolve("localyear", none).as_deref(), Some("2015"));
+        assert_eq!(
+            ctx.resolve("localdatetime", none).as_deref(),
+            Some("2015-01-01 10:00:00 UTC")
+        );
+
+        assert_eq!(ctx.resolve("docdate", none).as_deref(), Some("2019-01-02"));
+        assert_eq!(
+            ctx.resolve("doctime", none).as_deref(),
+            Some("03:04:05 +0600")
+        );
+        assert_eq!(ctx.resolve("docyear", none).as_deref(), Some("2019"));
+        assert_eq!(
+            ctx.resolve("docdatetime", none).as_deref(),
+            Some("2019-01-02 03:04:05 +0600")
+        );
+
+        assert_eq!(ctx.resolve("frog", none), None);
+    }
+
+    #[test]
+    fn resolve_honors_explicit_overrides() {
+        let ctx = ctx();
+
+        // Explicit docdate + doctime: docyear from docdate, docdatetime from
+        // both.
+        let explicit = |name: &str| match name {
+            "docdate" => Some("2015-01-01".to_string()),
+            "doctime" => Some("10:00:00-0700".to_string()),
+            _ => None,
+        };
+        assert_eq!(ctx.resolve("docyear", explicit).as_deref(), Some("2015"));
+        assert_eq!(
+            ctx.resolve("docdatetime", explicit).as_deref(),
+            Some("2015-01-01 10:00:00-0700")
+        );
+
+        // Explicit docdate only: doctime still computed from the instant.
+        let explicit = |name: &str| match name {
+            "docdate" => Some("2015-01-01".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            ctx.resolve("docdatetime", explicit).as_deref(),
+            Some("2015-01-01 03:04:05 +0600")
+        );
+
+        // An explicit date without a `YYYY-` prefix leaves the year unset.
+        let explicit = |name: &str| match name {
+            "docdate" => Some("January 1".to_string()),
+            _ => None,
+        };
+        assert_eq!(ctx.resolve("docyear", explicit), None);
     }
 }

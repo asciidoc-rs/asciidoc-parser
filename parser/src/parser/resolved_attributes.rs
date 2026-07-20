@@ -3,8 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     document::InterpretedValue,
     parser::{
-        AttributeValue,
+        AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime,
         built_in_attrs::{built_in_attr, synthesized_attr},
+        is_datetime_attribute,
     },
 };
 
@@ -37,6 +38,15 @@ pub(crate) struct ResolvedAttributes {
     /// Current value of each counter as of the end of parsing. A counter value
     /// supersedes any like-named attribute.
     counter_values: HashMap<String, String>,
+
+    /// The parser's pinned reference-time configuration, if any, used to
+    /// resolve the time-dependent attributes (`docdate` and its family) on
+    /// demand. This is deterministic parser configuration (not a captured
+    /// instant), so two snapshots taken from equally-configured parsers
+    /// stay equal. It is boxed (and `None` unless a clock was pinned) so it
+    /// costs only a pointer here — this snapshot is embedded in a
+    /// size-sensitive cell enum.
+    datetime_inputs: Option<Box<DatetimeInputs>>,
 }
 
 impl ResolvedAttributes {
@@ -44,11 +54,14 @@ impl ResolvedAttributes {
         attribute_values: Arc<HashMap<String, AttributeValue>>,
         default_attribute_values: Arc<HashMap<String, String>>,
         counter_values: HashMap<String, String>,
+        reference_time: Option<ReferenceTime>,
+        input_mtime: Option<ReferenceTime>,
     ) -> Self {
         Self {
             attribute_values,
             default_attribute_values,
             counter_values,
+            datetime_inputs: DatetimeInputs::new(reference_time, input_mtime),
         }
     }
 
@@ -82,8 +95,56 @@ impl ResolvedAttributes {
                     av.value.clone()
                 }
             }
-            None => InterpretedValue::Unset,
+            // A time-dependent attribute is resolved on demand from the
+            // reference-time configuration rather than stored in a table.
+            None => self
+                .resolve_datetime_attribute(name)
+                .unwrap_or(InterpretedValue::Unset),
         }
+    }
+
+    /// Resolves a time-dependent document attribute (`docdate` and its family)
+    /// on demand from the snapshot's reference-time configuration, mirroring
+    /// [`Parser::attribute_value`](crate::Parser::attribute_value). Returns
+    /// `None` for any other name.
+    ///
+    /// The reference instant is captured per call (these attributes are read
+    /// rarely from a snapshot) rather than cached; within a single call it is
+    /// consistent. An explicit value stored during parsing still wins, since
+    /// the readers consult
+    /// [`effective_attribute`](Self::effective_attribute) first.
+    fn resolve_datetime_attribute(&self, name: &str) -> Option<InterpretedValue> {
+        if !is_datetime_attribute(name) {
+            return None;
+        }
+
+        // Absent any pinned clock the inputs box is `None`; capture from the
+        // defaults (SOURCE_DATE_EPOCH, then the real wall clock) in that case.
+        let context = match &self.datetime_inputs {
+            Some(inputs) => inputs.capture(),
+            None => DatetimeContext::capture(None, None),
+        };
+
+        context
+            .resolve(name, |sibling| self.stored_datetime_override(sibling))
+            .map(InterpretedValue::Value)
+    }
+
+    /// Returns the *explicitly-set* value of `name` from the stored attribute
+    /// map (a value-less "set" reads as an empty string), or `None`.
+    ///
+    /// Reads only the stored overrides — never the on-the-fly datetime
+    /// resolution — so it can feed the explicit sibling values
+    /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute) needs
+    /// without recursing.
+    fn stored_datetime_override(&self, name: &str) -> Option<String> {
+        self.attribute_values
+            .get(name)
+            .and_then(|av| match &av.value {
+                InterpretedValue::Value(value) => Some(value.clone()),
+                InterpretedValue::Set => Some(String::new()),
+                InterpretedValue::Unset => None,
+            })
     }
 
     /// Returns the effective attribute definition for `name`, falling back to
@@ -125,7 +186,7 @@ impl ResolvedAttributes {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
-        self.effective_attribute(name).is_some()
+        self.effective_attribute(name).is_some() || self.resolve_datetime_attribute(name).is_some()
     }
 
     /// Returns `true` if the named document attribute is present and set (i.e.
@@ -148,7 +209,7 @@ impl ResolvedAttributes {
 
         self.effective_attribute(name)
             .map(|a| a.value != InterpretedValue::Unset)
-            .unwrap_or(false)
+            .unwrap_or_else(|| self.resolve_datetime_attribute(name).is_some())
     }
 }
 
@@ -199,6 +260,8 @@ mod tests {
             Arc::new(attribute_values),
             Arc::new(default_attribute_values),
             counter_values,
+            None,
+            None,
         )
     }
 
