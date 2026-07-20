@@ -2970,6 +2970,92 @@ mod date_time_attributes {
             InterpretedValue::Value("2019-01-02 03:04:05 +0600")
         );
     }
+
+    // Not direct Ruby ports: the tests below exercise resolution of the
+    // time-dependent attributes *during* a parse (a `{docdate}` reference or an
+    // `ifdef::docdate[]` directive) rather than off the finished document, plus
+    // the explicit-sibling handling for a value, a value-less "set", and an
+    // explicit unset.
+
+    #[test]
+    fn resolves_date_attributes_referenced_in_the_document_body() {
+        // A `{docdate}` reference resolves the attribute on demand through the
+        // parser (during substitution), not off the finished document snapshot.
+        let doc = Parser::default()
+            .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+            .parse("docdate={docdate} docyear={docyear} docdatetime={docdatetime}");
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec!["docdate=2015-01-01 docyear=2015 docdatetime=2015-01-01 10:00:00 UTC".to_string()]
+        );
+    }
+
+    #[test]
+    fn conditional_directive_sees_a_computed_date_attribute() {
+        // `ifdef` queries `is_attribute_set`, which must report the computed
+        // `docdate` as set.
+        let doc = Parser::default()
+            .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+            .parse("ifdef::docdate[present]");
+
+        assert_eq!(rendered_paragraphs(&doc), vec!["present".to_string()]);
+    }
+
+    #[test]
+    fn an_explicit_doctime_feeds_the_computed_docdatetime() {
+        // An explicit `doctime` (a stored value) supplies the time portion of
+        // the computed `docdatetime`, both when referenced in the body and when
+        // read off the document.
+        let mut parser = Parser::default()
+            .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+            .with_intrinsic_attribute("doctime", "09:09:09-0500", ModificationContext::ApiOrHeader);
+        let doc = parser.parse("at {docdatetime}");
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec!["at 2015-01-01 09:09:09-0500".to_string()]
+        );
+        assert_eq!(
+            doc.attribute_value("docdatetime"),
+            InterpretedValue::Value("2015-01-01 09:09:09-0500")
+        );
+    }
+
+    #[test]
+    fn an_unset_doctime_falls_back_to_the_reference_time() {
+        // An explicitly unset `doctime` is treated as absent, so `docdatetime`
+        // falls back to the reference instant's time.
+        let mut parser = Parser::default()
+            .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+            .with_intrinsic_attribute_bool("doctime", false, ModificationContext::ApiOrHeader);
+        let doc = parser.parse("at {docdatetime}");
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec!["at 2015-01-01 10:00:00 UTC".to_string()]
+        );
+        assert_eq!(
+            doc.attribute_value("docdatetime"),
+            InterpretedValue::Value("2015-01-01 10:00:00 UTC")
+        );
+    }
+
+    #[test]
+    fn a_value_less_doctime_reads_as_an_empty_time() {
+        // A value-less `doctime` (set, but with no value) contributes an empty
+        // time, leaving a trailing space in the computed `docdatetime`.
+        let mut parser = Parser::default()
+            .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
+            .with_intrinsic_attribute_bool("doctime", true, ModificationContext::ApiOrHeader);
+        let doc = parser.parse("x{docdatetime}x");
+
+        assert_eq!(rendered_paragraphs(&doc), vec!["x2015-01-01 x".to_string()]);
+        assert_eq!(
+            doc.attribute_value("docdatetime"),
+            InterpretedValue::Value("2015-01-01 ")
+        );
+    }
 }
 
 // `end` (closes `context 'Document'`)

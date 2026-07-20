@@ -379,8 +379,11 @@ impl DatetimeContext {
 ///
 /// [reproducible builds specification]: https://reproducible-builds.org/specs/source-date-epoch/
 fn source_date_epoch_from_env() -> Option<ReferenceTime> {
-    let raw = std::env::var("SOURCE_DATE_EPOCH").ok()?;
-    parse_source_date_epoch(&raw)
+    // An unset variable reads as empty, which `parse_source_date_epoch` rejects
+    // just like a set-but-empty value — so the (common) unset path exercises the
+    // same line as a set one, without the tests having to mutate the process
+    // environment.
+    parse_source_date_epoch(&std::env::var("SOURCE_DATE_EPOCH").unwrap_or_default())
 }
 
 /// Parses a `SOURCE_DATE_EPOCH` string into a reference time, returning `None`
@@ -614,5 +617,15 @@ mod tests {
             _ => None,
         };
         assert_eq!(ctx.resolve("docyear", explicit), None);
+
+        // An explicit year wins outright over both the date-derived and the
+        // instant-derived year. (The reader path never reaches this — an
+        // explicitly-set attribute short-circuits before resolution — so it is
+        // covered here directly.)
+        let explicit = |name: &str| match name {
+            "docyear" => Some("1999".to_string()),
+            _ => None,
+        };
+        assert_eq!(ctx.resolve("docyear", explicit).as_deref(), Some("1999"));
     }
 }
