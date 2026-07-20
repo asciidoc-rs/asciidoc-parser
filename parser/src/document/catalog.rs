@@ -246,20 +246,35 @@ pub struct Footnote {
     /// resolution. `None` for the common case of a footnote with no
     /// cross-references.
     pub(crate) deferred: Option<Box<FootnoteDeferred>>,
+
+    /// The location of this footnote's defining occurrence, as a
+    /// `(byte offset, byte length)` pair into the document source, used to
+    /// anchor a cross-reference warning at the footnote rather than at the
+    /// whole document. The range spans the enclosing content the footnote was
+    /// written in (paragraph granularity, matching how a non-footnote
+    /// reference is anchored at its `Content`).
+    ///
+    /// `None` when the defining occurrence is not locatable in the document
+    /// source: a footnote defined while substituting a privately-owned
+    /// sub-source (a Markdown-style blockquote, an AsciiDoc table cell) indexes
+    /// that owned source, which is not contiguous in the document, so storing
+    /// its offset would misplace the warning. Resolution falls back to the
+    /// whole-document span in that case.
+    pub(crate) location: Option<(usize, usize)>,
 }
 
 impl Footnote {
     /// Resolves any cross-references embedded in this footnote's text using
     /// `resolver`, then rebuilds [`text`](Self::text) from the resolved state.
-    /// Any unresolved target is reported in `warnings`, anchored at `source`.
+    /// Any unresolved target is reported in `warnings`.
     ///
-    /// A footnote's text is extracted out of the block it was defined in and
-    /// the footnote itself keeps no span, so `source` is the enclosing
-    /// document's span rather than the reference's own location. That makes two
-    /// bad references in two different footnotes indistinguishable by location;
-    /// narrowing it to the defining occurrence needs footnotes registered from
-    /// an owned sub-source (a Markdown blockquote, an include-expanded table
-    /// cell) to be re-homed first (#804).
+    /// A footnote's text is extracted out of the block it was defined in, so
+    /// the warning is anchored using the footnote's recorded
+    /// [`location`](Self::location) — the enclosing content it was written in —
+    /// reconstructed as a sub-span of `document_source`. When no location was
+    /// recorded (a footnote defined inside an owned sub-source, whose offset
+    /// does not map to the document), the warning falls back to the whole
+    /// `document_source` span.
     ///
     /// A footnote with no cross-references is left untouched.
     pub(crate) fn resolve_references<'src>(
@@ -267,9 +282,13 @@ impl Footnote {
         resolver: &dyn crate::parser::ReferenceResolver,
         renderer: &dyn crate::parser::InlineSubstitutionRenderer,
         warnings: &mut crate::parser::ReferenceWarnings<'src>,
-        source: crate::Span<'src>,
+        document_source: crate::Span<'src>,
     ) {
         if let Some(deferred) = self.deferred.as_mut() {
+            let source = match self.location {
+                Some((offset, len)) => document_source.slice(offset..offset + len),
+                None => document_source,
+            };
             deferred.resolve(resolver, warnings, source);
             self.text = deferred.render(renderer);
         }

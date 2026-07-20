@@ -1960,7 +1960,13 @@ fn parse_asciidoc_cell_body<'src>(
     // duration of the parse, so a table found within defaults its cell separator
     // to `!` rather than `|` (matching Asciidoctor's `Document#nested?`).
     parser.nested_document_depth += 1;
+    // The cell body parses from its own owned source (whether include-expanded or
+    // a borrowed `a|` cell), whose offsets do not map to the document. Mark that
+    // so a footnote defined inside records no (misleading) document location; see
+    // `Parser::owned_subsource_depth`.
+    parser.owned_subsource_depth += 1;
     let mut maw = parse_blocks_until(body, |_, _| false, parser);
+    parser.owned_subsource_depth -= 1;
     parser.nested_document_depth -= 1;
     warnings.append(&mut maw.warnings);
 

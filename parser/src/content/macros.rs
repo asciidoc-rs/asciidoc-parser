@@ -1853,7 +1853,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                     &normalize_footnote_text(&content),
                     self.all_xrefs,
                 );
-                let index = parser.define_footnote(Some(&id), template, xrefs);
+                let index = parser.define_footnote(Some(&id), template, xrefs, self.source);
                 parser.renderer.render_footnote(
                     &FootnoteRenderParams {
                         index: Some(index.as_str()),
@@ -1885,7 +1885,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                 &normalize_footnote_text(&content),
                 self.all_xrefs,
             );
-            let index = parser.define_footnote(None, template, xrefs);
+            let index = parser.define_footnote(None, template, xrefs, self.source);
             parser.renderer.render_footnote(
                 &FootnoteRenderParams {
                     index: Some(index.as_str()),
