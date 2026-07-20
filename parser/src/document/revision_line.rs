@@ -45,20 +45,33 @@ impl<'src> RevisionLine<'src> {
             }
         };
 
-        if let Some(revnumber) = revnumber.as_deref() {
-            parser.set_attribute_by_value_from_header("revnumber", revnumber);
-        }
+        // Resolve attribute references *before* recording the built-in
+        // `revnumber`/`revdate`/`revremark` document attributes, so a revision
+        // component written as an attribute reference (e.g. `{project-version}`)
+        // is reflected in `doc.attr` with its value resolved rather than as the
+        // raw `{...}` text.
+        let revnumber = revnumber.map(|s| {
+            let resolved = apply_header_subs(&s, parser);
+            parser.set_attribute_by_value_from_header("revnumber", &resolved);
+            resolved
+        });
 
-        parser.set_attribute_by_value_from_header("revdate", &revdate);
+        let revdate = {
+            let resolved = apply_header_subs(&revdate, parser);
+            parser.set_attribute_by_value_from_header("revdate", &resolved);
+            resolved
+        };
 
-        if let Some(revremark) = revremark.as_deref() {
-            parser.set_attribute_by_value_from_header("revremark", revremark);
-        }
+        let revremark = revremark.map(|s| {
+            let resolved = apply_header_subs(&s, parser);
+            parser.set_attribute_by_value_from_header("revremark", &resolved);
+            resolved
+        });
 
         Self {
-            revnumber: revnumber.map(|s| apply_header_subs(&s, parser)),
-            revdate: apply_header_subs(&revdate, parser),
-            revremark: revremark.map(|s| apply_header_subs(&s, parser)),
+            revnumber,
+            revdate,
+            revremark,
             source,
         }
     }
@@ -130,8 +143,13 @@ static STANDALONE_REVISION: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static NON_NUMERIC_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+    // Strip any leading run of characters that are neither a digit nor the start
+    // of an attribute reference (`{`). Stopping at `{` preserves a revision
+    // number written purely as an attribute reference (e.g. `v{project-version}`
+    // keeps `{project-version}` for later substitution) instead of dropping the
+    // whole value because it contains no literal digit.
     #[allow(clippy::unwrap_used)]
-    Regex::new(r"^[^0-9]*(.*)$").unwrap()
+    Regex::new(r"^[^0-9{]*(.*)$").unwrap()
 });
 
 #[cfg(test)]
