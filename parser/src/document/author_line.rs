@@ -47,12 +47,19 @@ impl<'src> AuthorLine<'src> {
     }
 }
 
-/// Matches an HTML character reference (named, decimal, or hexadecimal, such as
-/// `&reg;`, `&#174;`, or `&#xAE;`). The terminating semicolon of such a
-/// reference must never be treated as an author separator.
-static CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+/// Matches a numeric HTML character reference — decimal (`&#174;`) or
+/// hexadecimal (`&#xAE;`). The terminating semicolon of such a reference must
+/// never be treated as an author separator.
+///
+/// Only numeric references are recognized here. A named reference such as
+/// `&reg;` cannot be distinguished structurally from arbitrary `&word;` text
+/// (the crate does not carry a table of valid entity names), so treating every
+/// `&word;` as a reference would suppress genuine separators — e.g. the
+/// semicolon in `Alice &Development; Bob`. Numeric references are unambiguous,
+/// and they are what the implicit author line needs to guard (see issue #757).
+static NUMERIC_CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
-    Regex::new(r"&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);").unwrap()
+    Regex::new(r"&#(?:[0-9]+|[xX][0-9a-fA-F]+);").unwrap()
 });
 
 /// Split the implicit author line into raw author entries.
@@ -64,13 +71,13 @@ static CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
 /// empty middle entry — are left in place; [`Author::parse`] trims each entry
 /// and discards the empty ones.
 ///
-/// Semicolons that terminate an HTML character reference (such as `&#174;`) are
-/// never treated as separators, even when followed by a space, so a name like
-/// `AsciiDoc&#174; WG` is not split apart.
+/// Semicolons that terminate a numeric HTML character reference (such as
+/// `&#174;`) are never treated as separators, even when followed by a space, so
+/// a name like `AsciiDoc&#174; WG` is not split apart.
 fn split_authors(data: &str) -> Vec<&str> {
-    // Byte offsets of the semicolons that terminate a character reference; these
-    // are excluded from consideration as separators.
-    let char_ref_terminators: Vec<usize> = CHARACTER_REFERENCE
+    // Byte offsets of the semicolons that terminate a numeric character
+    // reference; these are excluded from consideration as separators.
+    let char_ref_terminators: Vec<usize> = NUMERIC_CHARACTER_REFERENCE
         .find_iter(data)
         .map(|m| m.end() - 1)
         .collect();
@@ -1017,6 +1024,47 @@ mod tests {
                 ],
                 source: Span {
                     data: "AsciiDoc&#174; WG; Another Author",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn invalid_named_entity_does_not_suppress_separator() {
+        // A literal `&word;` sequence is not a numeric character reference, so
+        // its semicolon still separates authors when followed by a space. Only
+        // numeric references (`&#nnn;`) guard against splitting.
+        let mut parser = Parser::default();
+
+        let al = crate::document::AuthorLine::parse(
+            crate::Span::new("Alice &Development; Bob"),
+            &mut parser,
+        );
+
+        assert_eq!(
+            al,
+            AuthorLine {
+                authors: &[
+                    Author {
+                        name: "Alice &Development",
+                        firstname: "Alice",
+                        middlename: None,
+                        lastname: Some("&Development"),
+                        email: None,
+                    },
+                    Author {
+                        name: "Bob",
+                        firstname: "Bob",
+                        middlename: None,
+                        lastname: None,
+                        email: None,
+                    },
+                ],
+                source: Span {
+                    data: "Alice &Development; Bob",
                     line: 1,
                     col: 1,
                     offset: 0,
