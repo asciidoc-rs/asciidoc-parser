@@ -819,3 +819,185 @@ mod unresolved_reference_warnings {
         assert_eq!(warnings[0].source.line(), 2);
     }
 }
+
+/// Issue #808: an inter-document cross reference whose target names a file that
+/// was included into this document collapses to a same-document reference — but
+/// only when the file was included in full.
+mod included_file_collapses_to_internal_anchor {
+    use super::first_paragraph;
+    use crate::{Parser, parser::SafeMode, tests::prelude::inline_file_handler::InlineFileHandler};
+
+    /// `other-chapters.adoc`, defining the `ch2` section. It carries a `ch2`
+    /// tagged region (so a partial include can select a portion of it) and a
+    /// separate `ch2-noid` region (for the fully-and-partially-included case).
+    const OTHER_CHAPTERS: &str = "[#ch2]\n== Chapter 2\n\n// tag::ch2[]\nThe second chapter.\n// end::ch2[]\n\n// tag::ch2-noid[]\nAn extra note.\n// end::ch2-noid[]\n";
+
+    fn parse_book(body: &str) -> crate::Document<'static> {
+        let handler = InlineFileHandler::from_pairs([("other-chapters.adoc", OTHER_CHAPTERS)]);
+        let source = format!("= Book Title\n:doctype: book\n\n{body}");
+        Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler)
+            .parse(&source)
+    }
+
+    #[test]
+    fn full_include_collapses_reference_with_fragment() {
+        // The whole file is included, so `ch2` is now an anchor in this
+        // document: `<<other-chapters.adoc#ch2>>` resolves to `#ch2`.
+        let doc = parse_book(
+            "Read <<other-chapters.adoc#ch2>> next!\n\ninclude::other-chapters.adoc[]\n",
+        );
+
+        assert!(doc.catalog().was_included("other-chapters"));
+        assert!(doc.catalog().include_is_full("other-chapters"));
+
+        assert_eq!(
+            first_paragraph(&doc),
+            r##"Read <a href="#ch2">Chapter 2</a> next!"##
+        );
+    }
+
+    #[test]
+    fn full_include_via_double_star_tag_collapses_reference() {
+        // `tags=**` selects the entire file, so the include is full.
+        let doc = parse_book(
+            "Read <<other-chapters.adoc#ch2>> next!\n\ninclude::other-chapters.adoc[tags=**]\n",
+        );
+
+        assert!(doc.catalog().include_is_full("other-chapters"));
+
+        assert_eq!(
+            first_paragraph(&doc),
+            r##"Read <a href="#ch2">Chapter 2</a> next!"##
+        );
+    }
+
+    #[test]
+    fn partial_include_does_not_collapse_reference() {
+        // Only the `ch2` region is included, so the reference may point at an
+        // anchor that never made it across: it stays an inter-document
+        // reference and keeps its derived output path.
+        let doc = parse_book(
+            "Read <<other-chapters.adoc#ch2,the next chapter>> next!\n\ninclude::other-chapters.adoc[tags=ch2]\n",
+        );
+
+        assert!(doc.catalog().was_included("other-chapters"));
+        assert!(!doc.catalog().include_is_full("other-chapters"));
+
+        assert_eq!(
+            first_paragraph(&doc),
+            r#"Read <a href="other-chapters.html#ch2">the next chapter</a> next!"#
+        );
+    }
+
+    #[test]
+    fn full_and_partial_includes_collapse_reference() {
+        // The file is included once in full and once partially; the full
+        // include wins, so the reference collapses.
+        let doc = parse_book(
+            "Read <<other-chapters.adoc#ch2,the next chapter>> next!\n\ninclude::other-chapters.adoc[]\n\ninclude::other-chapters.adoc[tags=ch2-noid]\n",
+        );
+
+        assert!(doc.catalog().include_is_full("other-chapters"));
+
+        assert_eq!(
+            first_paragraph(&doc),
+            r##"Read <a href="#ch2">the next chapter</a> next!"##
+        );
+    }
+
+    #[test]
+    fn include_outside_base_directory_still_registers_and_collapses() {
+        // A file included from outside the base directory registers under the
+        // target as written (`../section-a`), and an inter-document reference to
+        // it collapses just the same.
+        let handler =
+            InlineFileHandler::from_pairs([("../section-a.adoc", "[#section-a]\n== Section A\n")]);
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler)
+            .parse("= Document Title\n\nSee <<../section-a.adoc#section-a>>.\n\ninclude::../section-a.adoc[]\n");
+
+        assert!(doc.catalog().was_included("../section-a"));
+        assert!(doc.catalog().include_is_full("../section-a"));
+
+        assert_eq!(
+            first_paragraph(&doc),
+            r##"See <a href="#section-a">Section A</a>."##
+        );
+    }
+
+    #[test]
+    fn a_reference_to_a_file_that_was_not_included_is_unaffected() {
+        // With no include of `other-chapters.adoc`, the reference keeps its
+        // inter-document output path.
+        let doc = parse_book("Read <<other-chapters.adoc#ch2,the next chapter>> next!\n");
+
+        assert!(!doc.catalog().was_included("other-chapters"));
+
+        assert_eq!(
+            first_paragraph(&doc),
+            r#"Read <a href="other-chapters.html#ch2">the next chapter</a> next!"#
+        );
+    }
+
+    #[test]
+    fn a_nested_include_does_not_register_and_cannot_falsely_collapse() {
+        // The root document includes `part1/chapters.adoc`, which itself
+        // includes `intro.adoc` — a target relative to *that* file, i.e.
+        // `part1/intro.adoc` on disk. Registering it under the key `intro`
+        // would collide with the root-relative path of a *different* file, so
+        // a root-level `<<intro.adoc#…>>` would falsely collapse to an
+        // internal anchor. A nested include is therefore not registered at
+        // all, and the reference keeps its inter-document output path.
+        let handler = InlineFileHandler::from_pairs([
+            (
+                "part1/chapters.adoc",
+                "== Chapters\n\ninclude::intro.adoc[]\n",
+            ),
+            ("intro.adoc", "[#nested-intro]\n== Nested Intro\n"),
+        ]);
+
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler)
+            .parse("See <<intro.adoc#other,text>>.\n\ninclude::part1/chapters.adoc[]\n");
+
+        // The outermost include registers; the nested one does not.
+        assert!(doc.catalog().was_included("part1/chapters"));
+        assert!(!doc.catalog().was_included("intro"));
+
+        assert_eq!(
+            first_paragraph(&doc),
+            r#"See <a href="intro.html#other">text</a>."#
+        );
+    }
+
+    #[test]
+    fn an_include_inside_a_table_cell_registers_and_collapses() {
+        // An AsciiDoc table cell shares the enclosing document's catalog, so a
+        // file the cell includes in full registers on the document's include
+        // registry (as in Asciidoctor, where the cell's nested document shares
+        // the parent's `catalog[:includes]`) and an inter-document reference in
+        // that cell collapses to an internal anchor.
+        let handler =
+            InlineFileHandler::from_pairs([("chapter.adoc", "[#target]\n== Chapter\n\nBody.\n")]);
+
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler)
+            .parse("|===\na|See xref:chapter.adoc#target[].\n\ninclude::chapter.adoc[]\n|===\n");
+
+        assert!(doc.catalog().include_is_full("chapter"));
+
+        // The cell's blocks live in the cell's own owned sub-document, so the
+        // rendered link is asserted through the converted output.
+        crate::tests::assert_dom::assert_xpath(&doc, r##"//a[@href="#target"]"##, 1);
+        crate::tests::assert_dom::assert_xpath(
+            &doc,
+            r##"//a[@href="#target"][text()="Chapter"]"##,
+            1,
+        );
+    }
+}
