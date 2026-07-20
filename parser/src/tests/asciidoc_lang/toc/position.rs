@@ -61,11 +61,13 @@ The sidebar column containing the TOC is both fixed and scrollable.
 
     // The `left`/`right` side-column styling needs standalone HTML body framing
     // this crate does not model, but the values still resolve to their own
-    // placements and generate a TOC.
+    // placements, generate a TOC, and switch the default `toc-class` to the
+    // side-column `toc2` (see #749).
     for (value, mode) in [("left", TocMode::Left), ("right", TocMode::Right)] {
         let doc = Parser::default().parse(&format!("= Title\n:toc: {value}\n\n== Section\n\nhi"));
         assert_eq!(doc.toc_mode(), mode, "value: {value}");
-        assert_css(&doc, "#toc.toc", 1);
+        assert_eq!(doc.toc_class(), "toc2", "value: {value}");
+        assert_css(&doc, "#toc.toc2", 1);
     }
 }
 
