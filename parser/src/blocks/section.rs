@@ -8,7 +8,10 @@ use crate::{
     blocks::{
         Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
-    content::{Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans},
+    content::{
+        Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans,
+        substitute_attributes_in_reftext,
+    },
     document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
     parser::XrefSignifier,
@@ -130,6 +133,17 @@ impl<'src> SectionBlock<'src> {
             .is_some()
             || metadata.anchor_reftext.is_some()
             || embedded_reftext.is_some();
+
+        // A `[[id,reftext]]` anchor reftext can carry attribute references
+        // (`[[install,install on {platform-name}]]`); resolve them against the
+        // attributes in effect at the anchor's location — captured here, before
+        // the section body is parsed and can itself redefine those attributes —
+        // mirroring how the anchor ID and a `reftext=` attribute are already
+        // substituted when the attribute list is parsed. See issue #753.
+        let anchor_reftext = metadata
+            .anchor_reftext
+            .as_ref()
+            .map(|span| substitute_attributes_in_reftext(*span, parser));
 
         let (section_number, caption, xref_signifier) = if is_appendix_root {
             // The appendix letter is resolved through the `appendix-number`
@@ -259,20 +273,24 @@ impl<'src> SectionBlock<'src> {
         let manual_id = attr_or_anchor_id.or(embedded_id);
 
         // Reftext precedence mirrors `Block::block_reftext`: an explicit
-        // `reftext` attribute, then a `[[id,reftext]]` block-anchor reftext, then
-        // an embedded-anchor reftext, then the section title.
-        let reftext = metadata
+        // `reftext` attribute, then a `[[id,reftext]]` block-anchor reftext (with
+        // its attribute references already resolved above), then an
+        // embedded-anchor reftext, then the section title.
+        let reftext: CowStr<'_> = metadata
             .attrlist
             .as_ref()
-            .and_then(|a| a.named_attribute("reftext").map(|a| a.value()))
-            .or_else(|| metadata.anchor_reftext.as_ref().map(|span| span.data()))
-            .or(embedded_reftext)
-            .unwrap_or(&title_reftext);
+            .and_then(|a| {
+                a.named_attribute("reftext")
+                    .map(|a| CowStr::from(a.value()))
+            })
+            .or_else(|| anchor_reftext.clone())
+            .or_else(|| embedded_reftext.map(CowStr::from))
+            .unwrap_or_else(|| CowStr::from(title_reftext.as_str()));
 
         let section_id = if sectids && manual_id.is_none() {
             let id = parser.generate_and_register_unique_id(
                 &proposed_base_id,
-                Some(reftext),
+                Some(&reftext),
                 RefType::Section,
             );
             if let Some(signifier) = xref_signifier {
@@ -281,7 +299,7 @@ impl<'src> SectionBlock<'src> {
             Some(id)
         } else {
             if let Some(manual_id) = manual_id {
-                match parser.register_ref(manual_id, Some(reftext), RefType::Section) {
+                match parser.register_ref(manual_id, Some(&reftext), RefType::Section) {
                     Ok(()) => {
                         if let Some(signifier) = xref_signifier {
                             parser.set_ref_signifier(manual_id, signifier);

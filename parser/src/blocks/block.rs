@@ -9,7 +9,7 @@ use crate::{
         SimpleBlock, TableBlock, media::TargetResolution, metadata::BlockMetadata,
         starts_with_admonition_label,
     },
-    content::{Content, SubstitutionGroup},
+    content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{Attribute, InterpretedValue, RefType},
     parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, XrefSignifier},
     span::MatchedItem,
@@ -252,7 +252,7 @@ impl<'src> Block<'src> {
 
             Self::register_block_id(
                 block.id(),
-                Self::block_reftext(&block),
+                Self::block_reftext(&block, parser).as_deref(),
                 Self::block_signifier(&block, parser),
                 block.span(),
                 parser,
@@ -362,7 +362,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, parser).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -389,7 +389,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, parser).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -416,7 +416,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, parser).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -443,7 +443,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, parser).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -470,7 +470,7 @@ impl<'src> Block<'src> {
 
                 Self::register_block_id(
                     block.id(),
-                    Self::block_reftext(&block),
+                    Self::block_reftext(&block, parser).as_deref(),
                     Self::block_signifier(&block, parser),
                     block.span(),
                     parser,
@@ -522,7 +522,7 @@ impl<'src> Block<'src> {
 
                     Self::register_block_id(
                         block.id(),
-                        Self::block_reftext(&block),
+                        Self::block_reftext(&block, parser).as_deref(),
                         Self::block_signifier(&block, parser),
                         block.span(),
                         parser,
@@ -651,7 +651,7 @@ impl<'src> Block<'src> {
         if let BlockParseOutcome::Parsed(ref matched_item) = result.item {
             Self::register_block_id(
                 matched_item.item.id(),
-                Self::block_reftext(&matched_item.item),
+                Self::block_reftext(&matched_item.item, parser).as_deref(),
                 Self::block_signifier(&matched_item.item, parser),
                 matched_item.item.span(),
                 parser,
@@ -731,13 +731,26 @@ impl<'src> Block<'src> {
     /// block is the target of a cross reference. Asciidoctor's precedence is:
     /// an explicit `reftext` attribute, then the reftext supplied with a
     /// block anchor (`[[id,reftext]]`), and finally the block title.
-    fn block_reftext<'a>(block: &'a Block<'a>) -> Option<&'a str> {
-        block
+    ///
+    /// Attribute references in a `[[id,reftext]]` anchor reftext are resolved
+    /// against the attributes in effect when the block is registered, matching
+    /// how the anchor ID and a `reftext=` attribute (both substituted when the
+    /// attribute list is parsed) are handled. See issue #753. The `reftext=`
+    /// and title branches are already substituted, so only the anchor branch is
+    /// resolved here.
+    fn block_reftext<'a>(block: &'a Block<'a>, parser: &Parser) -> Option<CowStr<'a>> {
+        if let Some(attr) = block
             .attrlist()
             .and_then(|attrlist| attrlist.named_attribute("reftext"))
-            .map(|attr| attr.value())
-            .or_else(|| block.anchor_reftext().map(|span| span.data()))
-            .or_else(|| block.title())
+        {
+            return Some(CowStr::from(attr.value()));
+        }
+
+        if let Some(span) = block.anchor_reftext() {
+            return Some(substitute_attributes_in_reftext(span, parser));
+        }
+
+        block.title().map(CowStr::from)
     }
 
     /// Register a block's ID with the catalog if the block has an ID.
