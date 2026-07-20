@@ -63,6 +63,27 @@ impl<'src> SectionBlock<'src> {
 
         let level = level_and_title.item.0;
 
+        // An explicit ID supplied *above* the heading (a `[#id]`/`[id=…]` block
+        // attribute or a `[[id]]` block anchor) always wins. It also suppresses
+        // embedded-anchor processing below, so a `[[id]]` embedded in the title
+        // is then left in place and rendered as an ordinary inline anchor.
+        let attr_or_anchor_id = metadata
+            .attrlist
+            .as_ref()
+            .and_then(|a| a.id())
+            .or_else(|| metadata.anchor.as_ref().map(|anchor| anchor.data()));
+
+        // AsciiDoc lets a section define its ID via an anchor embedded at the end
+        // of the title (`== Title [[id]] ==`, optionally `[[id,reftext]]`). When
+        // present (and not already overridden by an explicit ID above), the anchor
+        // is consumed to set the section ID and removed from the rendered title,
+        // rather than being rendered as an inline anchor.
+        let (title_span, embedded_id, embedded_reftext) = if attr_or_anchor_id.is_none() {
+            match_embedded_section_anchor(level_and_title.item.1)
+        } else {
+            (level_and_title.item.1, None, None)
+        };
+
         // Assign the section type. At level 1, we look for an `appendix` section style;
         // at all other levels, we inherit the section type from parent.
         let section_type = if discrete {
@@ -99,14 +120,16 @@ impl<'src> SectionBlock<'src> {
         // A cross-reference builds `full`/`short` xrefstyle text from a section's
         // signifier and number, but only when the section has a number *and* no
         // explicit reftext (an explicit reftext is used verbatim instead). An
-        // explicit reftext can come from a `reftext` attribute or the second
-        // field of a `[[id,reftext]]` block anchor.
+        // explicit reftext can come from a `reftext` attribute, the second field
+        // of a `[[id,reftext]]` block anchor, or the second field of an anchor
+        // embedded in the section title.
         let has_explicit_reftext = metadata
             .attrlist
             .as_ref()
             .and_then(|a| a.named_attribute("reftext"))
             .is_some()
-            || metadata.anchor_reftext.is_some();
+            || metadata.anchor_reftext.is_some()
+            || embedded_reftext.is_some();
 
         let (section_number, caption, xref_signifier) = if is_appendix_root {
             // The appendix letter is resolved through the `appendix-number`
@@ -171,7 +194,7 @@ impl<'src> SectionBlock<'src> {
         // sentinels lets those be excised below from a single render — no second
         // substitution pass, so counters and attribute-expanded footnotes are
         // processed exactly once.
-        let mut section_title = Content::from(level_and_title.item.1);
+        let mut section_title = Content::from(title_span);
         parser.mark_footnote_spans.set(true);
         SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
         parser.mark_footnote_spans.set(false);
@@ -231,20 +254,19 @@ impl<'src> SectionBlock<'src> {
 
         let proposed_base_id = generate_section_id(&title_reftext, parser);
 
-        let manual_id = metadata
-            .attrlist
-            .as_ref()
-            .and_then(|a| a.id())
-            .or_else(|| metadata.anchor.as_ref().map(|anchor| anchor.data()));
+        // An explicit ID above the heading wins; otherwise an anchor embedded in
+        // the title supplies the ID.
+        let manual_id = attr_or_anchor_id.or(embedded_id);
 
         // Reftext precedence mirrors `Block::block_reftext`: an explicit
-        // `reftext` attribute, then a `[[id,reftext]]` anchor reftext, then the
-        // section title.
+        // `reftext` attribute, then a `[[id,reftext]]` block-anchor reftext, then
+        // an embedded-anchor reftext, then the section title.
         let reftext = metadata
             .attrlist
             .as_ref()
             .and_then(|a| a.named_attribute("reftext").map(|a| a.value()))
             .or_else(|| metadata.anchor_reftext.as_ref().map(|span| span.data()))
+            .or(embedded_reftext)
             .unwrap_or(&title_reftext);
 
         let section_id = if sectids && manual_id.is_none() {
@@ -275,7 +297,11 @@ impl<'src> SectionBlock<'src> {
                 }
             }
 
-            None
+            // An ID drawn from an anchor embedded in the title has no `anchor`
+            // span or attrlist entry for `id()` to read it back from, so record
+            // it here (unlike an ID supplied above the heading, which `id()`
+            // sources directly from the anchor/attrlist).
+            embedded_id.map(str::to_string)
         };
 
         // Restore "normal" top-level section type if exiting a level 1 appendix.
@@ -546,6 +572,66 @@ pub(crate) fn strip_symmetric_title_close(title: Span<'_>, marker: char, count: 
         }
         _ => title,
     }
+}
+
+/// Matches an anchor embedded at the end of a section title (after the
+/// symmetric ATX close has already been stripped): the title text, optional
+/// escape, the anchor ID, and an optional reftext.
+///
+/// Mirrors Asciidoctor's `InlineSectionAnchorRx`. The anchor must be separated
+/// from the title by at least one blank; the ID follows the usual name rules
+/// (leading letter/`_`/`:`, then letters/digits/`_`/`-`/`:`/`.`); an optional
+/// reftext after the first comma may itself contain commas.
+#[allow(clippy::unwrap_used)]
+static EMBEDDED_SECTION_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?x)
+        ^(.*?)                                                # (1) title text before the anchor
+        [\ \t]+                                               # blank(s) separating title from anchor
+        (\\)?                                                 # (2) optional escape backslash
+        \[\[
+          ( [\p{Alphabetic}_:] [\p{Alphabetic}\p{Nd}_\-:.]* )  # (3) anchor id
+          (?: , [\ \t]* (\S.*) )?                             # (4) optional reftext (may contain commas)
+        \]\]
+        $",
+    )
+    .unwrap()
+});
+
+/// Detects and consumes an anchor embedded at the end of a section `title`
+/// (`Title [[id]]` or `Title [[id,reftext]]`), returning the title span with
+/// the anchor removed, the anchor ID, and the reftext (each `None` when
+/// absent).
+///
+/// The `title` span must already have had any symmetric ATX close stripped. An
+/// *escaped* anchor (`Title \[[id]]`) is intentionally left intact — the ID is
+/// not adopted and the title is returned unchanged so the inline-anchor
+/// substitution can unescape it — mirroring Ruby Asciidoctor.
+fn match_embedded_section_anchor<'src>(
+    title: Span<'src>,
+) -> (Span<'src>, Option<&'src str>, Option<&'src str>) {
+    // A quick reject avoids running the regex on the common no-anchor title.
+    if !title.data().ends_with("]]") {
+        return (title, None, None);
+    }
+
+    let Some(caps) = EMBEDDED_SECTION_ANCHOR.captures(title.data()) else {
+        return (title, None, None);
+    };
+
+    // An escaped anchor is not adopted as the section ID.
+    if caps.get(2).is_some() {
+        return (title, None, None);
+    }
+
+    let title_text = caps.get(1).map_or("", |m| m.as_str());
+    let id = caps.get(3).map(|m| m.as_str());
+
+    // Trailing whitespace is trimmed from the reftext, matching the inline-anchor
+    // substitution's handling of a shorthand `[[id,reftext]]`.
+    let reftext = caps.get(4).map(|m| m.as_str().trim_end());
+
+    (title.slice_to(..title_text.len()), id, reftext)
 }
 
 /// Parses a section title line, returning the section's *effective* level
