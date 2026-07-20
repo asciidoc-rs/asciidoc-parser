@@ -45,20 +45,33 @@ impl<'src> RevisionLine<'src> {
             }
         };
 
-        if let Some(revnumber) = revnumber.as_deref() {
-            parser.set_attribute_by_value_from_header("revnumber", revnumber);
-        }
+        // Resolve attribute references *before* recording the built-in
+        // `revnumber`/`revdate`/`revremark` document attributes, so a revision
+        // component written as an attribute reference (e.g. `{project-version}`)
+        // is reflected in `doc.attr` with its value resolved rather than as the
+        // raw `{...}` text.
+        let revnumber = revnumber.map(|s| {
+            let resolved = apply_header_subs(&s, parser);
+            parser.set_attribute_by_value_from_header("revnumber", &resolved);
+            resolved
+        });
 
-        parser.set_attribute_by_value_from_header("revdate", &revdate);
+        let revdate = {
+            let resolved = apply_header_subs(&revdate, parser);
+            parser.set_attribute_by_value_from_header("revdate", &resolved);
+            resolved
+        };
 
-        if let Some(revremark) = revremark.as_deref() {
-            parser.set_attribute_by_value_from_header("revremark", revremark);
-        }
+        let revremark = revremark.map(|s| {
+            let resolved = apply_header_subs(&s, parser);
+            parser.set_attribute_by_value_from_header("revremark", &resolved);
+            resolved
+        });
 
         Self {
-            revnumber: revnumber.map(|s| apply_header_subs(&s, parser)),
-            revdate: apply_header_subs(&revdate, parser),
-            revremark: revremark.map(|s| apply_header_subs(&s, parser)),
+            revnumber,
+            revdate,
+            revremark,
             source,
         }
     }
@@ -130,8 +143,13 @@ static STANDALONE_REVISION: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static NON_NUMERIC_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+    // Strip any leading run of characters that are neither a digit nor the start
+    // of an attribute reference (`{`). Stopping at `{` preserves a revision
+    // number written purely as an attribute reference (e.g. `v{project-version}`
+    // keeps `{project-version}` for later substitution) instead of dropping the
+    // whole value because it contains no literal digit.
     #[allow(clippy::unwrap_used)]
-    Regex::new(r"^[^0-9]*(.*)$").unwrap()
+    Regex::new(r"^[^0-9{]*(.*)$").unwrap()
 });
 
 #[cfg(test)]
@@ -299,6 +317,41 @@ mod tests {
         // When there are no digits, the prefix stripping should leave empty string
         assert_eq!(result.revnumber(), Some(""));
         assert_eq!(result.revdate(), "2023-01-01");
+        assert_eq!(result.revremark(), None);
+    }
+
+    #[test]
+    fn comma_form_prefix_stops_at_attribute_reference() {
+        // Mirrors Asciidoctor's `RevisionInfoLineRx`, whose revision-number
+        // prefix class is `[^\d{]*`: the leading run stops at `{`, so an
+        // attribute reference survives prefix removal and is then resolved by
+        // the header substitutions. With the referenced attribute undefined the
+        // reference is preserved verbatim (default `attribute-missing` skips it).
+        let mut parser = Parser::default();
+        let result =
+            crate::document::RevisionLine::parse(Span::new("v{draft}, 2024-01-01"), &mut parser);
+
+        assert_eq!(result.revnumber(), Some("{draft}"));
+        assert_eq!(result.revdate(), "2024-01-01");
+        assert_eq!(result.revremark(), None);
+    }
+
+    #[test]
+    fn comma_form_prefix_absorbs_escape_before_reference() {
+        // Also mirrors Asciidoctor: the `[^\d{]*` prefix absorbs any leading
+        // characters up to the first `{` — including a backslash — so
+        // `v\{draft}1` yields `{draft}1`, an active reference the header
+        // substitutions then resolve when `draft` is defined.
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "draft",
+            "beta",
+            ModificationContext::Anywhere,
+        );
+        let result =
+            crate::document::RevisionLine::parse(Span::new("v\\{draft}1, 2024-01-01"), &mut parser);
+
+        assert_eq!(result.revnumber(), Some("beta1"));
+        assert_eq!(result.revdate(), "2024-01-01");
         assert_eq!(result.revremark(), None);
     }
 
