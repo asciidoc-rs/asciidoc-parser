@@ -16,10 +16,10 @@ pub(crate) struct BlockMetadata<'src> {
     /// The block's raw title, if any.
     pub(crate) title_source: Option<Span<'src>>,
 
-    /// The block's title, if any, retained as a [`Content`] so a cross-reference
-    /// embedded in the title can be resolved once the catalog is complete (by
-    /// the document-order title pass). Its rendered text is the block's title
-    /// string.
+    /// The block's title, if any, retained as a [`Content`] so a
+    /// cross-reference embedded in the title can be resolved once the
+    /// catalog is complete (by the document-order title pass). Its rendered
+    /// text is the block's title string.
     pub(crate) title: Option<Content<'src>>,
 
     /// The block's anchor, if any. The span does not include the opening or

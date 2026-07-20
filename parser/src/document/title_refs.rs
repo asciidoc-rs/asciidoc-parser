@@ -4,16 +4,17 @@
 //! reference text as its link text. When targets reference each other — a
 //! forward reference, or a circular one — the reference text of one title
 //! depends on another, so the per-content resolution pass (which resolves each
-//! [`Content`](crate::content::Content) in isolation) cannot get this right on
-//! its own: it would resolve every title's cross-references independently,
-//! against each target's *parse-time* reference text.
+//! [`Content`] in isolation) cannot get this right on its own: it would
+//! resolve every title's cross-references independently, against each target's
+//! *parse-time* reference text.
 //!
 //! This pass mirrors Asciidoctor, which converts each title exactly once, in
 //! document order, and caches the result. While a title is being converted, a
 //! cross-reference back to a title that is *already being converted* (a cycle)
 //! falls back to the bracketed `[id]` form rather than recursing forever. When
 //! a resolved reference text is spliced into another reference as its link
-//! text, any nested anchor is dropped (handled in the renderer's `render_xref`).
+//! text, any nested anchor is dropped (handled in the renderer's
+//! `render_xref`).
 //!
 //! The result is that a title's rendered form and the reference text every
 //! other reference sees for it are computed together, with cycles broken the

@@ -371,15 +371,16 @@ struct DocumentMetadata {
 }
 
 /// Parse a block attribute line (e.g. `[reftext="…"]`, `[#id]`, `[role=…]`,
-/// `[separator=::]`) appearing above the document title into [`DocumentMetadata`].
+/// `[separator=::]`) appearing above the document title into
+/// [`DocumentMetadata`].
 ///
-/// The `line` is expected to begin with `[` and end with `]`. Returns the folded
-/// metadata together with any warnings raised while parsing the attribute list
-/// when the line is a well-formed block attribute list, and `None` otherwise (so
-/// the caller can fall through to its normal handling of the line, which then
-/// terminates the header). The warnings are only surfaced when the line is
-/// actually consumed as document metadata; otherwise the line is left for the
-/// block parser, which reports them on its own path.
+/// The `line` is expected to begin with `[` and end with `]`. Returns the
+/// folded metadata together with any warnings raised while parsing the
+/// attribute list when the line is a well-formed block attribute list, and
+/// `None` otherwise (so the caller can fall through to its normal handling of
+/// the line, which then terminates the header). The warnings are only surfaced
+/// when the line is actually consumed as document metadata; otherwise the line
+/// is left for the block parser, which reports them on its own path.
 fn parse_document_metadata_attrlist<'src>(
     line: Span<'src>,
     parser: &Parser,
