@@ -321,6 +321,41 @@ mod tests {
     }
 
     #[test]
+    fn comma_form_prefix_stops_at_attribute_reference() {
+        // Mirrors Asciidoctor's `RevisionInfoLineRx`, whose revision-number
+        // prefix class is `[^\d{]*`: the leading run stops at `{`, so an
+        // attribute reference survives prefix removal and is then resolved by
+        // the header substitutions. With the referenced attribute undefined the
+        // reference is preserved verbatim (default `attribute-missing` skips it).
+        let mut parser = Parser::default();
+        let result =
+            crate::document::RevisionLine::parse(Span::new("v{draft}, 2024-01-01"), &mut parser);
+
+        assert_eq!(result.revnumber(), Some("{draft}"));
+        assert_eq!(result.revdate(), "2024-01-01");
+        assert_eq!(result.revremark(), None);
+    }
+
+    #[test]
+    fn comma_form_prefix_absorbs_escape_before_reference() {
+        // Also mirrors Asciidoctor: the `[^\d{]*` prefix absorbs any leading
+        // characters up to the first `{` — including a backslash — so
+        // `v\{draft}1` yields `{draft}1`, an active reference the header
+        // substitutions then resolve when `draft` is defined.
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "draft",
+            "beta",
+            ModificationContext::Anywhere,
+        );
+        let result =
+            crate::document::RevisionLine::parse(Span::new("v\\{draft}1, 2024-01-01"), &mut parser);
+
+        assert_eq!(result.revnumber(), Some("beta1"));
+        assert_eq!(result.revdate(), "2024-01-01");
+        assert_eq!(result.revremark(), None);
+    }
+
+    #[test]
     fn sets_document_attributes_with_all_components() {
         let mut parser = Parser::default();
         let _result = crate::document::RevisionLine::parse(
