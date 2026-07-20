@@ -168,7 +168,8 @@ impl IncludeFileHandler for RecordingIncludeFileHandler {
 /// no trailing newline, so the single trailing newline the preprocessor emits
 /// is stripped.)
 fn reader_read(parser: &Parser, input: &str) -> String {
-    let (output, _source_map, _warnings) = crate::parser::preprocessor::preprocess(input, parser);
+    let (output, _source_map, _warnings, _includes) =
+        crate::parser::preprocessor::preprocess(input, parser);
     output
         .strip_suffix('\n')
         .map(str::to_owned)
@@ -1556,7 +1557,7 @@ fn should_use_encoding_specified_by_encoding_attribute_when_reading_include_file
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler);
 
-    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         "include::fixtures/iso-8859-1.txt[encoding=iso-8859-1]",
         &parser,
     );
@@ -1614,7 +1615,7 @@ fn unresolved_target_referenced_by_include_directive_is_skipped_when_optional_op
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler);
 
-    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         "include::fixtures/{no-such-file}[opts=optional]\n\ntrailing content",
         &parser,
     );
@@ -1665,7 +1666,7 @@ fn should_skip_include_directive_that_references_missing_file_if_optional_option
     let parser = Parser::default()
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler);
-    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         "include::fixtures/no-such-file.adoc[opts=optional]\n\ntrailing content",
         &parser,
     );
@@ -1713,7 +1714,7 @@ fn should_replace_include_directive_that_references_missing_file_with_message() 
     let parser = Parser::default()
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler);
-    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         "include::fixtures/no-such-file.adoc[]\n\ntrailing content",
         &parser,
     );
@@ -1773,7 +1774,7 @@ fn should_replace_include_directive_that_references_unreadable_file_with_message
     let parser = Parser::default()
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler);
-    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         "include::fixtures/chapter-a.adoc[]\n\ntrailing content",
         &parser,
     );
@@ -4051,7 +4052,7 @@ fn line_is_skipped_by_default_if_target_of_include_directive_resolves_to_empty()
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler);
 
-    let (output, _source_map, warnings) =
+    let (output, _source_map, warnings, _includes) =
         crate::parser::preprocessor::preprocess("include::{blank}[]", &parser);
 
     assert_eq!(
@@ -4106,7 +4107,7 @@ fn include_is_dropped_if_target_contains_missing_attribute_and_attribute_missing
         )
         .with_include_file_handler(handler);
 
-    let (output, _source_map, warnings) =
+    let (output, _source_map, warnings, _includes) =
         crate::parser::preprocessor::preprocess("include::{foodir}/include-file.adoc[]", &parser);
 
     assert_eq!(output, "");
@@ -4153,7 +4154,7 @@ fn line_following_dropped_include_is_not_dropped() {
         .with_intrinsic_attribute("attribute-missing", "warn", ModificationContext::Anywhere)
         .with_include_file_handler(handler);
 
-    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         "include::{foodir}/include-file.adoc[]\nyo",
         &parser,
     );
@@ -4256,7 +4257,7 @@ fn include_directive_is_disabled_when_max_include_depth_attribute_is_0() {
         .with_intrinsic_attribute("max-include-depth", "0", ModificationContext::ApiOnly)
         .with_include_file_handler(handler);
 
-    let (output, _source_map, warnings) =
+    let (output, _source_map, warnings, _includes) =
         crate::parser::preprocessor::preprocess("include::include-file.adoc[]", &parser);
 
     assert_eq!(output, "include::include-file.adoc[]\n");
@@ -4292,7 +4293,7 @@ fn max_include_depth_cannot_be_set_by_document() {
         .with_intrinsic_attribute("max-include-depth", "0", ModificationContext::ApiOnly)
         .with_include_file_handler(handler);
 
-    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         ":max-include-depth: 1\n\ninclude::include-file.adoc[]",
         &parser,
     );
@@ -4357,7 +4358,7 @@ fn include_directive_should_be_disabled_if_max_include_depth_has_been_exceeded()
             ("grandchild-include.adoc", GRANDCHILD_INCLUDE_ADOC),
         ]));
 
-    let (output, source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         "include::fixtures/parent-include.adoc[depth=1]",
         &parser,
     );
@@ -4427,7 +4428,7 @@ fn include_directive_should_be_disabled_if_max_include_depth_set_in_nested_conte
             ("grandchild-include.adoc", GRANDCHILD_INCLUDE_ADOC),
         ]));
 
-    let (output, _source_map, warnings) = crate::parser::preprocessor::preprocess(
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
         "include::fixtures/parent-include-restricted.adoc[depth=3]",
         &parser,
     );

@@ -24,12 +24,17 @@ use crate::{
 /// by byte offset within the returned (preprocessed) source. `Document::parse`
 /// reconstitutes them into spanned [`Warning`]s once it owns that source.
 ///
+/// The fourth returned value lists the AsciiDoc files this pass included, each
+/// paired with whether it was included in full; see the `includes` field of
+/// [`PreprocessorState`]. `Parser::parse_deferred` folds these into the
+/// document's [`Catalog`](crate::document::Catalog).
+///
 /// [include file]: https://docs.asciidoctor.org/asciidoc/latest/directives/include/
 /// [conditional]: https://docs.asciidoctor.org/asciidoc/latest/directives/conditionals/
 pub(crate) fn preprocess(
     source: &str,
     parser: &Parser,
-) -> (String, SourceMap, Vec<DeferredWarning>) {
+) -> (String, SourceMap, Vec<DeferredWarning>, Vec<(String, bool)>) {
     preprocess_with_initial_file_name(source, parser, parser.primary_file_name.as_deref())
 }
 
@@ -44,7 +49,7 @@ pub(crate) fn preprocess_with_initial_file_name(
     source: &str,
     parser: &Parser,
     initial_file_name: Option<&str>,
-) -> (String, SourceMap, Vec<DeferredWarning>) {
+) -> (String, SourceMap, Vec<DeferredWarning>, Vec<(String, bool)>) {
     // Short-circuit if the original source document has no pre-processor
     // directives. `if` covers `ifdef`/`ifndef`/`ifeval`; `endif` is checked
     // separately because it does not share that prefix, and a stray `endif`
@@ -65,7 +70,7 @@ pub(crate) fn preprocess_with_initial_file_name(
         && !source.contains("\n\\include::")
         && initial_file_name.is_none()
     {
-        return (source.to_owned(), SourceMap::default(), vec![]);
+        return (source.to_owned(), SourceMap::default(), vec![], vec![]);
     }
 
     // We use a temporary clone of the parser to track document attribute values
@@ -79,7 +84,12 @@ pub(crate) fn preprocess_with_initial_file_name(
     // processed was never closed by a matching `endif`.
     state.emit_unterminated_conditional_warnings();
 
-    (state.output, state.source_map, state.warnings)
+    (
+        state.output,
+        state.source_map,
+        state.warnings,
+        state.includes,
+    )
 }
 
 #[derive(Debug)]
@@ -92,6 +102,24 @@ struct PreprocessorState<'p> {
     output: String,
     source_map: SourceMap,
     warnings: Vec<DeferredWarning>,
+
+    /// AsciiDoc files included by directives written in the outermost document,
+    /// in the order the `include::` directives were processed. Each entry pairs
+    /// the include target (relative to the outermost document, AsciiDoc
+    /// extension removed) with whether that directive merged the file *in full*
+    /// (`true`) or only a `lines`/`tag(s)` portion of it (`false`); the same
+    /// file may appear more than once. `Parser::parse_deferred` replays these
+    /// through
+    /// [`Catalog::register_include`](crate::document::Catalog::register_include),
+    /// which resolves the full/partial value (a full include wins), so an
+    /// inter-document cross reference to an included file can collapse to a
+    /// same-document one.
+    ///
+    /// A directive in a *nested* include (depth 2 and below) is not recorded:
+    /// its target is relative to the file containing it, not the outermost
+    /// document, so registering it as written could falsely collapse a
+    /// root-relative xref that names a different file.
+    includes: Vec<(String, bool)>,
 
     /// The include-depth limit currently in effect, or `None` when
     /// `max-include-depth` is 0 — which disables the include directive
@@ -194,6 +222,7 @@ impl<'p> PreprocessorState<'p> {
             output: String::new(),
             source_map: SourceMap::default(),
             warnings: vec![],
+            includes: vec![],
             max_include_depth,
             conditional_stack: vec![],
         }
@@ -520,6 +549,34 @@ impl<'p> PreprocessorState<'p> {
                     let content_start = self.output.len();
 
                     if is_asciidoc_file(&target) {
+                        // Register the included AsciiDoc file so an
+                        // inter-document cross reference whose target names it
+                        // can later collapse to a same-document reference (its
+                        // anchors are now part of this document). A `lines` or
+                        // partial `tag(s)` selection records a *partial* include,
+                        // which does not collapse the reference. A file
+                        // included both fully and partially resolves to full;
+                        // that merge is applied by
+                        // [`Catalog::register_include`] when these entries are
+                        // replayed into the catalog.
+                        //
+                        // Only a directive written in the *outermost* document
+                        // (depth 1) is recorded: its target is already in the
+                        // coordinate system an inter-document xref target uses.
+                        // A nested include's target is relative to the file
+                        // containing it, so registering it as written could
+                        // collide with — and falsely collapse — a root-relative
+                        // xref that names a different file. A nested include is
+                        // therefore not recorded at all: an xref to it keeps
+                        // its ordinary inter-document destination.
+                        //
+                        // [`Catalog::register_include`]: crate::document::Catalog::register_include
+                        if self.include_depth == 1 {
+                            let full = is_full_include(&attrlist);
+                            self.includes
+                                .push((include_catalog_key(&target).to_string(), full));
+                        }
+
                         // The directive's `depth` attribute lowers the maximum
                         // include depth while the included file (and anything
                         // it includes) is processed; the previous limit is
@@ -1386,6 +1443,54 @@ fn is_asciidoc_file(target: &str) -> bool {
     }
 }
 
+/// The [`Catalog`](crate::document::Catalog) include-registry key for an
+/// AsciiDoc include `target`: the target with its AsciiDoc file extension
+/// removed, matching the path an inter-document xref target interprets to (see
+/// [`interpret_xref_target`](crate::content)). `target` must name an AsciiDoc
+/// file (see [`is_asciidoc_file`]).
+///
+/// The key is the target as written in the `include::` directive. Only
+/// directives written in the outermost document are registered (see the
+/// `includes` field of [`PreprocessorState`]), so the key is always relative to
+/// that document — the coordinate system an inter-document xref target uses.
+fn include_catalog_key(target: &str) -> &str {
+    // `target` names an AsciiDoc file, so its final `.`-delimited segment is the
+    // extension to strip; only the trailing extension is removed, so a path that
+    // contains a period elsewhere (`using-.net-web-services.adoc`) keeps it.
+    match target.rsplit_once('.') {
+        Some((stem, _ext)) if !stem.is_empty() => stem,
+        _ => target,
+    }
+}
+
+/// Reports whether an `include::` directive with the given attributes merges
+/// the file *in full*, as opposed to selecting only a portion of it.
+///
+/// A `lines` selection is always partial. A `tag(s)` selection is partial too,
+/// except for the `**` wildcard, which selects every line of the file (both
+/// tagged and untagged regions) and so is a full include — matching
+/// Asciidoctor's `catalog[:includes]` bookkeeping.
+fn is_full_include(attrlist: &Attrlist<'_>) -> bool {
+    if attrlist
+        .named_attribute("lines")
+        .map(|a| a.value())
+        .is_some_and(|v| !v.is_empty())
+    {
+        return false;
+    }
+
+    match attrlist
+        .named_attribute("tags")
+        .or_else(|| attrlist.named_attribute("tag"))
+        .map(|a| a.value())
+        .filter(|v| !v.is_empty())
+    {
+        // `tags=**` selects the whole file; any other selection is partial.
+        Some(tags) => tags.trim() == "**",
+        None => true,
+    }
+}
+
 /// Returns `true` if `target` is a URI (i.e. it begins with a scheme followed
 /// by `://`, such as `https://`, `http://`, or `ftp://`).
 fn is_uri(target: &str) -> bool {
@@ -1915,7 +2020,7 @@ mod tests {
             "= Document Title\n\nThis is a simple document with no includes or conditionals.";
         let parser = Parser::default().with_primary_file_name("test.adoc");
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -1942,7 +2047,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -1991,7 +2096,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2039,7 +2144,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         // The include is converted to a link; the handler is never consulted.
         assert_eq!(
@@ -2077,7 +2182,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         // The include is converted to a link; the handler is never consulted.
         assert_eq!(
@@ -2119,7 +2224,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2180,7 +2285,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2231,7 +2336,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2255,7 +2360,7 @@ mod tests {
             .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc");
 
-        let (processed_source, source_map, warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2325,7 +2430,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(processed_source, "Top.\nNested.\n");
     }
@@ -2346,7 +2451,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(processed_source, "a,b\ninclude::inner.adoc[]\n");
         assert!(warnings.is_empty());
@@ -2376,7 +2481,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(processed_source, "Body.\n\nrow one\n\nrow two\n");
     }
@@ -2395,7 +2500,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, warnings, _includes) = preprocess(source, &parser);
 
         // The directive line is gone; no "Unresolved directive" text is inserted.
         assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
@@ -2431,7 +2536,7 @@ mod tests {
         // file.
         let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
 
-        let (processed_source, _source_map, warnings) =
+        let (processed_source, _source_map, warnings, _includes) =
             preprocess(source, &parser_with_attribute_missing("skip"));
 
         assert_eq!(
@@ -2455,7 +2560,7 @@ mod tests {
         // that follow. See issue #776.
         let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
 
-        let (processed_source, source_map, warnings) =
+        let (processed_source, source_map, warnings, _includes) =
             preprocess(source, &parser_with_attribute_missing("drop-line"));
 
         assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
@@ -2487,7 +2592,7 @@ mod tests {
                 ModificationContext::Anywhere,
             );
 
-        let (processed_source, _source_map, warnings) = preprocess(source, &parser);
+        let (processed_source, _source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
         assert!(warnings.is_empty());
@@ -2501,7 +2606,7 @@ mod tests {
         // include target, so the target is emptied and never resolved).
         let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
 
-        let (processed_source, _source_map, warnings) =
+        let (processed_source, _source_map, warnings, _includes) =
             preprocess(source, &parser_with_attribute_missing("warn"));
 
         assert_eq!(
@@ -2525,7 +2630,7 @@ mod tests {
         // warning that `warn` would otherwise produce for a dropped directive.
         let source = "Before.\n\ninclude::{foodir}/partial.adoc[opts=optional]\n\nAfter.";
 
-        let (processed_source, _source_map, warnings) =
+        let (processed_source, _source_map, warnings, _includes) =
             preprocess(source, &parser_with_attribute_missing("warn"));
 
         assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
@@ -2538,7 +2643,7 @@ mod tests {
         // is otherwise complete still resolves and the include is expanded.
         let source = "Before.\n\ninclude::{foodir}partial.adoc[]\n\nAfter.";
 
-        let (processed_source, _source_map, warnings) =
+        let (processed_source, _source_map, warnings, _includes) =
             preprocess(source, &parser_with_attribute_missing("drop"));
 
         assert_eq!(processed_source, "Before.\n\nIncluded content.\n\nAfter.\n");
@@ -2559,7 +2664,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2578,7 +2683,7 @@ mod tests {
         // thus no include handler) so the escape behaves identically.
         let source = "\\include::partial.adoc[]";
         let parser = Parser::default();
-        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
         assert_eq!(processed_source, "include::partial.adoc[]\n");
     }
 
@@ -2588,7 +2693,7 @@ mod tests {
         // (here, no attribute brackets) is left untouched.
         let source = "\\include::partial.adoc";
         let parser = Parser::default().with_primary_file_name("main.adoc");
-        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
         assert_eq!(processed_source, "\\include::partial.adoc\n");
     }
 
@@ -2598,7 +2703,7 @@ mod tests {
         // backslash is left as-is.
         let source = "\\\\include::partial.adoc[]";
         let parser = Parser::default().with_primary_file_name("main.adoc");
-        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
         assert_eq!(processed_source, "\\\\include::partial.adoc[]\n");
     }
 
@@ -2616,7 +2721,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2643,7 +2748,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2713,7 +2818,7 @@ mod tests {
             )
             .with_include_file_handler(handler);
 
-        let (processed_source, _source_map, warnings) = preprocess(source, &parser);
+        let (processed_source, _source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(processed_source, "Brace in the file name.\n");
         assert!(warnings.is_empty());
@@ -2733,7 +2838,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2771,7 +2876,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2811,7 +2916,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, _source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(processed_source, "Included via escaped literal target.\n");
     }
@@ -2836,7 +2941,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2874,7 +2979,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2906,7 +3011,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (processed_source, source_map, _warnings) = preprocess(source, &parser);
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             processed_source,
@@ -2942,7 +3047,7 @@ mod tests {
     /// resulting text, for the conditional-directive tests below.
     fn conditional_output(source: &str) -> String {
         let parser = Parser::default();
-        let (output, _source_map, _warnings) = preprocess(source, &parser);
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
         output
     }
 
@@ -3020,7 +3125,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess(source, &parser);
+        let (output, _source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert!(output.contains("Included."), "output was: {output:?}");
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
@@ -3148,7 +3253,7 @@ mod tests {
         // the lines that follow back to their original line numbers.
         let source = "l1\n\nifdef::foo[]\ndropped\ndropped\nendif::[]\n\nl8";
         let parser = Parser::default();
-        let (output, source_map, _warnings) = preprocess(source, &parser);
+        let (output, source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(output, "l1\n\n\nl8\n");
 
@@ -3394,7 +3499,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess(source, &parser);
+        let (output, _source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             output,
@@ -3416,7 +3521,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess(source, &parser);
+        let (output, _source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(output, "Remote content.\n");
         assert!(warnings.is_empty());
@@ -3436,7 +3541,7 @@ mod tests {
             .with_safe_mode(SafeMode::Server)
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
-        let (_output, _source_map, warnings) = preprocess(source, &parser);
+        let (_output, _source_map, warnings, _includes) = preprocess(source, &parser);
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
     }
 
@@ -3451,7 +3556,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess(source, &parser);
+        let (output, _source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(output, "Résumé.\n");
         assert_eq!(warnings.len(), 1);
@@ -3495,7 +3600,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(TranscodingFileHandler);
 
-        let (output, _source_map, warnings) = preprocess(source, &parser);
+        let (output, _source_map, warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(output, "Résumé.\n");
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
@@ -3512,7 +3617,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (output, _source_map, _warnings) = preprocess(source, &parser);
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             output,
@@ -3533,7 +3638,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (output, _source_map, _warnings) = preprocess(source, &parser);
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
 
         assert_eq!(
             output,
@@ -3616,7 +3721,7 @@ mod tests {
             .with_primary_file_name("main.adoc")
             .with_include_file_handler(handler);
 
-        let (output, _source_map, _warnings) = preprocess(source, &parser);
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
 
         // Tabs expand to the tab stop; the common indent is zero (the middle line
         // is flush left), so no further indentation change is made.
@@ -3635,7 +3740,8 @@ mod tests {
             .with_safe_mode(SafeMode::Server)
             .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess("include::loop.adoc[]", &parser);
+        let (output, _source_map, warnings, _includes) =
+            preprocess("include::loop.adoc[]", &parser);
 
         // Each nesting level's only line is the directive itself, which
         // expands to the next level (contributing no output of its own) until
@@ -3662,7 +3768,8 @@ mod tests {
             .with_intrinsic_attribute_bool("max-include-depth", true, ModificationContext::ApiOnly)
             .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess("include::shared.adoc[]", &parser);
+        let (output, _source_map, warnings, _includes) =
+            preprocess("include::shared.adoc[]", &parser);
 
         assert_eq!(output, "include::shared.adoc[]\n");
         assert!(warnings.is_empty());
@@ -3680,7 +3787,8 @@ mod tests {
             .with_intrinsic_attribute_bool("max-include-depth", false, ModificationContext::ApiOnly)
             .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess("include::shared.adoc[]", &parser);
+        let (output, _source_map, warnings, _includes) =
+            preprocess("include::shared.adoc[]", &parser);
 
         assert_eq!(output, "shared content\n");
         assert!(warnings.is_empty());
@@ -3703,7 +3811,8 @@ mod tests {
             .with_intrinsic_attribute("max-include-depth", "2", ModificationContext::ApiOnly)
             .with_include_file_handler(handler);
 
-        let (output, _source_map, warnings) = preprocess("include::a.adoc[depth=10]", &parser);
+        let (output, _source_map, warnings, _includes) =
+            preprocess("include::a.adoc[depth=10]", &parser);
 
         assert_eq!(output, "include::c.adoc[]\n");
         assert_eq!(warnings.len(), 1);
@@ -3725,7 +3834,8 @@ mod tests {
                 .with_intrinsic_attribute("max-include-depth", value, ModificationContext::ApiOnly)
                 .with_include_file_handler(handler);
 
-            let (output, _source_map, warnings) = preprocess("include::shared.adoc[]", &parser);
+            let (output, _source_map, warnings, _includes) =
+                preprocess("include::shared.adoc[]", &parser);
 
             assert_eq!(output, "shared content\n");
             assert!(warnings.is_empty());
@@ -3750,7 +3860,7 @@ mod tests {
                 .with_intrinsic_attribute("max-include-depth", "1", ModificationContext::ApiOnly)
                 .with_include_file_handler(handler);
 
-            let (output, _source_map, warnings) =
+            let (output, _source_map, warnings, _includes) =
                 preprocess(&format!("include::a.adoc[depth={value}]"), &parser);
 
             assert_eq!(output, "include::b.adoc[]\n");
@@ -3775,5 +3885,77 @@ mod tests {
         assert_eq!(ruby_to_i("abc"), 0);
         assert_eq!(ruby_to_i("-"), 0);
         assert_eq!(ruby_to_i(""), 0);
+    }
+
+    mod include_registry {
+        use super::super::{include_catalog_key, is_full_include};
+        use crate::{
+            Span,
+            attributes::{Attrlist, AttrlistContext},
+            tests::prelude::*,
+        };
+
+        #[test]
+        fn catalog_key_strips_the_asciidoc_extension() {
+            assert_eq!(include_catalog_key("other-chapters.adoc"), "other-chapters");
+            assert_eq!(include_catalog_key("part1/tigers.adoc"), "part1/tigers");
+            assert_eq!(include_catalog_key("../section-a.adoc"), "../section-a");
+            assert_eq!(include_catalog_key("notes.txt"), "notes");
+
+            // Only the trailing extension is removed, so a period elsewhere in
+            // the name is kept.
+            assert_eq!(
+                include_catalog_key("using-.net-web-services.adoc"),
+                "using-.net-web-services"
+            );
+
+            // Defensive fallback: production only reaches this function for a
+            // target `is_asciidoc_file` accepted (a dotted name with a
+            // non-empty stem), but a target without one is returned whole
+            // rather than truncated.
+            assert_eq!(include_catalog_key("no-extension"), "no-extension");
+            assert_eq!(include_catalog_key(".adoc"), ".adoc");
+        }
+
+        fn is_full(attrlist_text: &str) -> bool {
+            let parser = Parser::default();
+            let span = Span::new(attrlist_text);
+            let attrlist = Attrlist::parse(span, &parser, AttrlistContext::Inline)
+                .item
+                .item;
+            is_full_include(&attrlist)
+        }
+
+        #[test]
+        fn an_unfiltered_include_is_full() {
+            assert!(is_full(""));
+        }
+
+        #[test]
+        fn a_lines_selection_is_partial() {
+            assert!(!is_full("lines=1..5"));
+
+            // An empty `lines` value selects nothing in particular, so it does
+            // not make the include partial on its own.
+            assert!(is_full("lines="));
+        }
+
+        #[test]
+        fn a_tag_selection_is_partial_unless_it_selects_everything() {
+            assert!(!is_full("tags=ch2"));
+            assert!(!is_full("tag=ch2"));
+            assert!(!is_full("tags=ch2;ch3"));
+
+            // The `**` wildcard selects every line, so it is a full include.
+            assert!(is_full("tags=**"));
+            assert!(is_full("tag=**"));
+        }
+
+        #[test]
+        fn lines_takes_precedence_over_a_whole_file_tag_selection() {
+            // A `lines` selection is partial even when `tags=**` is also present
+            // (`lines` wins, matching the selection the preprocessor applies).
+            assert!(!is_full("lines=1..2,tags=**"));
+        }
     }
 }

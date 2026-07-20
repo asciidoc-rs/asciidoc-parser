@@ -1750,12 +1750,32 @@ fn process_content<'src>(
             // resulting source map: while this cell's owned source is parsed it
             // lets a directive buried deeper (e.g. in a nested table cell) map
             // its position back to the file and line it originally came from.
-            let (expanded, cell_source_map, preprocessor_warnings) =
+            let (expanded, cell_source_map, preprocessor_warnings, cell_includes) =
                 preprocess_with_initial_file_name(
                     trimmed.data(),
                     parser,
                     cell_origin_file.as_deref(),
                 );
+
+            // An AsciiDoc table cell shares the enclosing document's catalog
+            // (only its footnote list is cell-local), so a file included by the
+            // cell registers on the document's include registry — as it does in
+            // Asciidoctor, where the cell's nested document shares the parent's
+            // `catalog[:includes]`. Registration is skipped when the cell was
+            // itself brought in from an included file: the cell's include
+            // targets are then relative to that file, not the outermost
+            // document, and a mis-keyed entry could falsely collapse a
+            // root-relative xref naming a different file (the same rule the
+            // preprocessor applies to nested includes). Note that xrefs are
+            // interpreted in document order as blocks parse, so only xrefs in
+            // this cell and beyond observe these entries; Asciidoctor, which
+            // resolves xrefs after the whole document is read, has no such
+            // ordering.
+            if cell_origin_file.as_deref() == parser.primary_file_name.as_deref() {
+                for (key, full) in &cell_includes {
+                    parser.register_include(key, *full);
+                }
+            }
             let cell_source_map = Rc::new(cell_source_map);
 
             // The cell's first line as it appears in the source it was sliced
@@ -1960,7 +1980,13 @@ fn parse_asciidoc_cell_body<'src>(
     // duration of the parse, so a table found within defaults its cell separator
     // to `!` rather than `|` (matching Asciidoctor's `Document#nested?`).
     parser.nested_document_depth += 1;
+    // The cell body parses from its own owned source (whether include-expanded or
+    // a borrowed `a|` cell), whose offsets do not map to the document. Mark that
+    // so a footnote defined inside records no (misleading) document location; see
+    // `Parser::owned_subsource_depth`.
+    parser.owned_subsource_depth += 1;
     let mut maw = parse_blocks_until(body, |_, _| false, parser);
+    parser.owned_subsource_depth -= 1;
     parser.nested_document_depth -= 1;
     warnings.append(&mut maw.warnings);
 

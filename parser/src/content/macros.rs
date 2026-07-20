@@ -1668,14 +1668,22 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
 
             XrefTarget::SameDocument(id) => (id, None),
 
-            // A target that names *this* document is a reference within it
-            // after all: the element it names (if any) is in the catalog being
-            // built right now.
+            // A target that names *this* document, or a file that was included
+            // into it in full, is a reference within it after all: the element
+            // it names (if any) is in the catalog being built right now. The
+            // path is compared against `docname` and against the include
+            // registry the preprocessor populated, matching Asciidoctor's
+            // `docname == path || catalog[:includes][path]` test. A merely
+            // *partial* include does not qualify — the referenced anchor may not
+            // have been carried across.
             XrefTarget::OtherDocument {
                 path,
                 source,
                 fragment,
-            } if source && self.parser.docname().as_deref() == Some(path.as_str()) => {
+            } if source
+                && (self.parser.docname().as_deref() == Some(path.as_str())
+                    || self.parser.catalog_include_is_full(&path)) =>
+            {
                 match fragment {
                     Some(fragment) => (fragment, None),
                     None => (String::new(), Some(this_document_reference(self.parser))),
@@ -1853,7 +1861,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                     &normalize_footnote_text(&content),
                     self.all_xrefs,
                 );
-                let index = parser.define_footnote(Some(&id), template, xrefs);
+                let index = parser.define_footnote(Some(&id), template, xrefs, self.source);
                 parser.renderer.render_footnote(
                     &FootnoteRenderParams {
                         index: Some(index.as_str()),
@@ -1885,7 +1893,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                 &normalize_footnote_text(&content),
                 self.all_xrefs,
             );
-            let index = parser.define_footnote(None, template, xrefs);
+            let index = parser.define_footnote(None, template, xrefs, self.source);
             parser.renderer.render_footnote(
                 &FootnoteRenderParams {
                     index: Some(index.as_str()),
