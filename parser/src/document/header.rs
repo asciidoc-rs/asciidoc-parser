@@ -510,10 +510,10 @@ fn is_document_metadata_attrlist(line: Span<'_>) -> bool {
 /// [`DocumentMetadata`].
 ///
 /// The `line` must be a well-formed block attribute list — the caller confirms
-/// this with [`is_document_metadata_attrlist`] before calling, so parsing (which
-/// evaluates substitutions) only happens for a run that is actually consumed as
-/// document metadata. Returns the folded metadata together with any warnings
-/// raised while parsing the attribute list.
+/// this with [`is_document_metadata_attrlist`] before calling, so parsing
+/// (which evaluates substitutions) only happens for a run that is actually
+/// consumed as document metadata. Returns the folded metadata together with any
+/// warnings raised while parsing the attribute list.
 fn parse_document_metadata_attrlist<'src>(
     line: Span<'src>,
     parser: &Parser,
