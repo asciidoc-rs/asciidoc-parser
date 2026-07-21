@@ -584,8 +584,10 @@ struct AttributeReplacer<'p> {
     match_index: usize,
 
     /// Set to `true` when a (non-escaped) reference to a missing attribute is
-    /// encountered, so the caller can drop the whole line in
-    /// [`AttributeMissing::DropLine`] mode.
+    /// dropped, under either [`AttributeMissing::Drop`] or
+    /// [`AttributeMissing::DropLine`], so the caller can drop the line: the
+    /// whole line in `drop-line` mode, or a line the dropped reference left
+    /// empty in `drop` mode (Asciidoctor's `reject_if_empty`).
     missing_on_line: bool,
 }
 
@@ -696,6 +698,10 @@ impl Replacer for AttributeReplacer<'_> {
                 AttributeMissing::Skip => dest.push_str(&caps[0]),
                 AttributeMissing::Drop => {
                     // Drop the reference, leaving the rest of the line intact.
+                    // Flag that a missing reference was dropped here so the
+                    // caller can remove the line if the drop emptied it
+                    // (Asciidoctor's `reject_if_empty`).
+                    self.missing_on_line = true;
                 }
                 AttributeMissing::DropLine => {
                     // Mark the line for removal; whatever is written to `dest`
@@ -719,6 +725,19 @@ impl Replacer for AttributeReplacer<'_> {
         // Language description is unclear as to what happens for "set" and
         // "unset" attribute values. For now, we'll replace those with nothing.
     }
+}
+
+/// Whether a line that dropped a missing reference under
+/// [`AttributeMissing::Drop`] should be treated as emptied (and therefore
+/// removed, per Asciidoctor's `reject_if_empty`).
+///
+/// A trailing `\r` left from a CRLF terminator is part of the line ending, not
+/// content: a line the drop reduced to just `\r` still counts as empty. The
+/// block pipeline strips `\r` before content is assembled, but free-standing
+/// text (a docinfo file) is split on `\n` with the `\r` intact, so this guard
+/// is what makes a CRLF reference-only line drop there.
+fn drop_emptied_line(replaced: &str) -> bool {
+    replaced.strip_suffix('\r').unwrap_or(replaced).is_empty()
 }
 
 fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
@@ -770,8 +789,14 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 
-        if replacer.missing_on_line && mode == AttributeMissing::DropLine {
-            // Drop the entire line, including its line break.
+        if replacer.missing_on_line
+            && (mode == AttributeMissing::DropLine
+                || (mode == AttributeMissing::Drop && drop_emptied_line(&replaced)))
+        {
+            // Drop the entire line, including its line break: unconditionally
+            // in `drop-line` mode, or in `drop` mode when the dropped
+            // reference was all the line contained (Asciidoctor's
+            // `reject_if_empty`).
             changed = true;
             continue;
         }
@@ -876,8 +901,14 @@ pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> Stri
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 
-        if replacer.missing_on_line && mode == AttributeMissing::DropLine {
-            // Drop the entire line, including its line break.
+        if replacer.missing_on_line
+            && (mode == AttributeMissing::DropLine
+                || (mode == AttributeMissing::Drop && drop_emptied_line(&replaced)))
+        {
+            // Drop the entire line, including its line break: unconditionally
+            // in `drop-line` mode, or in `drop` mode when the dropped
+            // reference was all the line contained (Asciidoctor's
+            // `reject_if_empty`).
             continue;
         }
 
@@ -1701,6 +1732,48 @@ mod tests {
             }
 
             #[test]
+            fn drop_removes_line_that_only_contained_the_reference() {
+                // A line consisting solely of an unresolved reference is
+                // dropped entirely, not left as a blank line (issue #730).
+                let p = parser_with_mode("drop");
+                assert_eq!(render("Line 1\n{missing}\nLine 2", &p), "Line 1\nLine 2");
+            }
+
+            #[test]
+            fn drop_keeps_a_line_the_reference_did_not_empty() {
+                // The line still has other content after the reference is
+                // dropped, so it survives (only the reference is removed).
+                let p = parser_with_mode("drop");
+                assert_eq!(
+                    render("Line 1\ntext {missing}\nLine 2", &p),
+                    "Line 1\ntext \nLine 2"
+                );
+            }
+
+            #[test]
+            fn drop_removes_a_leading_or_trailing_reference_only_line() {
+                let p = parser_with_mode("drop");
+                assert_eq!(render("{missing}\nLine 2", &p), "Line 2");
+                assert_eq!(render("Line 1\n{missing}", &p), "Line 1");
+            }
+
+            #[test]
+            fn drop_can_empty_the_content() {
+                // A single line that is only an unresolved reference drops to
+                // empty content, mirroring `drop-line`.
+                let p = parser_with_mode("drop");
+                assert_eq!(render("{missing}", &p), "");
+            }
+
+            #[test]
+            fn drop_keeps_a_line_emptied_by_a_resolvable_reference() {
+                // The line becomes empty, but not because a *missing* reference
+                // was dropped, so it is retained.
+                let p = parser_with_mode("drop");
+                assert_eq!(render("Line 1\n{empty}\nLine 2", &p), "Line 1\n\nLine 2");
+            }
+
+            #[test]
             fn drop_line_removes_the_whole_line() {
                 let p = parser_with_mode("drop-line");
                 assert_eq!(render("Hello, {name}!\nSecond line.", &p), "Second line.");
@@ -1719,6 +1792,72 @@ mod tests {
             fn drop_line_can_empty_the_content() {
                 let p = parser_with_mode("drop-line");
                 assert_eq!(render("{missing}", &p), "");
+            }
+
+            /// Exercises the free-standing text path (used for docinfo file
+            /// content), which applies the same `attribute-missing` handling as
+            /// [`render`] but through [`substitute_attributes_in_text`] rather
+            /// than the block substitution pipeline.
+            mod free_standing_text {
+                use super::parser_with_mode;
+                use crate::content::substitute_attributes_in_text;
+
+                #[test]
+                fn drop_removes_line_that_only_contained_the_reference() {
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\n{missing}\nLine 2", &p),
+                        "Line 1\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_keeps_a_line_the_reference_did_not_empty() {
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\ntext {missing}\nLine 2", &p),
+                        "Line 1\ntext \nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_keeps_a_line_emptied_by_a_resolvable_reference() {
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\n{empty}\nLine 2", &p),
+                        "Line 1\n\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_line_removes_the_whole_line() {
+                    let p = parser_with_mode("drop-line");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
+                        "Line 1\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_removes_a_crlf_reference_only_line() {
+                    // The `\r` left by a CRLF terminator does not keep the line
+                    // from counting as emptied by the dropped reference, so the
+                    // whole `\r\n` line is removed.
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\r\n{missing}\r\nLine 2", &p),
+                        "Line 1\r\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_keeps_a_crlf_line_the_reference_did_not_empty() {
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\r\ntext {missing}\r\nLine 2", &p),
+                        "Line 1\r\ntext \r\nLine 2"
+                    );
+                }
             }
 
             #[test]

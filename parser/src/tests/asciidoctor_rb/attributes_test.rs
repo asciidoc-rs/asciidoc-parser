@@ -1959,10 +1959,9 @@ mod interpolation {
         assert_xpath(&doc, "//p[text()=\"Line 1\n{set:a}\nLine 2\"]", 1);
     }
 
-    // Tracked in #730.
     #[test]
     fn should_drop_line_that_only_contains_unresolved_attribute_when_attribute_missing_is_drop() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should drop line that only contains unresolved attribute when attribute-missing is drop' do
       input = <<~'EOS'
@@ -1978,15 +1977,15 @@ mod interpolation {
 "#
         );
 
-        // Divergence: with `attribute-missing=drop` this crate removes the
-        // missing reference but keeps the now-empty line, yielding
-        // `Line 1\n\nLine 2` rather than dropping the whole line.
+        // With `attribute-missing=drop`, a line that contains only an
+        // unresolved reference is dropped entirely (the reference removal
+        // empties the line), matching Asciidoctor's `reject_if_empty` (#730).
         let doc = Parser::default()
             .with_intrinsic_attribute("attribute-missing", "drop", ModificationContext::ApiOnly)
             .parse("Line 1\n{unresolved}\nLine 2");
         assert_eq!(
             rendered_paragraphs(&doc),
-            vec!["Line 1\n\nLine 2".to_string()]
+            vec!["Line 1\nLine 2".to_string()]
         );
     }
 
