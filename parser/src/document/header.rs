@@ -464,14 +464,13 @@ fn collect_document_metadata_lines<'src>(
     }
 
     // The run is well-formed and closed by a document title: only now parse each
-    // collected line into metadata. Every line was pre-validated above, so
-    // parsing does not reject (the `?` is defensive) and no substitution fires
-    // for a run that is ultimately rejected.
+    // collected line into metadata. Every line was pre-validated above, so no
+    // substitution fires for a run that is ultimately rejected.
     let mut metadata_list: Vec<DocumentMetadata> = vec![];
     let mut warnings: Vec<Warning<'src>> = vec![];
 
     for line in candidate_lines {
-        let (metadata, mut line_warnings) = parse_document_metadata_attrlist(line, parser)?;
+        let (metadata, mut line_warnings) = parse_document_metadata_attrlist(line, parser);
         metadata_list.push(metadata);
         warnings.append(&mut line_warnings);
     }
@@ -510,24 +509,17 @@ fn is_document_metadata_attrlist(line: Span<'_>) -> bool {
 /// `[separator=::]`) appearing above the document title into
 /// [`DocumentMetadata`].
 ///
-/// The `line` is expected to begin with `[` and end with `]`. Returns the
-/// folded metadata together with any warnings raised while parsing the
-/// attribute list when the line is a well-formed block attribute list (see
-/// [`is_document_metadata_attrlist`]), and `None` otherwise (so the caller can
-/// fall through to its normal handling of the line, which then terminates the
-/// header). The warnings are only surfaced when the line is actually consumed
-/// as document metadata; otherwise the line is left for the block parser, which
-/// reports them on its own path.
+/// The `line` must be a well-formed block attribute list — the caller confirms
+/// this with [`is_document_metadata_attrlist`] before calling, so parsing (which
+/// evaluates substitutions) only happens for a run that is actually consumed as
+/// document metadata. Returns the folded metadata together with any warnings
+/// raised while parsing the attribute list.
 fn parse_document_metadata_attrlist<'src>(
     line: Span<'src>,
     parser: &Parser,
-) -> Option<(DocumentMetadata, Vec<Warning<'src>>)> {
-    if !is_document_metadata_attrlist(line) {
-        return None;
-    }
-
-    // Drop the enclosing square brackets now that the caller has confirmed they
-    // are present.
+) -> (DocumentMetadata, Vec<Warning<'src>>) {
+    // Drop the enclosing square brackets; the caller has confirmed they are
+    // present (and that the line is a well-formed block attribute list).
     let inner = line.slice(1..line.len() - 1);
 
     let MatchAndWarnings {
@@ -550,7 +542,7 @@ fn parse_document_metadata_attrlist<'src>(
         options: attrlist.options().iter().map(|o| o.to_string()).collect(),
     };
 
-    Some((metadata, warnings))
+    (metadata, warnings)
 }
 
 /// Partition a document title into its main title and optional subtitle.
