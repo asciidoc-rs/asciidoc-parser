@@ -421,16 +421,27 @@ fn collect_document_metadata_lines<'src>(
     after_first: Span<'src>,
     parser: &Parser,
 ) -> Option<(Span<'src>, Vec<DocumentMetadata>, Vec<Warning<'src>>)> {
-    // First scan forward over the run of consecutive `[…]` lines *without*
-    // parsing their attribute lists. Parsing evaluates substitutions (a value
-    // may contain a `{counter:…}` reference, for instance), so it must not
-    // happen until a document title is known to close the run; a run that is
-    // not terminated by a title is block metadata for the body and is left
-    // untouched for the block parser.
-    let mut candidate_lines: Vec<Span<'src>> = vec![first_line];
+    // First scan forward over the run of consecutive `[…]` lines, validating
+    // each with only the cheap structural checks (via
+    // `is_document_metadata_attrlist`) and *without* parsing its attribute list.
+    // Parsing an attribute list evaluates substitutions — a value may contain a
+    // `{counter:…}` reference, which mutates parser state — so it must be
+    // deferred until the entire run is known to be well-formed *and* closed by a
+    // document title. A run that is rejected here (a bad bracket form such as
+    // `[[anchor]]`, or no trailing title) is left completely untouched for the
+    // block parser, so no counter or other substitution fires prematurely.
+    let mut candidate_lines: Vec<Span<'src>> = vec![];
+    let mut line = first_line;
     let mut rest = after_first;
 
     loop {
+        if !is_document_metadata_attrlist(line) {
+            // A bracket form that is not a well-formed block attribute list
+            // (e.g. `[[anchor]]` or a leading-space form) rejects the whole run.
+            return None;
+        }
+        candidate_lines.push(line);
+
         let next_mi = rest.take_normalized_line();
         let next_line = next_mi.item;
 
@@ -440,8 +451,9 @@ fn collect_document_metadata_lines<'src>(
         }
 
         if next_line.starts_with('[') && next_line.ends_with(']') {
-            // Another block attribute line stacks above the title; fold it too.
-            candidate_lines.push(next_line);
+            // Another block attribute line stacks above the title; validate and
+            // fold it on the next iteration.
+            line = next_line;
             rest = next_mi.after;
             continue;
         }
@@ -451,10 +463,10 @@ fn collect_document_metadata_lines<'src>(
         return None;
     }
 
-    // A document title closes the run: now parse each collected line into
-    // metadata. If any line is not a well-formed block attribute list (e.g. a
-    // `[[anchor]]` or a leading-space form), the whole run is rejected and the
-    // caller falls through, terminating the header as before.
+    // The run is well-formed and closed by a document title: only now parse each
+    // collected line into metadata. Every line was pre-validated above, so
+    // parsing does not reject (the `?` is defensive) and no substitution fires
+    // for a run that is ultimately rejected.
     let mut metadata_list: Vec<DocumentMetadata> = vec![];
     let mut warnings: Vec<Warning<'src>> = vec![];
 
@@ -469,38 +481,54 @@ fn collect_document_metadata_lines<'src>(
     Some((rest, metadata_list, warnings))
 }
 
+/// Returns `true` when `line` — which the caller has confirmed begins with `[`
+/// and ends with `]` — is a well-formed block attribute list that may carry
+/// document metadata above the title, and `false` for the forms rejected there.
+///
+/// The rejected forms mirror the checks used when parsing block metadata
+/// elsewhere: an empty list, a leading space or tab, or a `[[anchor]]` block
+/// anchor. The legacy double-bracket anchor above the document title is left
+/// unsupported (it terminates the header, as before); the single-bracket
+/// `[#id]` shorthand is the supported way to set a document ID.
+///
+/// This performs only cheap structural checks and does not parse the attribute
+/// list, so it never triggers substitutions (e.g. a `{counter:…}` reference in
+/// an attribute value). That lets a caller reject a run of lines before parsing
+/// any of them.
+fn is_document_metadata_attrlist(line: Span<'_>) -> bool {
+    // Drop the enclosing square brackets now that the caller has confirmed they
+    // are present.
+    let inner = line.slice(1..line.len() - 1);
+
+    !(inner.is_empty()
+        || inner.starts_with(' ')
+        || inner.starts_with('\t')
+        || (inner.starts_with('[') && inner.ends_with(']')))
+}
+
 /// Parse a block attribute line (e.g. `[reftext="…"]`, `[#id]`, `[role=…]`,
 /// `[separator=::]`) appearing above the document title into
 /// [`DocumentMetadata`].
 ///
 /// The `line` is expected to begin with `[` and end with `]`. Returns the
 /// folded metadata together with any warnings raised while parsing the
-/// attribute list when the line is a well-formed block attribute list, and
-/// `None` otherwise (so the caller can fall through to its normal handling of
-/// the line, which then terminates the header). The warnings are only surfaced
-/// when the line is actually consumed as document metadata; otherwise the line
-/// is left for the block parser, which reports them on its own path.
+/// attribute list when the line is a well-formed block attribute list (see
+/// [`is_document_metadata_attrlist`]), and `None` otherwise (so the caller can
+/// fall through to its normal handling of the line, which then terminates the
+/// header). The warnings are only surfaced when the line is actually consumed
+/// as document metadata; otherwise the line is left for the block parser, which
+/// reports them on its own path.
 fn parse_document_metadata_attrlist<'src>(
     line: Span<'src>,
     parser: &Parser,
 ) -> Option<(DocumentMetadata, Vec<Warning<'src>>)> {
+    if !is_document_metadata_attrlist(line) {
+        return None;
+    }
+
     // Drop the enclosing square brackets now that the caller has confirmed they
     // are present.
     let inner = line.slice(1..line.len() - 1);
-
-    // Reject forms that are not block attribute lists, mirroring the checks used
-    // when parsing block metadata elsewhere: a leading space or tab, an empty
-    // list, or a `[[anchor]]` block anchor. The legacy double-bracket anchor
-    // above the document title is left unsupported (it terminates the header, as
-    // before); the single-bracket `[#id]` shorthand is the supported way to set
-    // a document ID.
-    if inner.is_empty()
-        || inner.starts_with(' ')
-        || inner.starts_with('\t')
-        || (inner.starts_with('[') && inner.ends_with(']'))
-    {
-        return None;
-    }
 
     let MatchAndWarnings {
         item: MatchedItem {
@@ -1360,6 +1388,23 @@ mod tests {
 
         assert_eq!(header.title(), None);
         assert_eq!(header.id(), None);
+    }
+
+    #[test]
+    fn rejected_metadata_run_does_not_fire_counter() {
+        // A run whose attribute list carries a `{counter:…}` reference but is
+        // ultimately rejected (here by an embedded `[[anchor]]`) must not parse
+        // any of its lines during header parsing: the run is validated
+        // structurally and left for the block parser, so the counter is not
+        // advanced twice. The `reftext` line fires the counter exactly once when
+        // the block parser reaches it (yielding 1), so the following
+        // `{counter:item}` reference renders 2 — not 3, which is what a leaked
+        // header-time evaluation would produce.
+        let doc = Parser::default()
+            .parse("[reftext=\"See {counter:item}\"]\n[[anchor]]\n= Title\n\n{counter:item}");
+
+        assert_eq!(doc.header().title(), None);
+        assert_eq!(rendered_paragraphs(&doc), vec!["= Title", "2"]);
     }
 
     #[test]
