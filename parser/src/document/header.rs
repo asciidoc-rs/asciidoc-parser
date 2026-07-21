@@ -426,9 +426,9 @@ fn document_title_follows_block_metadata(after: Span<'_>) -> bool {
 /// ([`parse_document_metadata_attrlist`]): the line must be bracket-delimited
 /// and its contents must not be empty, must not begin with whitespace, and must
 /// not be a `[[anchor]]` block anchor. The legacy double-bracket anchor above
-/// the document title is left unsupported (it terminates the header, as before);
-/// the single-bracket `[#id]` shorthand is the supported way to set a document
-/// ID.
+/// the document title is left unsupported (it terminates the header, as
+/// before); the single-bracket `[#id]` shorthand is the supported way to set a
+/// document ID.
 fn is_document_metadata_line(line: Span<'_>) -> bool {
     if !(line.starts_with('[') && line.ends_with(']')) {
         return false;
