@@ -727,6 +727,19 @@ impl Replacer for AttributeReplacer<'_> {
     }
 }
 
+/// Whether a line that dropped a missing reference under
+/// [`AttributeMissing::Drop`] should be treated as emptied (and therefore
+/// removed, per Asciidoctor's `reject_if_empty`).
+///
+/// A trailing `\r` left from a CRLF terminator is part of the line ending, not
+/// content: a line the drop reduced to just `\r` still counts as empty. The
+/// block pipeline strips `\r` before content is assembled, but free-standing
+/// text (a docinfo file) is split on `\n` with the `\r` intact, so this guard
+/// is what makes a CRLF reference-only line drop there.
+fn drop_emptied_line(replaced: &str) -> bool {
+    replaced.strip_suffix('\r').unwrap_or(replaced).is_empty()
+}
+
 fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
     if !content.rendered.contains('{') {
         return;
@@ -778,7 +791,7 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
 
         if replacer.missing_on_line
             && (mode == AttributeMissing::DropLine
-                || (mode == AttributeMissing::Drop && replaced.is_empty()))
+                || (mode == AttributeMissing::Drop && drop_emptied_line(&replaced)))
         {
             // Drop the entire line, including its line break: unconditionally
             // in `drop-line` mode, or in `drop` mode when the dropped
@@ -890,7 +903,7 @@ pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> Stri
 
         if replacer.missing_on_line
             && (mode == AttributeMissing::DropLine
-                || (mode == AttributeMissing::Drop && replaced.is_empty()))
+                || (mode == AttributeMissing::Drop && drop_emptied_line(&replaced)))
         {
             // Drop the entire line, including its line break: unconditionally
             // in `drop-line` mode, or in `drop` mode when the dropped
@@ -1822,6 +1835,27 @@ mod tests {
                     assert_eq!(
                         substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
                         "Line 1\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_removes_a_crlf_reference_only_line() {
+                    // The `\r` left by a CRLF terminator does not keep the line
+                    // from counting as emptied by the dropped reference, so the
+                    // whole `\r\n` line is removed.
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\r\n{missing}\r\nLine 2", &p),
+                        "Line 1\r\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_keeps_a_crlf_line_the_reference_did_not_empty() {
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\r\ntext {missing}\r\nLine 2", &p),
+                        "Line 1\r\ntext \r\nLine 2"
                     );
                 }
             }
