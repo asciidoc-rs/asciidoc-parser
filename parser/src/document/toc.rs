@@ -120,9 +120,10 @@ pub(crate) const DEFAULT_TOC_TITLE: &str = "Table of Contents";
 /// `toc-class` attribute is not set. Matches Asciidoctor's default.
 pub(crate) const DEFAULT_TOC_CLASS: &str = "toc";
 
-/// The CSS class applied to the table of contents container for a `left`/`right`
-/// side-column TOC when the `toc-class` attribute is not set. This is the class
-/// that drives the fixed side-column styling in Asciidoctor's standalone HTML.
+/// The CSS class applied to the table of contents container for a
+/// `left`/`right` side-column TOC when the `toc-class` attribute is not set.
+/// This is the class that drives the fixed side-column styling in Asciidoctor's
+/// standalone HTML.
 pub(crate) const DEFAULT_TOC_CLASS_SIDE: &str = "toc2";
 
 /// The resolved table-of-contents configuration for a document (or a nested
