@@ -611,9 +611,11 @@ fn is_section_header(line: &str, level_offset: i32) -> bool {
         return false;
     };
 
-    // A section marker is one to six characters followed by a space.
+    // A section marker is one to six characters followed by a blank (space or
+    // tab), matching the whitespace `parse_title_line` requires after the
+    // marker (`take_required_whitespace`).
     let count = line.len() - rest.len();
-    if count == 0 || count > 6 || !rest.starts_with(' ') {
+    if count == 0 || count > 6 || !rest.starts_with([' ', '\t']) {
         return false;
     }
 
@@ -934,10 +936,20 @@ mod tests {
         }
 
         #[test]
-        fn requires_a_space_after_the_marker() {
+        fn requires_a_blank_after_the_marker() {
             assert!(!is_section_header("==nospace", 0));
             assert!(!is_section_header("=nospace", 1));
             assert!(!is_section_header("##nospace", 0));
+        }
+
+        #[test]
+        fn accepts_a_tab_after_the_marker() {
+            // `parse_title_line` accepts a tab (not just a space) after the
+            // marker, so the lookahead must too, or a valid tab-delimited
+            // heading would be swallowed as paragraph text.
+            assert!(is_section_header("==\tSection", 0));
+            assert!(is_section_header("=\tSection", 1));
+            assert!(!is_section_header("=\tSection", 0));
         }
 
         #[test]
