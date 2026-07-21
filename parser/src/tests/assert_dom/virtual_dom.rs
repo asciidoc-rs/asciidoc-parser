@@ -2960,13 +2960,15 @@ mod tests {
         fn left_and_right_render_like_auto_at_top() {
             // `left`/`right` request a side column in standalone HTML, but this
             // embeddable virtual DOM (Asciidoctor's documented fallback) renders
-            // them like `auto`: a `div#toc` at the top of the body.
+            // them like `auto`: a `div#toc` at the top of the body. The container
+            // still carries the side-column `toc2` class (see #749).
             for (value, mode) in [("left", TocMode::Left), ("right", TocMode::Right)] {
                 let doc =
                     Parser::default().parse(&format!("= Title\n:toc: {value}\n\n== Section\n\nhi"));
 
                 assert_eq!(doc.toc_mode(), mode, "value: {value}");
-                assert_css(&doc, "#toc.toc", 1);
+                assert_eq!(doc.toc_class(), "toc2", "value: {value}");
+                assert_css(&doc, "#toc.toc2", 1);
 
                 let vdom = doc.to_virtual_dom();
                 assert_eq!(vdom.children[0].id.as_deref(), Some("toc"));

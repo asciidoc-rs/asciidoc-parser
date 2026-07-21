@@ -1538,35 +1538,42 @@ mod assignment {
         // matrix row is exercised here through `toc_mode()` / `toc_class()`,
         // asserting this crate's actual behavior.
         //
-        // Two rows still diverge from Asciidoctor's matrix (and are asserted
-        // as this crate's actual behavior): the `toc2` alias is not recognized
-        // (it resolves to `Disabled`, not a left-placed TOC — #748) and
-        // `toc-class` is never switched to `toc2` (#749). The
-        // `toc toc-placement=macro` and `toc toc-placement!` rows now match
-        // Asciidoctor (`macro`): this crate honors an explicit `toc-placement`,
-        // and a soft-unset `toc-placement!` with `toc` set defers the TOC to a
-        // `toc::[]` block macro.
+        // One row still diverges from Asciidoctor's matrix (and is asserted as
+        // this crate's actual behavior): the `toc2` alias is not recognized (it
+        // resolves to `Disabled`, not a left-placed TOC — #748), so its
+        // `toc-class` also stays the default `toc` rather than `toc2`. The
+        // `toc=left` and `toc=right` rows now match Asciidoctor's `toc2`
+        // `toc-class` (#749): a left/right side-column placement switches the
+        // default class to `toc2`. The `toc toc-placement=macro` and
+        // `toc toc-placement!` rows match Asciidoctor (`macro`): this crate
+        // honors an explicit `toc-placement`, and a soft-unset `toc-placement!`
+        // with `toc` set defers the TOC to a `toc::[]` block macro.
         use crate::document::TocMode;
         // Each row is the raw attribute spec (as it appears in the vendored
         // matrix, parsed the same way Ruby does — space-separated entries,
         // `name=value`, or `name!` for an unset) paired with the `TocMode` this
-        // crate resolves for it.
-        let rows: &[(&str, TocMode)] = &[
-            ("toc", TocMode::Auto),
-            ("toc=header", TocMode::Auto),
-            ("toc=beeboo", TocMode::Auto),
-            ("toc=left", TocMode::Left),
-            // `toc2` alias unrecognized (#748); Asciidoctor: left-placed TOC.
-            ("toc2", TocMode::Disabled),
-            ("toc=right", TocMode::Right),
-            ("toc=preamble", TocMode::Preamble),
-            ("toc=macro", TocMode::Macro),
-            ("toc toc-placement=macro toc-position=left", TocMode::Macro),
+        // crate resolves for it and the expected `toc_class()`.
+        let rows: &[(&str, TocMode, &str)] = &[
+            ("toc", TocMode::Auto, "toc"),
+            ("toc=header", TocMode::Auto, "toc"),
+            ("toc=beeboo", TocMode::Auto, "toc"),
+            ("toc=left", TocMode::Left, "toc2"),
+            // `toc2` alias unrecognized (#748); Asciidoctor: left-placed TOC
+            // with `toc-class` `toc2`.
+            ("toc2", TocMode::Disabled, "toc"),
+            ("toc=right", TocMode::Right, "toc2"),
+            ("toc=preamble", TocMode::Preamble, "toc"),
+            ("toc=macro", TocMode::Macro, "toc"),
+            (
+                "toc toc-placement=macro toc-position=left",
+                TocMode::Macro,
+                "toc",
+            ),
             // Soft-unset `toc-placement!` with `toc` set defers to a `toc::[]`
             // macro, matching Asciidoctor (#750).
-            ("toc toc-placement!", TocMode::Macro),
+            ("toc toc-placement!", TocMode::Macro, "toc"),
         ];
-        for (spec, expected_mode) in rows {
+        for (spec, expected_mode, expected_class) in rows {
             let mut parser = Parser::default();
             for entry in spec.split(' ') {
                 parser = if let Some(name) = entry.strip_suffix('!') {
@@ -1579,9 +1586,9 @@ mod assignment {
             }
             let doc = parser.parse("");
             assert_eq!(doc.toc_mode(), *expected_mode, "toc_mode for {spec:?}");
-            // `toc-class` is never switched to `toc2`; it stays the default
-            // (#749); Asciidoctor sets `toc2` for left/right placement.
-            assert_eq!(doc.toc_class(), "toc", "toc_class for {spec:?}");
+            // A left/right side-column placement switches `toc-class` to `toc2`
+            // (#749); every other placement keeps the default `toc`.
+            assert_eq!(doc.toc_class(), *expected_class, "toc_class for {spec:?}");
         }
     }
 }

@@ -381,7 +381,10 @@ impl<'src> Document<'src> {
     }
 
     /// Return the CSS class applied to this document's table of contents
-    /// container, resolved from the [`toc-class` attribute] (default `toc`).
+    /// container, resolved from the [`toc-class` attribute]. An explicit,
+    /// non-empty `toc-class` is used verbatim; otherwise the default is `toc2`
+    /// for a `left`/`right` side-column placement (matching Asciidoctor) and
+    /// `toc` for every other placement.
     ///
     /// [`toc-class` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/
     pub fn toc_class(&self) -> &str {
