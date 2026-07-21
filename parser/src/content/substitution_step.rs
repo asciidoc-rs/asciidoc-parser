@@ -1781,6 +1781,51 @@ mod tests {
                 assert_eq!(render("{missing}", &p), "");
             }
 
+            /// Exercises the free-standing text path (used for docinfo file
+            /// content), which applies the same `attribute-missing` handling as
+            /// [`render`] but through [`substitute_attributes_in_text`] rather
+            /// than the block substitution pipeline.
+            mod free_standing_text {
+                use super::parser_with_mode;
+                use crate::content::substitute_attributes_in_text;
+
+                #[test]
+                fn drop_removes_line_that_only_contained_the_reference() {
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\n{missing}\nLine 2", &p),
+                        "Line 1\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_keeps_a_line_the_reference_did_not_empty() {
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\ntext {missing}\nLine 2", &p),
+                        "Line 1\ntext \nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_keeps_a_line_emptied_by_a_resolvable_reference() {
+                    let p = parser_with_mode("drop");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\n{empty}\nLine 2", &p),
+                        "Line 1\n\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_line_removes_the_whole_line() {
+                    let p = parser_with_mode("drop-line");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
+                        "Line 1\nLine 2"
+                    );
+                }
+            }
+
             #[test]
             fn warn_leaves_the_reference_and_records_a_warning() {
                 let p = parser_with_mode("warn");
