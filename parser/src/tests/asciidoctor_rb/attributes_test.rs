@@ -42,8 +42,8 @@
 //! `non_normative!` blocks (no `#[test]`), each tagged with a one-line reason:
 //! the mutable node/document attribute API (`Block.new` / `set_attr` /
 //! `remove_attr` / `set_attribute` / `role=` / `add_role` / `remove_role`), the
-//! DocBook backend, `max-attribute-value-size`, the `user-home` intrinsic, and
-//! the `Asciidoctor::INTRINSIC_ATTRIBUTES` constant enumeration.
+//! DocBook backend, the `user-home` intrinsic, and the
+//! `Asciidoctor::INTRINSIC_ATTRIBUTES` constant enumeration.
 //!
 //! A number of tests surface behavior differences from Asciidoctor. These keep
 //! their `#[test]` but move the Ruby source into a `non_normative!` block and
@@ -613,11 +613,10 @@ mod assignment {
         assert_xpath(&doc, "//em[text()=\"big\"]", 1);
     }
 
-    // Tracked in #736.
-    // Out of scope: this crate does not implement the `max-attribute-value-size`
-    // limit.
-    non_normative!(
-        r#"
+    #[test]
+    fn should_limit_maximum_size_of_attribute_value_if_safe_mode_is_secure() {
+        verifies!(
+            r#"
     test 'should limit maximum size of attribute value if safe mode is SECURE' do
       expected = 'a' * 4096
       input = <<~EOS
@@ -632,13 +631,23 @@ mod assignment {
     end
 
 "#
-    );
+        );
 
-    // Tracked in #736.
-    // Out of scope: this crate does not implement the `max-attribute-value-size`
-    // limit.
-    non_normative!(
-        r#"
+        // `Parser::default()` runs under `SafeMode::Secure`, where
+        // `max-attribute-value-size` defaults to 4096. The 5000-byte value is
+        // truncated to 4096 bytes.
+        let input = format!(":name: {}\n\n{{name}}", "a".repeat(5000));
+        let doc = Parser::default().parse(&input);
+
+        let value = doc.attribute_value("name");
+        assert_eq!(value.as_maybe_str(), Some("a".repeat(4096).as_str()));
+        assert_eq!(value.as_maybe_str().map(str::len), Some(4096));
+    }
+
+    #[test]
+    fn should_handle_multibyte_characters_when_limiting_attribute_value_size() {
+        verifies!(
+            r#"
     test 'should handle multibyte characters when limiting attribute value size' do
       expected = '日本'
       input = <<~'EOS'
@@ -653,13 +662,27 @@ mod assignment {
     end
 
 "#
-    );
+        );
 
-    // Tracked in #736.
-    // Out of scope: this crate does not implement the `max-attribute-value-size`
-    // limit.
-    non_normative!(
-        r#"
+        // Each of these characters is 3 bytes, so the limit of 6 lands exactly
+        // on a character boundary, keeping the first two characters.
+        let doc = Parser::default()
+            .with_intrinsic_attribute(
+                "max-attribute-value-size",
+                "6",
+                ModificationContext::ApiOnly,
+            )
+            .parse(":name: 日本語\n\n{name}");
+
+        let value = doc.attribute_value("name");
+        assert_eq!(value.as_maybe_str(), Some("日本"));
+        assert_eq!(value.as_maybe_str().map(str::len), Some(6));
+    }
+
+    #[test]
+    fn should_not_mangle_multibyte_characters_when_limiting_attribute_value_size() {
+        verifies!(
+            r#"
     test 'should not mangle multibyte characters when limiting attribute value size' do
       expected = '日本'
       input = <<~'EOS'
@@ -674,13 +697,28 @@ mod assignment {
     end
 
 "#
-    );
+        );
 
-    // Tracked in #736.
-    // Out of scope: this crate does not implement the `max-attribute-value-size`
-    // limit.
-    non_normative!(
-        r#"
+        // The limit of 8 falls in the middle of the third (3-byte) character, so
+        // that character is dropped whole rather than split: the truncated value
+        // is 6 bytes, not 8.
+        let doc = Parser::default()
+            .with_intrinsic_attribute(
+                "max-attribute-value-size",
+                "8",
+                ModificationContext::ApiOnly,
+            )
+            .parse(":name: 日本語\n\n{name}");
+
+        let value = doc.attribute_value("name");
+        assert_eq!(value.as_maybe_str(), Some("日本"));
+        assert_eq!(value.as_maybe_str().map(str::len), Some(6));
+    }
+
+    #[test]
+    fn should_allow_maximize_size_of_attribute_value_to_be_disabled() {
+        verifies!(
+            r#"
     test 'should allow maximize size of attribute value to be disabled' do
       expected = 'a' * 5000
       input = <<~EOS
@@ -695,7 +733,25 @@ mod assignment {
     end
 
 "#
-    );
+        );
+
+        // Asciidoctor disables the limit with a `nil` value; this crate models a
+        // disabled limit as a non-positive value (Ruby's `String#to_i` coerces
+        // `nil`/empty to `0`), so `0` turns it off and the full 5000-byte value
+        // is preserved.
+        let input = format!(":name: {}\n\n{{name}}", "a".repeat(5000));
+        let doc = Parser::default()
+            .with_intrinsic_attribute(
+                "max-attribute-value-size",
+                "0",
+                ModificationContext::ApiOnly,
+            )
+            .parse(&input);
+
+        let value = doc.attribute_value("name");
+        assert_eq!(value.as_maybe_str(), Some("a".repeat(5000).as_str()));
+        assert_eq!(value.as_maybe_str().map(str::len), Some(5000));
+    }
 
     // Tracked in #737.
     // Out of scope: this crate does not define the built-in `user-home` intrinsic
