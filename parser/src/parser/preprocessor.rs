@@ -366,6 +366,11 @@ impl<'p> PreprocessorState<'p> {
             // into a comment. When that block is an open block (`--`), its
             // content is raw up to the closing `--`; otherwise it is a comment
             // paragraph, whose lines after the first are raw (see above).
+            //
+            // Further block metadata (a title `.text`, an anchor or attribute
+            // list `[…]`) may sit between the `[comment]` line and the block it
+            // styles, so the comment-style marker is carried across those
+            // metadata lines until the block itself is reached.
             if was_comment_style {
                 if line.data() == "--" {
                     comment_block_delimiter = Some("--".to_owned());
@@ -378,7 +383,19 @@ impl<'p> PreprocessorState<'p> {
                     continue;
                 }
 
-                if !line.data().is_empty() {
+                if is_block_metadata_line(line.data()) {
+                    // Still within the block's metadata; keep the marker set so
+                    // the block the metadata introduces is classified below.
+                    after_comment_style = true;
+                } else if !line.data().is_empty() {
+                    // The first line of a comment paragraph is processed as
+                    // usual (falling through below); only its subsequent lines
+                    // are raw. NOTE: if that first line is itself an `include::`
+                    // directive, the merged content is preprocessed with fresh
+                    // comment state, so a directive on its own subsequent lines
+                    // is still evaluated. That case (an include on the very
+                    // first line of a comment paragraph) is an accepted
+                    // limitation of preprocessing in a separate pass.
                     in_comment_paragraph = true;
                 }
             }
@@ -1503,6 +1520,24 @@ fn to_owned(maybe_file_name: Option<&str>) -> Option<String> {
 /// [`RawDelimitedBlock::is_valid_delimiter`](crate::blocks::RawDelimitedBlock).
 fn is_comment_block_delimiter(line: &str) -> bool {
     line.len() >= 4 && line.bytes().all(|b| b == b'/')
+}
+
+/// Returns `true` if `line` is block metadata that may appear between a
+/// `[comment]` attribute line and the block it styles: an attribute-list or
+/// anchor line (`[…]`), or a block title (`.text`). Used only to carry
+/// comment-block state across the metadata preceding a comment paragraph or
+/// open block, so that the paragraph's true first line is the one processed.
+fn is_block_metadata_line(line: &str) -> bool {
+    if line.starts_with('[') {
+        return true;
+    }
+
+    // A block title is a leading `.` followed by a non-space, non-`.`
+    // character, so it is neither a `....` delimiter nor a `. ` list marker.
+    matches!(
+        line.strip_prefix('.'),
+        Some(rest) if rest.starts_with(|c: char| !c.is_whitespace() && c != '.')
+    )
 }
 
 /// Parse the attribute list of an `include::` directive from the directive's
@@ -3257,6 +3292,32 @@ mod tests {
         assert_eq!(
             conditional_output("[comment]\nfirst line\nifdef::foo[dropped]\n\ntail"),
             "[comment]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_style_carried_across_block_metadata() {
+        // Block metadata (a title, then an anchor) may sit between the
+        // `[comment]` line and the paragraph it styles. The comment style must
+        // carry across that metadata so the paragraph's true first line is the
+        // one processed and its later lines stay raw. Here the directive on the
+        // paragraph's second line must be left untouched.
+        assert_eq!(
+            conditional_output(
+                "[comment]\n.title\n[[id]]\nfirst line\nifdef::foo[dropped]\n\ntail"
+            ),
+            "[comment]\n.title\n[[id]]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_style_carried_across_metadata_before_open_block() {
+        // The same carry-across applies before a `[comment]` open block: a title
+        // between `[comment]` and `--` must not stop the block from being
+        // recognized as a comment.
+        assert_eq!(
+            conditional_output("[comment]\n.title\n--\nifdef::foo[dropped]\n--\n\ntail"),
+            "[comment]\n.title\n--\nifdef::foo[dropped]\n--\n\ntail\n"
         );
     }
 

@@ -2415,10 +2415,7 @@ mod tests {
         // (see issue #810).
         let mut parser = Parser::default();
 
-        assert_eq!(
-            parser.attribute_value("asciidoctor"),
-            InterpretedValue::Set
-        );
+        assert_eq!(parser.attribute_value("asciidoctor"), InterpretedValue::Set);
 
         let doc = parser.parse(concat!(
             "= Title\n",
@@ -2457,10 +2454,7 @@ mod tests {
             WarningType::AttributeValueIsLocked("asciidoctor".to_owned())
         );
 
-        assert_eq!(
-            parser.attribute_value("asciidoctor"),
-            InterpretedValue::Set
-        );
+        assert_eq!(parser.attribute_value("asciidoctor"), InterpretedValue::Set);
     }
 
     #[test]
