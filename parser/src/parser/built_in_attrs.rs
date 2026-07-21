@@ -36,8 +36,8 @@ static BUILT_IN_ATTRS: LazyLock<HashMap<String, AttributeValue>> =
 /// The shared value handed out for every synthesized *backend-family flag* —
 /// `backend-{backend}`, `basebackend-{basebackend}`, `filetype-{filetype}`,
 /// `doctype-{doctype}`, `backend-{backend}-doctype-{doctype}`, and
-/// `basebackend-{basebackend}-doctype-{doctype}`. Each is defined (with an empty
-/// value) only while its `{...}` component matches the document's active
+/// `basebackend-{basebackend}-doctype-{doctype}`. Each is defined (with an
+/// empty value) only while its `{...}` component matches the document's active
 /// backend / basebackend / filetype / doctype, so they are resolved on the fly
 /// rather than materialized, and every active flag can hand out this one shared
 /// value by reference. See [`synthesized_attr`].
@@ -155,8 +155,9 @@ pub(crate) fn derived_backend_value(
 /// * The backend-family flags `backend-{backend}`, `basebackend-{basebackend}`,
 ///   `filetype-{filetype}`, `doctype-{doctype}`,
 ///   `backend-{backend}-doctype-{doctype}`, and
-///   `basebackend-{basebackend}-doctype-{doctype}` are each defined (empty) only
-///   while their `{...}` component matches the active `backend` / `doctype`.
+///   `basebackend-{basebackend}-doctype-{doctype}` are each defined (empty)
+///   only while their `{...}` component matches the active `backend` /
+///   `doctype`.
 /// * `safe-mode-{name}` is defined (empty) only for the active safe mode (as
 ///   reported by `safe-mode-name`).
 ///

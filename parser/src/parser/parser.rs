@@ -2994,6 +2994,11 @@ mod tests {
             assert!(doc.has_attribute("basebackend-docbook"));
             assert!(doc.has_attribute("backend-docbook5-doctype-article"));
 
+            // The derived values report as set through the post-parse
+            // `Document` (snapshot) reader, not just the live parser.
+            assert!(doc.is_attribute_set("basebackend"));
+            assert!(doc.is_attribute_set("filetype"));
+
             // The html5 flags are no longer active.
             assert!(!doc.has_attribute("backend-html5"));
             assert!(!doc.has_attribute("basebackend-html"));
