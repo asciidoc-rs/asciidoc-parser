@@ -4,9 +4,7 @@ use crate::{
     document::InterpretedValue,
     parser::{
         AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime,
-        built_in_attrs::{
-            built_in_attr, derived_backend_value, is_derived_backend_value, synthesized_attr,
-        },
+        built_in_attrs::{built_in_attr, derived_backend_value, synthesized_attr},
         is_datetime_attribute,
     },
 };
@@ -217,7 +215,9 @@ impl ResolvedAttributes {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
-        if is_derived_backend_value(name) {
+        // A derived `basebackend` / `filetype` is present only while `backend`
+        // resolves to a non-empty value (see [`derived_backend_value`]).
+        if derived_backend_value(name, &self.attribute_values).is_some() {
             return true;
         }
         self.effective_attribute(name).is_some() || self.resolve_datetime_attribute(name).is_some()
@@ -241,9 +241,10 @@ impl ResolvedAttributes {
             return self.is_attribute_set("outfilesuffix");
         }
 
-        // A derived `basebackend` / `filetype` always holds a concrete (set)
-        // value.
-        if is_derived_backend_value(name) {
+        // A derived `basebackend` / `filetype` holds a concrete (set) value
+        // whenever it is present, i.e. while `backend` is non-empty (see
+        // [`derived_backend_value`]).
+        if derived_backend_value(name, &self.attribute_values).is_some() {
             return true;
         }
 

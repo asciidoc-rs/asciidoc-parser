@@ -179,11 +179,16 @@ fn stored_value(key: &str, overrides: &HashMap<String, AttributeValue>) -> Optio
 ///
 /// `overrides` is the caller's per-parser attribute map; layered over the
 /// shared built-in defaults it determines the active `backend`.
+///
+/// When `backend` has been explicitly unset (or resolves to an empty value)
+/// the whole family is treated as *absent*: this returns `None` so a reader
+/// reports `basebackend` / `filetype` as unset rather than as an empty derived
+/// value.
 pub(crate) fn derived_backend_value(
     name: &str,
     overrides: &HashMap<String, AttributeValue>,
 ) -> Option<InterpretedValue> {
-    let backend = stored_value("backend", overrides).unwrap_or_default();
+    let backend = stored_value("backend", overrides).filter(|b| !b.is_empty())?;
     match name {
         "basebackend" => Some(InterpretedValue::Value(basebackend_of(&backend).to_owned())),
         "filetype" => Some(InterpretedValue::Value(filetype_of(&backend))),
@@ -214,24 +219,42 @@ pub(crate) fn synthesized_attr(
 ) -> Option<&'static AttributeValue> {
     // The derived backend-family flags are all empty-valued and defined only for
     // the *active* backend / basebackend / filetype / doctype. Rather than parse
-    // the queried name, compute the six flag names that are currently active and
-    // compare — unambiguous even where the components overlap.
+    // the queried name, compute the flag names that are currently active and
+    // compare — unambiguous even where the components overlap. An explicitly
+    // unset (or empty) `backend` / `doctype` contributes no flags, so the
+    // backend-dependent and doctype-dependent groups are each gated on a
+    // present, non-empty value.
     if name.starts_with("backend-")
         || name.starts_with("basebackend-")
         || name.starts_with("filetype-")
         || name.starts_with("doctype-")
     {
-        let backend = stored_value("backend", overrides).unwrap_or_default();
-        let doctype = stored_value("doctype", overrides).unwrap_or_default();
-        let basebackend = basebackend_of(&backend);
-        let filetype = filetype_of(&backend);
+        let backend = stored_value("backend", overrides).filter(|b| !b.is_empty());
+        let doctype = stored_value("doctype", overrides).filter(|d| !d.is_empty());
 
-        let is_active = name == format!("backend-{backend}")
-            || name == format!("basebackend-{basebackend}")
-            || name == format!("filetype-{filetype}")
-            || name == format!("doctype-{doctype}")
-            || name == format!("backend-{backend}-doctype-{doctype}")
-            || name == format!("basebackend-{basebackend}-doctype-{doctype}");
+        let mut is_active = false;
+
+        // `doctype-{doctype}` depends on the doctype alone.
+        if let Some(doctype) = &doctype {
+            is_active = name == format!("doctype-{doctype}");
+        }
+
+        // The remaining flags all depend on the backend (and its derived
+        // basebackend / filetype), and the `*-doctype-*` combinations on the
+        // doctype as well.
+        if !is_active && let Some(backend) = &backend {
+            let basebackend = basebackend_of(backend);
+            let filetype = filetype_of(backend);
+
+            is_active = name == format!("backend-{backend}")
+                || name == format!("basebackend-{basebackend}")
+                || name == format!("filetype-{filetype}");
+
+            if !is_active && let Some(doctype) = &doctype {
+                is_active = name == format!("backend-{backend}-doctype-{doctype}")
+                    || name == format!("basebackend-{basebackend}-doctype-{doctype}");
+            }
+        }
 
         if is_active {
             return Some(&*DERIVED_FAMILY_FLAG);

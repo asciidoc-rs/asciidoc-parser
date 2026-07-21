@@ -699,7 +699,9 @@ impl Parser {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
-        if is_derived_backend_value(name) {
+        // A derived `basebackend` / `filetype` is present only while `backend`
+        // resolves to a non-empty value (see [`derived_backend_value`]).
+        if derived_backend_value(name, &self.attribute_values).is_some() {
             return true;
         }
         self.effective_attribute(name).is_some() || self.resolve_datetime_attribute(name).is_some()
@@ -722,9 +724,10 @@ impl Parser {
             return self.is_attribute_set("outfilesuffix");
         }
 
-        // A derived `basebackend` / `filetype` always holds a concrete (set)
-        // value.
-        if is_derived_backend_value(name) {
+        // A derived `basebackend` / `filetype` holds a concrete (set) value
+        // whenever it is present, i.e. while `backend` is non-empty (see
+        // [`derived_backend_value`]).
+        if derived_backend_value(name, &self.attribute_values).is_some() {
             return true;
         }
 
@@ -2229,29 +2232,30 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
     }
 }
 
-/// Returns `true` if `name` belongs to the reserved derived backend-family
-/// namespace — the `basebackend` / `filetype` values and the
-/// `backend-*` / `basebackend-*` / `filetype-*` / `doctype-*` flags — each a
-/// read-only synthesized intrinsic keyed on the active `backend` / `doctype`
-/// (see [`synthesized_attr`] and [`derived_backend_value`]).
+/// Returns `true` if `name` is a derived backend-family attribute whose
+/// assignment must be rejected *even while it is inactive*, because the flag it
+/// would name can become active later in the same parse and the stored override
+/// would then shadow the read-only intrinsic:
 ///
-/// A document header or body assignment to any such name is rejected — not only
-/// the flag that is active when the assignment is parsed. Otherwise a name that
-/// is inactive at assignment time (e.g. `backend-html5-doctype-article` while
-/// the doctype is `book`) would resolve to no synthesized attribute, pass the
-/// permission check, and be stored as a per-parser override that then shadows
-/// the intrinsic once the doctype switches to that value (e.g. in an AsciiDoc
-/// table cell that resets, then changes, its doctype).
+/// * The bare derived values `basebackend` / `filetype` — always resolved on
+///   the fly from `backend` (see [`derived_backend_value`]), never stored.
+/// * The doctype-keyed flags `backend-<b>-doctype-<d>` /
+///   `basebackend-<bb>-doctype-<d>` — the `doctype` component shifts mid-parse
+///   (e.g. an AsciiDoc table cell that resets, then changes, its doctype), so
+///   an assignment to an inactive one (`backend-html5-doctype-article` while
+///   the doctype is `book`) must not be stored where it could shadow the
+///   intrinsic once the doctype switches.
 ///
-/// The settable roots `backend` and `doctype` (bare, with no suffix) are
-/// deliberately *not* reserved: they are the inputs the derived family is
-/// computed from.
+/// The remaining flag names (`backend-<b>`, `basebackend-<bb>`, `filetype-<f>`,
+/// and bare `doctype-<d>`) are deliberately **not** reserved: rejecting them
+/// would swallow author-defined attributes such as `:backend-custom:` or
+/// `:doctype-draft:` (used as `ifdef` flags), which Asciidoctor keeps. The
+/// *active* one of these is still write-protected by the normal permission
+/// check, since [`synthesized_attr`] resolves it to a locked intrinsic.
 fn is_reserved_derived_attr(name: &str) -> bool {
     is_derived_backend_value(name)
-        || name.starts_with("backend-")
-        || name.starts_with("basebackend-")
-        || name.starts_with("filetype-")
-        || name.starts_with("doctype-")
+        || ((name.starts_with("backend-") || name.starts_with("basebackend-"))
+            && name.contains("-doctype-"))
 }
 
 #[cfg(test)]
@@ -3107,6 +3111,61 @@ mod tests {
                 doc.attribute_value("doctype-article"),
                 InterpretedValue::Value(String::new())
             );
+        }
+
+        #[test]
+        fn custom_prefixed_flags_stay_assignable() {
+            // Author-defined attributes that share a derived-family prefix but
+            // name no active flag (and are not the doctype-keyed namespace) are
+            // kept, not swallowed by the read-only reservation, so they stay
+            // visible to `ifdef` / attribute references — matching Asciidoctor.
+            let doc = Parser::default().parse(
+                ":backend-custom: enabled\n:basebackend-custom: on\n:filetype-custom: yes\n:doctype-draft: 1\n\nbody",
+            );
+
+            for (name, value) in [
+                ("backend-custom", "enabled"),
+                ("basebackend-custom", "on"),
+                ("filetype-custom", "yes"),
+                ("doctype-draft", "1"),
+            ] {
+                assert!(doc.has_attribute(name), "missing {name:?}");
+                assert_eq!(
+                    doc.attribute_value(name),
+                    InterpretedValue::Value(value.to_string()),
+                    "unexpected value for {name:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn unset_backend_makes_the_family_absent() {
+            // Explicitly unsetting `backend` leaves nothing to derive from, so
+            // `basebackend` / `filetype` and the backend-keyed flags are absent
+            // rather than resolving to empty traits or degenerate `backend-` /
+            // `filetype-` names.
+            let doc = Parser::default().parse(":backend!:\n\nbody");
+
+            assert_eq!(doc.attribute_value("backend"), InterpretedValue::Unset);
+            for name in ["basebackend", "filetype"] {
+                assert!(!doc.has_attribute(name), "unexpectedly present: {name:?}");
+                assert!(!doc.is_attribute_set(name), "unexpectedly set: {name:?}");
+                assert_eq!(doc.attribute_value(name), InterpretedValue::Unset);
+            }
+
+            // No degenerate empty-suffix flags, and the html5 flags are gone.
+            for name in [
+                "backend-",
+                "basebackend-",
+                "filetype-",
+                "backend-html5",
+                "basebackend-html",
+            ] {
+                assert!(!doc.has_attribute(name), "unexpectedly present: {name:?}");
+            }
+
+            // The doctype-only flag does not depend on `backend`, so it remains.
+            assert!(doc.has_attribute("doctype-article"));
         }
     }
 
