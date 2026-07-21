@@ -14,7 +14,10 @@ use crate::{
         HtmlSubstitutionRenderer, IncludeFileHandler, InlineSubstitutionRenderer,
         ModificationContext, PathResolver, ReferenceTime, ResolvedAttributes, SafeMode, SourceLine,
         SourceMap, SvgFileHandler,
-        built_in_attrs::{built_in_attr, built_in_default_values, synthesized_attr},
+        built_in_attrs::{
+            built_in_attr, built_in_default_values, max_attribute_value_size_default,
+            synthesized_attr,
+        },
         is_datetime_attribute,
         preprocessor::preprocess,
     },
@@ -640,6 +643,17 @@ impl Parser {
     pub(crate) fn effective_attribute(&self, name: &str) -> Option<&AttributeValue> {
         if let Some(av) = self.attribute_values.get(name) {
             return Some(av);
+        }
+        // `max-attribute-value-size` carries its `4096` default only under
+        // Secure, so it is resolved as a mode-aware synthesized attribute rather
+        // than a fixed built-in. It is consulted here *after* the per-parser map
+        // so a caller-supplied value (always API-only, hence always in that map)
+        // wins regardless of builder-call order, and a `with_safe_mode` change
+        // never rewrites it.
+        if name == "max-attribute-value-size" {
+            return Some(max_attribute_value_size_default(
+                self.safe == SafeMode::Secure,
+            ));
         }
         if let Some(av) = built_in_attr(name) {
             return Some(av);
@@ -1715,19 +1729,11 @@ impl Parser {
             intrinsic(InterpretedValue::Value(self.safe.name().to_string())),
         );
 
-        // The `max-attribute-value-size` default (`4096`) applies only under
-        // `SafeMode::Secure`. The built-in table carries that default (so a
-        // pristine, Secure parser sees it); when the caller relaxes the mode we
-        // shadow it with an explicit unset, and when they select Secure we drop
-        // any such shadow so the built-in default shows through again.
-        if self.safe == SafeMode::Secure {
-            attrs.remove("max-attribute-value-size");
-        } else {
-            attrs.insert(
-                "max-attribute-value-size".to_string(),
-                intrinsic(InterpretedValue::Unset),
-            );
-        }
+        // NOTE: `max-attribute-value-size` is deliberately *not* touched here.
+        // Its Secure-only default is resolved as a mode-aware synthesized
+        // attribute in [`effective_attribute`](Self::effective_attribute), so a
+        // caller's explicit limit (which lives in `attribute_values`) is never
+        // clobbered by a safe-mode change, whatever the builder-call order.
     }
 
     /// Returns the [`SafeMode`] under which this parser operates.

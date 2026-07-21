@@ -1927,6 +1927,55 @@ fn max_attribute_value_size_default_is_secure_only() {
     );
 }
 
+/// A caller-supplied `max-attribute-value-size` is API-only, so it must take
+/// effect regardless of builder-call order and must never be discarded or
+/// weakened by a later (or earlier) `with_safe_mode` change. The Secure-only
+/// `4096` default is resolved as a synthesized attribute, so it can only fill
+/// in when the caller has *not* configured a value of their own.
+#[test]
+fn explicit_max_attribute_value_size_survives_safe_mode_change() {
+    let configured = |parser: &Parser| {
+        parser
+            .attribute_value("max-attribute-value-size")
+            .as_maybe_str()
+            .map(str::to_owned)
+    };
+
+    // Explicit value set *before* the safe-mode change (the order the reviewer
+    // flagged) is preserved, whether the mode is relaxed or (redundantly) Secure.
+    let set_then_relax = Parser::default()
+        .with_intrinsic_attribute(
+            "max-attribute-value-size",
+            "100",
+            ModificationContext::ApiOnly,
+        )
+        .with_safe_mode(SafeMode::Unsafe);
+    assert_eq!(configured(&set_then_relax).as_deref(), Some("100"));
+
+    let set_then_secure = Parser::default()
+        .with_intrinsic_attribute(
+            "max-attribute-value-size",
+            "100",
+            ModificationContext::ApiOnly,
+        )
+        .with_safe_mode(SafeMode::Secure);
+    assert_eq!(configured(&set_then_secure).as_deref(), Some("100"));
+
+    // Explicit value set *after* the safe-mode change is likewise honored.
+    let relax_then_set = Parser::default()
+        .with_safe_mode(SafeMode::Unsafe)
+        .with_intrinsic_attribute(
+            "max-attribute-value-size",
+            "100",
+            ModificationContext::ApiOnly,
+        );
+    assert_eq!(configured(&relax_then_set).as_deref(), Some("100"));
+
+    // The synthesized Secure default only fills in when the caller supplies no
+    // value, and never overrides an explicit one.
+    assert_eq!(configured(&Parser::default()).as_deref(), Some("4096"));
+}
+
 non_normative!(
     r#"
 [[note-number]]^[1]^ The `-number` attributes are created and managed automatically by the AsciiDoc processor for numbered blocks.
