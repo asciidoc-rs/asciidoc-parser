@@ -1509,7 +1509,9 @@ mod assignment {
 "#
     );
 
-    // Tracked in #738.
+    // Tracked in #840 (split from #738): the `toc-position` / `toc-placement` /
+    // `toc-class` attributes are not materialized as queryable document
+    // attributes.
     #[test]
     fn verify_toc_attribute_matrix() {
         non_normative!(
