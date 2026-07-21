@@ -1168,9 +1168,9 @@ mod assignment {
             .with_intrinsic_attribute_bool("sectids", false, ModificationContext::Anywhere)
             .parse(":sectids:\n\n== Heading");
         assert!(doc.is_attribute_set("sectids"));
-        // The generated section id lands on the heading `h2` (this crate also
-        // mirrors it onto the section wrapper, so a bare `#_heading` matches
-        // twice — the heading anchor is the meaningful target here).
+        // The generated section id lands on the heading `h2` only, not on the
+        // section wrapper `div`, so a bare `#_heading` matches exactly once.
+        assert_css(&doc, "#_heading", 1);
         assert_css(&doc, "h2#_heading", 1);
     }
 
