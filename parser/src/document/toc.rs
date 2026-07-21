@@ -113,6 +113,48 @@ impl TocMode {
     pub fn is_enabled(self) -> bool {
         self != Self::Disabled
     }
+
+    /// Returns the value of the derived `toc-position` document attribute for
+    /// this placement, or `None` when Asciidoctor leaves it unset (its `nil`
+    /// default). The side-column placements report their side (`left` /
+    /// `right`); the content-flow placements (`preamble` / `macro`) report
+    /// `content`; an automatic top TOC (and a disabled TOC) leave it unset.
+    ///
+    /// See [`Parser::materialize_toc_attributes`](crate::Parser).
+    pub(crate) fn derived_toc_position(self) -> Option<&'static str> {
+        match self {
+            Self::Left => Some("left"),
+            Self::Right => Some("right"),
+            Self::Preamble | Self::Macro => Some("content"),
+            Self::Auto | Self::Disabled => None,
+        }
+    }
+
+    /// Returns the value of the derived `toc-placement` document attribute for
+    /// this placement, or `None` when no TOC is generated. The automatic and
+    /// side-column placements all fold to `auto`; `preamble` / `macro` report
+    /// themselves. This is the placement keyword Asciidoctor exposes once the
+    /// `toc` shorthand has been folded into `toc-placement`.
+    pub(crate) fn derived_toc_placement(self) -> Option<&'static str> {
+        match self {
+            Self::Disabled => None,
+            Self::Preamble => Some("preamble"),
+            Self::Macro => Some("macro"),
+            Self::Auto | Self::Left | Self::Right => Some("auto"),
+        }
+    }
+
+    /// Returns the value the derived `toc-class` document attribute defaults to
+    /// for this placement when the author has not set `toc-class`, or `None`
+    /// when Asciidoctor leaves it unset (its `nil` default). Only a `left` /
+    /// `right` side-column TOC introduces a default (`toc2`, the side-column
+    /// class).
+    pub(crate) fn derived_toc_class(self) -> Option<&'static str> {
+        match self {
+            Self::Left | Self::Right => Some(DEFAULT_TOC_CLASS_SIDE),
+            _ => None,
+        }
+    }
 }
 
 /// The depth of section levels included in a table of contents when the
@@ -234,7 +276,10 @@ fn default_toc_class(mode: TocMode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Parser, document::TocMode};
+    use crate::{
+        Parser,
+        document::{InterpretedValue, TocMode},
+    };
 
     /// Parses a minimal document with the given header attribute lines and
     /// returns the parsed [`Document`](crate::Document) for inspection.
@@ -384,5 +429,109 @@ mod tests {
         // default (`toc`) at the attribute layer, so the placement-derived `toc2`
         // default only applies when `toc-class` is left entirely unset.
         assert_eq!(doc_with(":toc: left\n:toc-class:").toc_class(), "toc");
+    }
+
+    /// The derived `toc-position` / `toc-placement` / `toc-class` attributes are
+    /// materialized so they are queryable via `Document::attribute_value`,
+    /// matching Asciidoctor (see the `verify toc attribute matrix` upstream
+    /// test).
+    #[test]
+    fn derived_attributes_are_materialized() {
+        use InterpretedValue::{Unset, Value};
+
+        // Reads the derived (`toc-position`, `toc-placement`, `toc-class`)
+        // document attributes as a `(position, placement, class)` triple.
+        let derived = |header: &str| {
+            let doc = doc_with(header);
+            (
+                doc.attribute_value("toc-position"),
+                doc.attribute_value("toc-placement"),
+                doc.attribute_value("toc-class"),
+            )
+        };
+
+        // An automatic top TOC: position and class stay unset, placement `auto`.
+        assert_eq!(derived(":toc:"), (Unset, Value("auto".into()), Unset));
+        // An unrecognized `toc` value still resolves to an automatic placement.
+        assert_eq!(
+            derived(":toc: beeboo"),
+            (Unset, Value("auto".into()), Unset)
+        );
+
+        // Side-column placements derive their side, keep placement `auto`, and
+        // default the class to `toc2`.
+        assert_eq!(
+            derived(":toc: left"),
+            (
+                Value("left".into()),
+                Value("auto".into()),
+                Value("toc2".into())
+            )
+        );
+        assert_eq!(
+            derived(":toc: right"),
+            (
+                Value("right".into()),
+                Value("auto".into()),
+                Value("toc2".into())
+            )
+        );
+        // The legacy `toc2` alias behaves like `toc=left`.
+        assert_eq!(
+            derived(":toc2:"),
+            (
+                Value("left".into()),
+                Value("auto".into()),
+                Value("toc2".into())
+            )
+        );
+
+        // Content-flow placements report `content` and leave the class unset.
+        assert_eq!(
+            derived(":toc: preamble"),
+            (Value("content".into()), Value("preamble".into()), Unset)
+        );
+        assert_eq!(
+            derived(":toc: macro"),
+            (Value("content".into()), Value("macro".into()), Unset)
+        );
+    }
+
+    #[test]
+    fn derived_placement_overwrites_author_supplied_values() {
+        use InterpretedValue::Value;
+
+        // A `toc-position` the resolved placement contradicts is overwritten:
+        // the `macro` placement forces `content`.
+        let doc = doc_with(":toc:\n:toc-placement: macro\n:toc-position: left");
+        assert_eq!(doc.attribute_value("toc-position"), Value("content".into()));
+        assert_eq!(doc.attribute_value("toc-placement"), Value("macro".into()));
+
+        // A soft-unset `toc-placement!` with `toc` set defers to a `toc::[]`
+        // macro; the derived `toc-placement` is re-materialized as `macro`,
+        // overwriting the unset tombstone.
+        let doc = doc_with(":toc:\n:toc-placement!:");
+        assert_eq!(doc.attribute_value("toc-position"), Value("content".into()));
+        assert_eq!(doc.attribute_value("toc-placement"), Value("macro".into()));
+    }
+
+    #[test]
+    fn explicit_toc_class_survives_side_column_default() {
+        // The side-column `toc2` default only fills in an *unset* `toc-class`;
+        // an explicit author value is left untouched.
+        assert_eq!(
+            doc_with(":toc: left\n:toc-class: floaty").attribute_value("toc-class"),
+            InterpretedValue::Value("floaty".into())
+        );
+    }
+
+    #[test]
+    fn disabled_toc_materializes_no_derived_attributes() {
+        // With no TOC enabled, the whole family stays unset (Asciidoctor's
+        // defaults), so none of the attributes is even present.
+        let doc = doc_with("");
+        for name in ["toc-position", "toc-placement", "toc-class"] {
+            assert!(!doc.has_attribute(name), "{name} should be absent");
+        }
     }
 }

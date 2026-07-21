@@ -8,7 +8,7 @@ use std::{
 use crate::{
     Document, HasSpan,
     blocks::{SectionNumber, SectionType},
-    document::{Attribute, Catalog, InterpretedValue, RefType},
+    document::{Attribute, Catalog, InterpretedValue, RefType, TocMode},
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DocinfoFileHandler,
         HtmlSubstitutionRenderer, IncludeFileHandler, InlineSubstitutionRenderer,
@@ -988,6 +988,59 @@ impl Parser {
                 value: InterpretedValue::Value(value.to_string()),
             },
         );
+    }
+
+    /// Materializes the derived `toc-position` / `toc-placement` / `toc-class`
+    /// document attributes from a resolved [`TocMode`], so they are queryable
+    /// through [`attribute_value`](Self::attribute_value) exactly as
+    /// Asciidoctor exposes them (see the `verify toc attribute matrix` upstream
+    /// test).
+    ///
+    /// This must run *after* [`TocMode::from_parser`], which reads the author's
+    /// raw stored `toc-placement` and distinguishes a never-set attribute from
+    /// an explicit unset tombstone (the soft-unset handling). Writing the
+    /// derived values earlier would change what that resolver observes;
+    /// deferring the write keeps resolution reading raw values while the
+    /// post-parse snapshot exposes the derived ones.
+    ///
+    /// `toc-placement` and `toc-position` are fully derived and overwrite any
+    /// author-supplied value — a `toc-position` the resolved placement
+    /// contradicts, or a soft-unset `toc-placement!` that the `toc` state
+    /// re-derives to `macro`. `toc-class` only *defaults* (to `toc2` for a
+    /// side-column TOC): an explicit author value is left untouched. Nothing is
+    /// materialized when no TOC is generated ([`TocMode::Disabled`]), matching
+    /// Asciidoctor, which leaves the whole family unset.
+    ///
+    /// [`TocMode`]: crate::document::TocMode
+    /// [`TocMode::from_parser`]: crate::document::TocMode
+    pub(crate) fn materialize_toc_attributes(&mut self, mode: TocMode) {
+        if mode == TocMode::Disabled {
+            return;
+        }
+
+        // A side-column TOC only *defaults* `toc-class` to `toc2`; an explicit
+        // author value wins (Asciidoctor's `attrs['toc-class'] ||= 'toc2'`).
+        // Read this before taking the mutable borrow below.
+        let toc_class_already_set = self.is_attribute_set("toc-class");
+
+        let derived = |value: &str| AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::ApiOnly,
+            silent_when_locked: false,
+            value: InterpretedValue::Value(value.to_string()),
+        };
+
+        let attrs = Arc::make_mut(&mut self.attribute_values);
+
+        if let Some(placement) = mode.derived_toc_placement() {
+            attrs.insert("toc-placement".to_string(), derived(placement));
+        }
+        if let Some(position) = mode.derived_toc_position() {
+            attrs.insert("toc-position".to_string(), derived(position));
+        }
+        if !toc_class_already_set && let Some(class) = mode.derived_toc_class() {
+            attrs.insert("toc-class".to_string(), derived(class));
+        }
     }
 
     /// Sets the value of an [intrinsic attribute].

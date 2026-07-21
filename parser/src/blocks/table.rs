@@ -2025,6 +2025,12 @@ fn parse_asciidoc_cell_body<'src>(
     // restores the parent's attribute snapshot.
     let toc = TocConfig::from_parser(parser);
 
+    // Materialize the cell's derived `toc-position` / `toc-placement` /
+    // `toc-class` attributes from the resolved placement, so the cell's snapshot
+    // exposes them the same way the top-level `Document` does. Safe to mutate
+    // here: the caller restores the parent's attribute snapshot on return.
+    parser.materialize_toc_attributes(toc.mode);
+
     // Snapshot the cell's resolved attribute state while the parser still holds
     // it (the caller restores the parent's snapshot immediately after this
     // returns). The snapshot shares the parser's attribute tables by `Arc`, so

@@ -231,17 +231,26 @@ impl<'src> Document<'src> {
                 });
             }
 
-            // Capture the parser's fully-resolved attribute state so it can be
-            // read back through the `Document` (via `attribute_value`,
-            // `has_attribute`, and `is_attribute_set`) without a `Parser` in
-            // hand — the embed path a renderer uses for `convert_document`.
-            let attributes = parser.snapshot_attributes();
-
             // The `toc` family of attributes is header-only, so the resolved
             // placement, depth, title, and class are fixed once the header (and
             // body) have been processed. Capture them here, while the parser
             // still holds the document's resolved attribute state.
             let toc = TocConfig::from_parser(parser);
+
+            // Materialize the derived `toc-position` / `toc-placement` /
+            // `toc-class` document attributes from the resolved placement, so
+            // they are queryable via `attribute_value` (matching Asciidoctor).
+            // This runs after `TocConfig::from_parser` — which reads the raw
+            // stored `toc-placement` during resolution — and before the snapshot
+            // below, so resolution observes the author's raw value while the
+            // snapshot exposes the derived one.
+            parser.materialize_toc_attributes(toc.mode);
+
+            // Capture the parser's fully-resolved attribute state so it can be
+            // read back through the `Document` (via `attribute_value`,
+            // `has_attribute`, and `is_attribute_set`) without a `Parser` in
+            // hand — the embed path a renderer uses for `convert_document`.
+            let attributes = parser.snapshot_attributes();
 
             // Resolve docinfo from the final attribute state and the parser's
             // configured docinfo file handler (empty when no handler is set).
