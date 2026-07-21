@@ -1884,11 +1884,96 @@ Since attributes can reference attributes, it's possible to create an output doc
     assert_default("max-include-depth", "64");
 
     // `max-attribute-value-size` is only assigned its `4096` default in SECURE
-    // mode. Although `SafeMode::Secure` is the default, the enforcement of (and
-    // SECURE default for) this limit is not yet implemented, so it is unset here.
-    for name in ["allow-uri-read", "max-attribute-value-size"] {
-        assert_not_set_by_default(name);
+    // mode. `SafeMode::Secure` is the default mode, so a pristine parser resolves
+    // it to `4096`; a relaxed safe mode leaves it unset (see
+    // `SafeMode`-relaxed coverage below).
+    assert_default("max-attribute-value-size", "4096");
+
+    assert_not_set_by_default("allow-uri-read");
+}
+
+/// The `max-attribute-value-size` default of `4096` is only assigned under
+/// `SafeMode::Secure`; relaxing the safe mode leaves the attribute unset (and
+/// so removes the attribute-value size limit).
+#[test]
+fn max_attribute_value_size_default_is_secure_only() {
+    // Secure is the default mode.
+    let secure = Parser::default();
+    assert_eq!(
+        secure
+            .attribute_value("max-attribute-value-size")
+            .as_maybe_str(),
+        Some("4096"),
+    );
+
+    for mode in [SafeMode::Unsafe, SafeMode::Safe, SafeMode::Server] {
+        let parser = Parser::default().with_safe_mode(mode);
+        assert!(
+            !parser.is_attribute_set("max-attribute-value-size"),
+            "`max-attribute-value-size` should be unset under {mode:?}"
+        );
     }
+
+    // Selecting Secure explicitly restores the built-in default, even after a
+    // relaxed mode shadowed it.
+    let toggled = Parser::default()
+        .with_safe_mode(SafeMode::Unsafe)
+        .with_safe_mode(SafeMode::Secure);
+    assert_eq!(
+        toggled
+            .attribute_value("max-attribute-value-size")
+            .as_maybe_str(),
+        Some("4096"),
+    );
+}
+
+/// A caller-supplied `max-attribute-value-size` is API-only, so it must take
+/// effect regardless of builder-call order and must never be discarded or
+/// weakened by a later (or earlier) `with_safe_mode` change. The Secure-only
+/// `4096` default is resolved as a synthesized attribute, so it can only fill
+/// in when the caller has *not* configured a value of their own.
+#[test]
+fn explicit_max_attribute_value_size_survives_safe_mode_change() {
+    let configured = |parser: &Parser| {
+        parser
+            .attribute_value("max-attribute-value-size")
+            .as_maybe_str()
+            .map(str::to_owned)
+    };
+
+    // Explicit value set *before* the safe-mode change (the order the reviewer
+    // flagged) is preserved, whether the mode is relaxed or (redundantly) Secure.
+    let set_then_relax = Parser::default()
+        .with_intrinsic_attribute(
+            "max-attribute-value-size",
+            "100",
+            ModificationContext::ApiOnly,
+        )
+        .with_safe_mode(SafeMode::Unsafe);
+    assert_eq!(configured(&set_then_relax).as_deref(), Some("100"));
+
+    let set_then_secure = Parser::default()
+        .with_intrinsic_attribute(
+            "max-attribute-value-size",
+            "100",
+            ModificationContext::ApiOnly,
+        )
+        .with_safe_mode(SafeMode::Secure);
+    assert_eq!(configured(&set_then_secure).as_deref(), Some("100"));
+
+    // Explicit value set *after* the safe-mode change is likewise honored.
+    let relax_then_set = Parser::default()
+        .with_safe_mode(SafeMode::Unsafe)
+        .with_intrinsic_attribute(
+            "max-attribute-value-size",
+            "100",
+            ModificationContext::ApiOnly,
+        );
+    assert_eq!(configured(&relax_then_set).as_deref(), Some("100"));
+
+    // The synthesized Secure default only fills in when the caller supplies no
+    // value, and never overrides an explicit one.
+    assert_eq!(configured(&Parser::default()).as_deref(), Some("4096"));
 }
 
 non_normative!(
