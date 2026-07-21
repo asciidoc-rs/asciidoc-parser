@@ -16,7 +16,7 @@ use crate::{
         SourceMap, SvgFileHandler,
         built_in_attrs::{
             built_in_attr, built_in_default_values, max_attribute_value_size_default,
-            synthesized_attr,
+            synthesized_attr, user_home_default,
         },
         is_datetime_attribute,
         preprocessor::preprocess,
@@ -654,6 +654,14 @@ impl Parser {
             return Some(max_attribute_value_size_default(
                 self.safe == SafeMode::Secure,
             ));
+        }
+        // `user-home` is the user's home directory below `SafeMode::Server` and
+        // the masking `.` at `Server`/`Secure`, so it too is resolved as a
+        // mode-aware synthesized attribute. Consulted here *after* the
+        // per-parser map so a caller-supplied `user-home` (always API-only,
+        // hence always in that map) wins regardless of builder-call order.
+        if name == "user-home" {
+            return Some(user_home_default(self.safe < SafeMode::Server));
         }
         if let Some(av) = built_in_attr(name) {
             return Some(av);

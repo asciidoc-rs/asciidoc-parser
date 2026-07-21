@@ -42,8 +42,8 @@
 //! `non_normative!` blocks (no `#[test]`), each tagged with a one-line reason:
 //! the mutable node/document attribute API (`Block.new` / `set_attr` /
 //! `remove_attr` / `set_attribute` / `role=` / `add_role` / `remove_role`), the
-//! DocBook backend, the `user-home` intrinsic, and the
-//! `Asciidoctor::INTRINSIC_ATTRIBUTES` constant enumeration.
+//! DocBook backend, and the `Asciidoctor::INTRINSIC_ATTRIBUTES` constant
+//! enumeration.
 //!
 //! A number of tests surface behavior differences from Asciidoctor. These keep
 //! their `#[test]` but move the Ruby source into a `non_normative!` block and
@@ -753,11 +753,10 @@ mod assignment {
         assert_eq!(value.as_maybe_str().map(str::len), Some(5000));
     }
 
-    // Tracked in #737.
-    // Out of scope: this crate does not define the built-in `user-home` intrinsic
-    // attribute.
-    non_normative!(
-        r#"
+    #[test]
+    fn resolves_user_home_attribute_if_safe_mode_is_less_than_server() {
+        verifies!(
+            r#"
     test 'resolves user-home attribute if safe mode is less than SERVER' do
       input = <<~'EOS'
       :imagesdir: {user-home}/etc/images
@@ -769,13 +768,25 @@ mod assignment {
     end
 
 "#
-    );
+        );
 
-    // Tracked in #737.
-    // Out of scope: this crate does not define the built-in `user-home` intrinsic
-    // attribute.
-    non_normative!(
-        r#"
+        // Below `SafeMode::Server`, the built-in `user-home` intrinsic resolves
+        // to the user's home directory, the counterpart of Ruby Asciidoctor's
+        // `USER_HOME` (resolved from the same environment).
+        let home = std::env::home_dir()
+            .expect("home directory should resolve in the test environment")
+            .to_string_lossy()
+            .into_owned();
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Safe)
+            .parse(":imagesdir: {user-home}/etc/images\n\n{imagesdir}");
+        assert_eq!(rendered_paragraphs(&doc), vec![format!("{home}/etc/images")]);
+    }
+
+    #[test]
+    fn user_home_attribute_resolves_to_if_safe_mode_is_server_or_greater() {
+        verifies!(
+            r#"
     test 'user-home attribute resolves to . if safe mode is SERVER or greater' do
       input = <<~'EOS'
       :imagesdir: {user-home}/etc/images
@@ -787,7 +798,16 @@ mod assignment {
     end
 
 "#
-    );
+        );
+
+        // At `SafeMode::Server` (and above, including the default `Secure`), the
+        // real home path is masked and `user-home` resolves to `.`, so the
+        // reference expands to a relative path.
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .parse(":imagesdir: {user-home}/etc/images\n\n{imagesdir}");
+        assert_eq!(rendered_paragraphs(&doc), vec!["./etc/images".to_string()]);
+    }
 
     #[test]
     fn user_home_attribute_can_be_overridden_by_api_if_safe_mode_is_less_than_server() {
