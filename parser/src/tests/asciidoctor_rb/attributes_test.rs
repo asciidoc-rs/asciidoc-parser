@@ -1537,14 +1537,13 @@ mod assignment {
         // matrix row is exercised here through `toc_mode()` / `toc_class()`,
         // asserting this crate's actual behavior.
         //
-        // One row still diverges from Asciidoctor's matrix (and is asserted as
-        // this crate's actual behavior): the `toc2` alias is not recognized (it
-        // resolves to `Disabled`, not a left-placed TOC — #748), so its
-        // `toc-class` also stays the default `toc` rather than `toc2`. The
-        // `toc=left` and `toc=right` rows now match Asciidoctor's `toc2`
-        // `toc-class` (#749): a left/right side-column placement switches the
-        // default class to `toc2`. The `toc toc-placement=macro` and
-        // `toc toc-placement!` rows match Asciidoctor (`macro`): this crate
+        // With the `toc2` alias recognized (#748) and the `toc-class` default
+        // switched to `toc2` for side-column placements (#749), every row now
+        // matches Asciidoctor's matrix in the columns this crate models. The
+        // `toc=left`, `toc=right`, and `toc2` rows resolve `toc-class` to `toc2`
+        // (a left/right side-column placement switches the default class); the
+        // `toc2` alias resolves to a left-placed TOC. The `toc toc-placement=macro`
+        // and `toc toc-placement!` rows match Asciidoctor (`macro`): this crate
         // honors an explicit `toc-placement`, and a soft-unset `toc-placement!`
         // with `toc` set defers the TOC to a `toc::[]` block macro.
         use crate::document::TocMode;
@@ -1557,9 +1556,10 @@ mod assignment {
             ("toc=header", TocMode::Auto, "toc"),
             ("toc=beeboo", TocMode::Auto, "toc"),
             ("toc=left", TocMode::Left, "toc2"),
-            // `toc2` alias unrecognized (#748); Asciidoctor: left-placed TOC
-            // with `toc-class` `toc2`.
-            ("toc2", TocMode::Disabled, "toc"),
+            // `toc2` is a legacy alias for a left-placed TOC (#748), whose
+            // side-column placement switches `toc-class` to `toc2` (#749),
+            // matching Asciidoctor.
+            ("toc2", TocMode::Left, "toc2"),
             ("toc=right", TocMode::Right, "toc2"),
             ("toc=preamble", TocMode::Preamble, "toc"),
             ("toc=macro", TocMode::Macro, "toc"),
