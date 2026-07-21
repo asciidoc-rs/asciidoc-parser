@@ -55,14 +55,22 @@ impl Author {
             // name.
             let expanded_source = apply_author_subs(source, parser);
 
-            let name_with_spaces = replace_underscores_with_spaces(expanded_source);
-            Some(Self {
-                name: name_with_spaces.clone(),
-                firstname: name_with_spaces,
-                middlename: None,
-                lastname: None,
-                email: None,
-            })
+            if names_only {
+                // An attribute-entry value is partitioned *after* its references
+                // are expanded, so a reference that resolves to a multi-part name
+                // (or one with a trailing email) yields the same metadata as the
+                // equivalent literal value.
+                Some(partition_names_only(&expanded_source))
+            } else {
+                let name_with_spaces = replace_underscores_with_spaces(expanded_source);
+                Some(Self {
+                    name: name_with_spaces.clone(),
+                    firstname: name_with_spaces,
+                    middlename: None,
+                    lastname: None,
+                    email: None,
+                })
+            }
         } else if let Some(captures) = AUTHOR.captures(source) {
             // Raw input matches author pattern: Extract components then apply
             // substitutions.
@@ -129,6 +137,13 @@ impl Author {
                     lastname,
                     email,
                 })
+            } else if names_only {
+                // An attribute-entry value that still fails the pattern after
+                // expansion is partitioned by the names-only rules, so a
+                // reference resolving to a four-plus-part name behaves like its
+                // literal equivalent. The expanded value is used before any HTML
+                // encoding so a trailing `<email>` can still be split off.
+                Some(partition_names_only(&expanded_source))
             } else {
                 // Even after expansion, doesn't match: Treat as single name with HTML encoding.
                 let mut expanded_name = expanded_source;
@@ -279,17 +294,34 @@ fn join_name_parts(firstname: &str, middlename: Option<&str>, lastname: Option<&
     name
 }
 
-/// Partition an attribute-entry author value (e.g. the value of `:author:`)
-/// that does not match the [`AUTHOR`] pattern.
+/// Partition an author value that does not match the [`AUTHOR`] pattern using
+/// Asciidoctor's `names_only` rules (the path taken for an attribute-entry
+/// value such as `:author:`).
 ///
-/// Mirroring Asciidoctor's `names_only` path in `process_authors`, the value is
-/// split on whitespace into at most three segments (Ruby's `String#split(nil,
-/// 3)`, which also drops leading whitespace). The trailing segment retains its
-/// interior text — so a four-plus-part name keeps its later parts in
-/// `lastname` — but has repeating spaces condensed to a single space. Each
-/// segment then has underscore joiners replaced with spaces.
+/// A trailing `<email>` (or URL) is first split off so it is not absorbed into
+/// the name — mirroring the email group of the author pattern and Asciidoctor's
+/// XML sanitization of a names-only value. The remaining name is then split on
+/// whitespace into at most three segments (Ruby's `String#split(nil, 3)`, which
+/// also drops leading whitespace). The trailing segment retains its interior
+/// text — so a four-plus-part name keeps its later parts in `lastname` — but
+/// has repeating spaces condensed to a single space. Each segment then has
+/// underscore joiners replaced with spaces.
+///
+/// `source` may already have attribute references substituted (the expanded
+/// value of a reference such as `{full-name}`); in that case any email it
+/// carries is likewise already substituted.
 fn partition_names_only(source: &str) -> Author {
-    let mut segments = split_whitespace_max3(source);
+    let source = source.trim();
+
+    let (name_source, email) = match NAMES_ONLY_EMAIL.captures(source) {
+        Some(captures) => (
+            captures.get(1).map_or(source, |m| m.as_str()),
+            Some(captures[2].to_string()),
+        ),
+        None => (source, None),
+    };
+
+    let mut segments = split_whitespace_max3(name_source);
 
     let firstname = replace_underscores_with_spaces(segments.remove(0));
     let (middlename, lastname) = match segments.len() {
@@ -311,7 +343,7 @@ fn partition_names_only(source: &str) -> Author {
         firstname,
         middlename,
         lastname,
-        email: None,
+        email,
     }
 }
 
@@ -319,15 +351,22 @@ fn partition_names_only(source: &str) -> Author {
 /// Ruby's `String#split(nil, 3)`. Leading whitespace is dropped and the first
 /// two whitespace runs delimit the first two segments; the remainder becomes
 /// the third segment, with its repeating spaces condensed to a single space
-/// (Ruby's `String#squeeze ' '`). The returned vector always has at least one
-/// element because the caller has already rejected empty input.
+/// (Ruby's `String#squeeze ' '`).
+///
+/// Only ASCII whitespace is treated as a delimiter, matching Ruby's split
+/// (which does not break on non-breaking or other Unicode spaces), so a name
+/// joined by such a space stays a single segment. The returned vector always
+/// has at least one element because the caller has already rejected empty
+/// input.
 fn split_whitespace_max3(source: &str) -> Vec<String> {
+    let is_ascii_ws = |c: char| c.is_ascii_whitespace();
+
     let mut segments: Vec<String> = Vec::with_capacity(3);
     let mut rest = source;
 
     for _ in 0..2 {
-        rest = rest.trim_start();
-        match rest.find(char::is_whitespace) {
+        rest = rest.trim_start_matches(is_ascii_ws);
+        match rest.find(is_ascii_ws) {
             Some(index) => {
                 segments.push(rest[..index].to_string());
                 rest = &rest[index..];
@@ -336,7 +375,7 @@ fn split_whitespace_max3(source: &str) -> Vec<String> {
         }
     }
 
-    rest = rest.trim_start();
+    rest = rest.trim_start_matches(is_ascii_ws);
     if !rest.is_empty() {
         segments.push(condense_whitespace(rest));
     }
@@ -388,6 +427,16 @@ static AUTHOR: LazyLock<Regex> = LazyLock::new(|| {
         "#,
     )
     .unwrap()
+});
+
+/// Splits a names-only author value into its name portion (group 1) and a
+/// trailing `<email>` (group 2). The name must contain at least one
+/// non-whitespace character and is followed by whitespace before the bracketed
+/// email, matching the email group of [`AUTHOR`] for a value that otherwise
+/// fails the full pattern (e.g. a name with four or more parts).
+static NAMES_ONLY_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"^(.*\S)\s+<([^>]+)>$").unwrap()
 });
 
 /// Returns whether `source` matches the author pattern — at most three

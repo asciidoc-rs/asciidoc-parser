@@ -1036,6 +1036,106 @@ mod tests {
     }
 
     #[test]
+    fn author_attribute_four_or_more_parts_with_inline_email() {
+        // A four-plus-part fallback value that carries a trailing `<email>` must
+        // split the email off before partitioning, so it lands in `email` rather
+        // than being absorbed into `lastname`.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Leroy  Harold  Scherer,  Jr. <leroy@example.com>");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("email"),
+            InterpretedValue::Value("leroy@example.com")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials"),
+            InterpretedValue::Value("LHS")
+        );
+    }
+
+    #[test]
+    fn author_attribute_reference_expands_and_partitions() {
+        // A `:author:` value given entirely as an attribute reference is expanded
+        // and then partitioned by the names-only rules, so it yields the same
+        // metadata as the equivalent literal four-plus-part name.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":full-name: Leroy Harold Scherer, Jr.\n:author: {full-name}");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials"),
+            InterpretedValue::Value("LHS")
+        );
+    }
+
+    #[test]
+    fn author_attribute_reference_within_larger_value_expands_and_partitions() {
+        // The same partitioning applies when the reference is only part of the
+        // value (so the single-attribute fast path is not taken) and the expanded
+        // result still fails the author pattern.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":rest: Harold Scherer, Jr.\n:author: Leroy {rest}");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+    }
+
+    #[test]
+    fn author_attribute_non_breaking_space_is_not_a_name_separator() {
+        // Only ASCII whitespace separates name parts. A non-breaking space
+        // (U+00A0) joining two words keeps them as a single first name, matching
+        // Ruby's whitespace split.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: John\u{a0}Doe Scherer, Jr.");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("John\u{a0}Doe")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Scherer,")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Jr.")
+        );
+    }
+
+    #[test]
     fn sets_author_attributes_from_author_attribute_two_names() {
         let mut parser = Parser::default();
         let _doc = parser.parse(":author: Jane Doe");
