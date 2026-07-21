@@ -1,3 +1,5 @@
+use crate::document::InterpretedValue;
+
 /// Describes the safe mode under which a document is parsed and rendered.
 ///
 /// Safe modes provide a security model that controls how much a document is
@@ -69,5 +71,61 @@ impl SafeMode {
     /// attribute. Higher numbers indicate a more restrictive (safer) mode.
     pub(crate) fn level(self) -> u8 {
         self as u8
+    }
+}
+
+/// Applies Ruby Asciidoctor's `SafeMode::Server`-and-greater masking of the
+/// `docdir` / `docfile` intrinsic attributes for a *read*.
+///
+/// Returns `Some(masked)` only when `name` is `docdir` or `docfile` and that
+/// attribute is currently set to a plain value (as reported by `raw_set_value`,
+/// which yields the *unmasked* stored value or `None` when the attribute is
+/// unset):
+///
+/// * `docdir` is masked to an empty value, so the host directory never leaks
+///   into rendered output.
+/// * `docfile` is relativized by stripping its `docdir` prefix and the
+///   following separator (`docfile[(docdir.length + 1)..]`), matching
+///   Asciidoctor. When no `docdir` is available to strip against, it falls back
+///   to the file's base name.
+///
+/// Returns `None` for any other name, and for an *unset* `docdir` / `docfile`
+/// (so a reference to one still resolves as missing rather than empty). Because
+/// the computation reads the *raw* stored values, the API-provided attributes
+/// are left untouched — a non-`Server` parser still reads them back verbatim.
+///
+/// Both [`Parser`](crate::Parser) and its
+/// [`ResolvedAttributes`](crate::parser::ResolvedAttributes) snapshot funnel
+/// their `docdir` / `docfile` reads through this one function (after confirming
+/// `safe >= SafeMode::Server`), so the two report identical values.
+pub(crate) fn masked_doc_path(
+    name: &str,
+    raw_set_value: impl Fn(&str) -> Option<String>,
+) -> Option<InterpretedValue> {
+    match name {
+        // `docdir` is blanked whenever it is set, regardless of its value.
+        "docdir" => raw_set_value("docdir").map(|_| InterpretedValue::Value(String::new())),
+
+        "docfile" => {
+            let docfile = raw_set_value("docfile")?;
+            let relative = match raw_set_value("docdir") {
+                // Strip the `docdir` prefix plus its trailing separator, matching
+                // Asciidoctor's `docfile[(docdir.length + 1)..-1]`. `get` keeps
+                // this panic-safe for any out-of-range or non-boundary index (a
+                // `docfile` not actually under `docdir`), yielding an empty
+                // relative path in that case.
+                Some(docdir) => docfile.get(docdir.len() + 1..).unwrap_or("").to_owned(),
+                // No `docdir` to relativize against: fall back to the base name
+                // (the trailing path segment).
+                None => docfile
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or(&docfile)
+                    .to_owned(),
+            };
+            Some(InterpretedValue::Value(relative))
+        }
+
+        _ => None,
     }
 }

@@ -3,9 +3,10 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     document::InterpretedValue,
     parser::{
-        AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime,
+        AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime, SafeMode,
         built_in_attrs::{built_in_attr, synthesized_attr},
         is_datetime_attribute,
+        safe_mode::masked_doc_path,
     },
 };
 
@@ -47,6 +48,13 @@ pub(crate) struct ResolvedAttributes {
     /// costs only a pointer here — this snapshot is embedded in a
     /// size-sensitive cell enum.
     datetime_inputs: Option<Box<DatetimeInputs>>,
+
+    /// The safe mode the parser ran under, so a snapshot read applies the same
+    /// `SafeMode::Server`-and-greater masking of `docdir` / `docfile` the
+    /// parser does (see [`masked_doc_path`]). Without it,
+    /// `Document::attribute_value` would leak the unmasked host path that
+    /// the parser hides.
+    safe: SafeMode,
 }
 
 impl ResolvedAttributes {
@@ -56,12 +64,14 @@ impl ResolvedAttributes {
         counter_values: HashMap<String, String>,
         reference_time: Option<ReferenceTime>,
         input_mtime: Option<ReferenceTime>,
+        safe: SafeMode,
     ) -> Self {
         Self {
             attribute_values,
             default_attribute_values,
             counter_values,
             datetime_inputs: DatetimeInputs::new(reference_time, input_mtime),
+            safe,
         }
     }
 
@@ -83,6 +93,15 @@ impl ResolvedAttributes {
         // [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
         if self.tracks_outfilesuffix(name) {
             return self.attribute_value("outfilesuffix");
+        }
+
+        // Under `SafeMode::Server` or greater, `docdir` reads as empty and
+        // `docfile` is relativized, exactly as the parser reports it (see
+        // [`masked_doc_path`]).
+        if self.safe >= SafeMode::Server
+            && let Some(masked) = masked_doc_path(name, |n| self.raw_set_value(n))
+        {
+            return masked;
         }
 
         match self.effective_attribute(name) {
@@ -170,6 +189,17 @@ impl ResolvedAttributes {
             })
     }
 
+    /// Returns the raw stored string value of `name` if it currently resolves
+    /// to a plain [`Value`](InterpretedValue::Value), *before* any safe-mode
+    /// masking is applied. Mirrors `Parser::raw_set_value`, so the `docfile`
+    /// relativization is computed from the *original* API-provided `docdir`.
+    fn raw_set_value(&self, name: &str) -> Option<String> {
+        match self.effective_attribute(name)?.value {
+            InterpretedValue::Value(ref v) => Some(v.clone()),
+            _ => None,
+        }
+    }
+
     /// Returns the effective attribute definition for `name`, falling back to
     /// the shared built-in defaults (and the synthesized derived doctype
     /// attribute) exactly as [`Parser::effective_attribute`] does.
@@ -242,7 +272,9 @@ mod tests {
 
     use crate::{
         document::InterpretedValue,
-        parser::{AllowableValue, AttributeValue, ModificationContext, ResolvedAttributes},
+        parser::{
+            AllowableValue, AttributeValue, ModificationContext, ResolvedAttributes, SafeMode,
+        },
     };
 
     fn attr(value: InterpretedValue) -> AttributeValue {
@@ -285,6 +317,7 @@ mod tests {
             counter_values,
             None,
             None,
+            SafeMode::Secure,
         )
     }
 
@@ -337,6 +370,66 @@ mod tests {
         assert!(attrs.has_attribute("unset"));
         assert!(attrs.has_attribute("count"));
         assert!(!attrs.has_attribute("absent"));
+    }
+
+    #[test]
+    fn masks_docdir_and_docfile_under_server_safe_mode() {
+        // A snapshot taken from a `SafeMode::Server` parser masks `docdir`
+        // (blanked) and `docfile` (relativized) exactly as the parser does, so
+        // `Document::attribute_value` never leaks the host path.
+        let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+        attribute_values.insert(
+            "docdir".to_string(),
+            attr(InterpretedValue::Value("/some/dir".to_string())),
+        );
+        attribute_values.insert(
+            "docfile".to_string(),
+            attr(InterpretedValue::Value("/some/dir/sample.adoc".to_string())),
+        );
+
+        let attrs = ResolvedAttributes::new(
+            Arc::new(attribute_values),
+            Arc::new(HashMap::new()),
+            HashMap::new(),
+            None,
+            None,
+            SafeMode::Server,
+        );
+
+        assert_eq!(
+            attrs.attribute_value("docdir"),
+            InterpretedValue::Value(String::new())
+        );
+        assert_eq!(
+            attrs.attribute_value("docfile"),
+            InterpretedValue::Value("sample.adoc".to_string())
+        );
+        // Masking changes only the value; the attributes stay present and set.
+        assert!(attrs.has_attribute("docdir"));
+        assert!(attrs.is_attribute_set("docfile"));
+    }
+
+    #[test]
+    fn does_not_mask_docdir_and_docfile_below_server_safe_mode() {
+        let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+        attribute_values.insert(
+            "docdir".to_string(),
+            attr(InterpretedValue::Value("/some/dir".to_string())),
+        );
+
+        let attrs = ResolvedAttributes::new(
+            Arc::new(attribute_values),
+            Arc::new(HashMap::new()),
+            HashMap::new(),
+            None,
+            None,
+            SafeMode::Safe,
+        );
+
+        assert_eq!(
+            attrs.attribute_value("docdir"),
+            InterpretedValue::Value("/some/dir".to_string())
+        );
     }
 
     #[test]

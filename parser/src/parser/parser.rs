@@ -20,6 +20,7 @@ use crate::{
         },
         is_datetime_attribute,
         preprocessor::preprocess,
+        safe_mode::masked_doc_path,
     },
     warnings::{Warning, WarningType},
 };
@@ -609,6 +610,20 @@ impl Parser {
             return self.attribute_value("outfilesuffix");
         }
 
+        // Under `SafeMode::Server` or greater, `docdir` reads as empty and
+        // `docfile` is relativized (its `docdir` prefix stripped), matching
+        // Ruby Asciidoctor's document-init masking. Resolved here at read time
+        // (like `relfilesuffix` above and `max-attribute-value-size`) so the
+        // API-provided values are never rewritten and builder-call order does
+        // not matter (see [`masked_doc_path`]).
+        //
+        // [`masked_doc_path`]: crate::parser::safe_mode::masked_doc_path
+        if self.safe >= SafeMode::Server
+            && let Some(masked) = masked_doc_path(name, |n| self.raw_set_value(n))
+        {
+            return masked;
+        }
+
         match self.effective_attribute(name) {
             Some(av) => {
                 if let InterpretedValue::Set = av.value
@@ -624,6 +639,22 @@ impl Parser {
             None => self
                 .resolve_datetime_attribute(name)
                 .unwrap_or(InterpretedValue::Unset),
+        }
+    }
+
+    /// Returns the raw stored string value of `name` if it currently resolves
+    /// to a plain [`Value`](InterpretedValue::Value), *before* any
+    /// safe-mode masking is applied. Returns `None` when the attribute is unset
+    /// or resolves to a non-value form.
+    ///
+    /// This feeds
+    /// [`masked_doc_path`](crate::parser::safe_mode::masked_doc_path),
+    /// which must compute the `docfile` relativization from the *original*
+    /// API-provided `docdir` rather than its masked (blanked) form.
+    fn raw_set_value(&self, name: &str) -> Option<String> {
+        match self.effective_attribute(name)?.value {
+            InterpretedValue::Value(ref v) => Some(v.clone()),
+            _ => None,
         }
     }
 
@@ -883,6 +914,7 @@ impl Parser {
             self.counter_values.borrow().clone(),
             self.reference_time.clone(),
             self.input_mtime.clone(),
+            self.safe,
         )
     }
 
@@ -2340,6 +2372,97 @@ mod tests {
         assert!(p.is_attribute_set("foo"));
         assert!(!p.is_attribute_set("foo2"));
         assert!(!p.is_attribute_set("xyz"));
+    }
+
+    // Under `SafeMode::Server` or greater, `docdir` reads as empty and
+    // `docfile` is relativized against `docdir`; see #735 and the ported
+    // upstream tests in `tests/asciidoctor_rb/attributes_test.rs`. These cover
+    // crate-specific edge cases not exercised by the single upstream test.
+    #[test]
+    fn masks_docdir_and_docfile_under_secure_mode() {
+        // Secure (the default) is stricter than Server, so masking also applies.
+        let p = Parser::default()
+            .with_intrinsic_attribute("docdir", "/some/dir", ModificationContext::ApiOnly)
+            .with_intrinsic_attribute(
+                "docfile",
+                "/some/dir/sample.adoc",
+                ModificationContext::ApiOnly,
+            );
+        assert_eq!(p.safe_mode(), SafeMode::Secure);
+        assert_eq!(p.attribute_value("docdir"), InterpretedValue::Value(""));
+        assert_eq!(
+            p.attribute_value("docfile"),
+            InterpretedValue::Value("sample.adoc")
+        );
+        // The masked `docdir` is still a *set* (present) attribute.
+        assert!(p.is_attribute_set("docdir"));
+        assert!(p.has_attribute("docfile"));
+    }
+
+    #[test]
+    fn relativizes_docfile_in_a_subdirectory_of_docdir() {
+        // A `docfile` nested below `docdir` keeps its sub-path relative to
+        // `docdir` (not merely its base name), matching Asciidoctor's
+        // `docfile[(docdir.length + 1)..-1]` slice.
+        let p = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute("docdir", "/some/dir", ModificationContext::ApiOnly)
+            .with_intrinsic_attribute(
+                "docfile",
+                "/some/dir/sub/sample.adoc",
+                ModificationContext::ApiOnly,
+            );
+        assert_eq!(
+            p.attribute_value("docfile"),
+            InterpretedValue::Value("sub/sample.adoc")
+        );
+    }
+
+    #[test]
+    fn docfile_without_docdir_falls_back_to_basename_under_server_mode() {
+        let p = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute(
+                "docfile",
+                "/some/dir/sample.adoc",
+                ModificationContext::ApiOnly,
+            );
+        assert_eq!(
+            p.attribute_value("docfile"),
+            InterpretedValue::Value("sample.adoc")
+        );
+    }
+
+    #[test]
+    fn does_not_mask_docdir_and_docfile_below_server_mode() {
+        // Below Server, the API-provided values pass through verbatim.
+        let p = Parser::default()
+            .with_safe_mode(SafeMode::Safe)
+            .with_intrinsic_attribute("docdir", "/some/dir", ModificationContext::ApiOnly)
+            .with_intrinsic_attribute(
+                "docfile",
+                "/some/dir/sample.adoc",
+                ModificationContext::ApiOnly,
+            );
+        assert_eq!(
+            p.attribute_value("docdir"),
+            InterpretedValue::Value("/some/dir")
+        );
+        assert_eq!(
+            p.attribute_value("docfile"),
+            InterpretedValue::Value("/some/dir/sample.adoc")
+        );
+    }
+
+    #[test]
+    fn unset_docdir_and_docfile_stay_missing_under_server_mode() {
+        // Masking never conjures a value for an attribute that was never set, so
+        // a reference to an unset `docdir` / `docfile` still resolves as missing.
+        let p = Parser::default().with_safe_mode(SafeMode::Server);
+        assert_eq!(p.attribute_value("docdir"), InterpretedValue::Unset);
+        assert_eq!(p.attribute_value("docfile"), InterpretedValue::Unset);
+        assert!(!p.has_attribute("docdir"));
+        assert!(!p.has_attribute("docfile"));
     }
 
     #[test]
