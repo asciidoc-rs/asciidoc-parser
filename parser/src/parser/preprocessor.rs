@@ -1293,7 +1293,7 @@ fn coerce_unquoted(s: &str) -> Value {
 /// Ruby's integers are unbounded; a value beyond the range of `i64` saturates
 /// to `i64::MIN`/`i64::MAX` (by sign) so that a very large magnitude is not
 /// mistaken for 0.
-fn ruby_to_i(s: &str) -> i64 {
+pub(super) fn ruby_to_i(s: &str) -> i64 {
     let mut digits = String::new();
 
     for (idx, ch) in s.trim().char_indices() {

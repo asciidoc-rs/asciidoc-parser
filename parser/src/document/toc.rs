@@ -30,8 +30,9 @@ pub enum TocMode {
     /// document.
     Auto,
 
-    /// The `toc` attribute is set to `left`: an automatically placed TOC that,
-    /// in standalone HTML, is rendered as a fixed left-hand side column.
+    /// The `toc` attribute is set to `left` (or the legacy `toc2` alias is
+    /// set): an automatically placed TOC that, in standalone HTML, is rendered
+    /// as a fixed left-hand side column.
     Left,
 
     /// The `toc` attribute is set to `right`: an automatically placed TOC that,
@@ -55,6 +56,13 @@ impl TocMode {
     pub(crate) fn from_parser(parser: &Parser) -> Self {
         let value = parser.attribute_value("toc");
         if value == InterpretedValue::Unset {
+            // `toc2` is a legacy alias that enables a left-positioned table of
+            // contents (equivalent to `:toc: left`). When the `toc` attribute
+            // itself is unset, a set `toc2` still turns the TOC on. (A soft-unset
+            // `toc2!` records an `Unset` tombstone, which does not enable it.)
+            if parser.attribute_value("toc2") != InterpretedValue::Unset {
+                return Self::Left;
+            }
             return Self::Disabled;
         }
 
@@ -120,6 +128,12 @@ pub(crate) const DEFAULT_TOC_TITLE: &str = "Table of Contents";
 /// `toc-class` attribute is not set. Matches Asciidoctor's default.
 pub(crate) const DEFAULT_TOC_CLASS: &str = "toc";
 
+/// The CSS class applied to the table of contents container for a
+/// `left`/`right` side-column TOC when the `toc-class` attribute is not set.
+/// This is the class that drives the fixed side-column styling in Asciidoctor's
+/// standalone HTML.
+pub(crate) const DEFAULT_TOC_CLASS_SIDE: &str = "toc2";
+
 /// The resolved table-of-contents configuration for a document (or a nested
 /// AsciiDoc table cell, which resolves its own configuration independently).
 ///
@@ -149,11 +163,12 @@ impl TocConfig {
     /// Resolves the full table-of-contents configuration from a parser's
     /// current attribute state.
     pub(crate) fn from_parser(parser: &Parser) -> Self {
+        let mode = TocMode::from_parser(parser);
         Self {
-            mode: TocMode::from_parser(parser),
+            mode,
             levels: resolve_levels(parser),
             title: resolve_title(parser),
-            class: resolve_class(parser),
+            class: resolve_class(parser, mode),
         }
     }
 
@@ -195,11 +210,25 @@ fn resolve_title(parser: &Parser) -> String {
     }
 }
 
-/// Resolves the `toc-class`, falling back to the default when unset or empty.
-fn resolve_class(parser: &Parser) -> String {
+/// Resolves the `toc-class`. An explicit, non-empty `toc-class` wins outright.
+/// Otherwise the default depends on placement: a `left`/`right` side-column TOC
+/// uses `toc2` (the class that drives the side-column styling), matching
+/// Asciidoctor, which switches the default `toc-class` to `toc2` for those
+/// placements; every other placement uses the plain `toc`.
+fn resolve_class(parser: &Parser, mode: TocMode) -> String {
     match parser.attribute_value("toc-class") {
         InterpretedValue::Value(v) if !v.trim().is_empty() => v,
-        _ => DEFAULT_TOC_CLASS.to_string(),
+        _ => default_toc_class(mode).to_string(),
+    }
+}
+
+/// Returns the default `toc-class` for a resolved placement: `toc2` for a
+/// `left`/`right` side-column TOC, and the plain `toc` for every other
+/// placement.
+fn default_toc_class(mode: TocMode) -> &'static str {
+    match mode {
+        TocMode::Left | TocMode::Right => DEFAULT_TOC_CLASS_SIDE,
+        _ => DEFAULT_TOC_CLASS,
     }
 }
 
@@ -243,6 +272,20 @@ mod tests {
     #[test]
     fn unrecognized_mode_is_treated_as_auto() {
         assert_eq!(doc_with(":toc: bogus").toc_mode(), TocMode::Auto);
+    }
+
+    #[test]
+    fn toc2_alias_enables_a_left_placed_toc() {
+        // `toc2` is a legacy alias for `:toc: left`: setting the bare attribute
+        // enables a left-positioned table of contents even though the `toc`
+        // attribute itself is unset.
+        assert_eq!(doc_with(":toc2:").toc_mode(), TocMode::Left);
+        assert!(doc_with(":toc2:").toc_mode().is_enabled());
+        // Its side-column placement also switches the default `toc-class` to
+        // `toc2`, like any other `left`/`right` TOC.
+        assert_eq!(doc_with(":toc2:").toc_class(), "toc2");
+        // A soft-unset `toc2!` does not enable the TOC.
+        assert_eq!(doc_with(":toc2!:").toc_mode(), TocMode::Disabled);
     }
 
     #[test]
@@ -319,5 +362,27 @@ mod tests {
         assert_eq!(doc_with(":toc:\n:toc-class: floaty").toc_class(), "floaty");
         // An empty `:toc-class:` falls back to the default.
         assert_eq!(doc_with(":toc:\n:toc-class:").toc_class(), "toc");
+    }
+
+    #[test]
+    fn class_defaults_to_toc2_for_side_column_placement() {
+        // A `left`/`right` side-column TOC switches the default class to `toc2`,
+        // matching Asciidoctor; every other placement keeps the plain `toc`.
+        assert_eq!(doc_with(":toc: left").toc_class(), "toc2");
+        assert_eq!(doc_with(":toc: right").toc_class(), "toc2");
+        assert_eq!(doc_with(":toc:\n:toc-placement: left").toc_class(), "toc2");
+        assert_eq!(doc_with(":toc:\n:toc-placement: right").toc_class(), "toc2");
+        assert_eq!(doc_with(":toc: preamble").toc_class(), "toc");
+        assert_eq!(doc_with(":toc: macro").toc_class(), "toc");
+
+        // An explicit `toc-class` still wins over the side-column default.
+        assert_eq!(
+            doc_with(":toc: left\n:toc-class: floaty").toc_class(),
+            "floaty"
+        );
+        // An explicit but empty `:toc-class:` resolves to the built-in `toc-class`
+        // default (`toc`) at the attribute layer, so the placement-derived `toc2`
+        // default only applies when `toc-class` is left entirely unset.
+        assert_eq!(doc_with(":toc: left\n:toc-class:").toc_class(), "toc");
     }
 }

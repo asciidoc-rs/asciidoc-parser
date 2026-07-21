@@ -72,6 +72,48 @@ static SAFE_MODE_ACTIVE_FLAG: LazyLock<AttributeValue> = LazyLock::new(|| Attrib
     value: InterpretedValue::Set,
 });
 
+/// The synthesized `max-attribute-value-size` default under `SafeMode::Secure`:
+/// a `4096`-byte cap on resolved attribute values. It is API/CLI-only
+/// (`ApiOnly`), so a document assignment to it is rejected (locked) in every
+/// mode.
+static MAX_ATTRIBUTE_VALUE_SIZE_SECURE_DEFAULT: LazyLock<AttributeValue> =
+    LazyLock::new(|| AttributeValue {
+        allowable_value: AllowableValue::Any,
+        modification_context: ModificationContext::ApiOnly,
+        silent_when_locked: false,
+        value: InterpretedValue::Value("4096".to_owned()),
+    });
+
+/// The synthesized `max-attribute-value-size` default for any *relaxed* safe
+/// mode: an explicit unset (no limit). It stays `ApiOnly` so the attribute
+/// remains locked against document assignment even when it carries no default
+/// value.
+static MAX_ATTRIBUTE_VALUE_SIZE_RELAXED_DEFAULT: LazyLock<AttributeValue> =
+    LazyLock::new(|| AttributeValue {
+        allowable_value: AllowableValue::Any,
+        modification_context: ModificationContext::ApiOnly,
+        silent_when_locked: false,
+        value: InterpretedValue::Unset,
+    });
+
+/// Returns the mode-aware built-in default for `max-attribute-value-size`: the
+/// `4096` cap under `SafeMode::Secure`, or an explicit unset (no limit) for any
+/// relaxed mode.
+///
+/// This is consulted by [`Parser::effective_attribute`] *after* the per-parser
+/// attribute map, so a caller-supplied value (which is API-only and therefore
+/// always lives in that map) always wins — the default never overrides an
+/// explicit limit, and a `with_safe_mode` call never rewrites one.
+///
+/// [`Parser::effective_attribute`]: crate::Parser
+pub(crate) fn max_attribute_value_size_default(is_secure: bool) -> &'static AttributeValue {
+    if is_secure {
+        &MAX_ATTRIBUTE_VALUE_SIZE_SECURE_DEFAULT
+    } else {
+        &MAX_ATTRIBUTE_VALUE_SIZE_RELAXED_DEFAULT
+    }
+}
+
 static BUILT_IN_DEFAULT_VALUES: LazyLock<Arc<HashMap<String, String>>> =
     LazyLock::new(|| Arc::new(build_built_in_default_values()));
 
@@ -321,6 +363,14 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
 
     // ### Security attributes
     attrs.insert("max-include-depth".to_owned(), set(ApiOnly, "64"));
+
+    // NOTE: `max-attribute-value-size` is *not* registered here. Its `4096`
+    // default is only in effect under `SafeMode::Secure`, so it is resolved as a
+    // mode-aware synthesized attribute instead (see
+    // [`max_attribute_value_size_default`] and `Parser::effective_attribute`).
+    // Keeping it out of this mode-agnostic table is what lets a caller-supplied
+    // limit (which, being API-only, always lives in the per-parser map) survive
+    // a later `with_safe_mode` call regardless of builder-call order.
 
     // ### Parser intrinsic attributes
     //

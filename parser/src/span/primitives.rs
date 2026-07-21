@@ -31,20 +31,25 @@ impl<'src> Span<'src> {
 
     /// Split the span, consuming an attribute name if found.
     ///
-    /// An [attribute name] consists of a word character (letter or numeral)
-    /// followed by any number of word or `-` characters (e.g., `see-also`).
+    /// An [attribute name] begins with a word character (a letter, numeral, or
+    /// underscore) and continues with any number of word, `-`, or `.`
+    /// characters (e.g., `see-also`, `_foo`, or `foo.foo`). This mirrors
+    /// Asciidoctor's `AttributeList::NameRx` (`#{CG_WORD}[#{CC_WORD}\-.]*`),
+    /// except that — as elsewhere in this crate — a "word character" is
+    /// restricted to ASCII (`[A-Za-z0-9_]`); accepting the full Unicode word
+    /// class is tracked separately.
     ///
     /// [attribute name]: https://docs.asciidoctor.org/asciidoc/latest/attributes/positional-and-named-attributes/#attribute-list-parsing
     pub(crate) fn take_attr_name(self) -> Option<MatchedItem<'src, Self>> {
         let mut chars = self.data.char_indices();
 
         let (_, c) = chars.next()?;
-        if !c.is_ascii_alphanumeric() {
+        if !is_attr_name_start(c) {
             return None;
         }
 
         for (index, c) in chars {
-            if !c.is_ascii_alphanumeric() && c != '-' {
+            if !is_attr_name_continuation(c) {
                 return Some(self.into_parse_result(index));
             }
         }
@@ -168,6 +173,18 @@ impl<'src> Span<'src> {
             self.slice(0..trim_len)
         }
     }
+}
+
+/// Returns `true` when `c` may begin an attribute-list name token: an ASCII
+/// word character (letter, digit, or underscore). See [`Span::take_attr_name`].
+fn is_attr_name_start(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// Returns `true` when `c` may continue an attribute-list name token: an ASCII
+/// word character, a hyphen, or a dot. See [`Span::take_attr_name`].
+fn is_attr_name_continuation(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'
 }
 
 #[cfg(test)]
@@ -479,6 +496,62 @@ mod tests {
                     line: 1,
                     col: 4,
                     offset: 3
+                }
+            );
+        }
+
+        #[test]
+        fn starts_with_underscore() {
+            // A leading underscore is a word character, so it may begin an
+            // attribute name (Asciidoctor's `NameRx` accepts `_foo`).
+            let span = crate::Span::new("_foo = bar");
+            let mi = span.take_attr_name().unwrap();
+
+            assert_eq!(
+                mi.item,
+                Span {
+                    data: "_foo",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+
+            assert_eq!(
+                mi.after,
+                Span {
+                    data: " = bar",
+                    line: 1,
+                    col: 5,
+                    offset: 4
+                }
+            );
+        }
+
+        #[test]
+        fn contains_dots_and_underscores() {
+            // Dots and (non-leading) underscores are valid continuation
+            // characters, so `foo.foo` and `foo_foo` are single name tokens.
+            let span = crate::Span::new("foo.foo_bar = baz");
+            let mi = span.take_attr_name().unwrap();
+
+            assert_eq!(
+                mi.item,
+                Span {
+                    data: "foo.foo_bar",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+
+            assert_eq!(
+                mi.after,
+                Span {
+                    data: " = baz",
+                    line: 1,
+                    col: 12,
+                    offset: 11
                 }
             );
         }

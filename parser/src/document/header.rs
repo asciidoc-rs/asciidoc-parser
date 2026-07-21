@@ -20,6 +20,7 @@ pub struct Header<'src> {
     main_title: Option<String>,
     subtitle: Option<String>,
     id: Option<String>,
+    roles: Vec<String>,
     attributes: Vec<Attribute<'src>>,
     author_line: Option<AuthorLine<'src>>,
     authors: Vec<Author>,
@@ -38,6 +39,7 @@ impl<'src> Header<'src> {
         let mut title_source: Option<Span<'src>> = None;
         let mut title: Option<String> = None;
         let mut id: Option<String> = None;
+        let mut roles: Vec<String> = vec![];
         let mut attributes: Vec<Attribute> = vec![];
         let mut author_line: Option<AuthorLine<'src>> = None;
         let mut author_attribute: Option<Author> = None;
@@ -138,8 +140,13 @@ impl<'src> Header<'src> {
                 if let Some(reftext) = metadata.reftext {
                     parser.set_attribute_by_value_from_header("reftext", reftext);
                 }
-                if let Some(role) = metadata.role {
-                    parser.set_attribute_by_value_from_header("role", role);
+                if !metadata.roles.is_empty() {
+                    // Fold the role(s) into the `role` document attribute
+                    // (space-joined, as Asciidoctor stores `attributes['role']`)
+                    // and also retain them on the header so `Document::roles()`
+                    // agrees with the document attribute (see #820).
+                    parser.set_attribute_by_value_from_header("role", metadata.roles.join(" "));
+                    roles = metadata.roles;
                 }
                 for option in metadata.options {
                     parser.set_attribute_by_value_from_header(format!("{option}-option"), "");
@@ -208,6 +215,7 @@ impl<'src> Header<'src> {
                     main_title,
                     subtitle,
                     id,
+                    roles,
                     attributes,
                     author_line,
                     authors,
@@ -269,6 +277,18 @@ impl<'src> Header<'src> {
     /// (`[id=id]`) syntax. Returns `None` when no such ID was given.
     pub fn id(&self) -> Option<&str> {
         self.id.as_deref()
+    }
+
+    /// Return the document's role(s), if any were assigned.
+    ///
+    /// Roles are set with a block attribute line directly above the document
+    /// title, using either the shorthand (`[.role]`) or longhand (`[role=…]`)
+    /// syntax; multiple roles combine. The same role(s) are also folded into
+    /// the `role` document attribute (space-joined), so the block accessor and
+    /// the document attribute agree. Returns an empty vector when no role was
+    /// given.
+    pub fn roles(&self) -> Vec<&str> {
+        self.roles.iter().map(String::as_str).collect()
     }
 
     /// Return an iterator over the attributes in this header.
@@ -366,7 +386,7 @@ struct DocumentMetadata {
     id: Option<String>,
     separator: Option<String>,
     reftext: Option<String>,
-    role: Option<String>,
+    roles: Vec<String>,
     options: Vec<String>,
 }
 
@@ -411,8 +431,6 @@ fn parse_document_metadata_attrlist<'src>(
         warnings,
     } = Attrlist::parse(inner, parser, AttrlistContext::Block);
 
-    let roles = attrlist.roles();
-
     let metadata = DocumentMetadata {
         id: attrlist.id().map(str::to_string),
         separator: attrlist
@@ -421,11 +439,7 @@ fn parse_document_metadata_attrlist<'src>(
         reftext: attrlist
             .named_attribute("reftext")
             .map(|attr| attr.value().to_string()),
-        role: if roles.is_empty() {
-            None
-        } else {
-            Some(roles.join(" "))
-        },
+        roles: attrlist.roles().iter().map(|r| r.to_string()).collect(),
         options: attrlist.options().iter().map(|o| o.to_string()).collect(),
     };
 
@@ -534,6 +548,7 @@ impl std::fmt::Debug for Header<'_> {
             .field("main_title", &self.main_title)
             .field("subtitle", &self.subtitle)
             .field("id", &self.id)
+            .field("roles", &self.roles)
             .field("attributes", &DebugSliceReference(&self.attributes))
             .field("author_line", &self.author_line)
             .field("authors", &self.authors)
@@ -1070,6 +1085,7 @@ mod tests {
     ),
     subtitle: None,
     id: None,
+    roles: [],
     attributes: &[],
     author_line: None,
     authors: [],
@@ -1211,7 +1227,9 @@ mod tests {
     #[test]
     fn role_block_attribute_above_title() {
         // A `[role=…]` block attribute above the title folds into the document's
-        // `role` attribute; multiple roles are space-joined.
+        // `role` attribute; multiple roles are space-joined. The same role(s)
+        // are surfaced through the block API, so `Header::roles()` and
+        // `Document::roles()` agree with the document attribute (see #820).
         let doc = Parser::default().parse("[role=special]\n= Document Title\n\nBody.");
         let header = doc.header();
 
@@ -1220,6 +1238,8 @@ mod tests {
             doc.attribute_value("role"),
             InterpretedValue::Value("special")
         );
+        assert_eq!(header.roles(), vec!["special"]);
+        assert_eq!(doc.roles(), vec!["special"]);
 
         // The dot shorthand assigns roles too, and they combine.
         let doc = Parser::default().parse("[.one.two]\n= Document Title");
@@ -1227,6 +1247,18 @@ mod tests {
             doc.attribute_value("role"),
             InterpretedValue::Value("one two")
         );
+        assert_eq!(doc.header().roles(), vec!["one", "two"]);
+        assert_eq!(doc.roles(), vec!["one", "two"]);
+    }
+
+    #[test]
+    fn roles_empty_without_block_attribute() {
+        // With no role assigned above the title, both the block accessor and the
+        // header accessor report no roles.
+        let doc = Parser::default().parse("= Document Title\n\nBody.");
+
+        assert!(doc.header().roles().is_empty());
+        assert!(doc.roles().is_empty());
     }
 
     #[test]
