@@ -1921,7 +1921,10 @@ mod interpolation {
         let doc = Parser::default()
             .with_intrinsic_attribute("attribute-missing", "drop", ModificationContext::ApiOnly)
             .parse("Line 1\n{unresolved}\nLine 2");
-        assert_eq!(rendered_paragraphs(&doc), vec!["Line 1\nLine 2".to_string()]);
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec!["Line 1\nLine 2".to_string()]
+        );
     }
 
     #[test]
