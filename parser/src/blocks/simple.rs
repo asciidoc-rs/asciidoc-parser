@@ -598,8 +598,8 @@ impl<'src> HasSpan<'src> for SimpleBlock<'src> {
 /// [`SectionBlock::parse`](crate::blocks::SectionBlock). A heading of two or
 /// more markers (`== `/`## `, effective level 1+, or clamped up to 1 under a
 /// negative offset) is always a section. A single-marker heading (`= `/`# `) is
-/// a document title rather than a section *unless* a positive offset lifts it to
-/// level 1 or beyond — mirroring the level-0 rule in
+/// a document title rather than a section *unless* a positive offset lifts it
+/// to level 1 or beyond — mirroring the level-0 rule in
 /// [`parse_title_line`](crate::blocks::section).
 fn is_section_header(line: &str, level_offset: i32) -> bool {
     // AsciiDoc `=` style or Markdown `#` style.
