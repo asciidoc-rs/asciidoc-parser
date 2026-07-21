@@ -30,8 +30,9 @@ pub enum TocMode {
     /// document.
     Auto,
 
-    /// The `toc` attribute is set to `left`: an automatically placed TOC that,
-    /// in standalone HTML, is rendered as a fixed left-hand side column.
+    /// The `toc` attribute is set to `left` (or the legacy `toc2` alias is
+    /// set): an automatically placed TOC that, in standalone HTML, is rendered
+    /// as a fixed left-hand side column.
     Left,
 
     /// The `toc` attribute is set to `right`: an automatically placed TOC that,
@@ -55,6 +56,13 @@ impl TocMode {
     pub(crate) fn from_parser(parser: &Parser) -> Self {
         let value = parser.attribute_value("toc");
         if value == InterpretedValue::Unset {
+            // `toc2` is a legacy alias that enables a left-positioned table of
+            // contents (equivalent to `:toc: left`). When the `toc` attribute
+            // itself is unset, a set `toc2` still turns the TOC on. (A soft-unset
+            // `toc2!` records an `Unset` tombstone, which does not enable it.)
+            if parser.attribute_value("toc2") != InterpretedValue::Unset {
+                return Self::Left;
+            }
             return Self::Disabled;
         }
 
@@ -264,6 +272,20 @@ mod tests {
     #[test]
     fn unrecognized_mode_is_treated_as_auto() {
         assert_eq!(doc_with(":toc: bogus").toc_mode(), TocMode::Auto);
+    }
+
+    #[test]
+    fn toc2_alias_enables_a_left_placed_toc() {
+        // `toc2` is a legacy alias for `:toc: left`: setting the bare attribute
+        // enables a left-positioned table of contents even though the `toc`
+        // attribute itself is unset.
+        assert_eq!(doc_with(":toc2:").toc_mode(), TocMode::Left);
+        assert!(doc_with(":toc2:").toc_mode().is_enabled());
+        // Its side-column placement also switches the default `toc-class` to
+        // `toc2`, like any other `left`/`right` TOC.
+        assert_eq!(doc_with(":toc2:").toc_class(), "toc2");
+        // A soft-unset `toc2!` does not enable the TOC.
+        assert_eq!(doc_with(":toc2!:").toc_mode(), TocMode::Disabled);
     }
 
     #[test]
