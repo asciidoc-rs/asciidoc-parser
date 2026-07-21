@@ -65,8 +65,7 @@
 //! * Multi-line attribute values fuse only the modern backslash continuation,
 //!   not the legacy `+`, so a legacy `+`-continued value keeps only its first
 //!   line.
-//! * Non-ASCII attribute names, names with spaces, and named tokens beginning
-//!   with `_` or containing `.` are not accepted.
+//! * Non-ASCII attribute names and names with spaces are not accepted.
 //! * A counter modifies a locked (API-set or built-in) attribute rather than
 //!   leaving it unchanged.
 //! * The derived `toc-position` / `toc-placement` / `toc-class` attributes are
@@ -1559,35 +1558,42 @@ mod assignment {
         // matrix row is exercised here through `toc_mode()` / `toc_class()`,
         // asserting this crate's actual behavior.
         //
-        // Two rows still diverge from Asciidoctor's matrix (and are asserted
-        // as this crate's actual behavior): the `toc2` alias is not recognized
-        // (it resolves to `Disabled`, not a left-placed TOC — #748) and
-        // `toc-class` is never switched to `toc2` (#749). The
-        // `toc toc-placement=macro` and `toc toc-placement!` rows now match
-        // Asciidoctor (`macro`): this crate honors an explicit `toc-placement`,
-        // and a soft-unset `toc-placement!` with `toc` set defers the TOC to a
-        // `toc::[]` block macro.
+        // With the `toc2` alias recognized (#748) and the `toc-class` default
+        // switched to `toc2` for side-column placements (#749), every row now
+        // matches Asciidoctor's matrix in the columns this crate models. The
+        // `toc=left`, `toc=right`, and `toc2` rows resolve `toc-class` to `toc2`
+        // (a left/right side-column placement switches the default class); the
+        // `toc2` alias resolves to a left-placed TOC. The `toc toc-placement=macro`
+        // and `toc toc-placement!` rows match Asciidoctor (`macro`): this crate
+        // honors an explicit `toc-placement`, and a soft-unset `toc-placement!`
+        // with `toc` set defers the TOC to a `toc::[]` block macro.
         use crate::document::TocMode;
         // Each row is the raw attribute spec (as it appears in the vendored
         // matrix, parsed the same way Ruby does — space-separated entries,
         // `name=value`, or `name!` for an unset) paired with the `TocMode` this
-        // crate resolves for it.
-        let rows: &[(&str, TocMode)] = &[
-            ("toc", TocMode::Auto),
-            ("toc=header", TocMode::Auto),
-            ("toc=beeboo", TocMode::Auto),
-            ("toc=left", TocMode::Left),
-            // `toc2` alias unrecognized (#748); Asciidoctor: left-placed TOC.
-            ("toc2", TocMode::Disabled),
-            ("toc=right", TocMode::Right),
-            ("toc=preamble", TocMode::Preamble),
-            ("toc=macro", TocMode::Macro),
-            ("toc toc-placement=macro toc-position=left", TocMode::Macro),
+        // crate resolves for it and the expected `toc_class()`.
+        let rows: &[(&str, TocMode, &str)] = &[
+            ("toc", TocMode::Auto, "toc"),
+            ("toc=header", TocMode::Auto, "toc"),
+            ("toc=beeboo", TocMode::Auto, "toc"),
+            ("toc=left", TocMode::Left, "toc2"),
+            // `toc2` is a legacy alias for a left-placed TOC (#748), whose
+            // side-column placement switches `toc-class` to `toc2` (#749),
+            // matching Asciidoctor.
+            ("toc2", TocMode::Left, "toc2"),
+            ("toc=right", TocMode::Right, "toc2"),
+            ("toc=preamble", TocMode::Preamble, "toc"),
+            ("toc=macro", TocMode::Macro, "toc"),
+            (
+                "toc toc-placement=macro toc-position=left",
+                TocMode::Macro,
+                "toc",
+            ),
             // Soft-unset `toc-placement!` with `toc` set defers to a `toc::[]`
             // macro, matching Asciidoctor (#750).
-            ("toc toc-placement!", TocMode::Macro),
+            ("toc toc-placement!", TocMode::Macro, "toc"),
         ];
-        for (spec, expected_mode) in rows {
+        for (spec, expected_mode, expected_class) in rows {
             let mut parser = Parser::default();
             for entry in spec.split(' ') {
                 parser = if let Some(name) = entry.strip_suffix('!') {
@@ -1600,9 +1606,9 @@ mod assignment {
             }
             let doc = parser.parse("");
             assert_eq!(doc.toc_mode(), *expected_mode, "toc_mode for {spec:?}");
-            // `toc-class` is never switched to `toc2`; it stays the default
-            // (#749); Asciidoctor sets `toc2` for left/right placement.
-            assert_eq!(doc.toc_class(), "toc", "toc_class for {spec:?}");
+            // A left/right side-column placement switches `toc-class` to `toc2`
+            // (#749); every other placement keeps the default `toc`.
+            assert_eq!(doc.toc_class(), *expected_class, "toc_class for {spec:?}");
         }
     }
 }
@@ -3233,10 +3239,9 @@ mod block_attributes {
             .map(|a| a.value())
     }
 
-    // Tracked in #727.
     #[test]
     fn parses_attribute_names_as_name_token() {
-        non_normative!(
+        verifies!(
             r#"
     test 'parses attribute names as name token' do
       input = <<~'EOS'
@@ -3258,16 +3263,12 @@ mod block_attributes {
         let doc = Parser::default().parse(
             "[normal,foo=\"bar\",_foo=\"_bar\",foo1=\"bar1\",foo-foo=\"bar-bar\",foo.foo=\"bar.bar\"]\ncontent",
         );
-        // Divergence: this crate does not accept attribute names that begin with
-        // `_` or contain `.` (`_foo`, `foo.foo`) as named tokens, so those
-        // entries are not recognized. `foo`, `foo1`, and `foo-foo` parse as
-        // expected.
         let block = first_block(&doc);
         assert_eq!(named(block, "foo"), Some("bar"));
+        assert_eq!(named(block, "_foo"), Some("_bar"));
         assert_eq!(named(block, "foo1"), Some("bar1"));
         assert_eq!(named(block, "foo-foo"), Some("bar-bar"));
-        assert_eq!(named(block, "_foo"), None);
-        assert_eq!(named(block, "foo.foo"), None);
+        assert_eq!(named(block, "foo.foo"), Some("bar.bar"));
     }
 
     #[test]

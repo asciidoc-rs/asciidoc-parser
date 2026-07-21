@@ -1416,7 +1416,11 @@ Any space or tab characters at the boundaries of the value are ignored.
 
         let mut parser = Parser::default();
 
-        let doc = parser.parse("[_foo = bar , zip , target=url]\nSome text here.");
+        // `-foo` is not a valid attribute name (a name cannot begin with `-`),
+        // so `-foo = bar` is not recognized as a named attribute and falls
+        // through to the "otherwise positional" branch, with the surrounding
+        // spaces trimmed from the value.
+        let doc = parser.parse("[-foo = bar , zip , target=url]\nSome text here.");
 
         assert_eq!(
             doc,
@@ -1446,7 +1450,7 @@ Any space or tab characters at the boundaries of the value are ignored.
                         rendered: "Some text here.",
                     },
                     source: Span {
-                        data: "[_foo = bar , zip , target=url]\nSome text here.",
+                        data: "[-foo = bar , zip , target=url]\nSome text here.",
                         line: 1,
                         col: 1,
                         offset: 0,
@@ -1462,8 +1466,8 @@ Any space or tab characters at the boundaries of the value are ignored.
                         attributes: &[
                             ElementAttribute {
                                 name: None,
-                                value: "_foo = bar",
-                                shorthand_items: &["_foo = bar"]
+                                value: "-foo = bar",
+                                shorthand_items: &["-foo = bar"]
                             },
                             ElementAttribute {
                                 name: None,
@@ -1478,7 +1482,7 @@ Any space or tab characters at the boundaries of the value are ignored.
                         ],
                         anchor: None,
                         source: Span {
-                            data: "_foo = bar , zip , target=url",
+                            data: "-foo = bar , zip , target=url",
                             line: 1,
                             col: 2,
                             offset: 1,
@@ -1486,7 +1490,7 @@ Any space or tab characters at the boundaries of the value are ignored.
                     },),
                 },),],
                 source: Span {
-                    data: "[_foo = bar , zip , target=url]\nSome text here.",
+                    data: "[-foo = bar , zip , target=url]\nSome text here.",
                     line: 1,
                     col: 1,
                     offset: 0,
