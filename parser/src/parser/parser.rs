@@ -721,7 +721,8 @@ impl Parser {
     }
 
     /// Returns the effective `max-attribute-value-size`: the byte limit applied
-    /// to a resolved attribute-entry value, or `None` when no limit is in force.
+    /// to a resolved attribute-entry value, or `None` when no limit is in
+    /// force.
     ///
     /// The value is coerced as Ruby's `String#to_i` would (matching
     /// Asciidoctor); a non-positive result — including an explicit unset or `0`
@@ -743,8 +744,8 @@ impl Parser {
     /// Applies the [`max-attribute-value-size`](Self::max_attribute_value_size)
     /// limit to a freshly resolved attribute-entry `value`, truncating it (on a
     /// character boundary, so a multibyte character is never split) when it
-    /// exceeds the limit. Values that already fit, and non-`Value` variants, are
-    /// returned unchanged.
+    /// exceeds the limit. Values that already fit, and non-`Value` variants,
+    /// are returned unchanged.
     fn limit_attribute_value_size(&self, value: InterpretedValue) -> InterpretedValue {
         let Some(max) = self.max_attribute_value_size() else {
             return value;
