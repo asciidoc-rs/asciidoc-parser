@@ -61,8 +61,9 @@ impl<'src> Span<'src> {
     /// Split the span, consuming the raw name of an [attribute entry].
     ///
     /// The name of an attribute entry begins with a [word character] (any
-    /// Unicode letter or digit, or `_`) and runs up to — but not including —
-    /// the closing colon (`:`) that terminates it. Mirroring Asciidoctor's
+    /// Unicode letter, digit, or `_`, matching Asciidoctor's `\p{Word}`) and
+    /// runs up to — but not including — the closing colon (`:`) that terminates
+    /// it. Mirroring Asciidoctor's
     /// `AttributeEntryRx` (whose capture is `!?#{CG_WORD}[^:]*`), the
     /// characters after the first are otherwise unconstrained: the raw name may
     /// contain spaces and other characters that are not valid in a canonical
