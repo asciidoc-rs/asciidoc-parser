@@ -427,19 +427,16 @@ impl<'src> SectionBlock<'src> {
     /// Returns the ID under which this section is registered in the catalog, if
     /// any, as an owned string.
     ///
-    /// Mirrors the effective-ID precedence of [`IsBlock::id`] (explicit anchor,
-    /// then attribute-list ID, then the auto-generated section ID) but without
-    /// the `&'src self` borrow, so the document-order title resolution pass can
-    /// key titles by ID while walking `&mut` blocks.
+    /// Mirrors the effective-ID precedence of [`IsBlock::id`] (attribute-list
+    /// ID, then explicit anchor, then the auto-generated section ID) but
+    /// without the `&'src self` borrow, so the document-order title
+    /// resolution pass can key titles by ID while walking `&mut` blocks.
     pub(crate) fn reference_id(&self) -> Option<String> {
-        self.anchor
-            .map(|a| a.data().to_string())
-            .or_else(|| {
-                self.attrlist
-                    .as_ref()
-                    .and_then(|attrlist| attrlist.id())
-                    .map(str::to_string)
-            })
+        self.attrlist
+            .as_ref()
+            .and_then(|attrlist| attrlist.id())
+            .map(str::to_string)
+            .or_else(|| self.anchor.map(|a| a.data().to_string()))
             .or_else(|| self.section_id.clone())
     }
 
@@ -532,11 +529,15 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
     }
 
     fn id(&'src self) -> Option<&'src str> {
-        // First try the default implementation (explicit IDs from anchor or attrlist)
-        self.anchor()
-            .map(|a| a.data())
-            .or_else(|| self.attrlist().and_then(|attrlist| attrlist.id()))
-            // Fall back to auto-generated ID if no explicit ID is set
+        // An explicit ID above the heading wins, and an attribute-list ID
+        // (`[id=…]`/`[#id]`) takes precedence over a `[[id]]` block anchor —
+        // matching the precedence used when the section registers itself in the
+        // catalog (see `attr_or_anchor_id` in `SectionBlock::parse`), so this
+        // accessor reports the same ID the section is cross-referenced under.
+        self.attrlist()
+            .and_then(|attrlist| attrlist.id())
+            .or_else(|| self.anchor().map(|a| a.data()))
+            // Fall back to auto-generated ID if no explicit ID is set.
             .or(self.section_id.as_deref())
     }
 }
@@ -794,7 +795,14 @@ fn peer_or_ancestor_section<'src>(
         return false;
     }
 
-    let source_after_metadata = block_metadata.block_start;
+    // Discard any blank lines between the collected metadata and the heading,
+    // mirroring the tolerance `Block::parse_internal` applies on the live parse
+    // path. Block metadata may be separated from its block by blank lines
+    // (including the blank lines around a comment that block-metadata parsing
+    // skips over), and `parse_title_line` requires a non-blank first line, so
+    // without this the boundary check would miss such a heading and wrongly fold
+    // the following peer/ancestor section into the current one.
+    let source_after_metadata = block_metadata.block_start.discard_empty_lines();
 
     // Compare effective levels: the boundary heading's `leveloffset` is read
     // from the *live* parser (every block up to this point, including any

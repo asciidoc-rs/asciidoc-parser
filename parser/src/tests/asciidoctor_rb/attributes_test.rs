@@ -68,9 +68,8 @@
 //! * Non-ASCII attribute names and names with spaces are not accepted.
 //! * A counter modifies a locked (API-set or built-in) attribute rather than
 //!   leaving it unchanged.
-//! * Safe-mode masking of `docdir`/`docfile`, the unterminated-header-comment
-//!   behavior, and the transfer of trailing anchors/attributes onto a following
-//!   section all differ.
+//! * Safe-mode masking of `docdir`/`docfile` and the
+//!   unterminated-header-comment behavior differ.
 //!
 //! Separately, block captions/titles are exposed via `caption()` / `title()`
 //! rather than as `<div class="title">` DOM nodes — a documented architectural
@@ -4363,10 +4362,9 @@ mod block_attributes {
         assert_eq!(p.roles(), vec!["lead"]);
     }
 
-    // Tracked in #733.
     #[test]
     fn last_wins_for_id_attribute() {
-        non_normative!(
+        verifies!(
             r#"
     test "Last wins for id attribute" do
       input = <<~'EOS'
@@ -4390,20 +4388,24 @@ mod block_attributes {
 "#
         );
 
-        // Divergence: Asciidoctor keeps the *last* of consecutive block anchors,
-        // so the section id resolves to `foo`. This crate keeps the *first*
-        // anchor, so the id is `bar`, and it does not collapse the stacked
-        // anchors/attributes onto the following section the same way.
+        // Of consecutive block anchors the last wins (`[[bar]]` / `[[foo]]`
+        // resolves to `foo`), and an `[id=…]` attribute list following a `[[id]]`
+        // anchor likewise wins (`[[baz]]` / `[id='coolio']` resolves to
+        // `coolio`).
         let doc = Parser::default().parse(
             "[[bar]]\n[[foo]]\n== Section\n\nparagraph\n\n[[baz]]\n[id='coolio']\n=== Section",
         );
-        assert_eq!(first_block(&doc).id(), Some("bar"));
+
+        let sec = first_block(&doc);
+        assert_eq!(sec.id(), Some("foo"));
+
+        let subsec = sec.nested_blocks().last().expect("expected a sub-section");
+        assert_eq!(subsec.id(), Some("coolio"));
     }
 
-    // Tracked in #733.
     #[test]
     fn trailing_block_attributes_transfer_to_the_following_section() {
-        non_normative!(
+        verifies!(
             r#"
     test "trailing block attributes transfer to the following section" do
       input = <<~'EOS'
@@ -4441,20 +4443,27 @@ mod block_attributes {
 "#
         );
 
-        // Divergence: Asciidoctor transfers a trailing block anchor / attribute
-        // list (separated from the heading by a comment or block) to the
-        // *following* section, so the sub-section gets id `sub` and Section Two
-        // gets role `classy`. This crate attaches them to standalone blocks
-        // instead, so the sub-section keeps its auto-generated id and Section Two
-        // has no role. The top-level section ids that this crate does assign are
-        // verified here.
+        // A trailing block anchor or attribute list separated from a heading by
+        // a comment (line or block) transfers to the *following* section: the
+        // sub-section gets id `sub` across the `// …` line comment, and Section
+        // Two gets role `classy` across the `////…////` comment block.
         let doc = Parser::default().parse(
             "[[one]]\n\n== Section One\n\nparagraph\n\n[[sub]]\n// try to mess this up!\n\n=== Sub-section\n\nparagraph\n\n[role='classy']\n\n////\nblock comment\n////\n\n== Section Two\n\ncontent",
         );
+
         let blocks: Vec<_> = doc.nested_blocks().collect();
-        assert_eq!(blocks[0].id(), Some("one"));
-        assert_eq!(blocks.last().unwrap().id(), Some("_section_two"));
-        assert!(blocks.last().unwrap().roles().is_empty());
+
+        let section_one = blocks.first().expect("expected Section One");
+        assert_eq!(section_one.id(), Some("one"));
+
+        let subsection = section_one
+            .nested_blocks()
+            .last()
+            .expect("expected a sub-section");
+        assert_eq!(subsection.id(), Some("sub"));
+
+        let section_two = blocks.last().expect("expected Section Two");
+        assert_eq!(section_two.roles(), vec!["classy"]);
     }
 }
 

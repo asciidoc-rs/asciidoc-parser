@@ -3,6 +3,7 @@ use std::ops::{RangeFrom, RangeTo};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
+    blocks::simple::is_section_header,
     content::{Content, SubstitutionGroup},
     span::MatchedItem,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -80,8 +81,12 @@ impl<'src> BlockMetadata<'src> {
                 }
             }
 
-            // Try to parse a block anchor.
-            if anchor.is_none() {
+            // Try to parse a block anchor. Consecutive block anchors are
+            // permitted and the last one wins (`[[bar]]` / `[[foo]]` → `foo`),
+            // matching Asciidoctor, which simply overwrites the running `id`
+            // (and its reftext) for each anchor line. The earlier `anchor.is_none()`
+            // guard is therefore intentionally gone: a later anchor overrides.
+            {
                 let mut anchor_maw = parse_maybe_block_anchor(block_start);
 
                 // Collect any warnings from the anchor parsing (e.g., empty anchor).
@@ -116,6 +121,11 @@ impl<'src> BlockMetadata<'src> {
                         // Validate anchor name.
                         if mi.item.is_xml_name() {
                             anchor = Some(mi.item);
+
+                            // A later plain anchor (`[[foo]]`) clears any reftext
+                            // carried by an earlier `[[bar,text]]`, keeping the
+                            // last-wins semantics consistent across both fields.
+                            reftext = None;
                             block_start = mi.after;
                         } else {
                             warnings.push(Warning {
@@ -154,6 +164,29 @@ impl<'src> BlockMetadata<'src> {
                     None => attrlist = Some(attrlist_item),
                 }
                 block_start = new_block_start;
+                continue;
+            }
+
+            // A comment line (`//`) or comment block (`////`) sitting between
+            // already-collected metadata and a *following section heading* is
+            // transparent: the metadata transfers across the comment to that
+            // section (e.g. `[[sub]]` / `// comment` / `=== Sub-section` gives
+            // the section id `sub`, and `[role=…]` / `////…////` / `== Section`
+            // gives the section the role). Asciidoctor skips comments while
+            // gathering block metadata; this crate deliberately *retains*
+            // comment blocks as ordinary blocks, so the transparency is scoped
+            // to the section-transfer case the wider divergence would otherwise
+            // break. A comment that a metadata line directly decorates (with no
+            // following section) is therefore left in place for normal dispatch.
+            //
+            // This only applies once at least one metadata item has been
+            // collected, so a standalone comment (with no preceding metadata) is
+            // untouched.
+            if !(title_source.is_none() && anchor.is_none() && attrlist.is_none())
+                && let Some(after_comments) =
+                    skip_comments_before_section(block_start, parser.level_offset())
+            {
+                block_start = after_comments;
                 continue;
             }
 
@@ -237,6 +270,61 @@ impl<'src> BlockMetadata<'src> {
         } else {
             false
         }
+    }
+}
+
+/// Looks past a run of comment lines (`//`) and comment blocks (`////`),
+/// together with the blank lines around them, to a following section heading.
+/// On success, returns the source span at that heading so already-collected
+/// block metadata attaches to the section rather than to the intervening
+/// comment.
+///
+/// Returns `None` unless at least one comment was skipped *and* the run lands
+/// on a section heading — every other case (no comment, or a comment that a
+/// metadata line directly decorates with no following section) leaves the
+/// comment in place for normal block dispatch, preserving this crate's
+/// retention of comment blocks as ordinary blocks.
+fn skip_comments_before_section(source: Span<'_>, level_offset: i32) -> Option<Span<'_>> {
+    let mut cursor = source;
+    let mut skipped_any = false;
+
+    loop {
+        let probe = cursor.discard_empty_lines();
+        if probe.is_empty() {
+            return None;
+        }
+
+        let line = probe.take_normalized_line();
+        let data = line.item.data();
+
+        // A comment block (`////`, or a longer run of slashes) is consumed
+        // through its matching closing delimiter — or to end of input if it is
+        // never closed, matching Asciidoctor's `read_lines_until terminator`.
+        if data.len() >= 4 && data.chars().all(|c| c == '/') {
+            let mut next = line.after;
+            while !next.is_empty() {
+                let inner = next.take_normalized_line();
+                next = inner.after;
+                if inner.item.data() == data {
+                    break;
+                }
+            }
+            cursor = next;
+            skipped_any = true;
+            continue;
+        }
+
+        // A comment line begins with `//` but is not the `///` (or longer) run
+        // that opens neither a comment line nor a valid comment block.
+        if data.starts_with("//") && !data.starts_with("///") {
+            cursor = line.after;
+            skipped_any = true;
+            continue;
+        }
+
+        // A non-comment line ends the run. The metadata transfers across the
+        // skipped comments only when they precede a section heading.
+        return (skipped_any && is_section_header(data, level_offset)).then_some(probe);
     }
 }
 
