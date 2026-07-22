@@ -4,7 +4,9 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{Content, SubstitutionGroup},
-    document::{Attribute, Author, AuthorLine, InterpretedValue, RevisionLine},
+    document::{
+        Attribute, Author, AuthorLine, InterpretedValue, RevisionLine, matches_author_pattern,
+    },
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -82,9 +84,15 @@ impl<'src> Header<'src> {
             {
                 // Special handling for :author: attribute to populate individual author
                 // attributes.
+                //
+                // When the value is a plain name, the partitioned name replaces
+                // the stored `author` value. This condenses repeated interior
+                // whitespace and joins a name with four or more parts, matching
+                // Asciidoctor (issue #758).
+                let mut author_name_override: Option<String> = None;
                 if attr.item.name().data().eq_ignore_ascii_case("author")
                     && let Some(raw_value) = attr.item.raw_value()
-                    && let Some(author) = Author::parse(raw_value.data(), parser)
+                    && let Some(author) = Author::parse(raw_value.data(), parser, true)
                 {
                     // Set individual author attributes.
                     parser.set_attribute_by_value_from_header("firstname", author.firstname());
@@ -99,6 +107,19 @@ impl<'src> Header<'src> {
                         parser.set_attribute_by_value_from_header("email", email);
                     }
 
+                    // Only override the `author` value when the name was
+                    // partitioned by the fallback whitespace split — a plain name
+                    // that does not match the author pattern (four or more parts,
+                    // or punctuation such as a comma). A value that matches the
+                    // pattern, carries an inline email (`<…>`), or holds an
+                    // attribute reference (`{…}`) keeps the substituted entry
+                    // value set below, so the handling of those forms is
+                    // unchanged.
+                    let raw = raw_value.data();
+                    if !raw.contains('<') && !raw.contains('{') && !matches_author_pattern(raw) {
+                        author_name_override = Some(author.name().to_string());
+                    }
+
                     // Retain the author parsed from the raw (pre-substitution)
                     // value so the resolved author list does not have to
                     // re-parse the HTML-encoded `author` attribute. A later
@@ -107,6 +128,11 @@ impl<'src> Header<'src> {
                 }
 
                 parser.set_attribute_from_header(&attr.item, &mut warnings);
+
+                if let Some(author_name) = author_name_override {
+                    parser.set_attribute_by_value_from_header("author", author_name);
+                }
+
                 attributes.push(attr.item);
                 source = attr.after;
             } else if title.is_none()
@@ -579,7 +605,7 @@ fn resolve_authors(
     let mut index = 1;
 
     while let Some(name) = value(&format!("author_{index}")) {
-        if let Some(author) = Author::parse(&name, parser) {
+        if let Some(author) = Author::parse(&name, parser, true) {
             authors.push(author.with_email(value(&format!("email_{index}"))));
         }
 
@@ -984,6 +1010,186 @@ mod tests {
         assert_eq!(
             parser.attribute_value("author"),
             InterpretedValue::Value("John Q. Smith &lt;john@example.com&gt;")
+        );
+    }
+
+    #[test]
+    fn author_attribute_with_four_or_more_parts_is_partitioned() {
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/758: a value
+        // with more than three parts does not match the author pattern, so it is
+        // partitioned by splitting on whitespace into at most three parts. The
+        // trailing parts are assigned to `lastname` and repeated interior
+        // whitespace is condensed.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Leroy  Harold  Scherer,  Jr.");
+
+        assert_eq!(
+            parser.attribute_value("author"),
+            InterpretedValue::Value("Leroy Harold Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials"),
+            InterpretedValue::Value("LHS")
+        );
+    }
+
+    #[test]
+    fn author_attribute_two_part_fallback_partitions_lastname() {
+        // A two-part value that does not match the author pattern (here because
+        // of the comma attached to the first part) still partitions into a first
+        // and last name via the whitespace split.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Jane, Doe");
+
+        assert_eq!(
+            parser.attribute_value("author"),
+            InterpretedValue::Value("Jane, Doe")
+        );
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Jane,")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Unset
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Doe")
+        );
+    }
+
+    #[test]
+    fn author_attribute_single_part_fallback_is_firstname_only() {
+        // A single-token value that does not match the author pattern partitions
+        // to `firstname` alone, with no middle or last name.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Jane,");
+
+        assert_eq!(
+            parser.attribute_value("author"),
+            InterpretedValue::Value("Jane,")
+        );
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Jane,")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Unset
+        );
+        assert_eq!(parser.attribute_value("lastname"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn author_attribute_four_or_more_parts_with_inline_email() {
+        // A four-plus-part fallback value that carries a trailing `<email>` must
+        // split the email off before partitioning, so it lands in `email` rather
+        // than being absorbed into `lastname`.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Leroy  Harold  Scherer,  Jr. <leroy@example.com>");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("email"),
+            InterpretedValue::Value("leroy@example.com")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials"),
+            InterpretedValue::Value("LHS")
+        );
+    }
+
+    #[test]
+    fn author_attribute_reference_expands_and_partitions() {
+        // A `:author:` value given entirely as an attribute reference is expanded
+        // and then partitioned by the names-only rules, so it yields the same
+        // metadata as the equivalent literal four-plus-part name.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":full-name: Leroy Harold Scherer, Jr.\n:author: {full-name}");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials"),
+            InterpretedValue::Value("LHS")
+        );
+    }
+
+    #[test]
+    fn author_attribute_reference_within_larger_value_expands_and_partitions() {
+        // The same partitioning applies when the reference is only part of the
+        // value (so the single-attribute fast path is not taken) and the expanded
+        // result still fails the author pattern.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":rest: Harold Scherer, Jr.\n:author: Leroy {rest}");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+    }
+
+    #[test]
+    fn author_attribute_non_breaking_space_is_not_a_name_separator() {
+        // Only ASCII whitespace separates name parts. A non-breaking space
+        // (U+00A0) joining two words keeps them as a single first name, matching
+        // Ruby's whitespace split.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: John\u{a0}Doe Scherer, Jr.");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("John\u{a0}Doe")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Scherer,")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Jr.")
         );
     }
 
