@@ -654,10 +654,9 @@ impl Parser {
     /// safe-mode masking is applied. Returns `None` when the attribute is unset
     /// or resolves to a non-value form.
     ///
-    /// This feeds
-    /// [`masked_doc_path`](crate::parser::safe_mode::masked_doc_path),
-    /// which must compute the `docfile` relativization from the *original*
-    /// API-provided `docdir` rather than its masked (blanked) form.
+    /// This feeds [`masked_doc_path`], which must compute the `docfile`
+    /// relativization from the *original* API-provided `docdir` rather than its
+    /// masked (blanked) form.
     fn raw_set_value(&self, name: &str) -> Option<String> {
         match self.effective_attribute(name)?.value {
             InterpretedValue::Value(ref v) => Some(v.clone()),
