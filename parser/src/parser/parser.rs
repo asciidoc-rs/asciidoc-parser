@@ -525,6 +525,12 @@ impl Parser {
         // fresh "now"; a parse that never references one does no datetime work.
         *self.datetime_context.borrow_mut() = None;
 
+        // Drop leading YAML/TOML front matter (and record it in the
+        // `front-matter` attribute) when `skip-front-matter` is set, before the
+        // source reaches the preprocessor or header parser.
+        let stripped_source = self.skip_front_matter(source);
+        let source = stripped_source.as_deref().unwrap_or(source);
+
         let (preprocessed_source, source_map, preprocessor_warnings, includes) =
             preprocess(source, self);
 
@@ -566,6 +572,91 @@ impl Parser {
             preprocessor_warnings,
             self,
         )
+    }
+
+    /// Drops leading YAML/TOML front matter from `source`, mirroring
+    /// Asciidoctor's `Reader#skip_front_matter!`.
+    ///
+    /// Front matter is a block opened by a line of exactly `---` at the very
+    /// start of the document and closed by a matching `---` line. It is only
+    /// removed when the `skip-front-matter` attribute is set (typically via the
+    /// API); otherwise `---` retains its ordinary meaning and this is a no-op.
+    /// When a well-formed block is found, its content (the lines between the
+    /// delimiters, joined by LF and with the delimiters excluded) is stored in
+    /// the `front-matter` document attribute, and a rewritten copy of the
+    /// source is returned in which every removed line – both delimiters and the
+    /// content – is replaced by a blank line. Preserving the line *count* keeps
+    /// every following line at its original line number, matching Asciidoctor
+    /// (whose reader advances `lineno` past the skipped block); the leading
+    /// blank lines are ignored by the header parser.
+    ///
+    /// Returns `None` (leaving the source untouched and setting no attribute)
+    /// when `skip-front-matter` is not set, when the first line is not `---`,
+    /// or when no closing `---` delimiter is found.
+    fn skip_front_matter(&mut self, source: &str) -> Option<String> {
+        if !self.is_attribute_set("skip-front-matter") {
+            return None;
+        }
+
+        // Strip a line's trailing end-of-line sequence (LF or CRLF) so the
+        // delimiter comparison and the captured content match Asciidoctor's
+        // chomped lines.
+        fn line_content(line: &str) -> &str {
+            let line = line.strip_suffix('\n').unwrap_or(line);
+            line.strip_suffix('\r').unwrap_or(line)
+        }
+
+        let mut lines = source.split_inclusive('\n');
+
+        // Front matter must open on the very first line, which must be exactly
+        // `---`.
+        let first = lines.next()?;
+        if line_content(first) != "---" {
+            return None;
+        }
+
+        // Byte offset just past the region being consumed, and the number of
+        // physical lines consumed (starting with the opening delimiter).
+        let mut consumed_end = first.len();
+        let mut consumed_lines = 1usize;
+
+        let mut front_matter = String::new();
+        let mut closed = false;
+
+        for line in lines {
+            consumed_end += line.len();
+            consumed_lines += 1;
+
+            if line_content(line) == "---" {
+                closed = true;
+                break;
+            }
+
+            if !front_matter.is_empty() {
+                front_matter.push('\n');
+            }
+
+            front_matter.push_str(line_content(line));
+        }
+
+        // Without a closing delimiter the block is malformed; leave the source
+        // (and attributes) untouched, matching Asciidoctor.
+        if !closed {
+            return None;
+        }
+
+        self.set_attribute_by_value_from_header("front-matter", &front_matter);
+
+        // Replace the consumed region with one blank line per removed physical
+        // line so the remaining content keeps its original line numbers.
+        let mut rewritten = String::with_capacity(source.len());
+        for _ in 0..consumed_lines {
+            rewritten.push('\n');
+        }
+
+        rewritten.push_str(&source[consumed_end..]);
+
+        Some(rewritten)
     }
 
     /// Retrieves the current interpreted value of a [document attribute].

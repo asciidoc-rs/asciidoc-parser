@@ -46,10 +46,11 @@
 //! `push_include` include stack, and every case that inspects `reader.lines` /
 //! `reader.read` / a cursor / `doc.catalog[:includes]` — have no analog here
 //! and are reproduced verbatim in `non_normative!` blocks, each annotated with
-//! the reason it is not ported. UTF-8 BOM stripping, front-matter skipping,
-//! UTF-16 transcoding, `uri:classloader:` includes, and remote (URL) includes
-//! are likewise out of scope for this crate (see the crate README) and stay
-//! non-normative.
+//! the reason it is not ported. UTF-8 BOM stripping, UTF-16 transcoding,
+//! `uri:classloader:` includes, and remote (URL) includes are likewise out of
+//! scope for this crate (see the crate README) and stay non-normative.
+//! Front-matter skipping (the `---` fence gated on `skip-front-matter`) *is*
+//! supported and is ported below.
 //!
 //! What *is* normative and supported — and therefore ported to `verifies!`
 //! blocks driving [`Parser`](crate::Parser) — is the observable preprocessor
@@ -861,14 +862,17 @@ fn should_clean_crlf_from_end_of_lines() {
     assert!(!paras[0].contains('\r'));
 }
 
-// Out of scope: YAML front matter (the `---` fence and `skip-front-matter`
-// attribute) is not handled by this crate — front matter must be stripped
-// before the source is handed to the parser (see the crate README and the
-// `document/header` spec notes). Dropping front matter is tracked by
-// https://github.com/asciidoc-rs/asciidoc-parser/issues/745. These also inspect
-// `reader.peek_line` / `reader.lineno`.
-non_normative!(
-    r#"
+// Front matter support (https://github.com/asciidoc-rs/asciidoc-parser/issues/745):
+// a `---`-fenced YAML/TOML block at the very top of the document is dropped –
+// and captured verbatim in the `front-matter` attribute – but only when the
+// `skip-front-matter` attribute is set. This crate has no public reader, so
+// where Asciidoctor inspects `reader.peek_line` / `reader.lineno`, these ports
+// observe the parsed document instead: the `front-matter` attribute, the
+// recognized document title, and the title's (preserved) line number.
+#[test]
+fn should_not_skip_front_matter_by_default() {
+    verifies!(
+        r#"
       test 'should not skip front matter by default' do
         input = <<~'EOS'
         ---
@@ -890,6 +894,25 @@ non_normative!(
         assert_equal 1, reader.lineno
       end
 
+"#
+    );
+
+    // With `skip-front-matter` unset, the leading `---` keeps its ordinary
+    // meaning: nothing is stripped, no `front-matter` attribute is recorded, and
+    // the `= Document Title` line – no longer the first line – is not read as the
+    // document title.
+    let doc = Parser::default().parse(
+        "---\nlayout: post\ntitle: Document Title\nauthor: username\ntags: [ first, second ]\n---\n= Document Title\nAuthor Name\n\npreamble\n",
+    );
+
+    assert_eq!(doc.attribute_value("front-matter"), InterpretedValue::Unset);
+    assert_eq!(doc.header().title(), None);
+}
+
+#[test]
+fn should_not_skip_front_matter_if_ending_delimiter_is_not_found() {
+    verifies!(
+        r#"
       test 'should not skip front matter if ending delimiter is not found' do
         input = <<~'EOS'
         ---
@@ -908,6 +931,26 @@ non_normative!(
         assert_equal 1, reader.lineno
       end
 
+"#
+    );
+
+    // `skip-front-matter` is set, but the block never closes with a second
+    // `---`, so it is malformed: the source is left untouched and no
+    // `front-matter` attribute is recorded.
+    let doc = Parser::default()
+        .with_intrinsic_attribute_bool("skip-front-matter", true, ModificationContext::ApiOnly)
+        .parse(
+            "---\ntitle: Document Title\ntags: [ first, second ]\n= Document Title\nAuthor Name\n\npreamble\n",
+        );
+
+    assert_eq!(doc.attribute_value("front-matter"), InterpretedValue::Unset);
+    assert_eq!(doc.header().title(), None);
+}
+
+#[test]
+fn should_skip_front_matter_if_specified_by_skip_front_matter_attribute() {
+    verifies!(
+        r#"
       test 'should skip front matter if specified by skip-front-matter attribute' do
         front_matter = <<~'EOS'.chop
         layout: post
@@ -933,7 +976,46 @@ non_normative!(
         assert_equal 7, reader.lineno
       end
 "#
-);
+    );
+
+    // `skip-front-matter` is set and the block is well-formed: its content
+    // (delimiters excluded, lines joined by LF) is captured in the
+    // `front-matter` attribute, and parsing resumes at `= Document Title`, which
+    // – thanks to the blank lines left in place of the removed block – is still
+    // reported at its original line 7.
+    let doc = Parser::default()
+        .with_intrinsic_attribute_bool("skip-front-matter", true, ModificationContext::ApiOnly)
+        .parse(
+            "---\nlayout: post\ntitle: Document Title\nauthor: username\ntags: [ first, second ]\n---\n= Document Title\nAuthor Name\n\npreamble\n",
+        );
+
+    assert_eq!(
+        doc.attribute_value("front-matter"),
+        InterpretedValue::Value(
+            "layout: post\ntitle: Document Title\nauthor: username\ntags: [ first, second ]"
+        )
+    );
+    assert_eq!(doc.header().title(), Some("Document Title"));
+    assert_eq!(doc.header().title_source().unwrap().line(), 7);
+}
+
+// Crate-native (no Asciidoctor analog): the front-matter delimiters are matched
+// after a CRLF line ending is stripped, and the captured `front-matter` value
+// is likewise chomped, so a document with `\r\n` line endings is handled the
+// same as one with bare `\n`.
+#[test]
+fn should_skip_front_matter_with_crlf_line_endings() {
+    let doc = Parser::default()
+        .with_intrinsic_attribute_bool("skip-front-matter", true, ModificationContext::ApiOnly)
+        .parse("---\r\nlayout: post\r\ntitle: Document Title\r\n---\r\n= Document Title\r\nAuthor Name\r\n\r\npreamble\r\n");
+
+    assert_eq!(
+        doc.attribute_value("front-matter"),
+        InterpretedValue::Value("layout: post\ntitle: Document Title")
+    );
+    assert_eq!(doc.header().title(), Some("Document Title"));
+    assert_eq!(doc.header().title_source().unwrap().line(), 5);
+}
 
 non_normative!(
     r#"
