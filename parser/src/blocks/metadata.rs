@@ -84,61 +84,59 @@ impl<'src> BlockMetadata<'src> {
             // Try to parse a block anchor. Consecutive block anchors are
             // permitted and the last one wins (`[[bar]]` / `[[foo]]` → `foo`),
             // matching Asciidoctor, which simply overwrites the running `id`
-            // (and its reftext) for each anchor line. The earlier `anchor.is_none()`
-            // guard is therefore intentionally gone: a later anchor overrides.
-            {
-                let mut anchor_maw = parse_maybe_block_anchor(block_start);
+            // (and its reftext) for each anchor line. There is deliberately no
+            // `anchor.is_none()` guard: a later anchor overrides an earlier one.
+            let mut anchor_maw = parse_maybe_block_anchor(block_start);
 
-                // Collect any warnings from the anchor parsing (e.g., empty anchor).
-                if !anchor_maw.warnings.is_empty() {
-                    warnings.append(&mut anchor_maw.warnings);
+            // Collect any warnings from the anchor parsing (e.g., empty anchor).
+            if !anchor_maw.warnings.is_empty() {
+                warnings.append(&mut anchor_maw.warnings);
+            }
+
+            if let Some(mi) = anchor_maw.item {
+                if let Some(comma_position) = mi.item.position(|c| c == ',')
+                    && comma_position < mi.item.len() - 1
+                {
+                    let anchor_span = mi.item.slice_to(RangeTo {
+                        end: comma_position,
+                    });
+                    let reftext_span = mi.item.slice_from(RangeFrom {
+                        start: comma_position + 1,
+                    });
+
+                    // Validate anchor name.
+                    if anchor_span.is_xml_name() {
+                        anchor = Some(anchor_span);
+                        reftext = Some(reftext_span);
+                        block_start = mi.after;
+                    } else {
+                        warnings.push(Warning {
+                            source: anchor_span,
+                            warning: WarningType::InvalidBlockAnchorName,
+                            origin: None,
+                        });
+                    }
+                } else {
+                    // Validate anchor name.
+                    if mi.item.is_xml_name() {
+                        anchor = Some(mi.item);
+
+                        // A later plain anchor (`[[foo]]`) clears any reftext
+                        // carried by an earlier `[[bar,text]]`, keeping the
+                        // last-wins semantics consistent across both fields.
+                        reftext = None;
+                        block_start = mi.after;
+                    } else {
+                        warnings.push(Warning {
+                            source: mi.item,
+                            warning: WarningType::InvalidBlockAnchorName,
+                            origin: None,
+                        });
+                    }
                 }
 
-                if let Some(mi) = anchor_maw.item {
-                    if let Some(comma_position) = mi.item.position(|c| c == ',')
-                        && comma_position < mi.item.len() - 1
-                    {
-                        let anchor_span = mi.item.slice_to(RangeTo {
-                            end: comma_position,
-                        });
-                        let reftext_span = mi.item.slice_from(RangeFrom {
-                            start: comma_position + 1,
-                        });
-
-                        // Validate anchor name.
-                        if anchor_span.is_xml_name() {
-                            anchor = Some(anchor_span);
-                            reftext = Some(reftext_span);
-                            block_start = mi.after;
-                        } else {
-                            warnings.push(Warning {
-                                source: anchor_span,
-                                warning: WarningType::InvalidBlockAnchorName,
-                                origin: None,
-                            });
-                        }
-                    } else {
-                        // Validate anchor name.
-                        if mi.item.is_xml_name() {
-                            anchor = Some(mi.item);
-
-                            // A later plain anchor (`[[foo]]`) clears any reftext
-                            // carried by an earlier `[[bar,text]]`, keeping the
-                            // last-wins semantics consistent across both fields.
-                            reftext = None;
-                            block_start = mi.after;
-                        } else {
-                            warnings.push(Warning {
-                                source: mi.item,
-                                warning: WarningType::InvalidBlockAnchorName,
-                                origin: None,
-                            });
-                        }
-                    }
-
-                    if block_start != original_block_start {
-                        continue;
-                    }
+                if block_start != original_block_start {
+                    continue;
                 }
             }
 
