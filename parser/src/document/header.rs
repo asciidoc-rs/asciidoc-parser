@@ -4,7 +4,9 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{Content, SubstitutionGroup},
-    document::{Attribute, Author, AuthorLine, InterpretedValue, RevisionLine},
+    document::{
+        Attribute, Author, AuthorLine, InterpretedValue, RevisionLine, matches_author_pattern,
+    },
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -82,9 +84,15 @@ impl<'src> Header<'src> {
             {
                 // Special handling for :author: attribute to populate individual author
                 // attributes.
+                //
+                // When the value is a plain name, the partitioned name replaces
+                // the stored `author` value. This condenses repeated interior
+                // whitespace and joins a name with four or more parts, matching
+                // Asciidoctor (issue #758).
+                let mut author_name_override: Option<String> = None;
                 if attr.item.name().data().eq_ignore_ascii_case("author")
                     && let Some(raw_value) = attr.item.raw_value()
-                    && let Some(author) = Author::parse(raw_value.data(), parser)
+                    && let Some(author) = Author::parse(raw_value.data(), parser, true)
                 {
                     // Set individual author attributes.
                     parser.set_attribute_by_value_from_header("firstname", author.firstname());
@@ -99,6 +107,19 @@ impl<'src> Header<'src> {
                         parser.set_attribute_by_value_from_header("email", email);
                     }
 
+                    // Only override the `author` value when the name was
+                    // partitioned by the fallback whitespace split — a plain name
+                    // that does not match the author pattern (four or more parts,
+                    // or punctuation such as a comma). A value that matches the
+                    // pattern, carries an inline email (`<…>`), or holds an
+                    // attribute reference (`{…}`) keeps the substituted entry
+                    // value set below, so the handling of those forms is
+                    // unchanged.
+                    let raw = raw_value.data();
+                    if !raw.contains('<') && !raw.contains('{') && !matches_author_pattern(raw) {
+                        author_name_override = Some(author.name().to_string());
+                    }
+
                     // Retain the author parsed from the raw (pre-substitution)
                     // value so the resolved author list does not have to
                     // re-parse the HTML-encoded `author` attribute. A later
@@ -107,12 +128,17 @@ impl<'src> Header<'src> {
                 }
 
                 parser.set_attribute_from_header(&attr.item, &mut warnings);
+
+                if let Some(author_name) = author_name_override {
+                    parser.set_attribute_by_value_from_header("author", author_name);
+                }
+
                 attributes.push(attr.item);
                 source = attr.after;
             } else if title.is_none()
                 && line.starts_with('[')
                 && line.ends_with(']')
-                && document_title_marker(line_mi.after.take_normalized_line().item).is_some()
+                && document_title_follows_block_metadata(line_mi.after)
                 && let Some((metadata, metadata_warnings)) =
                     parse_document_metadata_attrlist(line, parser)
             {
@@ -128,9 +154,12 @@ impl<'src> Header<'src> {
                 // like assigning the `title-separator` document attribute here, so
                 // both mechanisms share the same partitioning logic.
                 //
-                // The line is only intercepted when a document title immediately
-                // follows; otherwise it is block metadata for the body (e.g. a
-                // table's `separator`) and is left for the block parser.
+                // The line is only intercepted when a document title eventually
+                // follows — possibly after further stacked block attribute lines,
+                // each folded on its own pass through this loop, mirroring
+                // Asciidoctor's `parse_block_metadata_lines`. Otherwise it is
+                // block metadata for the body (e.g. a table's `separator`) and is
+                // left for the block parser.
                 if let Some(doc_id) = metadata.id {
                     id = Some(doc_id);
                 }
@@ -144,9 +173,11 @@ impl<'src> Header<'src> {
                     // Fold the role(s) into the `role` document attribute
                     // (space-joined, as Asciidoctor stores `attributes['role']`)
                     // and also retain them on the header so `Document::roles()`
-                    // agrees with the document attribute (see #820).
-                    parser.set_attribute_by_value_from_header("role", metadata.roles.join(" "));
-                    roles = metadata.roles;
+                    // agrees with the document attribute (see #820). Roles from
+                    // separate stacked block attribute lines accumulate, just as
+                    // multiple roles within a single line combine (see #821).
+                    roles.extend(metadata.roles);
+                    parser.set_attribute_by_value_from_header("role", roles.join(" "));
                 }
                 for option in metadata.options {
                     parser.set_attribute_by_value_from_header(format!("{option}-option"), "");
@@ -377,6 +408,66 @@ fn document_title_marker(line: Span<'_>) -> Option<char> {
     }
 }
 
+/// Reports whether a document title marker eventually follows the source at
+/// `after`, allowing any number of stacked block attribute lines in between.
+///
+/// Starting immediately below the block attribute line under consideration,
+/// consecutive lines that are themselves document-metadata block attribute
+/// lines (see [`is_document_metadata_line`]) are skipped, and the first line
+/// that is not is tested for a document title marker. This generalizes the
+/// original single-line lookahead so that stacked metadata lines above the
+/// title are all folded, mirroring Asciidoctor's `parse_block_metadata_lines`.
+///
+/// A line that starts with `[` and ends with `]` but is *not* a valid
+/// document-metadata line (e.g. a `[[anchor]]` block anchor or a leading-space
+/// form) stops the scan without matching, so the run of foldable lines is only
+/// ever a contiguous prefix of well-formed metadata lines terminated by the
+/// title.
+fn document_title_follows_block_metadata(after: Span<'_>) -> bool {
+    let mut next = after;
+
+    while !next.is_empty() {
+        let line_mi = next.take_normalized_line();
+        let line = line_mi.item;
+
+        if document_title_marker(line).is_some() {
+            return true;
+        }
+
+        if !is_document_metadata_line(line) {
+            return false;
+        }
+
+        next = line_mi.after;
+    }
+
+    false
+}
+
+/// Reports whether `line` is a block attribute line that this crate folds into
+/// document metadata when it appears above the document title.
+///
+/// This captures the purely syntactic acceptance rules shared by the lookahead
+/// ([`document_title_follows_block_metadata`]) and the folding step
+/// ([`parse_document_metadata_attrlist`]): the line must be bracket-delimited
+/// and its contents must not be empty, must not begin with whitespace, and must
+/// not be a `[[anchor]]` block anchor. The legacy double-bracket anchor above
+/// the document title is left unsupported (it terminates the header, as
+/// before); the single-bracket `[#id]` shorthand is the supported way to set a
+/// document ID.
+fn is_document_metadata_line(line: Span<'_>) -> bool {
+    if !(line.starts_with('[') && line.ends_with(']')) {
+        return false;
+    }
+
+    let inner = line.slice(1..line.len() - 1);
+
+    !(inner.is_empty()
+        || inner.starts_with(' ')
+        || inner.starts_with('\t')
+        || (inner.starts_with('[') && inner.ends_with(']')))
+}
+
 /// Document metadata folded from a block attribute line appearing directly
 /// above the document title.
 ///
@@ -405,23 +496,16 @@ fn parse_document_metadata_attrlist<'src>(
     line: Span<'src>,
     parser: &Parser,
 ) -> Option<(DocumentMetadata, Vec<Warning<'src>>)> {
-    // Drop the enclosing square brackets now that the caller has confirmed they
-    // are present.
-    let inner = line.slice(1..line.len() - 1);
-
-    // Reject forms that are not block attribute lists, mirroring the checks used
-    // when parsing block metadata elsewhere: a leading space or tab, an empty
-    // list, or a `[[anchor]]` block anchor. The legacy double-bracket anchor
-    // above the document title is left unsupported (it terminates the header, as
-    // before); the single-bracket `[#id]` shorthand is the supported way to set
-    // a document ID.
-    if inner.is_empty()
-        || inner.starts_with(' ')
-        || inner.starts_with('\t')
-        || (inner.starts_with('[') && inner.ends_with(']'))
-    {
+    // Reject forms that are not block attribute lists (a leading space or tab,
+    // an empty list, or a `[[anchor]]` block anchor); see
+    // [`is_document_metadata_line`] for the shared acceptance rules. The caller
+    // has already confirmed the enclosing square brackets are present.
+    if !is_document_metadata_line(line) {
         return None;
     }
+
+    // Drop the enclosing square brackets.
+    let inner = line.slice(1..line.len() - 1);
 
     let MatchAndWarnings {
         item: MatchedItem {
@@ -521,7 +605,7 @@ fn resolve_authors(
     let mut index = 1;
 
     while let Some(name) = value(&format!("author_{index}")) {
-        if let Some(author) = Author::parse(&name, parser) {
+        if let Some(author) = Author::parse(&name, parser, true) {
             authors.push(author.with_email(value(&format!("email_{index}"))));
         }
 
@@ -930,6 +1014,186 @@ mod tests {
     }
 
     #[test]
+    fn author_attribute_with_four_or_more_parts_is_partitioned() {
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/758: a value
+        // with more than three parts does not match the author pattern, so it is
+        // partitioned by splitting on whitespace into at most three parts. The
+        // trailing parts are assigned to `lastname` and repeated interior
+        // whitespace is condensed.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Leroy  Harold  Scherer,  Jr.");
+
+        assert_eq!(
+            parser.attribute_value("author"),
+            InterpretedValue::Value("Leroy Harold Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials"),
+            InterpretedValue::Value("LHS")
+        );
+    }
+
+    #[test]
+    fn author_attribute_two_part_fallback_partitions_lastname() {
+        // A two-part value that does not match the author pattern (here because
+        // of the comma attached to the first part) still partitions into a first
+        // and last name via the whitespace split.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Jane, Doe");
+
+        assert_eq!(
+            parser.attribute_value("author"),
+            InterpretedValue::Value("Jane, Doe")
+        );
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Jane,")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Unset
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Doe")
+        );
+    }
+
+    #[test]
+    fn author_attribute_single_part_fallback_is_firstname_only() {
+        // A single-token value that does not match the author pattern partitions
+        // to `firstname` alone, with no middle or last name.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Jane,");
+
+        assert_eq!(
+            parser.attribute_value("author"),
+            InterpretedValue::Value("Jane,")
+        );
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Jane,")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Unset
+        );
+        assert_eq!(parser.attribute_value("lastname"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn author_attribute_four_or_more_parts_with_inline_email() {
+        // A four-plus-part fallback value that carries a trailing `<email>` must
+        // split the email off before partitioning, so it lands in `email` rather
+        // than being absorbed into `lastname`.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: Leroy  Harold  Scherer,  Jr. <leroy@example.com>");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("email"),
+            InterpretedValue::Value("leroy@example.com")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials"),
+            InterpretedValue::Value("LHS")
+        );
+    }
+
+    #[test]
+    fn author_attribute_reference_expands_and_partitions() {
+        // A `:author:` value given entirely as an attribute reference is expanded
+        // and then partitioned by the names-only rules, so it yields the same
+        // metadata as the equivalent literal four-plus-part name.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":full-name: Leroy Harold Scherer, Jr.\n:author: {full-name}");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials"),
+            InterpretedValue::Value("LHS")
+        );
+    }
+
+    #[test]
+    fn author_attribute_reference_within_larger_value_expands_and_partitions() {
+        // The same partitioning applies when the reference is only part of the
+        // value (so the single-attribute fast path is not taken) and the expanded
+        // result still fails the author pattern.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":rest: Harold Scherer, Jr.\n:author: Leroy {rest}");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("Leroy")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Harold")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Scherer, Jr.")
+        );
+    }
+
+    #[test]
+    fn author_attribute_non_breaking_space_is_not_a_name_separator() {
+        // Only ASCII whitespace separates name parts. A non-breaking space
+        // (U+00A0) joining two words keeps them as a single first name, matching
+        // Ruby's whitespace split.
+        let mut parser = Parser::default();
+        let _doc = parser.parse(":author: John\u{a0}Doe Scherer, Jr.");
+
+        assert_eq!(
+            parser.attribute_value("firstname"),
+            InterpretedValue::Value("John\u{a0}Doe")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("Scherer,")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname"),
+            InterpretedValue::Value("Jr.")
+        );
+    }
+
+    #[test]
     fn sets_author_attributes_from_author_attribute_two_names() {
         let mut parser = Parser::default();
         let _doc = parser.parse(":author: Jane Doe");
@@ -1222,6 +1486,69 @@ mod tests {
         // The longhand `[id=…]` form is equivalent.
         let doc = Parser::default().parse("[id=docid]\n= Document Title");
         assert_eq!(doc.header().id(), Some("docid"));
+    }
+
+    #[test]
+    fn stacked_block_attributes_above_title() {
+        // Multiple block attribute lines may stack above the document title;
+        // each folds into the document's metadata and the title is still
+        // recovered (see #821). Here an `[#id]` line and a `[reftext="…"]` line
+        // both sit above the title.
+        let doc = Parser::default()
+            .parse("[#docid]\n[reftext=\"Links and Stuff\"]\n= Links & Stuff\n\nBody.");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Links &amp; Stuff"));
+        assert_eq!(header.id(), Some("docid"));
+        assert_eq!(doc.id(), Some("docid"));
+        assert_eq!(
+            doc.attribute_value("reftext"),
+            InterpretedValue::Value("Links and Stuff")
+        );
+        assert_eq!(rendered_paragraphs(&doc), vec!["Body."]);
+    }
+
+    #[test]
+    fn stacked_block_attributes_combine_roles() {
+        // Roles from stacked block attribute lines all fold into the document's
+        // `role` attribute (space-joined) and are surfaced through the block
+        // API, alongside an ID set on a separate line.
+        let doc = Parser::default().parse("[#docid]\n[.one]\n[.two]\n= Document Title");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Document Title"));
+        assert_eq!(header.id(), Some("docid"));
+        assert_eq!(
+            doc.attribute_value("role"),
+            InterpretedValue::Value("one two")
+        );
+        assert_eq!(header.roles(), vec!["one", "two"]);
+    }
+
+    #[test]
+    fn stacked_block_attributes_require_a_following_title() {
+        // Stacked block attribute lines are only folded when a document title
+        // eventually follows. Without one, the run is left for the block parser
+        // and no title is recognized.
+        let doc = Parser::default().parse("[#docid]\n[reftext=\"Stuff\"]\n\nBody.");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.id(), None);
+        assert_eq!(doc.attribute_value("reftext"), InterpretedValue::Unset);
+    }
+
+    #[test]
+    fn stacked_block_attributes_stop_at_a_block_anchor() {
+        // A `[[anchor]]` line breaks the run of foldable metadata lines: the
+        // scan stops there without seeing the title, so nothing above it is
+        // folded and the header terminates (matching the single-line anchor
+        // rejection).
+        let doc = Parser::default().parse("[#docid]\n[[anchor]]\n= Some Title");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.id(), None);
     }
 
     #[test]

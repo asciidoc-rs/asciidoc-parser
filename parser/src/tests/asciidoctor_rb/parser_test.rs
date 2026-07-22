@@ -1120,12 +1120,10 @@ fn skips_blank_author_entries_in_implicit_author_line() {
     assert_eq!(a[1].email.as_deref(), Some("john.smith@asciidoc.org"));
 }
 
-// Incompatibility (https://github.com/asciidoc-rs/asciidoc-parser/issues/758):
-// the `:author:` attribute-entry path in this crate does not partition a
-// 4+-part name (it stores the whole value as `firstname` without condensing
-// whitespace), whereas Asciidoctor assigns the trailing parts to `lastname`.
-non_normative!(
-    r#"
+#[test]
+fn parse_name_with_more_than_3_parts_in_author_attribute() {
+    verifies!(
+        r#"
   test 'parse name with more than 3 parts in author attribute' do
     doc = empty_document
     parse_header_metadata ':author: Leroy  Harold  Scherer,  Jr.', doc
@@ -1136,7 +1134,34 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // Unlike the implicit author line (which recognizes at most three
+    // space-separated names and otherwise stores the whole line as the author),
+    // the `:author:` attribute entry is partitioned by splitting on whitespace
+    // into at most three parts. A name with four or more parts keeps its
+    // trailing parts in `lastname`, and repeated interior whitespace is
+    // condensed (issue #758).
+    let mut parser = Parser::default();
+    parser.parse(":author: Leroy  Harold  Scherer,  Jr.");
+
+    assert_eq!(
+        parser.attribute_value("author"),
+        InterpretedValue::Value("Leroy Harold Scherer, Jr.")
+    );
+    assert_eq!(
+        parser.attribute_value("firstname"),
+        InterpretedValue::Value("Leroy")
+    );
+    assert_eq!(
+        parser.attribute_value("middlename"),
+        InterpretedValue::Value("Harold")
+    );
+    assert_eq!(
+        parser.attribute_value("lastname"),
+        InterpretedValue::Value("Scherer, Jr.")
+    );
+}
 
 #[test]
 fn use_explicit_authorinitials_if_set_after_implicit_author_line() {

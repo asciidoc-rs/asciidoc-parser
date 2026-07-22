@@ -53,6 +53,12 @@ pub enum TocMode {
 impl TocMode {
     /// Resolves the table-of-contents placement from a parser's current `toc`
     /// attribute state.
+    ///
+    /// This reads the raw stored `toc-placement`, distinguishing a never-set
+    /// attribute from an explicit unset tombstone. The derived `toc-position` /
+    /// `toc-placement` / `toc-class` document attributes are materialized from
+    /// the resolved placement *after* this runs — see
+    /// [`Parser::materialize_toc_attributes`](crate::Parser).
     pub(crate) fn from_parser(parser: &Parser) -> Self {
         let value = parser.attribute_value("toc");
         if value == InterpretedValue::Unset {

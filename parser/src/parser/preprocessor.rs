@@ -240,6 +240,22 @@ impl<'p> PreprocessorState<'p> {
         let mut has_reported_file = file_name.is_none();
         let mut source_span = Span::new(source);
 
+        // Comment-block tracking. Asciidoctor's `PreprocessorReader` never
+        // processes preprocessor directives inside a comment block: the parser
+        // reads the block's content with line processing disabled. This crate
+        // preprocesses in a separate pass, so it tracks that state here. See
+        // issue #810.
+        //
+        // `comment_block_delimiter` is the closing delimiter of the comment
+        // block currently open (a `////` run, or the `--` of a `[comment]` open
+        // block); `in_comment_paragraph` is set while inside the raw portion of
+        // a `[comment]` paragraph; `comment_style_pending` is set once a
+        // `[comment]` block style has been seen and holds while the block's
+        // remaining metadata is read, until the block it introduces is reached.
+        let mut comment_block_delimiter: Option<String> = None;
+        let mut in_comment_paragraph = false;
+        let mut comment_style_pending = false;
+
         while !source_span.is_empty() {
             let original_source = source_span;
 
@@ -247,6 +263,40 @@ impl<'p> PreprocessorState<'p> {
             source_span = after;
 
             let source_line_number = line.line();
+
+            // Inside a comment block, every line is raw: emit it verbatim, with
+            // no directive or include processing, until the closing delimiter.
+            if let Some(delimiter) = &comment_block_delimiter {
+                let closes = line.data() == delimiter;
+                self.emit_line(
+                    line.data(),
+                    file_name,
+                    source_line_number,
+                    &mut has_reported_file,
+                );
+                if closes {
+                    comment_block_delimiter = None;
+                }
+                continue;
+            }
+
+            // The lines of a `[comment]` paragraph after its first are likewise
+            // raw, up to the blank line that ends the paragraph. (Its first line
+            // is still processed, matching Asciidoctor's one-line look-ahead: by
+            // the time a paragraph is recognized as a comment, the reader has
+            // already visited that line.)
+            if in_comment_paragraph {
+                if line.data().is_empty() {
+                    in_comment_paragraph = false;
+                }
+                self.emit_line(
+                    line.data(),
+                    file_name,
+                    source_line_number,
+                    &mut has_reported_file,
+                );
+                continue;
+            }
 
             // Conditional preprocessor directives (`ifdef`, `ifndef`, `ifeval`,
             // `endif`) are handled before anything else so they take effect even
@@ -259,6 +309,12 @@ impl<'p> PreprocessorState<'p> {
                 // emitted line must re-anchor the source map (its original line
                 // number no longer matches the output line number).
                 has_reported_file = false;
+
+                // A directive as the first content line after `[comment]` ends
+                // the block's metadata run (Asciidoctor processes that first
+                // line via its one-line look-ahead), so the pending comment
+                // style no longer applies.
+                comment_style_pending = false;
 
                 if caps.get(1).is_some() {
                     // Escaped directive (e.g. `\ifdef::foo[]`): not processed.
@@ -292,6 +348,71 @@ impl<'p> PreprocessorState<'p> {
             if self.skipping() {
                 has_reported_file = false;
                 continue;
+            }
+
+            // A `////` line (four or more slashes, nothing else) opens a comment
+            // block. Its content is raw, so it is emitted verbatim and no
+            // directive within it is processed until the matching closing
+            // delimiter. See issue #810.
+            if is_comment_block_delimiter(line.data()) {
+                comment_block_delimiter = Some(line.data().to_owned());
+                // A `////` block is self-identifying, so it consumes any pending
+                // `[comment]` style; clearing it keeps the block that follows
+                // this one independent.
+                comment_style_pending = false;
+                self.emit_line(
+                    line.data(),
+                    file_name,
+                    source_line_number,
+                    &mut has_reported_file,
+                );
+                continue;
+            }
+
+            // With a `[comment]` block style pending, classify the block it
+            // introduces. An open block (`--`) is a comment block, raw up to the
+            // closing `--`; otherwise the block is a comment paragraph, whose
+            // lines after the first are raw (see above). Further block metadata
+            // (a title `.text`, an anchor or attribute list `[…]`) may sit
+            // between the `[comment]` line and the block it styles; the pending
+            // style holds across it until the block itself is reached.
+            if comment_style_pending {
+                if line.data() == "--" {
+                    comment_block_delimiter = Some("--".to_owned());
+                    comment_style_pending = false;
+                    self.emit_line(
+                        line.data(),
+                        file_name,
+                        source_line_number,
+                        &mut has_reported_file,
+                    );
+                    continue;
+                }
+
+                if !is_block_metadata_line(line.data()) {
+                    // The block's content begins here. The first line of a
+                    // comment paragraph is processed as usual (falling through
+                    // below); only its subsequent lines are raw. NOTE: if that
+                    // first line is itself an `include::` directive, the merged
+                    // content is preprocessed with fresh comment state, so a
+                    // directive on its own subsequent lines is still evaluated.
+                    // That case (an include on the very first line of a comment
+                    // paragraph) is an accepted limitation of preprocessing in a
+                    // separate pass.
+                    if !line.data().is_empty() {
+                        in_comment_paragraph = true;
+                    }
+                    comment_style_pending = false;
+                }
+            }
+
+            // A block attribute list sets or replaces the pending block style:
+            // `[comment]` marks the upcoming block a comment, another positional
+            // style (`[source]`, …) overrides it, and a bracketed line without a
+            // positional style (an anchor `[[id]]`, a shorthand- or named-only
+            // list) leaves the pending style unchanged.
+            if let Some(is_comment) = self.attrlist_block_style_is_comment(line.data()) {
+                comment_style_pending = is_comment;
             }
 
             if self.can_have_attribute
@@ -736,6 +857,31 @@ impl<'p> PreprocessorState<'p> {
             self.output.push_str(line.data());
             self.output.push('\n');
         }
+    }
+
+    /// Determine how a block attribute-list line affects the pending block
+    /// style, for tracking a `[comment]` style across a block's metadata.
+    ///
+    /// Returns `Some(true)` when `line` is an attribute list whose positional
+    /// block style is `comment`, `Some(false)` when it sets some other
+    /// positional style (which overrides an earlier `[comment]`), and `None`
+    /// when it is not a style-setting line — a block title, an anchor
+    /// (`[[id]]`), a shorthand- or named-only attribute list, or any
+    /// non-attribute-list line — so the pending style is left unchanged.
+    fn attrlist_block_style_is_comment(&self, line: &str) -> Option<bool> {
+        // Only a bracketed attribute list carries a positional block style.
+        let inner = line.strip_prefix('[')?.strip_suffix(']')?;
+
+        // A block anchor (`[[id]]`) is not a style.
+        if inner.starts_with('[') {
+            return None;
+        }
+
+        let attrlist = Attrlist::parse(Span::new(inner), self.parser, AttrlistContext::Block)
+            .item
+            .item;
+
+        attrlist.block_style().map(|style| style == "comment")
     }
 
     /// Apply attribute substitution to a string, replacing {attribute-name}
@@ -1400,6 +1546,32 @@ fn has_conditional_prefix(line: &str) -> bool {
 
 fn to_owned(maybe_file_name: Option<&str>) -> Option<String> {
     maybe_file_name.map(|n| n.to_string())
+}
+
+/// Returns `true` if `line` is a `////` comment-block delimiter: a run of four
+/// or more slashes and nothing else. A shorter run (`//`, `///`) is a line
+/// comment, not a delimiter. This mirrors the comment case of
+/// [`RawDelimitedBlock::is_valid_delimiter`](crate::blocks::RawDelimitedBlock).
+fn is_comment_block_delimiter(line: &str) -> bool {
+    line.len() >= 4 && line.bytes().all(|b| b == b'/')
+}
+
+/// Returns `true` if `line` is block metadata that may appear between a
+/// `[comment]` attribute line and the block it styles: an attribute-list or
+/// anchor line (`[…]`), or a block title (`.text`). Used only to carry
+/// comment-block state across the metadata preceding a comment paragraph or
+/// open block, so that the paragraph's true first line is the one processed.
+fn is_block_metadata_line(line: &str) -> bool {
+    if line.starts_with('[') {
+        return true;
+    }
+
+    // A block title is a leading `.` followed by a non-space, non-`.`
+    // character, so it is neither a `....` delimiter nor a `. ` list marker.
+    matches!(
+        line.strip_prefix('.'),
+        Some(rest) if rest.starts_with(|c: char| !c.is_whitespace() && c != '.')
+    )
 }
 
 /// Parse the attribute list of an `include::` directive from the directive's
@@ -3096,6 +3268,129 @@ mod tests {
         assert_eq!(
             conditional_output("head\n\nifdef::foo[dropped]\n\ntail"),
             "head\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_block_suppresses_conditional_directive() {
+        // A conditional directive inside a `////` comment block is not
+        // processed: the block's content is emitted verbatim so it parses as a
+        // comment (see issue #810). `foo` is unset, so were the directive
+        // processed, `hidden` would be dropped and the block corrupted.
+        assert_eq!(
+            conditional_output("////\nifdef::foo[]\nhidden\nendif::[]\n////\n\ntail"),
+            "////\nifdef::foo[]\nhidden\nendif::[]\n////\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn longer_comment_delimiter_closes_only_on_exact_match() {
+        // A comment block closes on a line matching its opening delimiter
+        // exactly; a shorter run of slashes inside it is ordinary content.
+        assert_eq!(
+            conditional_output("/////\nifdef::foo[x]\n////\nstill in comment\n/////\ntail"),
+            "/////\nifdef::foo[x]\n////\nstill in comment\n/////\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_block_suppresses_include_expansion() {
+        // An include directive inside a comment block is likewise left
+        // untouched rather than expanded.
+        let source = "////\ninclude::sub.adoc[]\n////\n\ntail";
+        let handler = InlineFileHandler::from_pairs([("sub.adoc", "Included.")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
+        assert_eq!(output, "////\ninclude::sub.adoc[]\n////\n\ntail\n");
+    }
+
+    #[test]
+    fn comment_open_block_suppresses_conditional_directive() {
+        // A `[comment]`-styled open block (`--`) is a comment block: a directive
+        // within it is emitted verbatim.
+        assert_eq!(
+            conditional_output("[comment]\n--\nfirst\nifdef::foo[dropped]\nlast\n--\n\ntail"),
+            "[comment]\n--\nfirst\nifdef::foo[dropped]\nlast\n--\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_paragraph_suppresses_directive_after_first_line() {
+        // In a `[comment]` paragraph the first line is still processed, but its
+        // subsequent lines are raw (matching Asciidoctor's one-line
+        // look-ahead). The directive on the second line is left untouched.
+        assert_eq!(
+            conditional_output("[comment]\nfirst line\nifdef::foo[dropped]\n\ntail"),
+            "[comment]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_style_carried_across_block_metadata() {
+        // Block metadata (a title, then an anchor) may sit between the
+        // `[comment]` line and the paragraph it styles. The comment style must
+        // carry across that metadata so the paragraph's true first line is the
+        // one processed and its later lines stay raw. Here the directive on the
+        // paragraph's second line must be left untouched.
+        assert_eq!(
+            conditional_output(
+                "[comment]\n.title\n[[id]]\nfirst line\nifdef::foo[dropped]\n\ntail"
+            ),
+            "[comment]\n.title\n[[id]]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_style_cleared_after_comment_block_delimiter() {
+        // A pending `[comment]` style consumed by a `////` block must not leak
+        // into the block that follows it: the directive on the next paragraph's
+        // second line must still be processed (here, expanded to `VISIBLE`).
+        assert_eq!(
+            conditional_output(":foo:\n\n[comment]\n////\nc\n////\n\nnext\nifdef::foo[VISIBLE]"),
+            ":foo:\n\n[comment]\n////\nc\n////\n\nnext\nVISIBLE\n"
+        );
+    }
+
+    #[test]
+    fn later_style_overrides_comment_style() {
+        // A positional style on a later attribute list (`[source]`) overrides an
+        // earlier `[comment]`, so the block is a real listing and an `include::`
+        // within it is processed rather than left raw.
+        let source = "[comment]\n[source]\n----\ninclude::sub.adoc[]\n----\n";
+        let handler = InlineFileHandler::from_pairs([("sub.adoc", "Included.")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
+        assert_eq!(output, "[comment]\n[source]\n----\nIncluded.\n----\n");
+    }
+
+    #[test]
+    fn non_style_attribute_list_keeps_comment_style() {
+        // A bracketed line without a positional style (here a role-only
+        // shorthand) is not a style override, so an earlier `[comment]` still
+        // governs the block and the directive on the paragraph's later line
+        // stays raw.
+        assert_eq!(
+            conditional_output("[comment]\n[.rolename]\nfirst line\nifdef::foo[dropped]\n\ntail"),
+            "[comment]\n[.rolename]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_style_carried_across_metadata_before_open_block() {
+        // The same carry-across applies before a `[comment]` open block: a title
+        // between `[comment]` and `--` must not stop the block from being
+        // recognized as a comment.
+        assert_eq!(
+            conditional_output("[comment]\n.title\n--\nifdef::foo[dropped]\n--\n\ntail"),
+            "[comment]\n.title\n--\nifdef::foo[dropped]\n--\n\ntail\n"
         );
     }
 
