@@ -427,19 +427,16 @@ impl<'src> SectionBlock<'src> {
     /// Returns the ID under which this section is registered in the catalog, if
     /// any, as an owned string.
     ///
-    /// Mirrors the effective-ID precedence of [`IsBlock::id`] (explicit anchor,
-    /// then attribute-list ID, then the auto-generated section ID) but without
-    /// the `&'src self` borrow, so the document-order title resolution pass can
-    /// key titles by ID while walking `&mut` blocks.
+    /// Mirrors the effective-ID precedence of [`IsBlock::id`] (attribute-list
+    /// ID, then explicit anchor, then the auto-generated section ID) but
+    /// without the `&'src self` borrow, so the document-order title
+    /// resolution pass can key titles by ID while walking `&mut` blocks.
     pub(crate) fn reference_id(&self) -> Option<String> {
-        self.anchor
-            .map(|a| a.data().to_string())
-            .or_else(|| {
-                self.attrlist
-                    .as_ref()
-                    .and_then(|attrlist| attrlist.id())
-                    .map(str::to_string)
-            })
+        self.attrlist
+            .as_ref()
+            .and_then(|attrlist| attrlist.id())
+            .map(str::to_string)
+            .or_else(|| self.anchor.map(|a| a.data().to_string()))
             .or_else(|| self.section_id.clone())
     }
 
@@ -532,11 +529,15 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
     }
 
     fn id(&'src self) -> Option<&'src str> {
-        // First try the default implementation (explicit IDs from anchor or attrlist)
-        self.anchor()
-            .map(|a| a.data())
-            .or_else(|| self.attrlist().and_then(|attrlist| attrlist.id()))
-            // Fall back to auto-generated ID if no explicit ID is set
+        // An explicit ID above the heading wins, and an attribute-list ID
+        // (`[id=…]`/`[#id]`) takes precedence over a `[[id]]` block anchor —
+        // matching the precedence used when the section registers itself in the
+        // catalog (see `attr_or_anchor_id` in `SectionBlock::parse`), so this
+        // accessor reports the same ID the section is cross-referenced under.
+        self.attrlist()
+            .and_then(|attrlist| attrlist.id())
+            .or_else(|| self.anchor().map(|a| a.data()))
+            // Fall back to auto-generated ID if no explicit ID is set.
             .or(self.section_id.as_deref())
     }
 }
@@ -787,6 +788,19 @@ fn peer_or_ancestor_section<'src>(
     // parser state.
     let mut temp_parser = Parser::default();
 
+    // Block-metadata parsing consults `leveloffset` to decide whether a comment
+    // separating collected metadata from a following heading is transparent
+    // (see `skip_comments_before_section`): a bare `=` counts as a section only
+    // when a positive offset promotes it. Mirror the live parser's offset onto
+    // the temporary parser so the boundary look-ahead makes the same decision
+    // the real parse will — otherwise a peer/ancestor section reached across
+    // such a comment would be missed and wrongly nested. The stored offset is
+    // already an absolute integer, so it needs no further resolution.
+    let level_offset = parser.level_offset();
+    if level_offset != 0 {
+        temp_parser.set_attribute_by_value_from_header("leveloffset", level_offset.to_string());
+    }
+
     let block_metadata_maw = BlockMetadata::parse(source, &mut temp_parser);
 
     let block_metadata = block_metadata_maw.item;
@@ -794,7 +808,14 @@ fn peer_or_ancestor_section<'src>(
         return false;
     }
 
-    let source_after_metadata = block_metadata.block_start;
+    // Discard any blank lines between the collected metadata and the heading,
+    // mirroring the tolerance `Block::parse_internal` applies on the live parse
+    // path. Block metadata may be separated from its block by blank lines
+    // (including the blank lines around a comment that block-metadata parsing
+    // skips over), and `parse_title_line` requires a non-blank first line, so
+    // without this the boundary check would miss such a heading and wrongly fold
+    // the following peer/ancestor section into the current one.
+    let source_after_metadata = block_metadata.block_start.discard_empty_lines();
 
     // Compare effective levels: the boundary heading's `leveloffset` is read
     // from the *live* parser (every block up to this point, including any
@@ -1895,6 +1916,37 @@ mod tests {
                     col: 1,
                     offset: 24
                 }
+            );
+        }
+
+        #[test]
+        fn comment_transfer_boundary_respects_leveloffset() {
+            // Under `:leveloffset: +2`, `== Parent` is level 3 and a bare
+            // `= Child` is level 2 — an ancestor that must end Parent. The
+            // `[[x]]` anchor and the `// comment` before `= Child` transfer to
+            // it, and the section-boundary look-ahead must apply the active
+            // `leveloffset` (rather than a default offset of zero) so `= Child`
+            // is recognized as the boundary and lands as a sibling of Parent,
+            // not nested inside it. Regression test for the boundary check
+            // reading the offset from its throwaway parser.
+            let doc = Parser::default().parse(
+                "= Doc\n:leveloffset: +2\n\n== Parent\n\npara\n\n[[x]]\n// comment\n= Child\n\nbody",
+            );
+
+            let top: Vec<_> = doc.nested_blocks().collect();
+            assert_eq!(top.len(), 2, "Child must be a sibling of Parent");
+
+            let parent = top.first().unwrap();
+            let child = top.last().unwrap();
+            assert_eq!(parent.id(), Some("_parent"));
+
+            // The transferred anchor gives Child its id, and Child owns the
+            // following paragraph as a child rather than sitting under Parent.
+            assert_eq!(child.id(), Some("x"));
+            assert!(
+                parent
+                    .nested_blocks()
+                    .all(|b| b.raw_context().as_ref() != "section")
             );
         }
 
