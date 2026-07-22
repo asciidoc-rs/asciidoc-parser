@@ -6,7 +6,8 @@ use crate::{
     parser::{
         AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime,
         built_in_attrs::{
-            built_in_attr, max_attribute_value_size_default, synthesized_attr, user_home_default,
+            built_in_attr, derived_backend_value, max_attribute_value_size_default,
+            synthesized_attr, user_home_default,
         },
         is_datetime_attribute,
     },
@@ -94,6 +95,12 @@ impl ResolvedAttributes {
         // [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
         if self.tracks_outfilesuffix(name) {
             return self.attribute_value("outfilesuffix");
+        }
+
+        // `basebackend` / `filetype` are derived on the fly from the current
+        // `backend` (see [`derived_backend_value`]) rather than stored.
+        if let Some(value) = derived_backend_value(name, &self.attribute_values) {
+            return value;
         }
 
         match self.effective_attribute(name) {
@@ -233,6 +240,11 @@ impl ResolvedAttributes {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
+        // A derived `basebackend` / `filetype` is present only while `backend`
+        // resolves to a non-empty value (see [`derived_backend_value`]).
+        if derived_backend_value(name, &self.attribute_values).is_some() {
+            return true;
+        }
         self.effective_attribute(name).is_some() || self.resolve_datetime_attribute(name).is_some()
     }
 
@@ -252,6 +264,13 @@ impl ResolvedAttributes {
 
         if self.tracks_outfilesuffix(name) {
             return self.is_attribute_set("outfilesuffix");
+        }
+
+        // A derived `basebackend` / `filetype` holds a concrete (set) value
+        // whenever it is present, i.e. while `backend` is non-empty (see
+        // [`derived_backend_value`]).
+        if derived_backend_value(name, &self.attribute_values).is_some() {
+            return true;
         }
 
         self.effective_attribute(name)

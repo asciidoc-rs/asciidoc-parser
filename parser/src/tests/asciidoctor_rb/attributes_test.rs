@@ -68,10 +68,11 @@
 //! * Non-ASCII attribute names and names with spaces are not accepted.
 //! * A counter modifies a locked (API-set or built-in) attribute rather than
 //!   leaving it unchanged.
-//! * The derived `backend*` / `basebackend*` / `filetype*` / `outfilesuffix` /
-//!   `toc-position` / `toc-placement` / `toc-class` attributes are not
-//!   materialized as queryable document attributes (this crate resolves them
-//!   through dedicated accessors).
+//! * The derived `toc-position` / `toc-placement` / `toc-class` attributes are
+//!   not materialized as queryable document attributes (this crate resolves the
+//!   table-of-contents configuration through the dedicated `Document::toc_*`
+//!   accessors). The `backend*` / `basebackend*` / `filetype*` /
+//!   `outfilesuffix` / `doctype-*` family *is* materialized (see #738).
 //! * Safe-mode masking of `docdir`/`docfile`, the unterminated-header-comment
 //!   behavior, and the transfer of trailing anchors/attributes onto a following
 //!   section all differ.
@@ -1207,10 +1208,9 @@ mod assignment {
         assert_css(&doc, "h2#_heading", 1);
     }
 
-    // Tracked in #738.
     #[test]
     fn backend_and_doctype_attributes_are_set_by_default_in_default_configuration() {
-        non_normative!(
+        verifies!(
             r#"
     test 'backend and doctype attributes are set by default in default configuration' do
       input = <<~'EOS'
@@ -1243,17 +1243,31 @@ mod assignment {
 "#
         );
 
-        // Divergence: this crate materializes only `doctype` as a queryable
-        // document attribute. It does not populate the derived `backend`,
-        // `basebackend`, `filetype`, `outfilesuffix`, or `*-doctype-*` /
-        // `*-html5` attributes that Asciidoctor sets by default, so only
-        // `doctype` can be verified here.
+        // The derived backend / basebackend / filetype / doctype family is
+        // materialized as queryable document attributes. A `''` Ruby value maps
+        // to an empty [`InterpretedValue::Value`] here; each key must be present
+        // (`has_attribute`) and resolve to the expected value.
         let doc = Parser::default().parse("= Document Title\nAuthor Name\n\ncontent");
-        assert_eq!(
-            doc.attribute_value("doctype"),
-            InterpretedValue::Value("article")
-        );
-        assert_eq!(doc.attribute_value("backend"), InterpretedValue::Unset);
+        for (key, value) in [
+            ("backend", "html5"),
+            ("backend-html5", ""),
+            ("backend-html5-doctype-article", ""),
+            ("outfilesuffix", ".html"),
+            ("basebackend", "html"),
+            ("basebackend-html", ""),
+            ("basebackend-html-doctype-article", ""),
+            ("doctype", "article"),
+            ("doctype-article", ""),
+            ("filetype", "html"),
+            ("filetype-html", ""),
+        ] {
+            assert!(doc.has_attribute(key), "missing attribute {key:?}");
+            assert_eq!(
+                doc.attribute_value(key),
+                InterpretedValue::Value(value),
+                "unexpected value for {key:?}"
+            );
+        }
     }
 
     // Out of scope: targets the DocBook backend, which is out of scope for this
@@ -1335,10 +1349,9 @@ mod assignment {
 "#
     );
 
-    // Tracked in #738.
     #[test]
     fn backend_attributes_defined_in_document_options_overrides_backend_attribute_in_document() {
-        non_normative!(
+        verifies!(
             r#"
     test 'backend attributes defined in document options overrides backend attribute in document' do
       doc = document_from_string(':backend: docbook5', safe: Asciidoctor::SafeMode::SAFE, attributes: { 'backend' => 'html5' })
@@ -1351,10 +1364,10 @@ mod assignment {
 "#
         );
 
-        // Divergence: the API-set `backend` value wins over the document
-        // assignment, but this crate does not materialize the derived
-        // `backend-html5` / `basebackend` attributes that Asciidoctor
-        // synthesizes, so only the winning `backend` value is verified.
+        // The API-set `backend` value (locked, `ApiOnly`) wins over the document
+        // `:backend: docbook5` assignment, and the derived `backend-html5` /
+        // `basebackend` / `basebackend-html` attributes are synthesized from the
+        // winning value.
         let doc = Parser::default()
             .with_safe_mode(SafeMode::Safe)
             .with_intrinsic_attribute("backend", "html5", ModificationContext::ApiOnly)
@@ -1363,6 +1376,12 @@ mod assignment {
             doc.attribute_value("backend"),
             InterpretedValue::Value("html5")
         );
+        assert!(doc.has_attribute("backend-html5"));
+        assert_eq!(
+            doc.attribute_value("basebackend"),
+            InterpretedValue::Value("html")
+        );
+        assert!(doc.has_attribute("basebackend-html"));
     }
 
     // Out of scope: exercises Ruby's mutable node attribute API (`Block.new` /
@@ -1578,7 +1597,9 @@ mod assignment {
 "#
     );
 
-    // Tracked in #738.
+    // Tracked in #840 (split from #738): the `toc-position` / `toc-placement` /
+    // `toc-class` attributes are not materialized as queryable document
+    // attributes.
     #[test]
     fn verify_toc_attribute_matrix() {
         non_normative!(

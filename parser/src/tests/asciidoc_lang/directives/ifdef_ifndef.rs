@@ -200,13 +200,15 @@ Otherwise, the content is not included.
 "#
     );
 
-    // OR (comma): one of the attributes is set, so the content is included.
-    let doc =
-        Parser::default().parse(":backend-html5:\n\nifdef::backend-html5,backend-docbook5[Shown.]");
+    // OR (comma): the default backend is `html5`, so the derived `backend-html5`
+    // flag is set and the content is included.
+    let doc = Parser::default().parse("ifdef::backend-html5,backend-docbook5[Shown.]");
     assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
 
-    // OR (comma): neither attribute is set, so the content is not included.
-    let doc = Parser::default().parse("ifdef::backend-html5,backend-docbook5[Shown.]\n\nTail.");
+    // OR (comma): with a different backend neither flag is set, so the content
+    // is not included.
+    let doc = Parser::default()
+        .parse(":backend: pdf\n\nifdef::backend-html5,backend-docbook5[Shown.]\n\nTail.");
     assert_eq!(rendered_paragraphs(&doc), vec!["Tail."]);
 
     // AND (plus): all attributes are set, so the content is included.
