@@ -17,7 +17,7 @@ impl<'src> AuthorLine<'src> {
     pub(crate) fn parse(source: Span<'src>, parser: &mut Parser) -> Self {
         let authors: Vec<Author> = split_authors(source.data())
             .into_iter()
-            .filter_map(|raw_author| Author::parse(raw_author, parser))
+            .filter_map(|raw_author| Author::parse(raw_author, parser, false))
             .collect();
 
         for (index, author) in authors.iter().enumerate() {

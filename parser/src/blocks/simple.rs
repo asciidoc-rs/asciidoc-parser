@@ -395,7 +395,7 @@ fn parse_lines<'src>(
         if !stop_for_list_items
             && skipped_comment_line
             && style == SimpleBlockStyle::Paragraph
-            && is_section_header(line.data())
+            && is_section_header(line.data(), parser.level_offset())
         {
             break;
         }
@@ -589,26 +589,43 @@ impl<'src> HasSpan<'src> for SimpleBlock<'src> {
     }
 }
 
-/// Returns true if the line looks like a section header.
-/// Matches `== `, `=== `, etc. (AsciiDoc) or `## `, `### `, etc. (Markdown).
-fn is_section_header(line: &str) -> bool {
-    // AsciiDoc style: `== `, `=== `, etc. (at least 2 `=` followed by space)
-    if line.starts_with("==") {
-        let rest = line.trim_start_matches('=');
-        if rest.starts_with(' ') {
-            return true;
-        }
+/// Reports whether `line` is a section heading (so a paragraph that has already
+/// swallowed a leading comment line must stop before it, letting the heading be
+/// parsed as its own section).
+///
+/// `level_offset` is the running `leveloffset` document attribute, which folds
+/// into the heading's effective level exactly as in
+/// [`SectionBlock::parse`](crate::blocks::SectionBlock). A heading of two or
+/// more markers (`== `/`## `, effective level 1+, or clamped up to 1 under a
+/// negative offset) is always a section. A single-marker heading (`= `/`# `) is
+/// a document title rather than a section *unless* a positive offset lifts it
+/// to level 1 or beyond — mirroring the level-0 rule in
+/// [`parse_title_line`](crate::blocks::section).
+fn is_section_header(line: &str, level_offset: i32) -> bool {
+    // AsciiDoc `=` style or Markdown `#` style.
+    let rest = if line.starts_with('=') {
+        line.trim_start_matches('=')
+    } else if line.starts_with('#') {
+        line.trim_start_matches('#')
+    } else {
+        return false;
+    };
+
+    // A section marker is one to six characters followed by a blank (space or
+    // tab), matching the whitespace `parse_title_line` requires after the
+    // marker (`take_required_whitespace`).
+    let count = line.len() - rest.len();
+    if count == 0 || count > 6 || !rest.starts_with([' ', '\t']) {
+        return false;
     }
 
-    // Markdown style: `## `, `### `, etc. (at least 2 `#` followed by space)
-    if line.starts_with("##") {
-        let rest = line.trim_start_matches('#');
-        if rest.starts_with(' ') {
-            return true;
-        }
-    }
-
-    false
+    // A bare `=`/`#` (syntactic level 0) heads a section only when a positive
+    // `leveloffset` promotes it to level 1 or deeper; otherwise it is a
+    // document title, not a section. Any deeper marker is always a section (a
+    // negative offset that would push it below level 1 is clamped, not
+    // rejected).
+    let syntactic_level = (count - 1) as i32;
+    syntactic_level > 0 || syntactic_level.saturating_add(level_offset) >= 1
 }
 
 #[cfg(test)]
@@ -891,5 +908,55 @@ mod tests {
             mi.item.rendered_content().unwrap(),
             "a<b>c <strong>bold</strong>"
         );
+    }
+
+    mod is_section_header {
+        use super::super::is_section_header;
+
+        #[test]
+        fn multi_marker_is_always_a_section_regardless_of_offset() {
+            // Two or more markers followed by a space are always a section, at
+            // any offset (a negative offset that would push the level below 1 is
+            // clamped in `parse_title_line`, not rejected).
+            assert!(is_section_header("== Section", 0));
+            assert!(is_section_header("=== Section", 0));
+            assert!(is_section_header("## Section", 0));
+            assert!(is_section_header("== Section", -1));
+        }
+
+        #[test]
+        fn single_marker_is_a_section_only_under_positive_offset() {
+            // A bare `=`/`#` is a document title, not a section, unless a
+            // positive `leveloffset` promotes it to level 1 or beyond.
+            assert!(!is_section_header("= Title", 0));
+            assert!(!is_section_header("# Title", 0));
+            assert!(is_section_header("= Title", 1));
+            assert!(is_section_header("# Title", 1));
+            assert!(is_section_header("= Title", 2));
+        }
+
+        #[test]
+        fn requires_a_blank_after_the_marker() {
+            assert!(!is_section_header("==nospace", 0));
+            assert!(!is_section_header("=nospace", 1));
+            assert!(!is_section_header("##nospace", 0));
+        }
+
+        #[test]
+        fn accepts_a_tab_after_the_marker() {
+            // `parse_title_line` accepts a tab (not just a space) after the
+            // marker, so the lookahead must too, or a valid tab-delimited
+            // heading would be swallowed as paragraph text.
+            assert!(is_section_header("==\tSection", 0));
+            assert!(is_section_header("=\tSection", 1));
+            assert!(!is_section_header("=\tSection", 0));
+        }
+
+        #[test]
+        fn non_marker_and_over_long_marker_are_not_sections() {
+            assert!(!is_section_header("paragraph", 1));
+            // Seven markers exceed the level-5 maximum, so this is not a heading.
+            assert!(!is_section_header("======= Too deep", 0));
+        }
     }
 }
