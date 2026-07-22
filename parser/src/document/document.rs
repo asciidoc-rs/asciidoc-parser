@@ -237,20 +237,20 @@ impl<'src> Document<'src> {
             // still holds the document's resolved attribute state.
             let toc = TocConfig::from_parser(parser);
 
-            // Materialize the derived `toc-position` / `toc-placement` /
-            // `toc-class` document attributes from the resolved placement, so
-            // they are queryable via `attribute_value` (matching Asciidoctor).
-            // This runs after `TocConfig::from_parser` — which reads the raw
-            // stored `toc-placement` during resolution — and before the snapshot
-            // below, so resolution observes the author's raw value while the
-            // snapshot exposes the derived one.
-            parser.materialize_toc_attributes(toc.mode);
-
             // Capture the parser's fully-resolved attribute state so it can be
             // read back through the `Document` (via `attribute_value`,
             // `has_attribute`, and `is_attribute_set`) without a `Parser` in
             // hand — the embed path a renderer uses for `convert_document`.
-            let attributes = parser.snapshot_attributes();
+            let mut attributes = parser.snapshot_attributes();
+
+            // Materialize the derived `toc-position` / `toc-placement` /
+            // `toc-class` document attributes from the resolved placement into
+            // the snapshot (matching Asciidoctor), so they are queryable via
+            // `attribute_value` without perturbing the parser's own attribute
+            // state — a reused parser must not carry this document's derived TOC
+            // values into the next parse, where they would change what
+            // `TocMode::from_parser` observes.
+            attributes.materialize_toc_attributes(toc.mode);
 
             // Resolve docinfo from the final attribute state and the parser's
             // configured docinfo file handler (empty when no handler is set).

@@ -538,6 +538,37 @@ mod tests {
     }
 
     #[test]
+    fn derived_attributes_do_not_leak_across_parses() {
+        // The derived attributes live on each document's snapshot, not on the
+        // parser, so reusing a parser must not carry one document's TOC state
+        // into the next.
+        let mut parser = Parser::default();
+
+        // A first document with a `macro` placement materializes its derived
+        // attributes on its own snapshot.
+        let doc1 = parser.parse("= One\n:toc: macro\n\n== S\n\nx");
+        assert_eq!(doc1.toc_mode(), TocMode::Macro);
+        assert_eq!(
+            doc1.attribute_value("toc-placement"),
+            InterpretedValue::Value("macro".into())
+        );
+
+        // A second document that enables an automatic TOC must resolve `Auto` —
+        // if the first document's derived `toc-placement: macro` had leaked onto
+        // the parser, `TocMode::from_parser` would read it back and wrongly
+        // resolve `Macro` here.
+        let doc2 = parser.parse("= Two\n:toc:\n\n== S\n\nx");
+        assert_eq!(doc2.toc_mode(), TocMode::Auto);
+        assert_eq!(
+            doc2.attribute_value("toc-placement"),
+            InterpretedValue::Value("auto".into())
+        );
+        // The first document's derived `toc-position` (`content`) likewise does
+        // not linger: an automatic TOC leaves it unset.
+        assert!(!doc2.has_attribute("toc-position"));
+    }
+
+    #[test]
     fn disabled_toc_materializes_no_derived_attributes() {
         // With no TOC enabled, the whole family stays unset (Asciidoctor's
         // defaults), so none of the attributes is even present.
