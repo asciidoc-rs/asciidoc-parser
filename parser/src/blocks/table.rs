@@ -1671,11 +1671,11 @@ fn process_content<'src>(
         // The inherited attribute set is the shared built-in defaults with the
         // parent's per-parser entries (`saved_attributes`) layered on top, so
         // walk both, letting a per-parser entry shadow a like-named built-in.
-        // The synthesized `backend-html5-doctype-*` and `safe-mode-*` flags need
-        // no lock here: they are read-only intrinsics that reject a cell-body
-        // assignment on their own (see `DERIVED_DOCTYPE_ATTR` /
-        // `SAFE_MODE_ACTIVE_FLAG`), which a static lock could not do anyway once
-        // the cell changes its own doctype.
+        // The synthesized backend-family and `safe-mode-*` flags need no lock
+        // here: they are read-only intrinsics that reject a cell-body assignment
+        // on their own (see `DERIVED_FAMILY_FLAG` / `SAFE_MODE_ACTIVE_FLAG`),
+        // which a static lock could not do anyway once the cell changes its own
+        // doctype.
         let saved_locks = parser.locked_attribute_names.clone();
         {
             let locks = &mut parser.locked_attribute_names;

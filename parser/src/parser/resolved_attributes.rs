@@ -4,7 +4,7 @@ use crate::{
     document::InterpretedValue,
     parser::{
         AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime, SafeMode,
-        built_in_attrs::{built_in_attr, synthesized_attr},
+        built_in_attrs::{built_in_attr, derived_backend_value, synthesized_attr},
         is_datetime_attribute,
         safe_mode::masked_doc_path,
     },
@@ -102,6 +102,12 @@ impl ResolvedAttributes {
             && let Some(masked) = masked_doc_path(name, |n| self.raw_set_value(n))
         {
             return masked;
+        }
+
+        // `basebackend` / `filetype` are derived on the fly from the current
+        // `backend` (see [`derived_backend_value`]) rather than stored.
+        if let Some(value) = derived_backend_value(name, &self.attribute_values) {
+            return value;
         }
 
         match self.effective_attribute(name) {
@@ -239,6 +245,11 @@ impl ResolvedAttributes {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
+        // A derived `basebackend` / `filetype` is present only while `backend`
+        // resolves to a non-empty value (see [`derived_backend_value`]).
+        if derived_backend_value(name, &self.attribute_values).is_some() {
+            return true;
+        }
         self.effective_attribute(name).is_some() || self.resolve_datetime_attribute(name).is_some()
     }
 
@@ -258,6 +269,13 @@ impl ResolvedAttributes {
 
         if self.tracks_outfilesuffix(name) {
             return self.is_attribute_set("outfilesuffix");
+        }
+
+        // A derived `basebackend` / `filetype` holds a concrete (set) value
+        // whenever it is present, i.e. while `backend` is non-empty (see
+        // [`derived_backend_value`]).
+        if derived_backend_value(name, &self.attribute_values).is_some() {
+            return true;
         }
 
         self.effective_attribute(name)

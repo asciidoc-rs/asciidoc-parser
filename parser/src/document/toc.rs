@@ -53,6 +53,13 @@ pub enum TocMode {
 impl TocMode {
     /// Resolves the table-of-contents placement from a parser's current `toc`
     /// attribute state.
+    // TODO(#840): Asciidoctor also materializes the derived `toc-position`,
+    // `toc-placement`, and `toc-class` document attributes (queryable via
+    // `attribute_value` / `has_attribute`). This crate resolves the TOC
+    // configuration only through the `Document::toc_*` accessors below. Note the
+    // entanglement: this resolver reads the raw `toc-placement` attribute and
+    // relies on distinguishing a never-set `toc-placement` from an explicit
+    // unset tombstone, so materializing a default of `auto` needs care.
     pub(crate) fn from_parser(parser: &Parser) -> Self {
         let value = parser.attribute_value("toc");
         if value == InterpretedValue::Unset {

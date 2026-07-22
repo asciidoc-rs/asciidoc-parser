@@ -2889,15 +2889,10 @@ mod level_offset {
 "##
     );
 
-    // NOTE: In this simulated-include scenario a `= ` heading is immediately
-    // followed by an attribute entry (`= Standalone Document` / `:author:`).
-    // The crate does not promote that heading to a section under the active
-    // `:leveloffset: 1` (the "Standalone Document" section is dropped), so the
-    // full section shape asserted here is not reproduced. The core level-offset
-    // behavior is covered by the other three tests in this context. Out of
-    // scope pending this edge case (see #746).
-    non_normative!(
-        r##"
+    #[test]
+    fn should_add_level_offset_to_section_level() {
+        verifies!(
+            r##"
     test 'should add level offset to section level' do
       input = <<~'EOS'
       = Main Document
@@ -2939,7 +2934,56 @@ mod level_offset {
     end
 
 "##
-    );
+        );
+
+        // The `= Standalone Document` heading is immediately followed by an
+        // attribute entry (`:author:`). A comment line (`// begin simulated
+        // include::[]`) precedes the heading, which previously caused the
+        // heading to be swallowed into a comment-led paragraph and the section
+        // to be dropped under the active `:leveloffset: 1` (see #746). It is now
+        // promoted to a level-1 section like its `==` sibling.
+        let doc = Parser::default().parse(
+            "= Main Document\nDoc Writer\n\nMain document written by {author}.\n\n:leveloffset: 1\n\n// begin simulated include::[]\n= Standalone Document\n:author: Junior Writer\n\nStandalone document written by {author}.\n\n== Section in Standalone\n\nStandalone section text.\n// end simulated include::[]\n\n:leveloffset!:\n\n== Section in Main\n\nMain section text.\n",
+        );
+
+        // No diagnostics are raised (`assert logger.empty?`).
+        assert!(doc.warnings().next().is_none());
+
+        // The offset shifts the included headings down one level: the level-0
+        // `= Standalone Document` becomes a level-1 section, its `== Section in
+        // Standalone` becomes level 2, and (after `:leveloffset!:` resets the
+        // offset) `== Section in Main` is level 1.
+        let by_title: Vec<(usize, &str)> = all_sections(&doc)
+            .iter()
+            .map(|s| (s.level(), s.section_title()))
+            .collect();
+        assert_eq!(
+            by_title,
+            vec![
+                (1, "Standalone Document"),
+                (2, "Section in Standalone"),
+                (1, "Section in Main"),
+            ]
+        );
+
+        // The `{author}` reference in each paragraph resolves to the author in
+        // effect where it appears: the document header's "Doc Writer" for the
+        // main paragraph, and the standalone section's `:author: Junior Writer`
+        // for its paragraph.
+        let paragraphs = rendered_paragraphs(&doc);
+        assert!(
+            paragraphs
+                .iter()
+                .any(|p| p == "Main document written by Doc Writer."),
+            "paragraphs: {paragraphs:?}"
+        );
+        assert!(
+            paragraphs
+                .iter()
+                .any(|p| p == "Standalone document written by Junior Writer."),
+            "paragraphs: {paragraphs:?}"
+        );
+    }
 
     #[test]
     fn level_offset_should_be_added_to_discrete_heading() {
@@ -5312,10 +5356,10 @@ mod table_of_contents {
 "##
     );
 
-    // NOTE: `:toc-placement!:` (which suppresses the TOC in Asciidoctor) is not
-    // honored by this crate — the TOC still renders. Out of scope (see #746).
-    non_normative!(
-        r##"
+    #[test]
+    fn should_not_output_table_of_contents_if_toc_placement_attribute_is_unset() {
+        verifies!(
+            r##"
     test 'should not output table of contents if toc-placement attribute is unset' do
       input = <<~'EOS'
       = Article
@@ -5336,7 +5380,19 @@ mod table_of_contents {
     end
 
 "##
-    );
+        );
+
+        // Unsetting `toc-placement` while `toc` is enabled resolves the
+        // placement to `macro` (Asciidoctor's `macro` fetch fallback), so the
+        // TOC renders only where a `toc::[]` block macro appears. With no such
+        // macro in this document, no `#toc` is emitted. See #746 (and #750,
+        // which introduced the soft-unset resolution).
+        let doc = Parser::default().parse(
+            "= Article\n:toc:\n:toc-placement!:\n\n== Section One\n\nIt was a dark and stormy night...\n\n== Section Two\n\nThey couldn't believe their eyes when...\n",
+        );
+        assert_eq!(doc.toc_mode(), crate::document::TocMode::Macro);
+        assert_xpath(&doc, r##"//*[@id="toc"]"##, 0);
+    }
 
     // NOTE: The remaining tests depend on standalone `#header` framing, the
     // `toc::[]` macro placement family, `toc-class`/`toc-title` rendered via the
