@@ -2277,10 +2277,9 @@ mod interpolation {
         assert_rendered_contains(&doc, "2010-01-01 == 2010-01-01");
     }
 
-    // Tracked in #731.
     #[test]
     fn should_warn_if_unterminated_block_comment_is_detected_in_document_header() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should warn if unterminated block comment is detected in document header' do
       input = <<~'EOS'
@@ -2302,11 +2301,19 @@ mod interpolation {
         // As in Asciidoctor, the unterminated `////` opens a comment block that
         // swallows the rest of the header, so `:hey: there` is never applied
         // (see https://github.com/asciidoc-rs/asciidoc-parser/issues/760).
-        // Remaining divergence: the `unterminated comment block` warning is not
-        // yet modeled (tracked in #731).
+        //
+        // The `unterminated comment block` warning is modeled as the crate's
+        // generic `UnterminatedDelimitedBlock`, anchored at the opening `////`
+        // delimiter (line 3), matching the body-level comment block path
+        // (see https://github.com/asciidoc-rs/asciidoc-parser/issues/731).
         let doc =
             Parser::default().parse("= Document Title\n:foo: bar\n////\n:hey: there\n\ncontent");
         assert_eq!(doc.attribute_value("hey"), InterpretedValue::Unset);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].warning, WarningType::UnterminatedDelimitedBlock);
+        assert_eq!(warnings[0].source.line(), 3);
     }
 
     #[test]
