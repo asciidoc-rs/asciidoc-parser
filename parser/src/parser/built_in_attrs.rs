@@ -117,6 +117,61 @@ pub(crate) fn max_attribute_value_size_default(is_secure: bool) -> &'static Attr
     }
 }
 
+/// The synthesized `user-home` intrinsic under a *server-or-greater* safe mode
+/// (`SafeMode::Server` / `SafeMode::Secure`): the current directory, `.`, which
+/// masks the real home path so a document cannot learn where the processor is
+/// running. Like Ruby Asciidoctor it is API/CLI-only (`ApiOnly`), so a document
+/// assignment to it is rejected (locked) in every mode.
+static USER_HOME_MASKED: LazyLock<AttributeValue> = LazyLock::new(|| AttributeValue {
+    allowable_value: AllowableValue::Any,
+    modification_context: ModificationContext::ApiOnly,
+    silent_when_locked: false,
+    value: InterpretedValue::Value(".".to_owned()),
+});
+
+/// The synthesized `user-home` intrinsic under a *relaxed* safe mode (below
+/// `SafeMode::Server`): the user's home directory, resolved once from the
+/// environment. This mirrors Ruby Asciidoctor's process-wide `USER_HOME`
+/// constant (`Dir.home rescue (ENV['HOME'] || Dir.pwd)`), which is likewise
+/// captured a single time. See [`resolve_user_home`] for the fallback chain.
+static USER_HOME_RESOLVED: LazyLock<AttributeValue> = LazyLock::new(|| AttributeValue {
+    allowable_value: AllowableValue::Any,
+    modification_context: ModificationContext::ApiOnly,
+    silent_when_locked: false,
+    value: InterpretedValue::Value(resolve_user_home()),
+});
+
+/// Best-effort resolution of the user's home directory, mirroring Ruby
+/// Asciidoctor's `USER_HOME = Dir.home rescue (ENV['HOME'] || Dir.pwd)`: the
+/// home directory if one can be determined, otherwise the current working
+/// directory, otherwise a literal `.`.
+fn resolve_user_home() -> String {
+    std::env::home_dir()
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| std::env::current_dir().ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_owned())
+}
+
+/// Returns the mode-aware built-in default for the `user-home` intrinsic: the
+/// user's home directory when the safe mode is below `SafeMode::Server`, or the
+/// masking `.` value under `Server`/`Secure`.
+///
+/// Like [`max_attribute_value_size_default`], this is consulted by
+/// [`Parser::effective_attribute`] *after* the per-parser attribute map, so a
+/// caller-supplied `user-home` (which is API-only and therefore always lives in
+/// that map) always wins regardless of builder-call order, and a
+/// `with_safe_mode` change never rewrites it.
+///
+/// [`Parser::effective_attribute`]: crate::Parser
+pub(crate) fn user_home_default(is_below_server: bool) -> &'static AttributeValue {
+    if is_below_server {
+        &USER_HOME_RESOLVED
+    } else {
+        &USER_HOME_MASKED
+    }
+}
+
 static BUILT_IN_DEFAULT_VALUES: LazyLock<Arc<HashMap<String, String>>> =
     LazyLock::new(|| Arc::new(build_built_in_default_values()));
 
