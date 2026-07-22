@@ -2466,6 +2466,19 @@ mod tests {
     }
 
     #[test]
+    fn leaves_non_string_docdir_and_docfile_untouched_under_server_mode() {
+        // A `docdir` / `docfile` present as a boolean flag (not a path string)
+        // carries no host path to leak, so the masking has nothing to blank or
+        // relativize and leaves the (empty) `Set` value as-is.
+        let p = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute_bool("docdir", true, ModificationContext::ApiOnly)
+            .with_intrinsic_attribute_bool("docfile", true, ModificationContext::ApiOnly);
+        assert_eq!(p.attribute_value("docdir"), InterpretedValue::Set);
+        assert_eq!(p.attribute_value("docfile"), InterpretedValue::Set);
+    }
+
+    #[test]
     fn with_intrinsic_attribute_set() {
         let p = Parser::default().with_intrinsic_attribute_bool(
             "foo",

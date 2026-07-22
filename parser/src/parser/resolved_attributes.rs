@@ -410,6 +410,28 @@ mod tests {
     }
 
     #[test]
+    fn leaves_non_string_docdir_and_docfile_untouched_under_server_safe_mode() {
+        // A `docdir` / `docfile` present as a value-less `Set` flag carries no
+        // path to relativize, so the masking leaves it untouched (mirroring
+        // `Parser`).
+        let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+        attribute_values.insert("docdir".to_string(), attr(InterpretedValue::Set));
+        attribute_values.insert("docfile".to_string(), attr(InterpretedValue::Set));
+
+        let attrs = ResolvedAttributes::new(
+            Arc::new(attribute_values),
+            Arc::new(HashMap::new()),
+            HashMap::new(),
+            None,
+            None,
+            SafeMode::Server,
+        );
+
+        assert_eq!(attrs.attribute_value("docdir"), InterpretedValue::Set);
+        assert_eq!(attrs.attribute_value("docfile"), InterpretedValue::Set);
+    }
+
+    #[test]
     fn does_not_mask_docdir_and_docfile_below_server_safe_mode() {
         let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
         attribute_values.insert(
