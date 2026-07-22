@@ -84,10 +84,10 @@ impl SafeMode {
 ///
 /// * `docdir` is masked to an empty value, so the host directory never leaks
 ///   into rendered output.
-/// * `docfile` is relativized by stripping its `docdir` prefix and the
-///   following separator (`docfile[(docdir.length + 1)..]`), matching
-///   Asciidoctor. When no `docdir` is available to strip against, it falls back
-///   to the file's base name.
+/// * `docfile` is relativized against `docdir` (see [`relativize_docfile`]),
+///   matching Asciidoctor's `docfile[(docdir.length + 1)..]` for the usual case
+///   where `docfile` sits under `docdir`, and falling back to the base name
+///   otherwise.
 ///
 /// Returns `None` for any other name, and for an *unset* `docdir` / `docfile`
 /// (so a reference to one still resolves as missing rather than empty). Because
@@ -108,24 +108,116 @@ pub(crate) fn masked_doc_path(
 
         "docfile" => {
             let docfile = raw_set_value("docfile")?;
-            let relative = match raw_set_value("docdir") {
-                // Strip the `docdir` prefix plus its trailing separator, matching
-                // Asciidoctor's `docfile[(docdir.length + 1)..-1]`. `get` keeps
-                // this panic-safe for any out-of-range or non-boundary index (a
-                // `docfile` not actually under `docdir`), yielding an empty
-                // relative path in that case.
-                Some(docdir) => docfile.get(docdir.len() + 1..).unwrap_or("").to_owned(),
-                // No `docdir` to relativize against: fall back to the base name
-                // (the trailing path segment).
-                None => docfile
-                    .rsplit(['/', '\\'])
-                    .next()
-                    .unwrap_or(&docfile)
-                    .to_owned(),
-            };
+            let relative = relativize_docfile(&docfile, raw_set_value("docdir").as_deref());
             Some(InterpretedValue::Value(relative))
         }
 
         _ => None,
+    }
+}
+
+/// Relativizes `docfile` against `docdir` for `SafeMode::Server` masking.
+///
+/// When `docfile` sits directly under `docdir` — i.e. it begins with the exact
+/// `docdir` prefix followed by a path separator — the prefix and separator are
+/// stripped, matching Ruby Asciidoctor's `docfile[(docdir.length + 1)..-1]`
+/// (which keeps any intermediate sub-directories, not just the base name). This
+/// is the normal case, since Asciidoctor derives `docdir` from `docfile`.
+///
+/// Unlike Asciidoctor, this crate exposes `docdir` and `docfile` as independent
+/// API attributes, so a caller can pair them inconsistently. Rather than slice
+/// at an unrelated byte offset (truncating the path, or dropping the first byte
+/// when `docdir` is empty), any `docdir` that is absent, empty, or not an
+/// actual prefix falls back to the file's base name (its trailing path
+/// segment).
+fn relativize_docfile(docfile: &str, docdir: Option<&str>) -> String {
+    if let Some(docdir) = docdir.filter(|d| !d.is_empty())
+        && let Some(rest) = docfile.strip_prefix(docdir)
+        && let Some(after) = rest.strip_prefix(['/', '\\'])
+    {
+        return after.to_owned();
+    }
+
+    // No usable `docdir` prefix: use the base name (trailing path segment).
+    docfile
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(docfile)
+        .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relativize_docfile;
+
+    #[test]
+    fn strips_exact_docdir_prefix() {
+        assert_eq!(
+            relativize_docfile("/some/dir/sample.adoc", Some("/some/dir")),
+            "sample.adoc"
+        );
+    }
+
+    #[test]
+    fn keeps_subdirectories_below_docdir() {
+        assert_eq!(
+            relativize_docfile("/some/dir/sub/sample.adoc", Some("/some/dir")),
+            "sub/sample.adoc"
+        );
+    }
+
+    #[test]
+    fn strips_a_backslash_separated_prefix() {
+        assert_eq!(
+            relativize_docfile(r"C:\some\dir\sample.adoc", Some(r"C:\some\dir")),
+            "sample.adoc"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_base_name_when_docfile_is_not_under_docdir() {
+        // A `docfile` outside `docdir` must not be truncated at an unrelated
+        // offset; it relativizes to its base name instead.
+        assert_eq!(
+            relativize_docfile("/some/different/file.adoc", Some("/some/dir")),
+            "file.adoc"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_base_name_when_prefix_is_not_separator_aligned() {
+        // `docdir` is a leading substring of `docfile` but not a path component
+        // (no separator follows), so the slice would corrupt the name.
+        assert_eq!(
+            relativize_docfile("/some/dirfile.adoc", Some("/some/dir")),
+            "dirfile.adoc"
+        );
+    }
+
+    #[test]
+    fn treats_empty_docdir_as_no_prefix() {
+        // An empty `docdir` must not drop the first byte of `docfile`.
+        assert_eq!(
+            relativize_docfile("/some/dir/sample.adoc", Some("")),
+            "sample.adoc"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_base_name_without_a_docdir() {
+        assert_eq!(
+            relativize_docfile("/some/dir/sample.adoc", None),
+            "sample.adoc"
+        );
+    }
+
+    #[test]
+    fn returns_a_bare_docfile_unchanged() {
+        // A `docfile` with no directory component is its own base name.
+        assert_eq!(relativize_docfile("sample.adoc", None), "sample.adoc");
+        assert_eq!(
+            relativize_docfile("sample.adoc", Some("/some/dir")),
+            "sample.adoc"
+        );
     }
 }

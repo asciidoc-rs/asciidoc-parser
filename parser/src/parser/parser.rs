@@ -2448,6 +2448,25 @@ mod tests {
     }
 
     #[test]
+    fn relativizes_docfile_not_under_docdir_to_its_basename() {
+        // An inconsistent `docdir` / `docfile` pairing (docfile not under
+        // docdir) must not be truncated at an unrelated byte offset; it
+        // relativizes to the base name instead (see #735 review feedback).
+        let p = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute("docdir", "/some/dir", ModificationContext::ApiOnly)
+            .with_intrinsic_attribute(
+                "docfile",
+                "/some/different/file.adoc",
+                ModificationContext::ApiOnly,
+            );
+        assert_eq!(
+            p.attribute_value("docfile"),
+            InterpretedValue::Value("file.adoc")
+        );
+    }
+
+    #[test]
     fn docfile_without_docdir_falls_back_to_basename_under_server_mode() {
         let p = Parser::default()
             .with_safe_mode(SafeMode::Server)
