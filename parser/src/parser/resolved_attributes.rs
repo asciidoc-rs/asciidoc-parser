@@ -1,10 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    SafeMode,
     document::InterpretedValue,
     parser::{
         AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime,
-        built_in_attrs::{built_in_attr, synthesized_attr},
+        built_in_attrs::{
+            built_in_attr, max_attribute_value_size_default, synthesized_attr, user_home_default,
+        },
         is_datetime_attribute,
     },
 };
@@ -39,6 +42,12 @@ pub(crate) struct ResolvedAttributes {
     /// supersedes any like-named attribute.
     counter_values: HashMap<String, String>,
 
+    /// The safe mode the parser ran under. It is not stored in any attribute
+    /// table, so the snapshot captures it here to resolve the mode-aware
+    /// intrinsics (`max-attribute-value-size`, `user-home`) exactly as the
+    /// parser does. Defaults to [`SafeMode::Secure`], matching the parser.
+    safe: SafeMode,
+
     /// The parser's pinned reference-time configuration, if any, used to
     /// resolve the time-dependent attributes (`docdate` and its family) on
     /// demand. This is deterministic parser configuration (not a captured
@@ -54,6 +63,7 @@ impl ResolvedAttributes {
         attribute_values: Arc<HashMap<String, AttributeValue>>,
         default_attribute_values: Arc<HashMap<String, String>>,
         counter_values: HashMap<String, String>,
+        safe: SafeMode,
         reference_time: Option<ReferenceTime>,
         input_mtime: Option<ReferenceTime>,
     ) -> Self {
@@ -61,6 +71,7 @@ impl ResolvedAttributes {
             attribute_values,
             default_attribute_values,
             counter_values,
+            safe,
             datetime_inputs: DatetimeInputs::new(reference_time, input_mtime),
         }
     }
@@ -171,13 +182,26 @@ impl ResolvedAttributes {
     }
 
     /// Returns the effective attribute definition for `name`, falling back to
-    /// the shared built-in defaults (and the synthesized derived doctype
-    /// attribute) exactly as [`Parser::effective_attribute`] does.
+    /// the mode-aware intrinsics (`max-attribute-value-size`, `user-home`), the
+    /// shared built-in defaults, and the synthesized derived attributes exactly
+    /// as [`Parser::effective_attribute`] does.
     ///
     /// [`Parser::effective_attribute`]: crate::Parser::effective_attribute
     fn effective_attribute(&self, name: &str) -> Option<&AttributeValue> {
         if let Some(av) = self.attribute_values.get(name) {
             return Some(av);
+        }
+        // Mirror the parser's mode-aware resolution of the two intrinsics whose
+        // default depends on the safe mode rather than on either attribute
+        // table (see [`Parser::effective_attribute`]). Consulted after the
+        // per-parser map so a caller-supplied value still wins.
+        if name == "max-attribute-value-size" {
+            return Some(max_attribute_value_size_default(
+                self.safe == SafeMode::Secure,
+            ));
+        }
+        if name == "user-home" {
+            return Some(user_home_default(self.safe < SafeMode::Server));
         }
         if let Some(av) = built_in_attr(name) {
             return Some(av);
@@ -241,6 +265,7 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use crate::{
+        SafeMode,
         document::InterpretedValue,
         parser::{AllowableValue, AttributeValue, ModificationContext, ResolvedAttributes},
     };
@@ -283,6 +308,7 @@ mod tests {
             Arc::new(attribute_values),
             Arc::new(default_attribute_values),
             counter_values,
+            SafeMode::Secure,
             None,
             None,
         )

@@ -784,6 +784,13 @@ mod assignment {
             rendered_paragraphs(&doc),
             vec![format!("{home}/etc/images")]
         );
+
+        // The intrinsic is also queryable on the completed document (mirroring
+        // Ruby's `doc.attributes['user-home']`), not only during substitution.
+        assert_eq!(
+            doc.attribute_value("user-home").as_maybe_str(),
+            Some(home.as_str())
+        );
     }
 
     #[test]
@@ -810,6 +817,9 @@ mod assignment {
             .with_safe_mode(SafeMode::Server)
             .parse(":imagesdir: {user-home}/etc/images\n\n{imagesdir}");
         assert_eq!(rendered_paragraphs(&doc), vec!["./etc/images".to_string()]);
+
+        // The masked value is likewise queryable on the completed document.
+        assert_eq!(doc.attribute_value("user-home").as_maybe_str(), Some("."));
     }
 
     #[test]

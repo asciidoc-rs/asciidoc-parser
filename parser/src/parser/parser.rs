@@ -889,6 +889,7 @@ impl Parser {
             Arc::clone(&self.attribute_values),
             Arc::clone(&self.default_attribute_values),
             self.counter_values.borrow().clone(),
+            self.safe,
             self.reference_time.clone(),
             self.input_mtime.clone(),
         )
