@@ -1027,20 +1027,28 @@ impl Parser {
     /// contradicts, or a soft-unset `toc-placement!` that the `toc` state
     /// re-derives to `macro`. `toc-class` only *defaults* (to `toc2` for a
     /// side-column TOC): an explicit author value is left untouched. Nothing is
-    /// materialized when no TOC is generated ([`TocMode::Disabled`]), matching
-    /// Asciidoctor, which leaves the whole family unset.
+    /// materialized when no TOC is generated ([`TocMode::Disabled`], for which
+    /// every derived value is `None`), matching Asciidoctor, which leaves the
+    /// whole family unset.
     ///
     /// [`TocMode`]: crate::document::TocMode
     /// [`TocMode::from_parser`]: crate::document::TocMode
     pub(crate) fn materialize_toc_attributes(&mut self, mode: TocMode) {
-        if mode == TocMode::Disabled {
+        let placement = mode.derived_toc_placement();
+        let position = mode.derived_toc_position();
+        // A side-column TOC only *defaults* `toc-class` to `toc2`; an explicit
+        // author value wins (Asciidoctor's `attrs['toc-class'] ||= 'toc2'`), so
+        // suppress the derived default when `toc-class` is already set.
+        let class = mode
+            .derived_toc_class()
+            .filter(|_| !self.is_attribute_set("toc-class"));
+
+        // No TOC generated (a disabled TOC yields all `None`), so materialize
+        // nothing — and avoid cloning the shared attribute map for the common
+        // no-TOC document.
+        if placement.is_none() && position.is_none() && class.is_none() {
             return;
         }
-
-        // A side-column TOC only *defaults* `toc-class` to `toc2`; an explicit
-        // author value wins (Asciidoctor's `attrs['toc-class'] ||= 'toc2'`).
-        // Read this before taking the mutable borrow below.
-        let toc_class_already_set = self.is_attribute_set("toc-class");
 
         let derived = |value: &str| AttributeValue {
             allowable_value: AllowableValue::Any,
@@ -1051,13 +1059,13 @@ impl Parser {
 
         let attrs = Arc::make_mut(&mut self.attribute_values);
 
-        if let Some(placement) = mode.derived_toc_placement() {
+        if let Some(placement) = placement {
             attrs.insert("toc-placement".to_string(), derived(placement));
         }
-        if let Some(position) = mode.derived_toc_position() {
+        if let Some(position) = position {
             attrs.insert("toc-position".to_string(), derived(position));
         }
-        if !toc_class_already_set && let Some(class) = mode.derived_toc_class() {
+        if let Some(class) = class {
             attrs.insert("toc-class".to_string(), derived(class));
         }
     }
