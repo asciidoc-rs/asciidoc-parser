@@ -4072,10 +4072,9 @@ mod block_attributes {
         assert_eq!(first_block(&doc).roles(), vec!["role1", "role2", "role3"]);
     }
 
-    // Tracked in #732.
     #[test]
     fn setting_a_role_using_the_role_attribute_replaces_any_existing_roles() {
-        non_normative!(
+        verifies!(
             r#"
     test 'setting a role using the role attribute replaces any existing roles' do
       input = <<~'EOS'
@@ -4093,12 +4092,11 @@ mod block_attributes {
 "#
         );
 
-        // Divergence: in Asciidoctor a formal `role=` entry replaces any roles
-        // already set by shorthand `.role`, so `.role1` is cleared and the
-        // result is `role2 role3`. This crate treats every role source as
-        // additive, so all three accumulate (in encounter order).
+        // A formal `role=` entry replaces any roles already set by an earlier
+        // shorthand `.role`, so `.role1` is cleared by `role=role2`; the later
+        // `.role3` shorthand then appends, yielding `role2 role3`.
         let doc = Parser::default().parse("[.role1]\n[role=role2]\n[.role3]\nText");
-        assert_eq!(first_block(&doc).roles(), vec!["role1", "role3", "role2"]);
+        assert_eq!(first_block(&doc).roles(), vec!["role2", "role3"]);
     }
 
     #[test]
