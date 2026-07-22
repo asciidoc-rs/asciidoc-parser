@@ -64,7 +64,7 @@ impl<'src> Header<'src> {
                 comments.push(line);
                 source = line_mi.after;
             } else if title.is_some()
-                && let Some(after) = skip_block_comment(line, line_mi.after)
+                && let Some((after, terminated)) = skip_block_comment(line, line_mi.after)
             {
                 // Once a title has been seen, a `////` block comment delimiter
                 // opens a comment block within the header. Skip every line
@@ -78,6 +78,20 @@ impl<'src> Header<'src> {
                 // context to protect, so a leading `////` is left for the block
                 // parser, which retains it as a body-level comment block.
                 comments.push(source.trim_remainder(after).trim_trailing_line_end());
+
+                // An unterminated comment block swallows the rest of the header
+                // (any following attribute entries are never applied), so warn
+                // as Asciidoctor does, anchoring the warning at the opening
+                // delimiter. This mirrors the body-level comment block path,
+                // which reports the same `UnterminatedDelimitedBlock` warning.
+                if !terminated {
+                    warnings.push(Warning {
+                        source: line,
+                        warning: WarningType::UnterminatedDelimitedBlock,
+                        origin: None,
+                    });
+                }
+
                 source = after;
             } else if line.starts_with(':')
                 && let Some(attr) = Attribute::parse(source, parser)
@@ -362,33 +376,37 @@ impl<'src> HasSpan<'src> for Header<'src> {
 }
 
 /// If `line` opens a `////` block comment, consume the comment block and
-/// return the source position immediately after its closing delimiter;
-/// otherwise return `None`.
+/// return the source position immediately after its closing delimiter together
+/// with a flag reporting whether a closing delimiter was found; otherwise
+/// return `None`.
 ///
 /// A block comment delimiter is a line of four or more forward slashes and
 /// nothing else, matching Asciidoctor's comment-block delimiter (a line of
 /// exactly three slashes instead terminates the header and is handled by the
 /// caller). The closing delimiter must repeat the opening line exactly; when
 /// it is absent the block runs to the end of the input, mirroring
-/// Asciidoctor's `read_lines_until`.
+/// Asciidoctor's `read_lines_until`, and the returned flag is `false` so the
+/// caller can warn that the comment block was never terminated.
 ///
 /// `after` is the source immediately following `line` (the opening delimiter).
-fn skip_block_comment<'src>(line: Span<'src>, after: Span<'src>) -> Option<Span<'src>> {
+fn skip_block_comment<'src>(line: Span<'src>, after: Span<'src>) -> Option<(Span<'src>, bool)> {
     let delimiter = line.data();
     if delimiter.len() < 4 || !delimiter.bytes().all(|b| b == b'/') {
         return None;
     }
 
     let mut next = after;
+    let mut terminated = false;
     while !next.is_empty() {
         let line_mi = next.take_normalized_line();
         next = line_mi.after;
         if line_mi.item.data() == delimiter {
+            terminated = true;
             break;
         }
     }
 
-    Some(next)
+    Some((next, terminated))
 }
 
 /// Returns the ATX marker character that introduces `line` as a document
