@@ -248,7 +248,8 @@ fn fold_continuation_value(data: &str) -> Option<String> {
         .split('\n')
         .map(|line| line.strip_suffix('\r').unwrap_or(line));
 
-    let first = lines.next()?;
+    // `str::split` always yields at least one item, so `first` is always present.
+    let first = lines.next().unwrap_or_default();
 
     // The continuation marker is fixed by the first line. Without one, the value
     // is a single line and needs no folding.
@@ -543,6 +544,25 @@ mod tests {
                 &Parser::default()
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn err_missing_closing_colon() {
+        // A valid attribute name that is not followed by a closing colon is not
+        // an attribute entry.
+        assert!(
+            crate::document::Attribute::parse(
+                crate::Span::new(":foo bar\nblah"),
+                &Parser::default()
+            )
+            .is_none()
+        );
+
+        // ... including at end of input.
+        assert!(
+            crate::document::Attribute::parse(crate::Span::new(":foo"), &Parser::default())
+                .is_none()
         );
     }
 
