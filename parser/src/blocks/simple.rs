@@ -601,7 +601,7 @@ impl<'src> HasSpan<'src> for SimpleBlock<'src> {
 /// a document title rather than a section *unless* a positive offset lifts it
 /// to level 1 or beyond — mirroring the level-0 rule in
 /// [`parse_title_line`](crate::blocks::section).
-fn is_section_header(line: &str, level_offset: i32) -> bool {
+pub(crate) fn is_section_header(line: &str, level_offset: i32) -> bool {
     // AsciiDoc `=` style or Markdown `#` style.
     let rest = if line.starts_with('=') {
         line.trim_start_matches('=')
