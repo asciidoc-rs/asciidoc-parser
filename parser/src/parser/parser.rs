@@ -3606,4 +3606,51 @@ mod tests {
             );
         }
     }
+
+    // Crate-native `skip-front-matter` cases (no Asciidoctor analog) covering
+    // edge conditions beyond the reader-suite ports in
+    // `tests::asciidoctor_rb::reader_test`. See [`Parser::skip_front_matter`].
+    mod skip_front_matter {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn crlf_line_endings() {
+            // The front-matter delimiters are matched after a CRLF line ending
+            // is stripped, and the captured `front-matter` value is likewise
+            // chomped, so a document with `\r\n` line endings is handled the
+            // same as one with bare `\n`.
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool(
+                    "skip-front-matter",
+                    true,
+                    ModificationContext::ApiOnly,
+                )
+                .parse("---\r\nlayout: post\r\ntitle: Document Title\r\n---\r\n= Document Title\r\nAuthor Name\r\n\r\npreamble\r\n");
+
+            assert_eq!(
+                doc.attribute_value("front-matter"),
+                InterpretedValue::Value("layout: post\ntitle: Document Title")
+            );
+            assert_eq!(doc.header().title(), Some("Document Title"));
+            assert_eq!(doc.header().title_source().unwrap().line(), 5);
+        }
+
+        #[test]
+        fn first_line_is_not_a_delimiter() {
+            // With `skip-front-matter` set but no opening `---` on the first
+            // line, there is nothing to skip: the document parses normally and
+            // no `front-matter` attribute is recorded.
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool(
+                    "skip-front-matter",
+                    true,
+                    ModificationContext::ApiOnly,
+                )
+                .parse("= Document Title\nAuthor Name\n\npreamble\n");
+
+            assert_eq!(doc.attribute_value("front-matter"), InterpretedValue::Unset);
+            assert_eq!(doc.header().title(), Some("Document Title"));
+            assert_eq!(doc.header().title_source().unwrap().line(), 1);
+        }
+    }
 }

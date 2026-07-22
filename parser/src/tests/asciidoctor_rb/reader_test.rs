@@ -999,38 +999,6 @@ fn should_skip_front_matter_if_specified_by_skip_front_matter_attribute() {
     assert_eq!(doc.header().title_source().unwrap().line(), 7);
 }
 
-// Crate-native (no Asciidoctor analog): the front-matter delimiters are matched
-// after a CRLF line ending is stripped, and the captured `front-matter` value
-// is likewise chomped, so a document with `\r\n` line endings is handled the
-// same as one with bare `\n`.
-#[test]
-fn should_skip_front_matter_with_crlf_line_endings() {
-    let doc = Parser::default()
-        .with_intrinsic_attribute_bool("skip-front-matter", true, ModificationContext::ApiOnly)
-        .parse("---\r\nlayout: post\r\ntitle: Document Title\r\n---\r\n= Document Title\r\nAuthor Name\r\n\r\npreamble\r\n");
-
-    assert_eq!(
-        doc.attribute_value("front-matter"),
-        InterpretedValue::Value("layout: post\ntitle: Document Title")
-    );
-    assert_eq!(doc.header().title(), Some("Document Title"));
-    assert_eq!(doc.header().title_source().unwrap().line(), 5);
-}
-
-// Crate-native (no Asciidoctor analog): with `skip-front-matter` set but no
-// opening `---` on the first line, there is nothing to skip – the document
-// parses normally and no `front-matter` attribute is recorded.
-#[test]
-fn should_not_skip_front_matter_when_first_line_is_not_a_delimiter() {
-    let doc = Parser::default()
-        .with_intrinsic_attribute_bool("skip-front-matter", true, ModificationContext::ApiOnly)
-        .parse("= Document Title\nAuthor Name\n\npreamble\n");
-
-    assert_eq!(doc.attribute_value("front-matter"), InterpretedValue::Unset);
-    assert_eq!(doc.header().title(), Some("Document Title"));
-    assert_eq!(doc.header().title_source().unwrap().line(), 1);
-}
-
 non_normative!(
     r#"
     end
