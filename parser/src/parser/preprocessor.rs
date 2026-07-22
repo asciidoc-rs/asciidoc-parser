@@ -356,6 +356,10 @@ impl<'p> PreprocessorState<'p> {
             // delimiter. See issue #810.
             if is_comment_block_delimiter(line.data()) {
                 comment_block_delimiter = Some(line.data().to_owned());
+                // A `////` block is self-identifying, so it consumes any pending
+                // `[comment]` style; clearing it keeps the block that follows
+                // this one independent.
+                comment_style_pending = false;
                 self.emit_line(
                     line.data(),
                     file_name,
@@ -3337,6 +3341,17 @@ mod tests {
                 "[comment]\n.title\n[[id]]\nfirst line\nifdef::foo[dropped]\n\ntail"
             ),
             "[comment]\n.title\n[[id]]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn comment_style_cleared_after_comment_block_delimiter() {
+        // A pending `[comment]` style consumed by a `////` block must not leak
+        // into the block that follows it: the directive on the next paragraph's
+        // second line must still be processed (here, expanded to `VISIBLE`).
+        assert_eq!(
+            conditional_output(":foo:\n\n[comment]\n////\nc\n////\n\nnext\nifdef::foo[VISIBLE]"),
+            ":foo:\n\n[comment]\n////\nc\n////\n\nnext\nVISIBLE\n"
         );
     }
 
