@@ -1,4 +1,5 @@
 use super::{MatchedItem, Span};
+use crate::internal::is_word_char;
 
 impl<'src> Span<'src> {
     /// Split the span, consuming an identifier if found.
@@ -59,28 +60,30 @@ impl<'src> Span<'src> {
 
     /// Split the span, consuming the raw name of an [attribute entry].
     ///
-    /// The name of an attribute entry begins with a word character (`a`-`z`,
-    /// `A`-`Z`, `0`-`9`, or `_`) and runs up to — but not including — the
-    /// closing colon (`:`) that terminates it. Mirroring Asciidoctor's
-    /// `AttributeEntryRx` (whose capture is `!?\w.*?`), the characters after
-    /// the first are otherwise unconstrained: the raw name may contain spaces
-    /// and other characters that are not valid in a canonical attribute name
-    /// (e.g. `Author Initials` or `Foo 3^ # - Bar[`).
+    /// The name of an attribute entry begins with a [word character] (any
+    /// Unicode letter, digit, or `_`, matching Asciidoctor's `\p{Word}`) and
+    /// runs up to — but not including — the closing colon (`:`) that terminates
+    /// it. Mirroring Asciidoctor's
+    /// `AttributeEntryRx` (whose capture is `!?#{CG_WORD}[^:]*`), the
+    /// characters after the first are otherwise unconstrained: the raw name may
+    /// contain spaces and other characters that are not valid in a canonical
+    /// attribute name (e.g. `Author Initials` or `Foo 3^ # - Bar[`).
     ///
     /// Returns `None` when the span is empty or does not begin with a word
     /// character. When the span contains no colon, the whole span is consumed
     /// as the name (the caller then fails to find the terminating colon).
     ///
     /// IMPORTANT: This function performs no normalization. The captured name is
-    /// sanitized — lower-cased, with every character outside `[a-z0-9_-]`
-    /// stripped — before it is used as an attribute key, so `URL-Repo` becomes
-    /// `url-repo` and `Author Initials` becomes `authorinitials`. See
-    /// `remap_attr_name` in the parser.
+    /// sanitized — lower-cased, with every character that is not a word
+    /// character or `-` stripped — before it is used as an attribute key, so
+    /// `URL-Repo` becomes `url-repo` and `Author Initials` becomes
+    /// `authorinitials`. See `remap_attr_name` in the parser.
     ///
     /// [attribute entry]: https://docs.asciidoctor.org/asciidoc/latest/attributes/names-and-values/#user-defined
+    /// [word character]: crate::internal::is_word_char
     pub(crate) fn take_user_attr_name(self) -> Option<MatchedItem<'src, Self>> {
         let first = self.data.chars().next()?;
-        if !first.is_ascii_alphanumeric() && first != '_' {
+        if !is_word_char(first) {
             return None;
         }
 
@@ -655,6 +658,34 @@ mod tests {
                     line: 1,
                     col: 3,
                     offset: 2
+                }
+            );
+        }
+
+        #[test]
+        fn unicode_word_chars() {
+            // A name may begin with (and contain) any Unicode word character,
+            // not just ASCII, so `:café:` is recognized as an attribute entry.
+            let span = crate::Span::new("café: x");
+            let mi = span.take_user_attr_name().unwrap();
+
+            assert_eq!(
+                mi.item,
+                Span {
+                    data: "café",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+
+            assert_eq!(
+                mi.after,
+                Span {
+                    data: ": x",
+                    line: 1,
+                    col: 5,
+                    offset: 5
                 }
             );
         }

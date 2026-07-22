@@ -2,8 +2,10 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
+
+use regex::Regex;
 
 use crate::{
     Document, HasSpan,
@@ -2247,17 +2249,32 @@ fn string_succ(current: &str) -> String {
     out_rev.into_iter().rev().collect()
 }
 
+/// Matches every character that Asciidoctor's `sanitize_attribute_name` strips
+/// from an attribute name: anything that is not a [word character] (`\w`, i.e.
+/// `\p{Word}`) or a hyphen. Mirrors Asciidoctor's `InvalidAttributeNameCharsRx`
+/// (`/[^#{CC_WORD}-]/`).
+///
+/// [word character]: crate::internal::is_word_char
+static INVALID_ATTR_NAME_CHARS: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"[^\w-]").unwrap()
+});
+
 fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
     // Sanitize the name the way Asciidoctor's `sanitize_attribute_name` does:
-    // drop every character that is not a word character (ASCII letter, digit, or
-    // underscore) or a hyphen, then lower-case the result. This is what lets an
-    // attribute entry written as `:Author Initials:` set the `authorinitials`
-    // attribute, and `:Foo 3^ # - Bar[:` set `foo3-bar`.
-    let attr_name: String = raw_attr_name
-        .as_ref()
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
-        .collect::<String>()
+    // drop every character that is not a word character or a hyphen, then
+    // lower-case the result. This is what lets an attribute entry written as
+    // `:Author Initials:` set the `authorinitials` attribute, `:Foo 3^ # -
+    // Bar[:` set `foo3-bar`, and `:My frog:` set `myfrog`. Unicode word
+    // characters are preserved, so `:café:` sets `café` and `:سمن:` sets `سمن`.
+    //
+    // Only ASCII case is folded (not Asciidoctor's Unicode `downcase`): a
+    // reference is looked up under its raw, case-sensitive spelling (see the
+    // case-sensitivity divergence in the tests), so folding non-ASCII case here
+    // — which can also expand a character, e.g. `İ` -> `i` + combining dot —
+    // would leave a Unicode-named entry unreachable by its own spelling.
+    let attr_name: String = INVALID_ATTR_NAME_CHARS
+        .replace_all(raw_attr_name.as_ref(), "")
         .to_ascii_lowercase();
 
     // Some attribute names have aliases. Remap to the primary name.
@@ -2317,6 +2334,55 @@ mod tests {
     fn default_is_unset() {
         let p = Parser::default();
         assert_eq!(p.attribute_value("foo"), InterpretedValue::Unset);
+    }
+
+    mod remap_attr_name {
+        use super::super::remap_attr_name;
+
+        #[test]
+        fn strips_non_word_and_lower_cases_ascii() {
+            assert_eq!(remap_attr_name("Foo Bar"), "foobar");
+            assert_eq!(remap_attr_name("Foo 3^ # - Bar["), "foo3-bar");
+            assert_eq!(remap_attr_name("My frog"), "myfrog");
+        }
+
+        #[test]
+        fn preserves_unicode_word_characters() {
+            // Unicode letters and digits are word characters, so they survive
+            // sanitization; the `{café}` / `{سمن}` references then resolve.
+            assert_eq!(remap_attr_name("café"), "café");
+            assert_eq!(remap_attr_name("سمن"), "سمن");
+        }
+
+        #[test]
+        fn preserves_marks_and_join_controls() {
+            // `\p{Word}` includes combining marks and join controls, so a
+            // decomposed name and a name embedding a ZWNJ are not mangled.
+            let decomposed = "cafe\u{301}";
+            assert_eq!(remap_attr_name(decomposed), decomposed);
+
+            let with_zwnj = "\u{645}\u{200c}\u{646}";
+            assert_eq!(remap_attr_name(with_zwnj), with_zwnj);
+        }
+
+        #[test]
+        fn folds_only_ascii_case() {
+            // Non-ASCII case is left intact so a Unicode-named entry stays
+            // reachable by its own (case-sensitive) spelling: `İ` would expand
+            // under a Unicode `downcase`, but a reference is not folded.
+            assert_eq!(remap_attr_name("İstanbul"), "İstanbul");
+        }
+    }
+
+    #[test]
+    fn unicode_attribute_reference_resolves_in_preprocessor() {
+        // The preprocessor (conditional directives, include targets) resolves
+        // `{name}` references with the same Unicode word-character class as the
+        // main substitution pass, so a Unicode-named attribute drives an
+        // `ifeval` condition. See #726.
+        let doc = Parser::default()
+            .parse(":café: yes\n\nifeval::[\"{café}\" == \"yes\"]\nShown.\nendif::[]");
+        assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
     }
 
     #[test]
