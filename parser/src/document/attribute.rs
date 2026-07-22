@@ -1163,6 +1163,60 @@ mod tests {
         assert!(warnings.next().is_none());
     }
 
+    mod fold_continuation_value {
+        use super::super::fold_continuation_value;
+
+        #[test]
+        fn no_marker_returns_none() {
+            // A plain single-line value has no continuation marker and needs no
+            // folding.
+            assert_eq!(fold_continuation_value("bar"), None);
+            assert_eq!(fold_continuation_value("bar+"), None);
+            assert_eq!(fold_continuation_value("bar ++"), None);
+        }
+
+        #[test]
+        fn modern_soft_wrap_folds_with_space() {
+            assert_eq!(
+                fold_continuation_value("bar \\\nblah"),
+                Some("bar blah".to_string())
+            );
+        }
+
+        #[test]
+        fn legacy_marker_folds_with_space() {
+            assert_eq!(
+                fold_continuation_value("This is the first +\nRuby implementation of +\nAsciiDoc."),
+                Some("This is the first Ruby implementation of AsciiDoc.".to_string())
+            );
+        }
+
+        #[test]
+        fn hard_line_break_joins_with_newline() {
+            // A soft-wrap value whose text ends in a hard line break marker
+            // (` +`) is joined with a newline rather than a space.
+            assert_eq!(
+                fold_continuation_value("bar + \\\nblah"),
+                Some("bar +\nblah".to_string())
+            );
+        }
+
+        #[test]
+        fn blank_line_terminates_value() {
+            // A blank line inside the (already-extent-trimmed) data terminates
+            // the fold without consuming further lines.
+            assert_eq!(fold_continuation_value("a +\n\nb"), Some("a".to_string()));
+        }
+
+        #[test]
+        fn crlf_line_endings_are_normalized() {
+            assert_eq!(
+                fold_continuation_value("bar +\r\nblah"),
+                Some("bar blah".to_string())
+            );
+        }
+    }
+
     mod interpreted_value {
         mod impl_debug {
             use crate::document::InterpretedValue;
