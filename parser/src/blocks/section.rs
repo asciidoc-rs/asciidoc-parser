@@ -788,6 +788,19 @@ fn peer_or_ancestor_section<'src>(
     // parser state.
     let mut temp_parser = Parser::default();
 
+    // Block-metadata parsing consults `leveloffset` to decide whether a comment
+    // separating collected metadata from a following heading is transparent
+    // (see `skip_comments_before_section`): a bare `=` counts as a section only
+    // when a positive offset promotes it. Mirror the live parser's offset onto
+    // the temporary parser so the boundary look-ahead makes the same decision
+    // the real parse will — otherwise a peer/ancestor section reached across
+    // such a comment would be missed and wrongly nested. The stored offset is
+    // already an absolute integer, so it needs no further resolution.
+    let level_offset = parser.level_offset();
+    if level_offset != 0 {
+        temp_parser.set_attribute_by_value_from_header("leveloffset", level_offset.to_string());
+    }
+
     let block_metadata_maw = BlockMetadata::parse(source, &mut temp_parser);
 
     let block_metadata = block_metadata_maw.item;
@@ -1903,6 +1916,37 @@ mod tests {
                     col: 1,
                     offset: 24
                 }
+            );
+        }
+
+        #[test]
+        fn comment_transfer_boundary_respects_leveloffset() {
+            // Under `:leveloffset: +2`, `== Parent` is level 3 and a bare
+            // `= Child` is level 2 — an ancestor that must end Parent. The
+            // `[[x]]` anchor and the `// comment` before `= Child` transfer to
+            // it, and the section-boundary look-ahead must apply the active
+            // `leveloffset` (rather than a default offset of zero) so `= Child`
+            // is recognized as the boundary and lands as a sibling of Parent,
+            // not nested inside it. Regression test for the boundary check
+            // reading the offset from its throwaway parser.
+            let doc = Parser::default().parse(
+                "= Doc\n:leveloffset: +2\n\n== Parent\n\npara\n\n[[x]]\n// comment\n= Child\n\nbody",
+            );
+
+            let top: Vec<_> = doc.nested_blocks().collect();
+            assert_eq!(top.len(), 2, "Child must be a sibling of Parent");
+
+            let parent = top.first().unwrap();
+            let child = top.last().unwrap();
+            assert_eq!(parent.id(), Some("_parent"));
+
+            // The transferred anchor gives Child its id, and Child owns the
+            // following paragraph as a child rather than sitting under Parent.
+            assert_eq!(child.id(), Some("x"));
+            assert!(
+                parent
+                    .nested_blocks()
+                    .all(|b| b.raw_context().as_ref() != "section")
             );
         }
 
