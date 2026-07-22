@@ -428,6 +428,26 @@ mod tests {
     }
 
     #[test]
+    fn absent_docdir_and_docfile_stay_missing_under_server_safe_mode() {
+        // With no `docdir` / `docfile` stored, the masking finds nothing to mask
+        // (`raw_set_value` short-circuits on the absent attribute) and they stay
+        // missing — mirroring the parser.
+        let attrs = ResolvedAttributes::new(
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            HashMap::new(),
+            None,
+            None,
+            SafeMode::Server,
+        );
+
+        assert_eq!(attrs.attribute_value("docdir"), InterpretedValue::Unset);
+        assert_eq!(attrs.attribute_value("docfile"), InterpretedValue::Unset);
+        assert!(!attrs.has_attribute("docdir"));
+        assert!(!attrs.has_attribute("docfile"));
+    }
+
+    #[test]
     fn leaves_non_string_docdir_and_docfile_untouched_under_server_safe_mode() {
         // A `docdir` / `docfile` present as a value-less `Set` flag carries no
         // path to relativize, so the masking leaves it untouched (mirroring
