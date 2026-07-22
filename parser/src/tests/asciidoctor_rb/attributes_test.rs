@@ -142,10 +142,9 @@ mod assignment {
     # NOTE AsciiDoc.py recognizes this entry
 "#
     );
-    // Tracked in #728.
     #[test]
     fn does_not_recognize_attribute_entry_if_name_contains_colon() {
-        non_normative!(
+        verifies!(
             r#"
     test 'does not recognize attribute entry if name contains colon' do
       input = ':foo:bar: baz'
@@ -158,14 +157,16 @@ mod assignment {
 "#
         );
 
-        // Divergence: Asciidoctor renders `:foo:bar: baz` as a paragraph (a name
-        // containing a colon isn't a valid attribute entry). This crate also
-        // rejects `foo:bar` as an attribute, but consumes the line into the
-        // document header, yielding no blocks — so the block count/context
-        // assertions can't be verified against it.
+        // A name containing a colon isn't a valid attribute entry (Asciidoctor
+        // requires the value to be separated from the closing colon by at least
+        // one space or tab). The whole line falls through to a paragraph.
         let doc = Parser::default().parse(":foo:bar: baz");
         assert!(!doc.has_attribute("foo:bar"));
-        assert_eq!(doc.nested_blocks().count(), 0);
+
+        let mut blocks = doc.nested_blocks();
+        let block = blocks.next().unwrap();
+        assert_eq!(block.raw_context().as_ref(), "paragraph");
+        assert!(blocks.next().is_none());
     }
 
     non_normative!(
@@ -173,10 +174,9 @@ mod assignment {
     # NOTE AsciiDoc.py recognizes this entry
 "#
     );
-    // Tracked in #728.
     #[test]
     fn does_not_recognize_attribute_entry_if_name_ends_with_colon() {
-        non_normative!(
+        verifies!(
             r#"
     test 'does not recognize attribute entry if name ends with colon' do
       input = ':foo:: bar'
@@ -189,12 +189,21 @@ mod assignment {
 "#
         );
 
-        // Divergence: Asciidoctor renders `:foo:: bar` as a description list (a
-        // name ending with a colon isn't a valid attribute entry). This crate
-        // consumes the line into the document header, yielding no blocks.
+        // A name ending with a colon isn't a valid attribute entry; `:foo:: bar`
+        // is instead a description list (`foo` is the term, `bar` the
+        // description). This crate models a description list as a `list` block
+        // whose type is `Description`, the equivalent of Asciidoctor's `:dlist`.
         let doc = Parser::default().parse(":foo:: bar");
         assert!(!doc.has_attribute("foo:"));
-        assert_eq!(doc.nested_blocks().count(), 0);
+
+        let mut blocks = doc.nested_blocks();
+        let block = blocks.next().unwrap();
+
+        let crate::blocks::Block::List(list) = block else {
+            panic!("Expected a list block, got {block:#?}");
+        };
+        assert_eq!(list.type_(), crate::blocks::ListType::Description);
+        assert!(blocks.next().is_none());
     }
 
     non_normative!(
