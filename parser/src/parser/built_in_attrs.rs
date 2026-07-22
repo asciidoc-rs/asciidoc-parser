@@ -510,12 +510,12 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         set(ApiOnly, ASCIIDOCTOR_VERSION),
     );
 
-    // NOTE: The companion always-set `asciidoctor` flag is deliberately still
-    // *not* defined here. Defining it exposes a preprocessor bug – conditional
-    // directives are processed inside `////` comment blocks – that Asciidoctor's
-    // own `preprocessor directives should not be processed within comment block`
-    // tests catch via `ifdef::asciidoctor[////]`. See issue #810; the flag lands
-    // with that fix.
+    // The always-set boolean flag identifying an Asciidoctor-compatible
+    // processor. A document uses `ifdef::asciidoctor[]` to guard content meant
+    // only for Asciidoctor (and its compatible implementations, such as this
+    // crate). Like its companions above it is locked against document
+    // assignment (`ApiOnly`).
+    attrs.insert("asciidoctor".to_owned(), empty(ApiOnly, Set));
 
     // ### Safe-mode intrinsic attributes
     //
