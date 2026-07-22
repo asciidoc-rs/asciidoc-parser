@@ -1017,6 +1017,20 @@ fn should_skip_front_matter_with_crlf_line_endings() {
     assert_eq!(doc.header().title_source().unwrap().line(), 5);
 }
 
+// Crate-native (no Asciidoctor analog): with `skip-front-matter` set but no
+// opening `---` on the first line, there is nothing to skip – the document
+// parses normally and no `front-matter` attribute is recorded.
+#[test]
+fn should_not_skip_front_matter_when_first_line_is_not_a_delimiter() {
+    let doc = Parser::default()
+        .with_intrinsic_attribute_bool("skip-front-matter", true, ModificationContext::ApiOnly)
+        .parse("= Document Title\nAuthor Name\n\npreamble\n");
+
+    assert_eq!(doc.attribute_value("front-matter"), InterpretedValue::Unset);
+    assert_eq!(doc.header().title(), Some("Document Title"));
+    assert_eq!(doc.header().title_source().unwrap().line(), 1);
+}
+
 non_normative!(
     r#"
     end
