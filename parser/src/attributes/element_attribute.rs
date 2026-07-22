@@ -538,33 +538,29 @@ impl<'src> ElementAttribute<'src> {
         let id = self.id_internal();
         let options = self.options_internal();
 
+        // Rebuild the shorthand string from the retained components, recording
+        // the start offset of each shorthand item as it is appended. The
+        // components were validated (and stripped of their delimiters) when the
+        // source line was parsed, so these offsets match what
+        // `parse_shorthand_items` would produce for the same string — without
+        // re-parsing it (or having to discard its always-empty warnings).
         let mut value = String::new();
+        let mut shorthand_item_indices: Vec<usize> = vec![];
+
         if let Some(block_style) = block_style {
+            shorthand_item_indices.push(value.len());
             value.push_str(block_style);
         }
         if let Some(id) = id {
+            shorthand_item_indices.push(value.len());
             value.push('#');
             value.push_str(id);
         }
         for option in &options {
+            shorthand_item_indices.push(value.len());
             value.push('%');
             value.push_str(option);
         }
-
-        // The shorthand string is synthesized from components that were already
-        // parsed and validated when the source line was read, so re-parsing it
-        // can never warn (see `merge_block_style_shorthand`).
-        let mut warnings: Vec<WarningType> = vec![];
-        let shorthand_item_indices = if value.is_empty() {
-            vec![]
-        } else {
-            parse_shorthand_items(&value, &mut warnings)
-        };
-
-        debug_assert!(
-            warnings.is_empty(),
-            "stripping shorthand roles should not produce warnings, got: {warnings:?}"
-        );
 
         Self {
             name: None,

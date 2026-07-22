@@ -356,9 +356,10 @@ impl<'src> Attrlist<'src> {
     }
 
     /// Replace (or clear) the formal `role` attribute with the given resolved
-    /// role list. Called by [`merge_block_attribute_line`] once roles have been
-    /// resolved under Asciidoctor's running model. An empty list removes any
-    /// existing `role` attribute.
+    /// role list. Called by
+    /// [`merge_block_attribute_line`](Self::merge_block_attribute_line) once
+    /// roles have been resolved under Asciidoctor's running model. An empty
+    /// list removes any existing `role` attribute.
     fn set_role_attribute(&mut self, roles: Vec<String>) {
         if roles.is_empty() {
             self.attributes.retain(|a| a.name_str() != Some("role"));
