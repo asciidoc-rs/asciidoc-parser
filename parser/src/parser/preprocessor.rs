@@ -249,11 +249,12 @@ impl<'p> PreprocessorState<'p> {
         // `comment_block_delimiter` is the closing delimiter of the comment
         // block currently open (a `////` run, or the `--` of a `[comment]` open
         // block); `in_comment_paragraph` is set while inside the raw portion of
-        // a `[comment]` paragraph; `after_comment_style` records that the line
-        // just emitted was a `[comment]` block-attribute line.
+        // a `[comment]` paragraph; `comment_style_pending` is set once a
+        // `[comment]` block style has been seen and holds while the block's
+        // remaining metadata is read, until the block it introduces is reached.
         let mut comment_block_delimiter: Option<String> = None;
         let mut in_comment_paragraph = false;
-        let mut after_comment_style = false;
+        let mut comment_style_pending = false;
 
         while !source_span.is_empty() {
             let original_source = source_span;
@@ -297,10 +298,6 @@ impl<'p> PreprocessorState<'p> {
                 continue;
             }
 
-            // Whether the line just emitted was a `[comment]` block-attribute
-            // line (consumed below when classifying the block it introduces).
-            let was_comment_style = std::mem::take(&mut after_comment_style);
-
             // Conditional preprocessor directives (`ifdef`, `ifndef`, `ifeval`,
             // `endif`) are handled before anything else so they take effect even
             // while a surrounding conditional is skipping (the nesting still has
@@ -312,6 +309,12 @@ impl<'p> PreprocessorState<'p> {
                 // emitted line must re-anchor the source map (its original line
                 // number no longer matches the output line number).
                 has_reported_file = false;
+
+                // A directive as the first content line after `[comment]` ends
+                // the block's metadata run (Asciidoctor processes that first
+                // line via its one-line look-ahead), so the pending comment
+                // style no longer applies.
+                comment_style_pending = false;
 
                 if caps.get(1).is_some() {
                     // Escaped directive (e.g. `\ifdef::foo[]`): not processed.
@@ -362,18 +365,17 @@ impl<'p> PreprocessorState<'p> {
                 continue;
             }
 
-            // A `[comment]` block-attribute line turns the block it introduces
-            // into a comment. When that block is an open block (`--`), its
-            // content is raw up to the closing `--`; otherwise it is a comment
-            // paragraph, whose lines after the first are raw (see above).
-            //
-            // Further block metadata (a title `.text`, an anchor or attribute
-            // list `[…]`) may sit between the `[comment]` line and the block it
-            // styles, so the comment-style marker is carried across those
-            // metadata lines until the block itself is reached.
-            if was_comment_style {
+            // With a `[comment]` block style pending, classify the block it
+            // introduces. An open block (`--`) is a comment block, raw up to the
+            // closing `--`; otherwise the block is a comment paragraph, whose
+            // lines after the first are raw (see above). Further block metadata
+            // (a title `.text`, an anchor or attribute list `[…]`) may sit
+            // between the `[comment]` line and the block it styles; the pending
+            // style holds across it until the block itself is reached.
+            if comment_style_pending {
                 if line.data() == "--" {
                     comment_block_delimiter = Some("--".to_owned());
+                    comment_style_pending = false;
                     self.emit_line(
                         line.data(),
                         file_name,
@@ -383,21 +385,30 @@ impl<'p> PreprocessorState<'p> {
                     continue;
                 }
 
-                if is_block_metadata_line(line.data()) {
-                    // Still within the block's metadata; keep the marker set so
-                    // the block the metadata introduces is classified below.
-                    after_comment_style = true;
-                } else if !line.data().is_empty() {
-                    // The first line of a comment paragraph is processed as
-                    // usual (falling through below); only its subsequent lines
-                    // are raw. NOTE: if that first line is itself an `include::`
-                    // directive, the merged content is preprocessed with fresh
-                    // comment state, so a directive on its own subsequent lines
-                    // is still evaluated. That case (an include on the very
-                    // first line of a comment paragraph) is an accepted
-                    // limitation of preprocessing in a separate pass.
-                    in_comment_paragraph = true;
+                if !is_block_metadata_line(line.data()) {
+                    // The block's content begins here. The first line of a
+                    // comment paragraph is processed as usual (falling through
+                    // below); only its subsequent lines are raw. NOTE: if that
+                    // first line is itself an `include::` directive, the merged
+                    // content is preprocessed with fresh comment state, so a
+                    // directive on its own subsequent lines is still evaluated.
+                    // That case (an include on the very first line of a comment
+                    // paragraph) is an accepted limitation of preprocessing in a
+                    // separate pass.
+                    if !line.data().is_empty() {
+                        in_comment_paragraph = true;
+                    }
+                    comment_style_pending = false;
                 }
+            }
+
+            // A block attribute list sets or replaces the pending block style:
+            // `[comment]` marks the upcoming block a comment, another positional
+            // style (`[source]`, …) overrides it, and a bracketed line without a
+            // positional style (an anchor `[[id]]`, a shorthand- or named-only
+            // list) leaves the pending style unchanged.
+            if let Some(is_comment) = self.attrlist_block_style_is_comment(line.data()) {
+                comment_style_pending = is_comment;
             }
 
             if self.can_have_attribute
@@ -800,12 +811,6 @@ impl<'p> PreprocessorState<'p> {
                     source_line_number,
                     &mut has_reported_file,
                 );
-
-                // Remember a `[comment]` block-attribute line so the next
-                // iteration can classify the block it introduces as a comment.
-                if line_text == "[comment]" {
-                    after_comment_style = true;
-                }
             }
         }
 
@@ -848,6 +853,31 @@ impl<'p> PreprocessorState<'p> {
             self.output.push_str(line.data());
             self.output.push('\n');
         }
+    }
+
+    /// Determine how a block attribute-list line affects the pending block
+    /// style, for tracking a `[comment]` style across a block's metadata.
+    ///
+    /// Returns `Some(true)` when `line` is an attribute list whose positional
+    /// block style is `comment`, `Some(false)` when it sets some other
+    /// positional style (which overrides an earlier `[comment]`), and `None`
+    /// when it is not a style-setting line — a block title, an anchor
+    /// (`[[id]]`), a shorthand- or named-only attribute list, or any
+    /// non-attribute-list line — so the pending style is left unchanged.
+    fn attrlist_block_style_is_comment(&self, line: &str) -> Option<bool> {
+        // Only a bracketed attribute list carries a positional block style.
+        let inner = line.strip_prefix('[')?.strip_suffix(']')?;
+
+        // A block anchor (`[[id]]`) is not a style.
+        if inner.starts_with('[') {
+            return None;
+        }
+
+        let attrlist = Attrlist::parse(Span::new(inner), self.parser, AttrlistContext::Block)
+            .item
+            .item;
+
+        attrlist.block_style().map(|style| style == "comment")
     }
 
     /// Apply attribute substitution to a string, replacing {attribute-name}
@@ -3307,6 +3337,34 @@ mod tests {
                 "[comment]\n.title\n[[id]]\nfirst line\nifdef::foo[dropped]\n\ntail"
             ),
             "[comment]\n.title\n[[id]]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn later_style_overrides_comment_style() {
+        // A positional style on a later attribute list (`[source]`) overrides an
+        // earlier `[comment]`, so the block is a real listing and an `include::`
+        // within it is processed rather than left raw.
+        let source = "[comment]\n[source]\n----\ninclude::sub.adoc[]\n----\n";
+        let handler = InlineFileHandler::from_pairs([("sub.adoc", "Included.")]);
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
+        assert_eq!(output, "[comment]\n[source]\n----\nIncluded.\n----\n");
+    }
+
+    #[test]
+    fn non_style_attribute_list_keeps_comment_style() {
+        // A bracketed line without a positional style (here a role-only
+        // shorthand) is not a style override, so an earlier `[comment]` still
+        // governs the block and the directive on the paragraph's later line
+        // stays raw.
+        assert_eq!(
+            conditional_output("[comment]\n[.rolename]\nfirst line\nifdef::foo[dropped]\n\ntail"),
+            "[comment]\n[.rolename]\nfirst line\nifdef::foo[dropped]\n\ntail\n"
         );
     }
 
