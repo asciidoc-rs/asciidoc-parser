@@ -65,12 +65,10 @@
 //! * Multi-line attribute values fuse only the modern backslash continuation,
 //!   not the legacy `+`, so a legacy `+`-continued value keeps only its first
 //!   line.
-//! * Non-ASCII attribute names and names with spaces are not accepted.
 //! * A counter modifies a locked (API-set or built-in) attribute rather than
 //!   leaving it unchanged.
-//! * Safe-mode masking of `docdir`/`docfile`, the unterminated-header-comment
-//!   behavior, and the transfer of trailing anchors/attributes onto a following
-//!   section all differ.
+//! * Safe-mode masking of `docdir`/`docfile` and the
+//!   unterminated-header-comment behavior differ.
 //!
 //! Separately, block captions/titles are exposed via `caption()` / `title()`
 //! rather than as `<div class="title">` DOM nodes — a documented architectural
@@ -142,10 +140,9 @@ mod assignment {
     # NOTE AsciiDoc.py recognizes this entry
 "#
     );
-    // Tracked in #728.
     #[test]
     fn does_not_recognize_attribute_entry_if_name_contains_colon() {
-        non_normative!(
+        verifies!(
             r#"
     test 'does not recognize attribute entry if name contains colon' do
       input = ':foo:bar: baz'
@@ -158,14 +155,16 @@ mod assignment {
 "#
         );
 
-        // Divergence: Asciidoctor renders `:foo:bar: baz` as a paragraph (a name
-        // containing a colon isn't a valid attribute entry). This crate also
-        // rejects `foo:bar` as an attribute, but consumes the line into the
-        // document header, yielding no blocks — so the block count/context
-        // assertions can't be verified against it.
+        // A name containing a colon isn't a valid attribute entry (Asciidoctor
+        // requires the value to be separated from the closing colon by at least
+        // one space or tab). The whole line falls through to a paragraph.
         let doc = Parser::default().parse(":foo:bar: baz");
         assert!(!doc.has_attribute("foo:bar"));
-        assert_eq!(doc.nested_blocks().count(), 0);
+
+        let mut blocks = doc.nested_blocks();
+        let block = blocks.next().unwrap();
+        assert_eq!(block.raw_context().as_ref(), "paragraph");
+        assert!(blocks.next().is_none());
     }
 
     non_normative!(
@@ -173,10 +172,9 @@ mod assignment {
     # NOTE AsciiDoc.py recognizes this entry
 "#
     );
-    // Tracked in #728.
     #[test]
     fn does_not_recognize_attribute_entry_if_name_ends_with_colon() {
-        non_normative!(
+        verifies!(
             r#"
     test 'does not recognize attribute entry if name ends with colon' do
       input = ':foo:: bar'
@@ -189,12 +187,21 @@ mod assignment {
 "#
         );
 
-        // Divergence: Asciidoctor renders `:foo:: bar` as a description list (a
-        // name ending with a colon isn't a valid attribute entry). This crate
-        // consumes the line into the document header, yielding no blocks.
+        // A name ending with a colon isn't a valid attribute entry; `:foo:: bar`
+        // is instead a description list (`foo` is the term, `bar` the
+        // description). This crate models a description list as a `list` block
+        // whose type is `Description`, the equivalent of Asciidoctor's `:dlist`.
         let doc = Parser::default().parse(":foo:: bar");
         assert!(!doc.has_attribute("foo:"));
-        assert_eq!(doc.nested_blocks().count(), 0);
+
+        let mut blocks = doc.nested_blocks();
+        let block = blocks.next().unwrap();
+
+        let crate::blocks::Block::List(list) = block else {
+            panic!("Expected a list block, got {block:#?}");
+        };
+        assert_eq!(list.type_(), crate::blocks::ListType::Description);
+        assert!(blocks.next().is_none());
     }
 
     non_normative!(
@@ -202,10 +209,9 @@ mod assignment {
     # NOTE AsciiDoc.py does not recognize this entry
 "#
     );
-    // Tracked in #726.
     #[test]
     fn allows_any_word_character_defined_by_unicode_in_an_attribute_name() {
-        non_normative!(
+        verifies!(
             r#"
     test 'allows any word character defined by Unicode in an attribute name' do
       [['café', 'a coffee shop'], ['سمن', %(سازمان مردمنهاد)]].each do |(name, value)|
@@ -222,15 +228,13 @@ mod assignment {
 "#
         );
 
-        // Divergence: Asciidoctor accepts any Unicode word character in an
-        // attribute name; this crate restricts names to ASCII word characters,
-        // so `:café: …` / `:سمن: …` are treated as literal paragraphs and the
-        // `{café}` / `{سمن}` references are left unresolved.
+        // A word character in an attribute-entry name is any Unicode letter or
+        // digit (or `_`), so `:café:` / `:سمن:` are recognized and their
+        // `{café}` / `{سمن}` references resolve. See #726.
         for (name, value) in [("café", "a coffee shop"), ("سمن", "سازمان مردمنهاد")]
         {
-            let _ = value;
             let doc = Parser::default().parse(&format!(":{name}: {value}\n\n{{{name}}}"));
-            assert_xpath(&doc, &format!("//p[text()=\"{{{name}}}\"]"), 1);
+            assert_xpath(&doc, &format!("//p[text()=\"{value}\"]"), 1);
         }
     }
 
@@ -2257,10 +2261,9 @@ mod interpolation {
         assert_rendered_contains(&doc, "2010-01-01 == 2010-01-01");
     }
 
-    // Tracked in #731.
     #[test]
     fn should_warn_if_unterminated_block_comment_is_detected_in_document_header() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should warn if unterminated block comment is detected in document header' do
       input = <<~'EOS'
@@ -2282,11 +2285,19 @@ mod interpolation {
         // As in Asciidoctor, the unterminated `////` opens a comment block that
         // swallows the rest of the header, so `:hey: there` is never applied
         // (see https://github.com/asciidoc-rs/asciidoc-parser/issues/760).
-        // Remaining divergence: the `unterminated comment block` warning is not
-        // yet modeled (tracked in #731).
+        //
+        // The `unterminated comment block` warning is modeled as the crate's
+        // generic `UnterminatedDelimitedBlock`, anchored at the opening `////`
+        // delimiter (line 3), matching the body-level comment block path
+        // (see https://github.com/asciidoc-rs/asciidoc-parser/issues/731).
         let doc =
             Parser::default().parse("= Document Title\n:foo: bar\n////\n:hey: there\n\ncontent");
         assert_eq!(doc.attribute_value("hey"), InterpretedValue::Unset);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].warning, WarningType::UnterminatedDelimitedBlock);
+        assert_eq!(warnings[0].source.line(), 3);
     }
 
     #[test]
@@ -4347,10 +4358,9 @@ mod block_attributes {
         assert_eq!(p.roles(), vec!["lead"]);
     }
 
-    // Tracked in #733.
     #[test]
     fn last_wins_for_id_attribute() {
-        non_normative!(
+        verifies!(
             r#"
     test "Last wins for id attribute" do
       input = <<~'EOS'
@@ -4374,20 +4384,24 @@ mod block_attributes {
 "#
         );
 
-        // Divergence: Asciidoctor keeps the *last* of consecutive block anchors,
-        // so the section id resolves to `foo`. This crate keeps the *first*
-        // anchor, so the id is `bar`, and it does not collapse the stacked
-        // anchors/attributes onto the following section the same way.
+        // Of consecutive block anchors the last wins (`[[bar]]` / `[[foo]]`
+        // resolves to `foo`), and an `[id=…]` attribute list following a `[[id]]`
+        // anchor likewise wins (`[[baz]]` / `[id='coolio']` resolves to
+        // `coolio`).
         let doc = Parser::default().parse(
             "[[bar]]\n[[foo]]\n== Section\n\nparagraph\n\n[[baz]]\n[id='coolio']\n=== Section",
         );
-        assert_eq!(first_block(&doc).id(), Some("bar"));
+
+        let sec = first_block(&doc);
+        assert_eq!(sec.id(), Some("foo"));
+
+        let subsec = sec.nested_blocks().last().expect("expected a sub-section");
+        assert_eq!(subsec.id(), Some("coolio"));
     }
 
-    // Tracked in #733.
     #[test]
     fn trailing_block_attributes_transfer_to_the_following_section() {
-        non_normative!(
+        verifies!(
             r#"
     test "trailing block attributes transfer to the following section" do
       input = <<~'EOS'
@@ -4425,20 +4439,27 @@ mod block_attributes {
 "#
         );
 
-        // Divergence: Asciidoctor transfers a trailing block anchor / attribute
-        // list (separated from the heading by a comment or block) to the
-        // *following* section, so the sub-section gets id `sub` and Section Two
-        // gets role `classy`. This crate attaches them to standalone blocks
-        // instead, so the sub-section keeps its auto-generated id and Section Two
-        // has no role. The top-level section ids that this crate does assign are
-        // verified here.
+        // A trailing block anchor or attribute list separated from a heading by
+        // a comment (line or block) transfers to the *following* section: the
+        // sub-section gets id `sub` across the `// …` line comment, and Section
+        // Two gets role `classy` across the `////…////` comment block.
         let doc = Parser::default().parse(
             "[[one]]\n\n== Section One\n\nparagraph\n\n[[sub]]\n// try to mess this up!\n\n=== Sub-section\n\nparagraph\n\n[role='classy']\n\n////\nblock comment\n////\n\n== Section Two\n\ncontent",
         );
+
         let blocks: Vec<_> = doc.nested_blocks().collect();
-        assert_eq!(blocks[0].id(), Some("one"));
-        assert_eq!(blocks.last().unwrap().id(), Some("_section_two"));
-        assert!(blocks.last().unwrap().roles().is_empty());
+
+        let section_one = blocks.first().expect("expected Section One");
+        assert_eq!(section_one.id(), Some("one"));
+
+        let subsection = section_one
+            .nested_blocks()
+            .last()
+            .expect("expected a sub-section");
+        assert_eq!(subsection.id(), Some("sub"));
+
+        let section_two = blocks.last().expect("expected Section Two");
+        assert_eq!(section_two.roles(), vec!["classy"]);
     }
 }
 

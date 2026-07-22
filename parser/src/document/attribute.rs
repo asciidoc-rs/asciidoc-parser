@@ -78,16 +78,24 @@ impl<'src> Attribute<'src> {
                 .take_value_with_continuation();
             (InterpretedValue::Unset, None, extent.after)
         } else {
-            let first_line = line.after.take_line();
+            // The first line's content after the closing colon, with trailing
+            // spaces trimmed, decides whether this is a set-only entry.
+            let first_line = line.after.take_normalized_line();
 
             if first_line.item.is_empty() {
-                // `:name:` with nothing after the closing colon (before any
-                // newline) is a set-only entry.
+                // `:name:` with nothing (but optional trailing whitespace) after
+                // the closing colon is a set-only entry.
                 (InterpretedValue::Set, None, first_line.after)
             } else {
+                // Asciidoctor requires at least one space or tab between the
+                // closing colon and the value. A non-blank character immediately
+                // after the colon means the line is not a valid attribute entry:
+                // the name either contains a colon (`:foo:bar: baz`) or ends with
+                // one (`:foo:: bar`), so the whole line falls through to be parsed
+                // as an ordinary block. See #728.
                 let extent = line
                     .after
-                    .take_whitespace()
+                    .take_required_whitespace()?
                     .after
                     .take_value_with_continuation();
                 (

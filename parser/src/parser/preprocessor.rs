@@ -2138,8 +2138,13 @@ static INCLUDE_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+    // The attribute-name class `\w` (Unicode `\p{Word}`) matches Asciidoctor's
+    // `#{CG_WORD}[#{CC_WORD}-]*`, so a Unicode-named attribute resolves in
+    // preprocessor contexts too (e.g. `include::{café}[]` and conditional
+    // directives), consistent with the main substitution matcher and with
+    // `is_word_char`.
     #[allow(clippy::unwrap_used)]
-    Regex::new(r#"\\?\{([A-Za-z0-9_][A-Za-z0-9_-]*)\}"#).unwrap()
+    Regex::new(r#"\\?\{(\w[\w-]*)\}"#).unwrap()
 });
 
 static CONDITIONAL_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
