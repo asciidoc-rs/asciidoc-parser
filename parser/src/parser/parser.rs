@@ -9,6 +9,7 @@ use crate::{
     Document, HasSpan,
     blocks::{SectionNumber, SectionType},
     document::{Attribute, Catalog, InterpretedValue, RefType},
+    internal::is_word_char,
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DocinfoFileHandler,
         HtmlSubstitutionRenderer, IncludeFileHandler, InlineSubstitutionRenderer,
@@ -2219,16 +2220,18 @@ fn string_succ(current: &str) -> String {
 
 fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
     // Sanitize the name the way Asciidoctor's `sanitize_attribute_name` does:
-    // drop every character that is not a word character (ASCII letter, digit, or
-    // underscore) or a hyphen, then lower-case the result. This is what lets an
-    // attribute entry written as `:Author Initials:` set the `authorinitials`
-    // attribute, and `:Foo 3^ # - Bar[:` set `foo3-bar`.
+    // drop every character that is not a word character (any Unicode letter,
+    // digit, or `_`) or a hyphen, then lower-case the result. This is what lets
+    // an attribute entry written as `:Author Initials:` set the
+    // `authorinitials` attribute, `:Foo 3^ # - Bar[:` set `foo3-bar`, and
+    // `:My frog:` set `myfrog`. Unicode word characters are preserved, so
+    // `:café:` sets `café` and `:سمن:` sets `سمن`.
     let attr_name: String = raw_attr_name
         .as_ref()
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .filter(|c| is_word_char(*c) || *c == '-')
         .collect::<String>()
-        .to_ascii_lowercase();
+        .to_lowercase();
 
     // Some attribute names have aliases. Remap to the primary name.
     //

@@ -65,7 +65,6 @@
 //! * Multi-line attribute values fuse only the modern backslash continuation,
 //!   not the legacy `+`, so a legacy `+`-continued value keeps only its first
 //!   line.
-//! * Non-ASCII attribute names and names with spaces are not accepted.
 //! * A counter modifies a locked (API-set or built-in) attribute rather than
 //!   leaving it unchanged.
 //! * Safe-mode masking of `docdir`/`docfile`, the unterminated-header-comment
@@ -202,10 +201,9 @@ mod assignment {
     # NOTE AsciiDoc.py does not recognize this entry
 "#
     );
-    // Tracked in #726.
     #[test]
     fn allows_any_word_character_defined_by_unicode_in_an_attribute_name() {
-        non_normative!(
+        verifies!(
             r#"
     test 'allows any word character defined by Unicode in an attribute name' do
       [['café', 'a coffee shop'], ['سمن', %(سازمان مردمنهاد)]].each do |(name, value)|
@@ -222,15 +220,13 @@ mod assignment {
 "#
         );
 
-        // Divergence: Asciidoctor accepts any Unicode word character in an
-        // attribute name; this crate restricts names to ASCII word characters,
-        // so `:café: …` / `:سمن: …` are treated as literal paragraphs and the
-        // `{café}` / `{سمن}` references are left unresolved.
+        // A word character in an attribute-entry name is any Unicode letter or
+        // digit (or `_`), so `:café:` / `:سمن:` are recognized and their
+        // `{café}` / `{سمن}` references resolve. See #726.
         for (name, value) in [("café", "a coffee shop"), ("سمن", "سازمان مردمنهاد")]
         {
-            let _ = value;
             let doc = Parser::default().parse(&format!(":{name}: {value}\n\n{{{name}}}"));
-            assert_xpath(&doc, &format!("//p[text()=\"{{{name}}}\"]"), 1);
+            assert_xpath(&doc, &format!("//p[text()=\"{value}\"]"), 1);
         }
     }
 
