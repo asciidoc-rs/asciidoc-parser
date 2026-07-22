@@ -73,7 +73,13 @@ impl<'src> Attribute<'src> {
         } else if line.after.is_empty() {
             (InterpretedValue::Set, None)
         } else {
-            let raw_value = line.after.take_whitespace();
+            // Asciidoctor requires at least one space or tab between the closing
+            // colon and the value. A non-blank character immediately after the
+            // colon means the line is not a valid attribute entry: the name
+            // either contains a colon (`:foo:bar: baz`) or ends with one
+            // (`:foo:: bar`), so the whole line falls through to be parsed as an
+            // ordinary block. See #728.
+            let raw_value = line.after.take_required_whitespace()?;
             (
                 InterpretedValue::from_raw_value(&raw_value.after, parser),
                 Some(raw_value.after),
