@@ -1,10 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    SafeMode,
     document::InterpretedValue,
     parser::{
-        AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime, SafeMode,
-        built_in_attrs::{built_in_attr, derived_backend_value, synthesized_attr},
+        AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime,
+        built_in_attrs::{
+            built_in_attr, derived_backend_value, max_attribute_value_size_default,
+            synthesized_attr, user_home_default,
+        },
         is_datetime_attribute,
         safe_mode::masked_doc_path,
     },
@@ -40,6 +44,15 @@ pub(crate) struct ResolvedAttributes {
     /// supersedes any like-named attribute.
     counter_values: HashMap<String, String>,
 
+    /// The safe mode the parser ran under. It is not stored in any attribute
+    /// table, so the snapshot captures it here to resolve the mode-aware
+    /// intrinsics (`max-attribute-value-size`, `user-home`) and to apply the
+    /// `SafeMode::Server`-and-greater masking of `docdir` / `docfile` (see
+    /// [`masked_doc_path`]) exactly as the parser does. Without it,
+    /// `Document::attribute_value` would leak the unmasked host path that the
+    /// parser hides. Defaults to [`SafeMode::Secure`], matching the parser.
+    safe: SafeMode,
+
     /// The parser's pinned reference-time configuration, if any, used to
     /// resolve the time-dependent attributes (`docdate` and its family) on
     /// demand. This is deterministic parser configuration (not a captured
@@ -48,13 +61,6 @@ pub(crate) struct ResolvedAttributes {
     /// costs only a pointer here — this snapshot is embedded in a
     /// size-sensitive cell enum.
     datetime_inputs: Option<Box<DatetimeInputs>>,
-
-    /// The safe mode the parser ran under, so a snapshot read applies the same
-    /// `SafeMode::Server`-and-greater masking of `docdir` / `docfile` the
-    /// parser does (see [`masked_doc_path`]). Without it,
-    /// `Document::attribute_value` would leak the unmasked host path that
-    /// the parser hides.
-    safe: SafeMode,
 }
 
 impl ResolvedAttributes {
@@ -62,16 +68,16 @@ impl ResolvedAttributes {
         attribute_values: Arc<HashMap<String, AttributeValue>>,
         default_attribute_values: Arc<HashMap<String, String>>,
         counter_values: HashMap<String, String>,
+        safe: SafeMode,
         reference_time: Option<ReferenceTime>,
         input_mtime: Option<ReferenceTime>,
-        safe: SafeMode,
     ) -> Self {
         Self {
             attribute_values,
             default_attribute_values,
             counter_values,
-            datetime_inputs: DatetimeInputs::new(reference_time, input_mtime),
             safe,
+            datetime_inputs: DatetimeInputs::new(reference_time, input_mtime),
         }
     }
 
@@ -207,13 +213,26 @@ impl ResolvedAttributes {
     }
 
     /// Returns the effective attribute definition for `name`, falling back to
-    /// the shared built-in defaults (and the synthesized derived doctype
-    /// attribute) exactly as [`Parser::effective_attribute`] does.
+    /// the mode-aware intrinsics (`max-attribute-value-size`, `user-home`), the
+    /// shared built-in defaults, and the synthesized derived attributes exactly
+    /// as [`Parser::effective_attribute`] does.
     ///
     /// [`Parser::effective_attribute`]: crate::Parser::effective_attribute
     fn effective_attribute(&self, name: &str) -> Option<&AttributeValue> {
         if let Some(av) = self.attribute_values.get(name) {
             return Some(av);
+        }
+        // Mirror the parser's mode-aware resolution of the two intrinsics whose
+        // default depends on the safe mode rather than on either attribute
+        // table (see [`Parser::effective_attribute`]). Consulted after the
+        // per-parser map so a caller-supplied value still wins.
+        if name == "max-attribute-value-size" {
+            return Some(max_attribute_value_size_default(
+                self.safe == SafeMode::Secure,
+            ));
+        }
+        if name == "user-home" {
+            return Some(user_home_default(self.safe < SafeMode::Server));
         }
         if let Some(av) = built_in_attr(name) {
             return Some(av);
@@ -289,10 +308,9 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use crate::{
+        SafeMode,
         document::InterpretedValue,
-        parser::{
-            AllowableValue, AttributeValue, ModificationContext, ResolvedAttributes, SafeMode,
-        },
+        parser::{AllowableValue, AttributeValue, ModificationContext, ResolvedAttributes},
     };
 
     fn attr(value: InterpretedValue) -> AttributeValue {
@@ -333,9 +351,9 @@ mod tests {
             Arc::new(attribute_values),
             Arc::new(default_attribute_values),
             counter_values,
-            None,
-            None,
             SafeMode::Secure,
+            None,
+            None,
         )
     }
 
@@ -391,6 +409,19 @@ mod tests {
     }
 
     #[test]
+    fn is_attribute_set_reports_set_state() {
+        let attrs = sample();
+
+        assert!(attrs.is_attribute_set("value"));
+        assert!(attrs.is_attribute_set("set-no-default"));
+        assert!(!attrs.is_attribute_set("unset"));
+        assert!(!attrs.is_attribute_set("absent"));
+
+        // A counter always holds a concrete (set) value.
+        assert!(attrs.is_attribute_set("count"));
+    }
+
+    #[test]
     fn masks_docdir_and_docfile_under_server_safe_mode() {
         // A snapshot taken from a `SafeMode::Server` parser masks `docdir`
         // (blanked) and `docfile` (relativized) exactly as the parser does, so
@@ -409,9 +440,9 @@ mod tests {
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
             HashMap::new(),
-            None,
-            None,
             SafeMode::Server,
+            None,
+            None,
         );
 
         assert_eq!(
@@ -436,9 +467,9 @@ mod tests {
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
             HashMap::new(),
-            None,
-            None,
             SafeMode::Server,
+            None,
+            None,
         );
 
         assert_eq!(attrs.attribute_value("docdir"), InterpretedValue::Unset);
@@ -460,9 +491,9 @@ mod tests {
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
             HashMap::new(),
-            None,
-            None,
             SafeMode::Server,
+            None,
+            None,
         );
 
         assert_eq!(attrs.attribute_value("docdir"), InterpretedValue::Set);
@@ -481,27 +512,14 @@ mod tests {
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
             HashMap::new(),
-            None,
-            None,
             SafeMode::Safe,
+            None,
+            None,
         );
 
         assert_eq!(
             attrs.attribute_value("docdir"),
             InterpretedValue::Value("/some/dir".to_string())
         );
-    }
-
-    #[test]
-    fn is_attribute_set_reports_set_state() {
-        let attrs = sample();
-
-        assert!(attrs.is_attribute_set("value"));
-        assert!(attrs.is_attribute_set("set-no-default"));
-        assert!(!attrs.is_attribute_set("unset"));
-        assert!(!attrs.is_attribute_set("absent"));
-
-        // A counter always holds a concrete (set) value.
-        assert!(attrs.is_attribute_set("count"));
     }
 }
