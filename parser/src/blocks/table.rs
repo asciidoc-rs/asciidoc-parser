@@ -2031,7 +2031,13 @@ fn parse_asciidoc_cell_body<'src>(
     // it is cheap. It lets a caller introspect the nested cell document —
     // including the attributes it inherited from the parent — the same way the
     // top-level `Document` exposes its own.
-    let attributes = parser.snapshot_attributes();
+    let mut attributes = parser.snapshot_attributes();
+
+    // Materialize the cell's derived `toc-position` / `toc-placement` /
+    // `toc-class` attributes into its snapshot, so it exposes them the same way
+    // the top-level `Document` does — without mutating the parser (whose
+    // attribute state the caller restores to the parent's on return anyway).
+    attributes.materialize_toc_attributes(toc.mode);
 
     (title, inline, toc, maw.item.item, attributes)
 }

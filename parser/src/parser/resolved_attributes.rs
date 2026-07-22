@@ -2,9 +2,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     SafeMode,
-    document::InterpretedValue,
+    document::{InterpretedValue, TocMode},
     parser::{
-        AttributeValue, DatetimeContext, DatetimeInputs, ReferenceTime,
+        AllowableValue, AttributeValue, DatetimeContext, DatetimeInputs, ModificationContext,
+        ReferenceTime,
         built_in_attrs::{
             built_in_attr, derived_backend_value, max_attribute_value_size_default,
             synthesized_attr, user_home_default,
@@ -78,6 +79,56 @@ impl ResolvedAttributes {
             counter_values,
             safe,
             datetime_inputs: DatetimeInputs::new(reference_time, input_mtime),
+        }
+    }
+
+    /// Materializes the derived `toc-position` / `toc-placement` / `toc-class`
+    /// document attributes from a resolved [`TocMode`], so they are queryable
+    /// on this snapshot exactly as Asciidoctor exposes them (see the
+    /// `verify toc attribute matrix` upstream test).
+    ///
+    /// The values are written into *this snapshot's* attribute map (via
+    /// [`Arc::make_mut`], which detaches it from the parser's shared table),
+    /// not into the parser — so a reused parser never carries a document's
+    /// derived TOC state into the next parse, where it would otherwise
+    /// perturb [`TocMode::from_parser`](crate::document::TocMode)'s reading
+    /// of the raw `toc-placement`.
+    ///
+    /// `toc-placement` and `toc-position` are fully derived and overwrite any
+    /// author-supplied value; `toc-class` only *defaults* (to `toc2` for a
+    /// side-column TOC), leaving an explicit author value untouched. Nothing is
+    /// materialized when no TOC is generated ([`TocMode::Disabled`], for which
+    /// every derived value is `None`), matching Asciidoctor — and avoiding a
+    /// map clone for the common no-TOC document.
+    pub(crate) fn materialize_toc_attributes(&mut self, mode: TocMode) {
+        let placement = mode.derived_toc_placement();
+        let position = mode.derived_toc_position();
+        // A side-column TOC only *defaults* `toc-class` to `toc2`; an explicit
+        // author value wins (Asciidoctor's `attrs['toc-class'] ||= 'toc2'`).
+        let class = mode
+            .derived_toc_class()
+            .filter(|_| !self.is_attribute_set("toc-class"));
+
+        if placement.is_none() && position.is_none() && class.is_none() {
+            return;
+        }
+
+        let derived = |value: &str| AttributeValue {
+            allowable_value: AllowableValue::Any,
+            modification_context: ModificationContext::ApiOnly,
+            silent_when_locked: false,
+            value: InterpretedValue::Value(value.to_string()),
+        };
+
+        let attrs = Arc::make_mut(&mut self.attribute_values);
+        if let Some(placement) = placement {
+            attrs.insert("toc-placement".to_string(), derived(placement));
+        }
+        if let Some(position) = position {
+            attrs.insert("toc-position".to_string(), derived(position));
+        }
+        if let Some(class) = class {
+            attrs.insert("toc-class".to_string(), derived(class));
         }
     }
 
