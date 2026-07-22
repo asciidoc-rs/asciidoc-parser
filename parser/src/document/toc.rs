@@ -534,4 +534,32 @@ mod tests {
             assert!(!doc.has_attribute(name), "{name} should be absent");
         }
     }
+
+    /// Exercises the derived-attribute mapping directly for every [`TocMode`]
+    /// variant, including [`TocMode::Disabled`] — which the parse path never
+    /// feeds to these helpers (materialization returns early for it), but whose
+    /// arms must still map to "no attribute".
+    #[test]
+    fn derived_attribute_mapping_covers_every_mode() {
+        for (mode, position, placement, class) in [
+            (TocMode::Disabled, None, None, None),
+            (TocMode::Auto, None, Some("auto"), None),
+            (TocMode::Left, Some("left"), Some("auto"), Some("toc2")),
+            (TocMode::Right, Some("right"), Some("auto"), Some("toc2")),
+            (TocMode::Preamble, Some("content"), Some("preamble"), None),
+            (TocMode::Macro, Some("content"), Some("macro"), None),
+        ] {
+            assert_eq!(
+                mode.derived_toc_position(),
+                position,
+                "position for {mode:?}"
+            );
+            assert_eq!(
+                mode.derived_toc_placement(),
+                placement,
+                "placement for {mode:?}"
+            );
+            assert_eq!(mode.derived_toc_class(), class, "class for {mode:?}");
+        }
+    }
 }
