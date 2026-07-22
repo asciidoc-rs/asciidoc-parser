@@ -431,10 +431,10 @@ mod tests {
         assert_eq!(doc_with(":toc: left\n:toc-class:").toc_class(), "toc");
     }
 
-    /// The derived `toc-position` / `toc-placement` / `toc-class` attributes are
-    /// materialized so they are queryable via `Document::attribute_value`,
-    /// matching Asciidoctor (see the `verify toc attribute matrix` upstream
-    /// test).
+    /// The derived `toc-position` / `toc-placement` / `toc-class` attributes
+    /// are materialized so they are queryable via
+    /// `Document::attribute_value`, matching Asciidoctor (see the `verify
+    /// toc attribute matrix` upstream test).
     #[test]
     fn derived_attributes_are_materialized() {
         use InterpretedValue::{Unset, Value};
