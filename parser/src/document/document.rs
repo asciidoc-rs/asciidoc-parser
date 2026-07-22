@@ -1765,6 +1765,37 @@ mod tests {
         }
 
         #[test]
+        fn matches_parser_state_for_masked_docdir_and_docfile() {
+            // Under `SafeMode::Server` the `Document` snapshot must report the
+            // same masked `docdir` / `docfile` the parser does, so the host path
+            // never leaks through the public `Document::attribute_value` (#735).
+            let mut parser = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_intrinsic_attribute("docdir", "/some/dir", ModificationContext::ApiOnly)
+                .with_intrinsic_attribute(
+                    "docfile",
+                    "/some/dir/sample.adoc",
+                    ModificationContext::ApiOnly,
+                );
+            let doc = parser.parse("Body.");
+
+            for name in ["docdir", "docfile"] {
+                assert_eq!(doc.attribute_value(name), parser.attribute_value(name));
+                assert_eq!(doc.has_attribute(name), parser.has_attribute(name));
+                assert_eq!(doc.is_attribute_set(name), parser.is_attribute_set(name));
+            }
+
+            assert_eq!(
+                doc.attribute_value("docdir"),
+                InterpretedValue::Value(String::new())
+            );
+            assert_eq!(
+                doc.attribute_value("docfile"),
+                InterpretedValue::Value("sample.adoc".to_string())
+            );
+        }
+
+        #[test]
         fn counter_value() {
             // A counter's current value is part of the resolved attribute state
             // and supersedes any like-named attribute.

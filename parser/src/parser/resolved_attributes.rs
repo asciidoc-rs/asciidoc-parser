@@ -11,6 +11,7 @@ use crate::{
             synthesized_attr, user_home_default,
         },
         is_datetime_attribute,
+        safe_mode::masked_doc_path,
     },
 };
 
@@ -46,8 +47,11 @@ pub(crate) struct ResolvedAttributes {
 
     /// The safe mode the parser ran under. It is not stored in any attribute
     /// table, so the snapshot captures it here to resolve the mode-aware
-    /// intrinsics (`max-attribute-value-size`, `user-home`) exactly as the
-    /// parser does. Defaults to [`SafeMode::Secure`], matching the parser.
+    /// intrinsics (`max-attribute-value-size`, `user-home`) and to apply the
+    /// `SafeMode::Server`-and-greater masking of `docdir` / `docfile` (see
+    /// [`masked_doc_path`]) exactly as the parser does. Without it,
+    /// `Document::attribute_value` would leak the unmasked host path that the
+    /// parser hides. Defaults to [`SafeMode::Secure`], matching the parser.
     safe: SafeMode,
 
     /// The parser's pinned reference-time configuration, if any, used to
@@ -148,6 +152,15 @@ impl ResolvedAttributes {
             return self.attribute_value("outfilesuffix");
         }
 
+        // Under `SafeMode::Server` or greater, `docdir` reads as empty and
+        // `docfile` is relativized, exactly as the parser reports it (see
+        // [`masked_doc_path`]).
+        if self.safe >= SafeMode::Server
+            && let Some(masked) = masked_doc_path(name, |n| self.raw_set_value(n))
+        {
+            return masked;
+        }
+
         // `basebackend` / `filetype` are derived on the fly from the current
         // `backend` (see [`derived_backend_value`]) rather than stored.
         if let Some(value) = derived_backend_value(name, &self.attribute_values) {
@@ -237,6 +250,17 @@ impl ResolvedAttributes {
                 InterpretedValue::Set => Some(String::new()),
                 InterpretedValue::Unset => None,
             })
+    }
+
+    /// Returns the raw stored string value of `name` if it currently resolves
+    /// to a plain [`Value`](InterpretedValue::Value), *before* any safe-mode
+    /// masking is applied. Mirrors `Parser::raw_set_value`, so the `docfile`
+    /// relativization is computed from the *original* API-provided `docdir`.
+    fn raw_set_value(&self, name: &str) -> Option<String> {
+        match self.effective_attribute(name)?.value {
+            InterpretedValue::Value(ref v) => Some(v.clone()),
+            _ => None,
+        }
     }
 
     /// Returns the effective attribute definition for `name`, falling back to
@@ -446,5 +470,107 @@ mod tests {
 
         // A counter always holds a concrete (set) value.
         assert!(attrs.is_attribute_set("count"));
+    }
+
+    #[test]
+    fn masks_docdir_and_docfile_under_server_safe_mode() {
+        // A snapshot taken from a `SafeMode::Server` parser masks `docdir`
+        // (blanked) and `docfile` (relativized) exactly as the parser does, so
+        // `Document::attribute_value` never leaks the host path.
+        let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+        attribute_values.insert(
+            "docdir".to_string(),
+            attr(InterpretedValue::Value("/some/dir".to_string())),
+        );
+        attribute_values.insert(
+            "docfile".to_string(),
+            attr(InterpretedValue::Value("/some/dir/sample.adoc".to_string())),
+        );
+
+        let attrs = ResolvedAttributes::new(
+            Arc::new(attribute_values),
+            Arc::new(HashMap::new()),
+            HashMap::new(),
+            SafeMode::Server,
+            None,
+            None,
+        );
+
+        assert_eq!(
+            attrs.attribute_value("docdir"),
+            InterpretedValue::Value(String::new())
+        );
+        assert_eq!(
+            attrs.attribute_value("docfile"),
+            InterpretedValue::Value("sample.adoc".to_string())
+        );
+        // Masking changes only the value; the attributes stay present and set.
+        assert!(attrs.has_attribute("docdir"));
+        assert!(attrs.is_attribute_set("docfile"));
+    }
+
+    #[test]
+    fn absent_docdir_and_docfile_stay_missing_under_server_safe_mode() {
+        // With no `docdir` / `docfile` stored, the masking finds nothing to mask
+        // (`raw_set_value` short-circuits on the absent attribute) and they stay
+        // missing — mirroring the parser.
+        let attrs = ResolvedAttributes::new(
+            Arc::new(HashMap::new()),
+            Arc::new(HashMap::new()),
+            HashMap::new(),
+            SafeMode::Server,
+            None,
+            None,
+        );
+
+        assert_eq!(attrs.attribute_value("docdir"), InterpretedValue::Unset);
+        assert_eq!(attrs.attribute_value("docfile"), InterpretedValue::Unset);
+        assert!(!attrs.has_attribute("docdir"));
+        assert!(!attrs.has_attribute("docfile"));
+    }
+
+    #[test]
+    fn leaves_non_string_docdir_and_docfile_untouched_under_server_safe_mode() {
+        // A `docdir` / `docfile` present as a value-less `Set` flag carries no
+        // path to relativize, so the masking leaves it untouched (mirroring
+        // `Parser`).
+        let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+        attribute_values.insert("docdir".to_string(), attr(InterpretedValue::Set));
+        attribute_values.insert("docfile".to_string(), attr(InterpretedValue::Set));
+
+        let attrs = ResolvedAttributes::new(
+            Arc::new(attribute_values),
+            Arc::new(HashMap::new()),
+            HashMap::new(),
+            SafeMode::Server,
+            None,
+            None,
+        );
+
+        assert_eq!(attrs.attribute_value("docdir"), InterpretedValue::Set);
+        assert_eq!(attrs.attribute_value("docfile"), InterpretedValue::Set);
+    }
+
+    #[test]
+    fn does_not_mask_docdir_and_docfile_below_server_safe_mode() {
+        let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+        attribute_values.insert(
+            "docdir".to_string(),
+            attr(InterpretedValue::Value("/some/dir".to_string())),
+        );
+
+        let attrs = ResolvedAttributes::new(
+            Arc::new(attribute_values),
+            Arc::new(HashMap::new()),
+            HashMap::new(),
+            SafeMode::Safe,
+            None,
+            None,
+        );
+
+        assert_eq!(
+            attrs.attribute_value("docdir"),
+            InterpretedValue::Value("/some/dir".to_string())
+        );
     }
 }

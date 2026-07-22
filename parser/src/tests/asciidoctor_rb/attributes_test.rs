@@ -2509,10 +2509,9 @@ mod interpolation {
         assert_rendered_contains(&doc, "{foo}");
     }
 
-    // Tracked in #735.
     #[test]
     fn does_not_show_docdir_and_shows_relative_docfile_if_safe_mode_is_server_or_greater() {
-        non_normative!(
+        verifies!(
             r#"
     test 'does not show docdir and shows relative docfile if safe mode is SERVER or greater' do
       input = <<~'EOS'
@@ -2530,6 +2529,8 @@ mod interpolation {
 "#
         );
 
+        // Under `SafeMode::Server` or greater, `docdir` renders empty and
+        // `docfile` is relativized to strip its `docdir` prefix (see #735).
         let doc = Parser::default()
             .with_safe_mode(SafeMode::Server)
             .with_intrinsic_attribute("docdir", "/some/dir", ModificationContext::ApiOnly)
@@ -2539,15 +2540,9 @@ mod interpolation {
                 ModificationContext::ApiOnly,
             )
             .parse("* docdir: {docdir}\n* docfile: {docfile}");
-        // Divergence: this crate does not apply Asciidoctor's SERVER-safe-mode
-        // masking of `docdir` (blanked) and `docfile` (relativized); the
-        // API-provided values are substituted verbatim.
         assert_eq!(
             rendered_paragraphs(&doc),
-            vec![
-                "docdir: /some/dir".to_string(),
-                "docfile: /some/dir/sample.adoc".to_string(),
-            ]
+            vec!["docdir: ".to_string(), "docfile: sample.adoc".to_string(),]
         );
     }
 
