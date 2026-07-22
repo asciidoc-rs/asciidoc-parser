@@ -124,6 +124,10 @@ pub(crate) fn masked_doc_path(
 /// (which keeps any intermediate sub-directories, not just the base name). This
 /// is the normal case, since Asciidoctor derives `docdir` from `docfile`.
 ///
+/// A trailing separator on `docdir` (e.g. `/some/dir/`) is ignored so the match
+/// still lands on a path-component boundary and nested components are
+/// preserved.
+///
 /// Unlike Asciidoctor, this crate exposes `docdir` and `docfile` as independent
 /// API attributes, so a caller can pair them inconsistently. Rather than slice
 /// at an unrelated byte offset (truncating the path, or dropping the first byte
@@ -131,7 +135,12 @@ pub(crate) fn masked_doc_path(
 /// actual prefix falls back to the file's base name (its trailing path
 /// segment).
 fn relativize_docfile(docfile: &str, docdir: Option<&str>) -> String {
-    if let Some(docdir) = docdir.filter(|d| !d.is_empty())
+    // Normalize away any trailing separator(s) on `docdir` so a directory
+    // written as `/some/dir/` matches at the same component boundary as
+    // `/some/dir`; without this the relative remainder loses its leading
+    // separator and nested components would collapse to the base name.
+    if let Some(docdir) = docdir.map(|d| d.trim_end_matches(['/', '\\']))
+        && !docdir.is_empty()
         && let Some(rest) = docfile.strip_prefix(docdir)
         && let Some(after) = rest.strip_prefix(['/', '\\'])
     {
@@ -191,6 +200,29 @@ mod tests {
         assert_eq!(
             relativize_docfile("/some/dirfile.adoc", Some("/some/dir")),
             "dirfile.adoc"
+        );
+    }
+
+    #[test]
+    fn ignores_a_trailing_separator_on_docdir() {
+        // A `docdir` written with a trailing separator still relativizes to the
+        // same component boundary, preserving nested path components.
+        assert_eq!(
+            relativize_docfile("/some/dir/sub/sample.adoc", Some("/some/dir/")),
+            "sub/sample.adoc"
+        );
+        assert_eq!(
+            relativize_docfile("/some/dir/sample.adoc", Some("/some/dir/")),
+            "sample.adoc"
+        );
+        // Multiple trailing separators, and the Windows separator, too.
+        assert_eq!(
+            relativize_docfile("/some/dir/sub/sample.adoc", Some("/some/dir///")),
+            "sub/sample.adoc"
+        );
+        assert_eq!(
+            relativize_docfile(r"C:\some\dir\sub\sample.adoc", Some(r"C:\some\dir\")),
+            r"sub\sample.adoc"
         );
     }
 
