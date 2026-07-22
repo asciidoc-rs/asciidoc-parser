@@ -780,7 +780,10 @@ mod assignment {
         let doc = Parser::default()
             .with_safe_mode(SafeMode::Safe)
             .parse(":imagesdir: {user-home}/etc/images\n\n{imagesdir}");
-        assert_eq!(rendered_paragraphs(&doc), vec![format!("{home}/etc/images")]);
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec![format!("{home}/etc/images")]
+        );
     }
 
     #[test]
