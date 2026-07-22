@@ -398,7 +398,13 @@ mod tests {
     fn title_default_value_and_empty() {
         assert_eq!(doc_with(":toc:").toc_title(), "Table of Contents");
         assert_eq!(doc_with(":toc:\n:toc-title: My TOC").toc_title(), "My TOC");
+        // A `:toc-title:` set with no value yields an empty title.
         assert_eq!(doc_with(":toc:\n:toc-title:").toc_title(), "");
+        // An explicitly unset `:toc-title!:` falls back to the built-in default.
+        assert_eq!(
+            doc_with(":toc:\n:toc-title!:").toc_title(),
+            "Table of Contents"
+        );
     }
 
     #[test]
