@@ -318,7 +318,19 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
             && self.scope == QuoteScope::Constrained
             && after.starts_with(['"', '\'', '`'])
         {
-            let skip_ahead = if caps[0].starts_with('\\') { 2 } else { 1 };
+            // The leading boundary group `[^\w&;:"'`}]` matches any non-word
+            // Unicode scalar, so it can be a multi-byte character. Skip the full
+            // width of that leading character rather than assuming one byte;
+            // otherwise the slice below (and the matching offset in
+            // `SkipAheadAndRetry`) would land inside the character and panic.
+            let skip_ahead = if caps[0].starts_with('\\') {
+                // Escape case: skip the backslash plus the following byte, which
+                // is always an ASCII `[` or `` ` ``.
+                2
+            } else {
+                caps[0].chars().next().map_or(1, char::len_utf8)
+            };
+
             dest.push_str(&caps[0][0..skip_ahead]);
             return LookaheadResult::SkipAheadAndRetry(skip_ahead);
         }
@@ -1547,6 +1559,25 @@ mod tests {
             );
 
             assert!(doc.catalog().contains_id("the_id"));
+        }
+
+        #[test]
+        fn multibyte_leading_char_before_constrained_monospace() {
+            // The constrained-monospace leading boundary group matches any
+            // non-word Unicode scalar, so it can begin with a multi-byte
+            // character. When the failed look-ahead skips past that leading
+            // character, the skip width must honor the character boundary
+            // rather than assuming a single byte.
+            for leading in ["€", "中", "🎉"] {
+                let source = format!("{leading}`code``");
+                let mut content = Content::from(crate::Span::new(&source));
+                let p = Parser::default();
+
+                // Must not panic on the multi-byte leading character.
+                SubstitutionStep::Quotes.apply(&mut content, &p, None);
+
+                assert!(content.rendered.starts_with(leading));
+            }
         }
     }
 
