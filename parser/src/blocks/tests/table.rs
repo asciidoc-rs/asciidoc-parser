@@ -970,7 +970,7 @@ fn row_fully_covered_by_rowspans_drops_following_cell() {
             .iter()
             .filter(|w| matches!(
                 w.warning,
-                crate::warnings::WarningType::TableDroppingIncompleteRowAtEndOfTable
+                crate::warnings::WarningType::TableIncompleteRowAtEndOfTable
             ))
             .count(),
         1

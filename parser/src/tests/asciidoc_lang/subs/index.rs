@@ -93,13 +93,14 @@ The normal substitution group (`normal`) is applied to the majority of the Ascii
         assert_eq!(block1.substitution_group(), SubstitutionGroup::Normal);
     }
 
-    #[ignore]
-    #[test]
-    fn header_group() {
-        // We don't describe the substitution group for header lines, so this isn't
-        // directly verifiable.
-        to_do_verifies!(
-            r#"
+    // Unlike the other substitution groups in this section, the `header` group
+    // applies to document-header metadata lines (author/revision) and to
+    // attribute-entry values rather than to a parsed block. There's no block that
+    // exposes a `header` substitution group to assert against – the way the normal
+    // and verbatim groups are checked below – so this paragraph is out of scope
+    // for verification and is treated as non-normative.
+    non_normative!(
+        r#"
 [#header-group]
 === Header substitution group
 
@@ -110,8 +111,7 @@ Only special characters, attribute references, and the inline pass macro are rep
 TIP: You can use the inline pass macro in attribute entries to xref:apply-subs-to-text.adoc[customize the substitution types applied to the attribute's value].
 
 "#
-        );
-    }
+    );
 
     #[test]
     fn verbatim_group() {
