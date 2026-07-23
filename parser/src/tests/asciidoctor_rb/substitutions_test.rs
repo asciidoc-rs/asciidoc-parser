@@ -4971,6 +4971,17 @@ mod macros {
     #[test]
     fn a_single_line_image_macro_with_text_and_link_to_self_should_be_interpreted_as_a_self_referencing_image_with_alt_text()
      {
+        verifies!(
+            r#"
+    test 'a single-line image macro with text and link to self should be interpreted as a self-referencing image with alt text' do
+      para = block_from_string 'image:tiger.png[Tiger, link=self]', attributes: { 'imagesdir' => 'img' }
+      assert_equal '<span class="image"><a class="image" href="img/tiger.png"><img src="img/tiger.png" alt="Tiger"></a></span>',
+        para.sub_macros(para.source).gsub(/>\s+</, '><')
+    end
+
+"#
+        );
+
         let mut p = Parser::default().with_intrinsic_attribute(
             "imagesdir",
             "img",
@@ -4984,6 +4995,8 @@ mod macros {
 
         let block = maw.item.unwrap().item;
 
+        // `link=self` resolves to the image's own resolved `src`
+        // (`img/tiger.png`), not the literal string `self`.
         assert_eq!(
             block,
             Block::Simple(SimpleBlock {
@@ -4994,7 +5007,7 @@ mod macros {
                         col: 1,
                         offset: 0,
                     },
-                    rendered: r#"<span class="image"><a class="image" href="self"><img src="img/tiger.png" alt="Tiger"></a></span>"#,
+                    rendered: r#"<span class="image"><a class="image" href="img/tiger.png"><img src="img/tiger.png" alt="Tiger"></a></span>"#,
                 },
                 source: Span {
                     data: r#"image:tiger.png[Tiger, link=self]"#,
@@ -5014,11 +5027,9 @@ mod macros {
         );
     }
 
-    #[ignore]
     #[test]
     fn should_link_to_data_uri_if_value_of_link_attribute_is_self_and_inline_image_is_embedded() {
-        todo!(
-            "Port when `data-uri` image embedding and `link=self` data-URI resolution are implemented (asciidoc-rs/asciidoc-parser#697): {}",
+        verifies!(
             r###"
         test 'should link to data URI if value of link attribute is self and inline image is embedded' do
             para = block_from_string 'image:circle.svg[Tiger,100,link=self]', safe: Asciidoctor::SafeMode::SERVER, attributes: { 'data-uri' => '', 'imagesdir' => 'fixtures', 'docdir' => testdir }
@@ -5028,6 +5039,55 @@ mod macros {
         end
             "###
         );
+
+        use crate::tests::fixtures::image_file_handler::ImageFileHandlerFixture;
+
+        // The bytes the image file handler returns for `circle.svg`. This crate
+        // reads no files itself, so the handler supplies what Asciidoctor would
+        // read from disk; `data-uri` embedding base64-encodes exactly these
+        // bytes.
+        const CIRCLE_SVG: &str = concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"500\" height=\"500\" ",
+            "style=\"fill:red\" viewBox=\"0 0 500 500\">",
+            "<circle cx=\"250\" cy=\"250\" r=\"200\"/></svg>",
+        );
+
+        // Base64 (strict, `pack 'm0'`) of `CIRCLE_SVG`, the `data:` URI payload.
+        const CIRCLE_SVG_BASE64: &str = concat!(
+            "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB4bWxucz0iaHR0",
+            "cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIiBzdHls",
+            "ZT0iZmlsbDpyZWQiIHZpZXdCb3g9IjAgMCA1MDAgNTAwIj48Y2lyY2xlIGN4PSIyNTAiIGN5",
+            "PSIyNTAiIHI9IjIwMCIvPjwvc3ZnPg==",
+        );
+
+        let mut content = crate::content::Content::from(crate::Span::new(
+            "image:circle.svg[Tiger,100,link=self]",
+        ));
+
+        // Below `Secure`, with `data-uri` set, the (non-inline) SVG image is
+        // embedded as a data URI, and `link=self` resolves to that same data
+        // URI for the anchor's `href`.
+        let p = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute_bool("data-uri", true, ModificationContext::Anywhere)
+            .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
+            .with_image_file_handler(ImageFileHandlerFixture::from_pairs([(
+                "fixtures/circle.svg",
+                CIRCLE_SVG.as_bytes(),
+            )]));
+
+        SubstitutionStep::Macros.apply(&mut content, &p, None);
+
+        let expected = format!(
+            concat!(
+                r#"<span class="image"><a class="image" href="data:image/svg+xml;base64,{b64}">"#,
+                r#"<img src="data:image/svg+xml;base64,{b64}" alt="Tiger" width="100"></a></span>"#,
+            ),
+            b64 = CIRCLE_SVG_BASE64,
+        );
+
+        assert_eq!(content.rendered, CowStr::Boxed(expected.into_boxed_str()));
     }
 
     // Not ported to this crate:
@@ -5796,7 +5856,6 @@ mod macros {
 "#
     );
 
-    #[ignore]
     #[test]
     fn should_substitute_attributes_in_target_of_inline_image_in_section_title() {
         verifies!(
@@ -5816,23 +5875,28 @@ mod macros {
 "#
         );
 
-        todo!(
-            "Port when `data-uri` embedding and `catalog_assets` are implemented (asciidoc-rs/asciidoc-parser#697): {}",
-            r###"
-            # NOTE this test verifies attributes get substituted eagerly in target of image in title
-            test 'should substitute attributes in target of inline image in section title' do
-                input = '== image:{iconsdir}/dot.gif[dot] Title'
+        // With `catalog_assets` enabled, the `image:` macro in the section title
+        // records its target in the document catalog. The `{iconsdir}` reference
+        // in the target is resolved (to `fixtures`) by the attribute-references
+        // step, which runs before the macros step, so the catalog records the
+        // resolved `fixtures/dot.gif`. `imagesdir` is unset here, so the
+        // reference carries no `imagesdir`.
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_intrinsic_attribute_bool("data-uri", true, ModificationContext::Anywhere)
+            .with_intrinsic_attribute("iconsdir", "fixtures", ModificationContext::Anywhere)
+            .with_catalog_assets(true)
+            .parse("== image:{iconsdir}/dot.gif[dot] Title");
 
-                using_memory_logger do |logger|
-                sect = block_from_string input, attributes: { 'data-uri' => '', 'iconsdir' => 'fixtures', 'docdir' => testdir }, safe: :server, catalog_assets: true
-                assert_equal 1, sect.document.catalog[:images].size
-                assert_equal 'fixtures/dot.gif', sect.document.catalog[:images][0].to_s
-                assert_nil sect.document.catalog[:images][0].imagesdir
-                assert_empty logger
-                end
-            end
-        "###
-        );
+        let images = doc.catalog().images();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].to_string(), "fixtures/dot.gif");
+        assert_eq!(images[0].imagesdir, None);
+
+        // `data-uri` is set but no image file handler is registered, so the
+        // image degrades silently to a web path – no warning is emitted
+        // (mirroring `assert logger.empty?`).
+        assert_eq!(doc.warnings().count(), 0);
     }
 
     #[test]

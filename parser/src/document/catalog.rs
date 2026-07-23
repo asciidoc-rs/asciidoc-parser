@@ -25,6 +25,13 @@ pub struct Catalog {
     /// footnotes defined inside a cell are *not* shared with the main document.
     pub(crate) footnotes: Vec<Footnote>,
 
+    /// Images referenced by `image:`/`image::` macros, recorded in document
+    /// order while substituting inline macros – but only when the parser was
+    /// configured with
+    /// [`with_catalog_assets(true)`](crate::Parser::with_catalog_assets)
+    /// (Asciidoctor's `catalog_assets` API option). Empty otherwise.
+    pub(crate) images: Vec<ImageReference>,
+
     /// AsciiDoc files that were included into this document, keyed by the
     /// include target relative to the outermost document with its AsciiDoc
     /// extension removed (e.g. `other-chapters` for
@@ -57,6 +64,7 @@ impl Catalog {
             refs: HashMap::new(),
             reftext_to_id: HashMap::new(),
             footnotes: Vec::new(),
+            images: Vec::new(),
             includes: HashMap::new(),
         }
     }
@@ -220,6 +228,21 @@ impl Catalog {
         self.footnotes.iter().find(|f| f.id.as_deref() == Some(id))
     }
 
+    /// Returns the images referenced in this document, in document order.
+    ///
+    /// This list is populated only when the parser was configured with
+    /// [`with_catalog_assets(true)`](crate::Parser::with_catalog_assets); it is
+    /// empty otherwise.
+    pub fn images(&self) -> &[ImageReference] {
+        &self.images
+    }
+
+    /// Records a referenced image (an `image:`/`image::` macro target) in
+    /// document order.
+    pub(crate) fn register_image(&mut self, target: String, imagesdir: Option<String>) {
+        self.images.push(ImageReference { target, imagesdir });
+    }
+
     /// Records that the AsciiDoc file named by `key` was included into this
     /// document.
     ///
@@ -376,8 +399,34 @@ impl std::fmt::Debug for Catalog {
             .field("refs", &DebugHashMapFrom(&self.refs))
             .field("reftext_to_id", &DebugHashMapFrom(&self.reftext_to_id))
             .field("footnotes", &self.footnotes)
+            .field("images", &self.images)
             .field("includes", &DebugHashMapFrom(&self.includes))
             .finish()
+    }
+}
+
+/// A reference to an image asset recorded in the document
+/// [`Catalog`](Catalog::images) when `catalog_assets` is enabled.
+///
+/// Mirrors Asciidoctor's `Document::ImageReference`: it pairs the image
+/// [`target`](Self::target) with the value of the `imagesdir` attribute in
+/// effect where the image was referenced.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImageReference {
+    /// The image target as written in the macro, after attribute references in
+    /// the target have been substituted (e.g. `fixtures/dot.gif`).
+    pub target: String,
+
+    /// The value of the `imagesdir` document attribute at the point of
+    /// reference, or `None` when it was unset.
+    pub imagesdir: Option<String>,
+}
+
+impl std::fmt::Display for ImageReference {
+    /// Displays the image reference as its [`target`](Self::target), mirroring
+    /// Asciidoctor's `ImageReference#to_s`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.target)
     }
 }
 /// Type of referenceable element in the document.
@@ -438,7 +487,7 @@ impl std::error::Error for DuplicateIdError {}
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::indexing_slicing, clippy::unwrap_used)]
 
     use super::*;
 
@@ -630,6 +679,29 @@ mod tests {
         catalog.register_include("tigers", false);
         assert!(catalog.was_included("tigers"));
         assert!(!catalog.include_is_full("tigers"));
+    }
+
+    #[test]
+    fn register_image_records_in_document_order() {
+        let mut catalog = Catalog::new();
+        assert!(catalog.images().is_empty());
+
+        catalog.register_image("fixtures/dot.gif".to_string(), None);
+        catalog.register_image("logo.png".to_string(), Some("images".to_string()));
+
+        let images = catalog.images();
+        assert_eq!(images.len(), 2);
+
+        // The first image carries no `imagesdir`; `to_string`/`Display` yields
+        // the bare target.
+        assert_eq!(images[0].target, "fixtures/dot.gif");
+        assert_eq!(images[0].imagesdir, None);
+        assert_eq!(images[0].to_string(), "fixtures/dot.gif");
+
+        // The second records the `imagesdir` in effect at the reference.
+        assert_eq!(images[1].target, "logo.png");
+        assert_eq!(images[1].imagesdir, Some("images".to_string()));
+        assert_eq!(images[1].to_string(), "logo.png");
     }
 
     #[test]
