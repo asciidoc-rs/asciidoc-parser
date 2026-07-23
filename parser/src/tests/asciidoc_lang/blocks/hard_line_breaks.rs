@@ -509,9 +509,7 @@ Note that `empty` is a built-in document attribute in AsciiDoc.
 }
 
 #[test]
-#[ignore]
 fn per_line_dialogue_syntax() {
-    // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/440): Await spec clarity on correct behavior for this example.
     verifies!(
         r#"
 If you're writing a story with dialogue, and you want to prefix the dialogue lines with `--`, be aware that you are going to get a conflict between the hard line break and the automatic endash replacement.
@@ -540,11 +538,70 @@ Then each dialog will appear on its own line.
 "#
     );
 
+    // No hard line break is generated here, matching Asciidoctor. The spaced em
+    // dash replacement for the ` -- ` at the start of the second line matches (and
+    // consumes) the preceding newline, so both source lines render on one output
+    // line. Because the newline is gone, the trailing ` +` is no longer at the end
+    // of a line and is left literal rather than becoming a `<br>`.
     let doc =
         Parser::default().parse("-- Come here! -- I said. +\n-- What is it? -- replied Lance.");
 
-    dbg!(&doc);
-    todo!("This appears to be generating wrong results");
+    assert_eq!(
+        doc,
+        Document {
+            header: Header {
+                title_source: None,
+                title: None,
+                attributes: &[],
+                author_line: None,
+                revision_line: None,
+                comments: &[],
+                source: Span {
+                    data: "",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+            },
+            blocks: &[Block::Simple(SimpleBlock {
+                content: Content {
+                    original: Span {
+                        data: "-- Come here! -- I said. +\n-- What is it? -- replied Lance.",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    rendered: "&#8201;&#8212;&#8201;Come here!&#8201;&#8212;&#8201;I said. +&#8201;&#8212;&#8201;What is it?&#8201;&#8212;&#8201;replied Lance.",
+                },
+                source: Span {
+                    data: "-- Come here! -- I said. +\n-- What is it? -- replied Lance.",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                style: SimpleBlockStyle::Paragraph,
+                title_source: None,
+                title: None,
+                caption: None,
+                number: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            },),],
+            source: Span {
+                data: "-- Come here! -- I said. +\n-- What is it? -- replied Lance.",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },
+            warnings: &[],
+            source_map: SourceMap(&[]),
+            catalog: Catalog {
+                refs: HashMap::from([]),
+                reftext_to_id: HashMap::from([]),
+            },
+        }
+    );
 }
 
 #[test]
