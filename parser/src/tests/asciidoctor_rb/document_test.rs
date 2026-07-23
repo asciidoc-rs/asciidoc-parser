@@ -1240,6 +1240,9 @@ mod structure {
         assert_eq!(doc.doctitle(), Some("Title"));
     }
 
+    // Tracked as #876: needs the `include-with-leading-blank-line.adoc` fixture
+    // plus title-recognition and `lines=` assertions before this can become a
+    // `verifies!`.
     to_do_verifies!(
         r##"
     test 'should recognize document title in include file when preceded by blank lines' do

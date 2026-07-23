@@ -408,7 +408,7 @@ The table below lists the structural containers, documenting the name, default c
     assert_eq!(mi.item.raw_context().as_ref(), "sidebar");
     assert_eq!(mi.item.resolved_context().as_ref(), "sidebar");
 
-    to_do_verifies!(
+    verifies!(
         r#"
 |table
 |:table
@@ -421,8 +421,21 @@ The table below lists the structural containers, documenting the name, default c
 "#
     );
 
-    if false {
-        todo!("Support for table parsing");
+    // Each of the four table delimiters (`|===` for PSV, `,===` for CSV, `:===`
+    // for DSV, and `!===` for a nested table) resolves to the `table` context
+    // with the `table` content model.
+    for delimiter in ["|===", ",===", ":===", "!==="] {
+        let mut parser = Parser::default();
+
+        let source = format!("{delimiter}\n{delimiter}");
+
+        let mi = crate::blocks::Block::parse(crate::Span::new(&source), &mut parser)
+            .unwrap_if_no_warnings()
+            .unwrap();
+
+        assert_eq!(mi.item.content_model(), ContentModel::Table);
+        assert_eq!(mi.item.raw_context().as_ref(), "table");
+        assert_eq!(mi.item.resolved_context().as_ref(), "table");
     }
 
     verifies!(
