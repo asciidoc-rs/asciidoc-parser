@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.24.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.23.4...v0.24.0)
+_23 July 2026_
+
+### Added
+
+* Drop YAML-style front matter when `skip-front-matter` is set (close #745) ([#848](https://github.com/asciidoc-rs/asciidoc-parser/pull/848))
+* Embed images as `data-uri` and catalog image assets (close #697) ([#854](https://github.com/asciidoc-rs/asciidoc-parser/pull/854))
+* Define the `user-home` intrinsic attribute (close #737) ([#843](https://github.com/asciidoc-rs/asciidoc-parser/pull/843))
+* Materialize derived backend/basebackend/filetype/doctype attributes ([#738](https://github.com/asciidoc-rs/asciidoc-parser/pull/738)) ([#839](https://github.com/asciidoc-rs/asciidoc-parser/pull/839))
+* Implement max-attribute-value-size limit (close #736) ([#835](https://github.com/asciidoc-rs/asciidoc-parser/pull/835))
+* Define a section ID via an anchor embedded in the section title ([#751](https://github.com/asciidoc-rs/asciidoc-parser/pull/751)) ([#827](https://github.com/asciidoc-rs/asciidoc-parser/pull/827))
+* Implement time-dependent document attributes (docdate/doctime/docdatetime/docyear) ([#819](https://github.com/asciidoc-rs/asciidoc-parser/pull/819))
+* Resolve an inter-document xref to an included file as an internal anchor ([#808](https://github.com/asciidoc-rs/asciidoc-parser/pull/808)) ([#822](https://github.com/asciidoc-rs/asciidoc-parser/pull/822))
+* Predefine the `asciidoctor-version` attribute ([#809](https://github.com/asciidoc-rs/asciidoc-parser/pull/809))
+* [**breaking**] Resolve inter-document xref targets to output paths ([#773](https://github.com/asciidoc-rs/asciidoc-parser/pull/773)) ([#803](https://github.com/asciidoc-rs/asciidoc-parser/pull/803))
+* Support the Markdown-style (#) document title ([#774](https://github.com/asciidoc-rs/asciidoc-parser/pull/774)) ([#796](https://github.com/asciidoc-rs/asciidoc-parser/pull/796))
+* Honor `numbered`/`numbered!` as a legacy alias for `sectnums` ([#793](https://github.com/asciidoc-rs/asciidoc-parser/pull/793))
+* Define a predefined `asciidoc-parser-version` attribute ([#778](https://github.com/asciidoc-rs/asciidoc-parser/pull/778)) ([#787](https://github.com/asciidoc-rs/asciidoc-parser/pull/787))
+* Honor the appendix-number attribute for appendix lettering ([#789](https://github.com/asciidoc-rs/asciidoc-parser/pull/789))
+* Track Asciidoctor's links_test.rb via SDD (and fix the link/xref incompatibilities it surfaces) ([#743](https://github.com/asciidoc-rs/asciidoc-parser/pull/743))
+* Track Asciidoctor's sections_test.rb via SDD ([#747](https://github.com/asciidoc-rs/asciidoc-parser/pull/747))
+* Track Asciidoctor's blocks_test.rb via SDD ([#767](https://github.com/asciidoc-rs/asciidoc-parser/pull/767))
+* Track Asciidoctor's reader_test.rb via SDD ([#744](https://github.com/asciidoc-rs/asciidoc-parser/pull/744))
+
+### Documented
+
+* Mark non-`article` doctypes (incl. `manpage`) as out of scope (close #721) ([#858](https://github.com/asciidoc-rs/asciidoc-parser/pull/858))
+
+### Fixed
+
+* Fuse legacy `+`-continued multi-line attribute values (close #729) ([#852](https://github.com/asciidoc-rs/asciidoc-parser/pull/852))
+* Formal `role=` replaces roles set via shorthand `.role` (close #732) ([#850](https://github.com/asciidoc-rs/asciidoc-parser/pull/850))
+* Accept Asciidoctor `_` markdown-style thematic breaks (close #723) ([#860](https://github.com/asciidoc-rs/asciidoc-parser/pull/860))
+* Derive author attributes from `:author:`/`:authors:`/`author_N` entries and set `authorcount` (close #718) ([#855](https://github.com/asciidoc-rs/asciidoc-parser/pull/855))
+* Resolve attribute references case-insensitively (close #724) ([#859](https://github.com/asciidoc-rs/asciidoc-parser/pull/859))
+* Do not let counters modify locked (API-set / built-in) attributes (close #725) ([#857](https://github.com/asciidoc-rs/asciidoc-parser/pull/857))
+* Derive and override the doctitle from `:doctitle:`/`:title:` attribute entries (close #716) ([#853](https://github.com/asciidoc-rs/asciidoc-parser/pull/853))
+* Accept Unicode word characters in attribute-entry names (close #726) ([#849](https://github.com/asciidoc-rs/asciidoc-parser/pull/849))
+* Last-wins block anchors and trailing metadata transfer across comments to a following section (close #733) ([#851](https://github.com/asciidoc-rs/asciidoc-parser/pull/851))
+* Warn on an unterminated `////` comment block in the document header (close #731) ([#846](https://github.com/asciidoc-rs/asciidoc-parser/pull/846))
+* Reject attribute entry whose name contains or ends with a colon (close #728) ([#847](https://github.com/asciidoc-rs/asciidoc-parser/pull/847))
+* Mask docdir and relativize docfile under SERVER safe mode (close #735) ([#844](https://github.com/asciidoc-rs/asciidoc-parser/pull/844))
+* Materialize derived toc-position/toc-placement/toc-class attributes (close #840) ([#845](https://github.com/asciidoc-rs/asciidoc-parser/pull/845))
+* Suppress preprocessor directives inside comment blocks and define the `asciidoctor` flag (close #810) ([#837](https://github.com/asciidoc-rs/asciidoc-parser/pull/837))
+* Promote a level-0 heading after a comment line under an active leveloffset (close #746) ([#838](https://github.com/asciidoc-rs/asciidoc-parser/pull/838))
+* Partition a 4+-part name supplied via the :author: attribute entry ([#758](https://github.com/asciidoc-rs/asciidoc-parser/pull/758)) ([#836](https://github.com/asciidoc-rs/asciidoc-parser/pull/836))
+* Fold stacked block attribute lines above the document title (close #821) ([#841](https://github.com/asciidoc-rs/asciidoc-parser/pull/841))
+* Emit auto-generated section id only on the heading, not the wrapper (close #734) ([#842](https://github.com/asciidoc-rs/asciidoc-parser/pull/842))
+* Drop a line emptied by an unresolved reference under attribute-missing=drop (close #730) ([#831](https://github.com/asciidoc-rs/asciidoc-parser/pull/831))
+* Recognize the legacy `toc2` attribute alias as a left-placed TOC (close #748) ([#829](https://github.com/asciidoc-rs/asciidoc-parser/pull/829))
+* Surface a document role through Document::roles() (close #820) ([#830](https://github.com/asciidoc-rs/asciidoc-parser/pull/830))
+* Accept `_`-prefixed and dotted named tokens in attribute lists (close #727) ([#834](https://github.com/asciidoc-rs/asciidoc-parser/pull/834))
+* Switch toc-class default to toc2 for left/right TOC placement (close #749) ([#832](https://github.com/asciidoc-rs/asciidoc-parser/pull/832))
+* Substitute attribute references in a block anchor's reftext when registering it ([#753](https://github.com/asciidoc-rs/asciidoc-parser/pull/753)) ([#828](https://github.com/asciidoc-rs/asciidoc-parser/pull/828))
+* Split the implicit author line on `;` followed by space or end of line ([#757](https://github.com/asciidoc-rs/asciidoc-parser/pull/757)) ([#824](https://github.com/asciidoc-rs/asciidoc-parser/pull/824))
+* Resolve soft-unset `toc-placement!` with `toc` set to macro (close #750) ([#826](https://github.com/asciidoc-rs/asciidoc-parser/pull/826))
+* Condense author-line whitespace and keep angle brackets literal ([#756](https://github.com/asciidoc-rs/asciidoc-parser/pull/756)) ([#825](https://github.com/asciidoc-rs/asciidoc-parser/pull/825))
+* Resolve cross-references embedded in section titles ([#770](https://github.com/asciidoc-rs/asciidoc-parser/pull/770)) ([#817](https://github.com/asciidoc-rs/asciidoc-parser/pull/817))
+* Resolve revision components given as attribute references ([#759](https://github.com/asciidoc-rs/asciidoc-parser/pull/759)) ([#823](https://github.com/asciidoc-rs/asciidoc-parser/pull/823))
+* Anchor footnote cross-reference warnings at the footnote ([#804](https://github.com/asciidoc-rs/asciidoc-parser/pull/804)) ([#815](https://github.com/asciidoc-rs/asciidoc-parser/pull/815))
+* Do not register a bibliography anchor found in prose ([#769](https://github.com/asciidoc-rs/asciidoc-parser/pull/769)) ([#813](https://github.com/asciidoc-rs/asciidoc-parser/pull/813))
+* Parse a block attribute line above the document title as document metadata ([#805](https://github.com/asciidoc-rs/asciidoc-parser/pull/805)) ([#814](https://github.com/asciidoc-rs/asciidoc-parser/pull/814))
+* Recognize a URL macro preceded by a no-break space ([#768](https://github.com/asciidoc-rs/asciidoc-parser/pull/768)) ([#811](https://github.com/asciidoc-rs/asciidoc-parser/pull/811))
+* Skip `////` block comments in the header before the author or revision line ([#816](https://github.com/asciidoc-rs/asciidoc-parser/pull/816))
+* Sanitize attribute-entry names (close #761) ([#818](https://github.com/asciidoc-rs/asciidoc-parser/pull/818))
+* Do not treat a numeric character reference as an xref path separator ([#797](https://github.com/asciidoc-rs/asciidoc-parser/pull/797))
+* Apply attribute-missing policy to include directive targets ([#798](https://github.com/asciidoc-rs/asciidoc-parser/pull/798))
+* Report an unresolved cross-reference as a document warning ([#772](https://github.com/asciidoc-rs/asciidoc-parser/pull/772)) ([#799](https://github.com/asciidoc-rs/asciidoc-parser/pull/799))
+* Enforce max-include-depth in the preprocessor ([#792](https://github.com/asciidoc-rs/asciidoc-parser/pull/792))
+* Resolve unset attribute references to empty in ifeval expressions ([#788](https://github.com/asciidoc-rs/asciidoc-parser/pull/788))
+* Carry a block title above a section heading over to the section's first block ([#791](https://github.com/asciidoc-rs/asciidoc-parser/pull/791))
+* Implement the abstract block style (close #783) ([#790](https://github.com/asciidoc-rs/asciidoc-parser/pull/790))
+* Honor an empty `subs` list (e.g. `[subs=","]`) ([#786](https://github.com/asciidoc-rs/asciidoc-parser/pull/786))
+
+### Other
+
+* Remove resolved #308 reference from post_replacements titles stub ([#861](https://github.com/asciidoc-rs/asciidoc-parser/pull/861))
+
 ## [0.23.4](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.23.3...v0.23.4)
 _18 July 2026_
 
