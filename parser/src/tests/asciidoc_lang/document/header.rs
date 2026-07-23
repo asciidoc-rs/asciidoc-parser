@@ -543,8 +543,12 @@ If you don't want the header of a document to be displayed, set the `noheader` a
 "#
 );
 
-// Treating as non-normative because the parser crate doesn't support front
-// matter. (This can be handled before passing data in for parsing.)
+// Treating as non-normative because this page only describes front matter and
+// links out to the `skip-front-matter` reference; it prescribes no behavior to
+// verify here. Front matter *is* supported: setting the `skip-front-matter`
+// attribute drops a leading `---`-fenced block and records it in the
+// `front-matter` attribute, mirroring Asciidoctor's reader. That behavior is
+// verified in `tests::asciidoctor_rb::reader_test`.
 non_normative!(
     r#"
 == Front matter
