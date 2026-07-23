@@ -1,5 +1,12 @@
 use super::{MatchedItem, Span};
 
+/// ASCII whitespace trimmed from an attribute-entry continuation line before
+/// its continuation marker is tested. This MUST stay identical to the set
+/// trimmed by the folder (`InterpretedValue::fold_continuation_value`, whose
+/// local `ASCII_WHITESPACE` mirrors this) so the multi-line extent consumed
+/// here and the lines the folder actually joins can never disagree.
+const CONTINUATION_WHITESPACE: [char; 6] = [' ', '\t', '\n', '\r', '\x0C', '\x0B'];
+
 impl<'src> Span<'src> {
     /// Split the span, consuming a single line from the source.
     ///
@@ -80,53 +87,84 @@ impl<'src> Span<'src> {
         i
     }
 
-    /// Split the span, consuming one normalized, non-empty line that may be
-    /// continued onto subsequent lines with an explicit continuation marker.
+    /// Split the span, consuming an attribute entry value that may be continued
+    /// onto subsequent lines with an explicit continuation marker.
     ///
-    /// A line is terminated by end-of-input or a single `\n` character
-    /// or a single `\r\n` sequence. The end of line sequence is consumed
-    /// but not included in the returned line.
+    /// The continuation marker is fixed by the first line: a modern soft-wrap
+    /// marker (a space immediately followed by `\`) or a legacy marker (a space
+    /// immediately followed by `+`). When the first line carries a marker,
+    /// subsequent non-blank lines are consumed while they carry the _same_
+    /// marker; the first line lacking it is still consumed (it terminates the
+    /// value), and a blank line terminates the value without being consumed.
+    /// This mirrors Asciidoctor's `Parser.process_attribute_entry`.
     ///
-    /// A line is _not_ terminated by `\n` when preceded by a `\` character.
+    /// A bare trailing marker with no preceding space (e.g. `foo\`) is a
+    /// literal character and does not continue the line.
     ///
-    /// SPEC QUESTION: Is it allowed to have a `+` character followed by
-    /// white space? For now, I'm saying yes.
-    ///
-    /// Trailing white spaces are removed from the final line and are not
-    /// removed from any lines with continuations.
-    ///
-    /// Returns `None` if the line becomes empty after trailing spaces have been
-    /// removed.
-    pub(crate) fn take_line_with_continuation(self) -> Option<MatchedItem<'src, Self>> {
-        // Consume any number of lines terminated by '\\'.
-        let mut mi = self.into_parse_result(0);
-        while let Some(new_pr) = mi.after.one_line_with_continuation() {
-            mi = new_pr;
-        }
+    /// The returned `item` spans the raw source of the (possibly multi-line)
+    /// value with the trailing end-of-line and trailing spaces removed; the
+    /// embedded continuation markers and interior newlines are preserved so the
+    /// value can be folded later (see `InterpretedValue::from_raw_value`).
+    /// Trailing spaces are _not_ removed from interior (continued) lines.
+    /// Callers are responsible for treating an empty `item` as "no value".
+    pub(crate) fn take_value_with_continuation(self) -> MatchedItem<'src, Self> {
+        let first = self.take_normalized_line();
 
-        // Consume at most one line without a `\\` terminator.
-        mi = mi.after.take_line();
-
-        let mi = self
-            .into_parse_result(mi.after.byte_offset() - self.byte_offset())
-            .trim_item_end_matches('\n')
-            .trim_item_end_matches('\r')
-            .trim_item_trailing_spaces();
-
-        if mi.item.is_empty() { None } else { Some(mi) }
-    }
-
-    fn one_line_with_continuation(self) -> Option<MatchedItem<'src, Self>> {
-        let line = self.take_normalized_line();
-
-        // A soft-wrap line continuation is a *space* immediately followed by a
-        // trailing backslash. A bare trailing backslash (no preceding space) is a
-        // literal character and does not continue the line (matching Asciidoctor).
-        if line.item.ends_with(" \\") {
-            Some(line)
+        // A continuation marker is a *space* immediately followed by a trailing
+        // backslash (modern) or plus (legacy). A bare trailing marker with no
+        // preceding space is a literal character (matching Asciidoctor).
+        let con = if first.item.ends_with(" \\") {
+            Some(" \\")
+        } else if first.item.ends_with(" +") {
+            Some(" +")
         } else {
             None
-        }
+        };
+
+        let end_after = if let Some(con) = con {
+            let mut cursor = first;
+
+            loop {
+                let next = cursor.after.take_normalized_line();
+
+                // A blank line (or end of input) terminates the value and is not
+                // consumed.
+                if next.item.is_empty() {
+                    break;
+                }
+
+                // Left- and right-trim the line before testing for the marker so
+                // this agrees exactly with `fold_continuation_value`, which trims
+                // each continuation line the same way. Without the left trim a
+                // line that is *only* the marker (e.g. a bare ` +`) would be kept
+                // open here but treated as a terminating line by the folder,
+                // causing the following line to be consumed from the stream yet
+                // silently dropped from the value.
+                let keep_open = next
+                    .item
+                    .data()
+                    .trim_matches(CONTINUATION_WHITESPACE)
+                    .ends_with(con);
+
+                cursor = next;
+
+                // The first continuation line lacking the marker terminates the
+                // value (but is still part of it).
+                if !keep_open {
+                    break;
+                }
+            }
+
+            cursor.after
+        } else {
+            // No continuation marker: a single line.
+            self.take_line().after
+        };
+
+        self.into_parse_result(end_after.byte_offset() - self.byte_offset())
+            .trim_item_end_matches('\n')
+            .trim_item_end_matches('\r')
+            .trim_item_trailing_spaces()
     }
 }
 
@@ -1079,25 +1117,37 @@ mod tests {
         }
     }
 
-    mod take_line_with_continuation {
+    mod take_value_with_continuation {
         use crate::tests::prelude::*;
 
         #[test]
         fn empty_source() {
             let span = crate::Span::default();
-            assert!(span.take_line_with_continuation().is_none());
+            let line = span.take_value_with_continuation();
+            assert!(line.item.is_empty());
         }
 
         #[test]
         fn only_spaces() {
             let span = crate::Span::new("   ");
-            assert!(span.take_line_with_continuation().is_none());
+            let line = span.take_value_with_continuation();
+            assert!(line.item.is_empty());
+
+            assert_eq!(
+                line.after,
+                Span {
+                    data: "",
+                    line: 1,
+                    col: 4,
+                    offset: 3
+                }
+            );
         }
 
         #[test]
         fn simple_line() {
             let span = crate::Span::new("abc");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1123,7 +1173,7 @@ mod tests {
         #[test]
         fn discards_trailing_space() {
             let span = crate::Span::new("abc ");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1151,7 +1201,7 @@ mod tests {
             // Should consume but not return \n.
 
             let span = crate::Span::new("abc  \ndef");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1179,7 +1229,7 @@ mod tests {
             // Should consume but not return \r\n.
 
             let span = crate::Span::new("abc  \r\ndef");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1207,7 +1257,7 @@ mod tests {
             // Should consume \n but not a subsequent \r.
 
             let span = crate::Span::new("abc  \n\rdef");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1235,7 +1285,7 @@ mod tests {
             // Shouldn't terminate line at \r without \n.
 
             let span = crate::Span::new("abc   \rdef");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1261,7 +1311,7 @@ mod tests {
         #[test]
         fn simple_continuation() {
             let span = crate::Span::new("abc \\\ndef");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1287,7 +1337,7 @@ mod tests {
         #[test]
         fn simple_continuation_with_crlf() {
             let span = crate::Span::new("abc \\\r\ndef");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1313,7 +1363,7 @@ mod tests {
         #[test]
         fn continuation_with_trailing_space() {
             let span = crate::Span::new("abc \\   \ndef");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1339,7 +1389,7 @@ mod tests {
         #[test]
         fn multiple_continuations() {
             let span = crate::Span::new("abc \\\ndef \\\nghi");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1369,7 +1419,7 @@ mod tests {
             // terminates the line; the next line is not folded in.
             // See https://github.com/asciidoc-rs/asciidoc-parser/issues/666.
             let span = crate::Span::new("abc\\\ndef");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1395,7 +1445,7 @@ mod tests {
         #[test]
         fn terminates_on_line_without_trailing_slash() {
             let span = crate::Span::new("abc \\\ndef  \nghi");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1421,7 +1471,7 @@ mod tests {
         #[test]
         fn doesnt_consume_empty_line() {
             let span = crate::Span::new("abc \\\ndef\n\nghi");
-            let line = span.take_line_with_continuation().unwrap();
+            let line = span.take_value_with_continuation();
 
             assert_eq!(
                 line.after,
@@ -1440,6 +1490,152 @@ mod tests {
                     line: 1,
                     col: 1,
                     offset: 0
+                }
+            );
+        }
+
+        #[test]
+        fn legacy_plus_continuation() {
+            // A legacy `+` continuation (a space followed by `+`) fuses lines just
+            // like the modern `\` marker. The raw item preserves the markers and
+            // interior newlines; folding happens later.
+            let span = crate::Span::new("abc +\ndef +\nghi");
+            let line = span.take_value_with_continuation();
+
+            assert_eq!(
+                line.after,
+                Span {
+                    data: "",
+                    line: 3,
+                    col: 4,
+                    offset: 15
+                }
+            );
+
+            assert_eq!(
+                line.item,
+                Span {
+                    data: "abc +\ndef +\nghi",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+        }
+
+        #[test]
+        fn legacy_plus_terminates_on_line_without_marker() {
+            // The continuation stops after the first line that no longer carries
+            // the legacy `+` marker (that line is still consumed).
+            let span = crate::Span::new("abc +\ndef\nghi");
+            let line = span.take_value_with_continuation();
+
+            assert_eq!(
+                line.after,
+                Span {
+                    data: "ghi",
+                    line: 3,
+                    col: 1,
+                    offset: 10
+                }
+            );
+
+            assert_eq!(
+                line.item,
+                Span {
+                    data: "abc +\ndef",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+        }
+
+        #[test]
+        fn legacy_plus_marker_is_fixed_by_first_line() {
+            // The marker is fixed by the first line. When the first line has no
+            // marker, a trailing `\` on a *later* line is not a continuation: the
+            // value is just the first line.
+            let span = crate::Span::new("abc\ndef \\\nghi");
+            let line = span.take_value_with_continuation();
+
+            assert_eq!(
+                line.after,
+                Span {
+                    data: "def \\\nghi",
+                    line: 2,
+                    col: 1,
+                    offset: 4
+                }
+            );
+
+            assert_eq!(
+                line.item,
+                Span {
+                    data: "abc",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+        }
+
+        #[test]
+        fn bare_plus_is_not_a_continuation() {
+            // A legacy continuation requires a *space* before the trailing `+`. A
+            // bare `+` (no preceding space) is a literal character and terminates
+            // the line; the next line is not folded in.
+            let span = crate::Span::new("abc+\ndef");
+            let line = span.take_value_with_continuation();
+
+            assert_eq!(
+                line.after,
+                Span {
+                    data: "def",
+                    line: 2,
+                    col: 1,
+                    offset: 5
+                }
+            );
+
+            assert_eq!(
+                line.item,
+                Span {
+                    data: "abc+",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+        }
+
+        #[test]
+        fn bare_marker_only_line_terminates_extent() {
+            // A continuation line that is *only* the marker (a bare ` +` once
+            // left-trimmed) terminates the value. The extent must stop after that
+            // line so the following line stays in the stream; otherwise the folder
+            // (which left-trims and treats the bare marker as terminating) would
+            // drop it. Extent = `text +\n +`; `more` is left for the next block.
+            let span = crate::Span::new("text +\n +\nmore");
+            let line = span.take_value_with_continuation();
+
+            assert_eq!(
+                line.item,
+                Span {
+                    data: "text +\n +",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+
+            assert_eq!(
+                line.after,
+                Span {
+                    data: "more",
+                    line: 3,
+                    col: 1,
+                    offset: 10
                 }
             );
         }

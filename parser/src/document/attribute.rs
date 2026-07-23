@@ -38,8 +38,7 @@ pub struct Attribute<'src> {
 
 impl<'src> Attribute<'src> {
     pub(crate) fn parse(source: Span<'src>, parser: &Parser) -> Option<MatchedItem<'src, Self>> {
-        let attr_line = source.take_line_with_continuation()?;
-        let colon = attr_line.item.take_prefix(":")?;
+        let colon = source.take_prefix(":")?;
 
         let mut unset = false;
         let line = if colon.after.starts_with('!') {
@@ -65,28 +64,49 @@ impl<'src> Attribute<'src> {
             (name.item, name.after)
         };
 
+        // `line.after` begins immediately after the closing `:` and runs to the
+        // end of the source. The value (and any continuation lines) live here.
         let line = after_name.take_prefix(":")?;
 
-        let (value, value_source) = if unset {
-            // Ensure line is now empty except for comment.
-            (InterpretedValue::Unset, None)
-        } else if line.after.is_empty() {
-            (InterpretedValue::Set, None)
+        let (value, value_source, after) = if unset {
+            // The value (if any) is ignored, but any continuation lines are
+            // still consumed so they don't leak into the block stream.
+            let extent = line
+                .after
+                .take_whitespace()
+                .after
+                .take_value_with_continuation();
+            (InterpretedValue::Unset, None, extent.after)
         } else {
-            // Asciidoctor requires at least one space or tab between the closing
-            // colon and the value. A non-blank character immediately after the
-            // colon means the line is not a valid attribute entry: the name
-            // either contains a colon (`:foo:bar: baz`) or ends with one
-            // (`:foo:: bar`), so the whole line falls through to be parsed as an
-            // ordinary block. See #728.
-            let raw_value = line.after.take_required_whitespace()?;
-            (
-                InterpretedValue::from_raw_value(&raw_value.after, parser),
-                Some(raw_value.after),
-            )
+            // The first line's content after the closing colon, with trailing
+            // spaces trimmed, decides whether this is a set-only entry.
+            let first_line = line.after.take_normalized_line();
+
+            if first_line.item.is_empty() {
+                // `:name:` with nothing (but optional trailing whitespace) after
+                // the closing colon is a set-only entry.
+                (InterpretedValue::Set, None, first_line.after)
+            } else {
+                // Asciidoctor requires at least one space or tab between the
+                // closing colon and the value. A non-blank character immediately
+                // after the colon means the line is not a valid attribute entry:
+                // the name either contains a colon (`:foo:bar: baz`) or ends with
+                // one (`:foo:: bar`), so the whole line falls through to be parsed
+                // as an ordinary block. See #728.
+                let extent = line
+                    .after
+                    .take_required_whitespace()?
+                    .after
+                    .take_value_with_continuation();
+                (
+                    InterpretedValue::from_raw_value(&extent.item, parser),
+                    Some(extent.item),
+                    extent.after,
+                )
+            }
         };
 
-        let source = source.trim_remainder(attr_line.after);
+        let source = source.trim_remainder(after);
         Some(MatchedItem {
             item: Self {
                 name: name_item,
@@ -94,7 +114,7 @@ impl<'src> Attribute<'src> {
                 value,
                 source: source.trim_trailing_whitespace(),
             },
-            after: attr_line.after,
+            after,
         })
     }
 
@@ -184,68 +204,13 @@ impl std::fmt::Debug for InterpretedValue {
 
 impl InterpretedValue {
     fn from_raw_value(raw_value: &Span<'_>, parser: &Parser) -> Self {
-        let data = raw_value.data();
         let mut content = Content::from(*raw_value);
 
-        if data.contains('\n') {
-            let lines: Vec<&str> = data.lines().collect();
-            let last_count = lines.len() - 1;
-
-            let value: Vec<String> = lines
-                .iter()
-                .enumerate()
-                .map(|(count, line)| {
-                    let line = if count > 0 {
-                        line.trim_start_matches(' ')
-                    } else {
-                        line
-                    };
-
-                    let line = line.trim_start_matches('\r').trim_end_matches(' ');
-
-                    // Strip the soft-wrap line continuation marker (a space
-                    // followed by a backslash). Only non-final lines carry a
-                    // continuation; a trailing backslash on the final line is a
-                    // literal character and is preserved.
-                    let line = if count < last_count {
-                        line.trim_end_matches('\\').trim_end_matches(' ')
-                    } else {
-                        line
-                    };
-
-                    // A hard line break marker (a space followed by `+`) before
-                    // a line continuation preserves the newline instead of
-                    // folding it into a space. The `+` itself is left in the
-                    // value verbatim: the post_replacements substitution step is
-                    // not applied to attribute entry values, so the `+` is only
-                    // interpreted as a line break later, when the value is used
-                    // in a block whose substitutions include post_replacements.
-                    if line.ends_with(" +") {
-                        format!("{line}\n")
-                    } else if count < last_count {
-                        format!("{line} ")
-                    } else {
-                        line.to_string()
-                    }
-                })
-                .collect();
-
-            content.rendered = CowStr::Boxed(value.join("").into_boxed_str());
-        } else if let Some(stripped) = data.strip_suffix(" +") {
-            // A single-line value ending in a bare hard line break marker (a
-            // space followed by a single `+`) has that marker stripped. This
-            // mirrors Asciidoctor, where ` +` at the end of an attribute value
-            // is treated as a legacy line-continuation marker: it is removed and
-            // the remaining value is right-trimmed. Contrast with a multi-line
-            // (continued) value, where the marker is preserved so it can drive
-            // post_replacements when the value is later used.
-            //
-            // Trim only ASCII whitespace (matching Ruby's `rstrip`, which
-            // Asciidoctor applies here); Unicode whitespace such as a
-            // non-breaking space is significant and must be preserved.
-            content.rendered = stripped
-                .trim_end_matches([' ', '\t', '\n', '\r', '\x0C', '\x0B'])
-                .into();
+        // Fold any soft-wrap (`\`) or legacy (`+`) line continuation. When there
+        // is no continuation marker, the value is a plain single line and is
+        // left untouched.
+        if let Some(folded) = fold_continuation_value(raw_value.data()) {
+            content.rendered = CowStr::Boxed(folded.into_boxed_str());
         }
 
         SubstitutionGroup::Header.apply(&mut content, parser, None);
@@ -259,6 +224,103 @@ impl InterpretedValue {
             _ => None,
         }
     }
+}
+
+/// ASCII whitespace stripped by Ruby's `String#lstrip` / `#rstrip`, which
+/// Asciidoctor applies while fusing a continued attribute value. Unicode
+/// whitespace (e.g. a non-breaking space) is significant and is preserved.
+///
+/// This MUST stay identical to `CONTINUATION_WHITESPACE` in `span::line` (which
+/// the extent scanner `Span::take_value_with_continuation` uses) so the extent
+/// that scanner consumes and the lines this folder actually joins can never
+/// disagree.
+const ASCII_WHITESPACE: [char; 6] = [' ', '\t', '\n', '\r', '\x0C', '\x0B'];
+
+/// Fold an attribute entry value that carries a soft-wrap (`\`) or legacy (`+`)
+/// line continuation across physical lines, mirroring Asciidoctor's
+/// `Parser.process_attribute_entry`.
+///
+/// The continuation marker is fixed by the first line: a modern soft-wrap
+/// marker (a space followed by `\`) or a legacy marker (a space followed by
+/// `+`). Continued lines are left-trimmed and, while they carry the same
+/// marker, keep the value open. Lines are joined with a newline when the
+/// accumulated value ends in a hard line break marker (` +`), otherwise they
+/// are folded into a single space.
+///
+/// The `+` of a preserved hard line break is left in the value verbatim: the
+/// `post_replacements` substitution step is not applied to attribute entry
+/// values, so the `+` is only interpreted as a line break later, when the value
+/// is used in a block whose substitutions include `post_replacements`.
+///
+/// Returns `None` when the value has no continuation marker (a plain
+/// single-line value that needs no folding).
+fn fold_continuation_value(data: &str) -> Option<String> {
+    const HARD_LINE_BREAK: &str = " +";
+
+    let mut lines = data
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line));
+
+    // `str::split` always yields at least one item, so `first` is always present.
+    // The first line is never left-trimmed (its leading whitespace was consumed
+    // with the `:name:` prefix), but it is right-trimmed so marker detection
+    // tolerates trailing whitespace, matching the extent scanner.
+    let first = lines
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(ASCII_WHITESPACE);
+
+    // The continuation marker is fixed by the first line. Without one, the value
+    // is a single line and needs no folding.
+    let con: &str = if first.ends_with(" \\") {
+        " \\"
+    } else if first.ends_with(" +") {
+        " +"
+    } else {
+        return None;
+    };
+
+    // Drop the marker from the first line (already right-trimmed above).
+    let mut value = first[..first.len() - con.len()]
+        .trim_end_matches(ASCII_WHITESPACE)
+        .to_string();
+
+    for line in lines {
+        // A blank line (or end of input) terminates the value.
+        if line.is_empty() {
+            break;
+        }
+
+        // Continuation lines are left- and right-trimmed before the marker is
+        // tested, matching the extent scanner (`take_value_with_continuation`) so
+        // the two never disagree about where the value ends.
+        let line = line.trim_matches(ASCII_WHITESPACE);
+
+        // A line still carrying the marker keeps the value open; strip the
+        // marker (and right-trim) before appending.
+        let keep_open = line.ends_with(con);
+        let piece = if keep_open {
+            line[..line.len() - con.len()].trim_end_matches(ASCII_WHITESPACE)
+        } else {
+            line
+        };
+
+        // Join with a newline when the accumulated value ends in a hard line
+        // break marker (` +`), otherwise fold into a single space.
+        value.push_str(if value.ends_with(HARD_LINE_BREAK) {
+            "\n"
+        } else {
+            " "
+        });
+
+        value.push_str(piece);
+
+        if !keep_open {
+            break;
+        }
+    }
+
+    Some(value)
 }
 
 #[cfg(test)]
@@ -503,6 +565,25 @@ mod tests {
                 &Parser::default()
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn err_missing_closing_colon() {
+        // A valid attribute name that is not followed by a closing colon is not
+        // an attribute entry.
+        assert!(
+            crate::document::Attribute::parse(
+                crate::Span::new(":foo bar\nblah"),
+                &Parser::default()
+            )
+            .is_none()
+        );
+
+        // ... including at end of input.
+        assert!(
+            crate::document::Attribute::parse(crate::Span::new(":foo"), &Parser::default())
+                .is_none()
         );
     }
 
@@ -758,16 +839,15 @@ mod tests {
 
     #[test]
     fn single_line_trailing_hard_break_marker_is_stripped() {
-        // A single-line value ending in a bare hard line break marker (a space
-        // followed by a single `+`) has that marker stripped from the
-        // interpreted value, matching Asciidoctor. The raw `value_source` still
-        // contains the literal ` +`. Contrast with `value_with_hard_wrap`, where
-        // a ` +` on a *continued* (multi-line) value is preserved as a newline.
-        let mi = crate::document::Attribute::parse(
-            crate::Span::new(":foo: bar +\nblah"),
-            &Parser::default(),
-        )
-        .unwrap();
+        // A single-line value ending in a legacy continuation marker (a space
+        // followed by a single `+`) with no following non-blank line has that
+        // marker stripped from the interpreted value, matching Asciidoctor. The
+        // raw `value_source` still contains the literal ` +`. Contrast with
+        // `legacy_multi_line_value_is_fused`, where a following line _is_ folded
+        // in.
+        let mi =
+            crate::document::Attribute::parse(crate::Span::new(":foo: bar +"), &Parser::default())
+                .unwrap();
 
         assert_eq!(
             mi.item,
@@ -796,24 +876,74 @@ mod tests {
 
         assert_eq!(mi.item.value(), InterpretedValue::Value("bar"));
 
-        // `blah` is a separate line, not folded into the value (there is no line
-        // continuation).
         assert_eq!(
             mi.after,
             Span {
-                data: "blah",
-                line: 2,
-                col: 1,
-                offset: 12
+                data: "",
+                line: 1,
+                col: 12,
+                offset: 11
             }
         );
     }
 
     #[test]
-    fn single_line_hard_break_marker_edge_cases() {
-        // The marker is exactly a space followed by a single `+`. Any leading
-        // whitespace before the `+` (including tabs) is trimmed from the result,
-        // but only the single trailing ` +` is removed (not a repeated marker).
+    fn legacy_multi_line_value_is_fused() {
+        // A legacy `+`-continued value fuses the following line: the trailing
+        // ` +` marker is stripped and the lines are folded with a space (the
+        // value does not end in a hard line break marker after the strip). The
+        // following line is consumed, so `after` is empty. See #729.
+        let mi = crate::document::Attribute::parse(
+            crate::Span::new(":foo: bar +\nblah"),
+            &Parser::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Attribute {
+                name: Span {
+                    data: "foo",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+                value_source: Some(Span {
+                    data: "bar +\nblah",
+                    line: 1,
+                    col: 7,
+                    offset: 6,
+                }),
+                value: InterpretedValue::Value("bar blah"),
+                source: Span {
+                    data: ":foo: bar +\nblah",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                }
+            }
+        );
+
+        assert_eq!(mi.item.value(), InterpretedValue::Value("bar blah"));
+
+        assert_eq!(
+            mi.after,
+            Span {
+                data: "",
+                line: 2,
+                col: 5,
+                offset: 16
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_hard_break_marker_edge_cases() {
+        // The legacy continuation marker is exactly a space followed by a single
+        // `+`. When a following non-blank line is present, the marker fuses the
+        // lines (stripping the marker and right-trimming). Contrast with markers
+        // that are _not_ legacy continuations (`++`, a bare `+`, a tab before the
+        // `+`, or a lone `+`), which leave the value on a single line.
         let value = |src| {
             crate::document::Attribute::parse(crate::Span::new(src), &Parser::default())
                 .unwrap()
@@ -822,32 +952,87 @@ mod tests {
                 .clone()
         };
 
-        // Extra space(s) before the `+` are trimmed away with the marker.
-        assert_eq!(value(":foo: bar  +\nx"), InterpretedValue::Value("bar"));
+        // Extra space(s) before the `+` are trimmed away with the marker, and the
+        // following line is folded in with a single space.
+        assert_eq!(value(":foo: bar  +\nx"), InterpretedValue::Value("bar x"));
 
         // A tab preceding the marker's space is also trimmed.
-        assert_eq!(value(":foo: bar\t +\nx"), InterpretedValue::Value("bar"));
+        assert_eq!(value(":foo: bar\t +\nx"), InterpretedValue::Value("bar x"));
 
-        // `++` is not a hard line break marker; it is preserved verbatim.
+        // `++` is not a continuation marker; the value stays on one line verbatim.
         assert_eq!(value(":foo: bar ++\nx"), InterpretedValue::Value("bar ++"));
 
-        // A `+` with no preceding space is a literal character.
+        // A `+` with no preceding space is a literal character (no continuation).
         assert_eq!(value(":foo: bar+\nx"), InterpretedValue::Value("bar+"));
 
         // A tab (rather than a space) before the `+` does not form a marker.
         assert_eq!(value(":foo: bar\t+\nx"), InterpretedValue::Value("bar\t+"));
 
-        // A lone `+` (nothing before the space) is preserved.
+        // A lone `+` (nothing before it) is not a marker; it is preserved.
         assert_eq!(value(":foo: +\nx"), InterpretedValue::Value("+"));
 
-        // Only the final ` +` is stripped; an earlier ` +` remains literal.
-        assert_eq!(value(":foo: bar + +\nx"), InterpretedValue::Value("bar +"));
+        // An earlier ` +` in the fused first line ends in a hard line break
+        // marker, so the following line is joined with a newline rather than a
+        // space.
+        assert_eq!(
+            value(":foo: bar + +\nx"),
+            InterpretedValue::Value("bar +\nx")
+        );
 
-        // Trimming after the marker uses ASCII whitespace rules (Ruby `rstrip`);
-        // a preceding non-breaking space is significant and is preserved.
+        // Right-trimming after the marker uses ASCII whitespace rules (Ruby
+        // `rstrip`); a preceding non-breaking space is significant and preserved.
         assert_eq!(
             value(":foo: bar\u{00a0} +\nx"),
-            InterpretedValue::Value("bar\u{00a0}")
+            InterpretedValue::Value("bar\u{00a0} x")
+        );
+    }
+
+    #[test]
+    fn bare_marker_only_continuation_line_does_not_swallow_next_line() {
+        // A continuation line that is only a bare marker (` +`) terminates the
+        // value. The line after it must remain in the stream, not be consumed by
+        // the extent scanner and then dropped by the folder. The extent scanner
+        // and the folder must agree on where the value ends.
+        let mi = crate::document::Attribute::parse(
+            crate::Span::new(":foo: text +\n +\nmore"),
+            &Parser::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Attribute {
+                name: Span {
+                    data: "foo",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+                value_source: Some(Span {
+                    data: "text +\n +",
+                    line: 1,
+                    col: 7,
+                    offset: 6,
+                }),
+                value: InterpretedValue::Value("text +"),
+                source: Span {
+                    data: ":foo: text +\n +",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                }
+            }
+        );
+
+        // `more` is preserved for the following block, not swallowed.
+        assert_eq!(
+            mi.after,
+            Span {
+                data: "more",
+                line: 3,
+                col: 1,
+                offset: 16,
+            }
         );
     }
 
@@ -1066,6 +1251,84 @@ mod tests {
         );
 
         assert!(warnings.next().is_none());
+    }
+
+    mod fold_continuation_value {
+        use super::super::fold_continuation_value;
+
+        #[test]
+        fn no_marker_returns_none() {
+            // A plain single-line value has no continuation marker and needs no
+            // folding.
+            assert_eq!(fold_continuation_value("bar"), None);
+            assert_eq!(fold_continuation_value("bar+"), None);
+            assert_eq!(fold_continuation_value("bar ++"), None);
+        }
+
+        #[test]
+        fn modern_soft_wrap_folds_with_space() {
+            assert_eq!(
+                fold_continuation_value("bar \\\nblah"),
+                Some("bar blah".to_string())
+            );
+        }
+
+        #[test]
+        fn legacy_marker_folds_with_space() {
+            assert_eq!(
+                fold_continuation_value("This is the first +\nRuby implementation of +\nAsciiDoc."),
+                Some("This is the first Ruby implementation of AsciiDoc.".to_string())
+            );
+        }
+
+        #[test]
+        fn hard_line_break_joins_with_newline() {
+            // A soft-wrap value whose text ends in a hard line break marker
+            // (` +`) is joined with a newline rather than a space.
+            assert_eq!(
+                fold_continuation_value("bar + \\\nblah"),
+                Some("bar +\nblah".to_string())
+            );
+        }
+
+        #[test]
+        fn blank_line_terminates_value() {
+            // A blank line inside the (already-extent-trimmed) data terminates
+            // the fold without consuming further lines.
+            assert_eq!(fold_continuation_value("a +\n\nb"), Some("a".to_string()));
+        }
+
+        #[test]
+        fn crlf_line_endings_are_normalized() {
+            assert_eq!(
+                fold_continuation_value("bar +\r\nblah"),
+                Some("bar blah".to_string())
+            );
+        }
+
+        #[test]
+        fn bare_marker_only_line_terminates_value() {
+            // A continuation line that is *only* the marker (a bare ` +` after
+            // left-trimming) does not keep the value open. It terminates the fold
+            // and its literal `+` is appended, matching Asciidoctor. The folder
+            // and `Span::take_value_with_continuation` must agree on this so the
+            // line after the bare marker is not consumed-then-dropped.
+            assert_eq!(
+                fold_continuation_value("text +\n +\nmore"),
+                Some("text +".to_string())
+            );
+        }
+
+        #[test]
+        fn trailing_whitespace_after_marker_still_continues() {
+            // Trailing whitespace after the marker is tolerated (right-trimmed)
+            // consistently with the extent scanner, so the following line is still
+            // folded in rather than dropped.
+            assert_eq!(
+                fold_continuation_value("a +\nb + \nmore"),
+                Some("a b more".to_string())
+            );
+        }
     }
 
     mod interpreted_value {

@@ -234,10 +234,9 @@ mod assignment {
         }
     }
 
-    // Tracked in #729.
     #[test]
     fn creates_an_attribute_by_fusing_a_legacy_multi_line_value() {
-        non_normative!(
+        verifies!(
             r#"
     test 'creates an attribute by fusing a legacy multi-line value' do
       str = <<~'EOS'
@@ -252,17 +251,12 @@ mod assignment {
 "#
         );
 
-        // Divergence: Asciidoctor fuses a legacy `+`-terminated multi-line
-        // attribute value; this crate only fuses the modern backslash
-        // continuation, so the `+`-continued lines are not joined, and the
-        // trailing `+` is treated as a hard-break marker and stripped, leaving
-        // just the first line's text.
         let doc = Parser::default().parse(
             ":description: This is the first      +\n              Ruby implementation of +\n              AsciiDoc.",
         );
         assert_eq!(
             doc.attribute_value("description"),
-            InterpretedValue::Value("This is the first")
+            InterpretedValue::Value("This is the first Ruby implementation of AsciiDoc.")
         );
     }
 
@@ -516,10 +510,9 @@ mod assignment {
         assert_eq!(doc.attribute_value("release"), InterpretedValue::Value(""));
     }
 
-    // Tracked in #729.
     #[test]
     fn assigns_multi_line_attribute_to_empty_string_if_substitution_fails_to_resolve_attribute() {
-        non_normative!(
+        verifies!(
             r#"
     test 'assigns multi-line attribute to empty string if substitution fails to resolve attribute' do
       input = <<~'EOS'
@@ -534,11 +527,10 @@ mod assignment {
 "#
         );
 
-        // Divergence: this crate only fuses the modern backslash continuation,
-        // not the legacy `+` continuation, so the `{version}` line never
-        // participates in the header value; the trailing `+` is treated as a
-        // hard-break marker and stripped, leaving just `Asciidoctor`. (The INFO
-        // drop-line log is also not modeled.)
+        // The legacy `+` continuation fuses the `{version}` line into the header
+        // value (`Asciidoctor {version}`); the unresolved `{version}` reference
+        // then drops the line under `attribute-missing=drop-line`, leaving the
+        // empty string. (The INFO drop-line log is not modeled.)
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "attribute-missing",
@@ -546,10 +538,7 @@ mod assignment {
                 ModificationContext::ApiOnly,
             )
             .parse(":release: Asciidoctor +\n          {version}\n");
-        assert_eq!(
-            doc.attribute_value("release"),
-            InterpretedValue::Value("Asciidoctor")
-        );
+        assert_eq!(doc.attribute_value("release"), InterpretedValue::Value(""));
     }
 
     #[test]
