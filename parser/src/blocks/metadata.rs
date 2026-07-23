@@ -744,6 +744,88 @@ mod tests {
         }
 
         #[test]
+        fn formal_role_replaces_earlier_shorthand_roles() {
+            // A formal `role=` entry replaces roles set by an earlier shorthand
+            // `.role`; a shorthand `.role` on a still-later line then appends.
+            // (Tracks #732.)
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[.role1]\n[role=role2]\n[.role3]\ncontent\n",
+            );
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.roles(), vec!["role2", "role3"]);
+        }
+
+        #[test]
+        fn formal_role_replaces_and_multiple_values_are_kept() {
+            // A multi-valued formal `role=` replaces every earlier role, in
+            // order.
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[.role1.role2]\n[role=\"r3 r4\"]\ncontent\n",
+            );
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.roles(), vec!["r3", "r4"]);
+        }
+
+        #[test]
+        fn later_formal_role_replaces_earlier_formal_role() {
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[role=role1]\n[role=role2]\ncontent\n",
+            );
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.roles(), vec!["role2"]);
+        }
+
+        #[test]
+        fn shorthand_role_appends_to_earlier_formal_role() {
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[role=role1]\n[.role2]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.roles(), vec!["role1", "role2"]);
+        }
+
+        #[test]
+        fn later_line_carrying_both_formal_and_shorthand_roles() {
+            // When a single later line carries both a formal `role=` and a
+            // shorthand `.role`, the formal value replaces the running roles and
+            // that same line's shorthand then appends after it.
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[role=formal]\n[.sh,role=formal2]\ncontent\n",
+            );
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.roles(), vec!["formal2", "sh"]);
+        }
+
+        #[test]
+        fn empty_formal_role_clears_earlier_roles() {
+            // An explicitly empty `role=` replaces the running role list with
+            // nothing, clearing roles set by an earlier shorthand `.role`.
+            let metadata =
+                crate::blocks::metadata::BlockMetadata::new("[.role1]\n[role=]\ncontent\n");
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert!(attrlist.roles().is_empty());
+        }
+
+        #[test]
+        fn formal_role_replaces_but_preserves_id_and_options() {
+            // Replacing roles must not disturb the ID or options carried on the
+            // first positional.
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[#id1.role1%opt1]\n[role=role2]\ncontent\n",
+            );
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.id().unwrap(), "id1");
+            assert_eq!(attrlist.roles(), vec!["role2"]);
+            assert_eq!(attrlist.options(), vec!["opt1"]);
+        }
+
+        #[test]
         fn shorthand_id_later_wins() {
             let metadata = crate::blocks::metadata::BlockMetadata::new("[#id1]\n[#id2]\ncontent\n");
 
