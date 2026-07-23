@@ -19,6 +19,7 @@ use crate::{
 pub struct Header<'src> {
     title_source: Option<Span<'src>>,
     title: Option<String>,
+    doctitle: Option<String>,
     main_title: Option<String>,
     subtitle: Option<String>,
     id: Option<String>,
@@ -40,6 +41,17 @@ impl<'src> Header<'src> {
 
         let mut title_source: Option<Span<'src>> = None;
         let mut title: Option<String> = None;
+
+        // State that mirrors Asciidoctor's `parse_document_header` doctitle
+        // handling: whether an implicit `= Title` line was seen, the eager
+        // (at-title-line) substitution stored in the `doctitle` attribute, and
+        // whether a `:doctitle:` attribute entry appeared below the title (a
+        // candidate to override the section title).
+        let mut saw_implicit_title = false;
+        let mut implicit_overridden_from_above = false;
+        let mut implicit_doctitle_str: Option<String> = None;
+        let mut doctitle_entry_after_title = false;
+
         let mut id: Option<String> = None;
         let mut roles: Vec<String> = vec![];
         let mut attributes: Vec<Attribute> = vec![];
@@ -147,6 +159,13 @@ impl<'src> Header<'src> {
                     parser.set_attribute_by_value_from_header("author", author_name);
                 }
 
+                // A `:doctitle:` entry below the document title is a candidate to
+                // override the implicit section title (resolved after the header
+                // is fully parsed; see below).
+                if title.is_some() && attr.item.name().data().eq_ignore_ascii_case("doctitle") {
+                    doctitle_entry_after_title = true;
+                }
+
                 attributes.push(attr.item);
                 source = attr.after;
             } else if title.is_none()
@@ -207,12 +226,32 @@ impl<'src> Header<'src> {
                     marker,
                     1,
                 );
-                let title_str = apply_header_subs(title_span.data(), parser);
+                saw_implicit_title = true;
 
-                parser.set_attribute_by_value_from_header("doctitle", &title_str);
-
-                title = Some(title_str);
                 title_source = Some(title_span);
+
+                // A `doctitle` attribute already set above the title – via a
+                // `:doctitle:` entry or the API – overrides the implicit title:
+                // the implicit text is discarded, the existing doctitle stands
+                // as the document title, and the `doctitle` attribute is left
+                // untouched. Otherwise the implicit title is
+                // substituted now (so `{doctitle}` references below resolve to
+                // it) and recorded as the baseline for a later override check.
+                if let InterpretedValue::Value(existing) = parser.attribute_value("doctitle")
+                    && !existing.is_empty()
+                {
+                    implicit_overridden_from_above = true;
+                    implicit_doctitle_str = Some(existing.clone());
+                    title = Some(existing);
+                } else {
+                    let title_str = apply_header_subs(title_span.data(), parser);
+
+                    parser.set_attribute_by_value_from_header("doctitle", &title_str);
+
+                    implicit_doctitle_str = Some(title_str.clone());
+                    title = Some(title_str);
+                }
+
                 source = line_mi.after;
             } else if title.is_some() && author_line.is_none() {
                 author_line = Some(AuthorLine::parse(line, parser));
@@ -235,6 +274,65 @@ impl<'src> Header<'src> {
         let after = source.discard_empty_lines();
         let source = original_source.trim_remainder(source);
 
+        // Finalize the document (section) title, mirroring Asciidoctor's
+        // `parse_document_header` doctitle handling. The `doctitle` attribute
+        // retains the eager, at-title-line substitution; the section title below
+        // is (re)derived from the *final* attribute state so that:
+        //
+        //   - an implicit `= Title` referencing an attribute defined later in the
+        //     header still resolves ("lazy" resolution),
+        //   - a `:doctitle:` attribute entry (above or below the title, or in a
+        //     document with no title line at all) can supply or override it.
+        let final_doctitle_attr = match parser.attribute_value("doctitle") {
+            InterpretedValue::Value(v) if !v.is_empty() => Some(v),
+            _ => None,
+        };
+
+        title = if saw_implicit_title {
+            // The base section title is normally the eager (at-title-line)
+            // substitution already held in `title`. It is re-resolved against the
+            // final attribute set only when that eager substitution left an
+            // unresolved attribute reference – an attribute defined later in the
+            // header – so that one-shot substitutions such as a `{counter:…}` in
+            // the title are not evaluated a second time. When the implicit title
+            // was overridden by a `doctitle` set above it, `title` already holds
+            // that (resolved) value and is not re-substituted.
+            //
+            // Residual edge: a title that *mixes* a counter with a later-defined
+            // reference (e.g. `= {counter:n} {project-name}`) still contains a
+            // `{` after the eager pass, so the re-resolution runs and advances the
+            // counter a second time. Re-resolving is done from the raw title (not
+            // the eager result) so that escaped `\{…}` and specialchars stay
+            // correct; the counter here is the price of that. This is a rare
+            // combination and no test exercises it.
+            let base = if !implicit_overridden_from_above
+                && let Some(raw) = title_source
+                && implicit_doctitle_str
+                    .as_deref()
+                    .is_some_and(|s| s.contains('{'))
+            {
+                Some(apply_header_subs(raw.data(), parser))
+            } else {
+                title
+            };
+
+            // A `:doctitle:` entry below the title overrides the section title
+            // when it sets a new, non-empty value (an empty or unchanged value
+            // leaves the implicit title in place).
+            if doctitle_entry_after_title
+                && let Some(ref dt) = final_doctitle_attr
+                && Some(dt) != implicit_doctitle_str.as_ref()
+            {
+                Some(dt.clone())
+            } else {
+                base
+            }
+        } else {
+            // No `= Title` line: a `:doctitle:` attribute entry, if any, supplies
+            // the implicit document title.
+            final_doctitle_attr
+        };
+
         // Partition the (fully substituted) document title into a main title and
         // an optional subtitle. This happens after the header has been fully
         // parsed so that a `title-separator` attribute takes effect even when it
@@ -247,6 +345,15 @@ impl<'src> Header<'src> {
             None => (None, None),
         };
 
+        // The value returned by `Document::doctitle()`: a `title` attribute entry
+        // overrides the section title (Asciidoctor's `Document#doctitle`), even
+        // when it is blank; otherwise the section title is the doctitle.
+        let doctitle = match parser.attribute_value("title") {
+            InterpretedValue::Value(v) => Some(v),
+            InterpretedValue::Set => Some(String::new()),
+            InterpretedValue::Unset => title.clone(),
+        };
+
         // Resolve the document's author list. The author line, when present, is
         // the source of truth; otherwise the list is derived from the `author`
         // and indexed `author_N` document attributes (see [`resolve_authors`]).
@@ -257,6 +364,7 @@ impl<'src> Header<'src> {
                 item: Self {
                     title_source,
                     title,
+                    doctitle,
                     main_title,
                     subtitle,
                     id,
@@ -290,6 +398,21 @@ impl<'src> Header<'src> {
     /// [`main_title`]: Self::main_title
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    /// Return the effective document title, applying the override precedence of
+    /// Asciidoctor's `Document#doctitle`: a `title` attribute entry (even a
+    /// blank one) takes priority over the section [`title`], which in turn may
+    /// have been supplied or overridden by a `:doctitle:` attribute entry.
+    ///
+    /// This backs [`Document::doctitle`] and can differ from [`title`]: for
+    /// `= Document Title` followed by `:title: Override`, [`title`] is
+    /// `Document Title` while this is `Override`.
+    ///
+    /// [`title`]: Self::title
+    /// [`Document::doctitle`]: crate::Document::doctitle
+    pub(crate) fn doctitle(&self) -> Option<&str> {
+        self.doctitle.as_deref()
     }
 
     /// Return the main portion of the document title, if there was a title.
@@ -647,6 +770,7 @@ impl std::fmt::Debug for Header<'_> {
         f.debug_struct("Header")
             .field("title_source", &self.title_source)
             .field("title", &self.title)
+            .field("doctitle", &self.doctitle)
             .field("main_title", &self.main_title)
             .field("subtitle", &self.subtitle)
             .field("id", &self.id)
@@ -1360,6 +1484,9 @@ mod tests {
         },
     ),
     title: Some(
+        "Example Title",
+    ),
+    doctitle: Some(
         "Example Title",
     ),
     main_title: Some(
