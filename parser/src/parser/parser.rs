@@ -49,6 +49,25 @@ pub struct Parser {
     /// [`built_in_attrs`]: super::built_in_attrs
     pub(crate) attribute_values: Arc<HashMap<String, AttributeValue>>,
 
+    /// The configured baseline of [`attribute_values`](Self::attribute_values):
+    /// a snapshot of the API-established attributes as of the last builder
+    /// call, with none of the attributes a document discovers during
+    /// parsing.
+    ///
+    /// [`parse_deferred`](Self::parse_deferred) restores
+    /// [`attribute_values`](Self::attribute_values) from this at the start of
+    /// every parse, so a `Parser` reused across documents returns to its
+    /// configured baseline between parses rather than leaking one document's
+    /// header assignments into the next. It is refreshed (by
+    /// [`capture_attribute_baseline`](Self::capture_attribute_baseline)) after
+    /// each attribute-configuring builder call, so reconfiguring a `Parser`
+    /// between parses is honored. Shared via [`Arc`] copy-on-write for the same
+    /// reason as [`attribute_values`](Self::attribute_values), so tracking it
+    /// costs only an `Arc` clone.
+    ///
+    /// [`attribute_values`]: Self::attribute_values
+    pub(crate) baseline_attribute_values: Arc<HashMap<String, AttributeValue>>,
+
     /// Default values for attributes if "set." Immutable after construction and
     /// shared via [`Arc`] (never copied per parser).
     default_attribute_values: Arc<HashMap<String, String>>,
@@ -466,6 +485,7 @@ impl Default for Parser {
             // Starts empty: built-in defaults are resolved on the fly via the
             // shared table (see `attribute_value`), not copied in per parser.
             attribute_values: Arc::new(HashMap::new()),
+            baseline_attribute_values: Arc::new(HashMap::new()),
             default_attribute_values: built_in_default_values(),
             renderer: Rc::new(HtmlSubstitutionRenderer {}),
             primary_file_name: None,
@@ -526,7 +546,23 @@ impl Parser {
     ///
     /// The `Parser` struct will be updated with document attribute values
     /// discovered during parsing. These values may be inspected using
-    /// [`attribute_value()`].
+    /// [`attribute_value()`] after this call returns.
+    ///
+    /// # Reusing a `Parser` across documents
+    ///
+    /// A single `Parser` may be reused to parse many documents (in a loop, for
+    /// example). Each parse begins from the `Parser`'s configured baseline —
+    /// the attributes established through the builder API (e.g.
+    /// [`with_intrinsic_attribute()`]) — with the document attributes
+    /// discovered while parsing the *previous* document cleared.
+    /// Header/body assignments (`:foo: bar`) therefore do not leak from one
+    /// document into the next, so output does not depend on parse order.
+    /// (Attributes discovered by a parse remain inspectable per the paragraph
+    /// above only until the next parse, which clears them back to the
+    /// baseline.) Reconfiguring the `Parser` with a builder method between
+    /// parses updates that baseline for all subsequent parses.
+    ///
+    /// [`with_intrinsic_attribute()`]: Self::with_intrinsic_attribute
     ///
     /// # Warnings, not errors
     ///
@@ -566,6 +602,14 @@ impl Parser {
     /// [`parse()`]: Self::parse
     /// [`catalog()`]: Document::catalog
     pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
+        // Restore the configured attribute baseline so a `Parser` reused across
+        // documents does not carry one document's header/body assignments into
+        // the next (which would make conditional-include, substitution, and
+        // section-numbering behavior order-dependent). This must precede front-
+        // matter handling and preprocessing below, both of which read document
+        // attributes. See `baseline_attribute_values`.
+        self.attribute_values = Arc::clone(&self.baseline_attribute_values);
+
         // The time-dependent document attributes (docdate, doctime, docdatetime,
         // docyear, and their local* siblings) are resolved lazily from a
         // reference instant captured the first time one is read (see
@@ -1191,6 +1235,19 @@ impl Parser {
         );
     }
 
+    /// Records the current [`attribute_values`](Self::attribute_values) as the
+    /// configured baseline restored at the start of each parse.
+    ///
+    /// Called at the end of every attribute-configuring builder method, once
+    /// all of that call's effects (including any
+    /// [title-visibility](Self::apply_title_visibility_linkage) partner or
+    /// safe-mode attributes) have been applied. The snapshot is an [`Arc`]
+    /// clone, so it captures exactly the post-call state and stays cheap; see
+    /// [`baseline_attribute_values`](Self::baseline_attribute_values).
+    fn capture_attribute_baseline(&mut self) {
+        self.baseline_attribute_values = Arc::clone(&self.attribute_values);
+    }
+
     /// Sets the value of an [intrinsic attribute].
     ///
     /// Intrinsic attributes are set automatically by the processor. These
@@ -1228,6 +1285,8 @@ impl Parser {
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
         self.apply_title_visibility_linkage(&name, &value, modification_context, false);
+
+        self.capture_attribute_baseline();
 
         self
     }
@@ -1275,6 +1334,8 @@ impl Parser {
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
         self.apply_title_visibility_linkage(&name, &value, modification_context, true);
+
+        self.capture_attribute_baseline();
 
         self
     }
@@ -1680,6 +1741,8 @@ impl Parser {
 
         self.apply_title_visibility_linkage(&name, &value, modification_context, false);
 
+        self.capture_attribute_baseline();
+
         self
     }
 
@@ -1726,6 +1789,8 @@ impl Parser {
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
         self.apply_title_visibility_linkage(&name, &value, modification_context, true);
+
+        self.capture_attribute_baseline();
 
         self
     }
@@ -1947,6 +2012,9 @@ impl Parser {
     pub fn with_safe_mode(mut self, safe: SafeMode) -> Self {
         self.safe = safe;
         self.apply_safe_mode_attributes();
+
+        self.capture_attribute_baseline();
+
         self
     }
 
@@ -2620,6 +2688,98 @@ mod tests {
     fn default_is_unset() {
         let p = Parser::default();
         assert_eq!(p.attribute_value("foo"), InterpretedValue::Unset);
+    }
+
+    mod attribute_state_between_parses {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn discovered_header_attribute_does_not_leak() {
+            let mut parser = Parser::default();
+
+            // The first document defines `foo`; it is inspectable on the parser
+            // once that parse returns.
+            parser.parse(":foo: bar\n\nText.\n");
+            assert_eq!(
+                parser.attribute_value("foo"),
+                InterpretedValue::Value("bar")
+            );
+
+            // A second document that never defines `foo` must not observe the
+            // first document's assignment.
+            parser.parse("Text.\n");
+            assert_eq!(parser.attribute_value("foo"), InterpretedValue::Unset);
+        }
+
+        #[test]
+        fn discovered_body_attribute_does_not_leak() {
+            let mut parser = Parser::default();
+
+            // A body (not header) assignment leaks the same way a header one
+            // would if the baseline were not restored.
+            parser.parse("First.\n\n:mode: fast\n\nSecond.\n");
+            assert_eq!(
+                parser.attribute_value("mode"),
+                InterpretedValue::Value("fast")
+            );
+
+            parser.parse("Text.\n");
+            assert_eq!(parser.attribute_value("mode"), InterpretedValue::Unset);
+        }
+
+        #[test]
+        fn configured_baseline_is_restored_each_parse() {
+            let mut parser = Parser::default().with_intrinsic_attribute(
+                "site",
+                "prod",
+                ModificationContext::Anywhere,
+            );
+
+            // The first document overrides the API-configured value in its body.
+            parser.parse(":site: dev\n\nText.\n");
+            assert_eq!(
+                parser.attribute_value("site"),
+                InterpretedValue::Value("dev")
+            );
+
+            // The next parse begins from the configured baseline, not the
+            // previous document's override.
+            parser.parse("Text.\n");
+            assert_eq!(
+                parser.attribute_value("site"),
+                InterpretedValue::Value("prod")
+            );
+        }
+
+        #[test]
+        fn reconfiguring_between_parses_updates_baseline() {
+            let mut parser = Parser::default();
+
+            parser.parse("Text.\n");
+            assert_eq!(parser.attribute_value("env"), InterpretedValue::Unset);
+
+            // A builder call between parses re-establishes the baseline for every
+            // subsequent parse.
+            parser = parser.with_intrinsic_attribute("env", "ci", ModificationContext::Anywhere);
+
+            parser.parse("Text.\n");
+            assert_eq!(parser.attribute_value("env"), InterpretedValue::Value("ci"));
+        }
+
+        #[test]
+        fn leaked_attribute_does_not_affect_rendered_output() {
+            let mut parser = Parser::default();
+
+            // The first document defines `who`, so `{who}` resolves for it.
+            let doc1 = parser.parse(":who: world\n\nHello {who}.\n");
+            assert_eq!(rendered_paragraphs(&doc1), vec!["Hello world."]);
+
+            // The second document does not define `who`; without the baseline
+            // restore, `{who}` would still resolve to "world". Instead it stays
+            // an unresolved literal reference.
+            let doc2 = parser.parse("Hello {who}.\n");
+            assert_eq!(rendered_paragraphs(&doc2), vec!["Hello {who}."]);
+        }
     }
 
     mod remap_attr_name {
