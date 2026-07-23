@@ -267,12 +267,19 @@ impl Replacer for InlineImageMacroReplacer<'_> {
         // `alt`.
 
         if caps[0].starts_with("image:") {
-            // TO DO: Register image with parser?
-            // IMPORTANT: May require interior mutability on Parser because it looks like we
-            // can't pass mutable references to Parser in a recursive Regex replacement.
-
-            // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/335):
-            // todo!("Port this: {}", "doc.register :images, target");
+            // Record the referenced image in the document catalog when
+            // `catalog_assets` is enabled (a no-op otherwise). Attribute
+            // references in the target were already substituted by the earlier
+            // attribute-references step, so `target` is the resolved path, and
+            // the catalog stores it alongside the current `imagesdir`. Mirrors
+            // Asciidoctor's `doc.register :images, target`.
+            self.0.register_image(
+                target.to_string(),
+                self.0
+                    .attribute_value("imagesdir")
+                    .as_maybe_str()
+                    .map(str::to_owned),
+            );
 
             let params = ImageRenderParams {
                 target,

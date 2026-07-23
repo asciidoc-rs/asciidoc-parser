@@ -11,6 +11,9 @@ pub(crate) use built_in_attrs::{built_in_attr, built_in_attrs_iter};
 mod docinfo_file_handler;
 pub use docinfo_file_handler::DocinfoFileHandler;
 
+mod image_file_handler;
+pub use image_file_handler::ImageFileHandler;
+
 mod include_file_handler;
 pub use include_file_handler::{IncludeContent, IncludeFileHandler};
 

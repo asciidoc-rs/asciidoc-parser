@@ -1660,6 +1660,7 @@ mod tests {
         refs: HashMap::from([]),
         reftext_to_id: HashMap::from([]),
         footnotes: [],
+        images: [],
         includes: HashMap::from([]),
     },
 }"#

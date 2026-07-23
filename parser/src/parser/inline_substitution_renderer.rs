@@ -65,13 +65,12 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// The `target_image_path` is resolved relative to the directory retrieved
     /// from the specified document-scoped attribute key, if provided.
     ///
-    /// In Asciidoctor, if the `data-uri` attribute is set on the document and
-    /// the safe mode is below `SafeMode::Secure`, the image is converted to a
-    /// data URI by reading its bytes from the same directory; otherwise a
-    /// relative path (i.e., URL) is returned. The `data-uri` embedding path is
-    /// not yet implemented in this crate (tracked by
-    /// <https://github.com/asciidoc-rs/asciidoc-parser/issues/697>), so a
-    /// normalized web path is always returned.
+    /// If the `data-uri` attribute is set on the document and the safe mode is
+    /// below `SafeMode::Secure`, the image is embedded as a
+    /// `data:<mime>;base64,…` URI by reading its bytes through the
+    /// [`ImageFileHandler`](crate::parser::ImageFileHandler); otherwise (or
+    /// when no handler is registered) a normalized relative path (i.e.,
+    /// URL) is returned. A target that is itself a URI is never embedded.
     ///
     /// ## Parameters
     ///
@@ -761,7 +760,13 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         let svg_active = (format == Some("svg") || params.target.contains(".svg"))
             && params.parser.safe_mode() < SafeMode::Secure;
 
-        let img = if svg_active && params.attrlist.has_option("inline") {
+        // An inline SVG is embedded verbatim and has no meaningful `src`, so a
+        // `link=self` on it is left as the literal `self` rather than resolved
+        // to a URI (see `render_icon_or_image`). Every other image form does
+        // have a `src` (a data URI or web path) that `link=self` resolves to.
+        let inline_svg = svg_active && params.attrlist.has_option("inline");
+
+        let img = if inline_svg {
             // Embed the SVG contents directly. When the contents cannot be read
             // (no handler is registered, or it cannot find the file), fall back
             // to the alt text, mirroring Ruby Asciidoctor.
@@ -786,7 +791,9 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             format!(r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#)
         };
 
-        render_icon_or_image(params.attrlist, &img, "image", dest);
+        let link_self_href = if inline_svg { None } else { Some(src.as_str()) };
+
+        render_icon_or_image(params.attrlist, &img, "image", link_self_href, dest);
     }
 
     fn image_uri(
@@ -797,21 +804,38 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     ) -> String {
         let asset_dir_key = asset_dir_key.unwrap_or("imagesdir");
 
-        // Asciidoctor embeds the image as a data URI when the `data-uri`
-        // attribute is set and the safe mode is below `SafeMode::Secure`. That
-        // requires reading the image's bytes, which this crate leaves to the
-        // caller rather than performing file/network access itself; the
-        // `data-uri` attribute is therefore not yet implemented (tracked by
-        // https://github.com/asciidoc-rs/asciidoc-parser/issues/697) and the
-        // image is always emitted as a normalized web path. Because data-uri
-        // embedding is absent, there is no safe-mode-sensitive behavior to gate
-        // here.
         let asset_dir = parser
             .attribute_value(asset_dir_key)
             .as_maybe_str()
             .map(|s| s.to_string());
 
-        normalize_web_path(target_image_path, parser, asset_dir.as_deref(), true)
+        let normalized = normalize_web_path(target_image_path, parser, asset_dir.as_deref(), true);
+
+        // Asciidoctor embeds the image as a data URI when the `data-uri`
+        // attribute is set and the safe mode is below `SafeMode::Secure`. A
+        // target that is itself a URI is never embedded – there is no local
+        // file to read – so it passes through as an ordinary web path
+        // (Asciidoctor only fetches a remote target under `allow-uri-read`,
+        // which this crate does not implement). Otherwise the image's bytes are
+        // read through the `ImageFileHandler` and base64-encoded into a
+        // `data:<mime>;base64,…` URI.
+        //
+        // This crate never performs file I/O itself, so an absent handler (or
+        // one that cannot find the file) degrades silently to the web path,
+        // mirroring how a missing `SvgFileHandler` degrades an inline SVG.
+        if parser.safe_mode() < SafeMode::Secure
+            && parser.is_attribute_set("data-uri")
+            && !is_uri_ish(target_image_path)
+            && let Some(handler) = parser.image_file_handler.as_ref()
+            && let Some(bytes) = handler.resolve_image(&normalized, parser)
+        {
+            let mimetype = data_uri_mimetype(target_image_path);
+            let encoded = crate::internal::base64::strict_encode(&bytes);
+
+            return format!("data:{mimetype};base64,{encoded}");
+        }
+
+        normalized
     }
 
     fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
@@ -877,7 +901,19 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             format!("[{alt}&#93;", alt = params.alt)
         };
 
-        render_icon_or_image(params.attrlist, &img, "icon", dest);
+        // `src` is only a real image URI in the image-icon branch (icons enabled
+        // and not font-based); the font (`<i>`) and text (`[alt]`) branches have
+        // no `src`, so a `link=self` on them stays literal (see
+        // `render_icon_or_image`).
+        let link_self_href = if params.parser.is_attribute_set("icons")
+            && params.parser.attribute_value("icons").as_maybe_str() != Some("font")
+        {
+            Some(src.as_str())
+        } else {
+            None
+        };
+
+        render_icon_or_image(params.attrlist, &img, "icon", link_self_href, dest);
     }
 
     fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
@@ -1156,16 +1192,31 @@ fn wrap_body_in_html_tag(
     dest.push('>');
 }
 
-fn render_icon_or_image(attrlist: &Attrlist, img: &str, type_: &'static str, dest: &mut String) {
+fn render_icon_or_image(
+    attrlist: &Attrlist,
+    img: &str,
+    type_: &'static str,
+    link_self_href: Option<&str>,
+    dest: &mut String,
+) {
     let mut img = img.to_string();
 
-    // The `link` attribute value is used verbatim as the `href` (matching Ruby
-    // Asciidoctor, which does not special-case `link=self`). This applies to
-    // every image, including an inline SVG embedded in the flow of text.
+    // The `link` attribute value is used verbatim as the `href`, except that a
+    // `link=self` resolves to the image's own `src` (its data URI or web path)
+    // when one is available. An inline SVG (and a font/text icon) has no `src`
+    // to resolve to, so `link_self_href` is `None` there and the literal `self`
+    // is kept. (Ruby Asciidoctor, where `src` is undefined in those branches,
+    // instead drops the anchor entirely; this crate keeps it with the literal
+    // `self` target.)
     if let Some(link) = attrlist.named_attribute("link") {
+        let href = if link.value() == "self" {
+            link_self_href.unwrap_or("self")
+        } else {
+            link.value()
+        };
+
         img = format!(
-            r#"<a class="image" href="{link}"{link_constraint_attrs}>{img}</a>"#,
-            link = link.value(),
+            r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
             link_constraint_attrs = link_constraint_attrs(attrlist, None)
         );
     }
@@ -1228,15 +1279,39 @@ fn is_uri_ish(path: &str) -> bool {
     path.contains(':') && URI_SNIFF.is_match(path)
 }
 
-/// Reports whether the final path segment of `path` carries a file extension,
-/// i.e. it contains a `.` that is neither the first nor the last character of
-/// the segment. Mirrors Asciidoctor's `Helpers.extname?`, used by the icon
-/// macro to decide whether the `icontype` attribute should be appended.
-fn has_extname(path: &str) -> bool {
+/// Returns the file extension (including the leading `.`) of the final path
+/// segment of `path`, or `None` when that segment carries no extension (its `.`
+/// is the first or last character of the segment, or there is no `.`). Mirrors
+/// Asciidoctor's `Helpers.extname`.
+fn extname(path: &str) -> Option<&str> {
     let segment = path.rsplit(['/', '\\']).next().unwrap_or(path);
     match segment.rfind('.') {
-        Some(i) => i > 0 && i < segment.len() - 1,
-        None => false,
+        Some(i) if i > 0 && i < segment.len() - 1 => Some(&segment[i..]),
+        _ => None,
+    }
+}
+
+/// Reports whether the final path segment of `path` carries a file extension.
+/// Mirrors Asciidoctor's `Helpers.extname?`, used by the icon macro to decide
+/// whether the `icontype` attribute should be appended.
+fn has_extname(path: &str) -> bool {
+    extname(path).is_some()
+}
+
+/// Determines the MIME type for a `data:` URI from the target image's file
+/// extension, mirroring Asciidoctor's `generate_data_uri`: `.svg` maps to
+/// `image/svg+xml`, any other extension maps to `image/<ext>`, and a target
+/// with no extension maps to `application/octet-stream`.
+///
+/// The `image/<ext>` mapping is verbatim, matching Asciidoctor: `.jpg` yields
+/// `image/jpg` (not the IANA-registered `image/jpeg`), while `.jpeg` yields
+/// `image/jpeg`. This parity with Asciidoctor is deliberate.
+fn data_uri_mimetype(target: &str) -> String {
+    match extname(target) {
+        Some(".svg") => "image/svg+xml".to_string(),
+        // `extname` always includes the leading `.`, which is dropped here.
+        Some(ext) => format!("image/{ext}", ext = ext.strip_prefix('.').unwrap_or(ext)),
+        None => "application/octet-stream".to_string(),
     }
 }
 
@@ -1457,7 +1532,46 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) 
 
 #[cfg(test)]
 mod tests {
-    use super::{drop_anchor_tags, encode_html_attribute};
+    use super::{data_uri_mimetype, drop_anchor_tags, encode_html_attribute, extname, has_extname};
+
+    #[test]
+    fn extname_extracts_final_segment_extension() {
+        // A normal extension on the final path segment.
+        assert_eq!(extname("fixtures/dot.gif"), Some(".gif"));
+        assert_eq!(extname("circle.svg"), Some(".svg"));
+
+        // A dot in an earlier segment does not count; only the final segment's
+        // extension does.
+        assert_eq!(extname("a.b/c"), None);
+
+        // A leading or trailing dot in the segment is not an extension.
+        assert_eq!(extname(".hidden"), None);
+        assert_eq!(extname("trailing."), None);
+
+        // No dot at all.
+        assert_eq!(extname("plain"), None);
+
+        // `has_extname` is the boolean form.
+        assert!(has_extname("a/b.png"));
+        assert!(!has_extname("a.b/c"));
+    }
+
+    #[test]
+    fn data_uri_mimetype_maps_extension() {
+        // `.svg` is special-cased; every other extension maps to `image/<ext>`.
+        assert_eq!(data_uri_mimetype("circle.svg"), "image/svg+xml");
+        assert_eq!(data_uri_mimetype("fixtures/dot.gif"), "image/gif");
+        assert_eq!(data_uri_mimetype("photo.png"), "image/png");
+
+        // The extension is used verbatim (matching Asciidoctor), so `.jpg`
+        // yields `image/jpg` rather than the registered `image/jpeg`, while
+        // `.jpeg` yields `image/jpeg`.
+        assert_eq!(data_uri_mimetype("photo.jpg"), "image/jpg");
+        assert_eq!(data_uri_mimetype("photo.jpeg"), "image/jpeg");
+
+        // A target with no extension falls back to a generic binary type.
+        assert_eq!(data_uri_mimetype("noext"), "application/octet-stream");
+    }
 
     #[test]
     fn encode_html_attribute_escapes_special_characters() {

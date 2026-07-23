@@ -13,7 +13,7 @@ use crate::{
     document::{Attribute, Catalog, InterpretedValue, RefType},
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DocinfoFileHandler,
-        HtmlSubstitutionRenderer, IncludeFileHandler, InlineSubstitutionRenderer,
+        HtmlSubstitutionRenderer, ImageFileHandler, IncludeFileHandler, InlineSubstitutionRenderer,
         ModificationContext, PathResolver, ReferenceTime, ResolvedAttributes, SafeMode, SourceLine,
         SourceMap, SvgFileHandler,
         built_in_attrs::{
@@ -78,6 +78,18 @@ pub struct Parser {
     /// image with the `inline` option. If absent, inline SVG images fall back
     /// to rendering their alt text.
     pub(crate) svg_file_handler: Option<Rc<dyn SvgFileHandler>>,
+
+    /// Handler for reading the bytes of an image file that must be embedded as
+    /// a `data:` URI (when the `data-uri` attribute is set below
+    /// [`SafeMode::Secure`]). If absent, such images fall back to an ordinary
+    /// web path.
+    pub(crate) image_file_handler: Option<Rc<dyn ImageFileHandler>>,
+
+    /// Whether referenced images are recorded in the document catalog as they
+    /// are encountered (Asciidoctor's `catalog_assets` API option). When
+    /// `false` (the default), the `image:`/`image::` macros do not populate
+    /// [`Catalog::images`](crate::document::Catalog::images).
+    pub(crate) catalog_assets: bool,
 
     /// The safe mode under which the document is parsed and rendered. Controls
     /// security-sensitive rendering behavior (such as whether an interactive
@@ -461,6 +473,8 @@ impl Default for Parser {
             include_file_handler: None,
             docinfo_file_handler: None,
             svg_file_handler: None,
+            image_file_handler: None,
+            catalog_assets: false,
             safe: SafeMode::default(),
             catalog: RefCell::new(Catalog::new()),
             last_section_number: SectionNumber::default(),
@@ -1198,6 +1212,22 @@ impl Parser {
         self.catalog.borrow_mut().set_signifier(id, signifier);
     }
 
+    /// Records a referenced image in the document catalog when
+    /// [`catalog_assets`](Self::with_catalog_assets) is enabled. A no-op
+    /// otherwise.
+    ///
+    /// `target` is the (already attribute-substituted) image target as written
+    /// in the macro; `imagesdir` is the value of the document `imagesdir`
+    /// attribute at the point of reference, or `None` when it is unset.
+    ///
+    /// Takes `&self` so it can be called from the macros substitution step,
+    /// which only holds a shared reference to the parser.
+    pub(crate) fn register_image(&self, target: String, imagesdir: Option<String>) {
+        if self.catalog_assets {
+            self.catalog.borrow_mut().register_image(target, imagesdir);
+        }
+    }
+
     /// Registers a callout number defined by a verbatim block.
     ///
     /// Takes `&self` so it can be called from the callouts substitution step,
@@ -1765,6 +1795,36 @@ impl Parser {
     /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
     pub fn with_svg_file_handler<SFH: SvgFileHandler + 'static>(mut self, handler: SFH) -> Self {
         self.svg_file_handler = Some(Rc::new(handler));
+        self
+    }
+
+    /// Sets the [`ImageFileHandler`] for this parser.
+    ///
+    /// The image file handler is responsible for providing the raw bytes of an
+    /// image that must be embedded as a `data:` URI – i.e. when the `data-uri`
+    /// document attribute is set and the safe mode is below
+    /// [`SafeMode::Secure`]. If no handler is provided (or it cannot find the
+    /// file), such images fall back to an ordinary web path, exactly as if
+    /// `data-uri` were not set.
+    ///
+    /// [`ImageFileHandler`]: crate::parser::ImageFileHandler
+    pub fn with_image_file_handler<IFH: ImageFileHandler + 'static>(
+        mut self,
+        handler: IFH,
+    ) -> Self {
+        self.image_file_handler = Some(Rc::new(handler));
+        self
+    }
+
+    /// Enables or disables cataloging of referenced image assets.
+    ///
+    /// When enabled (Asciidoctor's `catalog_assets` API option), each image
+    /// referenced by an `image:`/`image::` macro is recorded in the document
+    /// catalog and can be retrieved afterward via
+    /// [`Catalog::images`](crate::document::Catalog::images). The default is
+    /// disabled, in which case no image references are recorded.
+    pub fn with_catalog_assets(mut self, catalog_assets: bool) -> Self {
+        self.catalog_assets = catalog_assets;
         self
     }
 
