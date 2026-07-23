@@ -125,11 +125,12 @@ We'll cover that modifier shortly.
         todo!("Redundant: Covered by block_style test below.");
     }
 
-    #[test]
-    #[ignore]
-    fn block_name() {
-        to_do_verifies!(
-            r#"
+    // Block extensions are out of scope for the 1.0 release, so the block name →
+    // context mapping described here – an arbitrary block name mapped to one or
+    // more contexts by an extension's process method – has no corresponding
+    // parser behavior to verify. Treated as non-normative for now.
+    non_normative!(
+        r#"
 For blocks, the context is sometimes referred to as the block name.
 This comes up in particular when talking about custom blocks.
 The block name is just another layer of abstraction.
@@ -139,10 +140,7 @@ Which context is ultimately used depends on what is returned from the extension'
 In the end, it's the context that determines how the block is converted.
 
 "#
-        );
-
-        todo!("Revisit when we support block extensions.");
-    }
+    );
 
     #[test]
     fn sections_are_compound() {

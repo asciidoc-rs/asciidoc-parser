@@ -75,7 +75,7 @@ WARNING: If any line in the verbatim content is not indented, the `indent` attri
 fn tabsize_expands_tabs() {
     // The parser expands tabs on the included content when `indent` is also
     // supplied; block-level tab expansion independent of `indent` is not yet
-    // implemented, so the broader claim is tracked as a to-do.
+    // implemented, so the broader claim is tracked as a to-do (#877).
     to_do_verifies!(
         r#"
 If the `tabsize` attribute is set on the block or the document, tabs are also replaced with the number of spaces specified by that attribute, regardless of whether the `indent` attribute is set.
