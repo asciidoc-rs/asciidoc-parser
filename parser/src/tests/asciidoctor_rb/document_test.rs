@@ -761,6 +761,10 @@ mod structure {
       EOS
       doc = document_from_string input
       assert_equal 'Document Title', doc.doctitle
+      assert doc.has_header?
+      assert_equal 'Document Title', doc.header.title
+      assert_equal 'Document Title', doc.first_section.title
+    end
 "##
         );
 
@@ -768,21 +772,11 @@ mod structure {
             Parser::default().parse(":doctitle: Document Title\n\npreamble\n\n== First Section");
 
         // A `:doctitle:` attribute entry, with no `= Title` line, supplies the
-        // implicit document title.
+        // implicit document title. (Ruby's `header.title` and `first_section.title`
+        // both read the section title verified here; asciidoc-parser has no
+        // `has_header?` accessor.)
         assert_eq!(doc.doctitle(), Some("Document Title"));
         assert_eq!(doc.header().title(), Some("Document Title"));
-
-        // Ruby's `first_section.title` reads the same header (doctitle) section
-        // title verified above; asciidoc-parser has no `has_header?`/
-        // `first_section` accessors.
-        non_normative!(
-            r##"
-      assert doc.has_header?
-      assert_equal 'Document Title', doc.header.title
-      assert_equal 'Document Title', doc.first_section.title
-    end
-"##
-        );
     }
 
     #[test]
@@ -837,6 +831,11 @@ mod structure {
       doc = document_from_string input
       assert_equal 'Override', doc.doctitle
       assert_equal 'Override', doc.title
+      assert doc.has_header?
+      assert_equal 'Document Title', doc.header.title
+      assert_equal 'Document Title', doc.first_section.title
+      assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.convert, 1
+    end
 "##
         );
 
@@ -846,25 +845,11 @@ mod structure {
         // A `:title:` attribute entry overrides the value of `doctitle` (and
         // `title`) without disturbing the section title or the `doctitle`
         // attribute – so `{doctitle}` in the body still renders the implicit
-        // title.
+        // title. (The `#preamble` wrapper Ruby asserts on is standalone-HTML
+        // structure asciidoc-parser does not emit.)
         assert_eq!(doc.doctitle(), Some("Override"));
         assert_eq!(doc.header().title(), Some("Document Title"));
         assert_eq!(rendered_paragraphs(&doc), ["Document Title"]);
-
-        // The section title verified above is what Ruby's `header.title` and
-        // `first_section.title` return; the rendered body paragraph text is
-        // verified above too, but the `#preamble` wrapper it asserts on is
-        // standalone-HTML structure asciidoc-parser does not emit, and there is
-        // no `has_header?` accessor.
-        non_normative!(
-            r##"
-      assert doc.has_header?
-      assert_equal 'Document Title', doc.header.title
-      assert_equal 'Document Title', doc.first_section.title
-      assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.convert, 1
-    end
-"##
-        );
     }
 
     #[test]
@@ -883,6 +868,11 @@ mod structure {
       doc = document_from_string input
       assert_equal '', doc.doctitle
       assert_equal '', doc.title
+      assert doc.has_header?
+      assert_equal 'Document Title', doc.header.title
+      assert_equal 'Document Title', doc.first_section.title
+      assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.convert, 1
+    end
 "##
         );
 
@@ -894,16 +884,6 @@ mod structure {
         assert_eq!(doc.doctitle(), Some(""));
         assert_eq!(doc.header().title(), Some("Document Title"));
         assert_eq!(rendered_paragraphs(&doc), ["Document Title"]);
-
-        non_normative!(
-            r##"
-      assert doc.has_header?
-      assert_equal 'Document Title', doc.header.title
-      assert_equal 'Document Title', doc.first_section.title
-      assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.convert, 1
-    end
-"##
-        );
     }
 
     #[test]
@@ -955,6 +935,11 @@ mod structure {
       doc = document_from_string input
       assert_equal 'Override', doc.doctitle
       assert_equal 'Override', doc.title
+      assert doc.has_header?
+      assert_equal 'doctitle', doc.header.title
+      assert_equal 'doctitle', doc.first_section.title
+      assert_xpath '//*[@id="preamble"]//p[text()="Document Title, doctitle"]', doc.convert, 1
+    end
 "##
         );
 
@@ -977,16 +962,6 @@ mod structure {
             InterpretedValue::Value("doctitle")
         );
         assert_eq!(rendered_paragraphs(&doc), ["Document Title, doctitle"]);
-
-        non_normative!(
-            r##"
-      assert doc.has_header?
-      assert_equal 'doctitle', doc.header.title
-      assert_equal 'doctitle', doc.first_section.title
-      assert_xpath '//*[@id="preamble"]//p[text()="Document Title, doctitle"]', doc.convert, 1
-    end
-"##
-        );
     }
 
     #[test]
@@ -1006,6 +981,11 @@ mod structure {
       doc = document_from_string input
       assert_equal 'Override', doc.doctitle
       assert_nil doc.attributes['title']
+      assert doc.has_header?
+      assert_equal 'Override', doc.header.title
+      assert_equal 'Override', doc.first_section.title
+      assert_xpath '//*[@id="preamble"]//p[text()="Document Title, Override"]', doc.convert, 1
+    end
 "##
         );
 
@@ -1024,16 +1004,6 @@ mod structure {
             InterpretedValue::Value("Document Title")
         );
         assert_eq!(rendered_paragraphs(&doc), ["Document Title, Override"]);
-
-        non_normative!(
-            r##"
-      assert doc.has_header?
-      assert_equal 'Override', doc.header.title
-      assert_equal 'Override', doc.first_section.title
-      assert_xpath '//*[@id="preamble"]//p[text()="Document Title, Override"]', doc.convert, 1
-    end
-"##
-        );
     }
 
     #[test]
@@ -1052,6 +1022,11 @@ mod structure {
       doc = document_from_string input
       assert_equal 'Override', doc.doctitle
       assert_nil doc.attributes['title']
+      assert doc.has_header?
+      assert_equal 'Override', doc.header.title
+      assert_equal 'Override', doc.first_section.title
+      assert_xpath '//*[@id="preamble"]//p[text()="Override"]', doc.convert, 1
+    end
 "##
         );
 
@@ -1069,16 +1044,6 @@ mod structure {
             InterpretedValue::Value("Override")
         );
         assert_eq!(rendered_paragraphs(&doc), ["Override"]);
-
-        non_normative!(
-            r##"
-      assert doc.has_header?
-      assert_equal 'Override', doc.header.title
-      assert_equal 'Override', doc.first_section.title
-      assert_xpath '//*[@id="preamble"]//p[text()="Override"]', doc.convert, 1
-    end
-"##
-        );
     }
 
     #[test]
