@@ -258,7 +258,7 @@ impl<'src> Attrlist<'src> {
             // before its shorthand roles are appended).
             let later_formal: Option<Vec<String>> = later
                 .named_attribute("role")
-                .map(|attr| split_roles(attr.value()));
+                .map(|attr| split_role_value(attr.value()).map(str::to_string).collect());
 
             let later_shorthand: Vec<String> = later
                 .nth_attribute(1)
@@ -536,19 +536,7 @@ impl<'src> Attrlist<'src> {
             .unwrap_or_default();
 
         if let Some(role_attr) = self.named_attribute("role") {
-            let mut role_span = Span::new(role_attr.value());
-            let mut formal_roles: Vec<&'src str> = vec![];
-            role_span = role_span.take_while(|c| c == ' ').after;
-
-            while !role_span.is_empty() {
-                let mi = role_span.take_while(|c| c != ' ');
-                if !mi.item.is_empty() {
-                    formal_roles.push(mi.item.data());
-                }
-                role_span = mi.after.take_while(|c| c == ' ').after;
-            }
-
-            roles.append(&mut formal_roles);
+            roles.extend(split_role_value(role_attr.value()));
         }
 
         roles
@@ -680,15 +668,15 @@ fn split_options(value: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Split a formal `role` attribute value into individual role names, matching
-/// how [`Attrlist::roles`] reads a `role=` value: split on spaces and drop
-/// empty tokens. So `'role1  role2'` yields `role1`, `role2`.
-fn split_roles(value: &str) -> Vec<String> {
-    value
-        .split(' ')
-        .filter(|role| !role.is_empty())
-        .map(str::to_string)
-        .collect()
+/// Split a formal `role` attribute value into its individual role names: split
+/// on ASCII spaces and drop empty tokens. So `'role1  role2'` yields `role1`,
+/// `role2`.
+///
+/// This is the single source of truth for how a `role=` value is tokenized,
+/// shared by [`Attrlist::roles`] (which borrows the names) and the
+/// block-attribute merge (which owns them), so the two can never diverge.
+fn split_role_value(value: &str) -> impl Iterator<Item = &str> {
+    value.split(' ').filter(|role| !role.is_empty())
 }
 
 /// Context for attribute list parsing.

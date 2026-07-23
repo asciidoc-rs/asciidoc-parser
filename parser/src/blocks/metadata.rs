@@ -788,6 +788,19 @@ mod tests {
         }
 
         #[test]
+        fn later_line_carrying_both_formal_and_shorthand_roles() {
+            // When a single later line carries both a formal `role=` and a
+            // shorthand `.role`, the formal value replaces the running roles and
+            // that same line's shorthand then appends after it.
+            let metadata = crate::blocks::metadata::BlockMetadata::new(
+                "[role=formal]\n[.sh,role=formal2]\ncontent\n",
+            );
+
+            let attrlist = metadata.attrlist.as_ref().unwrap();
+            assert_eq!(attrlist.roles(), vec!["formal2", "sh"]);
+        }
+
+        #[test]
         fn empty_formal_role_clears_earlier_roles() {
             // An explicitly empty `role=` replaces the running role list with
             // nothing, clearing roles set by an earlier shorthand `.role`.
