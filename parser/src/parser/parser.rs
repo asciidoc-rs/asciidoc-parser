@@ -551,9 +551,9 @@ impl Parser {
     /// # Reusing a `Parser` across documents
     ///
     /// A single `Parser` may be reused to parse many documents (in a loop, for
-    /// example). Each parse begins from the `Parser`'s configured baseline —
+    /// example). Each parse begins from the `Parser`'s configured baseline –
     /// the attributes established through the builder API (e.g.
-    /// [`with_intrinsic_attribute()`]) — with the document attributes
+    /// [`with_intrinsic_attribute()`]) – with the document attributes
     /// discovered while parsing the *previous* document cleared.
     /// Header/body assignments (`:foo: bar`) therefore do not leak from one
     /// document into the next, so output does not depend on parse order.
