@@ -109,10 +109,6 @@ fn collect_files(root: &str, extension: &str) -> Vec<DirEntry> {
 }
 
 fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
-    // if !path.ends_with("revision_line.rs") {
-    //     return None;
-    // }
-
     let rs_file = fs::read(path).unwrap();
 
     let mut tracked_file: Option<String> = None;
