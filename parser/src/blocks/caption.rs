@@ -168,7 +168,10 @@ pub(crate) fn assign_caption(
         InterpretedValue::Value(label) if !label.is_empty() => {
             // The caption number is the counter named `<context>-number`, shared
             // with any `{counter:<context>-number}` reference in the document.
-            let value = parser.counter(&format!("{context}-number"), None);
+            // A captioning counter advances (and stays readable as) its
+            // attribute even when locked, mirroring Asciidoctor's
+            // `increment_and_store_counter`.
+            let value = parser.counter_for_caption(&format!("{context}-number"), None);
             let prefix = format!("{label} {value}. ");
             Some(Caption {
                 prefix,

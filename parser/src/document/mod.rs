@@ -13,7 +13,7 @@ pub use author_line::AuthorLine;
 mod catalog;
 #[allow(unused)] // TEMPORARY while building
 pub(crate) use catalog::DuplicateIdError;
-pub use catalog::{Catalog, Footnote, RefEntry, RefType};
+pub use catalog::{Catalog, Footnote, ImageReference, RefEntry, RefType};
 
 mod docinfo;
 pub(crate) use docinfo::Docinfo;

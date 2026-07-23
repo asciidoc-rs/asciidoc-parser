@@ -13,7 +13,7 @@ use crate::{
     document::{Attribute, Catalog, InterpretedValue, RefType},
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DocinfoFileHandler,
-        HtmlSubstitutionRenderer, IncludeFileHandler, InlineSubstitutionRenderer,
+        HtmlSubstitutionRenderer, ImageFileHandler, IncludeFileHandler, InlineSubstitutionRenderer,
         ModificationContext, PathResolver, ReferenceTime, ResolvedAttributes, SafeMode, SourceLine,
         SourceMap, SvgFileHandler,
         built_in_attrs::{
@@ -78,6 +78,18 @@ pub struct Parser {
     /// image with the `inline` option. If absent, inline SVG images fall back
     /// to rendering their alt text.
     pub(crate) svg_file_handler: Option<Rc<dyn SvgFileHandler>>,
+
+    /// Handler for reading the bytes of an image file that must be embedded as
+    /// a `data:` URI (when the `data-uri` attribute is set below
+    /// [`SafeMode::Secure`]). If absent, such images fall back to an ordinary
+    /// web path.
+    pub(crate) image_file_handler: Option<Rc<dyn ImageFileHandler>>,
+
+    /// Whether referenced images are recorded in the document catalog as they
+    /// are encountered (Asciidoctor's `catalog_assets` API option). When
+    /// `false` (the default), the `image:`/`image::` macros do not populate
+    /// [`Catalog::images`](crate::document::Catalog::images).
+    pub(crate) catalog_assets: bool,
 
     /// The safe mode under which the document is parsed and rendered. Controls
     /// security-sensitive rendering behavior (such as whether an interactive
@@ -182,6 +194,36 @@ pub struct Parser {
     /// [counter]: https://docs.asciidoctor.org/asciidoc/latest/attributes/counters/
     /// [`attribute_value()`]: Self::attribute_value
     pub(crate) counter_values: RefCell<HashMap<String, String>>,
+
+    /// Running state for inline `{counter:…}` / `{counter2:…}` counters whose
+    /// target attribute is *locked* (API-set or a locked built-in).
+    ///
+    /// Such a counter must keep advancing across repeated references, but it
+    /// must not overwrite the locked attribute's readable value — so its
+    /// sequence is tracked here rather than in the readable
+    /// [`counter_values`](Self::counter_values) overlay. This mirrors
+    /// Asciidoctor's `Document#counter`, which advances `@counters` while
+    /// leaving `@attributes` untouched for a locked attribute (see
+    /// [`counter_impl`](Self::counter_impl)). A captioning counter is exempt:
+    /// its value is committed to the readable overlay even when locked.
+    ///
+    /// Accepted limitation: a locked inline counter tracks its sequence here
+    /// while a captioning counter tracks it in
+    /// [`counter_values`](Self::counter_values), so the two sequences diverge
+    /// when the *same* locked attribute is advanced both ways in one document
+    /// (e.g. an API-locked `example-number` driven by both example blocks and
+    /// inline `{counter:example-number}` references) — Asciidoctor keeps a
+    /// single `@counters` sequence shared across both. This is left unmatched
+    /// deliberately. The scenario — API-locking a `<context>-number` attribute
+    /// *and* mixing caption and inline use — is pathological, and exact parity
+    /// is unreachable regardless: this crate resolves inline counters during
+    /// parsing, whereas Asciidoctor advances captions during parsing but inline
+    /// references during conversion, so the two sequences interleave
+    /// differently no matter how the state is stored. Unifying the maps would
+    /// therefore add read-path complexity (the gate would have to be threaded
+    /// through [`ResolvedAttributes`] too) without actually matching
+    /// Asciidoctor's output here.
+    pub(crate) locked_counter_values: RefCell<HashMap<String, String>>,
 
     /// Canonical names of attributes that are locked against modification from
     /// the document body for the current scope.
@@ -431,6 +473,8 @@ impl Default for Parser {
             include_file_handler: None,
             docinfo_file_handler: None,
             svg_file_handler: None,
+            image_file_handler: None,
+            catalog_assets: false,
             safe: SafeMode::default(),
             catalog: RefCell::new(Catalog::new()),
             last_section_number: SectionNumber::default(),
@@ -446,6 +490,7 @@ impl Default for Parser {
             mark_footnote_spans: Cell::new(false),
             pending_block_title: None,
             counter_values: RefCell::new(HashMap::new()),
+            locked_counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
             owned_subsource_depth: 0,
@@ -562,6 +607,7 @@ impl Parser {
 
         // Reset counter (and captioned-block) numbering for each new document.
         self.counter_values.borrow_mut().clear();
+        self.locked_counter_values.borrow_mut().clear();
 
         Document::parse(
             &preprocessed_source,
@@ -1166,6 +1212,22 @@ impl Parser {
         self.catalog.borrow_mut().set_signifier(id, signifier);
     }
 
+    /// Records a referenced image in the document catalog when
+    /// [`catalog_assets`](Self::with_catalog_assets) is enabled. A no-op
+    /// otherwise.
+    ///
+    /// `target` is the (already attribute-substituted) image target as written
+    /// in the macro; `imagesdir` is the value of the document `imagesdir`
+    /// attribute at the point of reference, or `None` when it is unset.
+    ///
+    /// Takes `&self` so it can be called from the macros substitution step,
+    /// which only holds a shared reference to the parser.
+    pub(crate) fn register_image(&self, target: String, imagesdir: Option<String>) {
+        if self.catalog_assets {
+            self.catalog.borrow_mut().register_image(target, imagesdir);
+        }
+    }
+
     /// Registers a callout number defined by a verbatim block.
     ///
     /// Takes `&self` so it can be called from the callouts substitution step,
@@ -1736,6 +1798,36 @@ impl Parser {
         self
     }
 
+    /// Sets the [`ImageFileHandler`] for this parser.
+    ///
+    /// The image file handler is responsible for providing the raw bytes of an
+    /// image that must be embedded as a `data:` URI – i.e. when the `data-uri`
+    /// document attribute is set and the safe mode is below
+    /// [`SafeMode::Secure`]. If no handler is provided (or it cannot find the
+    /// file), such images fall back to an ordinary web path, exactly as if
+    /// `data-uri` were not set.
+    ///
+    /// [`ImageFileHandler`]: crate::parser::ImageFileHandler
+    pub fn with_image_file_handler<IFH: ImageFileHandler + 'static>(
+        mut self,
+        handler: IFH,
+    ) -> Self {
+        self.image_file_handler = Some(Rc::new(handler));
+        self
+    }
+
+    /// Enables or disables cataloging of referenced image assets.
+    ///
+    /// When enabled (Asciidoctor's `catalog_assets` API option), each image
+    /// referenced by an `image:`/`image::` macro is recorded in the document
+    /// catalog and can be retrieved afterward via
+    /// [`Catalog::images`](crate::document::Catalog::images). The default is
+    /// disabled, in which case no image references are recorded.
+    pub fn with_catalog_assets(mut self, catalog_assets: bool) -> Self {
+        self.catalog_assets = catalog_assets;
+        self
+    }
+
     /// Sets the [`SafeMode`] under which the document is parsed and rendered.
     ///
     /// The default is [`SafeMode::Secure`], the most conservative setting.
@@ -2137,19 +2229,102 @@ impl Parser {
     ///
     /// [counter]: https://docs.asciidoctor.org/asciidoc/latest/attributes/counters/
     pub(crate) fn counter(&self, name: &str, seed: Option<&str>) -> String {
-        let next = match self.attribute_value(name) {
-            InterpretedValue::Value(current) if !current.is_empty() => next_counter_value(&current),
-            _ => match seed {
+        self.counter_impl(name, seed, false)
+    }
+
+    /// Like [`counter`](Self::counter), but the advanced value stays readable
+    /// as the attribute of the same name even when that attribute is
+    /// *locked* (API-set or a locked built-in). This is the captioning
+    /// counter, used for the `<context>-number` of a numbered block.
+    ///
+    /// Mirrors Asciidoctor's `increment_and_store_counter`: it too advances a
+    /// locked counter, and its block attribute entry is replayed onto the
+    /// document attributes during conversion, so a locked `example-number`
+    /// reads back as its latest counter value (unlike a plain inline
+    /// `{counter:…}`, which leaves the locked value in place).
+    pub(crate) fn counter_for_caption(&self, name: &str, seed: Option<&str>) -> String {
+        self.counter_impl(name, seed, true)
+    }
+
+    /// Advances the `name` counter and returns its new value. `seed` supplies
+    /// the starting value when the counter has no current value to advance
+    /// from.
+    ///
+    /// A counter reads the current value to produce (and display) the next one.
+    /// For an unlocked attribute the advanced value is stored in the readable
+    /// [`counter_values`](Self::counter_values) overlay, so a later reference
+    /// reads it. For a *locked* attribute — one set via the API, or a locked
+    /// built-in such as `max-include-depth` — the write path depends on the
+    /// caller:
+    ///
+    /// * `commit_when_locked` (the captioning counter): the value is stored in
+    ///   the readable overlay anyway, matching Asciidoctor's
+    ///   `increment_and_store_counter`, whose block attribute entry is replayed
+    ///   onto the document attributes during conversion.
+    /// * otherwise (an inline `{counter:…}` / `{counter2:…}` directive): the
+    ///   running value is kept in the private
+    ///   [`locked_counter_values`](Self::locked_counter_values) map instead, so
+    ///   the sequence still advances across repeated references while a plain
+    ///   reference to the attribute continues to read the locked value. This
+    ///   mirrors Asciidoctor's `Document#counter`, which advances `@counters`
+    ///   but leaves `@attributes` untouched while the attribute is
+    ///   `attribute_locked?`.
+    fn counter_impl(&self, name: &str, seed: Option<&str>, commit_when_locked: bool) -> String {
+        let use_private_state = !commit_when_locked && self.attribute_is_locked(name);
+
+        // The value to advance from: the private running state first (only
+        // populated when it is in use), otherwise the current readable value of
+        // the attribute (which, for an unlocked counter, already reflects the
+        // overlay).
+        let current = if use_private_state {
+            self.locked_counter_values.borrow().get(name).cloned()
+        } else {
+            None
+        }
+        .or_else(|| match self.attribute_value(name) {
+            InterpretedValue::Value(current) if !current.is_empty() => Some(current),
+            _ => None,
+        });
+
+        let next = match current {
+            Some(current) => next_counter_value(&current),
+            None => match seed {
                 Some(seed) if !seed.is_empty() => seed.to_string(),
                 _ => "1".to_string(),
             },
         };
 
-        self.counter_values
-            .borrow_mut()
-            .insert(name.to_string(), next.clone());
+        if use_private_state {
+            self.locked_counter_values
+                .borrow_mut()
+                .insert(name.to_string(), next.clone());
+        } else {
+            self.counter_values
+                .borrow_mut()
+                .insert(name.to_string(), next.clone());
+        }
 
         next
+    }
+
+    /// Reports whether `name` currently resolves to an attribute that is
+    /// *locked* against modification by a counter: it has an effective value
+    /// whose [`ModificationContext`] is
+    /// [`ApiOnly`](ModificationContext::ApiOnly) — an API-set override or a
+    /// locked built-in such as `max-include-depth`.
+    ///
+    /// This mirrors Asciidoctor's `Document#attribute_locked?`, which is `true`
+    /// exactly for an attribute supplied through the API (its
+    /// `@attribute_overrides`). It is deliberately *narrower* than the
+    /// write-permission check in
+    /// [`set_attribute_from_body`](Self::set_attribute_from_body): a
+    /// header-only attribute such as an unset `outfilesuffix`
+    /// ([`ApiOrHeader`](ModificationContext::ApiOrHeader)) cannot be assigned
+    /// from the body, yet a counter *may* advance it (matching Asciidoctor,
+    /// where `{counter:outfilesuffix}` moves it while it is not API-locked).
+    fn attribute_is_locked(&self, name: &str) -> bool {
+        self.effective_attribute(name)
+            .is_some_and(|a| a.modification_context == ModificationContext::ApiOnly)
     }
 }
 

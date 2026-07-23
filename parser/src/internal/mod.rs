@@ -1,3 +1,4 @@
+pub(crate) mod base64;
 pub(crate) mod chars;
 pub(crate) mod debug;
 mod regex;
