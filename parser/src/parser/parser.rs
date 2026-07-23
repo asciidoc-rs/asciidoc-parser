@@ -559,7 +559,7 @@ impl Parser {
         // fresh "now"; a parse that never references one does no datetime work.
         *self.datetime_context.borrow_mut() = None;
 
-        // Drop leading YAML/TOML front matter (and record it in the
+        // Drop leading YAML-style front matter (and record it in the
         // `front-matter` attribute) when `skip-front-matter` is set, before the
         // source reaches the preprocessor or header parser.
         let stripped_source = self.skip_front_matter(source);
@@ -609,21 +609,24 @@ impl Parser {
         )
     }
 
-    /// Drops leading YAML/TOML front matter from `source`, mirroring
+    /// Drops leading YAML-style front matter from `source`, mirroring
     /// Asciidoctor's `Reader#skip_front_matter!`.
     ///
     /// Front matter is a block opened by a line of exactly `---` at the very
-    /// start of the document and closed by a matching `---` line. It is only
-    /// removed when the `skip-front-matter` attribute is set (typically via the
-    /// API); otherwise `---` retains its ordinary meaning and this is a no-op.
-    /// When a well-formed block is found, its content (the lines between the
-    /// delimiters, joined by LF and with the delimiters excluded) is stored in
-    /// the `front-matter` document attribute, and a rewritten copy of the
-    /// source is returned in which every removed line – both delimiters and the
-    /// content – is replaced by a blank line. Preserving the line *count* keeps
-    /// every following line at its original line number, matching Asciidoctor
-    /// (whose reader advances `lineno` past the skipped block); the leading
-    /// blank lines are ignored by the header parser.
+    /// start of the document and closed by a matching `---` line. Only this
+    /// `---` fence (the YAML convention) is recognized – a `+++` TOML fence is
+    /// not – and the captured content is stored verbatim, never parsed. It is
+    /// only removed when the `skip-front-matter` attribute is set
+    /// (typically via the API); otherwise `---` retains its ordinary
+    /// meaning and this is a no-op. When a well-formed block is found, its
+    /// content (the lines between the delimiters, joined by LF and with the
+    /// delimiters excluded) is stored in the `front-matter` document
+    /// attribute, and a rewritten copy of the source is returned in which
+    /// every removed line – both delimiters and the content – is replaced
+    /// by a blank line. Preserving the line *count* keeps every following
+    /// line at its original line number, matching Asciidoctor (whose reader
+    /// advances `lineno` past the skipped block); the leading blank lines
+    /// are ignored by the header parser.
     ///
     /// Returns `None` (leaving the source untouched and setting no attribute)
     /// when `skip-front-matter` is not set, when the first line is not `---`,

@@ -862,7 +862,7 @@ fn should_clean_crlf_from_end_of_lines() {
     assert!(!paras[0].contains('\r'));
 }
 
-// Front matter support: a `---`-fenced YAML/TOML block at the very top of the
+// Front matter support: a `---`-fenced YAML-style block at the very top of the
 // document is dropped – and captured verbatim in the `front-matter` attribute –
 // but only when the `skip-front-matter` attribute is set. This crate has no
 // public reader, so where Asciidoctor inspects `reader.peek_line` /
