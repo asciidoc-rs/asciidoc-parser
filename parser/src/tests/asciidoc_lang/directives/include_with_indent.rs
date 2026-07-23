@@ -71,30 +71,45 @@ WARNING: If any line in the verbatim content is not indented, the `indent` attri
     );
 }
 
+/// Include `content` into a listing block with the given include `attrs` and a
+/// document `tabsize` of 4, returning the resulting listing block source.
+fn listing_include_with_tabsize(attrs: &str, content: &'static str) -> String {
+    let handler = InlineFileHandler::from_pairs([("code.rb", content)]);
+    let source = format!("----\ninclude::code.rb[{attrs}]\n----");
+    let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_intrinsic_attribute("tabsize", "4", ModificationContext::Anywhere)
+        .with_include_file_handler(handler)
+        .parse(&source);
+    doc.nested_blocks()
+        .next()
+        .unwrap()
+        .span()
+        .data()
+        .to_string()
+}
+
 #[test]
 fn tabsize_expands_tabs() {
-    // The parser expands tabs on the included content when `indent` is also
-    // supplied; block-level tab expansion independent of `indent` is not yet
-    // implemented, so the broader claim is tracked as a to-do.
-    to_do_verifies!(
+    verifies!(
         r#"
 If the `tabsize` attribute is set on the block or the document, tabs are also replaced with the number of spaces specified by that attribute, regardless of whether the `indent` attribute is set.
 
 "#
     );
 
-    let handler = InlineFileHandler::from_pairs([("code.rb", "\tdef names\n\t  @name\n\tend")]);
-    let doc = Parser::default()
-        .with_safe_mode(SafeMode::Server)
-        .with_intrinsic_attribute("tabsize", "4", ModificationContext::Anywhere)
-        .with_include_file_handler(handler)
-        .parse("----\ninclude::code.rb[indent=0]\n----");
-
-    // Tabs are expanded to spaces (tab stop of 4), then the common indent is
-    // stripped.
+    // With `indent=0`, tabs are expanded to spaces (tab stop of 4), then the
+    // common indent is stripped.
     assert_eq!(
-        doc.nested_blocks().next().unwrap().span().data(),
+        listing_include_with_tabsize("indent=0", "\tdef names\n\t  @name\n\tend"),
         "----\ndef names\n  @name\nend\n----"
+    );
+
+    // With no `indent` attribute, tabs are still expanded to spaces (tab stop of
+    // 4), but the block indentation is left untouched.
+    assert_eq!(
+        listing_include_with_tabsize("", "\tdef names\n\t  @name\n\tend"),
+        "----\n    def names\n      @name\n    end\n----"
     );
 }
 
