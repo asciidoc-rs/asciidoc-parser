@@ -398,7 +398,35 @@ https://example.org["href=\"#top\" attribute"] creates link to top of page
     non_normative!(
         r#"
 The double quote enclosure is not required in all cases when the link text contains an equals sign.
+"#
+    );
+
+    #[test]
+    fn enclosure_only_required_for_valid_attribute_name() {
+        to_do_verifies!(
+            r#"
 Strictly speaking, the enclosure is only required when the text preceding the equals sign matches a valid attribute name.
+"#
+        );
+
+        // The parser does not yet honor this rule: it treats any `name=value`
+        // segment as a named attribute regardless of whether `name` is a valid
+        // attribute name. Here `1` is not a valid attribute name, so per the
+        // spec the unquoted text should become the link text, but the parser
+        // instead consumes `1=...` as a named attribute and produces a bare
+        // link. This assertion documents the current (incorrect) behavior;
+        // it should flip to the quoted-form result once #871 is fixed.
+        let doc =
+            Parser::default().parse("https://example.org[1=2 posits the problem of inequality]");
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            &[r#"<a href="https://example.org" class="bare">https://example.org</a>"#]
+        );
+    }
+
+    non_normative!(
+        r#"
 However, it's best to use the double quotes just to be safe.
 
 "#

@@ -101,10 +101,28 @@ the `<attrlist>` is the link text unless a named attribute is detected.
         r#"
 See xref:link-macro-attribute-parsing.adoc[link macro attribute list] to learn how the `<attrlist>` is parsed.
 
+"#
+    );
+
+    #[test]
+    fn escaped_with_leading_backslash() {
+        verifies!(
+            r#"
 Like all inline macros, the link macro can be escaped using a leading backslash (`\`).
 
 "#
-    );
+        );
+
+        // A leading backslash suppresses macro recognition. The backslash is
+        // removed and the macro text is emitted verbatim rather than being
+        // converted into a link.
+        let doc = Parser::default().parse(r"Click \link:target[the text] now.");
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            &["Click link:target[the text] now."]
+        );
+    }
 }
 
 mod link_to_relative_file {
