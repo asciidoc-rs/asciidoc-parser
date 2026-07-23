@@ -473,6 +473,16 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     );
     attrs.insert("toc".to_owned(), any(ApiOrHeader, Unset));
 
+    // ### Author attributes
+    //
+    // `authorcount` reflects the number of resolved authors and defaults to `0`
+    // for a document with none. Registering the default here (rather than
+    // writing it during every header parse) lets an author-less document resolve
+    // `{authorcount}` to `0` without materializing the attribute — the header
+    // parser only writes `authorcount` when the count is non-zero (see
+    // [`Header::parse`](crate::document::Header)).
+    attrs.insert("authorcount".to_owned(), set(Anywhere, "0"));
+
     // ### General content and formatting attributes
     //
     // The active backend defaults to `html5` (the only backend this crate
