@@ -1250,9 +1250,11 @@ fn should_escape_spaces_in_target_when_generating_link_from_remote_include_direc
 
 // Below `SafeMode::Secure` the directive is *not* link-replaced (contrast the
 // default-safe-mode case above): the handler is consulted and its content is
-// merged in place. (The `doc.catalog[:includes]` assertion is the include
-// registry, tracked separately by
-// https://github.com/asciidoc-rs/asciidoc-parser/issues/335.)
+// merged in place. (The `doc.catalog[:includes]` assertion checks the include
+// registry, which this crate maintains via `Catalog::was_included`; it is not
+// reproduced here because `reader_read` exercises the preprocessor and returns
+// the expanded text rather than a parsed document. The include registry is
+// covered directly by the crate's own tests in `tests/xref.rs`.)
 #[test]
 fn include_directive_is_enabled_when_safe_mode_is_less_than_secure() {
     verifies!(
@@ -1311,9 +1313,12 @@ non_normative!(
 "#
 );
 
-// Out of scope for now: asserts on `doc.catalog[:includes]`, the include/link
-// registry. This crate does not yet maintain such a registry; it is tracked by
-// https://github.com/asciidoc-rs/asciidoc-parser/issues/335.
+// Not reproduced here: this asserts on `doc.catalog[:includes]`. The crate
+// maintains an include registry (via `Catalog::was_included`), but this test
+// drives the preprocessor through `reader_read`, which returns the expanded
+// text rather than a parsed document whose catalog could be inspected. The
+// include registry is covered directly by the crate's own tests in
+// `tests/xref.rs`.
 non_normative!(
     r#"
       test 'should not track include in catalog for non-AsciiDoc include files' do

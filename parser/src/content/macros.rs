@@ -865,8 +865,7 @@ impl Replacer for InlineLinkReplacer<'_> {
                 link_suffix = link_suffix.as_str()
             );
 
-            // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/335):
-            // doc.register :links, target
+            self.0.register_link(target.clone());
 
             let link_text = if self.0.is_attribute_set("hide-uri-scheme") {
                 URI_SNIFF.replace_all(&target, "").into_owned()
@@ -1021,8 +1020,7 @@ impl Replacer for InlineLinkReplacer<'_> {
 
         let extra_roles = if bare { vec!["bare"] } else { vec![] };
 
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/335):
-        // doc.register :links, (link_opts[:target] = target)
+        self.0.register_link(target.clone());
 
         dest.push_str(&prefix);
 
@@ -1176,8 +1174,7 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             }
         }
 
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/335):
-        // doc.register :links, (link_opts[:target] = target)
+        self.0.register_link(target.clone());
 
         let params = LinkRenderParams {
             target,
@@ -1321,6 +1318,8 @@ impl Replacer for InlineEmailReplacer<'_> {
         }
 
         let target = format!("mailto:{mailto}", mailto = &caps[2]);
+
+        self.0.register_link(target.clone());
 
         let attrlist = Attrlist::parse(Span::default(), self.0, AttrlistContext::Inline)
             .item
