@@ -2113,6 +2113,27 @@ mod tests {
     }
 
     #[test]
+    fn rejected_metadata_run_does_not_fire_counter() {
+        // A block attribute line above the title is only parsed as document
+        // metadata once a title is confirmed to follow it (via
+        // `document_title_follows_block_metadata`, which scans structurally and
+        // never parses an attribute list). Here the `[[anchor]]` breaks the run
+        // before any title, so the lookahead fails and the `[reftext=…]` line's
+        // attribute list is never parsed during header parsing — its embedded
+        // `{counter:item}` must not fire at header time.
+        //
+        // The `reftext` line advances the counter exactly once when the block
+        // parser reaches it (yielding 1), so the following `{counter:item}`
+        // reference renders 2 — not 3, which is what a leaked header-time
+        // evaluation would produce.
+        let doc = Parser::default()
+            .parse("[reftext=\"See {counter:item}\"]\n[[anchor]]\n= Title\n\n{counter:item}");
+
+        assert_eq!(doc.header().title(), None);
+        assert_eq!(rendered_paragraphs(&doc), vec!["= Title", "2"]);
+    }
+
+    #[test]
     fn role_block_attribute_above_title() {
         // A `[role=…]` block attribute above the title folds into the document's
         // `role` attribute; multiple roles are space-joined. The same role(s)
