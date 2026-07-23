@@ -1302,6 +1302,10 @@ fn has_extname(path: &str) -> bool {
 /// extension, mirroring Asciidoctor's `generate_data_uri`: `.svg` maps to
 /// `image/svg+xml`, any other extension maps to `image/<ext>`, and a target
 /// with no extension maps to `application/octet-stream`.
+///
+/// The `image/<ext>` mapping is verbatim, matching Asciidoctor: `.jpg` yields
+/// `image/jpg` (not the IANA-registered `image/jpeg`), while `.jpeg` yields
+/// `image/jpeg`. This parity with Asciidoctor is deliberate.
 fn data_uri_mimetype(target: &str) -> String {
     match extname(target) {
         Some(".svg") => "image/svg+xml".to_string(),
@@ -1558,6 +1562,12 @@ mod tests {
         assert_eq!(data_uri_mimetype("circle.svg"), "image/svg+xml");
         assert_eq!(data_uri_mimetype("fixtures/dot.gif"), "image/gif");
         assert_eq!(data_uri_mimetype("photo.png"), "image/png");
+
+        // The extension is used verbatim (matching Asciidoctor), so `.jpg`
+        // yields `image/jpg` rather than the registered `image/jpeg`, while
+        // `.jpeg` yields `image/jpeg`.
+        assert_eq!(data_uri_mimetype("photo.jpg"), "image/jpg");
+        assert_eq!(data_uri_mimetype("photo.jpeg"), "image/jpeg");
 
         // A target with no extension falls back to a generic binary type.
         assert_eq!(data_uri_mimetype("noext"), "application/octet-stream");

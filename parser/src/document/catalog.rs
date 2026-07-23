@@ -429,6 +429,7 @@ impl std::fmt::Display for ImageReference {
         f.write_str(&self.target)
     }
 }
+
 /// Type of referenceable element in the document.
 #[derive(Clone, PartialEq, Eq)]
 pub enum RefType {
