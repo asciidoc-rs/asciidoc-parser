@@ -63,8 +63,6 @@
 //! * Multi-line attribute values fuse only the modern backslash continuation,
 //!   not the legacy `+`, so a legacy `+`-continued value keeps only its first
 //!   line.
-//! * A counter modifies a locked (API-set or built-in) attribute rather than
-//!   leaving it unchanged.
 //! * Safe-mode masking of `docdir`/`docfile` and the
 //!   unterminated-header-comment behavior differ.
 //!
@@ -3247,10 +3245,9 @@ mod intrinsic_attributes {
         assert_eq!(blocks[2].caption(), Some("Figure 4. "));
     }
 
-    // Tracked in #725.
     #[test]
     fn should_not_allow_counter_to_modify_locked_attribute() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should not allow counter to modify locked attribute' do
       input = <<~'EOS'
@@ -3264,20 +3261,18 @@ mod intrinsic_attributes {
 "#
         );
 
-        // Divergence: Asciidoctor does not let a counter modify a locked
-        // (API-set) attribute, so `{foo}` stays `bar`. This crate's counter
-        // reads and increments the current value (`bar` → `bas`) and also stores
-        // it, so both references render `bas`.
+        // A counter reads and increments the current value (`bar` → `bas`) for
+        // display, but the API-locked `foo` is not overwritten, so `{foo}` still
+        // reads `bar`.
         let doc = Parser::default()
             .with_intrinsic_attribute("foo", "bar", ModificationContext::ApiOnly)
             .parse("{counter:foo:ignored} is not {foo}");
-        assert_xpath(&doc, "//p[text()=\"bas is not bas\"]", 1);
+        assert_xpath(&doc, "//p[text()=\"bas is not bar\"]", 1);
     }
 
-    // Tracked in #725.
     #[test]
     fn should_not_allow_counter2_to_modify_locked_attribute() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should not allow counter2 to modify locked attribute' do
       input = <<~'EOS'
@@ -3291,18 +3286,17 @@ mod intrinsic_attributes {
 "#
         );
 
-        // Divergence: as with `counter`, this crate's `counter2` modifies the
-        // locked `foo` (Asciidoctor leaves it `bar`), so `{foo}` renders `bas`.
+        // `counter2` advances silently and, like `counter`, does not overwrite
+        // the API-locked `foo`, so `{foo}` still reads `bar`.
         let doc = Parser::default()
             .with_intrinsic_attribute("foo", "bar", ModificationContext::ApiOnly)
             .parse("{counter2:foo:ignored}{foo}");
-        assert_xpath(&doc, "//p[text()=\"bas\"]", 1);
+        assert_xpath(&doc, "//p[text()=\"bar\"]", 1);
     }
 
-    // Tracked in #725.
     #[test]
     fn should_not_allow_counter_to_modify_built_in_locked_attribute() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should not allow counter to modify built-in locked attribute' do
       input = <<~'EOS'
@@ -3318,22 +3312,21 @@ mod intrinsic_attributes {
 "#
         );
 
-        // Divergence: Asciidoctor does not let a counter modify the built-in
-        // locked `max-include-depth`, so it stays 64. This crate increments and
-        // stores it, so both the counter output and the later reference read 65.
+        // The counter reads and increments the locked built-in `max-include-depth`
+        // (64 → 65) for display — its seed `128` is ignored while a current value
+        // exists — but the stored value is not overwritten, so it stays 64.
         let doc = Parser::default()
             .parse("{counter:max-include-depth:128} is one more than {max-include-depth}");
-        assert_xpath(&doc, "//p[text()=\"65 is one more than 65\"]", 1);
+        assert_xpath(&doc, "//p[text()=\"65 is one more than 64\"]", 1);
         assert_eq!(
             doc.attribute_value("max-include-depth"),
-            InterpretedValue::Value("65")
+            InterpretedValue::Value("64")
         );
     }
 
-    // Tracked in #725.
     #[test]
     fn should_not_allow_counter2_to_modify_built_in_locked_attribute() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should not allow counter2 to modify built-in locked attribute' do
       input = <<~'EOS'
@@ -3348,13 +3341,13 @@ mod intrinsic_attributes {
 "#
         );
 
-        // Divergence: as with `counter`, this crate's `counter2` modifies the
-        // built-in locked `max-include-depth` (Asciidoctor leaves it 64).
+        // `counter2` advances silently and, like `counter`, does not overwrite
+        // the locked built-in `max-include-depth`, so it stays 64.
         let doc = Parser::default().parse("{counter2:max-include-depth:128}{max-include-depth}");
-        assert_xpath(&doc, "//p[text()=\"65\"]", 1);
+        assert_xpath(&doc, "//p[text()=\"64\"]", 1);
         assert_eq!(
             doc.attribute_value("max-include-depth"),
-            InterpretedValue::Value("65")
+            InterpretedValue::Value("64")
         );
     }
 }
