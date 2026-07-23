@@ -2383,8 +2383,7 @@ mod tests {
     #[test]
     fn attribute_reference_resolves_case_insensitively() {
         // A reference is folded with the same Unicode `to_lowercase()` used to
-        // store the name, so any casing of the reference resolves the entry
-        // (close #724).
+        // store the name, so any casing of the reference resolves the entry.
         let doc = Parser::default().parse(":He-Man: the foe\n\n{he-man} / {HE-MAN} / {He-Man}");
         assert_eq!(
             rendered_paragraphs(&doc),
@@ -2416,7 +2415,7 @@ mod tests {
     fn case_insensitive_attribute_reference_resolves_in_preprocessor() {
         // The preprocessor folds a `{name}` reference the same way the main
         // substitution pass does, so a mismatched-case reference still drives an
-        // `ifeval` condition (close #724).
+        // `ifeval` condition.
         let doc = Parser::default()
             .parse(":Answer: yes\n\nifeval::[\"{answer}\" == \"yes\"]\nShown.\nendif::[]");
         assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
