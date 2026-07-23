@@ -1,5 +1,12 @@
 use super::{MatchedItem, Span};
 
+/// ASCII whitespace trimmed from an attribute-entry continuation line before
+/// its continuation marker is tested. This MUST stay identical to the set
+/// trimmed by the folder (`InterpretedValue::fold_continuation_value`, whose
+/// local `ASCII_WHITESPACE` mirrors this) so the multi-line extent consumed
+/// here and the lines the folder actually joins can never disagree.
+const CONTINUATION_WHITESPACE: [char; 6] = [' ', '\t', '\n', '\r', '\x0C', '\x0B'];
+
 impl<'src> Span<'src> {
     /// Split the span, consuming a single line from the source.
     ///
@@ -126,7 +133,19 @@ impl<'src> Span<'src> {
                     break;
                 }
 
-                let keep_open = next.item.ends_with(con);
+                // Left- and right-trim the line before testing for the marker so
+                // this agrees exactly with `fold_continuation_value`, which trims
+                // each continuation line the same way. Without the left trim a
+                // line that is *only* the marker (e.g. a bare ` +`) would be kept
+                // open here but treated as a terminating line by the folder,
+                // causing the following line to be consumed from the stream yet
+                // silently dropped from the value.
+                let keep_open = next
+                    .item
+                    .data()
+                    .trim_matches(CONTINUATION_WHITESPACE)
+                    .ends_with(con);
+
                 cursor = next;
 
                 // The first continuation line lacking the marker terminates the
@@ -1586,6 +1605,37 @@ mod tests {
                     line: 1,
                     col: 1,
                     offset: 0
+                }
+            );
+        }
+
+        #[test]
+        fn bare_marker_only_line_terminates_extent() {
+            // A continuation line that is *only* the marker (a bare ` +` once
+            // left-trimmed) terminates the value. The extent must stop after that
+            // line so the following line stays in the stream; otherwise the folder
+            // (which left-trims and treats the bare marker as terminating) would
+            // drop it. Extent = `text +\n +`; `more` is left for the next block.
+            let span = crate::Span::new("text +\n +\nmore");
+            let line = span.take_value_with_continuation();
+
+            assert_eq!(
+                line.item,
+                Span {
+                    data: "text +\n +",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+
+            assert_eq!(
+                line.after,
+                Span {
+                    data: "more",
+                    line: 3,
+                    col: 1,
+                    offset: 10
                 }
             );
         }

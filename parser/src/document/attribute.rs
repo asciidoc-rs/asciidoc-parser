@@ -229,6 +229,11 @@ impl InterpretedValue {
 /// ASCII whitespace stripped by Ruby's `String#lstrip` / `#rstrip`, which
 /// Asciidoctor applies while fusing a continued attribute value. Unicode
 /// whitespace (e.g. a non-breaking space) is significant and is preserved.
+///
+/// This MUST stay identical to `CONTINUATION_WHITESPACE` in `span::line` (which
+/// the extent scanner `Span::take_value_with_continuation` uses) so the extent
+/// that scanner consumes and the lines this folder actually joins can never
+/// disagree.
 const ASCII_WHITESPACE: [char; 6] = [' ', '\t', '\n', '\r', '\x0C', '\x0B'];
 
 /// Fold an attribute entry value that carries a soft-wrap (`\`) or legacy (`+`)
@@ -257,7 +262,13 @@ fn fold_continuation_value(data: &str) -> Option<String> {
         .map(|line| line.strip_suffix('\r').unwrap_or(line));
 
     // `str::split` always yields at least one item, so `first` is always present.
-    let first = lines.next().unwrap_or_default();
+    // The first line is never left-trimmed (its leading whitespace was consumed
+    // with the `:name:` prefix), but it is right-trimmed so marker detection
+    // tolerates trailing whitespace, matching the extent scanner.
+    let first = lines
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(ASCII_WHITESPACE);
 
     // The continuation marker is fixed by the first line. Without one, the value
     // is a single line and needs no folding.
@@ -269,7 +280,7 @@ fn fold_continuation_value(data: &str) -> Option<String> {
         return None;
     };
 
-    // Drop the marker from the first line and right-trim (Ruby `rstrip`).
+    // Drop the marker from the first line (already right-trimmed above).
     let mut value = first[..first.len() - con.len()]
         .trim_end_matches(ASCII_WHITESPACE)
         .to_string();
@@ -280,8 +291,10 @@ fn fold_continuation_value(data: &str) -> Option<String> {
             break;
         }
 
-        // Continuation lines are left-trimmed (Ruby `lstrip`).
-        let line = line.trim_start_matches(ASCII_WHITESPACE);
+        // Continuation lines are left- and right-trimmed before the marker is
+        // tested, matching the extent scanner (`take_value_with_continuation`) so
+        // the two never disagree about where the value ends.
+        let line = line.trim_matches(ASCII_WHITESPACE);
 
         // A line still carrying the marker keeps the value open; strip the
         // marker (and right-trim) before appending.
@@ -975,6 +988,55 @@ mod tests {
     }
 
     #[test]
+    fn bare_marker_only_continuation_line_does_not_swallow_next_line() {
+        // A continuation line that is only a bare marker (` +`) terminates the
+        // value. The line after it must remain in the stream, not be consumed by
+        // the extent scanner and then dropped by the folder. The extent scanner
+        // and the folder must agree on where the value ends.
+        let mi = crate::document::Attribute::parse(
+            crate::Span::new(":foo: text +\n +\nmore"),
+            &Parser::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            mi.item,
+            Attribute {
+                name: Span {
+                    data: "foo",
+                    line: 1,
+                    col: 2,
+                    offset: 1,
+                },
+                value_source: Some(Span {
+                    data: "text +\n +",
+                    line: 1,
+                    col: 7,
+                    offset: 6,
+                }),
+                value: InterpretedValue::Value("text +"),
+                source: Span {
+                    data: ":foo: text +\n +",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                }
+            }
+        );
+
+        // `more` is preserved for the following block, not swallowed.
+        assert_eq!(
+            mi.after,
+            Span {
+                data: "more",
+                line: 3,
+                col: 1,
+                offset: 16,
+            }
+        );
+    }
+
+    #[test]
     fn is_block() {
         let mut parser = Parser::default();
         let maw = crate::blocks::Block::parse(crate::Span::new(":foo: bar\nblah"), &mut parser);
@@ -1241,6 +1303,30 @@ mod tests {
             assert_eq!(
                 fold_continuation_value("bar +\r\nblah"),
                 Some("bar blah".to_string())
+            );
+        }
+
+        #[test]
+        fn bare_marker_only_line_terminates_value() {
+            // A continuation line that is *only* the marker (a bare ` +` after
+            // left-trimming) does not keep the value open. It terminates the fold
+            // and its literal `+` is appended, matching Asciidoctor. The folder
+            // and `Span::take_value_with_continuation` must agree on this so the
+            // line after the bare marker is not consumed-then-dropped.
+            assert_eq!(
+                fold_continuation_value("text +\n +\nmore"),
+                Some("text +".to_string())
+            );
+        }
+
+        #[test]
+        fn trailing_whitespace_after_marker_still_continues() {
+            // Trailing whitespace after the marker is tolerated (right-trimmed)
+            // consistently with the extent scanner, so the following line is still
+            // folded in rather than dropped.
+            assert_eq!(
+                fold_continuation_value("a +\nb + \nmore"),
+                Some("a b more".to_string())
             );
         }
     }
