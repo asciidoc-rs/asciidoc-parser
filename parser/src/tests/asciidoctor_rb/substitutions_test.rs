@@ -5899,6 +5899,43 @@ mod macros {
         assert_eq!(doc.warnings().count(), 0);
     }
 
+    // Asciidoctor's `catalog[:links]` registry: like `catalog[:images]`, link
+    // targets are recorded only when the `catalog_assets` option is enabled.
+    // This exercises the crate's equivalent `Catalog::links` across a bare URL
+    // autolink, a `link:` macro, a `mailto:` macro, and an autolinked email
+    // address. The recorded order follows the inline substitution passes: the
+    // bare-URL and `link:`/`mailto:` macro passes run before the email-autolink
+    // pass, so the autolinked address is registered last regardless of its
+    // position in the source.
+    #[test]
+    fn catalog_records_link_targets_when_catalog_assets_enabled() {
+        let doc = Parser::default().with_catalog_assets(true).parse(
+            "https://example.org is a site. link:https://example.com[Example]. fred@example.com. mailto:barney@example.com[Barney]",
+        );
+
+        assert_eq!(
+            doc.catalog().links(),
+            [
+                "https://example.org",
+                "https://example.com",
+                "mailto:barney@example.com",
+                "mailto:fred@example.com",
+            ]
+        );
+    }
+
+    // Without `catalog_assets`, the link registry stays empty (matching
+    // Asciidoctor, where `doc.register :links` is a no-op unless the option is
+    // set), even though the links still render.
+    #[test]
+    fn catalog_does_not_record_link_targets_by_default() {
+        let doc = Parser::default().parse(
+            "https://example.org is a site. link:https://example.com[Example]. fred@example.com",
+        );
+
+        assert!(doc.catalog().links().is_empty());
+    }
+
     #[test]
     fn an_icon_macro_should_be_interpreted_as_an_icon_if_icons_are_enabled() {
         verifies!(

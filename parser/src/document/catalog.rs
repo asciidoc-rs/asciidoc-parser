@@ -32,6 +32,17 @@ pub struct Catalog {
     /// (Asciidoctor's `catalog_assets` API option). Empty otherwise.
     pub(crate) images: Vec<ImageReference>,
 
+    /// Link targets referenced by `link:`/`mailto:` macros and by bare URL and
+    /// email autolinks, recorded in document order while substituting inline
+    /// macros – but only when the parser was configured with
+    /// [`with_catalog_assets(true)`](crate::Parser::with_catalog_assets)
+    /// (Asciidoctor's `catalog_assets` API option). Empty otherwise.
+    ///
+    /// Each entry is the final link target as it appears in the rendered `href`
+    /// (e.g. `https://example.org`, `mailto:fred@example.com`), matching
+    /// Asciidoctor's `catalog[:links]`.
+    pub(crate) links: Vec<String>,
+
     /// AsciiDoc files that were included into this document, keyed by the
     /// include target relative to the outermost document with its AsciiDoc
     /// extension removed (e.g. `other-chapters` for
@@ -65,6 +76,7 @@ impl Catalog {
             reftext_to_id: HashMap::new(),
             footnotes: Vec::new(),
             images: Vec::new(),
+            links: Vec::new(),
             includes: HashMap::new(),
         }
     }
@@ -243,6 +255,21 @@ impl Catalog {
         self.images.push(ImageReference { target, imagesdir });
     }
 
+    /// Returns the link targets referenced in this document, in document order.
+    ///
+    /// This list is populated only when the parser was configured with
+    /// [`with_catalog_assets(true)`](crate::Parser::with_catalog_assets); it is
+    /// empty otherwise.
+    pub fn links(&self) -> &[String] {
+        &self.links
+    }
+
+    /// Records a referenced link target (a `link:`/`mailto:` macro or an
+    /// autolinked bare URL or email address) in document order.
+    pub(crate) fn register_link(&mut self, target: String) {
+        self.links.push(target);
+    }
+
     /// Records that the AsciiDoc file named by `key` was included into this
     /// document.
     ///
@@ -400,6 +427,7 @@ impl std::fmt::Debug for Catalog {
             .field("reftext_to_id", &DebugHashMapFrom(&self.reftext_to_id))
             .field("footnotes", &self.footnotes)
             .field("images", &self.images)
+            .field("links", &self.links)
             .field("includes", &DebugHashMapFrom(&self.includes))
             .finish()
     }
@@ -703,6 +731,20 @@ mod tests {
         assert_eq!(images[1].target, "logo.png");
         assert_eq!(images[1].imagesdir, Some("images".to_string()));
         assert_eq!(images[1].to_string(), "logo.png");
+    }
+
+    #[test]
+    fn register_link_records_in_document_order() {
+        let mut catalog = Catalog::new();
+        assert!(catalog.links().is_empty());
+
+        catalog.register_link("https://example.org".to_string());
+        catalog.register_link("mailto:fred@example.com".to_string());
+
+        assert_eq!(
+            catalog.links(),
+            ["https://example.org", "mailto:fred@example.com"]
+        );
     }
 
     #[test]
