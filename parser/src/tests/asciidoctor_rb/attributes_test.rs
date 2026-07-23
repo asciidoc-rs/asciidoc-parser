@@ -60,8 +60,6 @@
 //! The remainder are tracked as issues (see the `sddbugfind` label). Each such
 //! test carries an inline `Divergence:` note; the notable ones are:
 //!
-//! * Attribute *references* are case-sensitive, so `{He-Man}` does not resolve
-//!   the lowercased `:He-Man:` entry.
 //! * Multi-line attribute values fuse only the modern backslash continuation,
 //!   not the legacy `+`, so a legacy `+`-continued value keeps only its first
 //!   line.
@@ -1796,10 +1794,9 @@ mod interpolation {
         assert_xpath(&doc, "//p[text()=\"Yo, Tanglefoot!\nBeat Spiderman!\"]", 1);
     }
 
-    // Tracked in #724.
     #[test]
     fn attribute_lookup_is_not_case_sensitive() {
-        non_normative!(
+        verifies!(
             r#"
     test 'attribute lookup is not case sensitive' do
       input = <<~'EOS'
@@ -1817,6 +1814,10 @@ mod interpolation {
 "#
         );
 
+        // An attribute-entry name and an API-supplied attribute name are both
+        // stored lower-cased; a reference is folded the same way before lookup,
+        // so `{He-Man}` resolves the `:He-Man:` entry and `{She-Ra}` resolves the
+        // API attribute stored as `she-ra`.
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "She-Ra",
@@ -1826,12 +1827,13 @@ mod interpolation {
             .parse(
                 ":He-Man: The most powerful man in the universe\n\nHe-Man: {He-Man}\n\nShe-Ra: {She-Ra}",
             );
-        // Divergence: attribute *references* are case-sensitive in this crate,
-        // so `{He-Man}` does not resolve against the lowercased `:He-Man:` entry
-        // and `{She-Ra}` does not match the API attribute stored as `she-ra`;
-        // both are left literal. Asciidoctor performs a case-insensitive lookup.
-        assert_xpath(&doc, "//p[text()=\"He-Man: {He-Man}\"]", 1);
-        assert_xpath(&doc, "//p[text()=\"She-Ra: {She-Ra}\"]", 1);
+
+        assert_xpath(
+            &doc,
+            "//p[text()=\"He-Man: The most powerful man in the universe\"]",
+            1,
+        );
+        assert_xpath(&doc, "//p[text()=\"She-Ra: The Princess of Power\"]", 1);
     }
 
     #[test]

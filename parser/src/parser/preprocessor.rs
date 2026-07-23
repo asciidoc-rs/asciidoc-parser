@@ -930,7 +930,13 @@ impl<'p> PreprocessorState<'p> {
                     return;
                 }
 
-                if !self.parser.has_attribute(attr_name) {
+                // Resolve case-insensitively: attribute names are stored
+                // lower-cased, so the lookup name is folded the same way (see the
+                // content-substitution path in `content::substitution_step` and
+                // Asciidoctor's `key = $2.downcase`).
+                let lookup_name = attr_name.to_lowercase();
+
+                if !self.parser.has_attribute(&lookup_name) {
                     self.missing_reference = true;
 
                     if matches!(self.missing, MissingAttribute::KeepLiteral) {
@@ -939,7 +945,7 @@ impl<'p> PreprocessorState<'p> {
                     return;
                 }
 
-                if let InterpretedValue::Value(value) = self.parser.attribute_value(attr_name) {
+                if let InterpretedValue::Value(value) = self.parser.attribute_value(&lookup_name) {
                     dest.push_str(value.as_ref());
                 }
             }
