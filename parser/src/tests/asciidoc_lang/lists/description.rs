@@ -22,27 +22,172 @@ Each item in a description list consists of:
 * one space or newline character
 * the description in the form of text, attached blocks, or both
 
+"#
+);
+
+#[test]
+fn term_anchor_on_same_line() {
+    verifies!(
+        r#"
 If a term has an anchor, the anchor must be defined at the start of the same line as the term.
 
+"#
+    );
+
+    let doc: crate::Document<'_> =
+        Parser::default().parse("[[cpu]]CPU:: The brain of the computer.");
+
+    let list = top_list(&doc);
+    assert_eq!(list.type_(), ListType::Description);
+
+    let items: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+    assert_eq!(items.len(), 1);
+
+    // The `::` term is still recognized even though the term line begins with an
+    // anchor, and the anchor becomes part of the rendered term.
+    assert_eq!(term_delimiter(items[0]), "::");
+    assert_eq!(term_rendered(items[0]), "<a id=\"cpu\"></a>CPU");
+
+    // The anchor defined at the start of the term line is registered in the
+    // document catalog, keyed to the term it introduces.
+    let entry = doc
+        .catalog()
+        .get_ref("cpu")
+        .expect("anchor `cpu` should be registered");
+
+    assert_eq!(entry.reftext.as_deref(), Some("CPU"));
+    assert!(matches!(entry.ref_type, crate::document::RefType::Anchor));
+
+    // Conversely, an anchor that is not at the start of the term line – here it
+    // follows the delimiter – belongs to the description rather than the term,
+    // so the term itself carries no anchor.
+    let doc: crate::Document<'_> =
+        Parser::default().parse("CPU:: [[cpu]] The brain of the computer.");
+
+    let items: Vec<&crate::blocks::Block<'_>> = top_list(&doc).nested_blocks().collect();
+    assert_eq!(items.len(), 1);
+    assert_eq!(term_rendered(items[0]), "CPU");
+}
+
+#[test]
+fn first_term_defines_delimiter_for_siblings() {
+    verifies!(
+        r#"
 The first term defines which term delimiter is used for the description list.
 The terms for the remaining entries at that level must use the same delimiter.
 
+"#
+    );
+
+    let doc: crate::Document<'_> =
+        Parser::default().parse("Spring:: A season.\nSummer:: Another season.");
+
+    let list = top_list(&doc);
+    assert_eq!(list.type_(), ListType::Description);
+
+    // Two entries that reuse the same delimiter form a single list of siblings
+    // at one level, rather than nesting.
+    let items: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+    assert_eq!(items.len(), 2);
+    assert_eq!(term_delimiter(items[0]), "::");
+    assert_eq!(term_delimiter(items[1]), "::");
+}
+
+#[test]
+fn changing_delimiter_starts_nested_list() {
+    verifies!(
+        r#"
 The valid set of term delimiters is fixed.
 When the term delimiter is changed, that term begins a new, nested description list (similar to how ordered and unordered lists work).
 The available term delimiters you can use for this purpose are as follows:
 
+"#
+    );
+
+    let doc: crate::Document<'_> =
+        Parser::default().parse("Term:: A definition.\nNested;; A nested definition.");
+
+    let list = top_list(&doc);
+    assert_eq!(list.type_(), ListType::Description);
+
+    // Changing the delimiter means the second term is not a sibling; it begins a
+    // new description list nested inside the first item.
+    let outer: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+    assert_eq!(outer.len(), 1);
+    assert_eq!(term_delimiter(outer[0]), "::");
+
+    let inner = nested_list(outer[0]);
+    assert_eq!(inner.type_(), ListType::Description);
+
+    let inner_items: Vec<&crate::blocks::Block<'_>> = inner.nested_blocks().collect();
+    assert_eq!(inner_items.len(), 1);
+    assert_eq!(term_delimiter(inner_items[0]), ";;");
+}
+
+#[test]
+fn valid_term_delimiters() {
+    verifies!(
+        r#"
 * `::`
 * `:::`
 * `::::`
 * `;;`
 
+"#
+    );
+
+    // Each delimiter in the fixed set is recognized as a description-list term
+    // delimiter.
+    for (src, delimiter) in [
+        ("Term:: A definition.", "::"),
+        ("Term::: A definition.", ":::"),
+        ("Term:::: A definition.", "::::"),
+        ("Term;; A definition.", ";;"),
+    ] {
+        let doc: crate::Document<'_> = Parser::default().parse(src);
+
+        let list = top_list(&doc);
+        assert_eq!(list.type_(), ListType::Description);
+
+        let items: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+        assert_eq!(items.len(), 1);
+        assert_eq!(term_delimiter(items[0]), delimiter);
+    }
+}
+
+#[test]
+fn delimiter_char_count_independent_of_nesting() {
+    verifies!(
+        r#"
 There's no direct correlation between the number of characters in the delimiter and the nesting level.
 Each time you change delimiters (selected from this set), it introduces a new level of nesting.
 This is how list depth is implied in a language with a left-aligned syntax.
 It's customary to use the delimiters in the order shown above to provide a hint that the list is nested at a certain level.
 
 "#
-);
+    );
+
+    // The outer level uses a four-character delimiter while the nested level
+    // uses a two-character delimiter, so the deeper level has fewer delimiter
+    // characters ... nesting depth is driven by the change of delimiter, not by
+    // the count of delimiter characters.
+    let doc: crate::Document<'_> =
+        Parser::default().parse("Outer:::: A definition.\nInner:: A nested definition.");
+
+    let list = top_list(&doc);
+    assert_eq!(list.type_(), ListType::Description);
+
+    let outer: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+    assert_eq!(outer.len(), 1);
+    assert_eq!(term_delimiter(outer[0]), "::::");
+
+    let inner = nested_list(outer[0]);
+    assert_eq!(inner.type_(), ListType::Description);
+
+    let inner_items: Vec<&crate::blocks::Block<'_>> = inner.nested_blocks().collect();
+    assert_eq!(inner_items.len(), 1);
+    assert_eq!(term_delimiter(inner_items[0]), "::");
+}
 
 #[test]
 fn basic_example() {
@@ -2096,4 +2241,54 @@ You can include more xref:continuation.adoc[compound content in a list item] as 
             },
         }
     );
+}
+
+/// Returns the document's first top-level block as a [`ListBlock`], panicking
+/// if it is absent or not a list.
+fn top_list<'d>(doc: &'d crate::Document<'d>) -> &'d crate::blocks::ListBlock<'d> {
+    match doc.nested_blocks().next() {
+        Some(crate::blocks::Block::List(list)) => list,
+        other => panic!("expected a top-level list block, got {other:#?}"),
+    }
+}
+
+/// Returns the term delimiter (e.g. `"::"`) of a description-list item,
+/// panicking if `block` is not a defined-term list item.
+fn term_delimiter<'d>(block: &'d crate::blocks::Block<'d>) -> &'d str {
+    let crate::blocks::Block::ListItem(item) = block else {
+        panic!("expected a list item, got {block:#?}");
+    };
+
+    match item.list_item_marker() {
+        crate::blocks::ListItemMarker::DefinedTerm { marker, .. } => marker.data(),
+        other => panic!("expected a defined-term marker, got {other:#?}"),
+    }
+}
+
+/// Returns the rendered term text (after substitutions) of a description-list
+/// item, panicking if `block` is not a defined-term list item.
+fn term_rendered(block: &crate::blocks::Block<'_>) -> String {
+    let crate::blocks::Block::ListItem(item) = block else {
+        panic!("expected a list item, got {block:#?}");
+    };
+
+    match item.list_item_marker() {
+        crate::blocks::ListItemMarker::DefinedTerm { term, .. } => term.rendered().to_string(),
+        other => panic!("expected a defined-term marker, got {other:#?}"),
+    }
+}
+
+/// Returns the description (or other) list nested inside a list item, panicking
+/// if `block` is not a list item or contains no nested list.
+fn nested_list<'d>(block: &'d crate::blocks::Block<'d>) -> &'d crate::blocks::ListBlock<'d> {
+    let crate::blocks::Block::ListItem(item) = block else {
+        panic!("expected a list item, got {block:#?}");
+    };
+
+    item.nested_blocks()
+        .find_map(|b| match b {
+            crate::blocks::Block::List(list) => Some(list),
+            _ => None,
+        })
+        .expect("expected a nested list block")
 }
