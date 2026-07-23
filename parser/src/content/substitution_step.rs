@@ -467,8 +467,14 @@ static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     // Either a `counter`/`counter2` directive (group 1) with its `name[:seed]`
     // expression (group 2), or a plain attribute name (group 3). This mirrors
     // the `counter2?:` branch of Asciidoctor's `AttributeReferenceRx`.
+    //
+    // The attribute-name class `\w` (Unicode `\p{Word}`) accepts any Unicode
+    // word character, matching Asciidoctor's `#{CG_WORD}[#{CC_WORD}-]*`, so
+    // references such as `{café}` and `{سمن}` resolve. It is the same class
+    // used to recognize and sanitize an attribute-entry name (see
+    // `is_word_char`), so a name and a reference to it always agree.
     #[allow(clippy::unwrap_used)]
-    Regex::new(r#"\\?\{(?:(counter2?):([^{}]+)|([A-Za-z0-9_][A-Za-z0-9_-]*))\}"#).unwrap()
+    Regex::new(r#"\\?\{(?:(counter2?):([^{}]+)|(\w[\w-]*))\}"#).unwrap()
 });
 
 /// How the processor handles a reference to a missing attribute, controlled by
