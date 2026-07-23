@@ -49,8 +49,6 @@
 //! currently diverges from Asciidoctor's document model. Each is tracked by an
 //! issue and marked `DIVERGENCE` (with the issue link) in the comments below:
 //!
-//! - doctitle not derived/overridden from `:doctitle:`/`:title:` attribute
-//!   entries: <https://github.com/asciidoc-rs/asciidoc-parser/issues/716>;
 //! - author-attribute gaps — the `authorcount` attribute is unset (the count
 //!   is available via `authors()`), the `author` attribute is not derived from
 //!   an indexed `author_1`, a semicolon-separated `:authors:` list is not split
@@ -620,10 +618,8 @@ mod structure {
 
     // Out of scope here: standalone `max-width` framing and the Ruby
     // `Document::Title` partition/`sanitize` API. asciidoc-parser also does not
-    // enable compat-mode for a legacy (setext) doctitle — an intentional
-    // divergence that will not be addressed. DIVERGENCE
-    // (https://github.com/asciidoc-rs/asciidoc-parser/issues/716): the doctitle
-    // is not derived/overridden from `:doctitle:`/`:title:` attribute entries.
+    // enable compat-mode for a legacy (setext) doctitle – an intentional
+    // divergence that will not be addressed.
     non_normative!(
         r##"
 
@@ -748,6 +744,13 @@ mod structure {
       assert_equal 'Subtitle', title.subtitle
     end
 
+"##
+    );
+
+    #[test]
+    fn document_with_doctitle_defined_as_attribute_entry() {
+        verifies!(
+            r##"
     test 'document with doctitle defined as attribute entry' do
       input = <<~'EOS'
       :doctitle: Document Title
@@ -758,11 +761,34 @@ mod structure {
       EOS
       doc = document_from_string input
       assert_equal 'Document Title', doc.doctitle
+"##
+        );
+
+        let doc =
+            Parser::default().parse(":doctitle: Document Title\n\npreamble\n\n== First Section");
+
+        // A `:doctitle:` attribute entry, with no `= Title` line, supplies the
+        // implicit document title.
+        assert_eq!(doc.doctitle(), Some("Document Title"));
+        assert_eq!(doc.header().title(), Some("Document Title"));
+
+        // Ruby's `first_section.title` reads the same header (doctitle) section
+        // title verified above; asciidoc-parser has no `has_header?`/
+        // `first_section` accessors.
+        non_normative!(
+            r##"
       assert doc.has_header?
       assert_equal 'Document Title', doc.header.title
       assert_equal 'Document Title', doc.first_section.title
     end
+"##
+        );
+    }
 
+    #[test]
+    fn document_with_doctitle_defined_as_attribute_entry_followed_by_block_with_title() {
+        verifies!(
+            r##"
     test 'document with doctitle defined as attribute entry followed by block with title' do
       input = <<~'EOS'
       :doctitle: Document Title
@@ -778,7 +804,27 @@ mod structure {
       assert_equal :paragraph, doc.blocks[0].context
       assert_equal 'Block title', doc.blocks[0].title
     end
+"##
+        );
 
+        let doc =
+            Parser::default().parse(":doctitle: Document Title\n\n.Block title\nBlock content");
+
+        // The `:doctitle:` entry supplies the document title; the `.Block title`
+        // that follows is a block title on the paragraph, not a second doctitle.
+        assert_eq!(doc.doctitle(), Some("Document Title"));
+
+        let blocks = top_blocks(&doc);
+        assert_eq!(blocks.len(), 1);
+        let block = blocks[0];
+        assert!(matches!(block, crate::blocks::Block::Simple(_)));
+        assert_eq!(block.title(), Some("Block title"));
+    }
+
+    #[test]
+    fn document_with_title_attribute_entry_overrides_doctitle() {
+        verifies!(
+            r##"
     test 'document with title attribute entry overrides doctitle' do
       input = <<~'EOS'
       = Document Title
@@ -791,12 +837,40 @@ mod structure {
       doc = document_from_string input
       assert_equal 'Override', doc.doctitle
       assert_equal 'Override', doc.title
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("= Document Title\n:title: Override\n\n{doctitle}\n\n== First Section");
+
+        // A `:title:` attribute entry overrides the value of `doctitle` (and
+        // `title`) without disturbing the section title or the `doctitle`
+        // attribute – so `{doctitle}` in the body still renders the implicit
+        // title.
+        assert_eq!(doc.doctitle(), Some("Override"));
+        assert_eq!(doc.header().title(), Some("Document Title"));
+        assert_eq!(rendered_paragraphs(&doc), ["Document Title"]);
+
+        // The section title verified above is what Ruby's `header.title` and
+        // `first_section.title` return; the rendered body paragraph text is
+        // verified above too, but the `#preamble` wrapper it asserts on is
+        // standalone-HTML structure asciidoc-parser does not emit, and there is
+        // no `has_header?` accessor.
+        non_normative!(
+            r##"
       assert doc.has_header?
       assert_equal 'Document Title', doc.header.title
       assert_equal 'Document Title', doc.first_section.title
       assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.convert, 1
     end
+"##
+        );
+    }
 
+    #[test]
+    fn document_with_blank_title_attribute_entry_overrides_doctitle() {
+        verifies!(
+            r##"
     test 'document with blank title attribute entry overrides doctitle' do
       input = <<~'EOS'
       = Document Title
@@ -809,14 +883,28 @@ mod structure {
       doc = document_from_string input
       assert_equal '', doc.doctitle
       assert_equal '', doc.title
+"##
+        );
+
+        let doc =
+            Parser::default().parse("= Document Title\n:title:\n\n{doctitle}\n\n== First Section");
+
+        // A blank `:title:` entry still overrides the doctitle, which becomes the
+        // empty string; the section title and `doctitle` attribute are untouched.
+        assert_eq!(doc.doctitle(), Some(""));
+        assert_eq!(doc.header().title(), Some("Document Title"));
+        assert_eq!(rendered_paragraphs(&doc), ["Document Title"]);
+
+        non_normative!(
+            r##"
       assert doc.has_header?
       assert_equal 'Document Title', doc.header.title
       assert_equal 'Document Title', doc.first_section.title
       assert_xpath '//*[@id="preamble"]//p[text()="Document Title"]', doc.convert, 1
     end
-
 "##
-    );
+        );
+    }
 
     #[test]
     fn document_header_can_reference_intrinsic_doctitle_attribute() {
@@ -849,14 +937,10 @@ mod structure {
         );
     }
 
-    // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/716):
-    // `:doctitle:`/`:title:` attribute entries overriding the implicit doctitle
-    // (and the `doctitle` accessor reflecting a later override) are not
-    // implemented; these also assert on standalone `#preamble` markup produced
-    // by full-document conversion.
-    non_normative!(
-        r##"
-
+    #[test]
+    fn document_with_title_attribute_entry_overrides_doctitle_attribute_entry() {
+        verifies!(
+            r##"
     test 'document with title attribute entry overrides doctitle attribute entry' do
       input = <<~'EOS'
       = Document Title
@@ -871,12 +955,44 @@ mod structure {
       doc = document_from_string input
       assert_equal 'Override', doc.doctitle
       assert_equal 'Override', doc.title
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "= Document Title\n:snapshot: {doctitle}\n:doctitle: doctitle\n:title: Override\n\n{snapshot}, {doctitle}\n\n== First Section",
+        );
+
+        // A `:title:` entry wins over a `:doctitle:` entry for the `doctitle`
+        // accessor, while the `:doctitle:` entry still overrides the section
+        // title. `{snapshot}` captured the implicit doctitle in force when it was
+        // defined; `{doctitle}` in the body resolves to the `:doctitle:` entry.
+        assert_eq!(doc.doctitle(), Some("Override"));
+        assert_eq!(doc.header().title(), Some("doctitle"));
+        assert_eq!(
+            doc.attribute_value("snapshot"),
+            InterpretedValue::Value("Document Title")
+        );
+        assert_eq!(
+            doc.attribute_value("doctitle"),
+            InterpretedValue::Value("doctitle")
+        );
+        assert_eq!(rendered_paragraphs(&doc), ["Document Title, doctitle"]);
+
+        non_normative!(
+            r##"
       assert doc.has_header?
       assert_equal 'doctitle', doc.header.title
       assert_equal 'doctitle', doc.first_section.title
       assert_xpath '//*[@id="preamble"]//p[text()="Document Title, doctitle"]', doc.convert, 1
     end
+"##
+        );
+    }
 
+    #[test]
+    fn document_with_doctitle_attribute_entry_overrides_implicit_doctitle() {
+        verifies!(
+            r##"
     test 'document with doctitle attribute entry overrides implicit doctitle' do
       input = <<~'EOS'
       = Document Title
@@ -890,12 +1006,40 @@ mod structure {
       doc = document_from_string input
       assert_equal 'Override', doc.doctitle
       assert_nil doc.attributes['title']
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "= Document Title\n:snapshot: {doctitle}\n:doctitle: Override\n\n{snapshot}, {doctitle}\n\n== First Section",
+        );
+
+        // A `:doctitle:` entry below the title overrides the implicit doctitle
+        // (both the accessor and the section title), without setting `title`.
+        // `{snapshot}` still holds the implicit title it captured earlier.
+        assert_eq!(doc.doctitle(), Some("Override"));
+        assert_eq!(doc.attribute_value("title"), InterpretedValue::Unset);
+        assert_eq!(doc.header().title(), Some("Override"));
+        assert_eq!(
+            doc.attribute_value("snapshot"),
+            InterpretedValue::Value("Document Title")
+        );
+        assert_eq!(rendered_paragraphs(&doc), ["Document Title, Override"]);
+
+        non_normative!(
+            r##"
       assert doc.has_header?
       assert_equal 'Override', doc.header.title
       assert_equal 'Override', doc.first_section.title
       assert_xpath '//*[@id="preamble"]//p[text()="Document Title, Override"]', doc.convert, 1
     end
+"##
+        );
+    }
 
+    #[test]
+    fn doctitle_attribute_entry_above_header_overrides_implicit_doctitle() {
+        verifies!(
+            r##"
     test 'doctitle attribute entry above header overrides implicit doctitle' do
       input = <<~'EOS'
       :doctitle: Override
@@ -908,14 +1052,34 @@ mod structure {
       doc = document_from_string input
       assert_equal 'Override', doc.doctitle
       assert_nil doc.attributes['title']
+"##
+        );
+
+        let doc = Parser::default()
+            .parse(":doctitle: Override\n= Document Title\n\n{doctitle}\n\n== First Section");
+
+        // A `:doctitle:` entry above the `= Title` line overrides the implicit
+        // title: the implicit text is discarded and the entry value stands (and
+        // is left in the `doctitle` attribute, so `{doctitle}` renders it).
+        assert_eq!(doc.doctitle(), Some("Override"));
+        assert_eq!(doc.attribute_value("title"), InterpretedValue::Unset);
+        assert_eq!(doc.header().title(), Some("Override"));
+        assert_eq!(
+            doc.attribute_value("doctitle"),
+            InterpretedValue::Value("Override")
+        );
+        assert_eq!(rendered_paragraphs(&doc), ["Override"]);
+
+        non_normative!(
+            r##"
       assert doc.has_header?
       assert_equal 'Override', doc.header.title
       assert_equal 'Override', doc.first_section.title
       assert_xpath '//*[@id="preamble"]//p[text()="Override"]', doc.convert, 1
     end
-
 "##
-    );
+        );
+    }
 
     #[test]
     fn should_apply_header_substitutions_to_value_of_the_doctitle_attribute_assigned_from_implicit_doctitle()
@@ -991,13 +1155,11 @@ mod structure {
         assert_eq!(rendered_paragraphs(&doc), ["ACME Docs"]);
     }
 
-    // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/716):
-    // the sibling case (attribute defined *later* in the header) resolves
-    // `doctitle` lazily in Asciidoctor to `ACME Docs`; asciidoc-parser leaves it
-    // unresolved.
-    non_normative!(
-        r##"
-
+    #[test]
+    fn should_not_warn_if_implicit_document_title_contains_attribute_reference_for_attribute_defined_later_in_header()
+     {
+        verifies!(
+            r##"
     test 'should not warn if implicit document title contains attribute reference for attribute defined later in header' do
       using_memory_logger do |logger|
         input = <<~'EOS'
@@ -1013,9 +1175,27 @@ mod structure {
         assert_xpath '//p[text()="{project-name} Docs"]', doc.convert, 1
       end
     end
-
 "##
-    );
+        );
+
+        let doc =
+            Parser::default().parse("= {project-name} Docs\n:project-name: ACME\n\n{doctitle}");
+
+        // The implicit title references an attribute defined *later* in the
+        // header. The `doctitle` attribute keeps the eager (at-title-line)
+        // value, where the reference was still unresolved (and, in `skip` mode,
+        // left literal without warning); `doctitle` itself resolves lazily
+        // against the final attribute state (issue #716). As in the sibling
+        // (defined-earlier) test, the port parses under the default
+        // `attribute-missing=skip` rather than `warn`.
+        assert_eq!(doc.warnings().count(), 0);
+        assert_eq!(
+            doc.attribute_value("doctitle"),
+            InterpretedValue::Value("{project-name} Docs")
+        );
+        assert_eq!(doc.doctitle(), Some("ACME Docs"));
+        assert_eq!(rendered_paragraphs(&doc), ["{project-name} Docs"]);
+    }
 
     #[test]
     fn should_recognize_document_title_when_preceded_by_blank_lines() {
