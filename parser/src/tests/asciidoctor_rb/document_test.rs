@@ -51,12 +51,9 @@
 //!
 //! - doctitle not derived/overridden from `:doctitle:`/`:title:` attribute
 //!   entries: <https://github.com/asciidoc-rs/asciidoc-parser/issues/716>;
-//! - author-attribute gaps — the `authorcount` attribute is unset (the count
-//!   is available via `authors()`), the `author` attribute is not derived from
-//!   an indexed `author_1`, a semicolon-separated `:authors:` list is not split
-//!   into individual authors, and an explicit `:authorinitials:` override is
-//!   ignored (a base `:author:` entry and indexed `author_N` entries *are*
-//!   resolved into `authors()`, as of #713):
+//! - author-attribute handling (`authorcount`, deriving `author` from an
+//!   indexed `author_1`, splitting a semicolon-separated `:authors:` list, and
+//!   honoring an explicit `:authorinitials:` override) was resolved in
 //!   <https://github.com/asciidoc-rs/asciidoc-parser/issues/718>;
 //! - `manpage` doctype not implemented: <https://github.com/asciidoc-rs/asciidoc-parser/issues/721>.
 //!
@@ -1460,9 +1457,11 @@ mod structure {
         let doc = Parser::default()
             .parse(":author: Doc Writer\n\n{lastname}, {firstname} ({authorinitials})");
 
-        // Asciidoctor asserts `authorcount == 1`; asciidoc-parser does not set the
-        // `authorcount` attribute, so the count is observed via `authors()`.
         assert_eq!(doc.authors().len(), 1);
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("1")
+        );
         assert_eq!(
             doc.attribute_value("author"),
             InterpretedValue::Value("Doc Writer")
@@ -1483,14 +1482,10 @@ mod structure {
         assert_eq!(rendered_paragraphs(&doc), ["Writer, Doc (DW)"]);
     }
 
-    // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/718):
-    // an explicit `:authorinitials:` entry that precedes `:author:` is
-    // overwritten by initials re-derived from the author name (Asciidoctor keeps
-    // the explicit value), and a semicolon-separated `:authors:` entry is not
-    // split into individual authors (`author`/`author_1`/`author_2`/… and the
-    // per-author initials remain unset).
-    non_normative!(
-        r##"
+    #[test]
+    fn should_process_author_and_authorinitials_defined_by_attribute() {
+        verifies!(
+            r##"
     test 'should process author and authorinitials defined by attribute when implicit doctitle is absent' do
       input = <<~'EOS'
       :authorinitials: DOC
@@ -1507,6 +1502,34 @@ mod structure {
       assert_xpath '//p[text()="Writer, Doc (DOC)"]', output, 1
     end
 
+"##
+        );
+
+        // An explicit `:authorinitials:` entry preceding `:author:` is preserved
+        // rather than re-derived from the author name.
+        let doc = Parser::default().parse(
+            ":authorinitials: DOC\n:author: Doc Writer\n\n{lastname}, {firstname} ({authorinitials})",
+        );
+
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DOC")
+        );
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("1")
+        );
+        assert_eq!(rendered_paragraphs(&doc), ["Writer, Doc (DOC)"]);
+    }
+
+    #[test]
+    fn should_process_authors_defined_by_attribute() {
+        verifies!(
+            r##"
     test 'should process authors defined by attribute when implicit doctitle is absent' do
       input = <<~'EOS'
       :authors: Doc Writer; Other Author
@@ -1531,6 +1554,71 @@ mod structure {
       assert_xpath '//p[text()="Writer, Doc (DW)"]', output, 1
     end
 
+"##
+        );
+
+        // A semicolon-separated `:authors:` entry splits into individual authors,
+        // populating the base and per-author `_N` attributes.
+        let doc = Parser::default().parse(
+            ":authors: Doc Writer; Other Author\n\n{lastname}, {firstname} ({authorinitials})",
+        );
+
+        assert_eq!(doc.authors().len(), 2);
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("authors"),
+            InterpretedValue::Value("Doc Writer, Other Author")
+        );
+        assert_eq!(
+            doc.attribute_value("author_1"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("lastname"),
+            InterpretedValue::Value("Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("lastname_1"),
+            InterpretedValue::Value("Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("firstname"),
+            InterpretedValue::Value("Doc")
+        );
+        assert_eq!(
+            doc.attribute_value("firstname_1"),
+            InterpretedValue::Value("Doc")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DW")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials_1"),
+            InterpretedValue::Value("DW")
+        );
+        assert_eq!(
+            doc.attribute_value("author_2"),
+            InterpretedValue::Value("Other Author")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials_2"),
+            InterpretedValue::Value("OA")
+        );
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("2")
+        );
+        assert_eq!(rendered_paragraphs(&doc), ["Writer, Doc (DW)"]);
+    }
+
+    #[test]
+    fn should_process_authors_and_authorinitials_defined_by_attribute() {
+        verifies!(
+            r##"
     test 'should process authors and authorinitials defined by attribute when implicit doctitle is absent' do
       input = <<~'EOS'
       :authorinitials: DOC
@@ -1553,7 +1641,37 @@ mod structure {
     end
 
 "##
-    );
+        );
+
+        // As in Asciidoctor, an explicit `:authorinitials:` is *not* preserved
+        // for a semicolon-separated `:authors:` entry (only for a single
+        // `:author:`); it is overwritten by the derived initials.
+        let doc = Parser::default().parse(
+            ":authorinitials: DOC\n:authors: Doc Writer; Other Author\n\n{lastname}, {firstname} ({authorinitials})",
+        );
+
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("author_1"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DW")
+        );
+        assert_eq!(
+            doc.attribute_value("author_2"),
+            InterpretedValue::Value("Other Author")
+        );
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("2")
+        );
+        assert_eq!(rendered_paragraphs(&doc), ["Writer, Doc (DW)"]);
+    }
 
     #[test]
     fn should_set_authorcount_to_0_if_document_has_no_header() {
@@ -1569,8 +1687,11 @@ mod structure {
 
         let doc = Parser::default().parse("content");
 
-        // Asciidoctor asserts `authorcount == 0`; observed here via `authors()`.
         assert_eq!(doc.authors().len(), 0);
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("0")
+        );
     }
 
     #[test]
@@ -1595,6 +1716,10 @@ mod structure {
         let doc = Parser::default().parse(":idprefix:\n\n== Section Title\n\ncontent");
 
         assert_eq!(doc.authors().len(), 0);
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("0")
+        );
     }
 
     #[test]
@@ -1628,15 +1753,16 @@ mod structure {
         );
 
         assert_eq!(doc.authors().len(), 0);
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("0")
+        );
     }
 
-    // DIVERGENCE (https://github.com/asciidoc-rs/asciidoc-parser/issues/718): an
-    // indexed `author_1` attribute entry populates `authors()` but does not set
-    // the `author` attribute, so `{author}` does not resolve. The remainder of
-    // the suite is out of scope — DocBook author/revision entries, standalone
-    // header/footer rendering, copyright, and footnote-footer output.
-    non_normative!(
-        r##"
+    #[test]
+    fn with_author_defined_by_indexed_attribute_name() {
+        verifies!(
+            r##"
     test 'with author defined by indexed attribute name' do
       input = <<~'EOS'
       = Document Title
@@ -1650,6 +1776,29 @@ mod structure {
       assert_equal 'Doc Writer', (doc.attr 'author_1')
     end
 
+"##
+        );
+
+        // An indexed `author_1` entry with no base `author` derives the base
+        // `author` attribute, so `{author}` resolves in the body.
+        let doc = Parser::default().parse("= Document Title\n:author_1: Doc Writer\n\n{author}");
+
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("author_1"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(rendered_paragraphs(&doc), ["Doc Writer"]);
+    }
+
+    // The remainder of the suite is out of scope — DocBook author/revision
+    // entries, standalone header/footer rendering, copyright, and
+    // footnote-footer output.
+    non_normative!(
+        r##"
     test 'with authors defined using attribute entry to DocBook' do
       input = <<~'EOS'
       = Document Title

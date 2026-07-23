@@ -45,6 +45,7 @@ impl<'src> Header<'src> {
         let mut attributes: Vec<Attribute> = vec![];
         let mut author_line: Option<AuthorLine<'src>> = None;
         let mut author_attribute: Option<Author> = None;
+        let mut authorinitials_from_entry = false;
         let mut revision_line: Option<RevisionLine<'src>> = None;
         let mut comments: Vec<Span<'src>> = vec![];
         let mut warnings: Vec<Warning<'src>> = vec![];
@@ -96,6 +97,23 @@ impl<'src> Header<'src> {
             } else if line.starts_with(':')
                 && let Some(attr) = Attribute::parse(source, parser)
             {
+                // Track an explicit `:authorinitials:` entry so a `:author:`
+                // entry (whether it precedes or follows this one) does not
+                // overwrite it with initials re-derived from the author's name.
+                // Asciidoctor preserves an explicit `authorinitials` for a
+                // single `author`; an empty value (`:authorinitials:`) still
+                // counts as explicit, only an unset (`:authorinitials!:`) does
+                // not.
+                if attr
+                    .item
+                    .name()
+                    .data()
+                    .eq_ignore_ascii_case("authorinitials")
+                {
+                    authorinitials_from_entry =
+                        !matches!(attr.item.value(), InterpretedValue::Unset);
+                }
+
                 // Special handling for :author: attribute to populate individual author
                 // attributes.
                 //
@@ -116,7 +134,16 @@ impl<'src> Header<'src> {
                     if let Some(lastname) = author.lastname() {
                         parser.set_attribute_by_value_from_header("lastname", lastname);
                     }
-                    parser.set_attribute_by_value_from_header("authorinitials", author.initials());
+
+                    // Do not re-derive `authorinitials` when the document has
+                    // supplied its own via an explicit entry (see above).
+                    if !authorinitials_from_entry {
+                        parser.set_attribute_by_value_from_header(
+                            "authorinitials",
+                            author.initials(),
+                        );
+                    }
+
                     if let Some(email) = author.email() {
                         parser.set_attribute_by_value_from_header("email", email);
                     }
@@ -248,9 +275,14 @@ impl<'src> Header<'src> {
         };
 
         // Resolve the document's author list. The author line, when present, is
-        // the source of truth; otherwise the list is derived from the `author`
-        // and indexed `author_N` document attributes (see [`resolve_authors`]).
+        // the source of truth; otherwise the list is derived from the `author`,
+        // `authors`, and indexed `author_N` document attributes (see
+        // [`resolve_authors`]).
         let authors = resolve_authors(author_line.as_ref(), author_attribute, parser);
+
+        // Asciidoctor exposes the number of resolved authors via the
+        // `authorcount` document attribute (0 when the document has none).
+        parser.set_attribute_by_value_from_header("authorcount", authors.len().to_string());
 
         MatchAndWarnings {
             item: MatchedItem {
@@ -585,11 +617,18 @@ fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
 /// When an [`AuthorLine`] is present it is authoritative (and has already
 /// populated the `author_N` attributes). Otherwise the list is reconstructed
 /// from document attributes, mirroring Asciidoctor's `parse_header_metadata`
-/// reconciliation: a directly-assigned `author` attribute stands in for a
-/// single author, and failing that a contiguous run of indexed `author_N`
-/// attributes (`author_1`, `author_2`, …) each contributes one author. In
-/// either case the email is taken from the companion `email`/`email_N`
-/// attribute, reflecting its final value.
+/// reconciliation in precedence order: a directly-assigned `author` attribute
+/// stands in for a single author; failing that a semicolon-separated `authors`
+/// attribute is split into individual authors; and failing that a contiguous
+/// run of indexed `author_N` attributes (`author_1`, `author_2`, …) each
+/// contributes one author. In each case the email is taken from the companion
+/// `email`/`email_N` attribute, reflecting its final value.
+///
+/// For the `authors` and `author_N` forms this also populates the derived
+/// author attributes (`author`, `firstname`, `authorinitials`, the `authors`
+/// list, the per-author `author_N` companions, …) so that references such as
+/// `{author}` resolve, matching Asciidoctor's `process_authors` (see issue
+/// #718).
 ///
 /// `author_attribute` is the author already parsed from the raw `author`
 /// attribute value (see the header parse loop); it is reused rather than
@@ -597,40 +636,168 @@ fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
 fn resolve_authors(
     author_line: Option<&AuthorLine>,
     author_attribute: Option<Author>,
-    parser: &Parser,
+    parser: &mut Parser,
 ) -> Vec<Author> {
     if let Some(author_line) = author_line {
         return author_line.authors().cloned().collect();
     }
 
-    let value = |name: &str| match parser.attribute_value(name) {
-        InterpretedValue::Value(value) => Some(value),
-        _ => None,
-    };
-
     // A directly-assigned `author` attribute describes a single author — but
     // only while it remains set. A later `:author!:` unsets the attribute
     // without carrying a raw value to refresh `author_attribute`, so consult
-    // the attribute's final state rather than trusting the cached parse.
-    if value("author").is_some()
+    // the attribute's final state rather than trusting the cached parse. The
+    // per-author attributes for this form were already populated inline as the
+    // `:author:` entry was parsed.
+    if attribute_string(parser, "author").is_some()
         && let Some(author) = author_attribute
     {
-        return vec![author.with_email(value("email"))];
+        return vec![author.with_email(attribute_string(parser, "email"))];
+    }
+
+    // A semicolon-separated `authors` attribute entry contributes one author
+    // per entry (Asciidoctor's `process_authors` with `multiple` set).
+    if let Some(authors_value) = attribute_string(parser, "authors") {
+        let authors = collect_indexed_authors(
+            split_author_entries(&authors_value)
+                .into_iter()
+                .filter_map(|entry| Author::parse(entry, parser, true)),
+            parser,
+        );
+
+        if !authors.is_empty() {
+            set_author_metadata(parser, &authors);
+            return authors;
+        }
     }
 
     // Otherwise, walk the indexed `author_N` attributes until one is missing.
-    let mut authors = vec![];
+    let mut raw_names = vec![];
     let mut index = 1;
 
-    while let Some(name) = value(&format!("author_{index}")) {
-        if let Some(author) = Author::parse(&name, parser, true) {
-            authors.push(author.with_email(value(&format!("email_{index}"))));
-        }
-
+    while let Some(name) = attribute_string(parser, &format!("author_{index}")) {
+        raw_names.push(name);
         index += 1;
     }
 
+    let authors = collect_indexed_authors(
+        raw_names
+            .iter()
+            .filter_map(|name| Author::parse(name, parser, true)),
+        parser,
+    );
+
+    if !authors.is_empty() {
+        set_author_metadata(parser, &authors);
+    }
+
     authors
+}
+
+/// Reads the string value of a document attribute, or `None` when it is unset
+/// or set without a value.
+fn attribute_string(parser: &Parser, name: &str) -> Option<String> {
+    match parser.attribute_value(name) {
+        InterpretedValue::Value(value) => Some(value),
+        _ => None,
+    }
+}
+
+/// Attaches each parsed author's companion `email_N` attribute (`email_1` for
+/// the first author, `email_2` for the second, …) so the resolved list carries
+/// the emails supplied through separate attribute entries.
+fn collect_indexed_authors(authors: impl Iterator<Item = Author>, parser: &Parser) -> Vec<Author> {
+    authors
+        .enumerate()
+        .map(|(idx, author)| {
+            author.with_email(attribute_string(parser, &format!("email_{}", idx + 1)))
+        })
+        .collect()
+}
+
+/// Splits an `authors` attribute value into raw author entries.
+///
+/// A semicolon separates authors only when it is immediately followed by a
+/// space or the end of the value, matching Asciidoctor's `AuthorDelimiterRx`
+/// (`/;(?: |$)/`). Blank entries are left in place; [`Author::parse`] trims
+/// each entry and discards the empty ones.
+fn split_author_entries(value: &str) -> Vec<&str> {
+    let bytes = value.as_bytes();
+    let mut entries: Vec<&str> = Vec::new();
+    let mut start = 0;
+
+    for (index, c) in value.char_indices() {
+        if c != ';' {
+            continue;
+        }
+
+        let is_separator = match bytes.get(index + 1) {
+            Some(next) => *next == b' ',
+            None => true,
+        };
+
+        if is_separator {
+            entries.push(&value[start..index]);
+            start = index + 1;
+        }
+    }
+
+    entries.push(&value[start..]);
+    entries
+}
+
+/// Populates the derived author document attributes from a resolved author
+/// list, mirroring Asciidoctor's `process_authors`.
+///
+/// The first author sets the unsuffixed keys (`author`, `firstname`,
+/// `authorinitials`, …); each subsequent author sets its `_N` companions. Once
+/// a second author appears, the first author is also mirrored onto its `_1`
+/// companions. The `authors` attribute is rewritten to the comma-joined list of
+/// resolved author names.
+fn set_author_metadata(parser: &mut Parser, authors: &[Author]) {
+    for (idx, author) in authors.iter().enumerate() {
+        set_author_keys(parser, author, if idx == 0 { None } else { Some(idx + 1) });
+
+        // The `_1` companions are only assigned once a second author is seen.
+        if idx == 1
+            && let Some(first) = authors.first()
+        {
+            set_author_keys(parser, first, Some(1));
+        }
+    }
+
+    let joined = authors
+        .iter()
+        .map(Author::name)
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    parser.set_attribute_by_value_from_header("authors", joined);
+}
+
+/// Sets the author attributes for a single author, either as the unsuffixed
+/// keys (`index` is `None`) or the `_N` companions (`index` is `Some(n)`).
+fn set_author_keys(parser: &mut Parser, author: &Author, index: Option<usize>) {
+    let key = |name: &str| match index {
+        None => name.to_string(),
+        Some(n) => format!("{name}_{n}"),
+    };
+
+    parser.set_attribute_by_value_from_header(key("author"), author.name());
+    parser.set_attribute_by_value_from_header(key("firstname"), author.firstname());
+
+    if let Some(middlename) = author.middlename() {
+        parser.set_attribute_by_value_from_header(key("middlename"), middlename);
+    }
+
+    if let Some(lastname) = author.lastname() {
+        parser.set_attribute_by_value_from_header(key("lastname"), lastname);
+    }
+
+    parser.set_attribute_by_value_from_header(key("authorinitials"), author.initials());
+
+    if let Some(email) = author.email() {
+        parser.set_attribute_by_value_from_header(key("email"), email);
+    }
 }
 
 fn apply_header_subs(source: &str, parser: &Parser) -> String {
@@ -1331,6 +1498,159 @@ mod tests {
         let doc = Parser::default().parse("= Title\n\nBody.");
 
         assert!(doc.authors().is_empty());
+    }
+
+    #[test]
+    fn authorcount_reflects_author_line() {
+        // The `authorcount` attribute counts the resolved authors, whether they
+        // come from the author line …
+        let doc = Parser::default().parse("= Title\nJane Doe; John Smith\n\nBody.");
+
+        assert_eq!(doc.authors().len(), 2);
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("2")
+        );
+
+        // … or from a single `:author:` attribute entry.
+        let doc = Parser::default().parse(":author: Jane Doe\n\nBody.");
+
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("1")
+        );
+
+        // A document with no author information reports a count of zero.
+        let doc = Parser::default().parse("= Title\n\nBody.");
+
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("0")
+        );
+    }
+
+    #[test]
+    fn explicit_authorinitials_after_author_still_wins() {
+        // An explicit `:authorinitials:` entry is honored regardless of whether
+        // it precedes or follows the `:author:` entry.
+        let doc = Parser::default().parse(":author: Doc Writer\n:authorinitials: DOC\n\nBody.");
+
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DOC")
+        );
+
+        // A second `:author:` entry after the explicit initials does not clobber
+        // them.
+        let doc = Parser::default()
+            .parse(":author: Jane Roe\n:authorinitials: DOC\n:author: Doc Writer\n\nBody.");
+
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DOC")
+        );
+    }
+
+    #[test]
+    fn later_author_entry_redrives_initials_without_explicit_override() {
+        // Without an explicit `:authorinitials:` entry, a later `:author:`
+        // overwrites the initials derived from the earlier one.
+        let doc = Parser::default().parse(":author: Jane Roe\n:author: Doc Writer\n\nBody.");
+
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DW")
+        );
+    }
+
+    #[test]
+    fn authors_attribute_splits_into_indexed_authors() {
+        // A semicolon-separated `:authors:` entry populates the author list and
+        // the derived per-author attributes.
+        let doc = Parser::default().parse(":authors: Jane Doe; John Q. Smith\n\nBody.");
+
+        assert_eq!(doc.authors().len(), 2);
+        assert_eq!(
+            doc.attribute_value("authors"),
+            InterpretedValue::Value("Jane Doe, John Q. Smith")
+        );
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Jane Doe")
+        );
+        assert_eq!(
+            doc.attribute_value("author_2"),
+            InterpretedValue::Value("John Q. Smith")
+        );
+        assert_eq!(
+            doc.attribute_value("middlename_2"),
+            InterpretedValue::Value("Q.")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials_2"),
+            InterpretedValue::Value("JQS")
+        );
+    }
+
+    #[test]
+    fn authors_attribute_attaches_companion_emails_and_base_middlename() {
+        // Companion `:email_N:` entries attach to each split author (`email_1`
+        // also fills the base `email`), and the first author's middle name lands
+        // on the unsuffixed `middlename`.
+        let doc = Parser::default().parse(
+            ":authors: Jane Q. Doe; John Smith\n:email_1: jane@example.com\n:email_2: john@example.com\n\nBody.",
+        );
+
+        let authors = doc.authors();
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors.first().unwrap().email(), Some("jane@example.com"));
+        assert_eq!(authors.get(1).unwrap().email(), Some("john@example.com"));
+
+        assert_eq!(
+            doc.attribute_value("middlename"),
+            InterpretedValue::Value("Q.")
+        );
+        assert_eq!(
+            doc.attribute_value("email"),
+            InterpretedValue::Value("jane@example.com")
+        );
+        assert_eq!(
+            doc.attribute_value("email_2"),
+            InterpretedValue::Value("john@example.com")
+        );
+    }
+
+    #[test]
+    fn authors_attribute_semicolon_without_space_is_one_author() {
+        // A semicolon that is not followed by a space (or the end of the value)
+        // does not separate authors.
+        let doc = Parser::default().parse(":authors: Joe Doe;Smith Johnson\n\nBody.");
+
+        assert_eq!(doc.authors().len(), 1);
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("1")
+        );
+    }
+
+    #[test]
+    fn author_attribute_takes_precedence_over_authors() {
+        // A base `:author:` entry wins over a semicolon-separated `:authors:`
+        // entry (matching Asciidoctor's `if author … elsif authors` order), so
+        // only the single author is resolved.
+        let doc = Parser::default()
+            .parse(":author: Solo Writer\n:authors: Jane Doe; John Smith\n\nBody.");
+
+        assert_eq!(doc.authors().len(), 1);
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Solo Writer")
+        );
+        assert_eq!(doc.attribute_value("author_2"), InterpretedValue::Unset);
     }
 
     #[test]
