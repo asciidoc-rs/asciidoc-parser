@@ -294,15 +294,25 @@ impl<'src> Document<'src> {
         self.header().authors()
     }
 
-    /// Return the document title (the level-0 `= Title`), if there was one.
+    /// Return the document title, if there was one.
+    ///
+    /// The title may be the implicit level-0 `= Title`, or it may be supplied
+    /// or overridden by a `:doctitle:` or `:title:` [attribute entry],
+    /// following Asciidoctor's `Document#doctitle` precedence: a `title`
+    /// attribute entry wins over the section title, which a `:doctitle:`
+    /// entry may itself supply or override. Consequently this can differ
+    /// from [`Header::title`] (the section title): given `= Document Title`
+    /// then `:title: Override`, this returns `Override` while
+    /// [`Header::title`] returns `Document Title`.
     ///
     /// If the title contains a subtitle, this returns the full, combined title.
     /// Use [`Header::main_title`] and [`Header::subtitle`] (via [`header`]) to
-    /// access the partitioned title.
+    /// access the partitioned section title.
     ///
+    /// [attribute entry]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
     /// [`header`]: Self::header
     pub fn doctitle(&self) -> Option<&str> {
-        self.header().title()
+        self.header().doctitle()
     }
 
     /// Return the document subtitle, if the document title contained one.
@@ -1559,6 +1569,9 @@ mod tests {
             },
         ),
         title: Some(
+            "Example Title",
+        ),
+        doctitle: Some(
             "Example Title",
         ),
         main_title: Some(
