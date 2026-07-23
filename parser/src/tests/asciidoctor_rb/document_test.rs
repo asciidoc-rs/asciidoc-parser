@@ -1240,8 +1240,28 @@ mod structure {
         assert_eq!(doc.doctitle(), Some("Title"));
     }
 
-    to_do_verifies!(
-        r##"
+    // The canonical Asciidoctor fixture `include-with-leading-blank-line.adoc`
+    // begins with two blank lines before the level-0 title:
+    //
+    // ```text
+    // 1: (blank)
+    // 2: (blank)
+    // 3: = Document Title
+    // 4: :toc:
+    // 5: (blank)
+    // 6: == Section
+    // ```
+    fn include_with_leading_blank_line_handler() -> inline_file_handler::InlineFileHandler {
+        inline_file_handler::InlineFileHandler::from_pairs([(
+            "fixtures/include-with-leading-blank-line.adoc",
+            "\n\n= Document Title\n:toc:\n\n== Section\n",
+        )])
+    }
+
+    #[test]
+    fn should_recognize_document_title_in_include_file_when_preceded_by_blank_lines() {
+        verifies!(
+            r##"
     test 'should recognize document title in include file when preceded by blank lines' do
       input = <<~'EOS'
       include::fixtures/include-with-leading-blank-line.adoc[]
@@ -1251,6 +1271,28 @@ mod structure {
       assert_css '#toc', output, 1
     end
 
+"##
+        );
+
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(include_with_leading_blank_line_handler())
+            .parse("include::fixtures/include-with-leading-blank-line.adoc[]");
+
+        // The document title is recognized even though the included content
+        // starts with blank lines (`assert_xpath '//h1[text()="Document
+        // Title"]'`).
+        assert_eq!(doc.doctitle(), Some("Document Title"));
+
+        // The `:toc:` header attribute is set, so a table of contents would be
+        // generated (`assert_css '#toc'`).
+        assert!(doc.is_attribute_set("toc"));
+    }
+
+    #[test]
+    fn should_include_specified_lines_even_when_leading_lines_are_skipped() {
+        verifies!(
+            r##"
     test 'should include specified lines even when leading lines are skipped' do
       input = <<~'EOS'
       include::fixtures/include-with-leading-blank-line.adoc[lines=6]
@@ -1260,7 +1302,18 @@ mod structure {
     end
 
 "##
-    );
+        );
+
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(include_with_leading_blank_line_handler())
+            .parse("include::fixtures/include-with-leading-blank-line.adoc[lines=6]");
+
+        // `lines=6` selects by original line number, so the leading blank lines
+        // and the title are skipped and only the section survives
+        // (`assert_xpath '//h2[text()="Section"]'`).
+        assert_eq!(first_section(&doc).section_title(), "Section");
+    }
 
     #[test]
     fn document_with_multiline_attribute_entry_but_only_one_line_should_not_crash() {
