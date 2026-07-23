@@ -391,29 +391,17 @@ mod default_post_replacements_substitution {
     #[ignore]
     #[test]
     fn titles() {
-        // TO DO (https://github.com/asciidoc-rs/asciidoc-parser/issues/308):
-        //
-        // Not sure if a block title can span multiple lines. If so, what does that
-        // syntax look like and how does it interact with post-replacement substitution?
+        // A block title cannot span multiple lines via a trailing `+`: a title is
+        // a single line, and a trailing ` +` is retained literally rather than
+        // joined to the following line. Because a title never spans lines, the
+        // post_replacements line-break substitution has nothing to act on here, so
+        // the `|Titles |{y}` row isn't directly verifiable.
         to_do_verifies!(
             r#"
 |Titles |{y}
 |===
 
 "#
-        );
-
-        let doc = Parser::default().parse(".Title abc +\ndef\n****\nStuff > nonsense\n****");
-
-        let block1 = doc.nested_blocks().next().unwrap();
-
-        let Block::CompoundDelimited(block1) = block1 else {
-            panic!("Unexpected block type: {block1:?}");
-        };
-
-        assert_eq!(
-            block1.title().unwrap(),
-            r#"Title <span class="icon"><img src="./images/icons/heart.png" alt="heart"></span> such"#
         );
     }
 }
