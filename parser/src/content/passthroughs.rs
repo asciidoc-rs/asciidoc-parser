@@ -397,11 +397,6 @@ impl Replacer for InlinePassReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if dest.ends_with('\\') || dest.ends_with(':') || dest.ends_with(';') {
             // Honor the prohibited prefix.
-            // let dest_ended_with_backslash = dest.ends_with('\\');
-            // if dest_ended_with_backslash {
-            //     dest.truncate(dest.len() - 1);
-            // }
-
             // EDGE CASE: Since we don't have lookarounds in Rust's regex, we have to retry
             // the inline pass replacement here. Possible it might miss a few very obscure
             // cases, but this should cover most cases where the attrlist is off-limits, but

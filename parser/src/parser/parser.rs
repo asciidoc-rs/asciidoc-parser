@@ -1322,6 +1322,21 @@ impl Parser {
         }
     }
 
+    /// Records a referenced link target in the document catalog when
+    /// [`catalog_assets`](Self::with_catalog_assets) is enabled. A no-op
+    /// otherwise.
+    ///
+    /// `target` is the final link target as it appears in the rendered `href`
+    /// (e.g. `https://example.org`, `mailto:fred@example.com`).
+    ///
+    /// Takes `&self` so it can be called from the macros substitution step,
+    /// which only holds a shared reference to the parser.
+    pub(crate) fn register_link(&self, target: String) {
+        if self.catalog_assets {
+            self.catalog.borrow_mut().register_link(target);
+        }
+    }
+
     /// Registers a callout number defined by a verbatim block.
     ///
     /// Takes `&self` so it can be called from the callouts substitution step,
