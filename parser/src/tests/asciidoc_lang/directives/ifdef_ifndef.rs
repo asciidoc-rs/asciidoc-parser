@@ -166,10 +166,44 @@ non_normative!(
 
 Both the `ifdef` and `ifndef` directives accept multiple attribute names.
 The combinator can be "`and`" or "`or`".
+"#
+);
+
+#[test]
+fn combinators_cannot_be_mixed() {
+    verifies!(
+        r#"
 The two combinators cannot be combined in the same expression.
 
 "#
-);
+    );
+
+    // The spec forbids mixing the `,` (or) and `+` (and) combinators in a single
+    // expression, but the parser (like Asciidoctor) neither rejects nor warns
+    // about a mixed expression. Instead, whichever combinator appears *first*
+    // governs the whole expression, and the target is split on that delimiter
+    // alone — so the other delimiter becomes part of a single literal attribute
+    // name. Since no attribute is ever named (for example) `b+c`, such a segment
+    // can never match.
+
+    // `,` appears first, so this is an "`or`": the `a` segment is set, so the
+    // content is included (the `b+c` segment is never consulted).
+    let doc = Parser::default().parse(":a:\n:b:\n:c:\n\nifdef::a,b+c[Shown.]");
+    assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
+
+    // Still an "`or`" (`,` first): with `a` unset, the `b+c` segment is a single
+    // never-set attribute name — the `+` is not honored as an "`and`" — so the
+    // content is excluded even though both `b` and `c` are set.
+    let doc = Parser::default().parse(":b:\n:c:\n\nifdef::a,b+c[Shown.]\n\nTail.");
+    assert_eq!(rendered_paragraphs(&doc), vec!["Tail."]);
+
+    // `+` appears first, so this is an "`and`": the `b,c` segment is a single
+    // never-set attribute name — the `,` is not honored as an "`or`" — so the
+    // content is excluded even though every real attribute (`a`, `b`, `c`) is
+    // set.
+    let doc = Parser::default().parse(":a:\n:b:\n:c:\n\nifdef::a+b,c[Shown.]\n\nTail.");
+    assert_eq!(rendered_paragraphs(&doc), vec!["Tail."]);
+}
 
 #[test]
 fn ifdef_with_multiple_attributes() {
