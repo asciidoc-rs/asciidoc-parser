@@ -218,7 +218,7 @@ Another way to solve the problem is to write the paragraph as a literal paragrap
                         col: 2,
                         offset: 1,
                     },
-                    warning: WarningType::EmptyShorthandItem,
+                    warning: WarningType::EmptyShorthandName,
                 },
                 Warning {
                     source: Span {

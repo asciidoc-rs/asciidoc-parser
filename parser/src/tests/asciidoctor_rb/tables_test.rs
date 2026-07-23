@@ -2664,7 +2664,7 @@ mod psv {
         assert_eq!(warnings.len(), 1);
         assert_eq!(
             warnings[0].warning,
-            WarningType::TableDroppingIncompleteRowAtEndOfTable
+            WarningType::TableIncompleteRowAtEndOfTable
         );
         assert_eq!(warnings[0].source.line(), 5);
     }

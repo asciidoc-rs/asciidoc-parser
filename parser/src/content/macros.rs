@@ -1820,7 +1820,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
             if !parser.is_attribute_set("compat-mode") {
                 parser.record_substitution_warning(
                     self.source,
-                    WarningType::DeprecatedFootnorefMacro(caps[0].to_string()),
+                    WarningType::DeprecatedFootnoterefMacro(caps[0].to_string()),
                 );
             }
 

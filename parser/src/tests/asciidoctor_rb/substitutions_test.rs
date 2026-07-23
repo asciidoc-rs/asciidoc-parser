@@ -6832,7 +6832,7 @@ mod macros {
             assert_eq!(warnings.len(), 1);
             assert_eq!(
                 warnings[0].warning,
-                WarningType::DeprecatedFootnorefMacro(
+                WarningType::DeprecatedFootnoterefMacro(
                     "footnoteref:[fn1,Commentary on this sentence.]".to_string()
                 )
             );
