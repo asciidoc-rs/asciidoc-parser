@@ -2443,14 +2443,16 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
     // Bar[:` set `foo3-bar`, and `:My frog:` set `myfrog`. Unicode word
     // characters are preserved, so `:café:` sets `café` and `:سمن:` sets `سمن`.
     //
-    // Only ASCII case is folded (not Asciidoctor's Unicode `downcase`): a
-    // reference is looked up under its raw, case-sensitive spelling (see the
-    // case-sensitivity divergence in the tests), so folding non-ASCII case here
-    // — which can also expand a character, e.g. `İ` -> `i` + combining dot —
-    // would leave a Unicode-named entry unreachable by its own spelling.
+    // The full Unicode case fold (Asciidoctor's `downcase`, not merely ASCII)
+    // is what makes an attribute reference case-insensitive: an entry written
+    // `:He-Man:` is reachable as `{he-man}` or `{HE-MAN}`. A reference is folded
+    // through this same `to_lowercase()` before lookup (see `AttributeReplacer`
+    // in `content::substitution_step`), so definition and reference stay
+    // symmetric even when a fold expands a character (e.g. `İ` -> `i` + combining
+    // dot): both sides land on the identical key.
     let attr_name: String = INVALID_ATTR_NAME_CHARS
         .replace_all(raw_attr_name.as_ref(), "")
-        .to_ascii_lowercase();
+        .to_lowercase();
 
     // Some attribute names have aliases. Remap to the primary name.
     //
@@ -2541,12 +2543,36 @@ mod tests {
         }
 
         #[test]
-        fn folds_only_ascii_case() {
-            // Non-ASCII case is left intact so a Unicode-named entry stays
-            // reachable by its own (case-sensitive) spelling: `İ` would expand
-            // under a Unicode `downcase`, but a reference is not folded.
-            assert_eq!(remap_attr_name("İstanbul"), "İstanbul");
+        fn folds_case_with_full_unicode() {
+            // The name is folded with the full Unicode `to_lowercase()`, so a
+            // reference lookup is case-insensitive. A fold that expands a
+            // character (`İ` -> `i` + U+0307 combining dot above) is harmless:
+            // an attribute reference is folded through the same function, so
+            // definition and reference still land on the identical key.
+            assert_eq!(remap_attr_name("He-Man"), "he-man");
+            assert_eq!(remap_attr_name("İstanbul"), "i\u{307}stanbul");
+            assert_eq!(remap_attr_name("İstanbul"), "İstanbul".to_lowercase());
         }
+    }
+
+    #[test]
+    fn attribute_reference_resolves_case_insensitively() {
+        // A reference is folded with the same Unicode `to_lowercase()` used to
+        // store the name, so any casing of the reference resolves the entry.
+        let doc = Parser::default().parse(":He-Man: the foe\n\n{he-man} / {HE-MAN} / {He-Man}");
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec!["the foe / the foe / the foe"]
+        );
+    }
+
+    #[test]
+    fn attribute_reference_case_fold_round_trips_when_it_expands() {
+        // `İ` folds to `i` + U+0307 under `to_lowercase()`. Because both the
+        // definition and the reference fold through that same function, the
+        // entry stays reachable by its own spelling despite the expansion.
+        let doc = Parser::default().parse(":İ: dotted\n\n{İ}");
+        assert_eq!(rendered_paragraphs(&doc), vec!["dotted"]);
     }
 
     #[test]
@@ -2557,6 +2583,16 @@ mod tests {
         // `ifeval` condition. See #726.
         let doc = Parser::default()
             .parse(":café: yes\n\nifeval::[\"{café}\" == \"yes\"]\nShown.\nendif::[]");
+        assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
+    }
+
+    #[test]
+    fn case_insensitive_attribute_reference_resolves_in_preprocessor() {
+        // The preprocessor folds a `{name}` reference the same way the main
+        // substitution pass does, so a mismatched-case reference still drives an
+        // `ifeval` condition.
+        let doc = Parser::default()
+            .parse(":Answer: yes\n\nifeval::[\"{answer}\" == \"yes\"]\nShown.\nendif::[]");
         assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
     }
 

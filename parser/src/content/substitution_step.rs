@@ -699,7 +699,15 @@ impl Replacer for AttributeReplacer<'_> {
             return;
         }
 
-        if !self.parser.has_attribute(attr_name) {
+        // Resolve the reference case-insensitively: attribute names are stored
+        // lower-cased (both an attribute-entry definition and an API-supplied
+        // attribute fold their name), so the lookup name is folded the same way
+        // here. This mirrors Asciidoctor's `sub_attributes`, which looks up
+        // `key = $2.downcase`. The original spelling is still what is emitted
+        // literally for a skipped or missing reference below.
+        let lookup_name = attr_name.to_lowercase();
+
+        if !self.parser.has_attribute(&lookup_name) {
             match self.mode {
                 AttributeMissing::Skip => dest.push_str(&caps[0]),
                 AttributeMissing::Drop => {
@@ -725,7 +733,7 @@ impl Replacer for AttributeReplacer<'_> {
             return;
         }
 
-        if let InterpretedValue::Value(value) = self.parser.attribute_value(attr_name) {
+        if let InterpretedValue::Value(value) = self.parser.attribute_value(&lookup_name) {
             dest.push_str(value.as_ref());
         }
         // Language description is unclear as to what happens for "set" and
