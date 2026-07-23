@@ -596,10 +596,34 @@ include::example$image.adoc[tag=inline]
         assert!(blocks.next().is_none());
     }
 
+    #[test]
+    fn alt_text_escaped_closing_bracket() {
+        verifies!(
+            r#"
+The alt text for an inline image has the same requirements as for a block image, with the added restriction that a closing square bracket must be escaped.
+"#
+        );
+
+        // Because the inline form terminates at the first unescaped closing
+        // bracket, a `]` that belongs to the alt text must be escaped with a
+        // leading backslash. The backslash is dropped and the bracket is
+        // retained in the alt text, while the macro still consumes the whole
+        // attribute list.
+        let doc = Parser::default().parse(r"Click image:play.png[Look \] here] to continue.");
+
+        let block = doc.nested_blocks().next().unwrap();
+        let Block::Simple(sb) = block else {
+            panic!("Unexpected block type: {block:?}");
+        };
+
+        assert_eq!(
+            sb.content().rendered(),
+            r#"Click <span class="image"><img src="play.png" alt="Look ] here"></span> to continue."#
+        );
+    }
+
     non_normative!(
         r#"
-The alt text for an inline image has the same requirements as for a block image, with the added restriction that a closing square bracket must be escaped.
-
 For inline images, the optional title is displayed as a tooltip.
 "#
     );
