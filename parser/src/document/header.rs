@@ -896,6 +896,14 @@ fn split_author_entries(value: &str) -> Vec<&str> {
 /// a second author appears, the first author is also mirrored onto its `_1`
 /// companions. The `authors` attribute is rewritten to the comma-joined list of
 /// resolved author names.
+///
+/// This intentionally does **not** honor `authorinitials_from_entry`: the
+/// derived `authorinitials` always overwrites an explicit `:authorinitials:`
+/// entry for the `authors` and `author_N` forms. Only a single `:author:` entry
+/// (handled inline in [`Header::parse`]) preserves an explicit override,
+/// exactly as Asciidoctor does — its `authorinitials` deletion guard lives only
+/// in the `author` branch of `process_authors`, not the `authors`/indexed
+/// branches.
 fn set_author_metadata(parser: &mut Parser, authors: &[Author]) {
     for (idx, author) in authors.iter().enumerate() {
         set_author_keys(parser, author, if idx == 0 { None } else { Some(idx + 1) });
@@ -1712,6 +1720,24 @@ mod tests {
     }
 
     #[test]
+    fn explicit_authorinitials_not_preserved_for_indexed_or_authors_forms() {
+        // The explicit-`:authorinitials:` override is honored only for a single
+        // `:author:` entry. For the indexed `author_N` form (and, as tested
+        // elsewhere, the `:authors:` form) the derived initials overwrite it,
+        // matching Asciidoctor (see [`set_author_metadata`]).
+        let doc = Parser::default().parse(":authorinitials: DOC\n:author_1: Doc Writer\n\nBody.");
+
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DW")
+        );
+    }
+
+    #[test]
     fn authors_attribute_splits_into_indexed_authors() {
         // A semicolon-separated `:authors:` entry populates the author list and
         // the derived per-author attributes.
@@ -1824,6 +1850,11 @@ mod tests {
             doc.attribute_value("authorcount"),
             InterpretedValue::Value("0")
         );
+
+        // With no authors resolved, the raw `authors` value is left as written
+        // (never rewritten to a comma-joined list) — matching Asciidoctor, whose
+        // `process_authors` returns only `authorcount` for an all-empty value.
+        assert_eq!(doc.attribute_value("authors"), InterpretedValue::Value(";"));
     }
 
     #[test]
