@@ -482,8 +482,33 @@ Instead, these attributes are scoped to the table cell.
         r#"
 If the AsciiDoc table cell starts with a preprocessor directive, that directive should be placed on the line after the cell separator.
 While it can be placed on the same line as the cell separator, that style is not recommended.
+"#
+    );
+
+    verifies!(
+        r#"
 That's because the preprocessor directive that starts after the cell separator must be treated with special handling and is thus limited to a single line (for example, a multiline preprocessor conditional is not allow in this case).
 By starting the contents of the AsciiDoc table cell on the line after the cell separator, the contents will be parsed as normal.
 "#
     );
+
+    // A preprocessor conditional that opens on the cell-separator line is limited
+    // to that single line: the `ifdef::[]` is retained as literal cell text
+    // rather than opening a multiline conditional, so the guarded body is neither
+    // included nor excluded by the attribute test. The `endif::[]` on a later
+    // line is then left unmatched.
+    let doc = Parser::default().parse("|===\na|ifdef::showit[]\nvisible\nendif::[]\n|===");
+    assert_eq!(asciidoc_cell_text(&doc), "ifdef::showit[]\nvisible");
+    assert!(doc.warnings().any(|w| matches!(
+        &w.warning,
+        WarningType::UnmatchedConditionalDirective(d) if d == "endif::[]"
+    )));
+
+    // By contrast, starting the cell contents on the line after the cell
+    // separator lets the directive act as a normal multiline conditional: with
+    // `showit` unset the guarded body is excluded, leaving the cell empty, and no
+    // unmatched-directive warning is raised.
+    let doc = Parser::default().parse("|===\na|\nifdef::showit[]\nvisible\nendif::[]\n|===");
+    assert_eq!(asciidoc_cell_text(&doc), "");
+    assert!(doc.warnings().next().is_none());
 }
