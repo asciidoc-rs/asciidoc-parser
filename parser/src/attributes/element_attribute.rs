@@ -654,7 +654,7 @@ fn parse_shorthand_items(source: &str, warnings: &mut Vec<WarningType>) -> Vec<u
         match after_delimiter.position(is_shorthand_delimiter) {
             None => {
                 if after_delimiter.is_empty() {
-                    warnings.push(WarningType::EmptyShorthandItem);
+                    warnings.push(WarningType::EmptyShorthandName);
                     shorthand_item_indices.push(span.byte_offset());
                     span = after_delimiter;
                 } else {
@@ -665,7 +665,7 @@ fn parse_shorthand_items(source: &str, warnings: &mut Vec<WarningType>) -> Vec<u
 
             Some(0) => {
                 shorthand_item_indices.push(span.byte_offset());
-                warnings.push(WarningType::EmptyShorthandItem);
+                warnings.push(WarningType::EmptyShorthandName);
                 span = after_delimiter;
             }
 
@@ -1527,7 +1527,7 @@ mod tests {
             );
 
             assert_eq!(offset, 4);
-            assert_eq!(warning_types, vec![WarningType::EmptyShorthandItem]);
+            assert_eq!(warning_types, vec![WarningType::EmptyShorthandName]);
         }
 
         #[test]
@@ -1552,7 +1552,7 @@ mod tests {
             );
 
             assert_eq!(offset, 7);
-            assert_eq!(warning_types, vec![WarningType::EmptyShorthandItem]);
+            assert_eq!(warning_types, vec![WarningType::EmptyShorthandName]);
         }
 
         #[test]
