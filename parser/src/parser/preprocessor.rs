@@ -2019,27 +2019,42 @@ fn find_tag_directive(line: &str) -> Option<(bool, &str)> {
 }
 
 /// Normalize the block indentation of included content per the `indent`
-/// attribute, returning the adjusted text. If `indent` is absent (or negative)
-/// the text is returned unchanged. See `include-with-indent.adoc`.
+/// attribute and, when the `tabsize` attribute is set, expand tabs to spaces.
+///
+/// Tab expansion applies whenever `tabsize` is positive, regardless of whether
+/// the `indent` attribute is set. Indentation normalization is applied only
+/// when `indent` is present and non-negative. If neither adjustment applies the
+/// text is returned unchanged. See `include-with-indent.adoc`.
 fn reindent_included_lines(text: String, attrlist: &Attrlist<'_>, parser: &Parser) -> String {
-    let Some(indent) = attrlist.named_attribute("indent").map(|a| a.value()) else {
-        return text;
-    };
-
     // Asciidoctor coerces the value with `String#to_i` (a non-numeric value
-    // yields 0). A negative value disables normalization.
-    let indent: i64 = indent.trim().parse().unwrap_or(0);
-    if indent < 0 {
-        return text;
-    }
+    // yields 0). A negative value disables indentation normalization.
+    let indent: Option<i64> = attrlist
+        .named_attribute("indent")
+        .map(|a| a.value().trim().parse().unwrap_or(0));
 
     let tab_size = match parser.attribute_value("tabsize") {
         InterpretedValue::Value(v) => v.trim().parse().unwrap_or(0),
         _ => 0,
     };
 
+    let expand = tab_size > 0 && text.contains('\t');
+    let apply_indent = matches!(indent, Some(i) if i >= 0);
+    if !expand && !apply_indent {
+        return text;
+    }
+
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    adjust_indentation(&mut lines, indent as usize, tab_size);
+
+    if expand {
+        for line in lines.iter_mut() {
+            *line = expand_tabs(line, tab_size);
+        }
+    }
+
+    if apply_indent {
+        // Tabs, if any, have already been expanded above.
+        adjust_indentation(&mut lines, indent.unwrap_or(0) as usize);
+    }
 
     let mut output = lines.join("\n");
     if !output.is_empty() || !text.is_empty() {
@@ -2049,20 +2064,13 @@ fn reindent_included_lines(text: String, attrlist: &Attrlist<'_>, parser: &Parse
 }
 
 /// Strip the common leading block indent from `lines` and, when `indent` is
-/// greater than zero, re-indent each non-empty line by that many spaces. When
-/// `tab_size` is greater than zero, leading tabs are first expanded to spaces.
+/// greater than zero, re-indent each non-empty line by that many spaces.
 ///
 /// Per the spec, if any line in the content is not indented (the common indent
 /// is zero) the `indent` normalization is skipped entirely.
-fn adjust_indentation(lines: &mut [String], indent: usize, tab_size: usize) {
+fn adjust_indentation(lines: &mut [String], indent: usize) {
     if lines.is_empty() {
         return;
-    }
-
-    if tab_size > 0 && lines.iter().any(|l| l.contains('\t')) {
-        for line in lines.iter_mut() {
-            *line = expand_tabs(line, tab_size);
-        }
     }
 
     // The common indent is the minimum count of leading spaces across the
