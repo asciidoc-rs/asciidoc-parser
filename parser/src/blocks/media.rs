@@ -110,7 +110,7 @@ impl<'src> MediaBlock<'src> {
                 item: None,
                 warnings: vec![Warning {
                     source: name.after,
-                    warning: WarningType::MacroMissingDoubleColon,
+                    warning: WarningType::MacroMissingSeparator,
                     origin: None,
                 }],
             };
@@ -420,7 +420,7 @@ mod tests {
                     col: 6,
                     offset: 5,
                 },
-                warning: WarningType::MacroMissingDoubleColon,
+                warning: WarningType::MacroMissingSeparator,
             }]
         );
     }

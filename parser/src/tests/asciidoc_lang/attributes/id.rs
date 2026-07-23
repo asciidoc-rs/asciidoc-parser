@@ -732,12 +732,42 @@ ____
         );
     }
 
-    non_normative!(
-        r#"
+    #[test]
+    fn shorthand_id_role_order_independent() {
+        verifies!(
+            r#"
 TIP: The order of ID and role values in the shorthand syntax does not matter.
 
 "#
-    );
+        );
+
+        // The role-then-id ordering from the example above (`.movie#roads`) and
+        // the reverse, id-then-role ordering (`#roads.movie`) assign the same ID
+        // and role: the shorthand is order-independent.
+        let mut parser = Parser::default();
+        let role_then_id = crate::blocks::Block::parse(
+            crate::Span::new("[quote.movie#roads]\n____\nRoads?\n____"),
+            &mut parser,
+        )
+        .unwrap_if_no_warnings()
+        .unwrap()
+        .item;
+
+        let mut parser = Parser::default();
+        let id_then_role = crate::blocks::Block::parse(
+            crate::Span::new("[quote#roads.movie]\n____\nRoads?\n____"),
+            &mut parser,
+        )
+        .unwrap_if_no_warnings()
+        .unwrap()
+        .item;
+
+        assert_eq!(role_then_id.id(), Some("roads"));
+        assert_eq!(role_then_id.roles(), vec!["movie"]);
+
+        assert_eq!(id_then_role.id(), role_then_id.id());
+        assert_eq!(id_then_role.roles(), role_then_id.roles());
+    }
 
     #[test]
     fn block_id_containing_dot() {

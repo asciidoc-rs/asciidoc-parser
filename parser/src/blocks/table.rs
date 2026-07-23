@@ -1223,7 +1223,7 @@ fn build_psv_table<'src>(
         if let Some(last) = current_row.last() {
             warnings.push(Warning {
                 source: last.content,
-                warning: WarningType::TableDroppingIncompleteRowAtEndOfTable,
+                warning: WarningType::TableIncompleteRowAtEndOfTable,
                 origin: None,
             });
         }

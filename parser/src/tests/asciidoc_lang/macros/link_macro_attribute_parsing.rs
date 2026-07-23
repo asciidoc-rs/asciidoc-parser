@@ -413,10 +413,6 @@ Strictly speaking, the enclosure is only required when the text preceding the eq
         // attribute name (it contains a space), so the whole unquoted attrlist is
         // taken as the first positional attribute (the link text) even though it
         // contains an equals sign. No double-quote enclosure is required.
-        //
-        // The complementary case – where the text before the `=` *is* a valid
-        // attribute name (e.g. `1=2 ...`, where `1` is a valid name) and therefore
-        // *does* require the enclosure – is covered by `quoted_title_only`.
         let doc = Parser::default().parse("https://example.org[Read this=important document]");
 
         assert_eq!(
@@ -471,6 +467,21 @@ Strictly speaking, the enclosure is only required when the text preceding the eq
                 source_map: SourceMap(&[]),
                 catalog: Catalog::default(),
             }
+        );
+
+        // The complementary case: when the text before the `=` *is* a valid
+        // attribute name, the enclosure genuinely is required. Here `1` is a
+        // valid attribute name (a leading numeral is permitted), so `1=...` is
+        // consumed as a named attribute, leaving the first positional empty and
+        // producing a bare link. This matches Asciidoctor. To render this text
+        // as the link text instead, enclose it in double quotes (see
+        // `quoted_title_only`).
+        let doc =
+            Parser::default().parse("https://example.org[1=2 posits the problem of inequality]");
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            &[r#"<a href="https://example.org" class="bare">https://example.org</a>"#]
         );
     }
 

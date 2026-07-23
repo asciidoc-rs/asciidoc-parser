@@ -43,11 +43,67 @@ non_normative!(
 In AsciiDoc, the shorthand xref is used to create a cross reference to an element (e.g., section, block, list item, etc.) that has an ID within the same document.
 The shorthand xref is processed by the macros substitution.
 
+"##
+);
+
+#[test]
+fn link_text_resolution() {
+    verifies!(
+        r##"
 If the cross reference specifies both an ID and text, the text is formatted and used as the link text.
 If the cross reference only specifies the ID, the reftext of the target element (typically the formatted title) is automatically used as the link text.
 If the element does not define reftext, a stylized form of the ID is used instead.
 Whether the ID is assigned explicitly on the referenced element or auto-generated does not affect how this mechanism works.
 
+"##
+    );
+
+    // Both an ID and text: the explicit text becomes the link text.
+    let doc =
+        Parser::default().parse("See <<the-id,Custom Text>>.\n\n[#the-id]\n== Some Section\n");
+
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[r##"See <a href="#the-id">Custom Text</a>."##]
+    );
+
+    // ID only, and the target defines reftext (here, the section title): the
+    // reftext is used as the link text.
+    let doc = Parser::default().parse("See <<the-id>>.\n\n[#the-id]\n== Some Section\n");
+
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[r##"See <a href="#the-id">Some Section</a>."##]
+    );
+
+    // An auto-generated ID resolves the same way as an explicitly assigned one.
+    let doc = Parser::default().parse("See <<_some_section>>.\n\n== Some Section\n");
+
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[r##"See <a href="#_some_section">Some Section</a>."##]
+    );
+
+    // ID only, and the target defines no reftext: a stylized form of the ID
+    // (the ID enclosed in square brackets) is used instead. The absence of a
+    // warning confirms the reference resolved rather than falling through to
+    // the unresolved-reference path, which renders the same `[id]` text but
+    // also warns.
+    let doc = Parser::default().parse("See <<my-anchor>>.\n\n[[my-anchor]]\nSome text.");
+
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &[
+            r##"See <a href="#my-anchor">[my-anchor]</a>."##,
+            "Some text."
+        ]
+    );
+
+    assert_eq!(doc.warnings().count(), 0);
+}
+
+non_normative!(
+    r##"
 Currently, an AsciiDoc processor can resolve a cross reference to the following elements:
 
 * Section (ID or block anchor)
