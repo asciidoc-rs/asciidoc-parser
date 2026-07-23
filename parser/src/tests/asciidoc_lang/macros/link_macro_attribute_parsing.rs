@@ -403,19 +403,79 @@ The double quote enclosure is not required in all cases when the link text conta
 
     #[test]
     fn enclosure_only_required_for_valid_attribute_name() {
-        to_do_verifies!(
+        verifies!(
             r#"
 Strictly speaking, the enclosure is only required when the text preceding the equals sign matches a valid attribute name.
 "#
         );
 
-        // The parser does not yet honor this rule: it treats any `name=value`
-        // segment as a named attribute regardless of whether `name` is a valid
-        // attribute name. Here `1` is not a valid attribute name, so per the
-        // spec the unquoted text should become the link text, but the parser
-        // instead consumes `1=...` as a named attribute and produces a bare
-        // link. This assertion documents the current (incorrect) behavior;
-        // it should flip to the quoted-form result once #871 is fixed.
+        // The text preceding the `=` here is `Read this`, which is not a valid
+        // attribute name (it contains a space), so the whole unquoted attrlist is
+        // taken as the first positional attribute (the link text) even though it
+        // contains an equals sign. No double-quote enclosure is required.
+        let doc = Parser::default().parse("https://example.org[Read this=important document]");
+
+        assert_eq!(
+            doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::Simple(SimpleBlock {
+                    content: Content {
+                        original: Span {
+                            data: "https://example.org[Read this=important document]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        rendered: "<a href=\"https://example.org\">Read this=important document</a>",
+                    },
+                    source: Span {
+                        data: "https://example.org[Read this=important document]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    style: SimpleBlockStyle::Paragraph,
+                    title_source: None,
+                    title: None,
+                    caption: None,
+                    number: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
+                source: Span {
+                    data: "https://example.org[Read this=important document]",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog::default(),
+            }
+        );
+
+        // The complementary case: when the text before the `=` *is* a valid
+        // attribute name, the enclosure genuinely is required. Here `1` is a
+        // valid attribute name (a leading numeral is permitted), so `1=...` is
+        // consumed as a named attribute, leaving the first positional empty and
+        // producing a bare link. This matches Asciidoctor. To render this text
+        // as the link text instead, enclose it in double quotes (see
+        // `quoted_title_only`).
         let doc =
             Parser::default().parse("https://example.org[1=2 posits the problem of inequality]");
 

@@ -18,7 +18,15 @@ pub(super) use verifies;
 
 // Use the to_do_verifies macro to annotate a test block that doesn't yet verify
 // a specific section within the .adoc file that is normative.
+//
+// This currently has no call sites (every to-do block has been promoted to a
+// real `verifies!`), but it is retained as part of the SDD annotation toolkit
+// for future spec-coverage work, so the unused-macro/-import warnings are
+// silenced under `#![deny(warnings)]`.
+#[allow(unused_macros)]
 macro_rules! to_do_verifies( ($($tt:tt)*) => {} );
+
+#[allow(unused_imports)]
 pub(super) use to_do_verifies;
 
 // All lines in each .adoc file should be covered by either non_normative or
