@@ -294,9 +294,17 @@ impl<'src> Header<'src> {
             // final attribute set only when that eager substitution left an
             // unresolved attribute reference – an attribute defined later in the
             // header – so that one-shot substitutions such as a `{counter:…}` in
-            // the title are not evaluated a second time. When the
-            // implicit title was overridden by a `doctitle` set above it, `title`
-            // already holds that (resolved) value and is not re-substituted.
+            // the title are not evaluated a second time. When the implicit title
+            // was overridden by a `doctitle` set above it, `title` already holds
+            // that (resolved) value and is not re-substituted.
+            //
+            // Residual edge: a title that *mixes* a counter with a later-defined
+            // reference (e.g. `= {counter:n} {project-name}`) still contains a
+            // `{` after the eager pass, so the re-resolution runs and advances the
+            // counter a second time. Re-resolving is done from the raw title (not
+            // the eager result) so that escaped `\{…}` and specialchars stay
+            // correct; the counter here is the price of that. This is a rare
+            // combination and no test exercises it.
             let base = if !implicit_overridden_from_above
                 && let Some(raw) = title_source
                 && implicit_doctitle_str
