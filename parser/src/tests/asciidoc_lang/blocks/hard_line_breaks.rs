@@ -542,8 +542,7 @@ Then each dialog will appear on its own line.
     // dash replacement for the ` -- ` at the start of the second line matches (and
     // consumes) the preceding newline, so both source lines render on one output
     // line. Because the newline is gone, the trailing ` +` is no longer at the end
-    // of a line and is left literal rather than becoming a `<br>`. See
-    // https://github.com/asciidoc-rs/asciidoc-parser/issues/440.
+    // of a line and is left literal rather than becoming a `<br>`.
     let doc =
         Parser::default().parse("-- Come here! -- I said. +\n-- What is it? -- replied Lance.");
 
