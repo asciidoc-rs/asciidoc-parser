@@ -1661,6 +1661,7 @@ mod tests {
         reftext_to_id: HashMap::from([]),
         footnotes: [],
         images: [],
+        links: [],
         includes: HashMap::from([]),
     },
 }"#

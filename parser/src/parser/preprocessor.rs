@@ -1324,17 +1324,33 @@ impl<'p> PreprocessorState<'p> {
     /// content should be included.
     ///
     /// Multiple attribute names may be combined with `,` (any is set — logical
-    /// OR) or `+` (all are set — logical AND); the two combinators cannot be
-    /// mixed. `ifndef` is the logical negation of `ifdef`.
+    /// OR) or `+` (all are set — logical AND). The spec forbids mixing the two
+    /// combinators in a single expression; when they are mixed anyway, the
+    /// combinator that appears *first* governs the whole expression and the
+    /// target is split on that delimiter alone, so the other delimiter becomes
+    /// part of a (never-set) literal attribute name. This mirrors Asciidoctor,
+    /// whose `ConditionalDirectiveRx` captures only the first `,`/`+` in the
+    /// target. `ifndef` is the logical negation of `ifdef`.
     fn eval_ifdef(&self, keyword: &str, target: &str) -> bool {
         // Attribute names are case-insensitive: the parser stores them
         // lowercased, so the directive's target names are lowercased to match
         // (`ifdef::showScript[]` resolves the `showscript` attribute).
         let is_set = |name: &str| self.parser.is_attribute_set(name.to_lowercase());
 
-        let defined = if target.contains(',') {
+        // Whichever of `,`/`+` appears first in the target selects the
+        // combinator; the target is then split on that delimiter alone.
+        let comma = target.find(',');
+        let plus = target.find('+');
+
+        let comma_first = match (comma, plus) {
+            (Some(c), Some(p)) => c < p,
+            (Some(_), None) => true,
+            _ => false,
+        };
+
+        let defined = if comma_first {
             target.split(',').any(is_set)
-        } else if target.contains('+') {
+        } else if plus.is_some() {
             target.split('+').all(is_set)
         } else {
             is_set(target)
