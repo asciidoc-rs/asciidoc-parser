@@ -194,6 +194,23 @@ pub struct Parser {
     /// leaving `@attributes` untouched for a locked attribute (see
     /// [`counter_impl`](Self::counter_impl)). A captioning counter is exempt:
     /// its value is committed to the readable overlay even when locked.
+    ///
+    /// Accepted limitation: a locked inline counter tracks its sequence here
+    /// while a captioning counter tracks it in
+    /// [`counter_values`](Self::counter_values), so the two sequences diverge
+    /// when the *same* locked attribute is advanced both ways in one document
+    /// (e.g. an API-locked `example-number` driven by both example blocks and
+    /// inline `{counter:example-number}` references) — Asciidoctor keeps a
+    /// single `@counters` sequence shared across both. This is left unmatched
+    /// deliberately. The scenario — API-locking a `<context>-number` attribute
+    /// *and* mixing caption and inline use — is pathological, and exact parity
+    /// is unreachable regardless: this crate resolves inline counters during
+    /// parsing, whereas Asciidoctor advances captions during parsing but inline
+    /// references during conversion, so the two sequences interleave
+    /// differently no matter how the state is stored. Unifying the maps would
+    /// therefore add read-path complexity (the gate would have to be threaded
+    /// through [`ResolvedAttributes`] too) without actually matching
+    /// Asciidoctor's output here.
     pub(crate) locked_counter_values: RefCell<HashMap<String, String>>,
 
     /// Canonical names of attributes that are locked against modification from
