@@ -247,6 +247,22 @@ non_normative!(
 
 By default, the text of the document title is used as the value of the HTML `<title>` element and main DocBook `<info>` element.
 You can override this behavior by setting the `title` attribute in the header with an attribute entry.
-If neither a level 0 section title or `doctitle` is specified in the header, but `title` is, its value is used as a fallback document title.
 "#
 );
+
+#[test]
+fn title_attribute_fallback() {
+    verifies!(
+        r#"
+If neither a level 0 section title or `doctitle` is specified in the header, but `title` is, its value is used as a fallback document title.
+"#
+    );
+
+    // With no level 0 section title (`= …`) and no `doctitle` attribute in the
+    // header, a `title` attribute entry supplies the document title: there is no
+    // section title, and the effective doctitle falls back to the `title` value.
+    let doc = Parser::default().parse(":title: The Intrepid Chronicles\n\nA frigid morning.");
+
+    assert_eq!(doc.header().title(), None);
+    assert_eq!(doc.doctitle(), Some("The Intrepid Chronicles"));
+}
