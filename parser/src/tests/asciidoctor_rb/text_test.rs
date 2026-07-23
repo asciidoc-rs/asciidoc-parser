@@ -50,10 +50,11 @@
 //!   assertion remains in the reproduced Ruby text only.
 //! * Markdown-style thematic breaks: per the AsciiDoc language spec
 //!   (`blocks/partials/thematic-breaks.adoc`), only the three-character `-` and
-//!   `*` forms are recognized. Asciidoctor additionally accepts the `_` forms
-//!   and 0–3 leading spaces; those extra cases are Asciidoctor-specific and are
-//!   noted where they arise (divergence tracked in
-//!   <https://github.com/asciidoc-rs/asciidoc-parser/issues/723>).
+//!   `*` forms are recognized. This crate also accepts Asciidoctor's `_` forms
+//!   (`___`, `_ _ _`) at column 1 as a compatibility extension. It
+//!   intentionally does *not* adopt Asciidoctor's 0–3 leading-space tolerance;
+//!   that is a deliberate, settled divergence (the marker must start at column
+//!   1), noted where it arises.
 
 use crate::tests::prelude::*;
 
@@ -274,13 +275,17 @@ fn horizontal_rule() {
 
 // The `markdown horizontal rules` (positive) test is out of scope as written,
 // so it is reproduced non-normatively rather than verified. It asserts a
-// thematic break for six variants at four leading offsets, but per the AsciiDoc
-// language spec (`blocks/partials/thematic-breaks.adoc`) only the
-// three-character `-`/`*` forms at column 1 are recognized; Asciidoctor's
-// additional `_`/`___`/`_ _ _` forms and 0–3 leading spaces are extensions this
-// crate deliberately does not implement (divergence tracked in
-// https://github.com/asciidoc-rs/asciidoc-parser/issues/723). The
-// spec-recognized subset is verified directly against the language spec in
+// thematic break for six variants at four leading offsets. This crate now
+// recognizes all six variants (`---`, `- - -`, `***`, `* * *`, `___`, `_ _ _`)
+// at column 1: the `-`/`*` forms are spec-recognized
+// (`blocks/partials/thematic-breaks.adoc`), and the `_` forms are accepted as
+// an Asciidoctor-compatibility extension. This crate intentionally diverges on
+// the leading offset: Asciidoctor tolerates 0–3 leading spaces, while this
+// crate requires the marker at column 1 (an indented line becomes a literal
+// paragraph, per AsciiDoc's general treatment of leading whitespace). That
+// divergence is a deliberate, settled decision, so the offset dimension of this
+// test is left unsatisfied by design. The spec-recognized subset is verified
+// directly against the language spec in
 // `tests::asciidoc_lang::blocks::thematic_breaks::markdown_style_thematic_breaks`.
 non_normative!(
     r#"
@@ -386,9 +391,9 @@ fn markdown_horizontal_rules_negative_case() {
 
     // None of these produce a thematic break in this crate. The four-character
     // variants are rejected by both this crate and Asciidoctor; the tab- and
-    // four-space-offset good variants are rejected here because this crate does
-    // not accept any leading offset (Asciidoctor rejects only these two — see
-    // https://github.com/asciidoc-rs/asciidoc-parser/issues/723).
+    // four-space-offset good variants are rejected here because this crate
+    // intentionally accepts no leading offset at all (Asciidoctor rejects only
+    // these two). That stricter behavior is a deliberate, settled divergence.
     for variant in ["- - - -", "* * * *", "_ _ _ _"] {
         for offset in ["", " ", "  ", "   "] {
             let input = format!(

@@ -57,7 +57,20 @@ impl<'src> Break<'src> {
         let data = line.item.data();
 
         let type_ = match data {
-            "---" | "- - -" | "***" | "* * *" => BreakType::Thematic,
+            // The `-`/`*` markdown-style thematic breaks are spec-recognized.
+            // Asciidoctor additionally accepts the `_` forms (`___`, `_ _ _`)
+            // to ease Markdown migration, and this crate matches that. Only
+            // exactly three repeating characters count: a run of four or more
+            // underscores (`____`) is a quote block delimiter, so extended `_`
+            // runs are deliberately not matched here (unlike the apostrophe run
+            // handled below).
+            //
+            // Asciidoctor also tolerates 0–3 leading spaces before any of these
+            // markers. This crate intentionally does not: the marker must start
+            // at column 1, consistent with how AsciiDoc treats leading-space
+            // lines generally (they become literal paragraphs). This divergence
+            // is deliberate and settled, not a pending gap.
+            "---" | "- - -" | "***" | "* * *" | "___" | "_ _ _" => BreakType::Thematic,
             "<<<" => BreakType::Page,
             // A run of three or more apostrophes is a thematic break. The
             // AsciiDoc language reference documents the canonical `'''` form,
@@ -358,6 +371,75 @@ mod tests {
         );
 
         assert_eq!(mi.item.type_(), BreakType::Thematic);
+    }
+
+    #[test]
+    fn thematic_break_triple_underscore() {
+        // Asciidoctor accepts `___` as a markdown-style thematic break (an
+        // extension beyond the AsciiDoc spec's `-`/`*` forms); this crate
+        // matches that.
+        let mut parser = Parser::default();
+
+        let mi = crate::blocks::Break::parse(&BlockMetadata::new("___"), &mut parser).unwrap();
+
+        assert_eq!(
+            mi.item,
+            Break {
+                type_: BreakType::Thematic,
+                source: Span {
+                    data: "___",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                title_source: None,
+                title: None,
+                anchor: None,
+                attrlist: None,
+            }
+        );
+
+        assert_eq!(mi.item.content_model(), ContentModel::Empty);
+        assert_eq!(mi.item.raw_context().deref(), "thematic_break");
+        assert_eq!(mi.item.type_(), BreakType::Thematic);
+    }
+
+    #[test]
+    fn thematic_break_spaced_underscore() {
+        let mut parser = Parser::default();
+
+        let mi = crate::blocks::Break::parse(&BlockMetadata::new("_ _ _"), &mut parser).unwrap();
+
+        assert_eq!(
+            mi.item,
+            Break {
+                type_: BreakType::Thematic,
+                source: Span {
+                    data: "_ _ _",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                title_source: None,
+                title: None,
+                anchor: None,
+                attrlist: None,
+            }
+        );
+
+        assert_eq!(mi.item.type_(), BreakType::Thematic);
+    }
+
+    #[test]
+    fn four_underscores_is_not_a_thematic_break() {
+        // A run of four or more underscores is a quote block delimiter, not a
+        // thematic break, so `Break::parse` must reject it. (Contrast the
+        // apostrophe run, where four or more `'` *is* a thematic break.)
+        let mut parser = Parser::default();
+        assert!(crate::blocks::Break::parse(&BlockMetadata::new("____"), &mut parser).is_none());
+
+        let mut parser = Parser::default();
+        assert!(crate::blocks::Break::parse(&BlockMetadata::new("_____"), &mut parser).is_none());
     }
 
     #[test]
