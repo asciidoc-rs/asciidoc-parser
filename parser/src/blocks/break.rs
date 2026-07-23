@@ -63,8 +63,13 @@ impl<'src> Break<'src> {
             // exactly three repeating characters count: a run of four or more
             // underscores (`____`) is a quote block delimiter, so extended `_`
             // runs are deliberately not matched here (unlike the apostrophe run
-            // handled below). See
-            // https://github.com/asciidoc-rs/asciidoc-parser/issues/723.
+            // handled below).
+            //
+            // Asciidoctor also tolerates 0–3 leading spaces before any of these
+            // markers. This crate intentionally does not: the marker must start
+            // at column 1, consistent with how AsciiDoc treats leading-space
+            // lines generally (they become literal paragraphs). This divergence
+            // is deliberate and settled, not a pending gap.
             "---" | "- - -" | "***" | "* * *" | "___" | "_ _ _" => BreakType::Thematic,
             "<<<" => BreakType::Page,
             // A run of three or more apostrophes is a thematic break. The
