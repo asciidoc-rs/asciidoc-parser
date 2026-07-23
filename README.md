@@ -2,13 +2,11 @@
 
 [![CI](https://github.com/asciidoc-rs/asciidoc-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/asciidoc-rs/asciidoc-parser/actions/workflows/ci.yml) [![Latest Version](https://img.shields.io/crates/v/asciidoc-parser.svg)](https://crates.io/crates/asciidoc-parser) [![docs.rs](https://img.shields.io/docsrs/asciidoc-parser)](https://docs.rs/asciidoc-parser/) [![Codecov](https://codecov.io/gh/asciidoc-rs/asciidoc-parser/graph/badge.svg?token=ULDZN1IUR9)](https://codecov.io/gh/asciidoc-rs/asciidoc-parser) [![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/asciidoc-rs/asciidoc-parser)
 
-This is an effort to write a semantic parser for the [AsciiDoc language](https://docs.asciidoctor.org/asciidoc/latest/) in the [Rust](https://rust-lang.org) language.
+This is a semantic parser for the [AsciiDoc language](https://docs.asciidoctor.org/asciidoc/latest/) written in the [Rust](https://rust-lang.org) language.
 
-As of version 0.18.0 (July 2026) this crate is effectively feature-complete and is ready to be used for experimental development projects. What few incomplete features remain are tagged with the [**to do** tag](https://github.com/asciidoc-rs/asciidoc-parser/issues?q=is%3Aissue%20state%3Aopen%20label%3Ato-do) in GitHub. Follow that for the most current status for planned development.
+As of version 0.25.0 (July 2026) this crate is feature-complete, heavily tested, and ready to be used.
 
-Now that the core is in place, I’ll be actively evolving the crate — including introducing possibly breaking changes — as I start to build the downstream projects described below. Expect the API to move in the coming months. I do expect to publish a mature (1.0) release within the year.
-
-You’re welcome to follow along and contribute.
+Now that the core is in place, I’ll be building the downstream projects described below. Expect the API to evolve slightly in the coming months as those projects mature. I do expect to publish a mature (1.0) release within the year.
 
 ## Why do this?
 
@@ -20,15 +18,13 @@ There are a few projects that I’m now starting to build that depend on the par
 * A version of Antora or similar that shows what portions of a spec are tested/completed/known good. (See the following section on “spec-driven development.”)
 * A version of [Zola](https://getzola.org), the static site generator that I use for most of my web sites, that accepts Asciidoc formatted text as input. (See [Project proposal: Asciidoc support in Zola](https://zola.discourse.group/t/project-proposal-asciidoc-support-in-zola/2867).)
 
-The parser is now complete enough to build these on.
-
 ## Spec-driven coverage
 
-If you know me from other projects, you know that I value high code coverage. Code coverage on this crate is now extremely high (99.5%).
+I value high code coverage. Code coverage for this crate is now extremely high (99.5%). But it’s not just code that I’m covering.
 
-With this project, I’m doing an experiment in what I call **“spec-driven development.”** Since I started, that phrase has taken on a different and now more widely used meaning — [writing a structured specification up front so that an AI coding agent can implement it](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/), as popularized by tooling such as [GitHub’s Spec Kit](https://github.com/github/spec-kit). That is _not_ what I mean here. In my sense the specification already exists — it’s the AsciiDoc language description — and I’m driving the implementation _toward_ it: not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/ref%2Fasciidoc-lang%2Fdocs%2Fmodules).
+In this project, I also employ a technique I call **“spec-driven development.”** Since I started, that phrase has taken on a different and now more widely used meaning — [writing a structured specification up front so that an AI coding agent can implement it](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/), as popularized by tooling such as [GitHub’s Spec Kit](https://github.com/github/spec-kit). That is _not_ what I mean here. In my sense the specification already exists — it’s the AsciiDoc language description — and I’m driving the implementation _toward_ it: not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/ref%2Fasciidoc-lang%2Fdocs%2Fmodules).
 
-I’m reading page-by-page, line-by-line, and writing tests to verify that the implementation matches the specification(*). This slowed progress considerably, but I believe it has resulted in an implementation that is very solid.
+I’ve read the language definition and Asciidoctor’s extensive test suite page-by-page, line-by-line, and written tests to verify that this implementation matches the specification(*) and Asciidoctor’s behavior. This slowed progress considerably, but I believe it has resulted in an implementation that is far more solid than it would otherwise be.
 
 (*) Yes, I’m aware that the Asciidoc language authors consider this a “language description,” not a specification. I’m splitting the difference here.
 
