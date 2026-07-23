@@ -166,10 +166,37 @@ non_normative!(
 
 Both the `ifdef` and `ifndef` directives accept multiple attribute names.
 The combinator can be "`and`" or "`or`".
+"#
+);
+
+#[test]
+fn combinators_cannot_be_mixed() {
+    verifies!(
+        r#"
 The two combinators cannot be combined in the same expression.
 
 "#
-);
+    );
+
+    // The spec forbids mixing the `,` (or) and `+` (and) combinators in a single
+    // expression, but the parser does not reject (or warn about) a mixed
+    // expression. Instead, the `,` (or) combinator takes precedence: the target
+    // is split on commas first and each comma-delimited segment is resolved as a
+    // single attribute name. A `+` therefore becomes part of that literal name
+    // rather than an "`and`" combinator, and since no attribute is ever named
+    // `b+c`, such a segment can never match.
+
+    // The first comma segment (`a`) is set, so the content is included — the
+    // `b+c` segment is never consulted.
+    let doc = Parser::default().parse(":a:\n:b:\n:c:\n\nifdef::a,b+c[Shown.]");
+    assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
+
+    // With `a` unset, the `b+c` segment is treated as a single (never-set)
+    // attribute name — the `+` is not honored as an "`and`" combinator — so even
+    // though both `b` and `c` are set, the content is excluded.
+    let doc = Parser::default().parse(":b:\n:c:\n\nifdef::a,b+c[Shown.]\n\nTail.");
+    assert_eq!(rendered_paragraphs(&doc), vec!["Tail."]);
+}
 
 #[test]
 fn ifdef_with_multiple_attributes() {
