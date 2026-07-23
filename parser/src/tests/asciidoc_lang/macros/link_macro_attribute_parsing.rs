@@ -398,7 +398,84 @@ https://example.org["href=\"#top\" attribute"] creates link to top of page
     non_normative!(
         r#"
 The double quote enclosure is not required in all cases when the link text contains an equals sign.
+"#
+    );
+
+    #[test]
+    fn enclosure_only_required_for_valid_attribute_name() {
+        verifies!(
+            r#"
 Strictly speaking, the enclosure is only required when the text preceding the equals sign matches a valid attribute name.
+"#
+        );
+
+        // The text preceding the `=` here is `Read this`, which is not a valid
+        // attribute name (it contains a space), so the whole unquoted attrlist is
+        // taken as the first positional attribute (the link text) even though it
+        // contains an equals sign. No double-quote enclosure is required.
+        //
+        // The complementary case – where the text before the `=` *is* a valid
+        // attribute name (e.g. `1=2 ...`, where `1` is a valid name) and therefore
+        // *does* require the enclosure – is covered by `quoted_title_only`.
+        let doc = Parser::default().parse("https://example.org[Read this=important document]");
+
+        assert_eq!(
+            doc,
+            Document {
+                header: Header {
+                    title_source: None,
+                    title: None,
+                    attributes: &[],
+                    author_line: None,
+                    revision_line: None,
+                    comments: &[],
+                    source: Span {
+                        data: "",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::Simple(SimpleBlock {
+                    content: Content {
+                        original: Span {
+                            data: "https://example.org[Read this=important document]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        rendered: "<a href=\"https://example.org\">Read this=important document</a>",
+                    },
+                    source: Span {
+                        data: "https://example.org[Read this=important document]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    style: SimpleBlockStyle::Paragraph,
+                    title_source: None,
+                    title: None,
+                    caption: None,
+                    number: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                },),],
+                source: Span {
+                    data: "https://example.org[Read this=important document]",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warnings: &[],
+                source_map: SourceMap(&[]),
+                catalog: Catalog::default(),
+            }
+        );
+    }
+
+    non_normative!(
+        r#"
 However, it's best to use the double quotes just to be safe.
 
 "#
