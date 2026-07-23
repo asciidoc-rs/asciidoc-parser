@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.25.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.24.0...v0.25.0)
+_23 July 2026_
+
+### Added
+
+* Populate the document catalog's link registry (close #335) ([#872](https://github.com/asciidoc-rs/asciidoc-parser/pull/872))
+
+### Fixed
+
+* Verify link attrlist enclosure rule for invalid attribute names (close #871) ([#883](https://github.com/asciidoc-rs/asciidoc-parser/pull/883))
+* Expand tabs from `tabsize` independently of `indent` on included content (close #877) ([#881](https://github.com/asciidoc-rs/asciidoc-parser/pull/881))
+* Match Asciidoctor's first-delimiter rule for mixed ifdef/ifndef combinators (close #866) ([#868](https://github.com/asciidoc-rs/asciidoc-parser/pull/868))
+
+### Other
+
+* Verify document-title & lines= selection for includes with leading blank lines (close #876) ([#882](https://github.com/asciidoc-rs/asciidoc-parser/pull/882))
+* *(warnings)* [**breaking**] Review WarningType variant names and messages (close #801) ([#880](https://github.com/asciidoc-rs/asciidoc-parser/pull/880))
+* Resolve remaining to_do_verifies! blocks from the #628 sweep ([#878](https://github.com/asciidoc-rs/asciidoc-parser/pull/878))
+* Cover inline-macro spec rules hidden behind non_normative! (close #865) ([#875](https://github.com/asciidoc-rs/asciidoc-parser/pull/875))
+
 ## [0.24.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.23.4...v0.24.0)
 _23 July 2026_
 
