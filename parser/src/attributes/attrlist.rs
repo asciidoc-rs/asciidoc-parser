@@ -225,11 +225,60 @@ impl<'src> Attrlist<'src> {
     ///   additionally carries the block style and shorthand items (`#id`,
     ///   `.role`, `%option`), which are merged via
     ///   [`ElementAttribute::merge_block_style_shorthand`].
+    /// * **Roles** follow Asciidoctor's running model once a formal `role=`
+    ///   entry is in play: a formal `role=` *replaces* every role accumulated
+    ///   so far, while shorthand `.role` entries *append*. Because a replacing
+    ///   `role=` on one line can sit between shorthand roles on earlier and
+    ///   later lines, the resolved (ordered) role list is folded into the
+    ///   formal `role` attribute and the first positional is left free of role
+    ///   shorthand, so [`roles`](Self::roles) reports the resolved list. When
+    ///   no formal `role=` is involved, shorthand roles simply accumulate as
+    ///   above.
     /// * The **anchor** is taken from the later line if it specifies one.
     ///
     /// The `source` span is left pointing at the first line, since the merged
     /// attributes no longer correspond to a single contiguous span.
     pub(crate) fn merge_block_attribute_line(&mut self, later: Attrlist<'src>) {
+        // Roles only need the running-model treatment once a formal `role=`
+        // entry appears (on this line or an earlier, already-folded one).
+        // Otherwise shorthand roles accumulate through the ordinary first-
+        // positional merge below, unchanged.
+        let fold_roles =
+            self.named_attribute("role").is_some() || later.named_attribute("role").is_some();
+
+        let resolved_roles: Option<Vec<String>> = if fold_roles {
+            // The roles accumulated so far, in resolved order (a folded `role`
+            // attribute holds them; failing that, `self`'s shorthand/formal
+            // roles are read the ordinary way).
+            let current: Vec<String> = self.roles().iter().map(|r| r.to_string()).collect();
+
+            // A formal `role=` on the later line replaces the running list;
+            // otherwise it carries forward. The later line's shorthand roles
+            // then append (matching Asciidoctor, where a line's `role=` is set
+            // before its shorthand roles are appended).
+            let later_formal: Option<Vec<String>> = later
+                .named_attribute("role")
+                .map(|attr| split_role_value(attr.value()).map(str::to_string).collect());
+
+            let later_shorthand: Vec<String> = later
+                .nth_attribute(1)
+                .map(|attr| attr.roles().iter().map(|r| r.to_string()).collect())
+                .unwrap_or_default();
+
+            let mut resolved = later_formal.unwrap_or(current);
+            resolved.extend(later_shorthand);
+
+            // Strip role shorthand from our own first positional so the formal
+            // `role` attribute set below is the only remaining source of roles.
+            if let Some(existing) = self.nth_positional_mut(1) {
+                *existing = existing.without_shorthand_roles();
+            }
+
+            Some(resolved)
+        } else {
+            None
+        };
+
         let Attrlist {
             attributes: later_attributes,
             anchor: later_anchor,
@@ -241,6 +290,13 @@ impl<'src> Attrlist<'src> {
         }
 
         for attr in later_attributes {
+            // When folding roles, the resolved role list is applied afterward,
+            // so skip the later line's formal `role` attribute here (it is
+            // accounted for in `resolved_roles`).
+            if fold_roles && attr.name_str() == Some("role") {
+                continue;
+            }
+
             // An attribute carries a positional index exactly when it is a
             // positional (unnamed) attribute; a named attribute has `None`.
             // Dispatching on the index keeps a positional at its Asciidoctor
@@ -265,7 +321,15 @@ impl<'src> Attrlist<'src> {
 
                 // The first positional additionally carries the block style and
                 // shorthand items (`#id`, `.role`, `%option`), which are merged.
+                // While folding roles, its role shorthand is dropped so roles
+                // flow solely through the formal `role` attribute.
                 Some(1) => {
+                    let attr = if fold_roles {
+                        attr.without_shorthand_roles()
+                    } else {
+                        attr
+                    };
+
                     if let Some(existing) = self.nth_positional_mut(1) {
                         *existing = ElementAttribute::merge_block_style_shorthand(existing, &attr);
                     } else {
@@ -283,6 +347,34 @@ impl<'src> Attrlist<'src> {
                     }
                 }
             }
+        }
+
+        // Record the resolved roles in the formal `role` attribute.
+        if let Some(resolved) = resolved_roles {
+            self.set_role_attribute(resolved);
+        }
+    }
+
+    /// Replace (or clear) the formal `role` attribute with the given resolved
+    /// role list. Called by
+    /// [`merge_block_attribute_line`](Self::merge_block_attribute_line) once
+    /// roles have been resolved under Asciidoctor's running model. An empty
+    /// list removes any existing `role` attribute.
+    fn set_role_attribute(&mut self, roles: Vec<String>) {
+        if roles.is_empty() {
+            self.attributes.retain(|a| a.name_str() != Some("role"));
+            return;
+        }
+
+        let attr = ElementAttribute::synthesized_role(roles.join(" "));
+        if let Some(existing) = self
+            .attributes
+            .iter_mut()
+            .find(|a| a.name_str() == Some("role"))
+        {
+            *existing = attr;
+        } else {
+            self.attributes.push(attr);
         }
     }
 
@@ -444,19 +536,7 @@ impl<'src> Attrlist<'src> {
             .unwrap_or_default();
 
         if let Some(role_attr) = self.named_attribute("role") {
-            let mut role_span = Span::new(role_attr.value());
-            let mut formal_roles: Vec<&'src str> = vec![];
-            role_span = role_span.take_while(|c| c == ' ').after;
-
-            while !role_span.is_empty() {
-                let mi = role_span.take_while(|c| c != ' ');
-                if !mi.item.is_empty() {
-                    formal_roles.push(mi.item.data());
-                }
-                role_span = mi.after.take_while(|c| c == ' ').after;
-            }
-
-            roles.append(&mut formal_roles);
+            roles.extend(split_role_value(role_attr.value()));
         }
 
         roles
@@ -586,6 +666,17 @@ fn split_options(value: &str) -> Vec<&str> {
         .map(str::trim)
         .filter(|opt| !opt.is_empty())
         .collect()
+}
+
+/// Split a formal `role` attribute value into its individual role names: split
+/// on ASCII spaces and drop empty tokens. So `'role1  role2'` yields `role1`,
+/// `role2`.
+///
+/// This is the single source of truth for how a `role=` value is tokenized,
+/// shared by [`Attrlist::roles`] (which borrows the names) and the
+/// block-attribute merge (which owns them), so the two can never diverge.
+fn split_role_value(value: &str) -> impl Iterator<Item = &str> {
+    value.split(' ').filter(|role| !role.is_empty())
 }
 
 /// Context for attribute list parsing.

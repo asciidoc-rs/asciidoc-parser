@@ -1,3 +1,11 @@
+codecov:
+  # Post coverage statuses as soon as the uploads arrive rather than waiting
+  # for a CI-completion webhook. The wait occasionally never resolves (the
+  # webhook is missed), leaving a commit's coverage status unposted and the PR
+  # showing a stale status from an earlier commit.
+  notify:
+    wait_for_ci: false
+
 coverage:
   status:
     project:

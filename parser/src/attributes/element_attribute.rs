@@ -522,6 +522,71 @@ impl<'src> ElementAttribute<'src> {
         }
     }
 
+    /// Return a copy of this first-position (block style) attribute with its
+    /// role shorthand (`.role`) items removed, retaining the block style, ID,
+    /// and options. Used while merging block attribute lines, where a formal
+    /// `role=` entry takes ownership of the resolved role list and the
+    /// shorthand must therefore no longer contribute roles of its own.
+    ///
+    /// If the attribute carries no role shorthand, it is returned unchanged.
+    pub(crate) fn without_shorthand_roles(&self) -> Self {
+        if self.roles_internal().is_empty() {
+            return self.clone();
+        }
+
+        let block_style = self.block_style_internal();
+        let id = self.id_internal();
+        let options = self.options_internal();
+
+        // Rebuild the shorthand string from the retained components, recording
+        // the start offset of each shorthand item as it is appended. The
+        // components were validated (and stripped of their delimiters) when the
+        // source line was parsed, so these offsets match what
+        // `parse_shorthand_items` would produce for the same string — without
+        // re-parsing it (or having to discard its always-empty warnings).
+        let mut value = String::new();
+        let mut shorthand_item_indices: Vec<usize> = vec![];
+
+        if let Some(block_style) = block_style {
+            shorthand_item_indices.push(value.len());
+            value.push_str(block_style);
+        }
+        if let Some(id) = id {
+            shorthand_item_indices.push(value.len());
+            value.push('#');
+            value.push_str(id);
+        }
+        for option in &options {
+            shorthand_item_indices.push(value.len());
+            value.push('%');
+            value.push_str(option);
+        }
+
+        Self {
+            name: None,
+            value: CowStr::from(value),
+            shorthand_item_indices,
+            positional_index: self.positional_index,
+            value_is_quoted: false,
+            value_is_substituted: false,
+        }
+    }
+
+    /// Synthesize a named `role` attribute whose value is the space-separated
+    /// list of resolved roles. Used while merging block attribute lines to
+    /// record the roles resolved under Asciidoctor's running model (a formal
+    /// `role=` replaces, shorthand `.role` appends).
+    pub(crate) fn synthesized_role(value: String) -> Self {
+        Self {
+            name: Some(CowStr::from("role")),
+            value: CowStr::from(value),
+            shorthand_item_indices: vec![],
+            positional_index: None,
+            value_is_quoted: false,
+            value_is_substituted: false,
+        }
+    }
+
     /// Return the 1-based positional index of this attribute, if it is a
     /// positional (unnamed) attribute whose position is known. See the
     /// [`positional_index`](Self::positional_index) field for the numbering
@@ -1799,6 +1864,57 @@ mod tests {
             assert!(merged.id().is_none());
             assert!(merged.roles().is_empty());
             assert!(merged.options().is_empty());
+        }
+    }
+
+    mod without_shorthand_roles {
+        use crate::{
+            attributes::{AttrlistContext, element_attribute::ParseShorthand},
+            strings::CowStr,
+            tests::prelude::*,
+        };
+
+        fn parse(value: &str) -> crate::attributes::ElementAttribute<'_> {
+            let p = Parser::default();
+            crate::attributes::ElementAttribute::parse(
+                &CowStr::from(value),
+                0,
+                &p,
+                ParseShorthand(true),
+                AttrlistContext::Block,
+            )
+            .0
+        }
+
+        #[test]
+        fn drops_roles_keeps_style_id_and_options() {
+            let attr = parse("sidebar#myid.role1.role2%opt1");
+            let stripped = attr.without_shorthand_roles();
+
+            assert_eq!(stripped.block_style().unwrap(), "sidebar");
+            assert_eq!(stripped.id().unwrap(), "myid");
+            assert!(stripped.roles().is_empty());
+            assert_eq!(stripped.options(), vec!["opt1"]);
+        }
+
+        #[test]
+        fn returns_clone_when_no_roles_present() {
+            // With no role shorthand to strip, the attribute is returned as-is.
+            let attr = parse("sidebar#myid%opt1");
+            let stripped = attr.without_shorthand_roles();
+
+            assert_eq!(stripped, attr);
+        }
+
+        #[test]
+        fn roles_only_becomes_empty() {
+            let attr = parse(".role1.role2");
+            let stripped = attr.without_shorthand_roles();
+
+            assert!(stripped.block_style().is_none());
+            assert!(stripped.id().is_none());
+            assert!(stripped.roles().is_empty());
+            assert!(stripped.options().is_empty());
         }
     }
 }
