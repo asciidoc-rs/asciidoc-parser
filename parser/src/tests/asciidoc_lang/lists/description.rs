@@ -44,8 +44,9 @@ If a term has an anchor, the anchor must be defined at the start of the same lin
     assert_eq!(items.len(), 1);
 
     // The `::` term is still recognized even though the term line begins with an
-    // anchor.
+    // anchor, and the anchor becomes part of the rendered term.
     assert_eq!(term_delimiter(items[0]), "::");
+    assert_eq!(term_rendered(items[0]), "<a id=\"cpu\"></a>CPU");
 
     // The anchor defined at the start of the term line is registered in the
     // document catalog, keyed to the term it introduces.
@@ -56,6 +57,16 @@ If a term has an anchor, the anchor must be defined at the start of the same lin
 
     assert_eq!(entry.reftext.as_deref(), Some("CPU"));
     assert!(matches!(entry.ref_type, crate::document::RefType::Anchor));
+
+    // Conversely, an anchor that is not at the start of the term line – here it
+    // follows the delimiter – belongs to the description rather than the term,
+    // so the term itself carries no anchor.
+    let doc: crate::Document<'_> =
+        Parser::default().parse("CPU:: [[cpu]] The brain of the computer.");
+
+    let items: Vec<&crate::blocks::Block<'_>> = top_list(&doc).nested_blocks().collect();
+    assert_eq!(items.len(), 1);
+    assert_eq!(term_rendered(items[0]), "CPU");
 }
 
 #[test]
@@ -2250,6 +2261,19 @@ fn term_delimiter<'d>(block: &'d crate::blocks::Block<'d>) -> &'d str {
 
     match item.list_item_marker() {
         crate::blocks::ListItemMarker::DefinedTerm { marker, .. } => marker.data(),
+        other => panic!("expected a defined-term marker, got {other:#?}"),
+    }
+}
+
+/// Returns the rendered term text (after substitutions) of a description-list
+/// item, panicking if `block` is not a defined-term list item.
+fn term_rendered(block: &crate::blocks::Block<'_>) -> String {
+    let crate::blocks::Block::ListItem(item) = block else {
+        panic!("expected a list item, got {block:#?}");
+    };
+
+    match item.list_item_marker() {
+        crate::blocks::ListItemMarker::DefinedTerm { term, .. } => term.rendered().to_string(),
         other => panic!("expected a defined-term marker, got {other:#?}"),
     }
 }
