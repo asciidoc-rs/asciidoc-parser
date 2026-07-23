@@ -43,10 +43,10 @@ impl<'src> Header<'src> {
         let mut title: Option<String> = None;
 
         // State that mirrors Asciidoctor's `parse_document_header` doctitle
-        // handling (issue #716): whether an implicit `= Title` line was seen,
-        // the eager (at-title-line) substitution stored in the `doctitle`
-        // attribute, and whether a `:doctitle:` attribute entry appeared below
-        // the title (a candidate to override the section title).
+        // handling: whether an implicit `= Title` line was seen, the eager
+        // (at-title-line) substitution stored in the `doctitle` attribute, and
+        // whether a `:doctitle:` attribute entry appeared below the title (a
+        // candidate to override the section title).
         let mut saw_implicit_title = false;
         let mut implicit_overridden_from_above = false;
         let mut implicit_doctitle_str: Option<String> = None;
@@ -161,7 +161,7 @@ impl<'src> Header<'src> {
 
                 // A `:doctitle:` entry below the document title is a candidate to
                 // override the implicit section title (resolved after the header
-                // is fully parsed; see below and issue #716).
+                // is fully parsed; see below).
                 if title.is_some() && attr.item.name().data().eq_ignore_ascii_case("doctitle") {
                     doctitle_entry_after_title = true;
                 }
@@ -231,10 +231,10 @@ impl<'src> Header<'src> {
                 title_source = Some(title_span);
 
                 // A `doctitle` attribute already set above the title – via a
-                // `:doctitle:` entry or the API – overrides the implicit title
-                // (issue #716): the implicit text is discarded, the existing
-                // doctitle stands as the document title, and the `doctitle`
-                // attribute is left untouched. Otherwise the implicit title is
+                // `:doctitle:` entry or the API – overrides the implicit title:
+                // the implicit text is discarded, the existing doctitle stands
+                // as the document title, and the `doctitle` attribute is left
+                // untouched. Otherwise the implicit title is
                 // substituted now (so `{doctitle}` references below resolve to
                 // it) and recorded as the baseline for a later override check.
                 if let InterpretedValue::Value(existing) = parser.attribute_value("doctitle")
@@ -275,9 +275,9 @@ impl<'src> Header<'src> {
         let source = original_source.trim_remainder(source);
 
         // Finalize the document (section) title, mirroring Asciidoctor's
-        // `parse_document_header` doctitle handling (issue #716). The `doctitle`
-        // attribute retains the eager, at-title-line substitution; the section
-        // title below is (re)derived from the *final* attribute state so that:
+        // `parse_document_header` doctitle handling. The `doctitle` attribute
+        // retains the eager, at-title-line substitution; the section title below
+        // is (re)derived from the *final* attribute state so that:
         //
         //   - an implicit `= Title` referencing an attribute defined later in the
         //     header still resolves ("lazy" resolution),
@@ -293,8 +293,8 @@ impl<'src> Header<'src> {
             // substitution already held in `title`. It is re-resolved against the
             // final attribute set only when that eager substitution left an
             // unresolved attribute reference – an attribute defined later in the
-            // header (issue #716) – so that one-shot substitutions such as a
-            // `{counter:…}` in the title are not evaluated a second time. When the
+            // header – so that one-shot substitutions such as a `{counter:…}` in
+            // the title are not evaluated a second time. When the
             // implicit title was overridden by a `doctitle` set above it, `title`
             // already holds that (resolved) value and is not re-substituted.
             let base = if !implicit_overridden_from_above
