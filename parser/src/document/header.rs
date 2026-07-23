@@ -277,12 +277,22 @@ impl<'src> Header<'src> {
         // Resolve the document's author list. The author line, when present, is
         // the source of truth; otherwise the list is derived from the `author`,
         // `authors`, and indexed `author_N` document attributes (see
-        // [`resolve_authors`]).
-        let authors = resolve_authors(author_line.as_ref(), author_attribute, parser);
+        // [`resolve_authors`]). Those attributes can only be set by header
+        // attribute entries, so a header with none needs no reconciliation.
+        let authors = resolve_authors(
+            author_line.as_ref(),
+            author_attribute,
+            !attributes.is_empty(),
+            parser,
+        );
 
         // Asciidoctor exposes the number of resolved authors via the
-        // `authorcount` document attribute (0 when the document has none).
-        parser.set_attribute_by_value_from_header("authorcount", authors.len().to_string());
+        // `authorcount` document attribute. It defaults to `0` (a built-in
+        // default), so only a non-zero count is materialized here — this keeps an
+        // author-less parse from touching the attribute map at all.
+        if !authors.is_empty() {
+            parser.set_attribute_by_value_from_header("authorcount", authors.len().to_string());
+        }
 
         MatchAndWarnings {
             item: MatchedItem {
@@ -633,13 +643,23 @@ fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
 /// `author_attribute` is the author already parsed from the raw `author`
 /// attribute value (see the header parse loop); it is reused rather than
 /// re-parsing the HTML-encoded stored value.
+///
+/// `header_has_attributes` reports whether the header carried any attribute
+/// entries. When it did not, none of the `author` / `authors` / `author_N`
+/// attributes can be set, so the attribute lookups are skipped — the common
+/// case for a document whose header is just a title (or absent).
 fn resolve_authors(
     author_line: Option<&AuthorLine>,
     author_attribute: Option<Author>,
+    header_has_attributes: bool,
     parser: &mut Parser,
 ) -> Vec<Author> {
     if let Some(author_line) = author_line {
         return author_line.authors().cloned().collect();
+    }
+
+    if !header_has_attributes {
+        return vec![];
     }
 
     // A directly-assigned `author` attribute describes a single author — but
@@ -1634,6 +1654,51 @@ mod tests {
         assert_eq!(
             doc.attribute_value("authorcount"),
             InterpretedValue::Value("1")
+        );
+    }
+
+    #[test]
+    fn authors_attribute_single_name_authors_and_trailing_separator() {
+        // Single-name authors carry no last name, and a trailing `;` (a
+        // separator at the end of the value) contributes no extra author.
+        let doc = Parser::default().parse(":authors: Cher; Madonna;\n\nBody.");
+
+        assert_eq!(doc.authors().len(), 2);
+        assert_eq!(
+            doc.attribute_value("authors"),
+            InterpretedValue::Value("Cher, Madonna")
+        );
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Cher")
+        );
+        assert_eq!(doc.attribute_value("lastname"), InterpretedValue::Unset);
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("C")
+        );
+        assert_eq!(
+            doc.attribute_value("author_2"),
+            InterpretedValue::Value("Madonna")
+        );
+        assert_eq!(doc.attribute_value("lastname_2"), InterpretedValue::Unset);
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("2")
+        );
+    }
+
+    #[test]
+    fn authors_attribute_with_only_empty_entries_yields_no_authors() {
+        // An `:authors:` value that splits into only empty entries resolves to no
+        // authors, so the derived attributes stay unset and `authorcount` is 0.
+        let doc = Parser::default().parse(":authors: ;\n\nBody.");
+
+        assert!(doc.authors().is_empty());
+        assert_eq!(doc.attribute_value("author"), InterpretedValue::Unset);
+        assert_eq!(
+            doc.attribute_value("authorcount"),
+            InterpretedValue::Value("0")
         );
     }
 
