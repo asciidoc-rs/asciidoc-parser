@@ -862,13 +862,13 @@ fn should_clean_crlf_from_end_of_lines() {
     assert!(!paras[0].contains('\r'));
 }
 
-// Front matter support (https://github.com/asciidoc-rs/asciidoc-parser/issues/745):
-// a `---`-fenced YAML/TOML block at the very top of the document is dropped –
-// and captured verbatim in the `front-matter` attribute – but only when the
-// `skip-front-matter` attribute is set. This crate has no public reader, so
-// where Asciidoctor inspects `reader.peek_line` / `reader.lineno`, these ports
-// observe the parsed document instead: the `front-matter` attribute, the
-// recognized document title, and the title's (preserved) line number.
+// Front matter support: a `---`-fenced YAML/TOML block at the very top of the
+// document is dropped – and captured verbatim in the `front-matter` attribute –
+// but only when the `skip-front-matter` attribute is set. This crate has no
+// public reader, so where Asciidoctor inspects `reader.peek_line` /
+// `reader.lineno`, these ports observe the parsed document instead: the
+// `front-matter` attribute, the recognized document title, and the title's
+// (preserved) line number.
 #[test]
 fn should_not_skip_front_matter_by_default() {
     verifies!(
