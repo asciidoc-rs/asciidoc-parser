@@ -573,6 +573,7 @@ impl<'src> Block<'src> {
             if (line.item.starts_with('\'')
                 || line.item.starts_with('-')
                 || line.item.starts_with('*')
+                || line.item.starts_with('_')
                 || line.item.starts_with('<'))
                 && let Some(mi_break) = Break::parse(&metadata, parser)
             {

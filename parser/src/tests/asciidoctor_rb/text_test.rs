@@ -274,13 +274,16 @@ fn horizontal_rule() {
 
 // The `markdown horizontal rules` (positive) test is out of scope as written,
 // so it is reproduced non-normatively rather than verified. It asserts a
-// thematic break for six variants at four leading offsets, but per the AsciiDoc
-// language spec (`blocks/partials/thematic-breaks.adoc`) only the
-// three-character `-`/`*` forms at column 1 are recognized; Asciidoctor's
-// additional `_`/`___`/`_ _ _` forms and 0–3 leading spaces are extensions this
-// crate deliberately does not implement (divergence tracked in
-// https://github.com/asciidoc-rs/asciidoc-parser/issues/723). The
-// spec-recognized subset is verified directly against the language spec in
+// thematic break for six variants at four leading offsets. This crate now
+// recognizes all six variants (`---`, `- - -`, `***`, `* * *`, `___`, `_ _ _`)
+// at column 1: the `-`/`*` forms are spec-recognized
+// (`blocks/partials/thematic-breaks.adoc`), and the `_` forms are accepted as
+// an Asciidoctor-compatibility extension (see
+// https://github.com/asciidoc-rs/asciidoc-parser/issues/723). The remaining
+// divergence is the leading offset: Asciidoctor tolerates 0–3 leading spaces,
+// while this crate requires the marker at column 1, so the offset dimension of
+// this test is not yet satisfied. The spec-recognized subset is verified
+// directly against the language spec in
 // `tests::asciidoc_lang::blocks::thematic_breaks::markdown_style_thematic_breaks`.
 non_normative!(
     r#"
