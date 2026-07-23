@@ -1517,7 +1517,7 @@ mod tests {
                     col: 1,
                     offset: 0,
                 },
-                warning: WarningType::EmptyShorthandItem,
+                warning: WarningType::EmptyShorthandName,
             }]
         );
     }

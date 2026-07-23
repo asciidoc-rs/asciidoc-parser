@@ -52,13 +52,13 @@ pub struct Warning<'src> {
 pub enum WarningType {
     /// A quoted attribute value ran to the end of its line (or the end of the
     /// attribute list) without a matching closing quote.
-    #[error("An attribute value is missing its terminating quote")]
+    #[error("an attribute value is missing its terminating quote")]
     AttributeValueMissingTerminatingQuote,
 
     /// A document header was not followed by a blank line, so the line that
     /// follows it can not be parsed as part of the header.
     #[error(
-        "Document header wasn't terminated by a blank line (this line can't be parsed as part of a document header)"
+        "document header wasn't terminated by a blank line (this line can't be parsed as part of a document header)"
     )]
     DocumentHeaderNotTerminated,
 
@@ -70,90 +70,88 @@ pub enum WarningType {
     NoInlineDoctypeCandidate,
 
     /// An element attribute was written with a name and `=` but no value.
-    #[error("An empty attribute value was detected")]
+    #[error("an empty attribute value was detected")]
     EmptyAttributeValue,
 
     /// A shorthand element attribute marker (`.` for a role, `#` for an ID, or
     /// `%` for an option) was found with no name after it.
     #[error(
-        "A shorthand element attribute marker ('.', '#', or '%') was found with no subsequent text"
+        "a shorthand element attribute marker ('.', '#', or '%') was found with no subsequent text"
     )]
-    EmptyShorthandItem,
+    EmptyShorthandName,
 
-    // TODO: Review the names and message strings of the variants that follow
-    // (#801).
     /// The name in a block or inline macro is not a valid identifier.
-    #[error("Macro name is not a valid identifier")]
+    #[error("macro name is not a valid identifier")]
     InvalidMacroName,
 
     /// A media macro (`image::`, `video::`, or `audio::`) was written without
     /// the target that names the media to embed.
-    #[error("Media macro missing target")]
+    #[error("media macro missing target")]
     MediaMacroMissingTarget,
 
     /// A macro was written without the `[…]` attribute list that terminates it.
-    #[error("Macro missing attribute list")]
+    #[error("macro missing attribute list")]
     MacroMissingAttributeList,
 
     /// A block macro was written without the `::` that separates its name from
     /// its target.
-    #[error("Macro missing :: separator")]
-    MacroMissingDoubleColon,
+    #[error("macro missing :: separator")]
+    MacroMissingSeparator,
 
     /// A quoted attribute value in an attribute list was followed by something
     /// other than the comma that separates it from the next attribute.
-    #[error("Missing comma after quoted attribute value")]
+    #[error("missing comma after quoted attribute value")]
     MissingCommaAfterQuotedAttributeValue,
 
     /// A delimited block was opened but the matching closing delimiter was
     /// never found, so the block runs to the end of the document.
-    #[error("Closing marker for delimited block not found")]
+    #[error("closing marker for delimited block not found")]
     UnterminatedDelimitedBlock,
 
     /// A block title (`.Title`) or attribute list (`[…]`) was found at the end
     /// of the document or immediately before a blank line, with no block for it
     /// to describe.
-    #[error("A block title or attribute list was found without a subsequent block")]
+    #[error("a block title or attribute list was found without a subsequent block")]
     MissingBlockAfterTitleOrAttributeList,
 
     /// A block anchor (`[[…]]`) was written with no name between its brackets.
-    #[error("Block anchor name is empty")]
+    #[error("block anchor name is empty")]
     EmptyBlockAnchorName,
 
     /// A block anchor (`[[…]]`) names an ID containing characters that are not
     /// permitted in a name.
-    #[error("Block anchor name contains invalid name characters")]
+    #[error("block anchor name contains invalid name characters")]
     InvalidBlockAnchorName,
 
     /// The document tried to set an attribute that the API caller locked when
     /// it configured the parser. The field is the attribute name.
-    #[error("Attribute {0:?} can not be modified by document")]
+    #[error("attribute {0:?} can not be modified by document")]
     AttributeValueIsLocked(String),
 
     /// An ID was assigned to an element when an earlier element had already
     /// registered it. The field is the duplicated ID.
-    #[error("Duplicate ID: {0:?} is already registered")]
+    #[error("duplicate ID: {0:?} is already registered")]
     DuplicateId(String),
 
     /// A level-0 section heading (`= Title`) was found somewhere other than the
     /// document header, where this crate does not support it.
-    #[error("Level 0 section headings not supported")]
+    #[error("level 0 section headings not supported")]
     Level0SectionHeadingNotSupported,
 
     /// A section heading skipped one or more levels below its parent. The
     /// fields are the expected level and the level actually found.
-    #[error("Section heading level skipped (expected {0}, found {1})")]
+    #[error("section heading level skipped (expected {0}, found {1})")]
     SectionHeadingLevelSkipped(usize, usize),
 
     /// A section heading nests deeper than the deepest supported level. The
     /// field is the level found.
-    #[error("Section heading level exceeds maximum (maximum 5, found {0})")]
+    #[error("section heading level exceeds maximum (maximum 5, found {0})")]
     SectionHeadingLevelExceedsMaximum(usize),
 
     /// A `leveloffset` shifted a section heading outside the supported range,
     /// so its level was clamped. The fields are the offset level and the level
     /// it was clamped to.
-    #[error("Section heading level {0} is outside the supported range 1-5; clamped to {1}")]
+    #[error("section heading level {0} is outside the supported range 1-5; clamped to {1}")]
     SectionHeadingLevelOutOfRange(i32, usize),
 
     /// A `leveloffset` is so large (or so negative) that no authored heading
@@ -163,38 +161,38 @@ pub enum WarningType {
 
     /// An explicitly-numbered list item does not continue the sequence its list
     /// established. The fields are the expected and actual indexes.
-    #[error("List item index: expected {0}, got {1}")]
+    #[error("list item index: expected {0}, got {1}")]
     ListItemOutOfSequence(String, String),
 
     /// A callout list item has no matching callout marker in the verbatim block
     /// it annotates. The field is the callout number.
-    #[error("No callout found for <{0}>")]
+    #[error("no callout found for <{0}>")]
     NoCalloutFound(usize),
 
     /// A callout list item does not continue the sequence its list established.
     /// The fields are the expected and actual indexes.
-    #[error("Callout list item index: expected {0}, got {1}")]
+    #[error("callout list item index: expected {0}, got {1}")]
     CalloutListItemOutOfSequence(usize, usize),
 
     /// A table row holds more cells than the table's column count allows; the
     /// surplus cell is dropped.
-    #[error("Dropping table cell because it exceeds the specified number of columns")]
+    #[error("dropping table cell because it exceeds the specified number of columns")]
     TableCellExceedsColumnCount,
 
     /// A quoted field in a CSV-format table was never closed; the cell is set
     /// to empty.
-    #[error("Unclosed quote in CSV data; setting cell to empty")]
+    #[error("unclosed quote in CSV data; setting cell to empty")]
     TableCsvDataHasUnclosedQuote,
 
     /// A table row does not begin with the cell separator its table uses;
     /// parsing recovers by assuming one.
-    #[error("Table is missing a leading separator; recovering automatically")]
+    #[error("table is missing a leading separator; recovering automatically")]
     TableMissingLeadingSeparator,
 
     /// A table ended part-way through a row; the cells of that partial row are
     /// dropped.
-    #[error("Dropping cells from incomplete row; detected end of table")]
-    TableDroppingIncompleteRowAtEndOfTable,
+    #[error("dropping cells from incomplete row; detected end of table")]
+    TableIncompleteRowAtEndOfTable,
 
     /// An attribute reference (`{name}`) names an attribute that is not set,
     /// under `attribute-missing=warn`. The field is the attribute name.
@@ -225,7 +223,7 @@ pub enum WarningType {
     /// The deprecated `footnoteref:[…]` macro was used outside compatibility
     /// mode. The footnote macro with a target should be used instead.
     #[error("found deprecated footnoteref macro: {0}; use footnote macro with target instead")]
-    DeprecatedFootnorefMacro(String),
+    DeprecatedFootnoterefMacro(String),
 
     /// An `include::` directive named a file that the configured include file
     /// handler could not resolve. The field is the target as written.
@@ -339,7 +337,7 @@ impl std::fmt::Debug for WarningType {
             }
 
             WarningType::EmptyAttributeValue => write!(f, "WarningType::EmptyAttributeValue"),
-            WarningType::EmptyShorthandItem => write!(f, "WarningType::EmptyShorthandItem"),
+            WarningType::EmptyShorthandName => write!(f, "WarningType::EmptyShorthandName"),
             WarningType::InvalidMacroName => write!(f, "WarningType::InvalidMacroName"),
 
             WarningType::MediaMacroMissingTarget => {
@@ -350,8 +348,8 @@ impl std::fmt::Debug for WarningType {
                 write!(f, "WarningType::MacroMissingAttributeList")
             }
 
-            WarningType::MacroMissingDoubleColon => {
-                write!(f, "WarningType::MacroMissingDoubleColon")
+            WarningType::MacroMissingSeparator => {
+                write!(f, "WarningType::MacroMissingSeparator")
             }
 
             WarningType::MissingCommaAfterQuotedAttributeValue => {
@@ -433,8 +431,8 @@ impl std::fmt::Debug for WarningType {
                 write!(f, "WarningType::TableMissingLeadingSeparator")
             }
 
-            WarningType::TableDroppingIncompleteRowAtEndOfTable => {
-                write!(f, "WarningType::TableDroppingIncompleteRowAtEndOfTable")
+            WarningType::TableIncompleteRowAtEndOfTable => {
+                write!(f, "WarningType::TableIncompleteRowAtEndOfTable")
             }
 
             WarningType::SkippingReferenceToMissingAttribute(name) => f
@@ -462,8 +460,8 @@ impl std::fmt::Debug for WarningType {
                 .field(id)
                 .finish(),
 
-            WarningType::DeprecatedFootnorefMacro(macro_text) => f
-                .debug_tuple("WarningType::DeprecatedFootnorefMacro")
+            WarningType::DeprecatedFootnoterefMacro(macro_text) => f
+                .debug_tuple("WarningType::DeprecatedFootnoterefMacro")
                 .field(macro_text)
                 .finish(),
 
@@ -626,10 +624,10 @@ mod tests {
             }
 
             #[test]
-            fn empty_shorthand_item() {
-                let warning = WarningType::EmptyShorthandItem;
+            fn empty_shorthand_name() {
+                let warning = WarningType::EmptyShorthandName;
                 let debug_output = format!("{:?}", warning);
-                assert_eq!(debug_output, "WarningType::EmptyShorthandItem");
+                assert_eq!(debug_output, "WarningType::EmptyShorthandName");
             }
 
             #[test]
@@ -654,10 +652,10 @@ mod tests {
             }
 
             #[test]
-            fn macro_missing_double_colon() {
-                let warning = WarningType::MacroMissingDoubleColon;
+            fn macro_missing_separator() {
+                let warning = WarningType::MacroMissingSeparator;
                 let debug_output = format!("{:?}", warning);
-                assert_eq!(debug_output, "WarningType::MacroMissingDoubleColon");
+                assert_eq!(debug_output, "WarningType::MacroMissingSeparator");
             }
 
             #[test]
@@ -856,13 +854,10 @@ mod tests {
             }
 
             #[test]
-            fn table_dropping_incomplete_row_at_end_of_table() {
-                let warning = WarningType::TableDroppingIncompleteRowAtEndOfTable;
+            fn table_incomplete_row_at_end_of_table() {
+                let warning = WarningType::TableIncompleteRowAtEndOfTable;
                 let debug_output = format!("{:?}", warning);
-                assert_eq!(
-                    debug_output,
-                    "WarningType::TableDroppingIncompleteRowAtEndOfTable"
-                );
+                assert_eq!(debug_output, "WarningType::TableIncompleteRowAtEndOfTable");
             }
 
             #[test]
@@ -917,13 +912,13 @@ mod tests {
             }
 
             #[test]
-            fn deprecated_footnoref_macro() {
+            fn deprecated_footnoteref_macro() {
                 let warning =
-                    WarningType::DeprecatedFootnorefMacro("footnoteref:[fn1]".to_string());
+                    WarningType::DeprecatedFootnoterefMacro("footnoteref:[fn1]".to_string());
                 let debug_output = format!("{:?}", warning);
                 assert_eq!(
                     debug_output,
-                    "WarningType::DeprecatedFootnorefMacro(\"footnoteref:[fn1]\")"
+                    "WarningType::DeprecatedFootnoterefMacro(\"footnoteref:[fn1]\")"
                 );
             }
 
