@@ -59,8 +59,15 @@ pub(crate) enum LookaheadResult {
     SkipAheadAndRetry(usize),
 }
 
-/// Alternative to
-// TODO: Complete this doc comment (#906).
+/// Alternative to [`regex::Replacer`] for use with
+/// [`replace_with_lookahead`].
+///
+/// Unlike [`regex::Replacer`], which can only decide _how_ to render a
+/// replacement, a `LookaheadReplacer` may also inspect the text that follows
+/// the match and, by returning [`LookaheadResult::SkipAheadAndRetry`], reject
+/// the match and resume searching further along the haystack. This models the
+/// skip-ahead-and-retry look-ahead pattern that [`regex::Replacer`] cannot
+/// express.
 pub(crate) trait LookaheadReplacer {
     fn replace_append(
         &mut self,
