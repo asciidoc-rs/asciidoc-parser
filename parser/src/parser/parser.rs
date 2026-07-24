@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -256,7 +257,14 @@ pub struct Parser {
     /// attribute assignment to such a name is silently ignored. The set is
     /// saved and restored around each cell, so the lock applies only within
     /// the cell (and nests correctly).
-    pub(crate) locked_attribute_names: HashSet<String>,
+    ///
+    /// The overwhelming majority of locked names are built-in attributes, whose
+    /// names are already `&'static str`, so entries are stored as
+    /// [`Cow<'static, str>`]: a built-in is locked with a borrowed static name
+    /// (no allocation), and only a genuinely dynamic (parent-defined) name is
+    /// owned. This keeps the per-cell rebuild – which runs once for every
+    /// AsciiDoc cell – from allocating a `String` per built-in attribute.
+    pub(crate) locked_attribute_names: HashSet<Cow<'static, str>>,
 
     /// Number of AsciiDoc table cells currently being parsed in the call stack.
     ///
@@ -2440,7 +2448,7 @@ impl Parser {
         // An attribute inherited from the parent document of an AsciiDoc table
         // cell is locked for the duration of that cell: a body assignment to it
         // is silently ignored (no warning), matching Asciidoctor.
-        if self.locked_attribute_names.contains(&attr_name) {
+        if self.locked_attribute_names.contains(attr_name.as_str()) {
             return;
         }
 
