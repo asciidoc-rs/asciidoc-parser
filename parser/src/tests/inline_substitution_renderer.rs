@@ -7,6 +7,8 @@
 //! [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
 
 use crate::{
+    Span,
+    content::{Content, SubstitutionStep},
     parser::{ImageRenderParams, InlineSubstitutionRenderer, SpecialCharacter},
     tests::{
         fixtures::{
@@ -153,5 +155,137 @@ fn file_handler_accessors_expose_registered_handlers() {
     assert_eq!(
         svg_handler.resolve_svg("fixtures/circle.svg", &parser),
         Some(CIRCLE_SVG.to_string())
+    );
+}
+
+/// A renderer that overrides nothing, so every substitution falls through to
+/// the inherited default. Its output must match the built-in
+/// [`HtmlSubstitutionRenderer`] exactly.
+///
+/// [`HtmlSubstitutionRenderer`]: crate::parser::HtmlSubstitutionRenderer
+#[derive(Debug)]
+struct InheritEverything;
+
+impl InlineSubstitutionRenderer for InheritEverything {}
+
+/// Applies `step` to `source` twice – once through the default (HTML) renderer
+/// and once through [`InheritEverything`] – with the same parser configuration,
+/// and asserts the two rendered outputs are identical. Because every default
+/// method body delegates to the built-in HTML renderer, a mismatch means a
+/// default no longer reproduces the HTML output it promises.
+fn assert_inherits_html(
+    source: &str,
+    step: SubstitutionStep,
+    configure: impl Fn(Parser) -> Parser,
+) {
+    let render = |parser: &Parser| {
+        let mut content = Content::from(Span::new(source));
+        step.apply(&mut content, parser, None);
+        content.rendered().to_string()
+    };
+
+    let expected = render(&configure(Parser::default()));
+    let actual =
+        render(&configure(Parser::default()).with_inline_substitution_renderer(InheritEverything));
+
+    assert_eq!(
+        actual, expected,
+        "mismatch rendering {source:?} via {step:?}"
+    );
+}
+
+#[test]
+fn an_empty_renderer_matches_the_html_renderer_for_every_substitution() {
+    let plain = |p: Parser| p;
+
+    // Set the `experimental` attribute so the UI macros (`btn`/`kbd`/`menu`)
+    // are recognized rather than passed through literally.
+    let experimental = |p: Parser| {
+        p.with_intrinsic_attribute_bool("experimental", true, ModificationContext::Anywhere)
+    };
+
+    // One case per default method body, driving the substitution step that
+    // reaches it. Each exercises the inherited default and confirms it delegates
+    // to the built-in HTML renderer.
+    assert_inherits_html("a < b & c > d", SubstitutionStep::SpecialCharacters, plain);
+    assert_inherits_html(
+        "(C) (R) (TM) -- ... -> <- => <= it's",
+        SubstitutionStep::CharacterReplacements,
+        plain,
+    );
+
+    // `#alert#` with a role takes the `<span>` branch of the `Mark` quote type
+    // (a bare `#marked#` would use `<mark>`), covering both.
+    assert_inherits_html(
+        "plain *bold* _em_ `code` #marked# [red]#alert#",
+        SubstitutionStep::Quotes,
+        plain,
+    );
+
+    // A trailing ` +` forces a hard line break, handled in post-replacement.
+    assert_inherits_html(
+        "first line +\nsecond line",
+        SubstitutionStep::PostReplacement,
+        plain,
+    );
+
+    // A `<N>` callout marker arrives here already special-character-escaped.
+    assert_inherits_html("code &lt;1&gt;", SubstitutionStep::Callouts, plain);
+
+    // The macros step reaches the image, icon, link, anchor, index-term, and
+    // footnote renderers.
+    assert_inherits_html(
+        "image:foo.png[Alt,200,100]",
+        SubstitutionStep::Macros,
+        plain,
+    );
+    assert_inherits_html("icon:home[]", SubstitutionStep::Macros, plain);
+    assert_inherits_html(
+        "link:https://example.org[text]",
+        SubstitutionStep::Macros,
+        plain,
+    );
+    assert_inherits_html("[[an-anchor]]", SubstitutionStep::Macros, plain);
+    assert_inherits_html(
+        "a ((visible term)) and (((concealed,term)))",
+        SubstitutionStep::Macros,
+        plain,
+    );
+    assert_inherits_html(
+        "a footnote:[the note here]",
+        SubstitutionStep::Macros,
+        plain,
+    );
+
+    // The UI macros require the `experimental` attribute.
+    assert_inherits_html("press btn:[OK]", SubstitutionStep::Macros, experimental);
+    assert_inherits_html("hit kbd:[Ctrl+T]", SubstitutionStep::Macros, experimental);
+    assert_inherits_html(
+        "open menu:File[Save > As]",
+        SubstitutionStep::Macros,
+        experimental,
+    );
+}
+
+#[test]
+fn an_empty_renderer_matches_the_html_renderer_for_cross_references() {
+    // Cross-reference rendering is deferred past the macros step to reference
+    // resolution, so it is exercised through a full parse rather than a single
+    // substitution step. The document has one resolved reference (to the
+    // anchored target) and one unresolved reference, covering both branches.
+    let source = concat!(
+        "[[the-target]]The target paragraph.\n\n",
+        "See <<the-target>> and <<missing>>.\n",
+    );
+
+    let default_doc = Parser::default().parse(source);
+
+    let inherit_doc = Parser::default()
+        .with_inline_substitution_renderer(InheritEverything)
+        .parse(source);
+
+    assert_eq!(
+        rendered_paragraphs(&inherit_doc),
+        rendered_paragraphs(&default_doc)
     );
 }
