@@ -11,7 +11,6 @@ mod author_line;
 pub use author_line::{AuthorLine, Authors};
 
 mod catalog;
-#[allow(unused)] // TEMPORARY while building
 pub(crate) use catalog::DuplicateIdError;
 pub use catalog::{Catalog, Footnote, ImageReference, RefEntry, RefType};
 
