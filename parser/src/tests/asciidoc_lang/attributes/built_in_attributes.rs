@@ -42,7 +42,7 @@ In the example above, the default value of `auto` will be assigned to `toc` sinc
     );
 
     let mut parser = Parser::default();
-    parser.parse("= Title of Document\n:toc:");
+    let _ = parser.parse("= Title of Document\n:toc:");
 
     assert_eq!(
         parser.attribute_value("toc").as_maybe_str().unwrap(),
@@ -76,7 +76,7 @@ The value assigned to an attribute in the document header replaces the default v
     );
 
     let mut parser = Parser::default();
-    parser.parse("= Title of My Document\n:doctype: book");
+    let _ = parser.parse("= Title of My Document\n:doctype: book");
 
     assert_eq!(
         parser.attribute_value("doctype").as_maybe_str().unwrap(),
@@ -111,7 +111,7 @@ This explicit user-defined value replaces the default value (assuming the attrib
     );
 
     let mut parser = Parser::default();
-    parser.parse("= My Document\n:imagesdir: ./images\n:iconsdir: ./icons\n:stylesdir: ./styles\n:scriptsdir: ./js");
+    let _ = parser.parse("= My Document\n:imagesdir: ./images\n:iconsdir: ./icons\n:stylesdir: ./styles\n:scriptsdir: ./js");
 
     assert_eq!(
         parser.attribute_value("imagesdir").as_maybe_str().unwrap(),

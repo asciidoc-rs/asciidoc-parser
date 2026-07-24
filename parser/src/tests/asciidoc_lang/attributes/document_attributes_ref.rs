@@ -1347,7 +1347,7 @@ fn relfilesuffix_tracks_outfilesuffix() {
     // Changing `outfilesuffix` (here, to a DocBook-style suffix) moves
     // `relfilesuffix` with it, rather than leaving it pinned at `.html`.
     let mut parser = Parser::default();
-    parser.parse("= Title\n:outfilesuffix: .xml\n");
+    let _ = parser.parse("= Title\n:outfilesuffix: .xml\n");
     assert_eq!(
         parser.attribute_value("outfilesuffix").as_maybe_str(),
         Some(".xml")
@@ -1359,7 +1359,7 @@ fn relfilesuffix_tracks_outfilesuffix() {
 
     // An explicit `relfilesuffix` wins and no longer tracks `outfilesuffix`.
     let mut parser = Parser::default();
-    parser.parse("= Title\n:outfilesuffix: .xml\n:relfilesuffix: .adoc\n");
+    let _ = parser.parse("= Title\n:outfilesuffix: .xml\n:relfilesuffix: .adoc\n");
     assert_eq!(
         parser.attribute_value("relfilesuffix").as_maybe_str(),
         Some(".adoc")
@@ -1385,7 +1385,7 @@ fn relfilesuffix_tracks_outfilesuffix() {
 #[test]
 fn relfilesuffix_tracks_outfilesuffix_counter_overlay() {
     let mut parser = Parser::default();
-    parser.parse("= Title\n\nSuffix is {counter:outfilesuffix}.\n");
+    let _ = parser.parse("= Title\n\nSuffix is {counter:outfilesuffix}.\n");
 
     // Resolving the counter overlays `outfilesuffix`: the counter increments its
     // last character, so `.html` becomes `.htmm`. An unset `relfilesuffix` must
