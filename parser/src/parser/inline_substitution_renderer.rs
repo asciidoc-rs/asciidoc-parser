@@ -54,7 +54,7 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// `text` is the passthrough's already-substituted content (its `subs` have
     /// been applied). The default implementation writes it verbatim, which is
-    /// what an HTML renderer wants — a passthrough is, by definition, emitted
+    /// what an HTML renderer wants – a passthrough is, by definition, emitted
     /// as-is. A structure-recording renderer can override this to capture the
     /// passthrough as its own node rather than folding it into surrounding
     /// text.

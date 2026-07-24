@@ -33,8 +33,8 @@
 //! # Correct numbering via pre-substitution capture
 //!
 //! The AST pass runs on a *clone* of the parser taken **before** the canonical
-//! pass mutates it. Every stateful side effect of substitution — counters,
-//! footnote numbering, the reference catalog — lives in `RefCell`/`Cell` fields
+//! pass mutates it. Every stateful side effect of substitution – counters,
+//! footnote numbering, the reference catalog – lives in `RefCell`/`Cell` fields
 //! that the parser's derived `Clone` deep-copies, so the clone (a) cannot
 //! perturb the real document and (b) starts from the identical state, and thus
 //! reproduces the *same* counter and footnote numbers the rendered output uses.
@@ -49,7 +49,7 @@
 //! The document's later resolution pass calls
 //! [`resolve_xref_nodes`] (from
 //! [`Content::resolve_references`](crate::content::Content)), filling each
-//! xref's `href` — so after parsing, block-content cross-references expose
+//! xref's `href` – so after parsing, block-content cross-references expose
 //! their resolved destination.
 //!
 //! # Known limitations
@@ -58,13 +58,13 @@
 //!   source).** Both are consequences of the marker approach, not oversights.
 //!   The tree is parsed from the *rendered* buffer (each substitution step
 //!   rebuilds `Content::rendered` as a fresh owned `String`), which no longer
-//!   maps back to source offsets — the very correlation issue #564 declined to
-//!   thread through the pipeline — and whose slices cannot outlive the pass, so
+//!   maps back to source offsets – the very correlation issue #564 declined to
+//!   thread through the pipeline – and whose slices cannot outlive the pass, so
 //!   they must be copied. Consumers that need to locate content in source can
 //!   use the block-granular
 //!   [`Content::original`](crate::content::Content::original). True per-node
 //!   spans (and zero-copy borrowing) would require making the AST the primary
-//!   artifact and deriving HTML from it — a larger refactor tracked separately.
+//!   artifact and deriving HTML from it – a larger refactor tracked separately.
 //! * Deeply nested quote formatting mirrors Asciidoctor's regex-ordering
 //!   quirks: whichever quote sub runs first is the outer marked node.
 //! * Cross-references inside footnote text or section titles resolve for the
@@ -84,12 +84,16 @@ use crate::{
     },
 };
 
-/// A node in the experimental inline AST.
+/// A node in the semantic inline AST exposed by
+/// [`Content::inline_nodes`](crate::content::Content::inline_nodes).
 ///
-/// This is an owned tree (the spike favors simplicity over borrowing through
-/// the marker stream). A production version would likely borrow `'src` where it
-/// can and carry per-node source spans.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// This is an owned tree: node text is copied out of the substitution buffer
+/// rather than borrowed from the source. (The rendered buffer the tree is
+/// parsed from is rebuilt as it goes and does not map back to source offsets,
+/// so the nodes carry no per-node source spans; use
+/// [`Content::original`](crate::content::Content::original) for block-granular
+/// location.)
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum InlineNode {
     /// A run of literal text between formatting elements. Special characters
     /// and character replacements are folded into the surrounding text (as
@@ -165,8 +169,8 @@ pub enum InlineNode {
         /// The footnote's id, if it was given one.
         id: Option<String>,
 
-        /// The footnote number as rendered in this (spike) pass; not
-        /// authoritative (see module limitations).
+        /// The footnote's number. This matches the rendered output: capture
+        /// runs from the same document-order state, so the counter is shared.
         index: Option<String>,
 
         /// `true` when this occurrence references an existing footnote.
@@ -191,9 +195,9 @@ pub enum InlineNode {
         id: String,
     },
 
-    /// A catch-all leaf for inline macros this spike does not model in detail
-    /// (keyboard, button, menu, icon, index term, callout). `kind` names the
-    /// macro; `text` is a best-effort display string.
+    /// A catch-all leaf for inline macros not yet modeled in detail (keyboard,
+    /// button, menu, icon, index term, callout). `kind` names the macro; `text`
+    /// is a best-effort display string.
     Macro {
         /// A short kind label (e.g. `"kbd"`, `"menu"`, `"icon"`).
         kind: &'static str,
@@ -204,7 +208,7 @@ pub enum InlineNode {
 }
 
 /// The style applied by an [`InlineNode::Styled`] span.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InlineStyle {
     /// `*strong*` (bold).
     Strong,
@@ -398,7 +402,7 @@ impl InlineSubstitutionRenderer for InlineAstRecorder {
         self.inner.render_character_replacement(type_, dest);
     }
 
-    fn render_quoted_substitition(
+    fn render_quoted_substitution(
         &self,
         type_: QuoteType,
         _scope: QuoteScope,
@@ -737,8 +741,8 @@ fn build_node(raw: &Raw, children: Vec<InlineNode>) -> InlineNode {
 ///
 /// `content` should be in its pre-substitution state (its `rendered` still
 /// holds the filtered source text), so the AST pass sees exactly what the
-/// canonical pass will. This clones `parser` so the AST pass — which re-runs
-/// stateful substitutions — does not perturb the caller's parser state; because
+/// canonical pass will. This clones `parser` so the AST pass – which re-runs
+/// stateful substitutions – does not perturb the caller's parser state; because
 /// all such state lives in `RefCell`/`Cell` fields that `Parser`'s derived
 /// `Clone` deep- copies, the clone reproduces identical counter and footnote
 /// numbering. The clone's renderer is wrapped so text-like substitutions render
@@ -1003,7 +1007,7 @@ mod tests {
         let mut p = Parser::default();
         let before = p
             .parse("A *bold* claim.")
-            .nested_blocks()
+            .child_blocks()
             .next()
             .unwrap()
             .rendered_content()
@@ -1013,7 +1017,7 @@ mod tests {
 
         let after = p
             .parse("A *bold* claim.")
-            .nested_blocks()
+            .child_blocks()
             .next()
             .unwrap()
             .rendered_content()
@@ -1026,7 +1030,7 @@ mod tests {
     /// Returns the inline AST of the first simple block, requiring capture to
     /// have produced one.
     fn block_nodes<'d>(doc: &'d crate::Document<'d>) -> &'d [InlineNode] {
-        doc.nested_blocks()
+        doc.child_blocks()
             .find_map(|b| match b {
                 crate::blocks::Block::Simple(s) => Some(s.content()),
                 _ => None,
@@ -1040,7 +1044,7 @@ mod tests {
         let mut p = Parser::default();
         let doc = p.parse("A *bold* claim.");
         let simple = doc
-            .nested_blocks()
+            .child_blocks()
             .find_map(|b| match b {
                 crate::blocks::Block::Simple(s) => Some(s.content()),
                 _ => None,
@@ -1078,7 +1082,7 @@ mod tests {
         let doc = p.parse("First.footnote:[one]\n\nSecond.footnote:[two]");
 
         let second = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|b| match b {
                 crate::blocks::Block::Simple(s) => s.content().inline_nodes(),
                 _ => None,
@@ -1104,7 +1108,7 @@ mod tests {
 
         // The xref lives in the second simple block ("See <<intro>>.").
         let xref = doc
-            .nested_blocks()
+            .child_blocks()
             .flat_map(|b| collect_simple(b))
             .find_map(|c| {
                 c.inline_nodes()?
@@ -1133,7 +1137,7 @@ mod tests {
         if let crate::blocks::Block::Simple(s) = block {
             out.push(s.content());
         }
-        for child in block.nested_blocks() {
+        for child in block.child_blocks() {
             out.extend(collect_simple(child));
         }
         out
