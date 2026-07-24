@@ -998,6 +998,36 @@ mod tests {
     use crate::tests::prelude::*;
 
     #[test]
+    fn attributes_iterator_supports_exact_size_double_ended_and_nth() {
+        // Exercises the opaque `HeaderAttributes` iterator's full surface:
+        // `ExactSizeIterator` (and, through its default `len`, `size_hint`),
+        // `DoubleEndedIterator`, and the `nth` override.
+        let doc = Parser::default().parse(":alpha: 1\n:bravo: 2\n:charlie: 3\n\nbody\n");
+        let header = doc.header();
+
+        // Collect once to learn the order and length without hard-coding a count.
+        let names: Vec<_> = header
+            .attributes()
+            .map(|a| a.name().data().to_string())
+            .collect();
+
+        assert!(names.len() >= 3);
+        assert_eq!(names.first().map(String::as_str), Some("alpha"));
+
+        assert_eq!(header.attributes().len(), names.len());
+
+        assert_eq!(
+            header.attributes().next_back().map(|a| a.name().data()),
+            names.last().map(String::as_str),
+        );
+
+        assert_eq!(
+            header.attributes().nth(1).map(|a| a.name().data()),
+            Some("bravo"),
+        );
+    }
+
+    #[test]
     fn impl_clone() {
         // Silly test to mark the #[derive(...)] line as covered.
         let mut parser = Parser::default();

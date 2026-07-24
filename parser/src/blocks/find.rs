@@ -854,6 +854,51 @@ mod tests {
     }
 
     #[test]
+    fn leaf_block_types_report_no_child_blocks() {
+        // Every leaf block type answers its inherent `child_blocks()` with an
+        // empty iterator.
+        // The trailing section (a non-leaf block) exercises the `_` arm below.
+        let doc = Parser::default().parse(
+            "A paragraph.\n\nimage::sunset.jpg[]\n\n----\nlisting\n----\n\n|===\n|cell\n|===\n\n'''\n\n== Section\n\nInside.\n",
+        );
+
+        let mut saw_simple = false;
+        let mut saw_media = false;
+        let mut saw_raw = false;
+        let mut saw_table = false;
+        let mut saw_break = false;
+
+        for block in doc.descendant_blocks() {
+            match block {
+                Block::Simple(b) => {
+                    assert_eq!(b.child_blocks().count(), 0);
+                    saw_simple = true;
+                }
+                Block::Media(b) => {
+                    assert_eq!(b.child_blocks().count(), 0);
+                    saw_media = true;
+                }
+                Block::RawDelimited(b) => {
+                    assert_eq!(b.child_blocks().count(), 0);
+                    saw_raw = true;
+                }
+                Block::Table(b) => {
+                    assert_eq!(b.child_blocks().count(), 0);
+                    saw_table = true;
+                }
+                Block::Break(b) => {
+                    assert_eq!(b.child_blocks().count(), 0);
+                    saw_break = true;
+                }
+                _ => {}
+            }
+        }
+
+        // Ensure the fixture actually exercised each leaf type.
+        assert!(saw_simple && saw_media && saw_raw && saw_table && saw_break);
+    }
+
+    #[test]
     fn child_blocks_does_not_enter_table_cells() {
         // A table reports no direct child blocks; its AsciiDoc cell content is a
         // separate nested document, reachable only through `find_blocks` with
