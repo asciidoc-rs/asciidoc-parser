@@ -18,10 +18,9 @@ use crate::{
 ///
 /// ## Overriding only what differs
 ///
-/// Every method has a default body that delegates to the built-in
-/// [`HtmlSubstitutionRenderer`], so an implementation only needs to override
-/// the substitutions whose output it wants to change and inherits HTML output
-/// for the rest. In particular, [`image_uri`](Self::image_uri) and
+/// Every method has a default body, so an implementation only needs to override
+/// the substitutions whose output it wants to change and inherits the built-in
+/// HTML output for the rest. In particular, [`image_uri`](Self::image_uri) and
 /// [`render_image`](Self::render_image) inherit the crate's `data-uri`
 /// embedding and `opts=inline` SVG handling – which read bytes through the
 /// [`ImageFileHandler`](crate::parser::ImageFileHandler) and
@@ -29,15 +28,19 @@ use crate::{
 /// [`Parser`] – so a downstream renderer gets that behavior without needing to
 /// reproduce it.
 ///
-/// Note that the defaults delegate to the HTML renderer's *own* methods rather
-/// than routing back through `self`: an override of one method does not change
-/// what a still-defaulted sibling emits. For example, overriding
+/// Note that these defaults delegate to the HTML renderer's *own* methods
+/// rather than routing back through `self`: an override of one method does not
+/// change what a still-defaulted sibling emits. For example, overriding
 /// [`image_uri`](Self::image_uri) alone does not change the URI that the
-/// inherited [`render_image`](Self::render_image) produces – override
-/// `render_image` too (calling `self.image_uri(…)`) if the two must agree. A
-/// renderer that resolves asset URIs itself can reach the registered handlers
-/// through [`Parser::image_file_handler`](crate::Parser::image_file_handler)
-/// and [`Parser::svg_file_handler`](crate::Parser::svg_file_handler).
+/// inherited [`render_image`](Self::render_image) or
+/// [`render_icon`](Self::render_icon) produces – override that method too
+/// (calling `self.image_uri(…)`) if the two must agree. The sole exception is
+/// [`icon_uri`](Self::icon_uri): its default derives an icon path and then
+/// calls `self.image_uri(…)`, so it alone *does* reflect an `image_uri`
+/// override. A renderer that resolves asset URIs itself can reach the
+/// registered handlers through
+/// [`Parser::image_file_handler`](crate::Parser::image_file_handler) and
+/// [`Parser::svg_file_handler`](crate::Parser::svg_file_handler).
 pub trait InlineSubstitutionRenderer: Debug {
     /// Renders the substitution for a special character.
     ///
