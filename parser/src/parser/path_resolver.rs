@@ -1,10 +1,49 @@
-use std::sync::LazyLock;
+use std::{fmt::Debug, sync::LazyLock};
 
 use regex::Regex;
 
 /// A `PathResolver` handles all operations for resolving, cleaning, and joining
-/// paths. This struct includes operations for handling both web paths (request
-/// URIs) and system paths.
+/// paths, covering both web paths (request URIs) and system paths.
+///
+/// The crate calls [`web_path`](Self::web_path) to turn an asset target (an
+/// image `src`, a stylesheet href, and so on) – optionally relative to a start
+/// path – into the clean, resolved path that appears in the rendered output.
+/// Clean paths are void of duplicate parent and current directory references in
+/// the path name.
+///
+/// This is one of the crate's extensibility seams, alongside
+/// [`IncludeFileHandler`], [`ImageFileHandler`], [`SvgFileHandler`],
+/// [`DocinfoFileHandler`], [`ReferenceResolver`], and
+/// [`InlineSubstitutionRenderer`]. A host that needs custom path or URL
+/// rewriting – a virtual filesystem, a content root, URL slugs (as an
+/// Antora- or Zola-style site generator might) – can supply its own
+/// implementation via [`Parser::with_path_resolver`]. The default
+/// implementation, [`DefaultPathResolver`], mirrors Ruby Asciidoctor's
+/// `PathResolver`.
+///
+/// [`IncludeFileHandler`]: crate::parser::IncludeFileHandler
+/// [`ImageFileHandler`]: crate::parser::ImageFileHandler
+/// [`SvgFileHandler`]: crate::parser::SvgFileHandler
+/// [`DocinfoFileHandler`]: crate::parser::DocinfoFileHandler
+/// [`ReferenceResolver`]: crate::parser::ReferenceResolver
+/// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+/// [`Parser::with_path_resolver`]: crate::Parser::with_path_resolver
+pub trait PathResolver: Debug {
+    /// Resolve a web path from the target and start paths.
+    ///
+    /// The main function of this operation is to resolve any parent references
+    /// and remove any self references.
+    ///
+    /// The target is assumed to be a path, not a qualified URI. That check
+    /// should happen before this method is invoked.
+    ///
+    /// Returns a path that joins the target path with the start path with any
+    /// parent references resolved and self references removed.
+    fn web_path(&self, target: &str, start: Option<&str>) -> String;
+}
+
+/// The default [`PathResolver`] implementation, mirroring the Ruby Asciidoctor
+/// `PathResolver` class.
 ///
 /// The main emphasis of the struct is on creating clean and secure paths. Clean
 /// paths are void of duplicate parent and current directory references in the
@@ -21,7 +60,7 @@ use regex::Regex;
 /// Posix and Windows paths independent of the operating system on which it
 /// runs. This makes the class both deterministic and easier to test.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PathResolver {
+pub struct DefaultPathResolver {
     /// File separator to use for path operations. (Defaults to
     /// platform-appropriate separator.)
     pub file_separator: char,
@@ -36,7 +75,7 @@ pub struct PathResolver {
     // caller-supplied base over an implicit working directory.
 }
 
-impl Default for PathResolver {
+impl Default for DefaultPathResolver {
     fn default() -> Self {
         Self {
             file_separator: std::path::MAIN_SEPARATOR,
@@ -44,27 +83,8 @@ impl Default for PathResolver {
     }
 }
 
-impl PathResolver {
-    /// Normalize path by converting any backslashes to forward slashes.
-    pub fn posixify(&self, path: &str) -> String {
-        if self.file_separator == '\\' && path.contains('\\') {
-            path.replace('\\', "/")
-        } else {
-            path.to_string()
-        }
-    }
-
-    /// Resolve a web path from the target and start paths.
-    ///
-    /// The main function of this operation is to resolve any parent references
-    /// and remove any self references.
-    ///
-    /// The target is assumed to be a path, not a qualified URI. That check
-    /// should happen before this method is invoked.
-    ///
-    /// Returns a path that joins the target path with the start path with any
-    /// parent references resolved and self references removed.
-    pub fn web_path(&self, target: &str, start: Option<&str>) -> String {
+impl PathResolver for DefaultPathResolver {
+    fn web_path(&self, target: &str, start: Option<&str>) -> String {
         let mut target = self.posixify(target);
         let start = start.map(|start| self.posixify(start));
 
@@ -119,6 +139,17 @@ impl PathResolver {
             "{uri_prefix}{resolved_path}",
             uri_prefix = uri_prefix.unwrap_or_default()
         )
+    }
+}
+
+impl DefaultPathResolver {
+    /// Normalize path by converting any backslashes to forward slashes.
+    pub fn posixify(&self, path: &str) -> String {
+        if self.file_separator == '\\' && path.contains('\\') {
+            path.replace('\\', "/")
+        } else {
+            path.to_string()
+        }
     }
 
     /// Partition the path into path segments and remove self references (`.`)
@@ -302,14 +333,14 @@ pub(crate) struct WebPath(pub(crate) bool);
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use crate::parser::PathResolver;
+    use crate::parser::DefaultPathResolver;
 
     mod posixify {
-        use crate::parser::PathResolver;
+        use crate::parser::DefaultPathResolver;
 
         #[test]
         fn replaces_backslashes_if_windowsish() {
-            let pr = PathResolver {
+            let pr = DefaultPathResolver {
                 file_separator: '\\',
             };
 
@@ -318,7 +349,7 @@ mod tests {
 
         #[test]
         fn doesnt_replace_backslashes_if_posixish() {
-            let pr = PathResolver {
+            let pr = DefaultPathResolver {
                 file_separator: '/',
             };
 
@@ -327,7 +358,7 @@ mod tests {
 
         #[test]
         fn doesnt_replace_backslashes_if_none_exist() {
-            let pr = PathResolver {
+            let pr = DefaultPathResolver {
                 file_separator: '\\',
             };
 
@@ -336,11 +367,11 @@ mod tests {
     }
 
     mod web_path {
-        use crate::parser::PathResolver;
+        use crate::parser::{DefaultPathResolver, PathResolver};
 
         #[test]
         fn test_cases_from_asciidoctor_rb() {
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
 
             assert_eq!(pr.web_path("images", None), "images");
             assert_eq!(pr.web_path("./images", None), "./images");
@@ -513,7 +544,7 @@ mod tests {
             // to `/`. This guards the trailing-empty-segment stripping in
             // `partition_path` against regressing to a one-shot pop (which would
             // leave `//`, `///`, etc.).
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
 
             assert_eq!(pr.web_path("/", None), "/");
             assert_eq!(pr.web_path("//", None), "/");
@@ -525,7 +556,7 @@ mod tests {
 
     #[test]
     fn is_web_root() {
-        let pr = PathResolver::default();
+        let pr = DefaultPathResolver::default();
         assert!(pr.is_web_root("/blah"));
         assert!(!pr.is_web_root(""));
         assert!(!pr.is_web_root("./blah"));
@@ -533,7 +564,7 @@ mod tests {
 
     mod partition_path {
         use super::super::WebPath;
-        use crate::parser::PathResolver;
+        use crate::parser::DefaultPathResolver;
 
         fn seg(items: &[&str]) -> Vec<String> {
             items.iter().map(|s| (*s).to_owned()).collect()
@@ -541,7 +572,7 @@ mod tests {
 
         #[test]
         fn relative_system_path() {
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
             assert_eq!(
                 pr.partition_path("sample/path", WebPath(false)),
                 (seg(&["sample", "path"]), None)
@@ -550,7 +581,7 @@ mod tests {
 
         #[test]
         fn dot_slash_system_path() {
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
             assert_eq!(
                 pr.partition_path("./sample/path", WebPath(false)),
                 (seg(&["sample", "path"]), Some("./".to_owned()))
@@ -559,7 +590,7 @@ mod tests {
 
         #[test]
         fn self_references_are_removed() {
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
             assert_eq!(
                 pr.partition_path("sample/./path", WebPath(false)),
                 (seg(&["sample", "path"]), None)
@@ -568,7 +599,7 @@ mod tests {
 
         #[test]
         fn absolute_system_path() {
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
             assert_eq!(
                 pr.partition_path("/sample/path", WebPath(false)),
                 (seg(&["sample", "path"]), Some("/".to_owned()))
@@ -577,7 +608,7 @@ mod tests {
 
         #[test]
         fn unc_path() {
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
             assert_eq!(
                 pr.partition_path("//server/share/path", WebPath(false)),
                 (seg(&["server", "share", "path"]), Some("//".to_owned()))
@@ -586,7 +617,7 @@ mod tests {
 
         #[test]
         fn uri_classloader_rooted() {
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
             assert_eq!(
                 pr.partition_path("uri:classloader:/sample/path", WebPath(false)),
                 (
@@ -598,7 +629,7 @@ mod tests {
 
         #[test]
         fn uri_classloader_relative() {
-            let pr = PathResolver::default();
+            let pr = DefaultPathResolver::default();
             assert_eq!(
                 pr.partition_path("uri:classloader:sample/path", WebPath(false)),
                 (
@@ -610,7 +641,7 @@ mod tests {
 
         #[test]
         fn windows_drive_letter() {
-            let pr = PathResolver {
+            let pr = DefaultPathResolver {
                 file_separator: '\\',
             };
 
@@ -622,7 +653,7 @@ mod tests {
 
         #[test]
         fn windows_drive_letter_forward_slashes() {
-            let pr = PathResolver {
+            let pr = DefaultPathResolver {
                 file_separator: '\\',
             };
 
@@ -637,7 +668,7 @@ mod tests {
             // Without a Windows-style separator, a drive-letter prefix is not
             // treated as a root. (Constructed explicitly rather than via
             // `default()`, whose separator is platform-dependent.)
-            let pr = PathResolver {
+            let pr = DefaultPathResolver {
                 file_separator: '/',
             };
 
