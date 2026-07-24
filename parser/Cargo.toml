@@ -21,8 +21,8 @@ self_cell = "1.2.0"
 thiserror = "2.0.1"
 
 [dev-dependencies]
-codspeed-criterion-compat = "5.0.0"
-criterion = "0.8.0"
+codspeed-criterion-compat = "5.0.1"
+criterion = "0.8.2"
 pretty_assertions_sorted = "1.2.3"
 
 [[bench]]
