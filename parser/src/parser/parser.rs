@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -256,7 +257,14 @@ pub struct Parser {
     /// attribute assignment to such a name is silently ignored. The set is
     /// saved and restored around each cell, so the lock applies only within
     /// the cell (and nests correctly).
-    pub(crate) locked_attribute_names: HashSet<String>,
+    ///
+    /// The overwhelming majority of locked names are built-in attributes, whose
+    /// names are already `&'static str`, so entries are stored as
+    /// [`Cow<'static, str>`]: a built-in is locked with a borrowed static name
+    /// (no allocation), and only a genuinely dynamic (parent-defined) name is
+    /// owned. This keeps the per-cell rebuild – which runs once for every
+    /// AsciiDoc cell – from allocating a `String` per built-in attribute.
+    pub(crate) locked_attribute_names: HashSet<Cow<'static, str>>,
 
     /// Number of AsciiDoc table cells currently being parsed in the call stack.
     ///
@@ -287,6 +295,42 @@ pub struct Parser {
     /// counts Markdown-style blockquotes (which are not nested documents), so
     /// the two cannot be merged.
     pub(crate) owned_subsource_depth: usize,
+
+    /// Number of nested block-parsing scopes currently open on the call stack.
+    ///
+    /// Every level of block nesting – a delimited block's body, a section body,
+    /// an AsciiDoc table cell, a nested list – is parsed by a fresh recursive
+    /// descent (through [`parse_blocks_until`] or
+    /// [`ListBlock::parse_inside_list`]) that consumes native stack. Without a
+    /// bound, a small crafted document (strictly-increasing delimiters, or
+    /// deeply-nested list markers) drives arbitrarily deep recursion and
+    /// overflows the stack – an *uncatchable* abort that takes down the whole
+    /// host process, not just the parse. This counter is incremented on entry
+    /// to each such scope and decremented on exit; when it would exceed
+    /// [`max_block_nesting`](Self::max_block_nesting) the over-nested content
+    /// is truncated with a [`MaxBlockNestingExceeded`] warning instead of
+    /// being descended into (see issue #885).
+    ///
+    /// [`parse_blocks_until`]: crate::blocks::parse_utils::parse_blocks_until
+    /// [`ListBlock::parse_inside_list`]: crate::blocks::ListBlock
+    /// [`MaxBlockNestingExceeded`]:
+    /// crate::warnings::WarningType::MaxBlockNestingExceeded
+    pub(crate) block_nesting_depth: usize,
+
+    /// The block-nesting cap ([`max_block_nesting`](Self::max_block_nesting))
+    /// resolved once per document, so the guard consulted on *every*
+    /// [`parse_blocks_until`] scope entry is a plain integer compare rather
+    /// than a document-attribute lookup (a `RefCell` borrow, several map
+    /// lookups, a string clone, and a parse) on that hot path.
+    ///
+    /// `max-block-nesting` is API-only, so its value cannot change mid-parse;
+    /// [`parse_deferred`](Self::parse_deferred) refreshes this from the
+    /// resolved attribute at the start of each parse. It is seeded with the
+    /// built-in default so a block parser invoked directly in a unit test
+    /// (bypassing `parse_deferred`) still sees the right cap.
+    ///
+    /// [`parse_blocks_until`]: crate::blocks::parse_utils::parse_blocks_until
+    pub(crate) block_nesting_limit: usize,
 
     /// Source map of the document currently being parsed, populated by
     /// [`Document::parse`] for the duration of the parse (and `None` outside
@@ -514,6 +558,8 @@ impl Default for Parser {
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
             owned_subsource_depth: 0,
+            block_nesting_depth: 0,
+            block_nesting_limit: Self::DEFAULT_MAX_BLOCK_NESTING,
             source_map: None,
             owned_cell_source_maps: vec![],
             owned_cell_warnings: RefCell::new(vec![]),
@@ -527,6 +573,11 @@ impl Default for Parser {
 }
 
 impl Parser {
+    /// The default value of [`max_block_nesting`](Self::max_block_nesting),
+    /// mirroring the `max-block-nesting` built-in default (see
+    /// [`built_in_attrs`](super::built_in_attrs)).
+    pub(crate) const DEFAULT_MAX_BLOCK_NESTING: usize = 32;
+
     /// Parse a UTF-8 string as an AsciiDoc document.
     ///
     /// The [`Document`] data structure returned by this call has a '`static`
@@ -617,6 +668,16 @@ impl Parser {
         // fresh "now"; a parse that never references one does no datetime work.
         *self.datetime_context.borrow_mut() = None;
 
+        // Strip a leading UTF-8 byte-order mark (U+FEFF), which is valid but
+        // non-content in a UTF-8 document. Left in place it becomes the first
+        // character of the first line and defeats header, front-matter, and
+        // section recognition (e.g. a leading `= ` title), silently misparsing
+        // the document. Asciidoctor strips it likewise. This is independent of
+        // UTF-16 transcoding, which remains out of scope; it handles only the
+        // UTF-8 encoding of the mark. This must precede front-matter handling
+        // and preprocessing, both of which key off the first line.
+        let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+
         // Drop leading YAML-style front matter (and record it in the
         // `front-matter` attribute) when `skip-front-matter` is set, before the
         // source reaches the preprocessor or header parser.
@@ -658,6 +719,18 @@ impl Parser {
         // Reset counter (and captioned-block) numbering for each new document.
         self.counter_values.borrow_mut().clear();
         self.locked_counter_values.borrow_mut().clear();
+
+        // Start each parse at the outermost block-nesting level. The counter is
+        // otherwise kept balanced by matched increment/decrement pairs, so this
+        // only matters if a prior parse was abandoned mid-flight; it is reset
+        // here (rather than in the recursive cell/blockquote paths) because
+        // `parse_deferred` runs only for the top-level document.
+        self.block_nesting_depth = 0;
+
+        // Resolve the block-nesting cap once, now, so the guard on the hot
+        // `parse_blocks_until` path is a plain integer compare. The attribute is
+        // API-only and so cannot change mid-parse.
+        self.block_nesting_limit = self.max_block_nesting();
 
         Document::parse(
             &preprocessed_source,
@@ -980,6 +1053,74 @@ impl Parser {
             InterpretedValue::Value(v) => v.trim().parse::<i32>().unwrap_or(0),
             _ => 0,
         }
+    }
+
+    /// Resolves the maximum block-nesting depth in effect from the
+    /// `max-block-nesting` attribute (default
+    /// [`DEFAULT_MAX_BLOCK_NESTING`](Self::DEFAULT_MAX_BLOCK_NESTING)). See
+    /// [`block_nesting_depth`](Self::block_nesting_depth).
+    ///
+    /// This walks the document-attribute machinery, so it is resolved once per
+    /// parse into [`block_nesting_limit`](Self::block_nesting_limit) rather
+    /// than consulted on the hot [`parse_blocks_until`] path; use
+    /// [`block_nesting_limit_reached`](Self::block_nesting_limit_reached)
+    /// there.
+    ///
+    /// The attribute is API-only, so a hostile document cannot raise its own
+    /// limit. The value is coerced as Ruby's `String#to_i` would (matching how
+    /// `max-include-depth` is read): a non-positive result yields `0` – which
+    /// permits only the outermost, document-level block scope – while a
+    /// positive value too large for `usize` saturates rather than wrapping to
+    /// the "disabled" sentinel.
+    ///
+    /// [`parse_blocks_until`]: crate::blocks::parse_utils::parse_blocks_until
+    pub(crate) fn max_block_nesting(&self) -> usize {
+        match self.attribute_value("max-block-nesting") {
+            InterpretedValue::Value(value) => {
+                let depth = super::preprocessor::ruby_to_i(&value);
+                if depth <= 0 {
+                    0
+                } else {
+                    usize::try_from(depth).unwrap_or(usize::MAX)
+                }
+            }
+
+            // An explicit empty `Set` coerces to 0; an explicit unset falls back
+            // to the built-in default.
+            InterpretedValue::Set => 0,
+            InterpretedValue::Unset => Self::DEFAULT_MAX_BLOCK_NESTING,
+        }
+    }
+
+    /// Reports whether descending into another nested block scope would exceed
+    /// the block-nesting limit, so the caller must stop nesting and truncate
+    /// instead. See [`block_nesting_depth`](Self::block_nesting_depth).
+    ///
+    /// This compares against the per-parse cached
+    /// [`block_nesting_limit`](Self::block_nesting_limit), so it stays cheap on
+    /// the hot [`parse_blocks_until`] path.
+    ///
+    /// [`parse_blocks_until`]: crate::blocks::parse_utils::parse_blocks_until
+    pub(crate) fn block_nesting_limit_reached(&self) -> bool {
+        self.block_nesting_depth > self.block_nesting_limit
+    }
+
+    /// Records a [`MaxBlockNestingExceeded`] warning anchored at `source`,
+    /// reporting the [`max_block_nesting`](Self::max_block_nesting) limit in
+    /// effect.
+    ///
+    /// [`MaxBlockNestingExceeded`]:
+    /// crate::warnings::WarningType::MaxBlockNestingExceeded
+    pub(crate) fn warn_block_nesting_exceeded<'src>(
+        &self,
+        source: crate::Span<'src>,
+        warnings: &mut Vec<Warning<'src>>,
+    ) {
+        warnings.push(Warning {
+            source,
+            warning: WarningType::MaxBlockNestingExceeded(self.block_nesting_limit),
+            origin: None,
+        });
     }
 
     /// Returns the effective `max-attribute-value-size`: the byte limit applied
@@ -2307,7 +2448,7 @@ impl Parser {
         // An attribute inherited from the parent document of an AsciiDoc table
         // cell is locked for the duration of that cell: a body assignment to it
         // is silently ignored (no warning), matching Asciidoctor.
-        if self.locked_attribute_names.contains(&attr_name) {
+        if self.locked_attribute_names.contains(attr_name.as_str()) {
             return;
         }
 
@@ -2787,6 +2928,60 @@ mod tests {
         }
     }
 
+    mod leading_byte_order_mark {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn bom_before_header_yields_title() {
+            // A UTF-8 BOM precedes the document header. It must be stripped so
+            // the `= ` title line is recognized rather than misparsed as a
+            // paragraph.
+            let doc = Parser::default().parse("\u{feff}= My Title\n\nbody");
+
+            assert_eq!(doc.header().title(), Some("My Title"));
+            assert_eq!(rendered_paragraphs(&doc), vec!["body"]);
+        }
+
+        #[test]
+        fn bom_before_paragraph_is_stripped() {
+            // With no header, the BOM must still be removed so it does not
+            // become the first character of the paragraph's content.
+            let doc = Parser::default().parse("\u{feff}Hello.\n");
+
+            assert_eq!(rendered_paragraphs(&doc), vec!["Hello."]);
+        }
+
+        #[test]
+        fn only_a_single_leading_bom_is_stripped() {
+            // Only one leading BOM is stripped; a second U+FEFF is ordinary
+            // content and survives into the paragraph text (matching
+            // Asciidoctor).
+            let doc = Parser::default().parse("\u{feff}\u{feff}Hello.\n");
+
+            assert_eq!(rendered_paragraphs(&doc), vec!["\u{feff}Hello."]);
+        }
+
+        #[test]
+        fn bom_precedes_front_matter_handling() {
+            // The BOM is stripped before front-matter detection, so a `---`
+            // fence that immediately follows the mark still opens front matter
+            // when `skip-front-matter` is set.
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool(
+                    "skip-front-matter",
+                    true,
+                    ModificationContext::ApiOnly,
+                )
+                .parse("\u{feff}---\ntitle: Doc\n---\n\n= My Title\n\nbody");
+
+            assert_eq!(
+                doc.attribute_value("front-matter"),
+                InterpretedValue::Value("title: Doc")
+            );
+            assert_eq!(doc.header().title(), Some("My Title"));
+        }
+    }
+
     mod remap_attr_name {
         use super::super::remap_attr_name;
 
@@ -2909,7 +3104,7 @@ mod tests {
         // Publish a cell source map (output line 1 came from `cell.adoc` line 2,
         // the way the preprocessor would record an include-expanded cell).
         let mut sm = SourceMap::default();
-        sm.append(1, SourceLine(Some("cell.adoc".to_owned()), 2));
+        sm.append(1, Some("cell.adoc"), 2, crate::parser::Fidelity::Verbatim);
         p.push_owned_cell_source_map(Rc::new(sm));
         assert!(p.is_in_owned_cell_source());
 

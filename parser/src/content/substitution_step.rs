@@ -10,7 +10,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
-        QuoteScope, QuoteType, SpecialCharacter,
+        QuoteScope, QuoteType, SpecialCharacter, attribute_lookup_name,
     },
     strings::CowStr,
     warnings::WarningType,
@@ -87,14 +87,19 @@ fn apply_special_characters(content: &mut Content<'_>, renderer: &dyn InlineSubs
         return;
     }
 
-    let mut result: Cow<'_, str> = content.rendered.to_string().into();
     let replacer = SpecialCharacterReplacer { renderer };
 
-    if let Cow::Owned(new_result) = SPECIAL_CHARS.replace_all(&result, replacer) {
-        result = new_result.into();
-    }
+    // The guard above guarantees at least one of `<`, `>`, `&` is present, so
+    // `replace_all` always rewrites the text and returns `Cow::Owned`, which
+    // `into_owned` then unwraps without copying. Seeding a working buffer with
+    // `to_string()` first would be a second, wholly redundant heap allocation.
+    // (A `Cow::Borrowed` cannot occur here; were it ever to, `into_owned` would
+    // clone the unchanged text, which is still correct.)
+    let rendered = SPECIAL_CHARS
+        .replace_all(content.rendered.as_ref(), replacer)
+        .into_owned();
 
-    content.rendered = result.into();
+    content.rendered = rendered.into();
 }
 
 static SPECIAL_CHARS: LazyLock<Regex> = LazyLock::new(|| {
@@ -456,7 +461,12 @@ fn apply_quotes(content: &mut Content<'_>, parser: &Parser) {
         return;
     }
 
-    let mut result: Cow<'_, str> = content.rendered.to_string().into();
+    // Start borrowed: the sniff above only proves a quote-like character is
+    // present, not that any pattern actually matches, so seeding an owned
+    // working buffer up front would allocate even when nothing is rewritten
+    // (a false-positive sniff). `owned` is materialized only once a pattern
+    // first produces `Cow::Owned`, and reused thereafter.
+    let mut owned: Option<String> = None;
 
     for sub in &*QUOTE_SUBS {
         let replacer = QuoteReplacer {
@@ -465,15 +475,28 @@ fn apply_quotes(content: &mut Content<'_>, parser: &Parser) {
             parser,
         };
 
-        if let Cow::Owned(new_result) = replace_with_lookahead(&sub.pattern, &result, replacer) {
-            result = new_result.into();
-        }
+        let replaced = {
+            let haystack = owned
+                .as_deref()
+                .unwrap_or_else(|| content.rendered.as_ref());
 
-        // If it's Cow::Borrowed, there was no match for this pattern, so no
-        // need to pay for a new string allocation.
+            match replace_with_lookahead(&sub.pattern, haystack, replacer) {
+                Cow::Owned(new_result) => Some(new_result),
+
+                // A borrowed result means this pattern did not match, so no need
+                // to pay for a new string allocation.
+                Cow::Borrowed(_) => None,
+            }
+        };
+
+        if let Some(new_result) = replaced {
+            owned = Some(new_result);
+        }
     }
 
-    content.rendered = result.into();
+    if let Some(rendered) = owned {
+        content.rendered = rendered.into();
+    }
 }
 
 static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
@@ -718,7 +741,7 @@ impl Replacer for AttributeReplacer<'_> {
         // here. This mirrors Asciidoctor's `sub_attributes`, which looks up
         // `key = $2.downcase`. The original spelling is still what is emitted
         // literally for a skipped or missing reference below.
-        let lookup_name = attr_name.to_lowercase();
+        let lookup_name = attribute_lookup_name(attr_name);
 
         if !self.parser.has_attribute(&lookup_name) {
             match self.mode {
@@ -981,7 +1004,12 @@ fn apply_character_replacements(
         return;
     }
 
-    let mut result: Cow<'_, str> = content.rendered.to_string().into();
+    // Start borrowed: the sniff above only proves a replaceable character is
+    // present, not that any pattern actually matches, so seeding an owned
+    // working buffer up front would allocate even when nothing is rewritten
+    // (a false-positive sniff). `owned` is materialized only once a pattern
+    // first produces `Cow::Owned`, and reused thereafter.
+    let mut owned: Option<String> = None;
 
     for repl in &*REPLACEMENTS {
         let replacer = CharacterReplacer {
@@ -989,15 +1017,28 @@ fn apply_character_replacements(
             renderer,
         };
 
-        if let Cow::Owned(new_result) = repl.pattern.replace_all(&result, replacer) {
-            result = new_result.into();
-        }
+        let replaced = {
+            let haystack = owned
+                .as_deref()
+                .unwrap_or_else(|| content.rendered.as_ref());
 
-        // If it's Cow::Borrowed, there was no match for this pattern, so no
-        // need to pay for a new string allocation.
+            match repl.pattern.replace_all(haystack, replacer) {
+                Cow::Owned(new_result) => Some(new_result),
+
+                // A borrowed result means this pattern did not match, so no need
+                // to pay for a new string allocation.
+                Cow::Borrowed(_) => None,
+            }
+        };
+
+        if let Some(new_result) = replaced {
+            owned = Some(new_result);
+        }
     }
 
-    content.rendered = result.into();
+    if let Some(rendered) = owned {
+        content.rendered = rendered.into();
+    }
 }
 
 struct CharacterReplacement {

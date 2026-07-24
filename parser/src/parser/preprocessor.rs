@@ -7,7 +7,7 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::AttributeMissing,
     document::{Attribute, InterpretedValue},
-    parser::{DeferredWarning, SourceLine, SourceMap},
+    parser::{DeferredWarning, Fidelity, SourceLine, SourceMap, Transform, attribute_lookup_name},
     span::MatchedItem,
     warnings::{Warning, WarningType},
 };
@@ -78,7 +78,7 @@ pub(crate) fn preprocess_with_initial_file_name(
     // document parsing.
     let mut temp_parser = parser.clone();
     let mut state = PreprocessorState::new(&mut temp_parser);
-    state.process_adoc_include(source, initial_file_name);
+    state.process_adoc_include(source, initial_file_name, &Reindented::default());
 
     // Any conditional directive still open once the whole source has been
     // processed was never closed by a matching `endif`.
@@ -101,6 +101,18 @@ struct PreprocessorState<'p> {
     output_line_number: usize,
     output: String,
     source_map: SourceMap,
+
+    /// The [`Fidelity`] currently in effect for emitted lines – that of the
+    /// segment governing the current output run, or [`Fidelity::Verbatim`] when
+    /// no segment has been appended for it yet (e.g. the root document's
+    /// leading lines, which map implicitly). A new segment is started
+    /// whenever the line being emitted has a different fidelity, so a
+    /// verbatim run interrupted by a transformed line splits into separate
+    /// segments. See [`record_origin`].
+    ///
+    /// [`record_origin`]: Self::record_origin
+    current_fidelity: Fidelity,
+
     warnings: Vec<DeferredWarning>,
 
     /// AsciiDoc files included by directives written in the outermost document,
@@ -222,6 +234,7 @@ impl<'p> PreprocessorState<'p> {
             output_line_number: 1,
             output: String::new(),
             source_map: SourceMap::default(),
+            current_fidelity: Fidelity::Verbatim,
             warnings: vec![],
             includes: vec![],
             max_include_depth,
@@ -235,7 +248,12 @@ impl<'p> PreprocessorState<'p> {
         self.conditional_stack.last().is_some_and(|c| c.skipping)
     }
 
-    fn process_adoc_include(&mut self, source: &str, file_name: Option<&str>) {
+    fn process_adoc_include(
+        &mut self,
+        source: &str,
+        file_name: Option<&str>,
+        reindented: &Reindented,
+    ) {
         self.include_depth += 1;
 
         let mut has_reported_file = file_name.is_none();
@@ -265,6 +283,13 @@ impl<'p> PreprocessorState<'p> {
 
             let source_line_number = line.line();
 
+            // The fidelity of this line if it is emitted verbatim: `Verbatim`
+            // unless the reindent pass for the enclosing include changed this
+            // line's content (tab expansion or `indent` normalization). Emit
+            // sites that instead rewrite or synthesize a line pass their own
+            // fidelity.
+            let content_fidelity = reindented.fidelity_for(source_line_number);
+
             // Inside a comment block, every line is raw: emit it verbatim, with
             // no directive or include processing, until the closing delimiter.
             if let Some(delimiter) = &comment_block_delimiter {
@@ -273,6 +298,7 @@ impl<'p> PreprocessorState<'p> {
                     line.data(),
                     file_name,
                     source_line_number,
+                    content_fidelity,
                     &mut has_reported_file,
                 );
                 if closes {
@@ -294,6 +320,7 @@ impl<'p> PreprocessorState<'p> {
                     line.data(),
                     file_name,
                     source_line_number,
+                    content_fidelity,
                     &mut has_reported_file,
                 );
                 continue;
@@ -323,10 +350,13 @@ impl<'p> PreprocessorState<'p> {
                     // emitted literally, matching Asciidoctor – unless we're
                     // skipping, in which case it's discarded like any other line.
                     if !self.skipping() {
+                        // The leading backslash is removed, so the emitted line
+                        // no longer matches the origin column-for-column.
                         self.emit_line(
                             &line.data()[1..],
                             file_name,
                             source_line_number,
+                            Fidelity::Transformed(Transform::Rewritten),
                             &mut has_reported_file,
                         );
                     }
@@ -366,6 +396,7 @@ impl<'p> PreprocessorState<'p> {
                     line.data(),
                     file_name,
                     source_line_number,
+                    content_fidelity,
                     &mut has_reported_file,
                 );
                 continue;
@@ -386,6 +417,7 @@ impl<'p> PreprocessorState<'p> {
                         line.data(),
                         file_name,
                         source_line_number,
+                        content_fidelity,
                         &mut has_reported_file,
                     );
                     continue;
@@ -426,13 +458,12 @@ impl<'p> PreprocessorState<'p> {
                 // We ignore warnings here since this is a quick pass through the content.
                 // Later, `Block::parse` will see the same warnings, if they occur, and will
                 // actually record them.
-                if !has_reported_file {
-                    has_reported_file = true;
-                    self.source_map.append(
-                        self.output_line_number,
-                        SourceLine(to_owned(file_name), source_line_number),
-                    );
-                }
+                self.record_origin(
+                    file_name,
+                    source_line_number,
+                    content_fidelity,
+                    &mut has_reported_file,
+                );
 
                 let mut warnings: Vec<Warning> = vec![];
                 self.parser
@@ -516,13 +547,12 @@ impl<'p> PreprocessorState<'p> {
                     // an arbitrary file, the directive is converted to a link to
                     // its target, matching Asciidoctor. The include file handler
                     // is never consulted in this case.
-                    if !has_reported_file {
-                        has_reported_file = true;
-                        self.source_map.append(
-                            self.output_line_number,
-                            SourceLine(to_owned(file_name), source_line_number),
-                        );
-                    }
+                    self.record_origin(
+                        file_name,
+                        source_line_number,
+                        Fidelity::Synthetic(Transform::SecureLinkRewrite),
+                        &mut has_reported_file,
+                    );
 
                     // A target containing a space would break the link macro,
                     // so it is wrapped in a `pass:c[…]` macro (matching
@@ -548,6 +578,7 @@ impl<'p> PreprocessorState<'p> {
                         line.data(),
                         file_name,
                         source_line_number,
+                        content_fidelity,
                         &mut has_reported_file,
                     );
                     continue;
@@ -573,6 +604,7 @@ impl<'p> PreprocessorState<'p> {
                         line.data(),
                         file_name,
                         source_line_number,
+                        content_fidelity,
                         &mut has_reported_file,
                     );
                     continue;
@@ -609,7 +641,8 @@ impl<'p> PreprocessorState<'p> {
                     // selected, re-indented lines.
                     let (selected, tag_diagnostics) =
                         select_included_lines(include_content.content(), &attrlist);
-                    let selected = reindent_included_lines(selected, &attrlist, self.parser);
+                    let (selected, nested_reindent) =
+                        reindent_included_lines(selected, &attrlist, self.parser);
 
                     // A malformed or unmatched tag directive (or a requested tag
                     // that was never found) is reported against the include
@@ -659,13 +692,21 @@ impl<'p> PreprocessorState<'p> {
                             }
                             _ => ":leveloffset!:".to_string(),
                         };
+                        let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
                         self.emit_line(
                             &format!(":leveloffset: {offset}"),
                             file_name,
                             source_line_number,
+                            wrapper,
                             &mut has_reported_file,
                         );
-                        self.emit_line("", file_name, source_line_number, &mut has_reported_file);
+                        self.emit_line(
+                            "",
+                            file_name,
+                            source_line_number,
+                            wrapper,
+                            &mut has_reported_file,
+                        );
                         restore
                     });
 
@@ -738,14 +779,14 @@ impl<'p> PreprocessorState<'p> {
                         // AsciiDoc files are run through the preprocessor, so the
                         // include (and other) directives they contain are
                         // interpreted.
-                        self.process_adoc_include(&selected, Some(&target));
+                        self.process_adoc_include(&selected, Some(&target), &nested_reindent);
 
                         self.max_include_depth = saved_max_depth;
                     } else {
                         // Non-AsciiDoc files are merged verbatim; the preprocessor
                         // does not interpret any AsciiDoc directives within them
                         // (matching Asciidoctor).
-                        self.process_nonadoc_include(&selected, Some(&target));
+                        self.process_nonadoc_include(&selected, Some(&target), &nested_reindent);
                     }
 
                     if let Some(encoding) = non_utf8_encoding {
@@ -766,11 +807,19 @@ impl<'p> PreprocessorState<'p> {
                     if let Some(restore) = restore_leveloffset {
                         // Reset the level offset to whatever was in effect before
                         // the include (unset unless a `:leveloffset:` was active).
-                        self.emit_line("", file_name, source_line_number, &mut has_reported_file);
+                        let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
+                        self.emit_line(
+                            "",
+                            file_name,
+                            source_line_number,
+                            wrapper,
+                            &mut has_reported_file,
+                        );
                         self.emit_line(
                             &restore,
                             file_name,
                             source_line_number,
+                            wrapper,
                             &mut has_reported_file,
                         );
                     }
@@ -803,18 +852,28 @@ impl<'p> PreprocessorState<'p> {
                 // emitted literally, matching Asciidoctor. The backslash is only
                 // removed when what follows is actually an include directive; a
                 // backslash followed by anything else is left untouched.
-                let line_text = if line.starts_with("\\include::")
-                    && INCLUDE_DIRECTIVE.is_match(&line.data()[1..])
-                {
+                let escaped_include = line.starts_with("\\include::")
+                    && INCLUDE_DIRECTIVE.is_match(&line.data()[1..]);
+
+                let line_text = if escaped_include {
                     &line.data()[1..]
                 } else {
                     line.data()
+                };
+
+                // Stripping the leading backslash shifts the columns, so an
+                // escaped include is no longer verbatim.
+                let fidelity = if escaped_include {
+                    Fidelity::Transformed(Transform::Rewritten)
+                } else {
+                    content_fidelity
                 };
 
                 self.emit_line(
                     line_text,
                     file_name,
                     source_line_number,
+                    fidelity,
                     &mut has_reported_file,
                 );
             }
@@ -832,7 +891,12 @@ impl<'p> PreprocessorState<'p> {
     /// Asciidoctor treats files that are not recognized as AsciiDoc.
     ///
     /// [`process_adoc_include`]: Self::process_adoc_include
-    fn process_nonadoc_include(&mut self, source: &str, file_name: Option<&str>) {
+    fn process_nonadoc_include(
+        &mut self,
+        source: &str,
+        file_name: Option<&str>,
+        reindented: &Reindented,
+    ) {
         let mut source_span = Span::new(source);
         let mut has_reported_file = false;
 
@@ -840,13 +904,12 @@ impl<'p> PreprocessorState<'p> {
             let MatchedItem { item: line, after } = source_span.take_line();
             source_span = after;
 
-            if !has_reported_file {
-                has_reported_file = true;
-                self.source_map.append(
-                    self.output_line_number,
-                    SourceLine(to_owned(file_name), line.line()),
-                );
-            }
+            self.record_origin(
+                file_name,
+                line.line(),
+                reindented.fidelity_for(line.line()),
+                &mut has_reported_file,
+            );
 
             if line.is_empty() {
                 self.in_document_header = false;
@@ -936,7 +999,7 @@ impl<'p> PreprocessorState<'p> {
                 // lower-cased, so the lookup name is folded the same way (see the
                 // content-substitution path in `content::substitution_step` and
                 // Asciidoctor's `key = $2.downcase`).
-                let lookup_name = attr_name.to_lowercase();
+                let lookup_name = attribute_lookup_name(attr_name);
 
                 if !self.parser.has_attribute(&lookup_name) {
                     self.missing_reference = true;
@@ -971,25 +1034,51 @@ impl<'p> PreprocessorState<'p> {
         (text, replacer.missing_reference)
     }
 
+    /// Anchor the current output line in the source map, if needed.
+    ///
+    /// A new segment is appended when the origin has not yet been reported
+    /// since the last re-anchor (`has_reported_file` is `false`), or when
+    /// `fidelity` differs from the previously appended segment's – so a run
+    /// of verbatim lines interrupted by a transformed one splits into
+    /// separate segments and each carries its own [`Fidelity`]. Otherwise
+    /// the current run continues and nothing is appended.
+    fn record_origin(
+        &mut self,
+        file_name: Option<&str>,
+        source_line_number: usize,
+        fidelity: Fidelity,
+        has_reported_file: &mut bool,
+    ) {
+        if *has_reported_file && self.current_fidelity == fidelity {
+            return;
+        }
+
+        *has_reported_file = true;
+        self.current_fidelity = fidelity;
+        self.source_map.append(
+            self.output_line_number,
+            file_name,
+            source_line_number,
+            fidelity,
+        );
+    }
+
     /// Emit a single line of text to the output, updating the source map and
     /// document-header tracking state exactly as the plain-line branch of
-    /// [`process_adoc_include`] does.
+    /// [`process_adoc_include`] does. `fidelity` records how `text` relates to
+    /// its origin line (see [`record_origin`]).
     ///
     /// [`process_adoc_include`]: Self::process_adoc_include
+    /// [`record_origin`]: Self::record_origin
     fn emit_line(
         &mut self,
         text: &str,
         file_name: Option<&str>,
         source_line_number: usize,
+        fidelity: Fidelity,
         has_reported_file: &mut bool,
     ) {
-        if !*has_reported_file {
-            *has_reported_file = true;
-            self.source_map.append(
-                self.output_line_number,
-                SourceLine(to_owned(file_name), source_line_number),
-            );
-        }
+        self.record_origin(file_name, source_line_number, fidelity, has_reported_file);
 
         if text.is_empty() {
             self.in_document_header = false;
@@ -1018,13 +1107,12 @@ impl<'p> PreprocessorState<'p> {
         source_line_number: usize,
         has_reported_file: &mut bool,
     ) {
-        if !*has_reported_file {
-            *has_reported_file = true;
-            self.source_map.append(
-                self.output_line_number,
-                SourceLine(to_owned(file_name), source_line_number),
-            );
-        }
+        self.record_origin(
+            file_name,
+            source_line_number,
+            Fidelity::Synthetic(Transform::UnresolvedDirective),
+            has_reported_file,
+        );
 
         let replacement = format!(
             "Unresolved directive in {file_name} - {directive_line}",
@@ -1310,7 +1398,15 @@ impl<'p> PreprocessorState<'p> {
             applied_attribute = true;
         }
 
-        self.emit_line(content, file_name, source_line_number, has_reported_file);
+        // The bracketed content is spliced in from within the directive line
+        // (`ifdef::name[content]`), so its columns do not align with the origin.
+        self.emit_line(
+            content,
+            file_name,
+            source_line_number,
+            Fidelity::Transformed(Transform::Rewritten),
+            has_reported_file,
+        );
 
         // The main attribute-entry handler leaves `can_have_attribute` unchanged
         // so that consecutive attribute entries are all applied by the
@@ -1337,7 +1433,7 @@ impl<'p> PreprocessorState<'p> {
         // Attribute names are case-insensitive: the parser stores them
         // lowercased, so the directive's target names are lowercased to match
         // (`ifdef::showScript[]` resolves the `showscript` attribute).
-        let is_set = |name: &str| self.parser.is_attribute_set(name.to_lowercase());
+        let is_set = |name: &str| self.parser.is_attribute_set(attribute_lookup_name(name));
 
         // Whichever of `,`/`+` appears first in the target selects the
         // combinator; the target is then split on that delimiter alone.
@@ -2026,6 +2122,31 @@ fn find_tag_directive(line: &str) -> Option<(bool, &str)> {
     None
 }
 
+/// Per-line record of how [`reindent_included_lines`] changed each line of an
+/// included block, so the resulting source-map segments can be tagged with the
+/// right [`Fidelity`]. An empty record (the common case, no reindent applied)
+/// reports every line as [`Fidelity::Verbatim`].
+#[derive(Debug, Default)]
+struct Reindented {
+    /// `changes[i]` is the transform applied to the 1-based line `i + 1`, or
+    /// `None` when that line was left unchanged. Reindenting never adds or
+    /// removes lines, so this indexes the same lines the recursive
+    /// [`process_adoc_include`](PreprocessorState::process_adoc_include) pass
+    /// re-tokenizes.
+    changes: Vec<Option<Transform>>,
+}
+
+impl Reindented {
+    /// The fidelity of the 1-based `line` of the reindented block: the recorded
+    /// transform if that line was changed, otherwise [`Fidelity::Verbatim`].
+    fn fidelity_for(&self, line: usize) -> Fidelity {
+        match self.changes.get(line.wrapping_sub(1)).copied().flatten() {
+            Some(transform) => Fidelity::Transformed(transform),
+            None => Fidelity::Verbatim,
+        }
+    }
+}
+
 /// Normalize the block indentation of included content per the `indent`
 /// attribute and, when the `tabsize` attribute is set, expand tabs to spaces.
 ///
@@ -2033,7 +2154,15 @@ fn find_tag_directive(line: &str) -> Option<(bool, &str)> {
 /// the `indent` attribute is set. Indentation normalization is applied only
 /// when `indent` is present and non-negative. If neither adjustment applies the
 /// text is returned unchanged. See `include-with-indent.adoc`.
-fn reindent_included_lines(text: String, attrlist: &Attrlist<'_>, parser: &Parser) -> String {
+///
+/// The returned [`Reindented`] records, per line, whether the content was
+/// changed (and by which transform), so the preprocessor can mark the
+/// corresponding source-map segments as non-verbatim.
+fn reindent_included_lines(
+    text: String,
+    attrlist: &Attrlist<'_>,
+    parser: &Parser,
+) -> (String, Reindented) {
     // Asciidoctor coerces the value with `String#to_i` (a non-numeric value
     // yields 0). A negative value disables indentation normalization.
     let indent: Option<i64> = attrlist
@@ -2048,10 +2177,15 @@ fn reindent_included_lines(text: String, attrlist: &Attrlist<'_>, parser: &Parse
     let expand = tab_size > 0 && text.contains('\t');
     let apply_indent = matches!(indent, Some(i) if i >= 0);
     if !expand && !apply_indent {
-        return text;
+        return (text, Reindented::default());
     }
 
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+
+    // Keep the pre-transform lines so each output line's fidelity can be
+    // determined by comparison – only the lines that actually changed lose
+    // their verbatim column mapping.
+    let originals = lines.clone();
 
     if expand {
         for line in lines.iter_mut() {
@@ -2064,11 +2198,29 @@ fn reindent_included_lines(text: String, attrlist: &Attrlist<'_>, parser: &Parse
         adjust_indentation(&mut lines, indent.unwrap_or(0) as usize);
     }
 
+    let changes = originals
+        .iter()
+        .zip(&lines)
+        .map(|(original, reindented)| {
+            if original == reindented {
+                None
+            } else if expand && original.contains('\t') {
+                // A line whose tabs were expanded: attribute the change to tab
+                // expansion, the dominant column shift, even if `indent` also
+                // adjusted it.
+                Some(Transform::TabExpansion)
+            } else {
+                Some(Transform::Reindent)
+            }
+        })
+        .collect();
+
     let mut output = lines.join("\n");
     if !output.is_empty() || !text.is_empty() {
         output.push('\n');
     }
-    output
+
+    (output, Reindented { changes })
 }
 
 /// Strip the common leading block indent from `lines` and, when `indent` is

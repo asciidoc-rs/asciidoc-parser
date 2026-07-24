@@ -246,6 +246,16 @@ pub enum WarningType {
     #[error("maximum include depth of {0} exceeded")]
     MaxIncludeDepthExceeded(usize),
 
+    /// Block parsing reached the maximum nesting depth (the `max-block-nesting`
+    /// attribute, default 32, API-only) before the innermost content was
+    /// parsed, so the over-nested content was truncated rather than descended
+    /// into. This bounds native recursion – a delimited block's body, a section
+    /// body, a table cell, or a nested list each parse on a fresh call stack –
+    /// so a crafted document cannot overflow the stack and abort the process.
+    /// The field is the limit in effect.
+    #[error("maximum block nesting depth of {0} exceeded")]
+    MaxBlockNestingExceeded(usize),
+
     /// An include directive specified an `encoding` attribute whose value is
     /// not UTF-8. The parser only handles UTF-8 content, so the requested
     /// encoding cannot be honored.
@@ -319,6 +329,14 @@ pub enum WarningType {
     /// false positive.
     #[error("possible invalid reference: {0}")]
     PossibleInvalidReference(String),
+
+    /// An explicit `link:` macro named a target whose URI scheme can execute
+    /// script (`javascript:`, `data:`, or `vbscript:`). The macro is not turned
+    /// into a link; it is left as literal source text instead. The field is the
+    /// target exactly as written. This is a security measure with no
+    /// counterpart in Ruby Asciidoctor.
+    #[error("rejected link with potentially unsafe scheme (rendered as text): {0}")]
+    UnsafeLinkSchemeRejected(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -480,6 +498,11 @@ impl std::fmt::Debug for WarningType {
                 .field(depth)
                 .finish(),
 
+            WarningType::MaxBlockNestingExceeded(depth) => f
+                .debug_tuple("WarningType::MaxBlockNestingExceeded")
+                .field(depth)
+                .finish(),
+
             WarningType::NonUtf8IncludeEncoding(encoding) => f
                 .debug_tuple("WarningType::NonUtf8IncludeEncoding")
                 .field(encoding)
@@ -533,6 +556,11 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::PossibleInvalidReference(target) => f
                 .debug_tuple("WarningType::PossibleInvalidReference")
+                .field(target)
+                .finish(),
+
+            WarningType::UnsafeLinkSchemeRejected(target) => f
+                .debug_tuple("WarningType::UnsafeLinkSchemeRejected")
                 .field(target)
                 .finish(),
         }
@@ -954,6 +982,13 @@ mod tests {
             }
 
             #[test]
+            fn max_block_nesting_exceeded() {
+                let warning = WarningType::MaxBlockNestingExceeded(64);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::MaxBlockNestingExceeded(64)");
+            }
+
+            #[test]
             fn non_utf8_include_encoding() {
                 let warning = WarningType::NonUtf8IncludeEncoding("iso-8859-1".to_string());
                 let debug_output = format!("{:?}", warning);
@@ -1064,6 +1099,17 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::PossibleInvalidReference(\"foobaz\")"
+                );
+            }
+
+            #[test]
+            fn unsafe_link_scheme_rejected() {
+                let warning =
+                    WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::UnsafeLinkSchemeRejected(\"javascript:alert(1)\")"
                 );
             }
         }

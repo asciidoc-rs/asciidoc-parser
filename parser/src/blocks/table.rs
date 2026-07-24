@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, rc::Rc, sync::Arc};
+use std::{borrow::Cow, collections::VecDeque, rc::Rc, sync::Arc};
 
 use self_cell::self_cell;
 
@@ -1694,22 +1694,28 @@ fn process_content<'src>(
         // doctype.
         let saved_locks = parser.locked_attribute_names.clone();
         {
-            let locks = &mut parser.locked_attribute_names;
-            let mut maybe_lock = |name: &str, value: &AttributeValue| {
+            // Whether `name` (holding `value` in the inherited set) must be
+            // locked for the cell. Kept separate from the insert so each source
+            // can own its name only when it is actually locked: a built-in name
+            // is `&'static` and stored borrowed (no allocation), while a dynamic
+            // parent-defined name is cloned into an owned entry.
+            let should_lock = |name: &str, value: &AttributeValue| {
                 let api_locked = value.modification_context == ModificationContext::ApiOnly;
-                if (!matches!(value.value, InterpretedValue::Unset) || api_locked)
+                (!matches!(value.value, InterpretedValue::Unset) || api_locked)
                     && !ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES.contains(&name)
-                {
-                    locks.insert(name.to_owned());
-                }
             };
+
+            let locks = &mut parser.locked_attribute_names;
             for (name, value) in built_in_attrs_iter() {
-                if !saved_attributes.contains_key(name) {
-                    maybe_lock(name, value);
+                if !saved_attributes.contains_key(name) && should_lock(name, value) {
+                    locks.insert(Cow::Borrowed(name.as_str()));
                 }
             }
+
             for (name, value) in saved_attributes.iter() {
-                maybe_lock(name, value);
+                if should_lock(name, value) {
+                    locks.insert(Cow::Owned(name.clone()));
+                }
             }
         }
 
@@ -1719,8 +1725,8 @@ fn process_content<'src>(
         // `toc` otherwise lives only in the shared table) with a relaxed context
         // for the duration of the cell so a body assignment is honored; the
         // snapshot restore reverts it afterward.
+        let attrs = Arc::make_mut(&mut parser.attribute_values);
         for name in ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES {
-            let attrs = Arc::make_mut(&mut parser.attribute_values);
             if let Some(mut attr) = attrs.get(*name).or_else(|| built_in_attr(name)).cloned() {
                 attr.modification_context = ModificationContext::Anywhere;
                 attrs.insert((*name).to_owned(), attr);

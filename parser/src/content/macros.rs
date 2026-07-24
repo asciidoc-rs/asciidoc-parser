@@ -17,7 +17,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle,
+        LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle, has_dangerous_scheme,
     },
     warnings::WarningType,
 };
@@ -98,7 +98,10 @@ fn apply_macros_internal(
     }
 
     if found_macroish && (text.contains("image:") || text.contains("icon:")) {
-        let replacer = InlineImageMacroReplacer(parser);
+        let replacer = InlineImageMacroReplacer {
+            parser,
+            source: content.original(),
+        };
 
         if let Cow::Owned(new_result) = INLINE_IMAGE_MACRO.replace_all(content.rendered(), replacer)
         {
@@ -127,7 +130,10 @@ fn apply_macros_internal(
     }
 
     if found_macroish && (text.contains("link:") || text.contains("ilto:")) {
-        let replacer = InlineLinkMacroReplacer(parser);
+        let replacer = InlineLinkMacroReplacer {
+            parser,
+            source: content.original(),
+        };
 
         if let Cow::Owned(new_result) = INLINE_LINK_MACRO.replace_all(content.rendered(), replacer)
         {
@@ -245,9 +251,15 @@ static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineImageMacroReplacer<'p>(&'p Parser);
+struct InlineImageMacroReplacer<'p, 's> {
+    parser: &'p Parser,
 
-impl Replacer for InlineImageMacroReplacer<'_> {
+    /// Span of the content being substituted, used to locate any warning this
+    /// replacer records.
+    source: Span<'s>,
+}
+
+impl Replacer for InlineImageMacroReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps[0].starts_with('\\') {
             // Honor the escape.
@@ -257,9 +269,23 @@ impl Replacer for InlineImageMacroReplacer<'_> {
 
         let target = &caps[1];
         let span = Span::new(&caps[2]);
-        let attrlist = Attrlist::parse(span, self.0, AttrlistContext::Inline)
+        let attrlist = Attrlist::parse(span, self.parser, AttrlistContext::Inline)
             .item
             .item;
+
+        // A `link=` destination whose scheme could execute script is rejected by
+        // the renderer (the image is emitted without the wrapping link); record
+        // the warning here, where the parser and a document span are available.
+        // `link=self` names the image's own `src`, so it is exempt.
+        if let Some(link) = attrlist.named_attribute("link")
+            && link.value() != "self"
+            && has_dangerous_scheme(link.value())
+        {
+            self.parser.record_substitution_warning(
+                self.source,
+                WarningType::UnsafeLinkSchemeRejected(link.value().to_owned()),
+            );
+        }
 
         let default_alt = basename(&target.replace(['_', '-'], " "));
 
@@ -274,9 +300,9 @@ impl Replacer for InlineImageMacroReplacer<'_> {
             // attribute-references step, so `target` is the resolved path, and
             // the catalog stores it alongside the current `imagesdir`. Mirrors
             // Asciidoctor's `doc.register :images, target`.
-            self.0.register_image(
+            self.parser.register_image(
                 target.to_string(),
-                self.0
+                self.parser
                     .attribute_value("imagesdir")
                     .as_maybe_str()
                     .map(str::to_owned),
@@ -296,10 +322,10 @@ impl Replacer for InlineImageMacroReplacer<'_> {
                     .named_or_positional_attribute("height", 3)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.0,
+                parser: self.parser,
             };
 
-            self.0.renderer.render_image(&params, dest);
+            self.parser.renderer.render_image(&params, dest);
         } else {
             let params = IconRenderParams {
                 target,
@@ -310,10 +336,10 @@ impl Replacer for InlineImageMacroReplacer<'_> {
                     .named_or_positional_attribute("size", 1)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.0,
+                parser: self.parser,
             };
 
-            self.0.renderer.render_icon(&params, dest);
+            self.parser.renderer.render_icon(&params, dest);
         }
     }
 }
@@ -1078,9 +1104,15 @@ static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineLinkMacroReplacer<'p>(&'p Parser);
+struct InlineLinkMacroReplacer<'p, 's> {
+    parser: &'p Parser,
 
-impl Replacer for InlineLinkMacroReplacer<'_> {
+    /// Span of the content being substituted, used to locate any warning this
+    /// replacer records.
+    source: Span<'s>,
+}
+
+impl Replacer for InlineLinkMacroReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps[0].starts_with('\\') {
             // Honor the escape.
@@ -1102,6 +1134,22 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             (None, None, target_str.to_string())
         };
 
+        // Neutralize an explicit `link:` target whose scheme could execute
+        // script (`javascript:`, `data:`, `vbscript:`). Escaping the `href`
+        // delimiter (see `render_link`) stops attribute breakout but not a
+        // script URI, so such a target is not turned into a link at all: the
+        // macro is left as literal source text, matching how an invalid `link:`
+        // macro is handled elsewhere. `mailto:` targets carry their own safe
+        // scheme and are exempt.
+        if mailto.is_none() && has_dangerous_scheme(&target) {
+            self.parser.record_substitution_warning(
+                self.source,
+                WarningType::UnsafeLinkSchemeRejected(target),
+            );
+            dest.push_str(&caps[0]);
+            return;
+        }
+
         let mut attrlist: Option<Attrlist<'_>> = None;
         let link_type = LinkRenderType::Link;
 
@@ -1120,7 +1168,7 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             if let Some(_mailto) = mailto {
                 if link_text.contains(',') {
                     let (lt, attrs) =
-                        extract_attributes_from_text(&span_for_attrlist, self.0, None);
+                        extract_attributes_from_text(&span_for_attrlist, self.parser, None);
 
                     link_text = lt;
 
@@ -1141,7 +1189,8 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
                     attrlist = Some(attrs);
                 }
             } else if link_text.contains('=') {
-                let (lt, attrs) = extract_attributes_from_text(&span_for_attrlist, self.0, None);
+                let (lt, attrs) =
+                    extract_attributes_from_text(&span_for_attrlist, self.parser, None);
                 link_text = lt;
 
                 attrlist = Some(attrs);
@@ -1156,7 +1205,7 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
         let attrlist = if let Some(attrlist) = attrlist {
             attrlist
         } else {
-            Attrlist::parse(Span::default(), self.0, AttrlistContext::Inline)
+            Attrlist::parse(Span::default(), self.parser, AttrlistContext::Inline)
                 .item
                 .item
         };
@@ -1168,7 +1217,7 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             if let Some(_mailto) = mailto {
                 link_text = mailto_text.map(|s| s.to_owned()).unwrap_or_default();
             } else {
-                link_text = if self.0.is_attribute_set("hide-uri-scheme") {
+                link_text = if self.parser.is_attribute_set("hide-uri-scheme") {
                     let lt = URI_SNIFF.replace_all(&target, "").into_owned();
                     if lt.is_empty() { target.clone() } else { lt }
                 } else {
@@ -1179,7 +1228,7 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             }
         }
 
-        self.0.register_link(target.clone());
+        self.parser.register_link(target.clone());
 
         let params = LinkRenderParams {
             target,
@@ -1188,10 +1237,10 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             window,
             type_: link_type,
             attrlist: &attrlist,
-            parser: self.0,
+            parser: self.parser,
         };
 
-        self.0.renderer.render_link(&params, dest);
+        self.parser.renderer.render_link(&params, dest);
     }
 }
 
