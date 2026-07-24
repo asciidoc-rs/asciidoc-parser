@@ -543,6 +543,16 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ### Security attributes
     attrs.insert("max-include-depth".to_owned(), set(ApiOnly, "64"));
 
+    // The maximum depth of nested block structures (a delimited block's body, a
+    // section body, a table cell, a nested list) the parser will descend into.
+    // Each level parses on a fresh native call stack, so an unbounded document
+    // could otherwise overflow the stack and abort the process; past this depth
+    // the over-nested content is truncated with a `MaxBlockNestingExceeded`
+    // warning. Like `max-include-depth` it is `ApiOnly` – a hostile document
+    // cannot raise its own limit – so a host on a small stack (e.g. a worker
+    // thread or Wasm) can lower it, and a host on a large one can raise it.
+    attrs.insert("max-block-nesting".to_owned(), set(ApiOnly, "64"));
+
     // NOTE: `max-attribute-value-size` is *not* registered here. Its `4096`
     // default is only in effect under `SafeMode::Secure`, so it is resolved as a
     // mode-aware synthesized attribute instead (see

@@ -269,6 +269,27 @@ pub struct Parser {
     /// the two cannot be merged.
     pub(crate) owned_subsource_depth: usize,
 
+    /// Number of nested block-parsing scopes currently open on the call stack.
+    ///
+    /// Every level of block nesting – a delimited block's body, a section body,
+    /// an AsciiDoc table cell, a nested list – is parsed by a fresh recursive
+    /// descent (through [`parse_blocks_until`] or
+    /// [`ListBlock::parse_inside_list`]) that consumes native stack. Without a
+    /// bound, a small crafted document (strictly-increasing delimiters, or
+    /// deeply-nested list markers) drives arbitrarily deep recursion and
+    /// overflows the stack – an *uncatchable* abort that takes down the whole
+    /// host process, not just the parse. This counter is incremented on entry
+    /// to each such scope and decremented on exit; when it would exceed
+    /// [`max_block_nesting`](Self::max_block_nesting) the over-nested content
+    /// is truncated with a [`MaxBlockNestingExceeded`] warning instead of
+    /// being descended into (see issue #885).
+    ///
+    /// [`parse_blocks_until`]: crate::blocks::parse_utils::parse_blocks_until
+    /// [`ListBlock::parse_inside_list`]: crate::blocks::ListBlock
+    /// [`MaxBlockNestingExceeded`]:
+    /// crate::warnings::WarningType::MaxBlockNestingExceeded
+    pub(crate) block_nesting_depth: usize,
+
     /// Source map of the document currently being parsed, populated by
     /// [`Document::parse`] for the duration of the parse (and `None` outside
     /// it).
@@ -494,6 +515,7 @@ impl Default for Parser {
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
             owned_subsource_depth: 0,
+            block_nesting_depth: 0,
             source_map: None,
             owned_cell_source_maps: vec![],
             owned_cell_warnings: RefCell::new(vec![]),
@@ -614,6 +636,13 @@ impl Parser {
         // Reset counter (and captioned-block) numbering for each new document.
         self.counter_values.borrow_mut().clear();
         self.locked_counter_values.borrow_mut().clear();
+
+        // Start each parse at the outermost block-nesting level. The counter is
+        // otherwise kept balanced by matched increment/decrement pairs, so this
+        // only matters if a prior parse was abandoned mid-flight; it is reset
+        // here (rather than in the recursive cell/blockquote paths) because
+        // `parse_deferred` runs only for the top-level document.
+        self.block_nesting_depth = 0;
 
         Document::parse(
             &preprocessed_source,
@@ -932,6 +961,60 @@ impl Parser {
             InterpretedValue::Value(v) => v.trim().parse::<i32>().unwrap_or(0),
             _ => 0,
         }
+    }
+
+    /// Returns the maximum block-nesting depth in effect (the
+    /// `max-block-nesting` attribute, default 64). See
+    /// [`block_nesting_depth`](Self::block_nesting_depth).
+    ///
+    /// The attribute is API-only, so a hostile document cannot raise its own
+    /// limit. The value is coerced as Ruby's `String#to_i` would (matching how
+    /// `max-include-depth` is read): a non-positive result yields `0` – which
+    /// permits only the outermost, document-level block scope – while a
+    /// positive value too large for `usize` saturates rather than wrapping to
+    /// the "disabled" sentinel.
+    pub(crate) fn max_block_nesting(&self) -> usize {
+        match self.attribute_value("max-block-nesting") {
+            InterpretedValue::Value(value) => {
+                let depth = super::preprocessor::ruby_to_i(&value);
+                if depth <= 0 {
+                    0
+                } else {
+                    usize::try_from(depth).unwrap_or(usize::MAX)
+                }
+            }
+
+            // An explicit empty `Set` coerces to 0; an explicit unset falls back
+            // to the built-in default.
+            InterpretedValue::Set => 0,
+            InterpretedValue::Unset => 64,
+        }
+    }
+
+    /// Reports whether descending into another nested block scope would exceed
+    /// the [`max_block_nesting`](Self::max_block_nesting) limit, so the caller
+    /// must stop nesting and truncate instead. See
+    /// [`block_nesting_depth`](Self::block_nesting_depth).
+    pub(crate) fn block_nesting_limit_reached(&self) -> bool {
+        self.block_nesting_depth > self.max_block_nesting()
+    }
+
+    /// Records a [`MaxBlockNestingExceeded`] warning anchored at `source`,
+    /// reporting the [`max_block_nesting`](Self::max_block_nesting) limit in
+    /// effect.
+    ///
+    /// [`MaxBlockNestingExceeded`]:
+    /// crate::warnings::WarningType::MaxBlockNestingExceeded
+    pub(crate) fn warn_block_nesting_exceeded<'src>(
+        &self,
+        source: crate::Span<'src>,
+        warnings: &mut Vec<Warning<'src>>,
+    ) {
+        warnings.push(Warning {
+            source,
+            warning: WarningType::MaxBlockNestingExceeded(self.max_block_nesting()),
+            origin: None,
+        });
     }
 
     /// Returns the effective `max-attribute-value-size`: the byte limit applied

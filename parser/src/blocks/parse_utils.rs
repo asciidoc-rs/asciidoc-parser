@@ -20,6 +20,29 @@ where
 
     source = source.discard_empty_lines();
 
+    // Bound native recursion (issue #885). This scope is one level of block
+    // nesting; if the running depth already exceeds `max-block-nesting`, refuse
+    // to descend – parse no blocks and leave `source` unconsumed – so a crafted
+    // document (strictly-increasing delimiters, deeply-nested sections, …)
+    // cannot overflow the stack and abort the host. Non-empty over-nested
+    // content is truncated with a warning; genuinely empty content is dropped
+    // silently (nothing is lost).
+    if parser.block_nesting_limit_reached() {
+        if !source.data().is_empty() {
+            parser.warn_block_nesting_exceeded(source.take_normalized_line().item, &mut warnings);
+        }
+
+        return MatchAndWarnings {
+            item: MatchedItem {
+                item: blocks,
+                after: source,
+            },
+            warnings,
+        };
+    }
+
+    parser.block_nesting_depth += 1;
+
     while !source.data().is_empty() {
         // The predicate is given the parser (as a shared borrow) so a stop
         // condition can consult the running document-attribute state — notably
@@ -52,6 +75,8 @@ where
         // non-blank. (Matching the behavior before drop-line support, which
         // likewise only advanced on a successful parse.)
     }
+
+    parser.block_nesting_depth -= 1;
 
     MatchAndWarnings {
         item: MatchedItem {
