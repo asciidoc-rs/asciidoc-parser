@@ -18,7 +18,7 @@ use crate::{
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
         LinkRenderParams, MenuRenderParams, XrefStyle, has_dangerous_scheme,
-        has_dangerous_self_href,
+        has_dangerous_self_href, is_uri_ish,
     },
     warnings::WarningType,
 };
@@ -299,15 +299,16 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
         // the warning here, where the parser and a document span are available.
         // `link=self` names the image's own `src`, which resolves from `target`,
         // so it is checked against the target (exempting a legitimately embedded
-        // `data:image/*`) rather than the literal `self` – but only when the
-        // renderer actually promotes that `src` into the `href`. A font (`<i>`)
-        // or text (`[alt]`) icon has no `src`, so `link=self` stays the literal
-        // `self` there and nothing is rejected (see `render_icon_or_image`); a
-        // warning would be spurious.
+        // `data:image/*`, but not an author-supplied SVG data URI) rather than
+        // the literal `self` – and only when the renderer actually promotes that
+        // `src` into the `href`. A font (`<i>`) or text (`[alt]`) icon has no
+        // `src`, so `link=self` stays the literal `self` there and nothing is
+        // rejected (see `render_icon_or_image`); a warning would be spurious.
         if let Some(link) = attrlist.named_attribute("link") {
             let rejected = if link.value() == "self" {
-                (self.link_self_resolves_to_src(&caps[0]) && has_dangerous_self_href(target))
-                    .then_some(target)
+                (self.link_self_resolves_to_src(&caps[0])
+                    && has_dangerous_self_href(target, is_uri_ish(target)))
+                .then_some(target)
             } else {
                 has_dangerous_scheme(link.value()).then_some(link.value())
             };

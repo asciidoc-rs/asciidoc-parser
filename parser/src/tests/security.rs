@@ -320,13 +320,44 @@ fn image_link_self_dangerous_target_rejection_is_case_insensitive() {
 }
 
 #[test]
-fn image_link_self_with_inline_data_image_target_stays_a_live_link() {
-    // `data:image/*` is a legitimate image source, so an author-supplied inline
-    // image target keeps its `link=self` anchor (the same exemption that lets
-    // an embedded `data-uri` image link to itself).
+fn image_link_self_with_inline_raster_data_image_target_stays_a_live_link() {
+    // A raster `data:image/*` is a legitimate image source that displays (never
+    // executes) when navigated to, so an author-supplied inline image target
+    // keeps its `link=self` anchor (the same exemption that lets an embedded
+    // `data-uri` image link to itself).
     assert_eq!(
         render_macros("image:data:image/png;base64,iVBORw0KGgo=[alt,link=self]"),
         r#"<span class="image"><a class="image" href="data:image/png;base64,iVBORw0KGgo="><img src="data:image/png;base64,iVBORw0KGgo=" alt="alt"></a></span>"#
+    );
+}
+
+#[test]
+fn image_link_self_with_author_supplied_svg_data_uri_drops_the_wrapping_link() {
+    // An SVG opened as a top-level document runs its embedded script, so an
+    // author-supplied `data:image/svg+xml` target – which `link=self` would
+    // promote into a followable `href` – is rejected, unlike a raster data URI
+    // (above) or a trusted embedded SVG (which is resolved from a file target,
+    // not passed through as a URI). Only the anchor is dropped. (The `<` `>`
+    // reaching the `src` are escaped by the special-characters step.)
+    assert_eq!(
+        render_macros("image:data:image/svg+xml,<svg onload='alert(1)'></svg>[alt,link=self]"),
+        // The space in the target is percent-encoded in the resolved `src`.
+        r#"<span class="image"><img src="data:image/svg+xml,&lt;svg%20onload='alert(1)'&gt;&lt;/svg&gt;" alt="alt"></span>"#
+    );
+}
+
+#[test]
+fn image_link_self_with_author_supplied_svg_data_uri_records_a_warning() {
+    let mut parser = Parser::default();
+    let doc = parser.parse("image:data:image/svg+xml,<svg onload='alert(1)'></svg>[alt,link=self]");
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::UnsafeLinkSchemeRejected(
+            "data:image/svg+xml,&lt;svg onload='alert(1)'&gt;&lt;/svg&gt;".to_string()
+        )
     );
 }
 

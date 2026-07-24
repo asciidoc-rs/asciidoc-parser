@@ -24,7 +24,9 @@ pub use inline_substitution_renderer::{
     InlineSubstitutionRenderer, LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType,
     SpecialCharacter, XrefRenderParams,
 };
-pub(crate) use inline_substitution_renderer::{has_dangerous_scheme, has_dangerous_self_href};
+pub(crate) use inline_substitution_renderer::{
+    has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
+};
 
 mod parser;
 pub(crate) use parser::DeferredWarning;
