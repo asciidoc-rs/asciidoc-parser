@@ -44,3 +44,18 @@ fn blocks_and_content_key_a_hashset() {
 
     assert_eq!(blocks.len(), 2);
 }
+
+#[test]
+fn a_table_with_an_asciidoc_cell_is_hashable() {
+    // An AsciiDoc (`a|`) table cell carries a `ResolvedAttributes` snapshot,
+    // whose `Hash` is hand-written (its `HashMap` fields can not derive it).
+    // Hashing the enclosing block exercises that path.
+    let doc = Parser::default().parse("|===\na| A nested _paragraph_.\n|===\n");
+
+    let mut blocks: HashSet<&Block<'_>> = HashSet::new();
+    for block in doc.child_blocks() {
+        blocks.insert(block);
+    }
+
+    assert_eq!(blocks.len(), 1);
+}

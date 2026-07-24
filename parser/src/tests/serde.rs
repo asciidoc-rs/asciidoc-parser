@@ -6,7 +6,9 @@
 //! of the source, so a consumer that needs to reload a parse result re-parses
 //! the original AsciiDoc rather than deserializing.
 
-use crate::{Parser, blocks::FindBlocks};
+use crate::{
+    Parser, SafeMode, blocks::FindBlocks, tests::prelude::inline_file_handler::InlineFileHandler,
+};
 
 const SAMPLE: &str = "= Doc Title\n\
 :author: A. Uthor\n\
@@ -55,4 +57,33 @@ fn a_single_block_serializes() {
 
     let json = serde_json::to_string(block).expect("Block should serialize");
     assert!(!json.is_empty());
+}
+
+#[test]
+fn markdown_blockquote_owned_blocks_serialize() {
+    // A Markdown-style (`>`) blockquote owns its `>`-stripped source, so its
+    // nested blocks live in a `self_cell` (`OwnedQuoteBlocks`) reached only on
+    // this path. Serializing the document exercises that cell's manual
+    // `Serialize` impl.
+    let doc = Parser::default().parse("> a quoted line\n> another quoted line\n");
+
+    let json = serde_json::to_string(&doc).expect("Document with a blockquote should serialize");
+    assert!(json.contains("quoted line"));
+}
+
+#[test]
+fn owned_asciidoc_table_cell_serializes() {
+    // An AsciiDoc (`a|`) table cell that expands an `include::` directive owns
+    // its preprocessed source in a `self_cell` (`OwnedCell`) reached only on
+    // this path. Serializing the document exercises that cell's manual
+    // `Serialize` impl.
+    let handler = InlineFileHandler::from_pairs([("inc.adoc", "included paragraph\n")]);
+
+    let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler)
+        .parse("|===\na| include::inc.adoc[]\n|===");
+
+    let json = serde_json::to_string(&doc).expect("Document with an owned cell should serialize");
+    assert!(json.contains("included paragraph"));
 }
