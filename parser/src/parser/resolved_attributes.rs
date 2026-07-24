@@ -86,18 +86,46 @@ pub(crate) struct ResolvedAttributes {
 
 impl std::hash::Hash for ResolvedAttributes {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // `HashMap` is not `Hash`, and its iteration order is nondeterministic,
-        // so the attribute tables can not feed the hasher directly. The `Hash` /
-        // `Eq` contract only requires that equal values hash equally, so hash an
-        // order-independent summary – each table's entry count – alongside the
-        // scalar fields. Two snapshots that differ only in their table contents
-        // may then share a hash, which is a permitted collision.
-        self.attribute_values.len().hash(state);
-        self.default_attribute_values.len().hash(state);
-        self.counter_values.len().hash(state);
+        // `HashMap` is neither `Hash` nor deterministically ordered, so a table
+        // can not feed the hasher directly. Instead fold an order-independent
+        // digest of each table's keys into `state`. This stays consistent with
+        // the derived, content-based `Eq` (equal snapshots hash equally), while
+        // distinguishing snapshots whose tables hold *different* keys – not
+        // merely a different number of them (hashing the entry count alone would
+        // collide every cell in a document, since they typically share one
+        // `Arc`-backed, equal-length attribute table).
+        hash_table_keys(self.attribute_values.keys(), state);
+        hash_table_keys(self.default_attribute_values.keys(), state);
+        hash_table_keys(self.counter_values.keys(), state);
         self.safe.hash(state);
         self.datetime_inputs.hash(state);
     }
+}
+
+/// Feeds an order-independent digest of a table's keys into `state`: the entry
+/// count together with the XOR of each key's individual hash.
+///
+/// XOR is commutative, so the digest does not depend on the `HashMap`'s
+/// nondeterministic iteration order, yet it still varies with the set of keys
+/// present. Keys of a `HashMap` are unique, so no key's hash cancels another's.
+fn hash_table_keys<'a, H: std::hash::Hasher>(
+    keys: impl Iterator<Item = &'a String>,
+    state: &mut H,
+) {
+    use std::hash::{Hash, Hasher};
+
+    let mut count: usize = 0;
+    let mut combined: u64 = 0;
+
+    for key in keys {
+        let mut key_hasher = std::hash::DefaultHasher::new();
+        key.hash(&mut key_hasher);
+        combined ^= key_hasher.finish();
+        count += 1;
+    }
+
+    count.hash(state);
+    combined.hash(state);
 }
 
 impl ResolvedAttributes {
