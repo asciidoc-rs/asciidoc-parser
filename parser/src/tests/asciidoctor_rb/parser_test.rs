@@ -343,7 +343,7 @@ fn store_accessible_attribute_on_document_with_value() {
     // `:foo:` entry.
     let mut parser =
         Parser::default().with_intrinsic_attribute("foo", "baz", ModificationContext::Anywhere);
-    parser.parse(":foo: bar");
+    let _ = parser.parse(":foo: bar");
     assert_eq!(
         parser.attribute_value("foo"),
         InterpretedValue::Value("bar")
@@ -377,7 +377,7 @@ fn store_accessible_attribute_on_document_with_value_that_contains_attribute_ref
     let mut parser = Parser::default()
         .with_intrinsic_attribute("foo", "baz", ModificationContext::Anywhere)
         .with_intrinsic_attribute("release", "ultramega", ModificationContext::Anywhere);
-    parser.parse(":foo: {release}");
+    let _ = parser.parse(":foo: {release}");
     assert_eq!(
         parser.attribute_value("foo"),
         InterpretedValue::Value("ultramega")
@@ -442,7 +442,7 @@ fn store_accessible_attribute_on_document_with_negated_value() {
     for input in [":foo!:", ":!foo:"] {
         let mut parser =
             Parser::default().with_intrinsic_attribute("foo", "baz", ModificationContext::Anywhere);
-        parser.parse(input);
+        let _ = parser.parse(input);
         assert_eq!(parser.attribute_value("foo"), InterpretedValue::Unset);
     }
 }
@@ -1143,7 +1143,7 @@ fn parse_name_with_more_than_3_parts_in_author_attribute() {
     // trailing parts in `lastname`, and repeated interior whitespace is
     // condensed (issue #758).
     let mut parser = Parser::default();
-    parser.parse(":author: Leroy  Harold  Scherer,  Jr.");
+    let _ = parser.parse(":author: Leroy  Harold  Scherer,  Jr.");
 
     assert_eq!(
         parser.attribute_value("author"),
@@ -1183,7 +1183,7 @@ fn use_explicit_authorinitials_if_set_after_implicit_author_line() {
     // This crate recognizes an author line only when a document title is
     // present, so the input is given a synthetic title.
     let mut parser = Parser::default();
-    parser.parse("= Document Title\nJean-Claude Van Damme\n:authorinitials: JCVD");
+    let _ = parser.parse("= Document Title\nJean-Claude Van Damme\n:authorinitials: JCVD");
     assert_eq!(
         parser.attribute_value("authorinitials"),
         InterpretedValue::Value("JCVD")
@@ -1208,7 +1208,7 @@ fn use_explicit_authorinitials_if_set_after_author_attribute() {
     );
 
     let mut parser = Parser::default();
-    parser.parse("= Document Title\n:author: Jean-Claude Van Damme\n:authorinitials: JCVD");
+    let _ = parser.parse("= Document Title\n:author: Jean-Claude Van Damme\n:authorinitials: JCVD");
     assert_eq!(
         parser.attribute_value("authorinitials"),
         InterpretedValue::Value("JCVD")
@@ -1324,7 +1324,7 @@ fn allows_authors_to_be_overridden_using_explicit_author_attributes() {
     // `author` rather than `author_1`, and does not derive `authorcount` /
     // `authors`.)
     let mut parser = Parser::default();
-    parser.parse(
+    let _ = parser.parse(
         "= Document Title\nKismet Chameleon; Johnny Bravo; Lazarus het_Draeke\n:author_2: Danger Mouse",
     );
     assert_eq!(
@@ -1684,7 +1684,7 @@ fn skip_line_comments_before_author() {
     // Line comments preceding the author line are skipped (synthetic title
     // added so the author line is recognized).
     let mut parser = Parser::default();
-    parser.parse("= Document Title\n// Asciidoctor\n// release artist\nRyan Waldron");
+    let _ = parser.parse("= Document Title\n// Asciidoctor\n// release artist\nRyan Waldron");
     assert_eq!(
         parser.attribute_value("author"),
         InterpretedValue::Value("Ryan Waldron")
@@ -1730,7 +1730,7 @@ fn skip_block_comment_before_author() {
     // A `////` block comment preceding the author line is skipped in its
     // entirety (synthetic title added so the author line is recognized).
     let mut parser = Parser::default();
-    parser.parse("= Document Title\n////\nAsciidoctor\nrelease artist\n////\nRyan Waldron");
+    let _ = parser.parse("= Document Title\n////\nAsciidoctor\nrelease artist\n////\nRyan Waldron");
     assert_eq!(
         parser.attribute_value("author"),
         InterpretedValue::Value("Ryan Waldron")
@@ -1817,7 +1817,7 @@ fn break_header_at_line_with_three_forward_slashes() {
     // A `///` line breaks the header; the author and revision number before it
     // are captured (synthetic title added).
     let mut parser = Parser::default();
-    parser.parse("= Document Title\nJoe Cool\nv1.0\n///\nstuff");
+    let _ = parser.parse("= Document Title\nJoe Cool\nv1.0\n///\nstuff");
     assert_eq!(
         parser.attribute_value("author"),
         InterpretedValue::Value("Joe Cool")

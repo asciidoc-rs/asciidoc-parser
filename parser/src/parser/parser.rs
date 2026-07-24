@@ -578,6 +578,16 @@ impl Parser {
     /// [`built_in_attrs`](super::built_in_attrs)).
     pub(crate) const DEFAULT_MAX_BLOCK_NESTING: usize = 32;
 
+    /// Creates a new [`Parser`] with the default configuration.
+    ///
+    /// This is equivalent to [`Parser::default()`](Self::default) and is
+    /// provided for discoverability. Configure the parser by chaining the
+    /// `with_*` builder methods, then call [`parse()`](Self::parse).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Parse a UTF-8 string as an AsciiDoc document.
     ///
     /// The [`Document`] data structure returned by this call has a '`static`
@@ -625,6 +635,7 @@ impl Parser {
     ///
     /// [`warnings()`]: Document::warnings
     /// [`attribute_value()`]: Self::attribute_value
+    #[must_use]
     pub fn parse(&mut self, source: &str) -> Document<'static> {
         let mut document = self.parse_deferred(source);
 
@@ -652,6 +663,7 @@ impl Parser {
     ///
     /// [`parse()`]: Self::parse
     /// [`catalog()`]: Document::catalog
+    #[must_use]
     pub fn parse_deferred(&mut self, source: &str) -> Document<'static> {
         // Restore the configured attribute baseline so a `Parser` reused across
         // documents does not carry one document's header/body assignments into
@@ -1412,6 +1424,7 @@ impl Parser {
     /// [intrinsic attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes-ref/#intrinsic-attributes
     ///
     /// [`with_intrinsic_attribute_bool()`]: Self::with_intrinsic_attribute_bool
+    #[must_use]
     pub fn with_intrinsic_attribute<N: AsRef<str>, V: AsRef<str>>(
         mut self,
         name: N,
@@ -1461,6 +1474,7 @@ impl Parser {
     /// [intrinsic attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes-ref/#intrinsic-attributes
     ///
     /// [`with_intrinsic_attribute()`]: Self::with_intrinsic_attribute
+    #[must_use]
     pub fn with_intrinsic_attribute_silent<N: AsRef<str>, V: AsRef<str>>(
         mut self,
         name: N,
@@ -1863,6 +1877,7 @@ impl Parser {
     /// [intrinsic attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes-ref/#intrinsic-attributes
     ///
     /// [`with_intrinsic_attribute()`]: Self::with_intrinsic_attribute
+    #[must_use]
     pub fn with_intrinsic_attribute_bool<N: AsRef<str>>(
         mut self,
         name: N,
@@ -1912,6 +1927,7 @@ impl Parser {
     ///
     /// [`with_intrinsic_attribute_bool()`]: Self::with_intrinsic_attribute_bool
     /// [`with_intrinsic_attribute_silent()`]: Self::with_intrinsic_attribute_silent
+    #[must_use]
     pub fn with_intrinsic_attribute_bool_silent<N: AsRef<str>>(
         mut self,
         name: N,
@@ -1962,6 +1978,7 @@ impl Parser {
     /// `:docdate:`) still wins over the computed default.
     ///
     /// [`with_input_mtime`]: Self::with_input_mtime
+    #[must_use]
     pub fn with_reference_time(mut self, reference_time: ReferenceTime) -> Self {
         self.reference_time = Some(reference_time);
         self
@@ -1980,6 +1997,7 @@ impl Parser {
     /// `:docdate:`) still wins over the computed default.
     ///
     /// [`with_reference_time`]: Self::with_reference_time
+    #[must_use]
     pub fn with_input_mtime(mut self, input_mtime: ReferenceTime) -> Self {
         self.input_mtime = Some(input_mtime);
         self
@@ -2047,6 +2065,7 @@ impl Parser {
     /// provided is suitable for HTML5 rendering. If you are targeting a
     /// different back-end rendering, you will need to provide your own
     /// implementation and set it using this call before parsing.
+    #[must_use]
     pub fn with_inline_substitution_renderer<ISR: InlineSubstitutionRenderer + 'static>(
         mut self,
         renderer: ISR,
@@ -2065,6 +2084,7 @@ impl Parser {
     ///
     /// [`parse()`]: Self::parse
     /// [`IncludeFileHandler::resolve_target()`]: crate::parser::IncludeFileHandler::resolve_target
+    #[must_use]
     pub fn with_primary_file_name<S: AsRef<str>>(mut self, name: S) -> Self {
         self.primary_file_name = Some(name.as_ref().to_owned());
         self
@@ -2077,6 +2097,7 @@ impl Parser {
     /// include directives will be ignored.
     ///
     /// [`IncludeFileHandler`]: crate::parser::IncludeFileHandler
+    #[must_use]
     pub fn with_include_file_handler<IFH: IncludeFileHandler + 'static>(
         mut self,
         handler: IFH,
@@ -2096,6 +2117,7 @@ impl Parser {
     /// [`DocinfoFileHandler`]: crate::parser::DocinfoFileHandler
     /// [docinfo files]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
     /// [`Document::docinfo`]: crate::Document::docinfo
+    #[must_use]
     pub fn with_docinfo_file_handler<DFH: DocinfoFileHandler + 'static>(
         mut self,
         handler: DFH,
@@ -2112,6 +2134,7 @@ impl Parser {
     /// images fall back to rendering their alt text.
     ///
     /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
+    #[must_use]
     pub fn with_svg_file_handler<SFH: SvgFileHandler + 'static>(mut self, handler: SFH) -> Self {
         self.svg_file_handler = Some(Rc::new(handler));
         self
@@ -2127,6 +2150,7 @@ impl Parser {
     /// `data-uri` were not set.
     ///
     /// [`ImageFileHandler`]: crate::parser::ImageFileHandler
+    #[must_use]
     pub fn with_image_file_handler<IFH: ImageFileHandler + 'static>(
         mut self,
         handler: IFH,
@@ -2142,6 +2166,7 @@ impl Parser {
     /// catalog and can be retrieved afterward via
     /// [`Catalog::images`](crate::document::Catalog::images). The default is
     /// disabled, in which case no image references are recorded.
+    #[must_use]
     pub fn with_catalog_assets(mut self, catalog_assets: bool) -> Self {
         self.catalog_assets = catalog_assets;
         self
@@ -2154,6 +2179,7 @@ impl Parser {
     /// such as rendering an interactive SVG image as an `<object>` element.
     ///
     /// [`SafeMode`]: crate::SafeMode
+    #[must_use]
     pub fn with_safe_mode(mut self, safe: SafeMode) -> Self {
         self.safe = safe;
         self.apply_safe_mode_attributes();
@@ -2836,6 +2862,14 @@ mod tests {
         assert_eq!(p.attribute_value("foo"), InterpretedValue::Unset);
     }
 
+    #[test]
+    fn new_matches_default() {
+        // `Parser::new()` is a discoverability alias for `Parser::default()`.
+        let p = Parser::new();
+        assert_eq!(p.attribute_value("foo"), InterpretedValue::Unset);
+        assert_eq!(p.safe_mode(), Parser::default().safe_mode());
+    }
+
     mod attribute_state_between_parses {
         use crate::tests::prelude::*;
 
@@ -2845,7 +2879,7 @@ mod tests {
 
             // The first document defines `foo`; it is inspectable on the parser
             // once that parse returns.
-            parser.parse(":foo: bar\n\nText.\n");
+            let _ = parser.parse(":foo: bar\n\nText.\n");
             assert_eq!(
                 parser.attribute_value("foo"),
                 InterpretedValue::Value("bar")
@@ -2853,7 +2887,7 @@ mod tests {
 
             // A second document that never defines `foo` must not observe the
             // first document's assignment.
-            parser.parse("Text.\n");
+            let _ = parser.parse("Text.\n");
             assert_eq!(parser.attribute_value("foo"), InterpretedValue::Unset);
         }
 
@@ -2863,13 +2897,13 @@ mod tests {
 
             // A body (not header) assignment leaks the same way a header one
             // would if the baseline were not restored.
-            parser.parse("First.\n\n:mode: fast\n\nSecond.\n");
+            let _ = parser.parse("First.\n\n:mode: fast\n\nSecond.\n");
             assert_eq!(
                 parser.attribute_value("mode"),
                 InterpretedValue::Value("fast")
             );
 
-            parser.parse("Text.\n");
+            let _ = parser.parse("Text.\n");
             assert_eq!(parser.attribute_value("mode"), InterpretedValue::Unset);
         }
 
@@ -2882,7 +2916,7 @@ mod tests {
             );
 
             // The first document overrides the API-configured value in its body.
-            parser.parse(":site: dev\n\nText.\n");
+            let _ = parser.parse(":site: dev\n\nText.\n");
             assert_eq!(
                 parser.attribute_value("site"),
                 InterpretedValue::Value("dev")
@@ -2890,7 +2924,7 @@ mod tests {
 
             // The next parse begins from the configured baseline, not the
             // previous document's override.
-            parser.parse("Text.\n");
+            let _ = parser.parse("Text.\n");
             assert_eq!(
                 parser.attribute_value("site"),
                 InterpretedValue::Value("prod")
@@ -2901,14 +2935,14 @@ mod tests {
         fn reconfiguring_between_parses_updates_baseline() {
             let mut parser = Parser::default();
 
-            parser.parse("Text.\n");
+            let _ = parser.parse("Text.\n");
             assert_eq!(parser.attribute_value("env"), InterpretedValue::Unset);
 
             // A builder call between parses re-establishes the baseline for every
             // subsequent parse.
             parser = parser.with_intrinsic_attribute("env", "ci", ModificationContext::Anywhere);
 
-            parser.parse("Text.\n");
+            let _ = parser.parse("Text.\n");
             assert_eq!(parser.attribute_value("env"), InterpretedValue::Value("ci"));
         }
 
@@ -3617,7 +3651,7 @@ mod tests {
             }
         }
 
-        fn render_quoted_substitition(
+        fn render_quoted_substitution(
             &self,
             _type_: QuoteType,
             _scope: QuoteScope,
@@ -3795,7 +3829,7 @@ mod tests {
 
         fn parse_header(entries: &str) -> Parser {
             let mut parser = Parser::default();
-            parser.parse(&format!("= Title\n{entries}\n\nbody"));
+            let _ = parser.parse(&format!("= Title\n{entries}\n\nbody"));
             parser
         }
 
@@ -3852,7 +3886,7 @@ mod tests {
             // A body attribute entry links the partner just as a header entry
             // does.
             let mut parser = Parser::default();
-            parser.parse("= Title\n\nintro\n\n:notitle:\n\nmore");
+            let _ = parser.parse("= Title\n\nintro\n\n:notitle:\n\nmore");
             assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
             assert!(!parser.has_attribute("showtitle"));
         }

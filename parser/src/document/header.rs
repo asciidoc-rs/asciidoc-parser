@@ -2302,7 +2302,7 @@ mod tests {
         // of the header, but instead the author and revision lines before it
         // are captured as before.
         let mut parser = Parser::default();
-        parser.parse("= Title\nJoe Cool\nv1.0\n///\nstuff");
+        let _ = parser.parse("= Title\nJoe Cool\nv1.0\n///\nstuff");
 
         assert_eq!(
             parser.attribute_value("author"),

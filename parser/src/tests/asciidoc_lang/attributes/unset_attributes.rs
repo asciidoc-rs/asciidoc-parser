@@ -47,7 +47,7 @@ Don't add a value to the entry.
             .with_intrinsic_attribute("name2", "name2", ModificationContext::Anywhere)
             .with_intrinsic_attribute("name3", "name3", ModificationContext::Anywhere);
 
-        parser.parse("= Title\n:!name1:\n:name2!:");
+        let _ = parser.parse("= Title\n:!name1:\n:name2!:");
 
         assert_eq!(parser.attribute_value("name1"), InterpretedValue::Unset);
 
@@ -83,7 +83,7 @@ When `sectids` is unset, the AsciiDoc processor will not generate IDs from secti
 
         let mut parser = Parser::default();
 
-        parser.parse("= Document Title\n:!sectids:");
+        let _ = parser.parse("= Document Title\n:!sectids:");
 
         assert_eq!(parser.attribute_value("sectids"), InterpretedValue::Unset);
     }
@@ -108,7 +108,7 @@ This is an attribute that is set and assigned a default value of `Example` autom
 
         let mut parser = Parser::default();
 
-        parser.parse("= Title\n:!example-caption:");
+        let _ = parser.parse("= Title\n:!example-caption:");
 
         assert_eq!(
             parser.attribute_value("example-caption"),
