@@ -1579,6 +1579,23 @@ mod tests {
                 assert!(content.rendered.starts_with(leading));
             }
         }
+
+        #[test]
+        fn escaped_leading_backtick_before_constrained_monospace() {
+            // When the leading boundary character is a backslash, the failed
+            // look-ahead skips the backslash plus the following backtick (both
+            // ASCII, so two bytes). Exercises the escape branch of the skip
+            // width and confirms the escaped text is preserved verbatim.
+            let mut content = Content::from(crate::Span::new(r"\`code``"));
+            let p = Parser::default();
+
+            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed(r"\`code``".to_string().into_boxed_str())
+            );
+        }
     }
 
     mod attribute_references {
