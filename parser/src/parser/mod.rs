@@ -18,12 +18,14 @@ mod include_file_handler;
 pub use include_file_handler::{IncludeContent, IncludeFileHandler};
 
 mod inline_substitution_renderer;
-pub(crate) use inline_substitution_renderer::has_dangerous_scheme;
 pub use inline_substitution_renderer::{
     CalloutGuard, CalloutRenderParams, CharacterReplacementType, FootnoteRenderParams,
     HtmlSubstitutionRenderer, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
     InlineSubstitutionRenderer, LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType,
     SpecialCharacter, XrefRenderParams,
+};
+pub(crate) use inline_substitution_renderer::{
+    has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
 };
 
 mod parser;
@@ -31,7 +33,7 @@ pub(crate) use parser::DeferredWarning;
 pub use parser::Parser;
 
 mod path_resolver;
-pub use path_resolver::PathResolver;
+pub use path_resolver::{DefaultPathResolver, PathResolver};
 
 mod safe_mode;
 pub use safe_mode::SafeMode;

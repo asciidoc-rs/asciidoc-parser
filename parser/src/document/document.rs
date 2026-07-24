@@ -276,6 +276,13 @@ impl<'src> Document<'src> {
             // configured docinfo file handler (empty when no handler is set).
             let docinfo = Docinfo::resolve(parser);
 
+            // Warnings are collected in assembly order (header, then blocks, then
+            // preprocessor, substitution, and post-parse checks), which is not
+            // source order. Put them into source order now so a host can rely on
+            // `warnings()` yielding line-ordered diagnostics. See
+            // `sort_warnings` for the ordering and its determinism.
+            sort_warnings(&mut warnings);
+
             InternalDependent {
                 header,
                 blocks,
@@ -463,6 +470,14 @@ impl<'src> Document<'src> {
     }
 
     /// Return an iterator over any warnings found during parsing.
+    ///
+    /// Warnings are yielded in **source order**: by the byte offset of each
+    /// warning's [`source`](Warning::source) span in the (preprocessed)
+    /// document, so a host can render a line-ordered gutter or pick the "first"
+    /// diagnostic without sorting them itself. The order is deterministic;
+    /// warnings that share an offset keep a stable relative order. Resolving
+    /// cross-references (via [`resolve_references`](Self::resolve_references))
+    /// folds its unresolved-reference warnings into this same source order.
     pub fn warnings(&self) -> Warnings<'_> {
         Warnings::new(&self.internal.borrow_dependent().warnings)
     }
@@ -632,6 +647,34 @@ fn replace_reference_warnings<'src>(
         .retain(|warning| !matches!(warning.warning, WarningType::PossibleInvalidReference(_)));
 
     document_warnings.append(sweep_warnings);
+
+    // A resolution sweep appends its unresolved-reference warnings at the end,
+    // so restore source order after folding them in – matching the order
+    // established at the end of the parse.
+    sort_warnings(document_warnings);
+}
+
+/// Stable-sorts `warnings` into source order.
+///
+/// Warnings are collected in assembly order during the parse (and a reference
+/// resolution sweep appends more afterward), which does not match the order the
+/// diagnostics appear in the source. The primary key is the byte offset of each
+/// warning's [`source`](Warning::source) span in the (preprocessed) document,
+/// so a host can render a line-ordered gutter or pick the "first" diagnostic.
+///
+/// The sort is *stable*, and the tiebreaker is the warning's
+/// [`origin`](Warning::origin) line: two warnings anchored to the same document
+/// span – several failing `include::` directives inside one AsciiDoc table
+/// cell, whose `source` is the enclosing cell's directive line – order by where
+/// they actually live, and any remaining ties keep their deterministic assembly
+/// order. The result is therefore both source-ordered and stable across runs.
+fn sort_warnings(warnings: &mut [Warning<'_>]) {
+    warnings.sort_by_key(|warning| {
+        (
+            warning.source.byte_offset(),
+            warning.origin.as_ref().map_or(0, |origin| origin.1),
+        )
+    });
 }
 
 impl<'src> IsBlock<'src> for Document<'src> {

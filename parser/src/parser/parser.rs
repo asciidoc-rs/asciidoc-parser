@@ -13,7 +13,7 @@ use crate::{
     blocks::{SectionNumber, SectionType},
     document::{Attribute, Catalog, InterpretedValue, RefType},
     parser::{
-        AllowableValue, AttributeValue, DatetimeContext, DocinfoFileHandler,
+        AllowableValue, AttributeValue, DatetimeContext, DefaultPathResolver, DocinfoFileHandler,
         HtmlSubstitutionRenderer, ImageFileHandler, IncludeFileHandler, InlineSubstitutionRenderer,
         ModificationContext, PathResolver, ReferenceTime, ResolvedAttributes, SafeMode, SourceLine,
         SourceMap, SvgFileHandler,
@@ -85,7 +85,11 @@ pub struct Parser {
 
     /// Specifies how to generate clean and secure paths relative to the parsing
     /// context.
-    pub path_resolver: PathResolver,
+    ///
+    /// Defaults to [`DefaultPathResolver`]; a host can substitute custom
+    /// path/URL rewriting via
+    /// [`with_path_resolver`](Self::with_path_resolver).
+    pub(crate) path_resolver: Rc<dyn PathResolver>,
 
     /// Handler for resolving include:: directives.
     pub(crate) include_file_handler: Option<Rc<dyn IncludeFileHandler>>,
@@ -533,7 +537,7 @@ impl Default for Parser {
             default_attribute_values: built_in_default_values(),
             renderer: Rc::new(HtmlSubstitutionRenderer {}),
             primary_file_name: None,
-            path_resolver: PathResolver::default(),
+            path_resolver: Rc::new(DefaultPathResolver::default()),
             include_file_handler: None,
             docinfo_file_handler: None,
             svg_file_handler: None,
@@ -2159,6 +2163,23 @@ impl Parser {
         self
     }
 
+    /// Sets the [`PathResolver`] for this parser.
+    ///
+    /// The path resolver turns an asset target (an image `src`, a stylesheet
+    /// href, and so on) into the clean, resolved path that appears in the
+    /// rendered output. The default is [`DefaultPathResolver`], which mirrors
+    /// Ruby Asciidoctor. A host that needs custom path or URL rewriting – a
+    /// virtual filesystem, a content root, URL slugs – can supply its own
+    /// implementation here.
+    ///
+    /// [`PathResolver`]: crate::parser::PathResolver
+    /// [`DefaultPathResolver`]: crate::parser::DefaultPathResolver
+    #[must_use]
+    pub fn with_path_resolver<PR: PathResolver + 'static>(mut self, path_resolver: PR) -> Self {
+        self.path_resolver = Rc::new(path_resolver);
+        self
+    }
+
     /// Enables or disables cataloging of referenced image assets.
     ///
     /// When enabled (Asciidoctor's `catalog_assets` API option), each image
@@ -3779,6 +3800,38 @@ mod tests {
         };
 
         assert_eq!(simple_block.content().rendered(), "test.[FOOTNOTE:missing]");
+    }
+
+    /// A custom [`PathResolver`](crate::parser::PathResolver) that rewrites
+    /// every asset target under a fixed content root, ignoring the start path.
+    /// Stands in for a host (Antora/Zola-style) that maps targets through a
+    /// virtual filesystem or URL scheme.
+    #[derive(Debug)]
+    struct CdnPathResolver;
+
+    impl crate::parser::PathResolver for CdnPathResolver {
+        fn web_path(&self, target: &str, _start: Option<&str>) -> String {
+            format!("https://cdn.example.com/{target}")
+        }
+    }
+
+    #[test]
+    fn with_path_resolver() {
+        let mut parser = Parser::default().with_path_resolver(CdnPathResolver);
+
+        // An inline image's `src` is resolved through the path resolver, so the
+        // custom resolver should rewrite it under the content root.
+        let doc = parser.parse("image:tiger.png[tiger]");
+
+        let block = doc.child_blocks().next().unwrap();
+        let Block::Simple(simple_block) = block else {
+            panic!("Expected simple block, got: {block:?}");
+        };
+
+        assert_eq!(
+            simple_block.content().rendered(),
+            r#"<span class="image"><img src="https://cdn.example.com/tiger.png" alt="tiger"></span>"#
+        );
     }
 
     mod resolve_show_title {
