@@ -796,7 +796,20 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let link_self_href = if inline_svg { None } else { Some(src.as_str()) };
 
-        render_icon_or_image(params.attrlist, &img, "image", link_self_href, dest);
+        // A URI-ish target passes through to `src` verbatim (it is never
+        // embedded), so a `link=self` resolving to it is author-supplied and
+        // subject to the stricter SVG-data-URI check; a plain path target is
+        // resolved to a web path or a trusted embedded `data-uri`.
+        let self_href_from_uri_target = is_uri_ish(params.target);
+
+        render_icon_or_image(
+            params.attrlist,
+            &img,
+            "image",
+            link_self_href,
+            self_href_from_uri_target,
+            dest,
+        );
     }
 
     fn image_uri(
@@ -947,7 +960,19 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             None
         };
 
-        render_icon_or_image(params.attrlist, &img, "icon", link_self_href, dest);
+        // As in `render_image`: a URI-ish target passes through to the icon
+        // `src` verbatim, so a `link=self` resolving to it is author-supplied
+        // and gets the stricter SVG-data-URI check.
+        let self_href_from_uri_target = is_uri_ish(params.target);
+
+        render_icon_or_image(
+            params.attrlist,
+            &img,
+            "icon",
+            link_self_href,
+            self_href_from_uri_target,
+            dest,
+        );
     }
 
     fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
@@ -1242,6 +1267,7 @@ fn render_icon_or_image(
     img: &str,
     type_: &'static str,
     link_self_href: Option<&str>,
+    self_href_from_uri_target: bool,
     dest: &mut String,
 ) {
     let mut img = img.to_string();
@@ -1267,10 +1293,19 @@ fn render_icon_or_image(
         // wrapping anchor. Escaping the `"` delimiter alone would still leave a
         // live `javascript:` URI, so the destination is rejected outright – the
         // same policy the explicit `link:` macro applies, and the macro layer
-        // records the accompanying warning. `link=self` names the image's own
-        // `src` (which may legitimately be a `data:` image URI), so it is
-        // exempt.
-        if is_self || !has_dangerous_scheme(link.value()) {
+        // records the accompanying warning. `link=self` resolves to the image's
+        // own `src`, which may legitimately be a `data:image/*` URI, so it is
+        // checked with the more permissive [`has_dangerous_self_href`] (a
+        // `javascript:` or non-image `data:` src – or an author-supplied SVG
+        // data URI target – still resolves to a live script URI here and is
+        // rejected).
+        let rejected = if is_self {
+            has_dangerous_self_href(href, self_href_from_uri_target)
+        } else {
+            has_dangerous_scheme(link.value())
+        };
+
+        if !rejected {
             img = format!(
                 r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
                 // Both sources of `href` – the image's own `src` (a resolved web
@@ -1327,6 +1362,69 @@ pub(crate) fn has_dangerous_scheme(target: &str) -> bool {
     })
 }
 
+/// Reports whether `href` – the `src` a `link=self` image/icon resolves to –
+/// would place a script-capable URI in the wrapping anchor's `href`.
+///
+/// `link=self` names the image's own `src`, so it cannot simply be run through
+/// [`has_dangerous_scheme`]: an embedded image (`data-uri`) legitimately
+/// resolves to a `data:image/*` URI, and there is an Asciidoctor-parity test
+/// for exactly that. A `data:image/*` source is therefore exempt. Every other
+/// dangerous scheme – `javascript:`, `vbscript:`, or a non-image `data:` such
+/// as `data:text/html,…` – is never a valid image source, so promoting it into
+/// an `href` is rejected: only the anchor is dropped (the harmless `<img src>`
+/// is left intact), mirroring the `link=` policy above.
+///
+/// `from_uri_target` narrows that exemption. It is set when the `src` was
+/// passed through verbatim from an author-supplied URI target, rather than
+/// resolved from a local file path (a plain web path, or a crate-embedded
+/// `data-uri`). A `data:image/svg+xml` document *executes* its embedded script
+/// when it is navigated to – which following the `href` on click does – unlike
+/// a raster image data URI, which merely displays. An embedded SVG comes from a
+/// trusted local file (the parity case) and stays exempt; an author-supplied
+/// `data:image/svg…` target is script-navigable and is rejected.
+pub(crate) fn has_dangerous_self_href(href: &str, from_uri_target: bool) -> bool {
+    if !has_dangerous_scheme(href) {
+        return false;
+    }
+
+    // A dangerous scheme that is not a `data:image/*` source (`javascript:`,
+    // `vbscript:`, `data:text/html`, …) is always rejected.
+    if !is_image_data_uri(href) {
+        return true;
+    }
+
+    // A `data:image/*` source is exempt, except an author-supplied SVG data URI,
+    // whose script runs when the anchor is followed.
+    from_uri_target && is_svg_data_uri(href)
+}
+
+/// Reports whether `href` is a `data:image/*` URI (the leading control/space
+/// characters are ignored and the comparison is ASCII-case-insensitive, as in
+/// [`has_dangerous_scheme`]). This is the one `data:` form that is a legitimate
+/// image source, so it is exempt from the `link=self` rejection above.
+fn is_image_data_uri(href: &str) -> bool {
+    let href = href.trim_start_matches(|c: char| c <= ' ');
+
+    const IMAGE_DATA_PREFIX: &str = "data:image/";
+
+    href.get(..IMAGE_DATA_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(IMAGE_DATA_PREFIX))
+}
+
+/// Reports whether `href` is a `data:image/svg…` URI. SVG is the one image
+/// media type that executes embedded script when the URI is opened as a
+/// top-level document, so an author-supplied SVG data URI is not a safe
+/// `link=self` target (see [`has_dangerous_self_href`]). Raster image data URIs
+/// never begin with `svg`, so they are unaffected.
+fn is_svg_data_uri(href: &str) -> bool {
+    let href = href.trim_start_matches(|c: char| c <= ' ');
+
+    const SVG_DATA_PREFIX: &str = "data:image/svg";
+
+    href.get(..SVG_DATA_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(SVG_DATA_PREFIX))
+}
+
 /// Escapes a value for safe interpolation into an HTML attribute.
 ///
 /// Unlike [`encode_attribute_value`] (which only guards the quote delimiter to
@@ -1362,7 +1460,7 @@ fn normalize_web_path(
     }
 }
 
-fn is_uri_ish(path: &str) -> bool {
+pub(crate) fn is_uri_ish(path: &str) -> bool {
     path.contains(':') && URI_SNIFF.is_match(path)
 }
 
