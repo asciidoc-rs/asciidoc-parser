@@ -26,7 +26,7 @@ pub struct PathResolver {
     /// platform-appropriate separator.)
     pub file_separator: char,
     // Ruby's `PathResolver` also carries a `working_dir`, but it is read only by
-    // `system_path` — the filesystem-resolution + safe-mode-jail routine — as a
+    // `system_path` – the filesystem-resolution + safe-mode-jail routine – as a
     // fallback base directory, and Ruby always seeds it from `Dir.pwd`. This
     // crate performs no filesystem I/O: `include::` and asset resolution are
     // delegated to the client via `IncludeFileHandler`, so there is no consumer
@@ -190,7 +190,7 @@ impl PathResolver {
         // Ruby builds these segments with `posix_path.split SLASH`, and Ruby's
         // `String#split` drops trailing empty fields (e.g. `'a/b/'.split '/'` is
         // `['a', 'b']`, and `''.split '/'` is `[]`). Rust's `str::split` keeps
-        // them, so strip trailing empties to match — otherwise a trailing slash
+        // them, so strip trailing empties to match – otherwise a trailing slash
         // would survive as a spurious empty final segment.
         while path_segments.last().is_some_and(|s| s.is_empty()) {
             path_segments.pop();
@@ -479,7 +479,7 @@ mod tests {
 
             // Mixed scenarios. (An empty target resolves to the start path with
             // no spurious trailing slash, and an empty `start` is treated like
-            // `None` — matching Ruby's `web_path`; see `paths_test.rb`.)
+            // `None` – matching Ruby's `web_path`; see `paths_test.rb`.)
             assert_eq!(pr.web_path("", Some("docs/images")), "docs/images");
             assert_eq!(pr.web_path("", Some("")), "");
             assert_eq!(pr.web_path("", None), "");

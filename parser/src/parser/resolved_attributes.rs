@@ -59,7 +59,7 @@ pub(crate) struct ResolvedAttributes {
     /// demand. This is deterministic parser configuration (not a captured
     /// instant), so two snapshots taken from equally-configured parsers
     /// stay equal. It is boxed (and `None` unless a clock was pinned) so it
-    /// costs only a pointer here — this snapshot is embedded in a
+    /// costs only a pointer here – this snapshot is embedded in a
     /// size-sensitive cell enum.
     datetime_inputs: Option<Box<DatetimeInputs>>,
 }
@@ -89,7 +89,7 @@ impl ResolvedAttributes {
     ///
     /// The values are written into *this snapshot's* attribute map (via
     /// [`Arc::make_mut`], which detaches it from the parser's shared table),
-    /// not into the parser — so a reused parser never carries a document's
+    /// not into the parser – so a reused parser never carries a document's
     /// derived TOC state into the next parse, where it would otherwise
     /// perturb [`TocMode::from_parser`](crate::document::TocMode)'s reading
     /// of the raw `toc-placement`.
@@ -98,11 +98,12 @@ impl ResolvedAttributes {
     /// author-supplied value; `toc-class` only *defaults* (to `toc2` for a
     /// side-column TOC), leaving an explicit author value untouched. Nothing is
     /// materialized when no TOC is generated ([`TocMode::Disabled`], for which
-    /// every derived value is `None`), matching Asciidoctor — and avoiding a
+    /// every derived value is `None`), matching Asciidoctor – and avoiding a
     /// map clone for the common no-TOC document.
     pub(crate) fn materialize_toc_attributes(&mut self, mode: TocMode) {
         let placement = mode.derived_toc_placement();
         let position = mode.derived_toc_position();
+
         // A side-column TOC only *defaults* `toc-class` to `toc2`; an explicit
         // author value wins (Asciidoctor's `attrs['toc-class'] ||= 'toc2'`).
         let class = mode
@@ -145,7 +146,7 @@ impl ResolvedAttributes {
         }
 
         // An unset `relfilesuffix` reads as the *effective* value of
-        // `outfilesuffix` — routed through this same reader so an
+        // `outfilesuffix` – routed through this same reader so an
         // `outfilesuffix` counter overlay is honored too (see
         // [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
         if self.tracks_outfilesuffix(name) {
@@ -177,6 +178,7 @@ impl ResolvedAttributes {
                     av.value.clone()
                 }
             }
+
             // A time-dependent attribute is resolved on demand from the
             // reference-time configuration rather than stored in a table.
             None => self
@@ -197,17 +199,17 @@ impl ResolvedAttributes {
     ///
     /// The reference instant is captured per call (these attributes are read
     /// rarely from a snapshot) rather than cached; within a single call it is
-    /// consistent. When the clock is *pinned* — a
+    /// consistent. When the clock is *pinned* – a
     /// [`reference_time`](crate::Parser::with_reference_time), an
     /// [`input_mtime`](crate::Parser::with_input_mtime), or `SOURCE_DATE_EPOCH`
-    /// — every capture yields the same instant, so a snapshot lookup always
+    /// – every capture yields the same instant, so a snapshot lookup always
     /// agrees with the value substituted into content during parsing. This is
     /// the reproducible-build path and the intended way to consume these
     /// attributes.
     ///
     /// When the clock is *not* pinned, each capture reads the real wall clock
     /// (or a since-changed `SOURCE_DATE_EPOCH`) afresh, so a post-parse lookup
-    /// can disagree with content the parser already rendered — e.g. `{docdate}`
+    /// can disagree with content the parser already rendered – e.g. `{docdate}`
     /// substituted just before midnight, then read back just after. The
     /// snapshot deliberately does *not* freeze the parser's capture here: doing
     /// so would either make snapshot equality depend on a wall-clock reading or
@@ -238,8 +240,8 @@ impl ResolvedAttributes {
     /// Returns the *explicitly-set* value of `name` from the stored attribute
     /// map (a value-less "set" reads as an empty string), or `None`.
     ///
-    /// Reads only the stored overrides — never the on-the-fly datetime
-    /// resolution — so it can feed the explicit sibling values
+    /// Reads only the stored overrides – never the on-the-fly datetime
+    /// resolution – so it can feed the explicit sibling values
     /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute) needs
     /// without recursing.
     fn stored_datetime_override(&self, name: &str) -> Option<String> {
@@ -273,6 +275,7 @@ impl ResolvedAttributes {
         if let Some(av) = self.attribute_values.get(name) {
             return Some(av);
         }
+
         // Mirror the parser's mode-aware resolution of the two intrinsics whose
         // default depends on the safe mode rather than on either attribute
         // table (see [`Parser::effective_attribute`]). Consulted after the
@@ -315,6 +318,7 @@ impl ResolvedAttributes {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
+
         // A derived `basebackend` / `filetype` is present only while `backend`
         // resolves to a non-empty value (see [`derived_backend_value`]).
         if derived_backend_value(name, &self.attribute_values).is_some() {
@@ -373,9 +377,9 @@ mod tests {
         }
     }
 
-    /// Builds a snapshot exercising each attribute shape — an explicit value, a
+    /// Builds a snapshot exercising each attribute shape – an explicit value, a
     /// `Set` with a registered default, a `Set` with no default, and an
-    /// explicitly unset attribute — plus a counter that shadows a like-named
+    /// explicitly unset attribute – plus a counter that shadows a like-named
     /// attribute.
     fn sample() -> ResolvedAttributes {
         let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
@@ -504,6 +508,7 @@ mod tests {
             attrs.attribute_value("docfile"),
             InterpretedValue::Value("sample.adoc".to_string())
         );
+
         // Masking changes only the value; the attributes stay present and set.
         assert!(attrs.has_attribute("docdir"));
         assert!(attrs.is_attribute_set("docfile"));
@@ -513,7 +518,7 @@ mod tests {
     fn absent_docdir_and_docfile_stay_missing_under_server_safe_mode() {
         // With no `docdir` / `docfile` stored, the masking finds nothing to mask
         // (`raw_set_value` short-circuits on the absent attribute) and they stay
-        // missing — mirroring the parser.
+        // missing – mirroring the parser.
         let attrs = ResolvedAttributes::new(
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),

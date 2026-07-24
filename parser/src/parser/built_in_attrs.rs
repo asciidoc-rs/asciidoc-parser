@@ -33,7 +33,7 @@ pub(crate) const DEFAULT_ICONSDIR: &str = "./images/icons";
 static BUILT_IN_ATTRS: LazyLock<HashMap<String, AttributeValue>> =
     LazyLock::new(build_built_in_attrs);
 
-/// The shared value handed out for every synthesized *backend-family flag* —
+/// The shared value handed out for every synthesized *backend-family flag* –
 /// `backend-{backend}`, `basebackend-{basebackend}`, `filetype-{filetype}`,
 /// `doctype-{doctype}`, `backend-{backend}-doctype-{doctype}`, and
 /// `basebackend-{basebackend}-doctype-{doctype}`. Each is defined (with an
@@ -105,7 +105,7 @@ static MAX_ATTRIBUTE_VALUE_SIZE_RELAXED_DEFAULT: LazyLock<AttributeValue> =
 ///
 /// This is consulted by [`Parser::effective_attribute`] *after* the per-parser
 /// attribute map, so a caller-supplied value (which is API-only and therefore
-/// always lives in that map) always wins — the default never overrides an
+/// always lives in that map) always wins – the default never overrides an
 /// explicit limit, and a `with_safe_mode` call never rewrites one.
 ///
 /// [`Parser::effective_attribute`]: crate::Parser
@@ -251,8 +251,8 @@ pub(crate) fn derived_backend_value(
     }
 }
 
-/// Resolves a *synthesized* attribute — one computed from other state rather
-/// than stored in either attribute table — for the active document state:
+/// Resolves a *synthesized* attribute – one computed from other state rather
+/// than stored in either attribute table – for the active document state:
 ///
 /// * The backend-family flags `backend-{backend}`, `basebackend-{basebackend}`,
 ///   `filetype-{filetype}`, `doctype-{doctype}`,
@@ -275,7 +275,7 @@ pub(crate) fn synthesized_attr(
     // The derived backend-family flags are all empty-valued and defined only for
     // the *active* backend / basebackend / filetype / doctype. Rather than parse
     // the queried name, compute the flag names that are currently active and
-    // compare — unambiguous even where the components overlap. An explicitly
+    // compare – unambiguous even where the components overlap. An explicitly
     // unset (or empty) `backend` / `doctype` contributes no flags, so the
     // backend-dependent and doctype-dependent groups are each gated on a
     // present, non-empty value.
@@ -478,7 +478,7 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // `authorcount` reflects the number of resolved authors and defaults to `0`
     // for a document with none. Registering the default here (rather than
     // writing it during every header parse) lets an author-less document resolve
-    // `{authorcount}` to `0` without materializing the attribute — the header
+    // `{authorcount}` to `0` without materializing the attribute – the header
     // parser only writes `authorcount` when the count is non-zero (see
     // [`Header::parse`](crate::document::Header)).
     attrs.insert("authorcount".to_owned(), set(Anywhere, "0"));
@@ -486,12 +486,12 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // ### General content and formatting attributes
     //
     // The active backend defaults to `html5` (the only backend this crate
-    // renders). It is a normal, unlocked attribute — settable in the header, the
+    // renders). It is a normal, unlocked attribute – settable in the header, the
     // body, or via the API, matching Asciidoctor, where `{backend}` reflects the
-    // latest assignment — so its default context is `Anywhere`; an API caller
-    // that wants to pin it uses `ApiOnly`. Its derived family —
+    // latest assignment – so its default context is `Anywhere`; an API caller
+    // that wants to pin it uses `ApiOnly`. Its derived family –
     // `backend-{backend}`, `basebackend`, `basebackend-{basebackend}`,
-    // `filetype`, `filetype-{filetype}`, and the `*-doctype-{doctype}` flags —
+    // `filetype`, `filetype-{filetype}`, and the `*-doctype-{doctype}` flags –
     // is synthesized on the fly from this value (see [`synthesized_attr`] and
     // [`derived_backend_value`]), so it is never materialized or kept in sync
     // when `backend` changes.
@@ -512,8 +512,8 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         any(ApiOrHeader, Value(".html".into())),
     );
 
-    // `relfilesuffix` — the path suffix added to relative (inter-document)
-    // xrefs — is intentionally *not* registered here. When it has not been
+    // `relfilesuffix` – the path suffix added to relative (inter-document)
+    // xrefs – is intentionally *not* registered here. When it has not been
     // explicitly set it tracks the current value of `outfilesuffix` rather than
     // a hardcoded `.html`, since the two diverge for non-HTML backends (e.g.
     // `.xml` for DocBook). That read-only default is resolved on the fly by the

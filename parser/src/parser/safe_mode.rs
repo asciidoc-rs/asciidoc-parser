@@ -92,7 +92,7 @@ impl SafeMode {
 /// Returns `None` for any other name, and for an *unset* `docdir` / `docfile`
 /// (so a reference to one still resolves as missing rather than empty). Because
 /// the computation reads the *raw* stored values, the API-provided attributes
-/// are left untouched — a non-`Server` parser still reads them back verbatim.
+/// are left untouched – a non-`Server` parser still reads them back verbatim.
 ///
 /// Both [`Parser`](crate::Parser) and its
 /// [`ResolvedAttributes`](crate::parser::ResolvedAttributes) snapshot funnel
@@ -118,8 +118,8 @@ pub(crate) fn masked_doc_path(
 
 /// Relativizes `docfile` against `docdir` for `SafeMode::Server` masking.
 ///
-/// When `docfile` sits directly under `docdir` — i.e. it begins with the exact
-/// `docdir` prefix followed by a path separator — the prefix and separator are
+/// When `docfile` sits directly under `docdir` – i.e. it begins with the exact
+/// `docdir` prefix followed by a path separator – the prefix and separator are
 /// stripped, matching Ruby Asciidoctor's `docfile[(docdir.length + 1)..-1]`
 /// (which keeps any intermediate sub-directories, not just the base name). This
 /// is the normal case, since Asciidoctor derives `docdir` from `docfile`.
@@ -215,6 +215,7 @@ mod tests {
             relativize_docfile("/some/dir/sample.adoc", Some("/some/dir/")),
             "sample.adoc"
         );
+
         // Multiple trailing separators, and the Windows separator, too.
         assert_eq!(
             relativize_docfile("/some/dir/sub/sample.adoc", Some("/some/dir///")),
