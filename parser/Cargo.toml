@@ -18,7 +18,16 @@ memchr = "2.6.4"
 percent-encoding = "2.3.2"
 regex = "1.11.1"
 self_cell = "1.2.0"
+serde = { version = "1.0.130", features = ["derive"], optional = true }
 thiserror = "2.0.1"
+
+[features]
+# Derive `serde::Serialize` on `Document` and the parsed AST / output types it
+# exposes, so a parse result can be serialized (e.g. to JSON) for snapshotting,
+# diffing, or caching. Deserialization is intentionally not provided: the AST is
+# a read-only projection of the source, so the way to reload a parse result is
+# to re-parse the original AsciiDoc.
+serde = ["dep:serde"]
 
 [dev-dependencies]
 codspeed-criterion-compat = "5.0.0"
@@ -49,4 +58,8 @@ name = "simple_parse"
 development = ["criterion"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(test)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(test)', 'cfg(docsrs)'] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

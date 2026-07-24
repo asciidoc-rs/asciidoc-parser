@@ -35,7 +35,7 @@ use crate::{
 /// [`RawDelimitedBlock`]: crate::blocks::RawDelimitedBlock
 /// [`Document::resolve_references`]: crate::Document::resolve_references
 /// [`rendered()`]: Self::rendered
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Content<'src> {
     /// The original [`Span`] from which this content was derived.
     original: Span<'src>,
