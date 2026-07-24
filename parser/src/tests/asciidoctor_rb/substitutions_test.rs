@@ -9583,7 +9583,7 @@ mod passthroughs {
         );
         let doc = p.parse("pass:bogus[++]");
         assert_eq!(
-            doc.nested_blocks().next().unwrap().rendered_content(),
+            doc.child_blocks().next().unwrap().rendered_content(),
             Some("++")
         );
 
@@ -10600,7 +10600,7 @@ mod passthroughs {
             let mut parser = parser;
             let doc = parser.parse(input);
             assert_eq!(
-                doc.nested_blocks().next().unwrap().rendered_content(),
+                doc.child_blocks().next().unwrap().rendered_content(),
                 Some(expected),
                 "input = {input:?}"
             );
@@ -11108,7 +11108,7 @@ mod passthroughs {
             );
             let doc = p.parse("stem:bogus[x^2]");
             assert_eq!(
-                doc.nested_blocks().next().unwrap().rendered_content(),
+                doc.child_blocks().next().unwrap().rendered_content(),
                 Some(r"\$x^2\$")
             );
 

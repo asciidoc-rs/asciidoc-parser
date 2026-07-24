@@ -45,7 +45,7 @@ TIP: When you need to prevent or control the substitutions on one or more blocks
 
     let doc = Parser::default().parse(":email: foo@example.com\n\npass:[content like #{variable} passed directly to the output] followed by normal content.\n\ncontent with only select substitutions applied: pass:c,a[__<{email}>__]");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::Simple(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -81,7 +81,7 @@ The main difference, however, is that they are applied first to suppress formatt
         "A +word+, a +sequence of words+, or ++char++acters that are escaped from formatting.",
     );
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::Simple(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -115,7 +115,7 @@ You can also escape formatting marks, like +``+.
 
     let doc = Parser::default().parse("A word or phrase between single pluses, such as +/document/{id}+, is not substituted.\nHowever, the special characters +<+ and +>+ are still escaped in the output.\n\nYou can also escape formatting marks, like +``+.");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
 
@@ -166,7 +166,7 @@ If you want to do both, you must enclose the pair in a monospace formatting pair
 
     let doc = Parser::default().parse(":conf: /prod\n\nText formatting is not applied to a link target if it is surrounded by double pluses.\nFor example, link:++https://example.org/now_this__link_works.html++[].\n\nYou can also escape formatting marks, like all-natural++*++.\n\nAn attribute reference within a word, such as dev++{conf}++, is not replaced.");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
 
@@ -230,7 +230,7 @@ include::example$pass.adoc[tag=3p]
     let doc =
         Parser::default().parse("The text +++<del>strike this</del>+++ is marked as deleted.");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::Simple(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -282,7 +282,7 @@ Let's look at how to use the inline pass macro to hand select substitutions.
 ",
     );
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::Simple(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -358,7 +358,7 @@ include::example$pass.adoc[tag=in-macro-sub]
     let doc =
         Parser::default().parse("The text pass:q[<del>strike *this*</del>] is marked as deleted.");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::Simple(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -392,7 +392,7 @@ include::example$pass.adoc[tag=in-macro-subs]
 
     let doc = Parser::default().parse(":docname: untitled document 1\n\nThe text pass:q,a[<del>strike _{docname}_</del>] is marked as deleted.");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::Simple(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -447,7 +447,7 @@ protected void configure(HttpSecurity http) throws Exception {
 
     let doc = Parser::default().parse("[source,java,subs=\"+quotes,+macros\"]\n----\nprotected void configure(HttpSecurity http) throws Exception {\n    http\n        .authorizeRequests()\n            **.antMatchers(\"/resources/+++**+++\").permitAll()**\n            .anyRequest().authenticated()\n            .and()\n        .formLogin()\n            .loginPage(\"/login\")\n            .permitAll();\n----");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::RawDelimited(rdb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");

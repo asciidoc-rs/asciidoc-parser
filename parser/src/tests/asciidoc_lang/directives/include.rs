@@ -62,7 +62,7 @@ The include directive is a <<include-processing,preprocessor directive>>, which 
         .with_include_file_handler(handler)
         .parse("----\ninclude::expander.adoc[]\n----");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.span().data(), "----\nEXPANDED\n----");
 }
 
@@ -348,7 +348,7 @@ Only after the lines from the target of the include directive are added to the c
         .with_include_file_handler(handler)
         .parse("= Doc Title\n\ninclude::sec.adoc[]");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert!(matches!(block, crate::blocks::Block::Section(_)));
 }
 
@@ -428,7 +428,7 @@ fn indentation_prevents_processing() {
         )]))
         .parse("[indent=0]\n----\n \\include::just-an-example.ext[]\n----");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(
         block.span().data(),
         "[indent=0]\n----\n \\include::just-an-example.ext[]\n----"
@@ -445,7 +445,7 @@ fn indentation_prevents_processing() {
         )]))
         .parse("[indent=0]\n----\n include::just-an-example.ext[]\n----");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(
         block.span().data(),
         "[indent=0]\n----\n include::just-an-example.ext[]\n----"
@@ -470,7 +470,7 @@ Escaping the directive is necessary _even if it appears in a verbatim block_ sin
         .with_include_file_handler(handler)
         .parse("----\ninclude::ex.adoc[]\n----");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.span().data(), "----\nIMPORTED\n----");
 }
 

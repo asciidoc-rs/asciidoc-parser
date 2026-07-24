@@ -310,7 +310,7 @@ See xref:subs:apply-subs-to-blocks.adoc[] to learn more about the `subs` attribu
             ModificationContext::Anywhere,
         ).parse("[subs=\"+attributes\"]\n----\nThis is a _delimited listing block_\nwith the `subs` attribute assigned\nthe incremental value `+attributes`.\nThis attribute reference:\n\n{replace-me}\n\nwill be replaced with the attribute's\nvalue when rendered.\n----");
 
-    let mut doc_blocks = doc.nested_blocks();
+    let mut doc_blocks = doc.child_blocks();
 
     let block = doc_blocks.next().unwrap();
     assert_eq!(block, &expected_block);

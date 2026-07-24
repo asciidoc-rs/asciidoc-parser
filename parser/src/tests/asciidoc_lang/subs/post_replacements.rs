@@ -26,7 +26,7 @@ The line break character, `{plus}`, is replaced when the `post_replacements` sub
 
     let doc = Parser::default().parse("first line +\nsecond line");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::Simple(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -76,7 +76,7 @@ mod default_post_replacements_substitution {
             ":haiku: Write your docs in text, + \\\nAsciiDoc makes it easy, + \\\nNow get back to work!\n\n[subs=attributes]\n++++\n{haiku}\n++++",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -95,7 +95,7 @@ mod default_post_replacements_substitution {
             ":haiku: Write your docs in text, + \\\nAsciiDoc makes it easy, + \\\nNow get back to work!\n\n{haiku}",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -118,7 +118,7 @@ mod default_post_replacements_substitution {
 
         let doc = Parser::default().parse("////\nabc +\ndef\n////");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -138,14 +138,14 @@ mod default_post_replacements_substitution {
 
         let doc = Parser::default().parse(":icons:\n\n====\nabc +\ndef\n====");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -180,7 +180,7 @@ mod default_post_replacements_substitution {
 
         let doc = Parser::default().parse("....\nabc +\ndef\n....");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -201,7 +201,7 @@ mod default_post_replacements_substitution {
             "Click image:pause.png[title=Pause pass:p[{abc +\ndef}] Resume] when you need a break.",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -225,7 +225,7 @@ mod default_post_replacements_substitution {
         let doc =
             Parser::default().parse("Click +++*Pause* +\n and Resume+++ when you need a break.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -248,14 +248,14 @@ mod default_post_replacements_substitution {
 
         let doc = Parser::default().parse(":icons:\n\n--\nabc +\ndef\n--");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -275,7 +275,7 @@ mod default_post_replacements_substitution {
 
         let doc = Parser::default().parse("abc +\ndef");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -295,7 +295,7 @@ mod default_post_replacements_substitution {
 
         let doc = Parser::default().parse("++++\nabc +\ndef\n++++");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -315,14 +315,14 @@ mod default_post_replacements_substitution {
 
         let doc = Parser::default().parse("____\nabc +\ndef\n____");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Quote(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -342,14 +342,14 @@ mod default_post_replacements_substitution {
 
         let doc = Parser::default().parse("****\nabc +\ndef\n****");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -371,7 +371,7 @@ mod default_post_replacements_substitution {
         // default table cells but not to literal (`l`) cells, hence "Varies".
         let doc = Parser::default().parse("|===\n|abc +\ndef\nl|abc +\nghi\n|===");
 
-        let Some(Block::Table(table)) = doc.nested_blocks().next() else {
+        let Some(Block::Table(table)) = doc.child_blocks().next() else {
             panic!("expected a table block");
         };
 
@@ -428,7 +428,7 @@ For blocks, the step's name, `post_replacements`, can be assigned to the xref:ap
         // as-is (verified against Asciidoctor 2.0.26).
         let doc = Parser::default().parse("[subs=post_replacements]\nabc *bold* +\ndef");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -447,7 +447,7 @@ For inline elements, the built-in values `p` or `post_replacements` can be appli
 
         let doc = Parser::default().parse("pass:p[abc +\n *bold*]{sp}and then ...");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");

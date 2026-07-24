@@ -75,7 +75,7 @@ fn id() {
     // (and registers it in the document catalog so it can be cross-referenced),
     // exactly like the `[[sunset-img]]` / `[#sunset-img]` block-anchor forms.
     let doc = Parser::default().parse("image::sunset.jpg[Sunset,id=sunset-img]");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.id(), Some("sunset-img"));
 
     // The registration is real end-to-end: a later `<<sunset-img>>` cross
@@ -189,7 +189,7 @@ fn caption() {
     // caption prefix (it wins over the automatic "Figure N. " label).
     let doc = Parser::default()
         .parse(".A mountain sunset\nimage::sunset.jpg[Sunset,caption=\"Figure 8: \"]");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.caption(), Some("Figure 8: "));
     assert_eq!(block.number(), None);
 }

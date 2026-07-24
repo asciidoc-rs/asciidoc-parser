@@ -1049,7 +1049,7 @@ mod tests {
             let mut p = Parser::default();
             let doc = p.parse("[subs=\"bogus,quotes\"]\nabc *bold* &\ndef");
 
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
             assert_eq!(
                 block.rendered_content(),
                 Some("abc <strong>bold</strong> &\ndef")
@@ -1070,7 +1070,7 @@ mod tests {
             let mut p = Parser::default();
             let doc = p.parse("[subs=\",\"]\n....\ncontent <here>\n....");
 
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
             assert_eq!(block.rendered_content(), Some("content <here>"));
 
             assert_eq!(doc.warnings().count(), 0);

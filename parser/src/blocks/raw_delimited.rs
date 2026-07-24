@@ -1,7 +1,9 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
-    blocks::{ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata},
+    blocks::{
+        ChildBlocks, ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata,
+    },
     content::{Content, SubstitutionGroup},
     span::MatchedItem,
     strings::CowStr,
@@ -54,6 +56,16 @@ pub struct RawDelimitedBlock<'src> {
 }
 
 impl<'src> RawDelimitedBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// A raw delimited block (listing, literal, or passthrough) holds verbatim
+    /// or raw content rather than child blocks, so this iterator is always
+    /// empty. See [`FindBlocks`](crate::blocks::FindBlocks) to search from a
+    /// [`Block`](crate::blocks::Block) or [`Document`](crate::Document).
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::empty()
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -1612,7 +1624,7 @@ mod tests {
         #[test]
         fn stem_style_block() {
             let doc = Parser::default().parse("[stem]\n++++\na < b\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.content_model(), ContentModel::Raw);
             assert_eq!(block.raw_context().as_ref(), "stem");
@@ -1626,7 +1638,7 @@ mod tests {
         #[test]
         fn asciimath_style_block() {
             let doc = Parser::default().parse("[asciimath]\n++++\nx^2\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("asciimath"));
@@ -1636,7 +1648,7 @@ mod tests {
         #[test]
         fn latexmath_style_block() {
             let doc = Parser::default().parse("[latexmath]\n++++\nC = \\alpha\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("latexmath"));
@@ -1648,7 +1660,7 @@ mod tests {
         #[test]
         fn unstyled_block_is_still_pass() {
             let doc = Parser::default().parse("++++\na < b\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "pass");
             assert_eq!(block.rendered_content(), Some("a < b"));
@@ -1660,7 +1672,7 @@ mod tests {
         #[test]
         fn subs_attribute_overrides_stem_default() {
             let doc = Parser::default().parse("[stem,subs=none]\n++++\na < b\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.rendered_content(), Some("a < b"));

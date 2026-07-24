@@ -617,7 +617,7 @@ include::example$video.adoc[tag=vimeo]
         // example$video.adoc[tag=vimeo]
         let doc = Parser::default().parse("video::67480300[vimeo]");
 
-        let Some(Block::Media(media)) = doc.nested_blocks().next() else {
+        let Some(Block::Media(media)) = doc.child_blocks().next() else {
             panic!("expected a media block");
         };
 
@@ -644,7 +644,7 @@ include::example$video.adoc[tag=youtube]
         // example$video.adoc[tag=youtube]
         let doc = Parser::default().parse("video::RvRhUHTV_8k[youtube]");
 
-        let Some(Block::Media(media)) = doc.nested_blocks().next() else {
+        let Some(Block::Media(media)) = doc.child_blocks().next() else {
             panic!("expected a media block");
         };
 
@@ -679,7 +679,7 @@ include::example$video.adoc[tag=youtube-with-list]
         let doc = Parser::default()
             .parse("video::RvRhUHTV_8k[youtube,list=PLDitloyBcHOm49bxNhvGgg0f9NRZ5lSaP]");
 
-        let Some(Block::Media(media)) = doc.nested_blocks().next() else {
+        let Some(Block::Media(media)) = doc.child_blocks().next() else {
             panic!("expected a media block");
         };
 
@@ -717,7 +717,7 @@ include::example$video.adoc[tag=youtube-with-list-in-target]
         let doc = Parser::default()
             .parse("video::RvRhUHTV_8k/PLDitloyBcHOm49bxNhvGgg0f9NRZ5lSaP[youtube]");
 
-        let Some(Block::Media(media)) = doc.nested_blocks().next() else {
+        let Some(Block::Media(media)) = doc.child_blocks().next() else {
             panic!("expected a media block");
         };
 
@@ -753,7 +753,7 @@ include::example$video.adoc[tag=youtube-with-playlist]
         let doc = Parser::default()
             .parse("video::RvRhUHTV_8k[youtube,playlist=\"_SvwdK_HibQ,SGqg_ZzThDU\"]");
 
-        let Some(Block::Media(media)) = doc.nested_blocks().next() else {
+        let Some(Block::Media(media)) = doc.child_blocks().next() else {
             panic!("expected a media block");
         };
 
@@ -790,7 +790,7 @@ include::example$video.adoc[tag=youtube-with-playlist-in-target]
         // example$video.adoc[tag=youtube-with-playlist-in-target]
         let doc = Parser::default().parse("video::RvRhUHTV_8k,_SvwdK_HibQ,SGqg_ZzThDU[youtube]");
 
-        let Some(Block::Media(media)) = doc.nested_blocks().next() else {
+        let Some(Block::Media(media)) = doc.child_blocks().next() else {
             panic!("expected a media block");
         };
 

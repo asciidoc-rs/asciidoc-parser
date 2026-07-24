@@ -80,7 +80,7 @@ You can think of a constrained pair as being a weaker markup hint than an uncons
 
         let doc = Parser::default().parse("That is *strong* stuff!");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -98,7 +98,7 @@ You can think of a constrained pair as being a weaker markup hint than an uncons
 
         let doc = Parser::default().parse("That is *really strong* stuff!");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -116,7 +116,7 @@ You can think of a constrained pair as being a weaker markup hint than an uncons
 
         let doc = Parser::default().parse("This stuff is *strong*!");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -158,7 +158,7 @@ See xref:troubleshoot-unconstrained-formatting.adoc#use-unconstrained[When shoul
         let doc = Parser::default()
             .parse("The man page, short for **man**ual page, is a form of software documentation.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {

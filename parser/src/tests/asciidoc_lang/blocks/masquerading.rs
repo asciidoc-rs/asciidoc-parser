@@ -20,7 +20,7 @@ non_normative!(
 fn facts(src: &str) -> (String, String, ContentModel, Option<String>) {
     let doc = Parser::default().parse(src);
     let block = doc
-        .nested_blocks()
+        .child_blocks()
         .next()
         .expect("expected at least one block");
 
@@ -439,7 +439,7 @@ A paragraph also access the `normal` style, which can be applied to revert a lit
     // style.
     let doc =
         Parser::default().parse("[normal]\n  This would be a literal paragraph without the style.");
-    let normal = doc.nested_blocks().next().expect("expected a block");
+    let normal = doc.child_blocks().next().expect("expected a block");
     assert_eq!(normal.resolved_context().as_ref(), "paragraph");
     assert_eq!(normal.content_model(), ContentModel::Simple);
     if let crate::blocks::Block::Simple(simple) = normal {
@@ -450,7 +450,7 @@ A paragraph also access the `normal` style, which can be applied to revert a lit
 
     // Without the `normal` style, the same indented text is a literal paragraph.
     let doc = Parser::default().parse("  This is a literal paragraph.");
-    let literal = doc.nested_blocks().next().expect("expected a block");
+    let literal = doc.child_blocks().next().expect("expected a block");
     if let crate::blocks::Block::Simple(simple) = literal {
         assert_eq!(simple.style(), SimpleBlockStyle::Literal);
     } else {

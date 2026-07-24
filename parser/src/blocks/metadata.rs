@@ -967,7 +967,7 @@ mod tests {
             let doc =
                 Parser::default().parse(":who: World\n\n[title=\"Hello {who}\"]\n====\nbody\n====");
 
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
             assert_eq!(block.title(), Some("Hello World"));
         }
 

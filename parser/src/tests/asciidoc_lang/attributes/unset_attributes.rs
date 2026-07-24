@@ -172,7 +172,7 @@ All of the sections below where the attribute is unset will not be numbered.
 
         // The sections before `sectnums` is unset are numbered; the sections
         // where it is unset are not; and numbering resumes once it is reset.
-        let mut top_sections = document.nested_blocks().filter_map(|block| {
+        let mut top_sections = document.child_blocks().filter_map(|block| {
             if let crate::blocks::Block::Section(section) = block {
                 Some(section)
             } else {
@@ -190,7 +190,7 @@ All of the sections below where the attribute is unset will not be numbered.
         assert!(second.section_number().is_none());
 
         let nested = second
-            .nested_blocks()
+            .child_blocks()
             .find_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)

@@ -198,7 +198,7 @@ fn origin_of_block_span() {
         .with_include_file_handler(handler)
         .parse("intro\n\n----\ninclude::code.rb[]\n----\n");
 
-    let listing = doc.nested_blocks().nth(1).unwrap();
+    let listing = doc.child_blocks().nth(1).unwrap();
     let origin = doc.origin_of(listing.span());
 
     // The listing's `----` opener is root line 3, verbatim.

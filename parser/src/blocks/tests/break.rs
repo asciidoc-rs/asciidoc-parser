@@ -92,7 +92,7 @@ fn thematic_break_triple_apostrophe() {
     assert_eq!(mi.item.content_model(), ContentModel::Empty);
     assert!(mi.item.rendered_content().is_none());
     assert_eq!(mi.item.raw_context().deref(), "thematic_break");
-    assert!(mi.item.nested_blocks().next().is_none());
+    assert!(mi.item.child_blocks().next().is_none());
     assert!(mi.item.title_source().is_none());
     assert!(mi.item.title().is_none());
     assert!(mi.item.anchor().is_none());
@@ -279,7 +279,7 @@ fn page_break() {
     assert_eq!(mi.item.content_model(), ContentModel::Empty);
     assert!(mi.item.rendered_content().is_none());
     assert_eq!(mi.item.raw_context().deref(), "page_break");
-    assert!(mi.item.nested_blocks().next().is_none());
+    assert!(mi.item.child_blocks().next().is_none());
     assert!(mi.item.title_source().is_none());
     assert!(mi.item.title().is_none());
     assert!(mi.item.anchor().is_none());
@@ -513,7 +513,7 @@ fn break_trait_methods_without_metadata() {
     assert_eq!(mi.item.raw_context().deref(), "page_break");
     assert_eq!(mi.item.resolved_context().deref(), "page_break");
     assert!(mi.item.declared_style().is_none());
-    assert!(mi.item.nested_blocks().next().is_none());
+    assert!(mi.item.child_blocks().next().is_none());
     assert!(mi.item.id().is_none());
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());

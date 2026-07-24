@@ -1,5 +1,3 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -7,10 +5,22 @@ use crate::{
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RevisionLine, matches_author_pattern,
     },
-    internal::debug::DebugSliceReference,
+    internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
+
+opaque_slice_iter! {
+    /// An iterator over the document attributes declared in a [`Header`],
+    /// returned by [`Header::attributes`].
+    pub struct HeaderAttributes<'a> yielding Attribute<'a>;
+}
+
+opaque_slice_iter! {
+    /// An iterator over the comment lines in a [`Header`], returned by
+    /// [`Header::comments`].
+    pub struct Comments<'a> yielding Span<'a>;
+}
 
 /// An AsciiDoc document may begin with a document header. The document header
 /// encapsulates the document title, author and revision information,
@@ -503,8 +513,8 @@ impl<'src> Header<'src> {
     }
 
     /// Return an iterator over the attributes in this header.
-    pub fn attributes(&'src self) -> Iter<'src, Attribute<'src>> {
-        self.attributes.iter()
+    pub fn attributes(&'src self) -> HeaderAttributes<'src> {
+        HeaderAttributes::new(&self.attributes)
     }
 
     /// Returns the author line, if found.
@@ -530,8 +540,8 @@ impl<'src> Header<'src> {
     }
 
     /// Return an iterator over the comments in this header.
-    pub fn comments(&'src self) -> Iter<'src, Span<'src>> {
-        self.comments.iter()
+    pub fn comments(&'src self) -> Comments<'src> {
+        Comments::new(&self.comments)
     }
 }
 
@@ -986,6 +996,36 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::tests::prelude::*;
+
+    #[test]
+    fn attributes_iterator_supports_exact_size_double_ended_and_nth() {
+        // Exercises the opaque `HeaderAttributes` iterator's full surface:
+        // `ExactSizeIterator` (and, through its default `len`, `size_hint`),
+        // `DoubleEndedIterator`, and the `nth` override.
+        let doc = Parser::default().parse(":alpha: 1\n:bravo: 2\n:charlie: 3\n\nbody\n");
+        let header = doc.header();
+
+        // Collect once to learn the order and length without hard-coding a count.
+        let names: Vec<_> = header
+            .attributes()
+            .map(|a| a.name().data().to_string())
+            .collect();
+
+        assert!(names.len() >= 3);
+        assert_eq!(names.first().map(String::as_str), Some("alpha"));
+
+        assert_eq!(header.attributes().len(), names.len());
+
+        assert_eq!(
+            header.attributes().next_back().map(|a| a.name().data()),
+            names.last().map(String::as_str),
+        );
+
+        assert_eq!(
+            header.attributes().nth(1).map(|a| a.name().data()),
+            Some("bravo"),
+        );
+    }
 
     #[test]
     fn impl_clone() {
