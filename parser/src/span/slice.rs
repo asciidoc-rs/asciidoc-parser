@@ -227,4 +227,26 @@ mod tests {
             let _ = s.slice_to(..9);
         }
     }
+
+    mod empty {
+        use crate::tests::prelude::*;
+
+        // `empty()` is the release-build fallback that the slice functions reach
+        // for an out-of-bounds range (debug builds panic before reaching it). It
+        // returns a zero-length span anchored at the start of `self`.
+        #[test]
+        fn anchors_at_start_of_span() {
+            let s = crate::Span::new("abcdef").slice_from(2..);
+
+            assert_eq!(
+                s.empty(),
+                Span {
+                    data: "",
+                    line: 1,
+                    col: 3,
+                    offset: 2,
+                }
+            );
+        }
+    }
 }
