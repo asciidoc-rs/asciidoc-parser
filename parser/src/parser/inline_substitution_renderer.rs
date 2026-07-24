@@ -973,7 +973,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // by the substitution pipeline, but that step leaves `"` intact. A
             // stray `"` in the target would otherwise close the `href` attribute
             // and let an author inject further attributes (e.g. an event
-            // handler), so escape the quote delimiter here — mirroring the
+            // handler), so escape the quote delimiter here – mirroring the
             // image `alt`/`title` handling.
             target = encode_attribute_value(params.target.clone()),
             id = if let Some(id) = id {
@@ -1272,9 +1272,9 @@ fn render_icon_or_image(
 
         img = format!(
             r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
-            // Both sources of `href` — the image's own `src` (a resolved web
+            // Both sources of `href` – the image's own `src` (a resolved web
             // path that can carry a stray `"`) and an author-supplied `link=`
-            // value — are escaped for the `"` delimiter so neither can break
+            // value – are escaped for the `"` delimiter so neither can break
             // out of the attribute.
             href = encode_attribute_value(href.to_owned()),
             link_constraint_attrs = link_constraint_attrs(attrlist, None)

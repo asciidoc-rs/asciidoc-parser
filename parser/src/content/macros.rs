@@ -1081,7 +1081,7 @@ static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Reports whether `target` begins with a URI scheme that can execute script
-/// when placed in an `href` — `javascript:`, `data:`, or `vbscript:`.
+/// when placed in an `href` – `javascript:`, `data:`, or `vbscript:`.
 ///
 /// Leading control and space characters are ignored first, because a browser
 /// strips them before it parses the scheme (so `"\u{1}javascript:…"` is still
