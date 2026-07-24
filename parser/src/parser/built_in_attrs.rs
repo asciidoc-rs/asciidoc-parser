@@ -550,8 +550,12 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // the over-nested content is truncated with a `MaxBlockNestingExceeded`
     // warning. Like `max-include-depth` it is `ApiOnly` – a hostile document
     // cannot raise its own limit – so a host on a small stack (e.g. a worker
-    // thread or Wasm) can lower it, and a host on a large one can raise it.
-    attrs.insert("max-block-nesting".to_owned(), set(ApiOnly, "64"));
+    // thread or Wasm) can lower it, and a host on a large one can raise it. The
+    // default is deliberately conservative: a nested block scope's stack frames
+    // are far larger than an include's, and a debug build's are several times a
+    // release build's, so 32 keeps even a debug parse clear of a small (~2 MiB)
+    // worker-thread stack.
+    attrs.insert("max-block-nesting".to_owned(), set(ApiOnly, "32"));
 
     // NOTE: `max-attribute-value-size` is *not* registered here. Its `4096`
     // default is only in effect under `SafeMode::Secure`, so it is resolved as a

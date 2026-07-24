@@ -247,7 +247,7 @@ pub enum WarningType {
     MaxIncludeDepthExceeded(usize),
 
     /// Block parsing reached the maximum nesting depth (the `max-block-nesting`
-    /// attribute, default 64, API-only) before the innermost content was
+    /// attribute, default 32, API-only) before the innermost content was
     /// parsed, so the over-nested content was truncated rather than descended
     /// into. This bounds native recursion – a delimited block's body, a section
     /// body, a table cell, or a nested list each parse on a fresh call stack –

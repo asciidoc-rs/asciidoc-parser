@@ -964,7 +964,7 @@ impl Parser {
     }
 
     /// Returns the maximum block-nesting depth in effect (the
-    /// `max-block-nesting` attribute, default 64). See
+    /// `max-block-nesting` attribute, default 32). See
     /// [`block_nesting_depth`](Self::block_nesting_depth).
     ///
     /// The attribute is API-only, so a hostile document cannot raise its own
@@ -987,7 +987,7 @@ impl Parser {
             // An explicit empty `Set` coerces to 0; an explicit unset falls back
             // to the built-in default.
             InterpretedValue::Set => 0,
-            InterpretedValue::Unset => 64,
+            InterpretedValue::Unset => 32,
         }
     }
 
