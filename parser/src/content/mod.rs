@@ -10,6 +10,10 @@ pub(crate) use content::{
     rehome_xref_placeholders, render_xref_template, strip_footnote_marker_spans,
 };
 
+mod inline_node;
+pub use inline_node::{InlineNode, InlineStyle};
+pub(crate) use inline_node::{capture_inline_nodes, resolve_xref_nodes};
+
 mod macros;
 pub(crate) use macros::apply_macros_with_leading_anchor_registered;
 

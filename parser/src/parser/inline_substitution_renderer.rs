@@ -20,6 +20,19 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// The renderer should write the appropriate rendering to `dest`.
     fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String);
 
+    /// Renders the restored content of a passthrough (`+…+`, `+++…+++`,
+    /// `pass:[…]`, …) that carries no quote formatting of its own.
+    ///
+    /// `text` is the passthrough's already-substituted content (its `subs` have
+    /// been applied). The default implementation writes it verbatim, which is
+    /// what an HTML renderer wants — a passthrough is, by definition, emitted
+    /// as-is. A structure-recording renderer can override this to capture the
+    /// passthrough as its own node rather than folding it into surrounding
+    /// text.
+    fn render_passthrough(&self, text: &str, dest: &mut String) {
+        dest.push_str(text);
+    }
+
     /// Renders the content of a [quote substitution].
     ///
     /// The renderer should write the appropriate rendering to `dest`.

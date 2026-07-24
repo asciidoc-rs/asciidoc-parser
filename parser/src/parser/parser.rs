@@ -391,6 +391,21 @@ pub struct Parser {
     /// `&Parser` attribute readers (which the substitution code paths reach
     /// with only a shared reference).
     datetime_context: RefCell<Option<DatetimeContext>>,
+
+    /// When `true`, inline substitution additionally captures a semantic inline
+    /// AST (see [`Content::inline_nodes`](crate::content::Content::inline_nodes))
+    /// for each content block, at the cost of a second substitution pass.
+    /// Opt-in via [`with_inline_ast_capture`](Self::with_inline_ast_capture);
+    /// off by default so ordinary parses pay nothing.
+    pub(crate) capture_inline_ast: bool,
+
+    /// Re-entrancy guard for inline-AST capture. The capture pass re-runs the
+    /// substitution pipeline (on a clone of this parser); this flag is set for
+    /// the duration of a capturing `apply` so the nested passes (the capture
+    /// itself, and any passthrough/table-cell substitution it triggers) do not
+    /// recursively capture. A [`Cell`] because it is toggled through the shared
+    /// `&Parser` that substitution holds.
+    pub(crate) inline_ast_capturing: Cell<bool>,
 }
 
 /// A warning recorded in a form that does not borrow the source so it can live
@@ -502,6 +517,8 @@ impl Default for Parser {
             reference_time: None,
             input_mtime: None,
             datetime_context: RefCell::new(None),
+            capture_inline_ast: false,
+            inline_ast_capturing: Cell::new(false),
         }
     }
 }
@@ -1842,6 +1859,21 @@ impl Parser {
         renderer: ISR,
     ) -> Self {
         self.renderer = Rc::new(renderer);
+        self
+    }
+
+    /// Enables capture of a semantic inline AST during parsing.
+    ///
+    /// When enabled, each content block additionally exposes its inline markup
+    /// as a tree of [`InlineNode`](crate::content::InlineNode)s via
+    /// [`Content::inline_nodes`](crate::content::Content::inline_nodes), in
+    /// addition to the rendered string. This runs the inline substitution
+    /// pipeline a second time per block (on an isolated clone of the parser
+    /// state, so counters and footnote numbering match the rendered output), so
+    /// it is off by default and should be enabled only when the AST is needed.
+    #[must_use]
+    pub fn with_inline_ast_capture(mut self) -> Self {
+        self.capture_inline_ast = true;
         self
     }
 

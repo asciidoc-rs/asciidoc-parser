@@ -226,6 +226,22 @@ impl SubstitutionGroup {
         parser: &Parser,
         attrlist: Option<&Attrlist>,
     ) {
+        // Capture the inline AST first, from the pre-substitution state, when
+        // the parser opts in and we are not already inside a capture pass. The
+        // guard flag stays set for the rest of this `apply` so nested
+        // substitutions (passthrough restore, table cells) do not recursively
+        // capture. See `capture_inline_nodes`.
+        let capturing = parser.capture_inline_ast && !parser.inline_ast_capturing.get();
+
+        let captured = if capturing {
+            parser.inline_ast_capturing.set(true);
+            Some(crate::content::capture_inline_nodes(
+                content, self, parser, attrlist,
+            ))
+        } else {
+            None
+        };
+
         let steps = self.steps();
 
         let passthroughs: Option<Passthroughs> =
@@ -248,6 +264,37 @@ impl SubstitutionGroup {
         // references are resolved. This is a no-op when no cross-references were
         // found.
         content.finalize_deferred(&*parser.renderer);
+
+        if capturing {
+            parser.inline_ast_capturing.set(false);
+        }
+
+        if let Some(nodes) = captured {
+            content.set_inline_nodes(nodes);
+        }
+    }
+
+    /// Produces the semantic inline AST (issue #892) for `span` under this
+    /// substitution group, instead of a rendered string.
+    ///
+    /// This runs the same ordered substitution pipeline as the rendering path
+    /// but with a recording renderer, then parses the result into a tree of
+    /// [`InlineNode`](crate::content::InlineNode)s. It is additive and does not
+    /// affect the rendered output
+    /// ([`Content::rendered`](crate::content::Content::rendered)).
+    /// Cross-references are captured but not resolved (there is no document
+    /// context here); for resolved cross-references, enable
+    /// [`Parser::with_inline_ast_capture`](crate::Parser::with_inline_ast_capture)
+    /// and read
+    /// [`Content::inline_nodes`](crate::content::Content::inline_nodes) after
+    /// parsing.
+    pub fn inline_nodes(
+        &self,
+        span: crate::Span<'_>,
+        parser: &Parser,
+        attrlist: Option<&Attrlist>,
+    ) -> Vec<crate::content::InlineNode> {
+        crate::content::capture_inline_nodes(&Content::from(span), self, parser, attrlist)
     }
 
     /// Applies any block style masquerade and `subs` attribute override from

@@ -641,7 +641,18 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
 
             dest.push_str(new_result.as_ref());
         } else {
-            dest.push_str(subbed_text.rendered());
+            // A formatted passthrough (`type_` set above) has already been
+            // rendered through `render_quoted_substitition`; a plain passthrough
+            // reaches the renderer here, so a structure-recording renderer can
+            // capture it as its own node. The default renderer writes it
+            // verbatim, preserving the existing HTML output exactly.
+            if pass.type_.is_some() {
+                dest.push_str(subbed_text.rendered());
+            } else {
+                self.1
+                    .renderer
+                    .render_passthrough(subbed_text.rendered(), dest);
+            }
         }
     }
 }

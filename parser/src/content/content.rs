@@ -5,6 +5,7 @@
 
 use crate::{
     Span,
+    content::InlineNode,
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
         XrefRenderParams,
@@ -69,6 +70,13 @@ pub struct Content<'src> {
     /// `None` for the overwhelming majority of content, which contains no
     /// cross-references.
     deferred: Option<Box<DeferredContent>>,
+
+    /// The semantic inline AST for this content, captured during substitution
+    /// when the parser has [`capture_inline_ast`] enabled; `None` otherwise
+    /// (the default). See [`inline_nodes`](Self::inline_nodes).
+    ///
+    /// [`capture_inline_ast`]: crate::Parser::with_inline_ast_capture
+    inline_nodes: Option<Box<[InlineNode]>>,
 }
 
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
@@ -195,6 +203,7 @@ impl<'src> Content<'src> {
             rendered: filtered.as_ref().to_string().into(),
             source_lines: None,
             deferred: None,
+            inline_nodes: None,
         }
     }
 
@@ -222,6 +231,7 @@ impl<'src> Content<'src> {
             deferred: title
                 .deferred
                 .map(|(template, xrefs)| Box::new(DeferredContent { template, xrefs })),
+            inline_nodes: None,
         }
     }
 
@@ -249,6 +259,7 @@ impl<'src> Content<'src> {
             rendered: filtered_lines.join("\n").into(),
             source_lines: Some(line_spans.into_boxed_slice()),
             deferred: None,
+            inline_nodes: None,
         }
     }
 
@@ -299,6 +310,25 @@ impl<'src> Content<'src> {
     /// Returns `true` if `self` contains no text.
     pub fn is_empty(&self) -> bool {
         self.rendered.as_ref().is_empty()
+    }
+
+    /// Returns the semantic inline AST for this content, or `None` when inline
+    /// AST capture was not enabled on the parser.
+    ///
+    /// Enable capture with
+    /// [`Parser::with_inline_ast_capture`](crate::Parser::with_inline_ast_capture).
+    /// The tree exposes the inline structure (formatting, links,
+    /// cross-references, footnotes, …) underneath [`rendered`](Self::rendered),
+    /// with source targets and – for cross-references – resolved destinations
+    /// once the document's references have been resolved.
+    pub fn inline_nodes(&self) -> Option<&[InlineNode]> {
+        self.inline_nodes.as_deref()
+    }
+
+    /// Installs the captured inline AST. Called once, from the substitution
+    /// pipeline, when capture is enabled.
+    pub(crate) fn set_inline_nodes(&mut self, nodes: Vec<InlineNode>) {
+        self.inline_nodes = Some(nodes.into_boxed_slice());
     }
 
     /// Removes the [`FOOTNOTE_MARKER_START`]/[`FOOTNOTE_MARKER_END`] sentinels
@@ -479,6 +509,12 @@ impl<'src> Content<'src> {
         }
 
         self.rebuild_rendered(renderer);
+
+        // Resolve the same cross-references in the captured inline AST, when
+        // present, so its `Xref` nodes expose the resolved destination too.
+        if let Some(nodes) = self.inline_nodes.as_deref_mut() {
+            crate::content::resolve_xref_nodes(nodes, resolver);
+        }
     }
 
     /// Rebuilds [`Content::rendered`] from the deferred template and the
@@ -698,6 +734,7 @@ impl<'src> From<Span<'src>> for Content<'src> {
             rendered: CowStr::from(span.data()),
             source_lines: None,
             deferred: None,
+            inline_nodes: None,
         }
     }
 }
