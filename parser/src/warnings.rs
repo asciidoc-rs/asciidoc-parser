@@ -246,6 +246,16 @@ pub enum WarningType {
     #[error("maximum include depth of {0} exceeded")]
     MaxIncludeDepthExceeded(usize),
 
+    /// Block parsing reached the maximum nesting depth (the `max-block-nesting`
+    /// attribute, default 32, API-only) before the innermost content was
+    /// parsed, so the over-nested content was truncated rather than descended
+    /// into. This bounds native recursion – a delimited block's body, a section
+    /// body, a table cell, or a nested list each parse on a fresh call stack –
+    /// so a crafted document cannot overflow the stack and abort the process.
+    /// The field is the limit in effect.
+    #[error("maximum block nesting depth of {0} exceeded")]
+    MaxBlockNestingExceeded(usize),
+
     /// An include directive specified an `encoding` attribute whose value is
     /// not UTF-8. The parser only handles UTF-8 content, so the requested
     /// encoding cannot be honored.
@@ -477,6 +487,11 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::MaxIncludeDepthExceeded(depth) => f
                 .debug_tuple("WarningType::MaxIncludeDepthExceeded")
+                .field(depth)
+                .finish(),
+
+            WarningType::MaxBlockNestingExceeded(depth) => f
+                .debug_tuple("WarningType::MaxBlockNestingExceeded")
                 .field(depth)
                 .finish(),
 
@@ -951,6 +966,13 @@ mod tests {
                 let warning = WarningType::MaxIncludeDepthExceeded(64);
                 let debug_output = format!("{:?}", warning);
                 assert_eq!(debug_output, "WarningType::MaxIncludeDepthExceeded(64)");
+            }
+
+            #[test]
+            fn max_block_nesting_exceeded() {
+                let warning = WarningType::MaxBlockNestingExceeded(64);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::MaxBlockNestingExceeded(64)");
             }
 
             #[test]
