@@ -8,6 +8,19 @@ As of version 0.25.0 (July 2026) this crate is feature-complete, heavily tested,
 
 Now that the core is in place, I’ll be building the downstream projects described below. Expect the API to evolve slightly in the coming months as those projects mature. I do expect to publish a mature (1.0) release within the year.
 
+## Security: rendering untrusted input
+
+**If you render AsciiDoc from an untrusted source to HTML that is then served to other users, you must run the rendered HTML through an HTML sanitizer (such as [`ammonia`](https://crates.io/crates/ammonia)) before serving it.**
+
+The HTML renderer in this crate is _not_ an HTML sanitizer. Like Ruby Asciidoctor, the AsciiDoc language intentionally allows a document to emit raw, unescaped HTML into the output. Two mechanisms do this **by design**:
+
+* **Attribute-reference substitution.** Attribute substitution runs _after_ special-character escaping, so the `<`, `>`, and `&` characters in an attribute’s value are never escaped. A document that sets `:x: <script>alert(1)</script>` and then references `{x}` emits a live `<script>` element.
+* **Passthroughs.** The passthrough forms (`+++…+++`, `pass:[…]`, and the `pass` block) re-emit their content verbatim, bypassing escaping – that is their entire purpose.
+
+This behavior is faithful to Ruby Asciidoctor and is not a defect in this crate; it is a fundamental property of the language. It means that **rendered HTML from untrusted AsciiDoc cannot safely be served to other users without a post-rendering sanitization pass.**
+
+Note that the [safe mode](https://docs.asciidoctor.org/asciidoc/latest/safe-modes/) (see [`SafeMode`](https://docs.rs/asciidoc-parser/latest/asciidoc_parser/parser/enum.SafeMode.html)) does **not** address this. Safe mode governs how far a document may reach outside of itself (file-system access, includes, and certain macros); it does not escape or sanitize the rendered HTML output.
+
 ## Why do this?
 
 Most of all this is a fun project that exercises different architectural and project design skills from my [day job](https://opensource.contentauthenticity.org). As part of that work, I write [technical standards for the Creator Assertions Working Group](https://cawg.io/specs/) in Asciidoc and [Antora](https://antora.org).
