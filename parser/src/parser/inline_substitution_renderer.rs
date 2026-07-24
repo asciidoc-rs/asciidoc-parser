@@ -734,11 +734,17 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         let mut dimension_attrs = String::new();
 
         if let Some(width) = params.width {
-            dimension_attrs.push_str(&format!(r#" width="{width}""#));
+            dimension_attrs.push_str(&format!(
+                r#" width="{width}""#,
+                width = encode_attribute_value(width.to_owned())
+            ));
         }
 
         if let Some(height) = params.height {
-            dimension_attrs.push_str(&format!(r#" height="{height}""#));
+            dimension_attrs.push_str(&format!(
+                r#" height="{height}""#,
+                height = encode_attribute_value(height.to_owned())
+            ));
         }
 
         if let Some(title) = params.attrlist.named_attribute("title") {
@@ -779,16 +785,23 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // display the object.
             let fallback = if let Some(fallback) = params.attrlist.named_attribute("fallback") {
                 let fallback_src = self.image_src(fallback.value(), params.attrlist, params.parser);
-                format!(r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#)
+                format!(
+                    r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#,
+                    fallback_src = encode_attribute_value(fallback_src)
+                )
             } else {
                 format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt)
             };
 
             format!(
-                r#"<object type="image/svg+xml" data="{src}"{dimension_attrs}>{fallback}</object>"#
+                r#"<object type="image/svg+xml" data="{src}"{dimension_attrs}>{fallback}</object>"#,
+                src = encode_attribute_value(src.clone())
             )
         } else {
-            format!(r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#)
+            format!(
+                r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#,
+                src = encode_attribute_value(src.clone())
+            )
         };
 
         let link_self_href = if inline_svg { None } else { Some(src.as_str()) };
@@ -894,7 +907,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 )
             } else {
                 let mut attrs: Vec<String> = vec![
-                    format!(r#"src="{src}""#),
+                    format!(r#"src="{src}""#, src = encode_attribute_value(src.clone())),
                     format!(
                         r#"alt="{alt}""#,
                         alt = encode_attribute_value(params.alt.to_string())
@@ -1259,6 +1272,11 @@ fn render_icon_or_image(
 
         img = format!(
             r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
+            // Both sources of `href` — the image's own `src` (a resolved web
+            // path that can carry a stray `"`) and an author-supplied `link=`
+            // value — are escaped for the `"` delimiter so neither can break
+            // out of the attribute.
+            href = encode_attribute_value(href.to_owned()),
             link_constraint_attrs = link_constraint_attrs(attrlist, None)
         );
     }

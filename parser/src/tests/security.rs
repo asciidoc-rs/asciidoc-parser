@@ -63,6 +63,20 @@ fn render_icon(src: &str, icons: &str) -> String {
     content.rendered().to_string()
 }
 
+/// Renders `src` through the special-characters and macros substitution steps
+/// with a default parser, mirroring the real pipeline's pre-escaping of
+/// `< > &`. Used for the `image:` macro, whose `src`/`link` handling needs no
+/// document attribute.
+fn render_macros(src: &str) -> String {
+    let mut content = Content::from(crate::Span::new(src));
+    let parser = Parser::default();
+
+    SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
+    SubstitutionStep::Macros.apply(&mut content, &parser, None);
+
+    content.rendered().to_string()
+}
+
 // ---- Link target escaping --------------------------------------------------
 
 #[test]
@@ -130,6 +144,56 @@ fn icon_image_dimensions_and_title_escape_quote_delimiter() {
     assert_eq!(
         render_icon(r#"icon:home[width="1\"x",height="2\"y",title="a\"b"]"#, ""),
         r#"<span class="icon"><img src="./images/icons/home.png" alt="home" width="1&quot;x" height="2&quot;y" title="a&quot;b"></span>"#
+    );
+}
+
+#[test]
+fn icon_image_src_escapes_quote_delimiter() {
+    // A `"` in the icon target reaches the resolved `src`; it must be escaped so
+    // it cannot break out of the `src` attribute.
+    assert_eq!(
+        render_icon(r#"icon:a"x[]"#, ""),
+        r#"<span class="icon"><img src="./images/icons/a&quot;x.png" alt="a&quot;x"></span>"#
+    );
+}
+
+// ---- Image src / dimensions / link escaping --------------------------------
+
+#[test]
+fn image_src_escapes_quote_delimiter() {
+    // A `"` in the image target reaches `src`; it must be escaped like the icon
+    // `src` above (the `alt` beside it was already escaped).
+    assert_eq!(
+        render_macros(r#"image:a"x.png[alt]"#),
+        r#"<span class="image"><img src="a&quot;x.png" alt="alt"></span>"#
+    );
+}
+
+#[test]
+fn image_width_escapes_quote_delimiter() {
+    assert_eq!(
+        render_macros(r#"image:x.png[alt,width="1\"y"]"#),
+        r#"<span class="image"><img src="x.png" alt="alt" width="1&quot;y"></span>"#
+    );
+}
+
+#[test]
+fn image_link_href_escapes_quote_delimiter() {
+    // An author-supplied `link=` value becomes the wrapping anchor's `href`.
+    assert_eq!(
+        render_macros(r#"image:x.png[alt,link="a\"b"]"#),
+        r#"<span class="image"><a class="image" href="a&quot;b"><img src="x.png" alt="alt"></a></span>"#
+    );
+}
+
+#[test]
+fn image_link_self_escapes_src_and_href_without_double_escaping() {
+    // `link=self` resolves the anchor `href` to the image's own `src`. Both the
+    // `href` and the `src` must be escaped exactly once (a `&quot;`, never a
+    // double-escaped `&amp;quot;`).
+    assert_eq!(
+        render_macros(r#"image:a"x.png[alt,link=self]"#),
+        r#"<span class="image"><a class="image" href="a&quot;x.png"><img src="a&quot;x.png" alt="alt"></a></span>"#
     );
 }
 
