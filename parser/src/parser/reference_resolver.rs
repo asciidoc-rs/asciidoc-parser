@@ -30,7 +30,7 @@ use crate::{
 /// [`Basic`](Self::Basic), mirroring Asciidoctor.
 ///
 /// [Cross reference styles]: https://docs.asciidoctor.org/asciidoc/latest/macros/xref-text-and-style/#cross-reference-styles
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum XrefStyle {
     /// The signifier and number followed by the title, quoted (or emphasized
     /// for a chapter or appendix): e.g. `Section 2.3, “Installation”`.
@@ -64,7 +64,7 @@ impl XrefStyle {
 ///
 /// This carries only the target-derived pieces; how they are combined with the
 /// target's title is decided by the reference's [`XrefStyle`] at render time.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct XrefSignifier {
     /// The signifier and reference number, already combined (e.g. `"Section
     /// 2.3"`, `"Figure 1"`, or just `"2.3"` when the target's `*-refsig`
@@ -77,7 +77,7 @@ pub struct XrefSignifier {
 }
 
 /// The resolved destination of a cross-reference.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ResolvedReference {
     /// The hyperlink destination. For a same-document reference this is a
     /// fragment such as `#section-id`; a cross-document resolver may return a
@@ -161,7 +161,7 @@ impl ResolvedReference {
 /// when it does not.
 ///
 /// [inter-document cross reference]: https://docs.asciidoctor.org/asciidoc/latest/macros/inter-document-xref/
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct DerivedReference {
     /// The hyperlink destination: the rewritten output path plus the target's
     /// fragment, if it had one (e.g. `tigers.html#about`), or `#` for a

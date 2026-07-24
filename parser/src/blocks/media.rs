@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// A media block is used to represent an image, video, or audio block macro.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct MediaBlock<'src> {
     type_: MediaType,
     target: Span<'src>,
@@ -38,7 +38,7 @@ pub(crate) enum TargetResolution {
 }
 
 /// A media type may be one of three different types.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum MediaType {
     /// Still image
     Image,

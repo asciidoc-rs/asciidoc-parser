@@ -17,7 +17,7 @@ use crate::{
 /// [`ListItem`].
 ///
 /// [`ListItem`]: crate::blocks::ListItem
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ListBlock<'src> {
     type_: ListType,
     items: Vec<Block<'src>>,
@@ -452,7 +452,7 @@ impl std::fmt::Debug for ListBlock<'_> {
 }
 
 /// Represents the type of a list.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum ListType {
     /// An unordered list is a list with items prefixed with symbol, such as a
     /// disc (aka bullet).

@@ -28,7 +28,7 @@ use crate::{
 /// attribute. Since it lives between blocks, we treat it as though it was a
 /// block (and thus implement [`IsBlock`] on this type) even though is not
 /// technically a block.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Attribute<'src> {
     name: Span<'src>,
     value_source: Option<Span<'src>>,
@@ -175,7 +175,7 @@ impl<'src> IsBlock<'src> for Attribute<'src> {
 /// If the value contains a textual value, this value will
 /// have any continuation markers resolved, but will no longer
 /// contain a reference to the [`Span`] that contains the value.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub enum InterpretedValue {
     /// A custom value with all necessary interpolations applied.
     Value(String),

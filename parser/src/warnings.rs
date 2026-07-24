@@ -47,7 +47,7 @@ pub struct Warning<'src> {
 ///
 /// This enum is `non_exhaustive`: new conditions are recognized as the parser
 /// grows, so a host matching on it needs a catch-all arm.
-#[derive(Clone, Eq, Error, PartialEq)]
+#[derive(Clone, Eq, Error, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum WarningType {
     /// A quoted attribute value ran to the end of its line (or the end of the

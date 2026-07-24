@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// The style of a simple block.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum SimpleBlockStyle {
     /// A paragraph block with normal substitutions.
     Paragraph,
@@ -47,7 +47,7 @@ impl std::fmt::Debug for SimpleBlockStyle {
 
 /// A block that's treated as contiguous lines of paragraph text (and subject to
 /// normal substitutions) (e.g., a paragraph block).
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SimpleBlock<'src> {
     content: Content<'src>,
     source: Span<'src>,

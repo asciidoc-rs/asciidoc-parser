@@ -35,7 +35,7 @@ use crate::{
 /// [`RawDelimitedBlock`]: crate::blocks::RawDelimitedBlock
 /// [`Document::resolve_references`]: crate::Document::resolve_references
 /// [`rendered()`]: Self::rendered
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Content<'src> {
     /// The original [`Span`] from which this content was derived.
     original: Span<'src>,
@@ -72,7 +72,7 @@ pub struct Content<'src> {
 }
 
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct DeferredContent {
     /// The locally-substituted text with opaque placeholder tokens marking
     /// where each cross-reference will be spliced in. This is the source of
@@ -85,7 +85,7 @@ struct DeferredContent {
 }
 
 /// A single deferred cross-reference.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct XrefSegment {
     /// The raw, uninterpreted target as written in the source.
     pub(crate) target: String,

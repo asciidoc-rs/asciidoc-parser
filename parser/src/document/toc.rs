@@ -190,7 +190,7 @@ pub(crate) const DEFAULT_TOC_CLASS_SIDE: &str = "toc2";
 /// `toc-title`, `toc-class`) are header-only, so this value is captured once
 /// the header has been processed and the parser still holds the document's
 /// resolved attribute state.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct TocConfig {
     /// Where (and whether) the TOC is placed.
     pub(crate) mode: TocMode,

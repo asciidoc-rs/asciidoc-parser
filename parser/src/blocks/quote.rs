@@ -28,7 +28,7 @@ self_cell! {
         dependent: OwnedQuoteBlocksInner,
     }
 
-    impl {Debug, Eq, PartialEq}
+    impl {Debug, Eq, Hash, PartialEq}
 }
 
 /// The parsed blocks of an [`OwnedQuoteBlocks`], borrowing its owned source.
@@ -42,7 +42,7 @@ struct OwnedQuoteBlocksInner<'src> {
 /// Prose excerpts and quotes use the [`Quote`](Self::Quote) type, which does
 /// not preserve line breaks. Verses (e.g., poems or song lyrics) use the
 /// [`Verse`](Self::Verse) type, which preserves line breaks in the output.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum QuoteType {
     /// A prose excerpt or quote. Line breaks are not preserved.
     Quote,
@@ -91,7 +91,7 @@ impl std::fmt::Debug for QuoteType {
 /// * A **quoted paragraph**: a paragraph wrapped in double quotes and followed
 ///   by an attribution line introduced by two hyphens (`-- …`). This produces a
 ///   `quote` block with the [`Simple`](ContentModel::Simple) content model.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct QuoteBlock<'src> {
     type_: QuoteType,
     content_model: ContentModel,

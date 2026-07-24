@@ -271,7 +271,7 @@ impl std::fmt::Debug for BuiltInContext {
 /// the assigned type (i.e., the uppercase label), which is specified either as
 /// a special paragraph prefix (e.g., `NOTE:`) or as the block style in an
 /// attribute list (e.g., `[NOTE]`).
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum AdmonitionVariant {
     /// The `NOTE` admonition type.
     Note,
