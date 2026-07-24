@@ -23,6 +23,7 @@ use crate::{
     blocks::{Block, IsBlock, SimpleBlock},
     content::{Content, SubstitutionStep},
     parser::ModificationContext,
+    warnings::WarningType,
 };
 
 /// Renders `src` as a document and returns the first paragraph's rendered HTML.
@@ -220,4 +221,28 @@ fn link_macro_allows_nonstandard_scheme_that_is_not_dangerous() {
         render_paragraph("link:mydata:thing[x]"),
         r#"<a href="mydata:thing">x</a>"#
     );
+}
+
+// ---- Rejection is reported as a warning ------------------------------------
+
+#[test]
+fn rejected_scheme_records_a_warning() {
+    let mut parser = Parser::default();
+    let doc = parser.parse("link:javascript:alert(1)[click]");
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string())
+    );
+    assert_eq!(warnings[0].source.line(), 1);
+}
+
+#[test]
+fn allowed_link_records_no_warning() {
+    let mut parser = Parser::default();
+    let doc = parser.parse("link:https://example.com[x]");
+
+    assert_eq!(doc.warnings().count(), 0);
 }

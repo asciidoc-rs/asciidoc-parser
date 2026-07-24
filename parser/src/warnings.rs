@@ -319,6 +319,14 @@ pub enum WarningType {
     /// false positive.
     #[error("possible invalid reference: {0}")]
     PossibleInvalidReference(String),
+
+    /// An explicit `link:` macro named a target whose URI scheme can execute
+    /// script (`javascript:`, `data:`, or `vbscript:`). The macro is not turned
+    /// into a link; it is left as literal source text instead. The field is the
+    /// target exactly as written. This is a security measure with no
+    /// counterpart in Ruby Asciidoctor.
+    #[error("rejected link with potentially unsafe scheme (rendered as text): {0}")]
+    UnsafeLinkSchemeRejected(String),
 }
 
 impl std::fmt::Debug for WarningType {
@@ -533,6 +541,11 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::PossibleInvalidReference(target) => f
                 .debug_tuple("WarningType::PossibleInvalidReference")
+                .field(target)
+                .finish(),
+
+            WarningType::UnsafeLinkSchemeRejected(target) => f
+                .debug_tuple("WarningType::UnsafeLinkSchemeRejected")
                 .field(target)
                 .finish(),
         }
@@ -1064,6 +1077,17 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::PossibleInvalidReference(\"foobaz\")"
+                );
+            }
+
+            #[test]
+            fn unsafe_link_scheme_rejected() {
+                let warning =
+                    WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::UnsafeLinkSchemeRejected(\"javascript:alert(1)\")"
                 );
             }
         }
