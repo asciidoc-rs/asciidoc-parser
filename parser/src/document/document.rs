@@ -13,7 +13,7 @@ use crate::{
     },
     internal::debug::DebugSliceReference,
     parser::{
-        CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, ReferenceResolver,
+        CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, Origin, ReferenceResolver,
         ReferenceWarning, ReferenceWarnings, ResolvedAttributes, SourceMap,
     },
     strings::CowStr,
@@ -445,6 +445,23 @@ impl<'src> Document<'src> {
     /// Return the source map that tracks original file locations.
     pub fn source_map(&self) -> &SourceMap {
         &self.internal.borrow_dependent().source_map
+    }
+
+    /// Translate the start of `span` back to its [`Origin`] in the original
+    /// input files: the file, line, and (on verbatim lines) column the author
+    /// actually wrote, together with the [`Fidelity`] of the mapping.
+    ///
+    /// Because a `Span` covers preprocessed source, its own `line`/`col` are
+    /// relative to the unified buffer, not any one input file; this resolves
+    /// them through the document's [`source_map`](Self::source_map). Pass any
+    /// element's span via [`HasSpan::span`], e.g.
+    /// `doc.origin_of(block.span())`.
+    ///
+    /// [`Origin`]: crate::parser::Origin
+    /// [`Fidelity`]: crate::parser::Fidelity
+    /// [`HasSpan::span`]: crate::HasSpan::span
+    pub fn origin_of(&self, span: Span<'_>) -> Origin<'_> {
+        self.source_map().origin_of(span)
     }
 
     /// Return the document catalog for accessing referenceable elements.
