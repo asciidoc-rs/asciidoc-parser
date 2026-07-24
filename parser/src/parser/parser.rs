@@ -617,6 +617,16 @@ impl Parser {
         // fresh "now"; a parse that never references one does no datetime work.
         *self.datetime_context.borrow_mut() = None;
 
+        // Strip a leading UTF-8 byte-order mark (U+FEFF), which is valid but
+        // non-content in a UTF-8 document. Left in place it becomes the first
+        // character of the first line and defeats header, front-matter, and
+        // section recognition (e.g. a leading `= ` title), silently misparsing
+        // the document. Asciidoctor strips it likewise. This is independent of
+        // UTF-16 transcoding, which remains out of scope; it handles only the
+        // UTF-8 encoding of the mark. This must precede front-matter handling
+        // and preprocessing, both of which key off the first line.
+        let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+
         // Drop leading YAML-style front matter (and record it in the
         // `front-matter` attribute) when `skip-front-matter` is set, before the
         // source reaches the preprocessor or header parser.
@@ -2784,6 +2794,60 @@ mod tests {
             // an unresolved literal reference.
             let doc2 = parser.parse("Hello {who}.\n");
             assert_eq!(rendered_paragraphs(&doc2), vec!["Hello {who}."]);
+        }
+    }
+
+    mod leading_byte_order_mark {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn bom_before_header_yields_title() {
+            // A UTF-8 BOM precedes the document header. It must be stripped so
+            // the `= ` title line is recognized rather than misparsed as a
+            // paragraph.
+            let doc = Parser::default().parse("\u{feff}= My Title\n\nbody");
+
+            assert_eq!(doc.header().title(), Some("My Title"));
+            assert_eq!(rendered_paragraphs(&doc), vec!["body"]);
+        }
+
+        #[test]
+        fn bom_before_paragraph_is_stripped() {
+            // With no header, the BOM must still be removed so it does not
+            // become the first character of the paragraph's content.
+            let doc = Parser::default().parse("\u{feff}Hello.\n");
+
+            assert_eq!(rendered_paragraphs(&doc), vec!["Hello."]);
+        }
+
+        #[test]
+        fn only_a_single_leading_bom_is_stripped() {
+            // Only one leading BOM is stripped; a second U+FEFF is ordinary
+            // content and survives into the paragraph text (matching
+            // Asciidoctor).
+            let doc = Parser::default().parse("\u{feff}\u{feff}Hello.\n");
+
+            assert_eq!(rendered_paragraphs(&doc), vec!["\u{feff}Hello."]);
+        }
+
+        #[test]
+        fn bom_precedes_front_matter_handling() {
+            // The BOM is stripped before front-matter detection, so a `---`
+            // fence that immediately follows the mark still opens front matter
+            // when `skip-front-matter` is set.
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool(
+                    "skip-front-matter",
+                    true,
+                    ModificationContext::ApiOnly,
+                )
+                .parse("\u{feff}---\ntitle: Doc\n---\n\n= My Title\n\nbody");
+
+            assert_eq!(
+                doc.attribute_value("front-matter"),
+                InterpretedValue::Value("title: Doc")
+            );
+            assert_eq!(doc.header().title(), Some("My Title"));
         }
     }
 
