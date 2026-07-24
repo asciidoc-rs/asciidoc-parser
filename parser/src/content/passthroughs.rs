@@ -626,7 +626,7 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
                 .and_then(|attrlist| attrlist.id().map(|id| id.to_string()));
 
             let mut new_text = String::default();
-            self.1.renderer.render_quoted_substitition(
+            self.1.renderer.render_quoted_substitution(
                 type_,
                 QuoteScope::Unconstrained,
                 attrlist,

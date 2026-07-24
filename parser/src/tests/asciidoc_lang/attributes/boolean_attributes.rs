@@ -36,7 +36,7 @@ The attribute is now set and its behavior will be applied to the document.
     );
 
     let mut parser = Parser::default();
-    parser.parse(":name-of-a-boolean-attribute:");
+    let _ = parser.parse(":name-of-a-boolean-attribute:");
 
     assert_eq!(
         parser.attribute_value("name-of-a-boolean-attribute"),
@@ -63,7 +63,7 @@ When `sectanchors` is set, it xref:sections:title-links.adoc#anchor[activates an
     );
 
     let mut parser = Parser::default();
-    parser.parse("= Document Title\n:sectanchors:");
+    let _ = parser.parse("= Document Title\n:sectanchors:");
 
     assert_eq!(parser.attribute_value("sectanchors"), InterpretedValue::Set);
 }

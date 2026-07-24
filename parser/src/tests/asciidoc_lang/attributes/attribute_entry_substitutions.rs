@@ -26,7 +26,7 @@ That means that any inline formatting in an attribute value isn't interpreted be
     );
 
     let mut parser = Parser::default();
-    parser.parse(":special_chars: <tag_this>\n:y: yes\n:answer: {y}\n:format: *bold*");
+    let _ = parser.parse(":special_chars: <tag_this>\n:y: yes\n:answer: {y}\n:format: *bold*");
 
     assert_eq!(
         parser
@@ -82,7 +82,7 @@ This might be useful if you're referencing the attribute in a place that depends
         );
 
         let mut parser = Parser::default();
-        parser.parse(":cols: pass:[.>2,.>4]");
+        let _ = parser.parse(":cols: pass:[.>2,.>4]");
 
         assert_eq!(
             parser.attribute_value("cols").as_maybe_str().unwrap(),

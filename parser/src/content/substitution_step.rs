@@ -359,7 +359,7 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
             QuoteScope::Constrained => {
                 if let Some(attrs) = unescaped_attrs {
                     dest.push_str(&attrs);
-                    self.parser.renderer.render_quoted_substitition(
+                    self.parser.renderer.render_quoted_substitution(
                         self.type_, self.scope, None, None, &caps[3], dest,
                     );
                 } else {
@@ -403,7 +403,7 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                         let _ = self.parser.register_ref(id, None, RefType::Anchor);
                     }
 
-                    self.parser.renderer.render_quoted_substitition(
+                    self.parser.renderer.render_quoted_substitution(
                         type_, self.scope, attrlist, id, &caps[3], dest,
                     );
                 }
@@ -448,7 +448,7 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
 
                 self.parser
                     .renderer
-                    .render_quoted_substitition(type_, self.scope, attrlist, id, &caps[2], dest);
+                    .render_quoted_substitution(type_, self.scope, attrlist, id, &caps[2], dest);
             }
         }
 

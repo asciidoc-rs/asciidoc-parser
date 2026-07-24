@@ -277,6 +277,26 @@ pub struct ResolutionContext<'a> {
     pub derived: Option<&'a DerivedReference>,
 }
 
+impl<'a> ResolutionContext<'a> {
+    /// Constructs a [`ResolutionContext`] from its parts.
+    ///
+    /// The crate itself builds these values internally; this constructor exists
+    /// so a downstream [`ReferenceResolver`] implementation can build its own
+    /// contexts in unit tests despite the type being `#[non_exhaustive]`.
+    #[must_use]
+    pub fn new(
+        target: &'a str,
+        provided_text: Option<&'a str>,
+        derived: Option<&'a DerivedReference>,
+    ) -> Self {
+        Self {
+            target,
+            provided_text,
+            derived,
+        }
+    }
+}
+
 /// Resolves cross-reference targets to their destinations.
 ///
 /// Implementations map a [`ResolutionContext`] to a [`ResolvedReference`], or
@@ -361,6 +381,22 @@ mod tests {
 
         assert_eq!(resolved.href, "#later");
         assert_eq!(resolved.text.as_deref(), Some("The Later Section"));
+    }
+
+    #[test]
+    fn new_builds_a_resolvable_context() {
+        // The `new` constructor is the seam a downstream `ReferenceResolver`
+        // uses to build its own contexts, since the type is `#[non_exhaustive]`.
+        let catalog = catalog_with("later", Some("The Later Section"), RefType::Section);
+        let resolver = CatalogResolver::new(&catalog);
+
+        let context = ResolutionContext::new("later", None, None);
+        assert_eq!(context.target, "later");
+        assert_eq!(context.provided_text, None);
+        assert!(context.derived.is_none());
+
+        let resolved = resolver.resolve(&context).unwrap();
+        assert_eq!(resolved.href, "#later");
     }
 
     #[test]
