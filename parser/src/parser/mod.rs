@@ -31,7 +31,7 @@ pub(crate) use parser::DeferredWarning;
 pub use parser::Parser;
 
 mod path_resolver;
-pub use path_resolver::PathResolver;
+pub use path_resolver::{DefaultPathResolver, PathResolver};
 
 mod safe_mode;
 pub use safe_mode::SafeMode;

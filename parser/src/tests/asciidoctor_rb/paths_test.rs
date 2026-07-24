@@ -59,7 +59,10 @@
 //! [`PathResolver`](crate::parser::PathResolver)). The whole context is
 //! therefore `non_normative!`.
 
-use crate::{parser::PathResolver, tests::sdd::*};
+use crate::{
+    parser::{DefaultPathResolver, PathResolver},
+    tests::sdd::*,
+};
 
 track_file!("ref/asciidoctor/test/paths_test.rb");
 
@@ -90,7 +93,7 @@ fn target_with_absolute_path() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(resolver.web_path("/images", None), "/images");
     assert_eq!(resolver.web_path("/images", Some("")), "/images");
@@ -110,7 +113,7 @@ fn target_with_relative_path() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(resolver.web_path("images", None), "images");
     assert_eq!(resolver.web_path("images", Some("")), "images");
@@ -130,7 +133,7 @@ fn target_with_hidden_relative_path() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(resolver.web_path(".images", None), ".images");
     assert_eq!(resolver.web_path(".images", Some("")), ".images");
@@ -150,7 +153,7 @@ fn target_with_path_relative_to_current_directory() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(resolver.web_path("./images", None), "./images");
     assert_eq!(resolver.web_path("./images", Some("")), "./images");
@@ -170,7 +173,7 @@ fn target_with_absolute_path_ignores_start_path() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(resolver.web_path("/images", Some("foo")), "/images");
     assert_eq!(resolver.web_path("/images", Some("/foo")), "/images");
@@ -193,7 +196,7 @@ fn target_with_relative_path_appended_to_start_path() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(resolver.web_path("images", Some("assets")), "assets/images");
     assert_eq!(
@@ -224,7 +227,7 @@ fn target_with_path_relative_to_current_directory_appended_to_start_path() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(
         resolver.web_path("./images", Some("assets")),
@@ -251,7 +254,7 @@ fn target_with_relative_path_appended_to_url_start_path() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(
         resolver.web_path("images", Some("http://www.example.com/assets")),
@@ -287,7 +290,7 @@ fn normalize_target() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(resolver.web_path("../images/../images", None), "../images");
 }
@@ -304,7 +307,7 @@ fn append_target_to_start_path_and_normalize() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(
         resolver.web_path("../images/../images", Some("../images")),
@@ -325,7 +328,7 @@ fn normalize_parent_directory_that_follows_root() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(resolver.web_path("/../tiger.png", None), "/tiger.png");
     assert_eq!(resolver.web_path("/../../tiger.png", None), "/tiger.png");
@@ -343,7 +346,7 @@ fn uses_start_when_target_is_empty() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(
         resolver.web_path("", Some("assets/images")),
@@ -374,7 +377,7 @@ fn posixifies_windows_paths() {
 "#
     );
 
-    let resolver = PathResolver {
+    let resolver = DefaultPathResolver {
         file_separator: '\\',
     };
 
@@ -398,7 +401,7 @@ fn url_encode_spaces_in_path() {
 "#
     );
 
-    let resolver = PathResolver::default();
+    let resolver = DefaultPathResolver::default();
 
     assert_eq!(
         resolver.web_path("lots of images", Some("assets and stuff")),
