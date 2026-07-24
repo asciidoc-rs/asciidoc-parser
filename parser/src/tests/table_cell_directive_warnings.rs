@@ -5,7 +5,7 @@
 //! no output of its own, so it carries a pre-resolved `origin`. When such a
 //! warning arises in a file that a document-level cell's directive *included*,
 //! that origin names the real `(file, line)` and must survive the cell's
-//! warning reconstruction — it must not be discarded and re-anchored to the
+//! warning reconstruction – it must not be discarded and re-anchored to the
 //! cell's own line.
 
 use crate::{

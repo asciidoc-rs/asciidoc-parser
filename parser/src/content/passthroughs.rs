@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::LazyLock};
+use std::{borrow::Cow, fmt::Write as _, sync::LazyLock};
 
 use regex::{Captures, Regex, Replacer};
 
@@ -99,7 +99,7 @@ impl Passthroughs {
 
         // A deferred cross-reference's explicit text is pulled out of the main
         // rendered string before this point, so any passthrough placeholder it
-        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too —
+        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too –
         // otherwise the placeholder sentinels leak into the link text.
         content.restore_deferred_xref_passthroughs(|text| {
             if let Cow::Owned(restored) =
@@ -115,7 +115,11 @@ impl Passthroughs {
         self.0.push(passthrough);
 
         dest.push('\u{96}');
-        dest.push_str(&format!("{index}"));
+
+        // Append the index in place with `write!`, avoiding the temporary
+        // `String` a `push_str(&format!(...))` would allocate.
+        let _ = write!(dest, "{index}");
+
         dest.push('\u{97}');
     }
 }
@@ -526,6 +530,7 @@ impl Replacer for InlineStemMacroReplacer<'_> {
         let type_ = match &caps[2] {
             "latexmath" => QuoteType::LatexMath,
             "asciimath" => QuoteType::AsciiMath,
+
             // `stem`: the notation is resolved from the `stem` document
             // attribute (defaulting to AsciiMath).
             _ => stem_notation(self.parser),
@@ -621,7 +626,7 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
                 .and_then(|attrlist| attrlist.id().map(|id| id.to_string()));
 
             let mut new_text = String::default();
-            self.1.renderer.render_quoted_substitition(
+            self.1.renderer.render_quoted_substitution(
                 type_,
                 QuoteScope::Unconstrained,
                 attrlist,

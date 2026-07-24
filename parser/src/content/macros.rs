@@ -17,7 +17,8 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle,
+        LinkRenderParams, MenuRenderParams, XrefStyle, has_dangerous_scheme,
+        has_dangerous_self_href, is_uri_ish,
     },
     warnings::WarningType,
 };
@@ -98,7 +99,10 @@ fn apply_macros_internal(
     }
 
     if found_macroish && (text.contains("image:") || text.contains("icon:")) {
-        let replacer = InlineImageMacroReplacer(parser);
+        let replacer = InlineImageMacroReplacer {
+            parser,
+            source: content.original(),
+        };
 
         if let Cow::Owned(new_result) = INLINE_IMAGE_MACRO.replace_all(content.rendered(), replacer)
         {
@@ -127,7 +131,10 @@ fn apply_macros_internal(
     }
 
     if found_macroish && (text.contains("link:") || text.contains("ilto:")) {
-        let replacer = InlineLinkMacroReplacer(parser);
+        let replacer = InlineLinkMacroReplacer {
+            parser,
+            source: content.original(),
+        };
 
         if let Cow::Owned(new_result) = INLINE_LINK_MACRO.replace_all(content.rendered(), replacer)
         {
@@ -174,8 +181,8 @@ fn apply_macros_internal(
     //
     // This runs *before* footnotes so that a cross-reference inside a footnote
     // becomes a (bracket-free) placeholder before the footnote text is
-    // extracted. That lets the footnote text — including the `xref:id[…]` macro
-    // form, whose literal `]` would otherwise truncate the footnote — be
+    // extracted. That lets the footnote text – including the `xref:id[…]` macro
+    // form, whose literal `]` would otherwise truncate the footnote – be
     // captured intact, and lets the footnote re-home the placeholder so it is
     // resolved in the document-level pass too.
     let mut xrefs: Vec<XrefSegment> = vec![];
@@ -245,9 +252,35 @@ static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineImageMacroReplacer<'p>(&'p Parser);
+struct InlineImageMacroReplacer<'p, 's> {
+    parser: &'p Parser,
 
-impl Replacer for InlineImageMacroReplacer<'_> {
+    /// Span of the content being substituted, used to locate any warning this
+    /// replacer records.
+    source: Span<'s>,
+}
+
+impl InlineImageMacroReplacer<'_, '_> {
+    /// Reports whether `link=self` on the macro `caps0` (the full match text,
+    /// e.g. `image:…` or `icon:…`) resolves to a real image `src` that the
+    /// renderer promotes into the anchor `href`.
+    ///
+    /// Mirrors the `link_self_href` selection in `render_image`/`render_icon`:
+    /// an `image:` has a `src`, while an `icon:` has one only in image-icon
+    /// mode (icons enabled and not font-based). A font (`<i>`) or text
+    /// (`[alt]`) icon keeps the literal `self`, so a dangerous target is
+    /// never promoted there and no warning should be recorded. (An inline
+    /// SVG also keeps the literal `self`, but that path requires a
+    /// `.svg`-ish target below `Secure`, which a script-capable scheme
+    /// never is, so it needs no special case here.)
+    fn link_self_resolves_to_src(&self, caps0: &str) -> bool {
+        caps0.starts_with("image:")
+            || (self.parser.is_attribute_set("icons")
+                && self.parser.attribute_value("icons").as_maybe_str() != Some("font"))
+    }
+}
+
+impl Replacer for InlineImageMacroReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps[0].starts_with('\\') {
             // Honor the escape.
@@ -257,11 +290,39 @@ impl Replacer for InlineImageMacroReplacer<'_> {
 
         let target = &caps[1];
         let span = Span::new(&caps[2]);
-        let attrlist = Attrlist::parse(span, self.0, AttrlistContext::Inline)
+        let attrlist = Attrlist::parse(span, self.parser, AttrlistContext::Inline)
             .item
             .item;
 
+        // A `link=` destination whose scheme could execute script is rejected by
+        // the renderer (the image is emitted without the wrapping link); record
+        // the warning here, where the parser and a document span are available.
+        // `link=self` names the image's own `src`, which resolves from `target`,
+        // so it is checked against the target (exempting a legitimately embedded
+        // `data:image/*`, but not an author-supplied SVG data URI) rather than
+        // the literal `self` – and only when the renderer actually promotes that
+        // `src` into the `href`. A font (`<i>`) or text (`[alt]`) icon has no
+        // `src`, so `link=self` stays the literal `self` there and nothing is
+        // rejected (see `render_icon_or_image`); a warning would be spurious.
+        if let Some(link) = attrlist.named_attribute("link") {
+            let rejected = if link.value() == "self" {
+                (self.link_self_resolves_to_src(&caps[0])
+                    && has_dangerous_self_href(target, is_uri_ish(target)))
+                .then_some(target)
+            } else {
+                has_dangerous_scheme(link.value()).then_some(link.value())
+            };
+
+            if let Some(rejected) = rejected {
+                self.parser.record_substitution_warning(
+                    self.source,
+                    WarningType::UnsafeLinkSchemeRejected(rejected.to_owned()),
+                );
+            }
+        }
+
         let default_alt = basename(&target.replace(['_', '-'], " "));
+
         // IMPORTANT: Implementations of `render_icon` and `render_image` need to
         // remember to use `default_alt` when attrlist doesn't contain a value for
         // `alt`.
@@ -273,9 +334,9 @@ impl Replacer for InlineImageMacroReplacer<'_> {
             // attribute-references step, so `target` is the resolved path, and
             // the catalog stores it alongside the current `imagesdir`. Mirrors
             // Asciidoctor's `doc.register :images, target`.
-            self.0.register_image(
+            self.parser.register_image(
                 target.to_string(),
-                self.0
+                self.parser
                     .attribute_value("imagesdir")
                     .as_maybe_str()
                     .map(str::to_owned),
@@ -295,10 +356,10 @@ impl Replacer for InlineImageMacroReplacer<'_> {
                     .named_or_positional_attribute("height", 3)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.0,
+                parser: self.parser,
             };
 
-            self.0.renderer.render_image(&params, dest);
+            self.parser.renderer.render_image(&params, dest);
         } else {
             let params = IconRenderParams {
                 target,
@@ -309,10 +370,10 @@ impl Replacer for InlineImageMacroReplacer<'_> {
                     .named_or_positional_attribute("size", 1)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.0,
+                parser: self.parser,
             };
 
-            self.0.renderer.render_icon(&params, dest);
+            self.parser.renderer.render_icon(&params, dest);
         }
     }
 }
@@ -375,7 +436,7 @@ impl Replacer for InlineKbdBtnMacroReplacer<'_> {
 /// Asciidoctor's delimiter handling.
 ///
 /// A single key produces a one-element vector; a key sequence is split on the
-/// first delimiter found — a comma (`,`) or a plus (`+`) — searching from the
+/// first delimiter found – a comma (`,`) or a plus (`+`) – searching from the
 /// *second* character so that a leading delimiter is treated as a literal key
 /// (e.g. `kbd:[,te]` is the single key `,te`). If the argument ends with the
 /// delimiter, that trailing delimiter is preserved as the value of the final
@@ -716,12 +777,17 @@ fn strip_see_and_seealso(term: &str) -> String {
 //
 // The blank alternative in the prefix (`[\ \t\p{Zs}]`) mirrors Asciidoctor's
 // `CG_BLANK` (`\p{Blank}`), which under Ruby's Unicode-aware engine treats any
-// space separator — including a no-break space (U+00A0) — as a boundary before
+// space separator – including a no-break space (U+00A0) – as a boundary before
 // the scheme. A plain ASCII `[\ \t]` would leave such a URL as literal text
 // (see #768).
 //
-// `InlineLinkReplacer` normalizes the two capture-group sets into a single view
-// (see `NormalizedCaps`), so the numbering below is only referenced there.
+// The `link:` prefix is broken out into its own branch (below) that *requires*
+// a trailing `[…]`, so a `link:` with no brackets simply fails to match here
+// rather than matching as a bare link and then being rejected as invalid macro
+// syntax in the replacer.
+//
+// `InlineLinkReplacer` normalizes the three capture-group sets into a single
+// view (see `NormalizedCaps`), so the numbering below is only referenced there.
 static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
@@ -738,14 +804,24 @@ static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
                                                               # group 7: trailing char
             )
           |
-            #### NON-ANGLE branch: no `&gt;` alternative (unreachable without `&lt;`).
-            ( ^ | link: | [\ \t\p{Zs}] | [>\(\)\[\];"'] )     # group 8: prefix
+            #### LINK-MACRO branch: a `link:` prefix, which REQUIRES a trailing
+            #### `[…]`. Because this branch has no bare-link alternative, a
+            #### `link:` followed by a URL but no brackets does not match at all
+            #### (it is left as literal text), so it can never reach the
+            #### invalid-macro-syntax path in the replacer.
+            ( link: )                                         # group 8: prefix
             ( \\? (?: https? | file | ftp | irc ):// )        # group 9: scheme
+            ( [^\s\[\]]+ )                                    # group 10: target
+            \[ ( | .*?[^\\] ) \]                              # group 11: attrlist
+          |
+            #### NON-ANGLE branch: no `&gt;` alternative (unreachable without `&lt;`).
+            ( ^ | [\ \t\p{Zs}] | [>\(\)\[\];"'] )             # group 12: prefix
+            ( \\? (?: https? | file | ftp | irc ):// )        # group 13: scheme
             (?:
-                ( [^\s\[\]]+ )                                # group 10: target
-                \[ ( | .*?[^\\] ) \]                          # group 11: attrlist
-              | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )          # group 12: bare link,
-                                                              # group 13: trailing char
+                ( [^\s\[\]]+ )                                # group 14: target
+                \[ ( | .*?[^\\] ) \]                          # group 15: attrlist
+              | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )          # group 16: bare link,
+                                                              # group 17: trailing char
             )
         )
     "#,
@@ -754,28 +830,35 @@ static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// A branch-agnostic view over the capture groups of [`INLINE_LINK`], which has
-/// two parallel top-level branches (angle / non-angle). Exactly one branch
-/// participates in any given match; this resolves the relevant groups so the
-/// replacer doesn't have to special-case the branch numbering everywhere.
+/// three parallel top-level branches (angle / link-macro / non-angle). Exactly
+/// one branch participates in any given match; this resolves the relevant
+/// groups so the replacer doesn't have to special-case the branch numbering
+/// everywhere.
 struct NormalizedCaps<'c, 't> {
     caps: &'c Captures<'t>,
+
     /// True when the ANGLE branch matched (prefix was `&lt;`). Corresponds to
     /// the `&lt;` flag (old capture group 2) in the Ruby implementation.
     is_angle: bool,
     prefix: usize,
     scheme: usize,
+
     /// Formal-macro target: the URL preceding a `[…]` attrlist.
     target: usize,
     attrlist: usize,
+
     /// URL captured inside `<…&gt;`; only present in the ANGLE branch.
     angle_url: Option<usize>,
-    /// Bare (auto-linked) URL.
-    bare: usize,
+
+    /// Bare (auto-linked) URL; absent in the LINK-MACRO branch, which always
+    /// has a trailing attrlist.
+    bare: Option<usize>,
 }
 
 impl<'c, 't> NormalizedCaps<'c, 't> {
     fn new(caps: &'c Captures<'t>) -> Self {
         if caps.get(1).is_some() {
+            // ANGLE branch.
             NormalizedCaps {
                 caps,
                 is_angle: true,
@@ -784,9 +867,11 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
                 target: 3,
                 attrlist: 4,
                 angle_url: Some(5),
-                bare: 6,
+                bare: Some(6),
             }
-        } else {
+        } else if caps.get(8).is_some() {
+            // LINK-MACRO branch: a `link:` prefix always paired with a trailing
+            // attrlist, so there is no bare-link group.
             NormalizedCaps {
                 caps,
                 is_angle: false,
@@ -795,7 +880,19 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
                 target: 10,
                 attrlist: 11,
                 angle_url: None,
-                bare: 12,
+                bare: None,
+            }
+        } else {
+            // NON-ANGLE branch.
+            NormalizedCaps {
+                caps,
+                is_angle: false,
+                prefix: 12,
+                scheme: 13,
+                target: 14,
+                attrlist: 15,
+                angle_url: None,
+                bare: Some(16),
             }
         }
     }
@@ -821,7 +918,7 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
     }
 
     fn bare(&self) -> Option<Match<'t>> {
-        self.caps.get(self.bare)
+        self.bare.and_then(|g| self.caps.get(g))
     }
 }
 
@@ -834,9 +931,9 @@ impl Replacer for InlineLinkReplacer<'_> {
             .item
             .item;
 
-        // `INLINE_LINK` has two parallel top-level branches (angle / non-angle);
-        // resolve which one matched so the logic below can stay branch-agnostic.
-        // See the note on `INLINE_LINK` and issue #503.
+        // `INLINE_LINK` has three parallel top-level branches (angle /
+        // link-macro / non-angle); resolve which one matched so the logic below
+        // can stay branch-agnostic. See the note on `INLINE_LINK` and issue #503.
         let n = NormalizedCaps::new(caps);
         let prefix_match = n.prefix();
         let scheme_match = n.scheme();
@@ -878,7 +975,6 @@ impl Replacer for InlineLinkReplacer<'_> {
                 link_text,
                 extra_roles: vec!["bare"],
                 window: None,
-                type_: LinkRenderType::Link,
                 attrlist: &attrlist,
                 parser: self.0,
             };
@@ -928,14 +1024,12 @@ impl Replacer for InlineLinkReplacer<'_> {
                 link_text = Some(attrlist.as_str().to_owned());
             }
         } else {
-            if prefix == "link:" || prefix == "\"" || prefix == "'" {
-                // Note from the Ruby implementation which also applies to this if clause:
-
-                // Invalid macro syntax (link: prefix w/o trailing square brackets or URL
-                // enclosed in quotes).
-
-                // FIXME: We probably shouldn't even get here when the link: prefix is present.
-                // The regex is doing too much.
+            // Invalid macro syntax: a URL enclosed in quotes (a `"` or `'`
+            // prefix with no trailing square brackets). Asciidoctor also lists
+            // a bracket-less `link:` prefix here, but our `INLINE_LINK` routes
+            // that through a dedicated branch that requires a trailing `[…]`, so
+            // a `link:` prefix can never reach this point.
+            if prefix == "\"" || prefix == "'" {
                 dest.push_str(&caps[0]);
                 return;
             }
@@ -981,8 +1075,8 @@ impl Replacer for InlineLinkReplacer<'_> {
 
                 // Only adopt the parsed result when a real named attribute split
                 // off (the positional value differs from the whole text).
-                // Otherwise the `=` was incidental — e.g. `[What You Need\n=
-                // What You Get]` — and the original wrapped text, newline and
+                // Otherwise the `=` was incidental – e.g. `[What You Need\n=
+                // What You Get]` – and the original wrapped text, newline and
                 // all, is the link text.
                 if lt != link_text_for_attrlist {
                     link_text = lt.replace("\\\"", "\"");
@@ -1029,7 +1123,6 @@ impl Replacer for InlineLinkReplacer<'_> {
             link_text,
             extra_roles,
             window,
-            type_: LinkRenderType::Link,
             attrlist: &attrlist,
             parser: self.0,
         };
@@ -1073,9 +1166,15 @@ static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineLinkMacroReplacer<'p>(&'p Parser);
+struct InlineLinkMacroReplacer<'p, 's> {
+    parser: &'p Parser,
 
-impl Replacer for InlineLinkMacroReplacer<'_> {
+    /// Span of the content being substituted, used to locate any warning this
+    /// replacer records.
+    source: Span<'s>,
+}
+
+impl Replacer for InlineLinkMacroReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps[0].starts_with('\\') {
             // Honor the escape.
@@ -1097,8 +1196,23 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             (None, None, target_str.to_string())
         };
 
+        // Neutralize an explicit `link:` target whose scheme could execute
+        // script (`javascript:`, `data:`, `vbscript:`). Escaping the `href`
+        // delimiter (see `render_link`) stops attribute breakout but not a
+        // script URI, so such a target is not turned into a link at all: the
+        // macro is left as literal source text, matching how an invalid `link:`
+        // macro is handled elsewhere. `mailto:` targets carry their own safe
+        // scheme and are exempt.
+        if mailto.is_none() && has_dangerous_scheme(&target) {
+            self.parser.record_substitution_warning(
+                self.source,
+                WarningType::UnsafeLinkSchemeRejected(target),
+            );
+            dest.push_str(&caps[0]);
+            return;
+        }
+
         let mut attrlist: Option<Attrlist<'_>> = None;
-        let link_type = LinkRenderType::Link;
 
         let mut link_text = caps
             .get(5)
@@ -1115,7 +1229,7 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             if let Some(_mailto) = mailto {
                 if link_text.contains(',') {
                     let (lt, attrs) =
-                        extract_attributes_from_text(&span_for_attrlist, self.0, None);
+                        extract_attributes_from_text(&span_for_attrlist, self.parser, None);
 
                     link_text = lt;
 
@@ -1136,7 +1250,8 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
                     attrlist = Some(attrs);
                 }
             } else if link_text.contains('=') {
-                let (lt, attrs) = extract_attributes_from_text(&span_for_attrlist, self.0, None);
+                let (lt, attrs) =
+                    extract_attributes_from_text(&span_for_attrlist, self.parser, None);
                 link_text = lt;
 
                 attrlist = Some(attrs);
@@ -1151,7 +1266,7 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
         let attrlist = if let Some(attrlist) = attrlist {
             attrlist
         } else {
-            Attrlist::parse(Span::default(), self.0, AttrlistContext::Inline)
+            Attrlist::parse(Span::default(), self.parser, AttrlistContext::Inline)
                 .item
                 .item
         };
@@ -1159,11 +1274,11 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
         let mut extra_roles: Vec<&str> = vec![];
 
         if link_text.is_empty() {
-            // mailto is a special case; already processed.
+            // `mailto` is a special case; already processed.
             if let Some(_mailto) = mailto {
                 link_text = mailto_text.map(|s| s.to_owned()).unwrap_or_default();
             } else {
-                link_text = if self.0.is_attribute_set("hide-uri-scheme") {
+                link_text = if self.parser.is_attribute_set("hide-uri-scheme") {
                     let lt = URI_SNIFF.replace_all(&target, "").into_owned();
                     if lt.is_empty() { target.clone() } else { lt }
                 } else {
@@ -1174,19 +1289,18 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
             }
         }
 
-        self.0.register_link(target.clone());
+        self.parser.register_link(target.clone());
 
         let params = LinkRenderParams {
             target,
             link_text: link_text.clone(),
             extra_roles,
             window,
-            type_: link_type,
             attrlist: &attrlist,
-            parser: self.0,
+            parser: self.parser,
         };
 
-        self.0.renderer.render_link(&params, dest);
+        self.parser.renderer.render_link(&params, dest);
     }
 }
 
@@ -1206,9 +1320,9 @@ fn extract_attributes_from_text<'src>(
     let attrs = attrlist_maw.item.item;
 
     if let Some(resolved_text) = attrs.nth_attribute(1) {
-        // If the resolved text is unchanged from the input — i.e. the attribute
+        // If the resolved text is unchanged from the input – i.e. the attribute
         // list parse produced a single positional value equal to the whole text
-        // and split nothing off as a named attribute — clear the attributes and
+        // and split nothing off as a named attribute – clear the attributes and
         // return the text unparsed. This matches Asciidoctor's
         // `extract_attributes_from_text` (substitutors.rb) and is what makes a
         // macro nested inside a link/xref's text (e.g. `link[image:...[]]`)
@@ -1330,7 +1444,6 @@ impl Replacer for InlineEmailReplacer<'_> {
             link_text: caps[2].to_owned(),
             extra_roles: vec![],
             window: None,
-            type_: LinkRenderType::Link,
             attrlist: &attrlist,
             parser: self.0,
         };
@@ -1633,7 +1746,7 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
                         .item;
 
                 // If the attribute-list parse split nothing off as a named
-                // attribute — the sole positional value is the whole text —
+                // attribute – the sole positional value is the whole text –
                 // the `=` was incidental (e.g. an already-rendered inner macro
                 // such as `xref:sec[image:...[]]`, whose HTML contains `=` and
                 // `"`), not a real attribute list. Treat the text as plain link
@@ -1680,7 +1793,7 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
             // path is compared against `docname` and against the include
             // registry the preprocessor populated, matching Asciidoctor's
             // `docname == path || catalog[:includes][path]` test. A merely
-            // *partial* include does not qualify — the referenced anchor may not
+            // *partial* include does not qualify – the referenced anchor may not
             // have been carried across.
             XrefTarget::OtherDocument {
                 path,
@@ -1732,10 +1845,10 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
 ///
 /// ## Examples
 ///
-/// * `footnote:[text]` — an anonymous footnote
-/// * `footnote:id[text]` — a footnote with an ID, so it can be referenced again
-/// * `footnote:id[]` — a reference to a previously-defined footnote
-/// * `footnoteref:[id,text]` / `footnoteref:[id]` — the deprecated equivalents
+/// * `footnote:[text]` – an anonymous footnote
+/// * `footnote:id[text]` – a footnote with an ID, so it can be referenced again
+/// * `footnote:id[]` – a reference to a previously-defined footnote
+/// * `footnoteref:[id,text]` / `footnoteref:[id]` – the deprecated equivalents
 ///
 /// Asciidoctor anchors the match with a `(?!</a>)` look-ahead after the closing
 /// bracket so a `footnote:[…]` that forms the text of an already-rendered link
@@ -2447,7 +2560,7 @@ mod tests {
             let doc = Parser::default().parse("foo https://example.org>;");
 
             let rendered = doc
-                .nested_blocks()
+                .child_blocks()
                 .next()
                 .unwrap()
                 .rendered_content()
@@ -2468,7 +2581,7 @@ mod tests {
             let doc = Parser::default().parse("See <https://example.org> for details.");
 
             let rendered = doc
-                .nested_blocks()
+                .child_blocks()
                 .next()
                 .unwrap()
                 .rendered_content()
@@ -3428,8 +3541,8 @@ mod tests {
             );
             assert!(!rendered.contains("<a id=\"mid\"></a>[mid]"));
 
-            // The inner `[[mid]]` is preceded by a `[`, so — like Asciidoctor's
-            // inline-anchor scan (`InlineAnchorScanRx`) — the id is rendered but
+            // The inner `[[mid]]` is preceded by a `[`, so – like Asciidoctor's
+            // inline-anchor scan (`InlineAnchorScanRx`) – the id is rendered but
             // not registered in the catalog, neither as a bibliography anchor nor
             // as a normal one. See #769.
             assert!(doc.catalog().get_ref("mid").is_none());

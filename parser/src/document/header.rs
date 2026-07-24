@@ -1,5 +1,3 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -7,10 +5,22 @@ use crate::{
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RevisionLine, matches_author_pattern,
     },
-    internal::debug::DebugSliceReference,
+    internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
+
+opaque_slice_iter! {
+    /// An iterator over the document attributes declared in a [`Header`],
+    /// returned by [`Header::attributes`].
+    pub struct HeaderAttributes<'a> yielding Attribute<'a>;
+}
+
+opaque_slice_iter! {
+    /// An iterator over the comment lines in a [`Header`], returned by
+    /// [`Header::comments`].
+    pub struct Comments<'a> yielding Span<'a>;
+}
 
 /// An AsciiDoc document may begin with a document header. The document header
 /// encapsulates the document title, author and revision information,
@@ -161,7 +171,7 @@ impl<'src> Header<'src> {
                     }
 
                     // Only override the `author` value when the name was
-                    // partitioned by the fallback whitespace split — a plain name
+                    // partitioned by the fallback whitespace split – a plain name
                     // that does not match the author pattern (four or more parts,
                     // or punctuation such as a comma). A value that matches the
                     // pattern, carries an inline email (`<…>`), or holds an
@@ -203,9 +213,10 @@ impl<'src> Header<'src> {
                     parse_document_metadata_attrlist(line, parser)
             {
                 warnings.extend(metadata_warnings);
+
                 // A block attribute line directly above the document title assigns
-                // metadata to the *document* — its `id`, `reftext`, `role`, and
-                // options — mirroring Asciidoctor's `parse_document_header`. Each
+                // metadata to the *document* – its `id`, `reftext`, `role`, and
+                // options – mirroring Asciidoctor's `parse_document_header`. Each
                 // recognized value folds into the document's attributes at this
                 // point in the header, so it follows document order alongside any
                 // equivalent header attribute entry (e.g. `:reftext:`).
@@ -215,7 +226,7 @@ impl<'src> Header<'src> {
                 // both mechanisms share the same partitioning logic.
                 //
                 // The line is only intercepted when a document title eventually
-                // follows — possibly after further stacked block attribute lines,
+                // follows – possibly after further stacked block attribute lines,
                 // each folded on its own pass through this loop, mirroring
                 // Asciidoctor's `parse_block_metadata_lines`. Otherwise it is
                 // block metadata for the body (e.g. a table's `separator`) and is
@@ -395,7 +406,7 @@ impl<'src> Header<'src> {
 
         // Asciidoctor exposes the number of resolved authors via the
         // `authorcount` document attribute. It defaults to `0` (a built-in
-        // default), so only a non-zero count is materialized here — this keeps an
+        // default), so only a non-zero count is materialized here – this keeps an
         // author-less parse from touching the attribute map at all.
         if !authors.is_empty() {
             parser.set_attribute_by_value_from_header("authorcount", authors.len().to_string());
@@ -502,8 +513,8 @@ impl<'src> Header<'src> {
     }
 
     /// Return an iterator over the attributes in this header.
-    pub fn attributes(&'src self) -> Iter<'src, Attribute<'src>> {
-        self.attributes.iter()
+    pub fn attributes(&'src self) -> HeaderAttributes<'src> {
+        HeaderAttributes::new(&self.attributes)
     }
 
     /// Returns the author line, if found.
@@ -529,8 +540,8 @@ impl<'src> Header<'src> {
     }
 
     /// Return an iterator over the comments in this header.
-    pub fn comments(&'src self) -> Iter<'src, Span<'src>> {
-        self.comments.iter()
+    pub fn comments(&'src self) -> Comments<'src> {
+        Comments::new(&self.comments)
     }
 }
 
@@ -769,7 +780,7 @@ fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
 ///
 /// `header_has_attributes` reports whether the header carried any attribute
 /// entries. When it did not, none of the `author` / `authors` / `author_N`
-/// attributes can be set, so the attribute lookups are skipped — the common
+/// attributes can be set, so the attribute lookups are skipped – the common
 /// case for a document whose header is just a title (or absent).
 fn resolve_authors(
     author_line: Option<&AuthorLine>,
@@ -785,7 +796,7 @@ fn resolve_authors(
         return vec![];
     }
 
-    // A directly-assigned `author` attribute describes a single author — but
+    // A directly-assigned `author` attribute describes a single author – but
     // only while it remains set. A later `:author!:` unsets the attribute
     // without carrying a raw value to refresh `author_attribute`, so consult
     // the attribute's final state rather than trusting the cached parse. The
@@ -901,7 +912,7 @@ fn split_author_entries(value: &str) -> Vec<&str> {
 /// derived `authorinitials` always overwrites an explicit `:authorinitials:`
 /// entry for the `authors` and `author_N` forms. Only a single `:author:` entry
 /// (handled inline in [`Header::parse`]) preserves an explicit override,
-/// exactly as Asciidoctor does — its `authorinitials` deletion guard lives only
+/// exactly as Asciidoctor does – its `authorinitials` deletion guard lives only
 /// in the `author` branch of `process_authors`, not the `authors`/indexed
 /// branches.
 fn set_author_metadata(parser: &mut Parser, authors: &[Author]) {
@@ -985,6 +996,36 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::tests::prelude::*;
+
+    #[test]
+    fn attributes_iterator_supports_exact_size_double_ended_and_nth() {
+        // Exercises the opaque `HeaderAttributes` iterator's full surface:
+        // `ExactSizeIterator` (and, through its default `len`, `size_hint`),
+        // `DoubleEndedIterator`, and the `nth` override.
+        let doc = Parser::default().parse(":alpha: 1\n:bravo: 2\n:charlie: 3\n\nbody\n");
+        let header = doc.header();
+
+        // Collect once to learn the order and length without hard-coding a count.
+        let names: Vec<_> = header
+            .attributes()
+            .map(|a| a.name().data().to_string())
+            .collect();
+
+        assert!(names.len() >= 3);
+        assert_eq!(names.first().map(String::as_str), Some("alpha"));
+
+        assert_eq!(header.attributes().len(), names.len());
+
+        assert_eq!(
+            header.attributes().next_back().map(|a| a.name().data()),
+            names.last().map(String::as_str),
+        );
+
+        assert_eq!(
+            header.attributes().nth(1).map(|a| a.name().data()),
+            Some("bravo"),
+        );
+    }
 
     #[test]
     fn impl_clone() {
@@ -1852,7 +1893,7 @@ mod tests {
         );
 
         // With no authors resolved, the raw `authors` value is left as written
-        // (never rewritten to a comma-joined list) — matching Asciidoctor, whose
+        // (never rewritten to a comma-joined list) – matching Asciidoctor, whose
         // `process_authors` returns only `authorcount` for an all-empty value.
         assert_eq!(doc.attribute_value("authors"), InterpretedValue::Value(";"));
     }
@@ -2119,12 +2160,12 @@ mod tests {
         // `document_title_follows_block_metadata`, which scans structurally and
         // never parses an attribute list). Here the `[[anchor]]` breaks the run
         // before any title, so the lookahead fails and the `[reftext=…]` line's
-        // attribute list is never parsed during header parsing — its embedded
+        // attribute list is never parsed during header parsing – its embedded
         // `{counter:item}` must not fire at header time.
         //
         // The `reftext` line advances the counter exactly once when the block
         // parser reaches it (yielding 1), so the following `{counter:item}`
-        // reference renders 2 — not 3, which is what a leaked header-time
+        // reference renders 2 – not 3, which is what a leaked header-time
         // evaluation would produce.
         let doc = Parser::default()
             .parse("[reftext=\"See {counter:item}\"]\n[[anchor]]\n= Title\n\n{counter:item}");
@@ -2291,7 +2332,7 @@ mod tests {
         // of the header, but instead the author and revision lines before it
         // are captured as before.
         let mut parser = Parser::default();
-        parser.parse("= Title\nJoe Cool\nv1.0\n///\nstuff");
+        let _ = parser.parse("= Title\nJoe Cool\nv1.0\n///\nstuff");
 
         assert_eq!(
             parser.attribute_value("author"),
@@ -2378,8 +2419,8 @@ mod tests {
 
         #[test]
         fn carries_the_rest_of_the_header() {
-            // Everything that may follow an `=` title — attribute entries, the
-            // author line, the revision line — follows a `#` title too.
+            // Everything that may follow an `=` title – attribute entries, the
+            // author line, the revision line – follows a `#` title too.
             let doc = Parser::default()
                 .parse("# Doc Title\n:foo: bar\nKismet R. Lee <kismet@asciidoctor.org>\nv1.0\n");
             let header = doc.header();

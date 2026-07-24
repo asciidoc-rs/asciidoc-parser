@@ -1,8 +1,8 @@
 //! Cross-reference resolution.
 //!
 //! Parsing leaves cross-references (`<<id>>`, `xref:id[…]`) unresolved so they
-//! can be resolved later, once the full document — or, for multi-document
-//! workflows such as Antora, the full corpus — has been parsed and its catalog
+//! can be resolved later, once the full document – or, for multi-document
+//! workflows such as Antora, the full corpus – has been parsed and its catalog
 //! of referenceable elements is complete.
 //!
 //! Resolution is performed through the [`ReferenceResolver`] trait. This crate
@@ -30,7 +30,7 @@ use crate::{
 /// [`Basic`](Self::Basic), mirroring Asciidoctor.
 ///
 /// [Cross reference styles]: https://docs.asciidoctor.org/asciidoc/latest/macros/xref-text-and-style/#cross-reference-styles
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum XrefStyle {
     /// The signifier and number followed by the title, quoted (or emphasized
     /// for a chapter or appendix): e.g. `Section 2.3, “Installation”`.
@@ -64,7 +64,7 @@ impl XrefStyle {
 ///
 /// This carries only the target-derived pieces; how they are combined with the
 /// target's title is decided by the reference's [`XrefStyle`] at render time.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct XrefSignifier {
     /// The signifier and reference number, already combined (e.g. `"Section
     /// 2.3"`, `"Figure 1"`, or just `"2.3"` when the target's `*-refsig`
@@ -77,7 +77,7 @@ pub struct XrefSignifier {
 }
 
 /// The resolved destination of a cross-reference.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ResolvedReference {
     /// The hyperlink destination. For a same-document reference this is a
     /// fragment such as `#section-id`; a cross-document resolver may return a
@@ -120,7 +120,7 @@ impl ResolvedReference {
     /// across documents: a multi-document (Antora-style) resolver that has
     /// located the target's [`RefEntry`] in some document's [`Catalog`] passes
     /// the `href` it computed for that document, and the target's signifier and
-    /// number — computed while *that* document was parsed — ride along. The
+    /// number – computed while *that* document was parsed – ride along. The
     /// style itself comes from the *referencing* document and is applied later,
     /// so the resolver need not know it. The single-document
     /// [`CatalogResolver`] is built on this same helper.
@@ -149,8 +149,8 @@ impl ResolvedReference {
 /// The destination a cross-reference target resolves to on its own, without
 /// consulting any catalog.
 ///
-/// A target that names a document — another one (an [inter-document cross
-/// reference]) or the current one — carries its own destination. The parser
+/// A target that names a document – another one (an [inter-document cross
+/// reference]) or the current one – carries its own destination. The parser
 /// derives it while substituting the reference, rewriting the path with the
 /// `relfileprefix`, `relfilesuffix`, and `outfilesuffix` attributes in effect
 /// at that point in the document.
@@ -161,7 +161,7 @@ impl ResolvedReference {
 /// when it does not.
 ///
 /// [inter-document cross reference]: https://docs.asciidoctor.org/asciidoc/latest/macros/inter-document-xref/
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct DerivedReference {
     /// The hyperlink destination: the rewritten output path plus the target's
     /// fragment, if it had one (e.g. `tigers.html#about`), or `#` for a
@@ -257,7 +257,7 @@ impl<'src> ReferenceWarnings<'src> {
 /// This carries only information the crate itself knows about the reference. A
 /// multi-document host that needs to know which document a reference originates
 /// from binds that "from" context when it constructs its [`ReferenceResolver`],
-/// rather than receiving it here — keeping this seam free of any host-specific
+/// rather than receiving it here – keeping this seam free of any host-specific
 /// coordinate system.
 #[non_exhaustive]
 pub struct ResolutionContext<'a> {
@@ -275,6 +275,26 @@ pub struct ResolutionContext<'a> {
     /// A resolver that can do better is free to ignore this and return its own
     /// [`ResolvedReference`]; returning `None` leaves this default in place.
     pub derived: Option<&'a DerivedReference>,
+}
+
+impl<'a> ResolutionContext<'a> {
+    /// Constructs a [`ResolutionContext`] from its parts.
+    ///
+    /// The crate itself builds these values internally; this constructor exists
+    /// so a downstream [`ReferenceResolver`] implementation can build its own
+    /// contexts in unit tests despite the type being `#[non_exhaustive]`.
+    #[must_use]
+    pub fn new(
+        target: &'a str,
+        provided_text: Option<&'a str>,
+        derived: Option<&'a DerivedReference>,
+    ) -> Self {
+        Self {
+            target,
+            provided_text,
+            derived,
+        }
+    }
 }
 
 /// Resolves cross-reference targets to their destinations.
@@ -361,6 +381,22 @@ mod tests {
 
         assert_eq!(resolved.href, "#later");
         assert_eq!(resolved.text.as_deref(), Some("The Later Section"));
+    }
+
+    #[test]
+    fn new_builds_a_resolvable_context() {
+        // The `new` constructor is the seam a downstream `ReferenceResolver`
+        // uses to build its own contexts, since the type is `#[non_exhaustive]`.
+        let catalog = catalog_with("later", Some("The Later Section"), RefType::Section);
+        let resolver = CatalogResolver::new(&catalog);
+
+        let context = ResolutionContext::new("later", None, None);
+        assert_eq!(context.target, "later");
+        assert_eq!(context.provided_text, None);
+        assert!(context.derived.is_none());
+
+        let resolved = resolver.resolve(&context).unwrap();
+        assert_eq!(resolved.href, "#later");
     }
 
     #[test]

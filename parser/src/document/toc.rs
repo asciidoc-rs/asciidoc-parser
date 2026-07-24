@@ -10,7 +10,7 @@ use crate::{Parser, document::InterpretedValue};
 /// The `toc`/`toc-placement` attributes are header-only, so this value is fixed
 /// once a document's header has been processed. A nested [AsciiDoc table cell]
 /// behaves as its own standalone document and resolves its own [`TocMode`]
-/// independently — it does **not** inherit the parent document's setting.
+/// independently – it does **not** inherit the parent document's setting.
 ///
 /// The `auto`, `left`, and `right` placements all render the TOC automatically
 /// near the top of the document; `left` and `right` additionally request a
@@ -57,7 +57,7 @@ impl TocMode {
     /// This reads the raw stored `toc-placement`, distinguishing a never-set
     /// attribute from an explicit unset tombstone. The derived `toc-position` /
     /// `toc-placement` / `toc-class` document attributes are materialized from
-    /// the resolved placement *after* this runs — see
+    /// the resolved placement *after* this runs – see
     /// [`Parser::materialize_toc_attributes`](crate::Parser).
     pub(crate) fn from_parser(parser: &Parser) -> Self {
         let value = parser.attribute_value("toc");
@@ -78,7 +78,7 @@ impl TocMode {
         // any unrecognized value) the placement comes from the separate
         // `toc-placement` attribute, matching Asciidoctor, which folds the `toc`
         // shorthand into `toc-placement` and treats the latter as the source of
-        // truth. A bogus `toc-placement` — like a bogus `toc` — falls back to an
+        // truth. A bogus `toc-placement` – like a bogus `toc` – falls back to an
         // automatic placement.
         match value.as_maybe_str().map(str::trim) {
             Some("macro") => Self::Macro,
@@ -92,6 +92,7 @@ impl TocMode {
                     Some("left") => Self::Left,
                     Some("right") => Self::Right,
                     Some("preamble") => Self::Preamble,
+
                     // `toc-placement` carries no recognized placement keyword.
                     // When it has been *explicitly unset* (via `:toc-placement!:`
                     // or an API unset) while `toc` is enabled, Asciidoctor's
@@ -99,7 +100,7 @@ impl TocMode {
                     // `macro` fetch fallback, so the TOC defers to a `toc::[]`
                     // block macro. (Asciidoctor deletes the attribute's default;
                     // this crate records the unset as an `Unset` tombstone, which
-                    // `has_attribute` still reports as present — distinguishing it
+                    // `has_attribute` still reports as present – distinguishing it
                     // from a `toc-placement` that was never set.) A `toc-placement`
                     // that was never set, or set to any other (bogus) value, falls
                     // back to an automatic placement.
@@ -189,7 +190,7 @@ pub(crate) const DEFAULT_TOC_CLASS_SIDE: &str = "toc2";
 /// `toc-title`, `toc-class`) are header-only, so this value is captured once
 /// the header has been processed and the parser still holds the document's
 /// resolved attribute state.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct TocConfig {
     /// Where (and whether) the TOC is placed.
     pub(crate) mode: TocMode,
@@ -332,9 +333,11 @@ mod tests {
         // attribute itself is unset.
         assert_eq!(doc_with(":toc2:").toc_mode(), TocMode::Left);
         assert!(doc_with(":toc2:").toc_mode().is_enabled());
+
         // Its side-column placement also switches the default `toc-class` to
         // `toc2`, like any other `left`/`right` TOC.
         assert_eq!(doc_with(":toc2:").toc_class(), "toc2");
+
         // A soft-unset `toc2!` does not enable the TOC.
         assert_eq!(doc_with(":toc2!:").toc_mode(), TocMode::Disabled);
     }
@@ -355,11 +358,13 @@ mod tests {
             doc_with(":toc: auto\n:toc-placement: preamble").toc_mode(),
             TocMode::Preamble
         );
+
         // A placement keyword in the `toc` value wins over `toc-placement`.
         assert_eq!(
             doc_with(":toc: macro\n:toc-placement: preamble").toc_mode(),
             TocMode::Macro
         );
+
         // A bogus `toc-placement` falls back to an automatic placement.
         assert_eq!(
             doc_with(":toc:\n:toc-placement: bogus").toc_mode(),
@@ -381,6 +386,7 @@ mod tests {
             doc_with(":toc:\n:!toc-placement:").toc_mode(),
             TocMode::Macro
         );
+
         // A placement keyword in the `toc` value still wins over an unset
         // `toc-placement`.
         assert_eq!(
@@ -393,6 +399,7 @@ mod tests {
     fn levels_default_and_overrides() {
         assert_eq!(doc_with(":toc:").toc_levels(), 2);
         assert_eq!(doc_with(":toc:\n:toclevels: 5").toc_levels(), 5);
+
         // `0` is coerced to `1`, values above `5` are clamped to `5`, and an
         // unparseable value falls back to the default.
         assert_eq!(doc_with(":toc:\n:toclevels: 0").toc_levels(), 1);
@@ -404,8 +411,10 @@ mod tests {
     fn title_default_value_and_empty() {
         assert_eq!(doc_with(":toc:").toc_title(), "Table of Contents");
         assert_eq!(doc_with(":toc:\n:toc-title: My TOC").toc_title(), "My TOC");
+
         // A `:toc-title:` set with no value yields an empty title.
         assert_eq!(doc_with(":toc:\n:toc-title:").toc_title(), "");
+
         // An explicitly unset `:toc-title!:` falls back to the built-in default.
         assert_eq!(
             doc_with(":toc:\n:toc-title!:").toc_title(),
@@ -417,6 +426,7 @@ mod tests {
     fn class_default_value_and_empty() {
         assert_eq!(doc_with(":toc:").toc_class(), "toc");
         assert_eq!(doc_with(":toc:\n:toc-class: floaty").toc_class(), "floaty");
+
         // An empty `:toc-class:` falls back to the default.
         assert_eq!(doc_with(":toc:\n:toc-class:").toc_class(), "toc");
     }
@@ -437,6 +447,7 @@ mod tests {
             doc_with(":toc: left\n:toc-class: floaty").toc_class(),
             "floaty"
         );
+
         // An explicit but empty `:toc-class:` resolves to the built-in `toc-class`
         // default (`toc`) at the attribute layer, so the placement-derived `toc2`
         // default only applies when `toc-class` is left entirely unset.
@@ -464,6 +475,7 @@ mod tests {
 
         // An automatic top TOC: position and class stay unset, placement `auto`.
         assert_eq!(derived(":toc:"), (Unset, Value("auto".into()), Unset));
+
         // An unrecognized `toc` value still resolves to an automatic placement.
         assert_eq!(
             derived(":toc: beeboo"),
@@ -488,6 +500,7 @@ mod tests {
                 Value("toc2".into())
             )
         );
+
         // The legacy `toc2` alias behaves like `toc=left`.
         assert_eq!(
             derived(":toc2:"),
@@ -553,7 +566,7 @@ mod tests {
             InterpretedValue::Value("macro".into())
         );
 
-        // A second document that enables an automatic TOC must resolve `Auto` —
+        // A second document that enables an automatic TOC must resolve `Auto` –
         // if the first document's derived `toc-placement: macro` had leaked onto
         // the parser, `TocMode::from_parser` would read it back and wrongly
         // resolve `Macro` here.
@@ -563,6 +576,7 @@ mod tests {
             doc2.attribute_value("toc-placement"),
             InterpretedValue::Value("auto".into())
         );
+
         // The first document's derived `toc-position` (`content`) likewise does
         // not linger: an automatic TOC leaves it unset.
         assert!(!doc2.has_attribute("toc-position"));
@@ -579,7 +593,7 @@ mod tests {
     }
 
     /// Exercises the derived-attribute mapping directly for every [`TocMode`]
-    /// variant, including [`TocMode::Disabled`] — which the parse path never
+    /// variant, including [`TocMode::Disabled`] – which the parse path never
     /// feeds to these helpers (materialization returns early for it), but whose
     /// arms must still map to "no attribute".
     #[test]

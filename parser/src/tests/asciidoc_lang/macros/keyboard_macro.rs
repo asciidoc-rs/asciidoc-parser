@@ -28,7 +28,7 @@ mod keyboard_macro_syntax {
         use crate::blocks::{Block, TableCellContent};
 
         let mut out = vec![];
-        for block in doc.nested_blocks() {
+        for block in doc.child_blocks() {
             if let Block::Table(table) = block {
                 for row in table.body_rows() {
                     if let Some(cell) = row.cells().first()

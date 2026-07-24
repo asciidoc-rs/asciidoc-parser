@@ -213,21 +213,21 @@ Another way to solve the problem is to write the paragraph as a literal paragrap
             warnings: &[
                 Warning {
                     source: Span {
-                        data: ".rolename]*main text*footnote:[The footnote.",
-                        line: 1,
-                        col: 2,
-                        offset: 1,
-                    },
-                    warning: WarningType::EmptyShorthandName,
-                },
-                Warning {
-                    source: Span {
                         data: "[.rolename]*main text*footnote:[The footnote.]",
                         line: 1,
                         col: 1,
                         offset: 0,
                     },
                     warning: WarningType::MissingBlockAfterTitleOrAttributeList,
+                },
+                Warning {
+                    source: Span {
+                        data: ".rolename]*main text*footnote:[The footnote.",
+                        line: 1,
+                        col: 2,
+                        offset: 1,
+                    },
+                    warning: WarningType::EmptyShorthandName,
                 },
             ],
             source_map: SourceMap(&[]),

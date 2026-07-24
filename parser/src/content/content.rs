@@ -26,8 +26,8 @@ use crate::{
 /// (or, for multi-document workflows, in another document entirely). The
 /// macros substitution therefore records each cross-reference in a deferred
 /// form and leaves an opaque placeholder in the rendered text. The
-/// references are resolved in a later pass — see
-/// [`Document::resolve_references`] — at which point [`rendered()`] reflects
+/// references are resolved in a later pass – see
+/// [`Document::resolve_references`] – at which point [`rendered()`] reflects
 /// the resolved links. Until then, [`rendered()`] shows an unresolved fallback,
 /// so it always returns clean text.
 ///
@@ -36,7 +36,7 @@ use crate::{
 /// [`RawDelimitedBlock`]: crate::blocks::RawDelimitedBlock
 /// [`Document::resolve_references`]: crate::Document::resolve_references
 /// [`rendered()`]: Self::rendered
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Content<'src> {
     /// The original [`Span`] from which this content was derived.
     original: Span<'src>,
@@ -80,7 +80,7 @@ pub struct Content<'src> {
 }
 
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct DeferredContent {
     /// The locally-substituted text with opaque placeholder tokens marking
     /// where each cross-reference will be spliced in. This is the source of
@@ -93,7 +93,7 @@ struct DeferredContent {
 }
 
 /// A single deferred cross-reference.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct XrefSegment {
     /// The raw, uninterpreted target as written in the source.
     pub(crate) target: String,
@@ -140,16 +140,16 @@ const XREF_PLACEHOLDER_END: char = '\u{E001}';
 /// A footnote in a section title is a real, document-order footnote, but its
 /// marker must be kept out of the section's reference text and auto-generated
 /// ID. Marking the marker in a single render (rather than re-rendering the
-/// title with footnotes suppressed) means stateful substitutions — counters,
-/// attribute references that expand into footnotes — run exactly once. See
+/// title with footnotes suppressed) means stateful substitutions – counters,
+/// attribute references that expand into footnotes – run exactly once. See
 /// [`strip_footnote_marker_spans`] and
 /// [`Content::remove_footnote_marker_sentinels`].
 pub(crate) const FOOTNOTE_MARKER_START: char = '\u{E002}';
 pub(crate) const FOOTNOTE_MARKER_END: char = '\u{E003}';
 
-/// Removes each footnote marker span — a [`FOOTNOTE_MARKER_START`] …
+/// Removes each footnote marker span – a [`FOOTNOTE_MARKER_START`] …
 /// [`FOOTNOTE_MARKER_END`] region and everything between, i.e. the sentinels
-/// *and* the marker they bracket — leaving footnote-free text suitable for a
+/// *and* the marker they bracket – leaving footnote-free text suitable for a
 /// section's reference text and auto-generated ID.
 pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -160,7 +160,7 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
         rest = &rest[start + FOOTNOTE_MARKER_START.len_utf8()..];
 
         // Drop through the matching end sentinel (the marker text). A start
-        // without an end cannot occur — the substitution always emits both — but
+        // without an end cannot occur – the substitution always emits both – but
         // if it somehow did, drop the remainder rather than reintroduce the
         // stray sentinel.
         rest = match rest.find(FOOTNOTE_MARKER_END) {
@@ -177,8 +177,8 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
 /// cross-references it carries.
 ///
 /// A block title stashed across a section heading (see
-/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] — the
-/// parser it rides on has no `'src` lifetime — so the title travels in this
+/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] – the
+/// parser it rides on has no `'src` lifetime – so the title travels in this
 /// owned form and is rebuilt into a [`Content`] (via
 /// [`Content::from_owned_title`]) when the next block claims it. Carrying the
 /// deferred template and cross-references along means an embedded `<<id>>`
@@ -198,9 +198,20 @@ impl<'src> Content<'src> {
     /// Constructs a `Content` from a source `Span` and a potentially-filtered
     /// view of that source text.
     pub(crate) fn from_filtered<T: AsRef<str>>(span: Span<'src>, filtered: T) -> Self {
+        let filtered = filtered.as_ref();
+
+        // When filtering was a no-op – the filtered text is byte-identical to
+        // the source span – borrow the span rather than allocating an owned
+        // copy of text we already hold.
+        let rendered = if filtered == span.data() {
+            CowStr::Borrowed(span.data())
+        } else {
+            filtered.to_string().into()
+        };
+
         Self {
             original: span,
-            rendered: filtered.as_ref().to_string().into(),
+            rendered,
             source_lines: None,
             deferred: None,
             inline_nodes: None,
@@ -247,16 +258,25 @@ impl<'src> Content<'src> {
     /// [`apply_attributes`](crate::content::substitution_step).
     pub(crate) fn from_filtered_lines(
         span: Span<'src>,
-        filtered_lines: &[&str],
+        filtered_lines: &[&'src str],
         line_spans: Vec<Span<'src>>,
     ) -> Self {
         // One source span is required per filtered line; the default
         // `debug_assert_eq!` message reports both counts if this is ever broken.
         debug_assert_eq!(filtered_lines.len(), line_spans.len());
 
+        // A single surviving line needs no join: it is already a contiguous
+        // `'src` slice, so borrow it rather than allocating an owned copy. This
+        // is the common plain-prose paragraph case; only a genuinely multi-line
+        // block pays for the `join`.
+        let rendered = match filtered_lines {
+            [only] => CowStr::Borrowed(only),
+            _ => filtered_lines.join("\n").into(),
+        };
+
         Self {
             original: span,
-            rendered: filtered_lines.join("\n").into(),
+            rendered,
             source_lines: Some(line_spans.into_boxed_slice()),
             deferred: None,
             inline_nodes: None,
@@ -667,8 +687,8 @@ fn render_template(
 /// macros substitution step, so any cross-reference (`<<id>>`, `xref:id[…]`)
 /// inside it cannot be resolved by the document-level pass that resolves
 /// references in block content. Instead, the footnote captures its
-/// cross-references here — as a placeholder template plus the references in
-/// placeholder order — and they are resolved alongside the block references
+/// cross-references here – as a placeholder template plus the references in
+/// placeholder order – and they are resolved alongside the block references
 /// (see [`Footnote::resolve_references`]).
 ///
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
@@ -775,6 +795,31 @@ mod tests {
         }
     }
 
+    mod from_filtered {
+        use crate::{Span, content::Content, strings::CowStr};
+
+        #[test]
+        fn borrows_source_when_filter_is_a_no_op() {
+            // A filtered view byte-identical to the source span is borrowed from
+            // the span rather than allocating an owned copy of text we already
+            // hold.
+            let content = Content::from_filtered(Span::new("plain text"), "plain text");
+
+            assert!(matches!(content.rendered, CowStr::Borrowed(_)));
+            assert_eq!(content.rendered.as_ref(), "plain text");
+        }
+
+        #[test]
+        fn owns_rendered_text_when_filter_changes_it() {
+            // A filtered view that differs from the source is materialized as an
+            // owned copy.
+            let content = Content::from_filtered(Span::new("a|b"), "ab");
+
+            assert!(matches!(content.rendered, CowStr::Boxed(_)));
+            assert_eq!(content.rendered.as_ref(), "ab");
+        }
+    }
+
     mod strip_footnote_marker_spans {
         use super::super::{
             FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, strip_footnote_marker_spans,
@@ -831,6 +876,7 @@ mod tests {
         #[test]
         fn rehomes_a_placeholder_into_a_local_segment() {
             let all = vec![segment("a"), segment("b")];
+
             // Reference only the second segment; it becomes local index 0.
             let text = format!("see {XREF_PLACEHOLDER_START}1{XREF_PLACEHOLDER_END} here");
 

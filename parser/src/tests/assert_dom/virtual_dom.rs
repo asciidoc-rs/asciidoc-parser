@@ -15,11 +15,11 @@ use regex::Regex;
 use crate::{
     Document, HasSpan,
     blocks::{
-        AdmonitionBlock, Block, Break, ColumnStyle, CompoundDelimitedBlock, ContentModel, Frame,
-        Grid, HorizontalAlignment, IsBlock, ListBlock, ListItem, ListItemMarker, ListType,
-        MediaBlock, MediaType, Preamble, QuoteBlock, QuoteType, RawDelimitedBlock, SectionBlock,
-        SimpleBlock, SimpleBlockStyle, Stripes, TableBlock, TableCellContent, TableColumn,
-        TableRow, VerticalAlignment,
+        AdmonitionBlock, Block, Break, ColumnStyle, CompoundDelimitedBlock, ContentModel,
+        FindBlocks, Frame, Grid, HorizontalAlignment, IsBlock, ListBlock, ListItem, ListItemMarker,
+        ListType, MediaBlock, MediaType, Preamble, QuoteBlock, QuoteType, RawDelimitedBlock,
+        SectionBlock, SimpleBlock, SimpleBlockStyle, Stripes, TableBlock, TableCellContent,
+        TableColumn, TableRow, VerticalAlignment,
     },
     document::{InterpretedValue, TocMode, first_inline_candidate},
 };
@@ -68,7 +68,7 @@ impl TocData {
     /// `toc` configuration and its top-level `blocks`.
     fn build(levels: usize, title: &str, class: &str, blocks: &[Block]) -> Self {
         Self {
-            ul: build_toc_ul(blocks, 1, levels),
+            ul: build_toc_ul(blocks.iter(), 1, levels),
             title: title.to_string(),
             class: class.to_string(),
         }
@@ -146,7 +146,11 @@ fn toc_macro_node(block: &Block) -> Option<VirtualNode> {
 /// sections); only [`Block::Section`] children contribute entries. Each entry
 /// is an `<li>` with an `<a href="#id">title</a>`, plus a nested `<ul>` of any
 /// subsections down to `max_level`. Returns `None` when there are no sections.
-fn build_toc_ul(blocks: &[Block], level: usize, max_level: usize) -> Option<VirtualNode> {
+fn build_toc_ul<'a>(
+    blocks: impl Iterator<Item = &'a Block<'a>>,
+    level: usize,
+    max_level: usize,
+) -> Option<VirtualNode> {
     if level > max_level {
         return None;
     }
@@ -164,9 +168,7 @@ fn build_toc_ul(blocks: &[Block], level: usize, max_level: usize) -> Option<Virt
                     .with_text(section.section_title()),
             );
 
-            if let Some(sub) =
-                build_toc_ul(section.nested_blocks().as_slice(), level + 1, max_level)
-            {
+            if let Some(sub) = build_toc_ul(section.child_blocks(), level + 1, max_level) {
                 li.children.push(sub);
             }
 
@@ -212,6 +214,7 @@ fn icons_mode_from_document(doc: &Document) -> IconsMode {
             return match attr.value() {
                 InterpretedValue::Value(v) if v == "font" => IconsMode::Font,
                 InterpretedValue::Unset => IconsMode::None,
+
                 // `:icons:` (set, empty) or any other value enables image icons.
                 _ => IconsMode::Image,
             };
@@ -567,7 +570,7 @@ impl ToVirtualDom for Document<'_> {
             InterpretedValue::Value(ref v) if v == "inline"
         ) {
             if let Some(rendered) =
-                first_inline_candidate(self.nested_blocks()).and_then(|b| b.rendered_content())
+                first_inline_candidate(self.child_blocks()).and_then(|b| b.rendered_content())
             {
                 node.children.extend(parse_html_content(rendered));
             }
@@ -603,7 +606,7 @@ impl ToVirtualDom for Document<'_> {
                 self.toc_levels(),
                 self.toc_title(),
                 self.toc_class(),
-                self.nested_blocks().as_slice(),
+                self.top_level_blocks(),
             )
         });
 
@@ -633,7 +636,7 @@ impl ToVirtualDom for Document<'_> {
         ) && self.doctitle().is_none();
 
         // Add child blocks, including block titles as separate siblings.
-        for block in self.nested_blocks() {
+        for block in self.child_blocks() {
             if exclude_abstracts && is_abstract(block) {
                 continue;
             }
@@ -785,6 +788,7 @@ impl ToVirtualDom for Block<'_> {
 
             Block::Section(section) => {
                 let mut node = section_to_node(section);
+
                 // Add section title as heading element.
                 // Section levels are 1-5, which map to h2-h6.
                 let heading_level = (section.level() + 1).min(6);
@@ -913,7 +917,7 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
     // For ordered lists whose explicit numbering does not start at 1, emit the
     // implicit `start` attribute (matching Asciidoctor).
     if list.type_() == ListType::Ordered
-        && let Some(Block::ListItem(first)) = list.nested_blocks().next()
+        && let Some(Block::ListItem(first)) = list.child_blocks().next()
         && let Some(ordinal) = first.list_item_marker().ordinal_value()
         && ordinal != 1
     {
@@ -948,7 +952,7 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
         list_element = list_element.with_class("bibliography");
     }
 
-    for item in list.nested_blocks() {
+    for item in list.child_blocks() {
         // For description lists, we need to create two peer nodes: dt and dd
         // (or tr/td for horizontal lists).
         if list.type_() == ListType::Description {
@@ -965,7 +969,7 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
                         tr_node.children.push(td_term);
 
                         let mut td_def = VirtualNode::new("td").with_class("hdlist2");
-                        let nested = list_item.nested_blocks().collect::<Vec<_>>();
+                        let nested = list_item.child_blocks().collect::<Vec<_>>();
                         for child in &nested {
                             td_def.children.push(child.to_virtual_dom());
                         }
@@ -989,7 +993,7 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
                         // Create dd node for the definition, but only if the item has content.
                         // Multiple consecutive terms can share a single definition.
-                        let nested = list_item.nested_blocks().collect::<Vec<_>>();
+                        let nested = list_item.child_blocks().collect::<Vec<_>>();
 
                         if !nested.is_empty() {
                             let mut dd_node = VirtualNode::new("dd");
@@ -1138,7 +1142,7 @@ fn colist_icon_table_to_node<'a>(list: &'a ListBlock<'a>, icons: IconsMode) -> V
 
     let mut table = VirtualNode::new("table");
 
-    for (index, item) in list.nested_blocks().enumerate() {
+    for (index, item) in list.child_blocks().enumerate() {
         let num = index + 1;
 
         let mut row = VirtualNode::new("tr");
@@ -1170,7 +1174,7 @@ fn colist_icon_table_to_node<'a>(list: &'a ListBlock<'a>, icons: IconsMode) -> V
         // Text cell: the callout list item's annotation text.
         let mut text_cell = VirtualNode::new("td");
         if let Some(text) = item
-            .nested_blocks()
+            .child_blocks()
             .next()
             .and_then(|b| b.rendered_content())
         {
@@ -1196,7 +1200,7 @@ fn list_item_to_node<'a>(item: &'a ListItem<'a>) -> VirtualNode {
         node = node.with_id(id);
     }
 
-    let nested = item.nested_blocks().collect::<Vec<_>>();
+    let nested = item.child_blocks().collect::<Vec<_>>();
     let has_multiple_blocks = nested.len() > 1;
 
     for (index, child) in nested.iter().enumerate() {
@@ -1327,16 +1331,12 @@ fn section_to_node<'a>(section: &'a SectionBlock<'a>) -> VirtualNode {
         node = node.with_class(role);
     }
 
-    // The section id lands on the heading (`<h2>`) only, not on this wrapper
-    // `<div>`, matching Asciidoctor's HTML5 converter. The heading id is added
-    // in the `Block::Section` match arm.
-
-    // TODO: Section title heading is added in the Block::Section match arm
-    // using section.level() to determine the heading level (h2-h6) and
-    // section.section_title() to get the rendered title text.
+    // The section id and title heading both land on the heading (`<h2>`) only,
+    // not on this wrapper `<div>`, matching Asciidoctor's HTML5 converter. The
+    // heading is added in the `Block::Section` match arm.
 
     // Add nested blocks, handling block titles as separate siblings.
-    for child in section.nested_blocks() {
+    for child in section.child_blocks() {
         add_block_with_title(&mut node, child);
     }
 
@@ -1459,6 +1459,7 @@ fn media_to_node<'a>(media: &'a MediaBlock<'a>) -> VirtualNode {
         {
             video = video.with_attribute("height", height.to_string());
         }
+
         // `controls` is present by default, suppressed by the `nocontrols`
         // option.
         if !macro_attrlist.has_option("nocontrols") {
@@ -1615,8 +1616,10 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
             // attribute).
             if let Some(attrlist) = raw.attrlist() {
                 let mut attrs = attrlist.attributes();
+
                 // Skip first attribute (style="source").
                 attrs.next();
+
                 // Second attribute is the language, which yields both a
                 // `language-<lang>` class and a `data-lang` attribute.
                 if let Some(lang_attr) = attrs.next() {
@@ -1649,7 +1652,7 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
 /// Renders a compound delimited block, matching Asciidoctor's HTML output.
 ///
 /// In practice this only ever renders an open block (`div.openblock`): the
-/// other compound containers are intercepted earlier — a sidebar by
+/// other compound containers are intercepted earlier – a sidebar by
 /// [`is_sidebar`], an example by [`is_example`], a quote/verse masquerade by
 /// [`QuoteBlock`], an admonition masquerade by [`AdmonitionBlock`], and a
 /// verbatim masquerade (`source`/`listing`/`literal`) by [`RawDelimitedBlock`].
@@ -1681,7 +1684,7 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
     }
 
     let mut content = VirtualNode::new("div").with_class("content");
-    for child in compound.nested_blocks() {
+    for child in compound.child_blocks() {
         add_block_with_title(&mut content, child);
     }
     node.children.push(content);
@@ -1695,7 +1698,7 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
 /// The paragraph form of an open block (`[open]` over a single paragraph)
 /// produces the same `div.openblock > div.content` structure as the delimited
 /// `--` form in [`compound_delimited_to_node`], but its inline content is
-/// rendered directly inside the content wrapper without a wrapping `<p>` —
+/// rendered directly inside the content wrapper without a wrapping `<p>` –
 /// mirroring the `[example]` and `[sidebar]` paragraph styles. The outer
 /// `div.openblock` carries the block's id and roles, and a title, when present,
 /// is rendered as a `div.title` *before* the content wrapper.
@@ -1766,7 +1769,7 @@ fn abstract_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     match block.content_model() {
         // A delimited abstract encloses other blocks.
         ContentModel::Compound => {
-            for child in block.nested_blocks() {
+            for child in block.child_blocks() {
                 add_block_with_title(&mut blockquote, child);
             }
         }
@@ -1836,7 +1839,7 @@ fn collapsible_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     match block.content_model() {
         // A collapsible (example) block encloses other blocks.
         ContentModel::Compound => {
-            for child in block.nested_blocks() {
+            for child in block.child_blocks() {
                 add_block_with_title(&mut content, child);
             }
         }
@@ -1869,8 +1872,8 @@ fn is_sidebar<'a>(block: &'a Block<'a>) -> bool {
 /// The delimited form is a [`Block::CompoundDelimited`] rendered by
 /// [`compound_delimited_to_node`]; the paragraph form is a [`Block::Simple`]
 /// rendered by [`open_paragraph_to_node`]. Every masquerade style on a `--`
-/// block is intercepted earlier — by [`is_sidebar`], [`is_example`],
-/// [`is_abstract`], `QuoteBlock`, `AdmonitionBlock`, or `RawDelimitedBlock` —
+/// block is intercepted earlier – by [`is_sidebar`], [`is_example`],
+/// [`is_abstract`], `QuoteBlock`, `AdmonitionBlock`, or `RawDelimitedBlock` –
 /// so a `CompoundDelimited` block that reaches here always resolves to `open`
 /// with no abstract styling. Like
 /// a sidebar, an open block renders its own title (as a `div.title` before its
@@ -1905,7 +1908,7 @@ fn sidebar_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     match block.content_model() {
         // A delimited sidebar encloses other blocks.
         ContentModel::Compound => {
-            for child in block.nested_blocks() {
+            for child in block.child_blocks() {
                 add_block_with_title(&mut content, child);
             }
         }
@@ -1955,7 +1958,7 @@ fn is_example<'a>(block: &'a Block<'a>) -> bool {
 /// directly inside the content wrapper without a `<p>` wrapper.
 ///
 /// A titled example block is rendered with a `div.title` caption placed
-/// *before* the content wrapper — unlike a sidebar, whose title sits inside the
+/// *before* the content wrapper – unlike a sidebar, whose title sits inside the
 /// content. The caption prefix and number are computed during parsing and
 /// stored on the block (see [`IsBlock::caption`]); when present the prefix is
 /// prepended to the title (e.g. "Example 1. Onomatopoeia"), otherwise the bare
@@ -1990,7 +1993,7 @@ fn example_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     match block.content_model() {
         // A delimited example encloses other blocks.
         ContentModel::Compound => {
-            for child in block.nested_blocks() {
+            for child in block.child_blocks() {
                 add_block_with_title(&mut content, child);
             }
         }
@@ -2055,7 +2058,7 @@ fn admonition_to_node<'a>(admonition: &'a AdmonitionBlock<'a>) -> VirtualNode {
 
     match admonition.content_model() {
         ContentModel::Compound => {
-            for child in admonition.nested_blocks() {
+            for child in admonition.child_blocks() {
                 add_block_with_title(&mut content_cell, child);
             }
         }
@@ -2124,9 +2127,9 @@ fn quote_to_node<'a>(quote: &'a QuoteBlock<'a>) -> VirtualNode {
 
             match quote.content_model() {
                 ContentModel::Compound => {
-                    // `blocks()` (rather than `nested_blocks()`) is used so that
-                    // a Markdown-style blockquote's nested blocks, which borrow
-                    // the block's own owned source, are rendered too.
+                    // `blocks()` returns a slice (rather than the `child_blocks()`
+                    // iterator) so a Markdown-style blockquote's nested blocks,
+                    // which borrow the block's own owned source, are rendered too.
                     for child in quote.blocks() {
                         add_block_with_title(&mut blockquote, child);
                     }
@@ -2663,7 +2666,7 @@ fn valign_class(align: VerticalAlignment) -> &'static str {
 fn preamble_to_node<'a>(preamble: &'a Preamble<'a>) -> VirtualNode {
     let mut node = VirtualNode::new("div").with_id("preamble");
 
-    for child in preamble.nested_blocks() {
+    for child in preamble.child_blocks() {
         // A `toc::[]` macro in the preamble renders the table of contents.
         if is_toc_macro(child) {
             if let Some(toc) = toc_macro_node(child) {
@@ -2785,12 +2788,14 @@ mod tests {
         let wrapper = &vdom.children[0];
         assert_eq!(wrapper.tag, "div");
         assert!(wrapper.classes.contains(&"olist".to_string()));
+
         // Wrapper should also have "arabic" class for ordered lists.
         assert!(wrapper.classes.contains(&"arabic".to_string()));
         assert_eq!(wrapper.children.len(), 1);
 
         let ol = &wrapper.children[0];
         assert_eq!(ol.tag, "ol");
+
         // The <ol> element should also have "arabic" class.
         assert!(ol.classes.contains(&"arabic".to_string()));
         assert_eq!(ol.children.len(), 3);
@@ -2869,6 +2874,7 @@ mod tests {
 
         let dl = &wrapper.children[0];
         assert_eq!(dl.tag, "dl");
+
         // Should have 4 children: dt, dd, dt, dd.
         assert_eq!(dl.children.len(), 4);
 
@@ -3090,6 +3096,7 @@ mod tests {
                 .parse("= Title\n:toc:\n:toc-class: floating-toc\n\n== Section\n\nhi");
 
             assert_eq!(doc.toc_class(), "floating-toc");
+
             // The container carries the custom class in place of the default.
             assert_css(&doc, "#toc.floating-toc", 1);
             assert_css(&doc, "#toc.toc", 0);
@@ -3145,7 +3152,7 @@ mod tests {
 
         #[test]
         fn toc_macro_renders_nothing_when_toc_not_enabled() {
-            // A stray `toc::[]` with no `toc` attribute renders nothing — neither
+            // A stray `toc::[]` with no `toc` attribute renders nothing – neither
             // a TOC nor the literal paragraph text.
             let doc = Parser::default().parse("= Title\n\ntoc::[]\n\n== Section\n\nhi");
 

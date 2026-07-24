@@ -43,7 +43,7 @@ include::example$text.adoc[tag=css]
             "Do werewolves believe in [.small]#small print#?\n\n[.big]##O##nce upon an infinite loop.",
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -96,7 +96,7 @@ include::example$text.adoc[tag=css-custom-html]
         let doc =
             Parser::default().parse("Type the word [.userinput]#asciidoctor# into the search bar.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {

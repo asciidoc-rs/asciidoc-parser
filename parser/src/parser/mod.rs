@@ -21,8 +21,11 @@ mod inline_substitution_renderer;
 pub use inline_substitution_renderer::{
     CalloutGuard, CalloutRenderParams, CharacterReplacementType, FootnoteRenderParams,
     HtmlSubstitutionRenderer, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-    InlineSubstitutionRenderer, LinkRenderParams, LinkRenderType, MenuRenderParams, QuoteScope,
-    QuoteType, SpecialCharacter, XrefRenderParams,
+    InlineSubstitutionRenderer, LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType,
+    SpecialCharacter, XrefRenderParams,
+};
+pub(crate) use inline_substitution_renderer::{
+    has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
 };
 
 mod parser;
@@ -30,7 +33,7 @@ pub(crate) use parser::DeferredWarning;
 pub use parser::Parser;
 
 mod path_resolver;
-pub use path_resolver::PathResolver;
+pub use path_resolver::{DefaultPathResolver, PathResolver};
 
 mod safe_mode;
 pub use safe_mode::SafeMode;
@@ -41,7 +44,7 @@ pub use svg_file_handler::SvgFileHandler;
 pub(crate) mod preprocessor;
 
 mod resolved_attributes;
-pub(crate) use resolved_attributes::ResolvedAttributes;
+pub(crate) use resolved_attributes::{ResolvedAttributes, attribute_lookup_name};
 
 mod reference_resolver;
 pub(crate) use reference_resolver::ReferenceWarnings;
@@ -55,4 +58,4 @@ pub use reference_time::ReferenceTime;
 pub(crate) use reference_time::{DatetimeContext, DatetimeInputs, is_datetime_attribute};
 
 mod source_map;
-pub use source_map::{SourceLine, SourceMap};
+pub use source_map::{Fidelity, Origin, SourceLine, SourceMap, Transform};

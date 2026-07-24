@@ -1,14 +1,18 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::{ElementAttribute, element_attribute::ParseShorthand},
     content::{Content, SubstitutionStep},
-    internal::debug::DebugSliceReference,
+    internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
+
+opaque_slice_iter! {
+    /// An iterator over the [`ElementAttribute`]s in an [`Attrlist`], returned
+    /// by [`Attrlist::attributes`].
+    pub struct ElementAttributes<'a> yielding ElementAttribute<'a>;
+}
 
 /// The source text that’s used to define attributes for an element is referred
 /// to as an **attrlist.** An attrlist is always enclosed in a pair of square
@@ -17,7 +21,7 @@ use crate::{
 /// entries, determines whether each entry is a positional or named attribute,
 /// parses the entry accordingly, and assigns the result as an attribute on the
 /// node.
-#[derive(Clone, Eq, PartialEq, Default)]
+#[derive(Clone, Eq, Hash, PartialEq, Default)]
 pub struct Attrlist<'src> {
     attributes: Vec<ElementAttribute<'src>>,
     anchor: Option<CowStr<'src>>,
@@ -66,7 +70,7 @@ impl<'src> Attrlist<'src> {
         let mut index = 0;
 
         // 1-based counter over every comma-delimited entry, incremented per
-        // entry — named attributes and blank (`nil`) slots included — so that
+        // entry – named attributes and blank (`nil`) slots included – so that
         // positional attributes are numbered the way Asciidoctor numbers them
         // (see `nth_attribute`).
         let mut entry_number = 0usize;
@@ -96,7 +100,7 @@ impl<'src> Attrlist<'src> {
 
             // Shorthand items (the `#id`, `.role`, and `%option` entries) are
             // only recognized in the first attribute position. Once the first
-            // attribute has been parsed — whether it was positional or named —
+            // attribute has been parsed – whether it was positional or named –
             // disable shorthand parsing so that, for example, a `%header`
             // entered after a named `cols` attribute is not mistaken for an
             // option (the processor ignores it).
@@ -126,12 +130,13 @@ impl<'src> Attrlist<'src> {
                     attributes.push(attr);
                 }
             } else if !attr.value().is_empty() || attr.value_is_quoted() {
-                // A positional attribute — including an explicit empty quoted
+                // A positional attribute – including an explicit empty quoted
                 // value (`""` / `''`). Record its position so later positionals
                 // stay aligned across named and blank entries.
                 attr.set_positional_index(entry_number);
                 attributes.push(attr);
             }
+
             // Otherwise this is an empty, unquoted positional: a blank (`nil`)
             // slot. It consumes `entry_number` (already incremented) but is not
             // stored, so a later positional keeps its Asciidoctor position.
@@ -148,6 +153,7 @@ impl<'src> Attrlist<'src> {
                             warning: WarningType::EmptyAttributeValue,
                             origin: None,
                         });
+
                         // Consume the blank slot between consecutive commas here,
                         // advancing the position counter past it.
                         entry_number += 1;
@@ -194,7 +200,7 @@ impl<'src> Attrlist<'src> {
     /// therefore carries the `source` block style in the first position and
     /// the language in the second, so that downstream consumers resolve the
     /// block to a source (highlighted listing) block and can read the
-    /// language via [`nth_attribute(2)`](Self::nth_attribute) — without
+    /// language via [`nth_attribute(2)`](Self::nth_attribute) – without
     /// this parser performing any syntax highlighting itself.
     ///
     /// The `source` span is set to the language span, since that is the only
@@ -300,8 +306,8 @@ impl<'src> Attrlist<'src> {
             // An attribute carries a positional index exactly when it is a
             // positional (unnamed) attribute; a named attribute has `None`.
             // Dispatching on the index keeps a positional at its Asciidoctor
-            // position — the same 1-based entry count `nth_attribute` uses,
-            // which includes named entries and blank slots — so positions stay
+            // position – the same 1-based entry count `nth_attribute` uses,
+            // which includes named entries and blank slots – so positions stay
             // aligned across lines even when a later line interleaves named
             // attributes before a positional.
             match attr.positional_index() {
@@ -379,7 +385,7 @@ impl<'src> Attrlist<'src> {
     }
 
     /// Return a mutable reference to the positional attribute at (1-based)
-    /// Asciidoctor position `n` — the position recorded on each attribute, not
+    /// Asciidoctor position `n` – the position recorded on each attribute, not
     /// its ordinal among stored positionals (the two differ once named entries
     /// or blank slots consume positions). See
     /// [`nth_attribute`](Self::nth_attribute).
@@ -397,8 +403,8 @@ impl<'src> Attrlist<'src> {
 
     /// Returns an iterator over the attributes contained within
     /// this attrlist.
-    pub fn attributes(&'src self) -> Iter<'src, ElementAttribute<'src>> {
-        self.attributes.iter()
+    pub fn attributes(&'src self) -> ElementAttributes<'src> {
+        ElementAttributes::new(&self.attributes)
     }
 
     /// Returns the anchor found in this attribute list, if any.

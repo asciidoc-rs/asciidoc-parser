@@ -1,6 +1,6 @@
 //! Describes the top-level document structure.
 
-use std::{marker::PhantomData, rc::Rc, slice::Iter};
+use std::{marker::PhantomData, rc::Rc};
 
 use self_cell::self_cell;
 
@@ -11,14 +11,20 @@ use crate::{
     document::{
         Author, Catalog, Docinfo, DocinfoLocation, Header, InterpretedValue, TocConfig, TocMode,
     },
-    internal::debug::DebugSliceReference,
+    internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     parser::{
-        CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, ReferenceResolver,
+        CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, Origin, ReferenceResolver,
         ReferenceWarning, ReferenceWarnings, ResolvedAttributes, SourceMap,
     },
     strings::CowStr,
     warnings::{Warning, WarningType},
 };
+
+opaque_slice_iter! {
+    /// An iterator over a [`Document`]'s parse-time [`Warning`]s, returned by
+    /// [`Document::warnings`].
+    pub struct Warnings<'a> yielding Warning<'a>;
+}
 
 /// A document represents the top-level block element in AsciiDoc. It consists
 /// of an optional document header and either a) one or more sections preceded
@@ -74,7 +80,7 @@ impl<'src> Document<'src> {
 
         // Publish the source map on the parser for the duration of the parse so
         // an AsciiDoc table cell can map a position in this (preprocessed)
-        // source back to the file and line it originally came from — needed to
+        // source back to the file and line it originally came from – needed to
         // report an unresolved `include::` directive inside such a cell against
         // the correct cursor. The document keeps its own copy of the map, so
         // clear the parser's reference once parsing completes.
@@ -113,9 +119,9 @@ impl<'src> Document<'src> {
             // the section-child boundary check only sees sections nested under
             // another section; flag the document-root case here.
             //
-            // Skipped for a title-less document or when `fragment` is set — both
+            // Skipped for a title-less document or when `fragment` is set – both
             // are treated as section fragments with no level-0 root to sequence
-            // against — and when `leveloffset` is in effect, since a shifted (or
+            // against – and when `leveloffset` is in effect, since a shifted (or
             // clamped) effective level no longer reflects the authored level
             // relationship and any degenerate offset is reported on its own.
             if header.title_source().is_some()
@@ -129,8 +135,8 @@ impl<'src> Document<'src> {
 
             // Warnings recorded while replacing attribute references (e.g. a
             // reference to a missing attribute under `attribute-missing=warn`)
-            // are collected on the parser, where only owned offsets — not
-            // borrowed spans — can live. Now that the document's owned source is
+            // are collected on the parser, where only owned offsets – not
+            // borrowed spans – can live. Now that the document's owned source is
             // available, turn each one back into a spanned `Warning`.
             let root = Span::new(owned_src);
 
@@ -210,8 +216,8 @@ impl<'src> Document<'src> {
             // Under `doctype: inline`, only the first eligible block is converted,
             // as bare inline content, and everything after it is dropped (the
             // rendering lives on the embed path). A compound or empty candidate
-            // has no inline content to emit, so warn here — matching
-            // Asciidoctor's `Document#convert` — and let the embed path render
+            // has no inline content to emit, so warn here – matching
+            // Asciidoctor's `Document#convert` – and let the embed path render
             // nothing. This runs on the final block list (after any preamble
             // split) and uses the same candidate selection as the renderer, so
             // the two always agree on which block is the candidate.
@@ -240,14 +246,14 @@ impl<'src> Document<'src> {
             // Capture the parser's fully-resolved attribute state so it can be
             // read back through the `Document` (via `attribute_value`,
             // `has_attribute`, and `is_attribute_set`) without a `Parser` in
-            // hand — the embed path a renderer uses for `convert_document`.
+            // hand – the embed path a renderer uses for `convert_document`.
             let mut attributes = parser.snapshot_attributes();
 
             // Materialize the derived `toc-position` / `toc-placement` /
             // `toc-class` document attributes from the resolved placement into
             // the snapshot (matching Asciidoctor), so they are queryable via
             // `attribute_value` without perturbing the parser's own attribute
-            // state — a reused parser must not carry this document's derived TOC
+            // state – a reused parser must not carry this document's derived TOC
             // values into the next parse, where they would change what
             // `TocMode::from_parser` observes.
             attributes.materialize_toc_attributes(toc.mode);
@@ -255,6 +261,13 @@ impl<'src> Document<'src> {
             // Resolve docinfo from the final attribute state and the parser's
             // configured docinfo file handler (empty when no handler is set).
             let docinfo = Docinfo::resolve(parser);
+
+            // Warnings are collected in assembly order (header, then blocks, then
+            // preprocessor, substitution, and post-parse checks), which is not
+            // source order. Put them into source order now so a host can rely on
+            // `warnings()` yielding line-ordered diagnostics. See
+            // `sort_warnings` for the ordering and its determinism.
+            sort_warnings(&mut warnings);
 
             InternalDependent {
                 header,
@@ -328,7 +341,7 @@ impl<'src> Document<'src> {
     /// attribute], as of the end of parsing.
     ///
     /// This mirrors [`Parser::attribute_value`] and is the accessor to use on
-    /// the *embed* path — rendering a [`Document`] you already hold, without a
+    /// the *embed* path – rendering a [`Document`] you already hold, without a
     /// [`Parser`] in hand. The value reflects the document's final attribute
     /// state: built-in defaults, values set in the header or body, and the
     /// current value of any counter of the same name. An attribute that is not
@@ -418,7 +431,7 @@ impl<'src> Document<'src> {
     /// private docinfo files (shared first, matching Asciidoctor), with
     /// `docinfosubs` substitutions already applied.
     ///
-    /// An empty string is returned when no docinfo applies to the location —
+    /// An empty string is returned when no docinfo applies to the location –
     /// for example when no [`DocinfoFileHandler`] was configured on the parser,
     /// the `docinfo` attribute did not enable that scope/location, or no
     /// matching file was found. Docinfo files are resolved through a
@@ -432,9 +445,27 @@ impl<'src> Document<'src> {
         self.internal.borrow_dependent().docinfo.content(location)
     }
 
+    /// Returns this document's direct (top-level) child blocks.
+    ///
+    /// This is the internal seed for the
+    /// [`FindBlocks`](crate::blocks::FindBlocks) traversal; the public
+    /// accessor is
+    /// [`FindBlocks::child_blocks`](crate::blocks::FindBlocks::child_blocks).
+    pub(crate) fn top_level_blocks(&'src self) -> &'src [Block<'src>] {
+        &self.internal.borrow_dependent().blocks
+    }
+
     /// Return an iterator over any warnings found during parsing.
-    pub fn warnings(&self) -> Iter<'_, Warning<'_>> {
-        self.internal.borrow_dependent().warnings.iter()
+    ///
+    /// Warnings are yielded in **source order**: by the byte offset of each
+    /// warning's [`source`](Warning::source) span in the (preprocessed)
+    /// document, so a host can render a line-ordered gutter or pick the "first"
+    /// diagnostic without sorting them itself. The order is deterministic;
+    /// warnings that share an offset keep a stable relative order. Resolving
+    /// cross-references (via [`resolve_references`](Self::resolve_references))
+    /// folds its unresolved-reference warnings into this same source order.
+    pub fn warnings(&self) -> Warnings<'_> {
+        Warnings::new(&self.internal.borrow_dependent().warnings)
     }
 
     /// Return a [`Span`] describing the entire document source.
@@ -445,6 +476,23 @@ impl<'src> Document<'src> {
     /// Return the source map that tracks original file locations.
     pub fn source_map(&self) -> &SourceMap {
         &self.internal.borrow_dependent().source_map
+    }
+
+    /// Translate the start of `span` back to its [`Origin`] in the original
+    /// input files: the file, line, and (on verbatim lines) column the author
+    /// actually wrote, together with the [`Fidelity`] of the mapping.
+    ///
+    /// Because a `Span` covers preprocessed source, its own `line`/`col` are
+    /// relative to the unified buffer, not any one input file; this resolves
+    /// them through the document's [`source_map`](Self::source_map). Pass any
+    /// element's span via [`HasSpan::span`], e.g.
+    /// `doc.origin_of(block.span())`.
+    ///
+    /// [`Origin`]: crate::parser::Origin
+    /// [`Fidelity`]: crate::parser::Fidelity
+    /// [`HasSpan::span`]: crate::HasSpan::span
+    pub fn origin_of(&self, span: Span<'_>) -> Origin<'_> {
+        self.source_map().origin_of(span)
     }
 
     /// Return the document catalog for accessing referenceable elements.
@@ -469,7 +517,7 @@ impl<'src> Document<'src> {
     /// Each call is a **full, independent resolution sweep**. Every
     /// cross-reference is re-resolved against `resolver`, overwriting any
     /// result from a previous pass, and the returned [`ReferenceWarning`]s
-    /// reflect only what *this* `resolver` could not resolve — a prior pass
+    /// reflect only what *this* `resolver` could not resolve – a prior pass
     /// having resolved a target does not suppress a warning here.
     /// Consequently, resolving with a resolver that knows fewer targets
     /// than an earlier pass (for example, calling this after
@@ -585,6 +633,34 @@ fn replace_reference_warnings<'src>(
         .retain(|warning| !matches!(warning.warning, WarningType::PossibleInvalidReference(_)));
 
     document_warnings.append(sweep_warnings);
+
+    // A resolution sweep appends its unresolved-reference warnings at the end,
+    // so restore source order after folding them in – matching the order
+    // established at the end of the parse.
+    sort_warnings(document_warnings);
+}
+
+/// Stable-sorts `warnings` into source order.
+///
+/// Warnings are collected in assembly order during the parse (and a reference
+/// resolution sweep appends more afterward), which does not match the order the
+/// diagnostics appear in the source. The primary key is the byte offset of each
+/// warning's [`source`](Warning::source) span in the (preprocessed) document,
+/// so a host can render a line-ordered gutter or pick the "first" diagnostic.
+///
+/// The sort is *stable*, and the tiebreaker is the warning's
+/// [`origin`](Warning::origin) line: two warnings anchored to the same document
+/// span – several failing `include::` directives inside one AsciiDoc table
+/// cell, whose `source` is the enclosing cell's directive line – order by where
+/// they actually live, and any remaining ties keep their deterministic assembly
+/// order. The result is therefore both source-ordered and stable across runs.
+fn sort_warnings(warnings: &mut [Warning<'_>]) {
+    warnings.sort_by_key(|warning| {
+        (
+            warning.source.byte_offset(),
+            warning.origin.as_ref().map_or(0, |origin| origin.1),
+        )
+    });
 }
 
 impl<'src> IsBlock<'src> for Document<'src> {
@@ -594,10 +670,6 @@ impl<'src> IsBlock<'src> for Document<'src> {
 
     fn raw_context(&self) -> CowStr<'src> {
         "document".into()
-    }
-
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.internal.borrow_dependent().blocks.iter()
     }
 
     fn title_source(&'src self) -> Option<Span<'src>> {

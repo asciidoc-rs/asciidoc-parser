@@ -49,7 +49,7 @@ use std::ops::Deref;
 /// ```
 ///
 /// [`data()`]: Self::data
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Span<'src> {
     data: &'src str,
     line: usize,

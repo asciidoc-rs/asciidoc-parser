@@ -182,7 +182,7 @@ A best practice is to only use lowercase letters in the name and avoid starting 
     #[test]
     fn may_contain_uppercase() {
         let mut parser = Parser::default();
-        parser.parse(":URL: /foo/bar");
+        let _ = parser.parse(":URL: /foo/bar");
 
         assert_eq!(parser.attribute_value("URL"), InterpretedValue::Unset);
 

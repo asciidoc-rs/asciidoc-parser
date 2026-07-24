@@ -20,7 +20,7 @@ You can include a glossary in an article, book, and book part by setting the `gl
 
     // A section assigned the `glossary` style carries that style.
     let doc = Parser::default().parse("[glossary]\n== Terminology\n");
-    let section = doc.nested_blocks().next().unwrap();
+    let section = doc.child_blocks().next().unwrap();
     assert_eq!(section.declared_style(), Some("glossary"));
 }
 
@@ -35,7 +35,7 @@ fn glossary_section_syntax() {
 
     // The `glossary` style is recognized on a level 1 section.
     let doc = Parser::default().parse("[glossary]\n== Terminology\n");
-    let section = doc.nested_blocks().next().unwrap();
+    let section = doc.child_blocks().next().unwrap();
     assert_eq!(section.declared_style(), Some("glossary"));
     assert_eq!(section.raw_context().as_ref(), "section");
 
@@ -66,7 +66,7 @@ The glossary section is defined as a level 1 section (`==`) when:
 
     // The `glossary` section style is recognized as a level 1 section.
     let doc = Parser::default().parse("[glossary]\n== Terminology\n");
-    let section = doc.nested_blocks().next().unwrap();
+    let section = doc.child_blocks().next().unwrap();
     assert_eq!(section.declared_style(), Some("glossary"));
     assert_eq!(section.raw_context().as_ref(), "section");
 
@@ -121,10 +121,10 @@ rain::
         "[glossary]\n== Glossary\n\n[glossary]\nmud:: wet, cold dirt\nrain::\n\twater falling from the sky\n",
     );
 
-    let section = doc.nested_blocks().next().unwrap();
+    let section = doc.child_blocks().next().unwrap();
     assert_eq!(section.declared_style(), Some("glossary"));
 
-    let dlist = section.nested_blocks().next().unwrap();
+    let dlist = section.child_blocks().next().unwrap();
     assert_eq!(dlist.declared_style(), Some("glossary"));
 
     assert_css(&doc, ".dlist.glossary", 1);

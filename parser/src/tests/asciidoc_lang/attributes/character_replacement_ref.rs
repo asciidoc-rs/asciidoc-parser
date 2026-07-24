@@ -213,7 +213,7 @@ fn reference_a_character_replacement_attribute() {
     let mut parser = Parser::default();
     let doc = parser.parse("Wolpertingers don't like temperatures above 100{deg}C.");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     let crate::blocks::Block::Simple(block) = block else {
         panic!("expected a simple block");
     };

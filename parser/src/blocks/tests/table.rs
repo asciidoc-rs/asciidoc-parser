@@ -4,8 +4,8 @@
 use crate::{
     HasSpan, Parser, Span,
     blocks::{
-        Block, ColumnStyle, ContentModel, DataFormat, HorizontalAlignment, IsBlock, TableBlock,
-        TableCellContent, VerticalAlignment,
+        Block, ColumnStyle, ContentModel, DataFormat, FindBlocks, HorizontalAlignment, IsBlock,
+        TableBlock, TableCellContent, VerticalAlignment,
     },
     content::SubstitutionGroup,
     parser::ModificationContext,
@@ -257,7 +257,7 @@ fn block_level_accessors() {
     assert_eq!(block.raw_context().as_ref(), "table");
     assert_eq!(block.resolved_context().as_ref(), "table");
     assert!(block.rendered_content().is_none());
-    assert_eq!(block.nested_blocks().count(), 0);
+    assert_eq!(block.child_blocks().count(), 0);
     assert!(block.declared_style().is_none());
     assert!(block.id().is_none());
     assert!(block.roles().is_empty());
@@ -371,7 +371,7 @@ fn captioned_tables_are_numbered_in_document_order() {
         .parse(".First\n|===\n|a\n|===\n\n|===\n|b\n|===\n\n.Second\n|===\n|c\n|===");
 
     let captions: Vec<(Option<&str>, Option<usize>)> = doc
-        .nested_blocks()
+        .child_blocks()
         .filter_map(|block| match block {
             Block::Table(table) => Some((table.caption(), table.number())),
             _ => None,
@@ -394,7 +394,7 @@ fn table_caption_can_be_relabeled() {
     // document attribute.
     let doc = Parser::default().parse(":table-caption: Spreadsheet\n\n.Numbers\n|===\n|a\n|===");
 
-    let caption = doc.nested_blocks().find_map(|block| match block {
+    let caption = doc.child_blocks().find_map(|block| match block {
         Block::Table(table) => table.caption().map(|c| c.to_string()),
         _ => None,
     });
@@ -409,7 +409,7 @@ fn unsetting_table_caption_suppresses_the_label() {
     let doc = Parser::default().parse(":!table-caption:\n\n.Numbers\n|===\n|a\n|===");
 
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -435,7 +435,7 @@ fn empty_table_caption_suppresses_the_label() {
     let doc = parser.parse(".First\n|===\n|a\n|===\n\n.Second\n|===\n|b\n|===");
 
     let observed: Vec<(Option<&str>, Option<&str>)> = doc
-        .nested_blocks()
+        .child_blocks()
         .filter_map(|block| match block {
             Block::Table(table) => Some((table.title(), table.caption())),
             _ => None,
@@ -469,7 +469,7 @@ fn caption_attribute_does_not_consume_a_table_number() {
     );
 
     let captions: Vec<(Option<&str>, Option<usize>)> = doc
-        .nested_blocks()
+        .child_blocks()
         .filter_map(|block| match block {
             Block::Table(table) => Some((table.caption(), table.number())),
             _ => None,
@@ -494,7 +494,7 @@ fn caption_attribute_applies_even_when_table_caption_is_unset() {
     let doc = Parser::default()
         .parse(":!table-caption:\n\n[caption=\"Forced. \"]\n.Numbers\n|===\n|a\n|===");
 
-    let caption = doc.nested_blocks().find_map(|block| match block {
+    let caption = doc.child_blocks().find_map(|block| match block {
         Block::Table(table) => table.caption().map(|c| c.to_string()),
         _ => None,
     });
@@ -533,7 +533,7 @@ fn empty_caption_attribute_does_not_consume_a_table_number() {
     );
 
     let captions: Vec<(Option<&str>, Option<usize>)> = doc
-        .nested_blocks()
+        .child_blocks()
         .filter_map(|block| match block {
             Block::Table(table) => Some((table.caption(), table.number())),
             _ => None,
@@ -605,7 +605,7 @@ fn asciidoc_cell_resolves_references_in_nested_blocks() {
         .parse("[#target]\nTarget paragraph.\n\n[cols=\"a\"]\n|===\n|See xref:target[].\n|===");
 
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -635,7 +635,7 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
     );
 
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -676,7 +676,7 @@ fn asciidoc_cell_is_always_nested() {
     let doc = Parser::default().parse("[cols=\"a\"]\n|===\n|nested content\n|===");
 
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -694,14 +694,14 @@ fn asciidoc_cell_exposes_inherited_attributes_for_introspection() {
     // The cell's attribute state is scoped to the cell and restored on the parser
     // once the cell is parsed, so it can no longer be read from the parser. The
     // cell nonetheless retains a snapshot of it, letting a caller introspect the
-    // nested document's attributes — both those inherited from the parent and any
-    // the cell set for itself — after parsing has finished.
+    // nested document's attributes – both those inherited from the parent and any
+    // the cell set for itself – after parsing has finished.
     let doc = Parser::default().parse(
         ":parent-attr: inherited\n\n[cols=\"a\"]\n|===\n|\n:cell-attr: local\ncontent\n|===",
     );
 
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -748,7 +748,7 @@ fn include_expanded_asciidoc_cell_exposes_inherited_attributes_for_introspection
         .parse("|===\na|include::fixtures/cell.adoc[]\n|===");
 
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -794,7 +794,7 @@ fn asciidoc_cell_cannot_modify_a_parent_attribute() {
         ":locked: parent\n\n[cols=\"a\"]\n|===\n|\n:locked: child\n\nvalue is {locked}\n|===",
     );
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -819,7 +819,7 @@ fn asciidoc_cell_may_set_an_attribute_unset_in_the_parent() {
         ":locked: value\n:locked!:\n\n[cols=\"a\"]\n|===\n|\n:locked: child\n\nvalue is {locked}\n|===",
     );
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -839,7 +839,7 @@ fn asciidoc_cell_may_modify_an_exempt_attribute() {
         ":compat-mode: parent\n:locked: parent\n\n[cols=\"a\"]\n|===\n|\n:compat-mode: child\n:locked: child\n\nc={compat-mode} l={locked}\n|===",
     );
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|block| match block {
             Block::Table(table) => Some(table),
             _ => None,
@@ -1115,7 +1115,7 @@ fn bare_duplication_operator_clones_once() {
 
 #[test]
 fn huge_duplication_factor_does_not_overallocate() {
-    // A duplication factor is an amplifier — `1000000000*` would otherwise
+    // A duplication factor is an amplifier – `1000000000*` would otherwise
     // materialize a billion cells (a multi-gigabyte allocation). The factor is
     // clamped to `MAX_DUPLICATION_FACTOR` (1,000), so the expansion stays
     // bounded. This is the one place the implementation diverges from Asciidoctor,

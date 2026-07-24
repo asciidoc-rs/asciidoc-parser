@@ -29,7 +29,7 @@ The only notable limitation is that an open block cannot be nested inside of ano
 
     // The block's raw context is `open`, and (absent a masquerade style) its
     // resolved context is `open` as well.
-    let open = doc.nested_blocks().next().unwrap();
+    let open = doc.child_blocks().next().unwrap();
     assert_eq!(open.raw_context().as_ref(), "open");
     assert_eq!(open.resolved_context().as_ref(), "open");
 
@@ -122,7 +122,7 @@ include::example$open.adoc[tag=sb]
 
     // The masquerade style replaces the open context: the resolved context is
     // `sidebar` even though the raw (delimiter-derived) context is `open`.
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.raw_context().as_ref(), "open");
     assert_eq!(block.resolved_context().as_ref(), "sidebar");
 }
@@ -167,7 +167,7 @@ include::example$open.adoc[tag=src]
 
     // The body is verbatim: the content model is verbatim, not the compound
     // (nested-block) model of a plain open block.
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.content_model(), ContentModel::Verbatim);
 }
 
@@ -202,7 +202,7 @@ fn open_block_masquerading_as_a_listing_or_literal_block() {
     assert_css(&doc, ".openblock", 0);
     assert_css(&doc, "div.listingblock > pre", 1);
     assert_eq!(
-        doc.nested_blocks().next().unwrap().content_model(),
+        doc.child_blocks().next().unwrap().content_model(),
         ContentModel::Verbatim
     );
 
@@ -212,7 +212,7 @@ fn open_block_masquerading_as_a_listing_or_literal_block() {
     assert_css(&doc, ".openblock", 0);
     assert_css(&doc, "div.literalblock > pre", 1);
     assert_eq!(
-        doc.nested_blocks().next().unwrap().content_model(),
+        doc.child_blocks().next().unwrap().content_model(),
         ContentModel::Verbatim
     );
 }

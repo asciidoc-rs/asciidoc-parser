@@ -35,7 +35,7 @@ fn simple_text(cell: &crate::blocks::TableCell<'_>) -> String {
 /// first (paragraph) block.
 fn rendered_paragraph(source: &str) -> String {
     let doc = Parser::default().parse(source);
-    let crate::blocks::Block::Simple(para) = &doc.nested_blocks().next().unwrap() else {
+    let crate::blocks::Block::Simple(para) = &doc.child_blocks().next().unwrap() else {
         panic!("expected a paragraph");
     };
     para.content().rendered().to_string()

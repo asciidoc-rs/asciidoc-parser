@@ -1,7 +1,7 @@
 use std::{cmp::PartialEq, fmt};
 
 use crate::{
-    blocks::IsBlock,
+    blocks::FindBlocks,
     tests::fixtures::{
         Span,
         blocks::Block,
@@ -61,11 +61,11 @@ fn fixture_eq_observed(fixture: &Document, observed: &crate::Document) -> bool {
         return false;
     }
 
-    if fixture.blocks.len() != observed.nested_blocks().len() {
+    if fixture.blocks.len() != observed.child_blocks().count() {
         return false;
     }
 
-    for (fixture_block, observed_block) in fixture.blocks.iter().zip(observed.nested_blocks()) {
+    for (fixture_block, observed_block) in fixture.blocks.iter().zip(observed.child_blocks()) {
         if fixture_block != observed_block {
             return false;
         }

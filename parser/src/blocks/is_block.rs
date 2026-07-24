@@ -1,4 +1,4 @@
-use std::{fmt::Debug, slice::Iter};
+use std::fmt::Debug;
 
 use crate::{
     Span,
@@ -64,7 +64,7 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
             // The `source` style is not itself a context; it specializes the
             // `listing` context (a source block is a listing block with syntax
             // highlighting). A `source` style therefore resolves the context to
-            // `listing` — for example, `[source]` placed over a `....` literal
+            // `listing` – for example, `[source]` placed over a `....` literal
             // block makes it a listing block.
             if declared_style == "source" {
                 return "listing".into();
@@ -122,30 +122,21 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
             .and_then(|attr| attr.block_style())
     }
 
-    /// Returns an iterator over the nested blocks contained within
-    /// this block.
+    /// Returns a mutable slice of the child blocks contained within this block.
     ///
-    /// Many block types do not have nested blocks so the default implementation
-    /// returns an empty iterator.
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        const NO_BLOCKS: &[Block<'static>] = &[];
-        NO_BLOCKS.iter()
-    }
-
-    /// Returns a mutable slice of the nested blocks contained within this
-    /// block.
+    /// The default returns an empty slice; container blocks override it to
+    /// expose their children for in-place passes such as cross-reference
+    /// resolution. This is a low-level extension hook; to read a block's
+    /// children, use its inherent `child_blocks()` accessor or
+    /// [`FindBlocks::child_blocks()`].
     ///
-    /// This is the mutable counterpart of [`nested_blocks()`]. The default
-    /// returns an empty slice; container blocks override it to expose their
-    /// children for in-place passes such as cross-reference resolution.
-    ///
-    /// [`nested_blocks()`]: Self::nested_blocks
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    /// [`FindBlocks::child_blocks()`]: crate::blocks::FindBlocks::child_blocks
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut []
     }
 
-    /// Returns a mutable reference to this block's own resolvable content — its
-    /// body or description-list term — if any.
+    /// Returns a mutable reference to this block's own resolvable content – its
+    /// body or description-list term – if any.
     ///
     /// The default returns `None`; content-bearing blocks override it. This is
     /// used by in-place passes such as cross-reference resolution. A section
@@ -353,7 +344,7 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
 
 /// The content model of a block determines what kind of content the block can
 /// have (if any) and how that content is processed.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum ContentModel {
     /// A block that may only contain other blocks (e.g., a section)
     Compound,
@@ -370,11 +361,11 @@ pub enum ContentModel {
     /// output with no substitutions applied (e.g., a passthrough block)
     Raw,
 
-    /// A block that has no content (e.g., an image block)
+    /// A block that has no content (e.g., an image block).
     Empty,
 
     /// A special content model reserved for tables that enforces a fixed
-    /// structure
+    /// structure.
     Table,
 }
 

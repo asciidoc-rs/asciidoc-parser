@@ -271,7 +271,7 @@ impl std::fmt::Debug for BuiltInContext {
 /// the assigned type (i.e., the uppercase label), which is specified either as
 /// a special paragraph prefix (e.g., `NOTE:`) or as the block style in an
 /// attribute list (e.g., `[NOTE]`).
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum AdmonitionVariant {
     /// The `NOTE` admonition type.
     Note,
@@ -398,6 +398,7 @@ mod tests {
         #[test]
         fn unknown_context_is_none() {
             assert_eq!(BuiltInContext::from_str("verbatim"), None);
+
             // The match is case-sensitive.
             assert_eq!(BuiltInContext::from_str("Paragraph"), None);
             assert!(!is_built_in_context("not-a-context"));
@@ -405,13 +406,13 @@ mod tests {
 
         #[test]
         fn impl_debug() {
-            // Spot-check one exact rendering...
+            // Spot-check one exact rendering ...
             assert_eq!(
                 format!("{:?}", BuiltInContext::FloatingTitle),
                 "BuiltInContext::FloatingTitle"
             );
 
-            // ...then exercise every variant's `Debug` arm, checking each
+            // ... then exercise every variant's `Debug` arm, checking each
             // renders as a distinct `BuiltInContext::`-prefixed name.
             let mut seen = std::collections::HashSet::new();
             for &context in BuiltInContext::ALL {

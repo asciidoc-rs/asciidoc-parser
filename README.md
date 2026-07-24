@@ -8,6 +8,19 @@ As of version 0.25.0 (July 2026) this crate is feature-complete, heavily tested,
 
 Now that the core is in place, I’ll be building the downstream projects described below. Expect the API to evolve slightly in the coming months as those projects mature. I do expect to publish a mature (1.0) release within the year.
 
+## Security: rendering untrusted input
+
+**If you render AsciiDoc from an untrusted source to HTML that is then served to other users, you must run the rendered HTML through an HTML sanitizer (such as [`ammonia`](https://crates.io/crates/ammonia)) before serving it.**
+
+The HTML renderer in this crate is _not_ an HTML sanitizer. Like Ruby Asciidoctor, the AsciiDoc language intentionally allows a document to emit raw, unescaped HTML into the output. Two mechanisms do this **by design**:
+
+* **Attribute-reference substitution.** Attribute substitution runs _after_ special-character escaping, so the `<`, `>`, and `&` characters in an attribute’s value are never escaped. A document that sets `:x: <script>alert(1)</script>` and then references `{x}` emits a live `<script>` element.
+* **Passthroughs.** The passthrough forms (`+++…+++`, `pass:[…]`, and the `pass` block) re-emit their content verbatim, bypassing escaping – that is their entire purpose.
+
+This behavior is faithful to Ruby Asciidoctor and is not a defect in this crate; it is a fundamental property of the language. It means that **rendered HTML from untrusted AsciiDoc cannot safely be served to other users without a post-rendering sanitization pass.**
+
+Note that the [safe mode](https://docs.asciidoctor.org/asciidoc/latest/safe-modes/) (see [`SafeMode`](https://docs.rs/asciidoc-parser/latest/asciidoc_parser/parser/enum.SafeMode.html)) does **not** address this. Safe mode governs how far a document may reach outside of itself (file-system access, includes, and certain macros); it does not escape or sanitize the rendered HTML output.
+
 ## Why do this?
 
 Most of all this is a fun project that exercises different architectural and project design skills from my [day job](https://opensource.contentauthenticity.org). As part of that work, I write [technical standards for the Creator Assertions Working Group](https://cawg.io/specs/) in Asciidoc and [Antora](https://antora.org).
@@ -22,7 +35,7 @@ There are a few projects that I’m now starting to build that depend on the par
 
 I value high code coverage. Code coverage for this crate is now extremely high (99.5%). But it’s not just code that I’m covering.
 
-In this project, I also employ a technique I call **“spec-driven development.”** Since I started, that phrase has taken on a different and now more widely used meaning — [writing a structured specification up front so that an AI coding agent can implement it](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/), as popularized by tooling such as [GitHub’s Spec Kit](https://github.com/github/spec-kit). That is _not_ what I mean here. In my sense the specification already exists — it’s the AsciiDoc language description — and I’m driving the implementation _toward_ it: not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/ref%2Fasciidoc-lang%2Fdocs%2Fmodules).
+In this project, I also employ a technique I call **“spec-driven development.”** Since I started, that phrase has taken on a different and now more widely used meaning – [writing a structured specification up front so that an AI coding agent can implement it](https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/), as popularized by tooling such as [GitHub’s Spec Kit](https://github.com/github/spec-kit). That is _not_ what I mean here. In my sense the specification already exists – it’s the AsciiDoc language description – and I’m driving the implementation _toward_ it: not only am I monitoring [coverage of the _code_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/parser%2Fsrc) but also [coverage of the _spec_](https://app.codecov.io/gh/asciidoc-rs/asciidoc-parser/tree/main/ref%2Fasciidoc-lang%2Fdocs%2Fmodules).
 
 I’ve read the language definition and Asciidoctor’s extensive test suite page-by-page, line-by-line, and written tests to verify that this implementation matches the specification(*) and Asciidoctor’s behavior. This slowed progress considerably, but I believe it has resulted in an implementation that is far more solid than it would otherwise be.
 
@@ -39,7 +52,7 @@ The following features are supported in the [Ruby implementation of Asciidoctor]
 * Parsing UTF-16 content is not supported. (UTF-16 documents must be re-encoded to UTF-8 prior to parsing with this crate.)
 * [Document types](https://docs.asciidoctor.org/asciidoc/latest/document/doctype/) other than `article` are not supported. Specifically, features which are enabled for the `book` doctype are not supported. These include [book parts](https://docs.asciidoctor.org/asciidoc/latest/sections/parts/) – level-0 section headings in the document body, which are reported via `WarningType::Level0SectionHeadingNotSupported` (see [#800](https://github.com/asciidoc-rs/asciidoc-parser/issues/800)) – and the `partintro` block style that goes with them (see [#794](https://github.com/asciidoc-rs/asciidoc-parser/issues/794)). A few behaviors that Asciidoctor gates on the `book` doctype are nonetheless implemented incidentally; they should not be relied upon.
 * The document attribute [`compat-mode`](https://docs.asciidoctor.org/asciidoctor/latest/migrate/asciidoc-py/#compatibility-mode) is not supported.
-* The legacy two-line (or _setext_) heading syntax — a line of title text underlined by a row of `=` or `-` characters — is not supported. It is not part of the [AsciiDoc language description](https://docs.asciidoctor.org/asciidoc/latest/), which defines only the single-line (ATX) form (`= Document Title`, `== Section Title`); only that form is recognized.
+* The legacy two-line (or _setext_) heading syntax – a line of title text underlined by a row of `=` or `-` characters – is not supported. It is not part of the [AsciiDoc language description](https://docs.asciidoctor.org/asciidoc/latest/), which defines only the single-line (ATX) form (`= Document Title`, `== Section Title`); only that form is recognized.
 * The parser has built-in support for HTML5 rendering similar to what is provided in Asciidoctor. Other back ends could be supported by other crates by implementing the `InlineSubstitutionRenderer` trait. They will not be directly supported in this crate.
 * Setting document attributes via the [inline attribute entry syntax](https://docs.asciidoctor.org/asciidoc/latest/attributes/inline-attribute-entries/) (`{set:name:value}` / `{set:name!}`) is not supported. (Note that this syntax is discouraged and may eventually be removed from the AsciiDoc language documentation.) As a consequence, per-cell table background colors set via the `{set:cellbgcolor:...}` document attribute are also not supported.
 * [Retrieving include file content via URL](https://docs.asciidoctor.org/asciidoc/latest/directives/include-uri/) is not directly supported. An implementation could implement the [`IncludeFileHandler`](https://docs.rs/asciidoc-parser/latest/asciidoc_parser/parser/trait.IncludeFileHandler.html) trait to provide that behavior.

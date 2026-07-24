@@ -73,7 +73,7 @@ The URL \https://example.org isn't converted into an active link.
         );
 
         let result = doc
-            .nested_blocks()
+            .child_blocks()
             .map(|block| {
                 let Block::Simple(block) = block else {
                     panic!("Unexpected block type: {block:?}");
@@ -114,7 +114,7 @@ include::example$subs.adoc[tag=double-slash]
             "The text \\\\__func__ will appear with two underscores\nin front of it and after it.\nIt won't be italicized.",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -162,7 +162,7 @@ First, you can escape it using the `\{plus}` attribute reference:
 
         let doc = Parser::default().parse("`{plus}` and `{plus}`");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -191,7 +191,7 @@ The backslash is only required before the pair, not before each occurance of the
 
         let doc = Parser::default().parse(r#"`\+` and `+`"#);
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");

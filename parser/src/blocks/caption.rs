@@ -65,7 +65,7 @@ pub(crate) struct Caption {
 ///
 /// This is the entry point used while parsing a block. It resolves the
 /// captioning context (a block style naming a built-in context, such as
-/// `[example]` over an open block, takes precedence over the raw context —
+/// `[example]` over an open block, takes precedence over the raw context –
 /// mirroring [`resolved_context`]) and the explicit caption override, then
 /// delegates to [`assign_caption`]:
 ///
@@ -107,14 +107,14 @@ pub(crate) fn assign_block_caption(
 /// Computes the caption for a block, following Asciidoctor's `assign_caption`.
 ///
 /// Returns `None` (no caption, no number) when:
-/// * the block has no title (`has_title` is `false`) — untitled blocks are
+/// * the block has no title (`has_title` is `false`) – untitled blocks are
 ///   never captioned or counted;
 /// * an explicit caption override is present but empty (e.g. `[caption=]`, or a
 ///   collapsible example whose caption is suppressed); or
 /// * the context is not captionable, or its caption attribute is unset.
 ///
 /// When a non-empty explicit `caption` override is supplied (from a
-/// `[caption=]` attribute) — or the document-wide `caption` attribute is set —
+/// `[caption=]` attribute) – or the document-wide `caption` attribute is set –
 /// that value is used verbatim as the prefix, with **no** number assigned.
 /// Otherwise the label comes from the context's caption attribute and the
 /// document-wide counter for that context is incremented, producing a `"<label>
@@ -191,7 +191,7 @@ mod tests {
     /// Returns the (caption, number) of the first nested block in `input`.
     fn first_block_caption(input: &str) -> (Option<String>, Option<usize>) {
         let doc = Parser::default().parse(input);
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
         (block.caption().map(str::to_string), block.number())
     }
 
@@ -236,7 +236,7 @@ mod tests {
         // them consumes no number.
         let doc =
             Parser::default().parse(".One\n====\na\n====\n\n====\nb\n====\n\n.Two\n====\nc\n====");
-        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![Some(1), None, Some(2)]);
     }
 
@@ -275,13 +275,13 @@ mod tests {
     #[test]
     fn document_caption_attribute_overrides_label() {
         // A document-wide `caption` attribute supplies a verbatim, unnumbered
-        // label for captionable blocks...
+        // label for captionable blocks ...
         assert_eq!(
             first_block_caption(":caption: Sample\n\n.Title\n====\nbody.\n===="),
             (Some("Sample".to_string()), None)
         );
 
-        // ...but it must not leak onto a non-captionable context such as an
+        // ... but it must not leak onto a non-captionable context such as an
         // ordinary titled paragraph.
         assert_eq!(
             first_block_caption(":caption: Sample\n\n.Title\nplain paragraph."),
@@ -295,7 +295,7 @@ mod tests {
         // consume a counter value, so a following example is still "Example 1".
         let doc = Parser::default()
             .parse("[%collapsible]\n====\nhidden\n====\n\n.Title\n====\nbody.\n====");
-        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![None, Some(1)]);
     }
 
@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn image_numbering_is_sequential() {
         let doc = Parser::default().parse(".First\nimage::a.jpg[]\n\n.Second\nimage::b.jpg[]");
-        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![Some(1), Some(2)]);
     }
 
@@ -419,7 +419,7 @@ mod tests {
     fn listing_numbering_is_sequential_when_captioned() {
         let doc = Parser::default()
             .parse(":listing-caption: Listing\n\n.First\n----\na\n----\n\n.Second\n----\nb\n----");
-        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![Some(1), Some(2)]);
     }
 
@@ -446,7 +446,7 @@ mod tests {
             ":attribute-missing: drop-line\n\n.Gone\nimage::{undefined}.jpg[]\n\n.Kept\nimage::ok.jpg[]",
         );
         let captions: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .map(|b| b.caption().map(str::to_string))
             .collect();
         assert_eq!(captions, vec![Some("Figure 1. ".to_string())]);

@@ -108,11 +108,7 @@ mod impl_debug {
 }
 
 mod as_list_item {
-    use crate::{
-        blocks::{Block, IsBlock},
-        span::Span,
-        tests::prelude::*,
-    };
+    use crate::{blocks::Block, span::Span, tests::prelude::*};
 
     #[test]
     fn returns_some_for_list_item() {
@@ -122,7 +118,7 @@ mod as_list_item {
             .unwrap();
 
         // The parsed block is a List; its first nested block is a ListItem.
-        let list_items: Vec<_> = mi.item.nested_blocks().collect();
+        let list_items: Vec<_> = mi.item.child_blocks().collect();
         assert!(list_items[0].as_list_item().is_some());
     }
 
@@ -182,7 +178,7 @@ mod caption_and_number {
         // A ListItem (reached only as a nested block of a List).
         let list = parse_block("* item one");
         let mut saw_list_item = false;
-        for item in list.nested_blocks() {
+        for item in list.child_blocks() {
             assert!(matches!(item, Block::ListItem(_)));
             assert!(item.caption().is_none());
             assert!(item.number().is_none());
@@ -197,7 +193,7 @@ mod caption_and_number {
 
         // A Preamble (synthesized for content that precedes the first section).
         let doc = Parser::default().parse("= Title\n\nintro paragraph.\n\n== Section\n\nbody.");
-        let preamble = doc.nested_blocks().next().unwrap();
+        let preamble = doc.child_blocks().next().unwrap();
         assert!(matches!(preamble, Block::Preamble(_)));
         assert!(preamble.caption().is_none());
         assert!(preamble.number().is_none());
@@ -223,12 +219,12 @@ mod caption_and_number {
         // through the list-item path. It carries no caption or number.
         let doc = Parser::default().parse("* item\n+\n[literal]\nliteral text\n");
 
-        let list = doc.nested_blocks().next().unwrap();
-        let item = list.nested_blocks().next().unwrap();
+        let list = doc.child_blocks().next().unwrap();
+        let item = list.child_blocks().next().unwrap();
 
         // The literal block is attached to the list item and renders verbatim.
         let literal = item
-            .nested_blocks()
+            .child_blocks()
             .find(|b| b.declared_style() == Some("literal"))
             .unwrap();
 
@@ -389,7 +385,7 @@ mod error_cases {
         // role is applied here) rather than dangling with a warning.
         let doc = Parser::default().parse("[.myrole]\n\ndef");
 
-        let blocks: Vec<_> = doc.nested_blocks().collect();
+        let blocks: Vec<_> = doc.child_blocks().collect();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].roles(), vec!["myrole"]);
         assert_eq!(blocks[0].rendered_content(), Some("def"));
@@ -402,7 +398,7 @@ mod error_cases {
         // tolerated, matching Asciidoctor's `skip_blank_lines`.
         let doc = Parser::default().parse(".My Title\n\n\ndef");
 
-        let blocks: Vec<_> = doc.nested_blocks().collect();
+        let blocks: Vec<_> = doc.child_blocks().collect();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].title(), Some("My Title"));
         assert_eq!(blocks[0].rendered_content(), Some("def"));
@@ -416,7 +412,7 @@ mod error_cases {
         // the title line is demoted to paragraph content.
         let doc = Parser::default().parse(".My Title\n\n");
 
-        let blocks: Vec<_> = doc.nested_blocks().collect();
+        let blocks: Vec<_> = doc.child_blocks().collect();
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].title().is_none());
         assert_eq!(

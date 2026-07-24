@@ -2213,15 +2213,15 @@ mod ast {
 
         // doc.sections?
         assert!(
-            doc.nested_blocks()
+            doc.child_blocks()
                 .any(|block| matches!(block, Block::Section(_)))
         );
 
         // doc.blocks[0].sections?
-        let first_section = doc.nested_blocks().next().unwrap();
+        let first_section = doc.child_blocks().next().unwrap();
         assert!(
             first_section
-                .nested_blocks()
+                .child_blocks()
                 .any(|block| matches!(block, Block::Section(_)))
         );
     }
@@ -2247,7 +2247,7 @@ mod ast {
         let doc = Parser::default().parse("= Document Title\n\ncontent\n");
 
         assert!(
-            !doc.nested_blocks()
+            !doc.child_blocks()
                 .any(|block| matches!(block, Block::Section(_)))
         );
     }
@@ -2272,10 +2272,10 @@ mod ast {
 
         let doc = Parser::default().parse("= Document Title\n\n== First Section\n");
 
-        let first_section = doc.nested_blocks().next().unwrap();
+        let first_section = doc.child_blocks().next().unwrap();
         assert!(
             !first_section
-                .nested_blocks()
+                .child_blocks()
                 .any(|block| matches!(block, Block::Section(_)))
         );
     }
@@ -2305,18 +2305,18 @@ mod ast {
         let doc = Parser::default()
             .parse(".Title\n====\nI'm not section!\n====\n\n[NOTE]\nI'm not a section either!\n");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
         let block_0 = blocks.next().unwrap();
         let block_1 = blocks.next().unwrap();
 
         assert!(
             !block_0
-                .nested_blocks()
+                .child_blocks()
                 .any(|block| matches!(block, Block::Section(_)))
         );
         assert!(
             !block_1
-                .nested_blocks()
+                .child_blocks()
                 .any(|block| matches!(block, Block::Section(_)))
         );
     }

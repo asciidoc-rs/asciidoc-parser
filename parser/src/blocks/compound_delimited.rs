@@ -1,11 +1,9 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata,
-        parse_utils::parse_blocks_until,
+        Block, ChildBlocks, ContentModel, IsBlock, caption::assign_block_caption,
+        metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
     content::Content,
     internal::debug::DebugSliceReference,
@@ -28,7 +26,7 @@ use crate::{
 /// paragraph and list parsing stop at it), but a `____` block is parsed as a
 /// [`QuoteBlock`](crate::blocks::QuoteBlock) rather than a
 /// `CompoundDelimitedBlock`.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct CompoundDelimitedBlock<'src> {
     blocks: Vec<Block<'src>>,
     context: CowStr<'src>,
@@ -43,6 +41,16 @@ pub struct CompoundDelimitedBlock<'src> {
 }
 
 impl<'src> CompoundDelimitedBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// For the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(&self.blocks)
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -124,6 +132,7 @@ impl<'src> CompoundDelimitedBlock<'src> {
             "====" => "example",
             "--" => "open",
             "****" => "sidebar",
+
             // Quote-delimited blocks (`____`) are handled by `QuoteBlock`, which
             // intercepts them before this parser is reached. `is_valid_delimiter`
             // still recognizes them so that paragraph and list parsing stop at a
@@ -213,11 +222,7 @@ impl<'src> IsBlock<'src> for CompoundDelimitedBlock<'src> {
         self.context.clone()
     }
 
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.blocks.iter()
-    }
-
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
     }
 
@@ -748,7 +753,7 @@ mod tests {
             assert_eq!(mi.item.raw_context().as_ref(), "example");
             assert_eq!(mi.item.resolved_context().as_ref(), "example");
             assert!(mi.item.declared_style().is_none());
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
             assert!(mi.item.id().is_none());
             assert!(mi.item.roles().is_empty());
             assert!(mi.item.options().is_empty());
@@ -858,7 +863,7 @@ mod tests {
             assert!(mi.item.attrlist().is_none());
             assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
 
-            let mut blocks = mi.item.nested_blocks();
+            let mut blocks = mi.item.child_blocks();
             assert_eq!(
                 blocks.next().unwrap(),
                 &Block::Simple(SimpleBlock {
@@ -1034,7 +1039,7 @@ mod tests {
             assert!(mi.item.attrlist().is_none());
             assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
 
-            let mut blocks = mi.item.nested_blocks();
+            let mut blocks = mi.item.child_blocks();
             assert_eq!(
                 blocks.next().unwrap(),
                 &Block::Simple(SimpleBlock {
@@ -1223,7 +1228,7 @@ mod tests {
             assert_eq!(mi.item.raw_context().as_ref(), "open");
             assert_eq!(mi.item.resolved_context().as_ref(), "open");
             assert!(mi.item.declared_style().is_none());
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
             assert!(mi.item.id().is_none());
             assert!(mi.item.roles().is_empty());
             assert!(mi.item.options().is_empty());
@@ -1333,7 +1338,7 @@ mod tests {
             assert!(mi.item.attrlist().is_none());
             assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
 
-            let mut blocks = mi.item.nested_blocks();
+            let mut blocks = mi.item.child_blocks();
             assert_eq!(
                 blocks.next().unwrap(),
                 &Block::Simple(SimpleBlock {
@@ -1507,7 +1512,7 @@ mod tests {
             assert!(mi.item.attrlist().is_none());
             assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
 
-            let mut blocks = mi.item.nested_blocks();
+            let mut blocks = mi.item.child_blocks();
             assert_eq!(
                 blocks.next().unwrap(),
                 &Block::Simple(SimpleBlock {
@@ -1630,7 +1635,7 @@ mod tests {
             assert_eq!(mi.item.raw_context().as_ref(), "sidebar");
             assert_eq!(mi.item.resolved_context().as_ref(), "sidebar");
             assert!(mi.item.declared_style().is_none());
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
             assert!(mi.item.id().is_none());
             assert!(mi.item.roles().is_empty());
             assert!(mi.item.options().is_empty());
@@ -1740,7 +1745,7 @@ mod tests {
             assert!(mi.item.attrlist().is_none());
             assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
 
-            let mut blocks = mi.item.nested_blocks();
+            let mut blocks = mi.item.child_blocks();
             assert_eq!(
                 blocks.next().unwrap(),
                 &Block::Simple(SimpleBlock {
@@ -1916,7 +1921,7 @@ mod tests {
             assert!(mi.item.attrlist().is_none());
             assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
 
-            let mut blocks = mi.item.nested_blocks();
+            let mut blocks = mi.item.child_blocks();
             assert_eq!(
                 blocks.next().unwrap(),
                 &Block::Simple(SimpleBlock {

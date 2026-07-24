@@ -43,7 +43,7 @@ To create an index, define a level 1 section (`==`) marked with the style `index
     // a converter that generates an index uses as the seed section. (The level 0
     // multipart-book form is not modeled by this single-document crate.)
     let doc = Parser::default().parse("[index]\n== Index\n");
-    let section = doc.nested_blocks().next().unwrap();
+    let section = doc.child_blocks().next().unwrap();
     assert_eq!(section.declared_style(), Some("index"));
     assert_eq!(section.raw_context().as_ref(), "section");
 
@@ -249,9 +249,9 @@ To create a new git repository,
     let doc = Parser::default().parse(
         "=== Create a new Git repository\n\n(((Repository, create)))\n(((Create Git repository)))\nTo create a new git repository,\n",
     );
-    let section = doc.nested_blocks().next().unwrap();
+    let section = doc.child_blocks().next().unwrap();
     let paragraphs = rendered_paragraphs(&doc);
-    assert_eq!(section.nested_blocks().count(), 1);
+    assert_eq!(section.child_blocks().count(), 1);
     assert_eq!(paragraphs, &["\n\nTo create a new git repository,"]);
 
     verifies!(
@@ -279,8 +279,8 @@ To create a new git repository,
     let doc = Parser::default().parse(
         "=== Create a new Git repository\n\n(((Repository, create)))\n(((Create Git repository)))\n\nTo create a new git repository,\n",
     );
-    let section = doc.nested_blocks().next().unwrap();
-    assert_eq!(section.nested_blocks().count(), 2);
+    let section = doc.child_blocks().next().unwrap();
+    assert_eq!(section.child_blocks().count(), 2);
     assert_eq!(
         rendered_paragraphs(&doc),
         &["\n", "To create a new git repository,"]
@@ -305,6 +305,6 @@ To create a new git repository,
     let doc = Parser::default().parse(
         "=== Create a new Git repository\n(((Repository, create)))\n(((Create Git repository)))\n\nTo create a new git repository,\n",
     );
-    let section = doc.nested_blocks().next().unwrap();
-    assert_eq!(section.nested_blocks().count(), 2);
+    let section = doc.child_blocks().next().unwrap();
+    assert_eq!(section.child_blocks().count(), 2);
 }

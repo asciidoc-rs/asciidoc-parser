@@ -7,8 +7,8 @@ pub(crate) use std::collections::HashMap;
 pub(crate) use crate::{
     ASCIIDOCTOR_VERSION, HasSpan, Parser, SafeMode,
     blocks::{
-        AdmonitionVariant, ColumnStyle, ContentModel, Frame, Grid, HorizontalAlignment, IsBlock,
-        QuoteType, SectionType, SimpleBlockStyle, Stripes, VerticalAlignment,
+        AdmonitionVariant, ColumnStyle, ContentModel, FindBlocks, Frame, Grid, HorizontalAlignment,
+        IsBlock, QuoteType, SectionType, SimpleBlockStyle, Stripes, VerticalAlignment,
     },
     content::SubstitutionGroup,
     parser::ModificationContext,
@@ -31,13 +31,13 @@ pub(crate) fn rendered_paragraphs(doc: &crate::Document<'_>) -> Vec<String> {
         if let crate::blocks::Block::Simple(simple) = block {
             out.push(simple.content().rendered().to_string());
         }
-        for child in block.nested_blocks() {
+        for child in block.child_blocks() {
             walk(child, out);
         }
     }
 
     let mut out = vec![];
-    for block in doc.nested_blocks() {
+    for block in doc.child_blocks() {
         walk(block, &mut out);
     }
     out
@@ -49,7 +49,7 @@ pub(crate) fn rendered_paragraphs(doc: &crate::Document<'_>) -> Vec<String> {
 /// [`Break`]: crate::blocks::Break
 pub(crate) fn first_break<'src>(doc: &'src crate::Document) -> &'src crate::blocks::Break<'src> {
     let block = doc
-        .nested_blocks()
+        .child_blocks()
         .next()
         .expect("expected at least one block");
 
@@ -80,7 +80,7 @@ pub(crate) fn as_section<'src>(
 pub(crate) fn top_blocks<'src>(
     doc: &'src crate::Document<'src>,
 ) -> Vec<&'src crate::blocks::Block<'src>> {
-    doc.nested_blocks().collect()
+    doc.child_blocks().collect()
 }
 
 /// Returns the first [`SectionBlock`] in document order, recursing into nested
@@ -98,12 +98,12 @@ pub(crate) fn first_section<'src>(
             if let crate::blocks::Block::Section(section) = block {
                 Some(section)
             } else {
-                walk(block.nested_blocks())
+                walk(block.child_blocks())
             }
         })
     }
 
-    walk(doc.nested_blocks()).expect("expected at least one section block")
+    walk(doc.child_blocks()).expect("expected at least one section block")
 }
 
 /// Returns every [`SectionBlock`] in the document, in document order, recursing
@@ -121,11 +121,11 @@ pub(crate) fn all_sections<'src>(
             if let crate::blocks::Block::Section(section) = block {
                 out.push(section);
             }
-            walk(block.nested_blocks(), out);
+            walk(block.child_blocks(), out);
         }
     }
 
     let mut out = vec![];
-    walk(doc.nested_blocks(), &mut out);
+    walk(doc.child_blocks(), &mut out);
     out
 }

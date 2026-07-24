@@ -2,8 +2,8 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker, RawDelimitedBlock,
-        caption::assign_block_caption, metadata::BlockMetadata,
+        ChildBlocks, CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker,
+        RawDelimitedBlock, caption::assign_block_caption, metadata::BlockMetadata,
     },
     content::{Content, SubstitutionGroup},
     span::MatchedItem,
@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// The style of a simple block.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum SimpleBlockStyle {
     /// A paragraph block with normal substitutions.
     Paragraph,
@@ -47,7 +47,7 @@ impl std::fmt::Debug for SimpleBlockStyle {
 
 /// A block that's treated as contiguous lines of paragraph text (and subject to
 /// normal substitutions) (e.g., a paragraph block).
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SimpleBlock<'src> {
     content: Content<'src>,
     source: Span<'src>,
@@ -62,6 +62,15 @@ pub struct SimpleBlock<'src> {
 }
 
 impl<'src> SimpleBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// A simple (paragraph) block never has child blocks, so this iterator is
+    /// always empty. See [`FindBlocks`](crate::blocks::FindBlocks) to search
+    /// from a [`Block`](crate::blocks::Block) or [`Document`](crate::Document).
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::empty()
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -344,6 +353,7 @@ fn parse_lines<'src>(
 
     let mut next = source;
     let mut filtered_lines: Vec<&'src str> = vec![];
+
     // Source span of each surviving line, kept in lockstep with `filtered_lines`
     // so the attribute-references substitution can locate an
     // `attribute-missing=warn` warning at the precise source offset of the
@@ -599,7 +609,7 @@ impl<'src> HasSpan<'src> for SimpleBlock<'src> {
 /// more markers (`== `/`## `, effective level 1+, or clamped up to 1 under a
 /// negative offset) is always a section. A single-marker heading (`= `/`# `) is
 /// a document title rather than a section *unless* a positive offset lifts it
-/// to level 1 or beyond — mirroring the level-0 rule in
+/// to level 1 or beyond – mirroring the level-0 rule in
 /// [`parse_title_line`](crate::blocks::section).
 pub(crate) fn is_section_header(line: &str, level_offset: i32) -> bool {
     // AsciiDoc `=` style or Markdown `#` style.
@@ -955,6 +965,7 @@ mod tests {
         #[test]
         fn non_marker_and_over_long_marker_are_not_sections() {
             assert!(!is_section_header("paragraph", 1));
+
             // Seven markers exceed the level-5 maximum, so this is not a heading.
             assert!(!is_section_header("======= Too deep", 0));
         }

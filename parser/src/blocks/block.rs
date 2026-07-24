@@ -1,5 +1,3 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
@@ -29,7 +27,7 @@ use crate::{
 ///
 /// This enum represents all of the block types that are understood directly by
 /// this parser and also implements the [`IsBlock`] trait.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 #[allow(clippy::large_enum_variant)] // TEMPORARY: review later
 #[non_exhaustive]
 pub enum Block<'src> {
@@ -292,7 +290,7 @@ impl<'src> Block<'src> {
         } = BlockMetadata::parse(source, parser);
 
         // A block title stashed by an enclosing section heading (see
-        // `SectionBlock::parse`) is claimed by the next block parsed — this
+        // `SectionBlock::parse`) is claimed by the next block parsed – this
         // one. A title of the block's own wins, discarding the carried title.
         // The carried title has no source line adjacent to this block, so
         // `title_source` stays `None` (the same shape as a `title=` attribute).
@@ -332,7 +330,7 @@ impl<'src> Block<'src> {
         // Resolve attribute references in a `[[id,reftext]]` anchor reftext now,
         // while the parser still holds the attributes in effect where the anchor
         // appears. A compound block's body (parsed below) can redefine those
-        // attributes, so deferring this to registration — after the body — would
+        // attributes, so deferring this to registration – after the body – would
         // record the wrong value. The result is threaded into `block_reftext`.
         let anchor_reftext = metadata
             .anchor_reftext
@@ -747,7 +745,7 @@ impl<'src> Block<'src> {
     ///
     /// `anchor_reftext` is the block's `[[id,reftext]]` anchor reftext with its
     /// attribute references already resolved (by the caller, against the
-    /// attributes in effect where the anchor appears — captured before the
+    /// attributes in effect where the anchor appears – captured before the
     /// block's body is parsed, since a compound block's body may itself
     /// redefine those attributes). This matches how the anchor ID and a
     /// `reftext=` attribute (both substituted when the attribute list is
@@ -813,7 +811,7 @@ impl<'src> Block<'src> {
     /// the resulting links. Unresolved targets are reported in `warnings`.
     ///
     /// This drives the recursion uniformly via the [`IsBlock::content_mut`] and
-    /// [`IsBlock::nested_blocks_mut`] accessors, so it needs no per-block-type
+    /// [`IsBlock::child_blocks_mut`] accessors, so it needs no per-block-type
     /// special casing.
     pub(crate) fn resolve_references(
         &mut self,
@@ -825,7 +823,7 @@ impl<'src> Block<'src> {
         // heading, which `content_mut` deliberately does not expose (see
         // `SectionBlock`). Headings are resolved by the document-order title
         // pass (`title_refs::resolve_title_references`), which coordinates
-        // cross-references *between* titles (forward and circular) — something
+        // cross-references *between* titles (forward and circular) – something
         // per-content resolution cannot see.
         if let Some(content) = self.content_mut() {
             content.resolve_references(resolver, renderer, warnings);
@@ -838,13 +836,13 @@ impl<'src> Block<'src> {
         }
 
         // A Markdown-style blockquote holds its nested blocks in its own owned
-        // source, which the generic `nested_blocks_mut()` walk below does not
+        // source, which the generic `child_blocks_mut()` walk below does not
         // reach, so they are resolved explicitly here.
         if let Self::Quote(quote) = self {
             quote.resolve_references(resolver, renderer, warnings);
         }
 
-        for child in self.nested_blocks_mut() {
+        for child in self.child_blocks_mut() {
             child.resolve_references(resolver, renderer, warnings);
         }
     }
@@ -946,39 +944,21 @@ impl<'src> IsBlock<'src> for Block<'src> {
         }
     }
 
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         match self {
-            Self::Simple(b) => b.nested_blocks(),
-            Self::Media(b) => b.nested_blocks(),
-            Self::Section(b) => b.nested_blocks(),
-            Self::List(b) => b.nested_blocks(),
-            Self::ListItem(b) => b.nested_blocks(),
-            Self::RawDelimited(b) => b.nested_blocks(),
-            Self::CompoundDelimited(b) => b.nested_blocks(),
-            Self::Admonition(b) => b.nested_blocks(),
-            Self::Quote(b) => b.nested_blocks(),
-            Self::Table(b) => b.nested_blocks(),
-            Self::Preamble(b) => b.nested_blocks(),
-            Self::Break(b) => b.nested_blocks(),
-            Self::DocumentAttribute(b) => b.nested_blocks(),
-        }
-    }
-
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
-        match self {
-            Self::Simple(b) => b.nested_blocks_mut(),
-            Self::Media(b) => b.nested_blocks_mut(),
-            Self::Section(b) => b.nested_blocks_mut(),
-            Self::List(b) => b.nested_blocks_mut(),
-            Self::ListItem(b) => b.nested_blocks_mut(),
-            Self::RawDelimited(b) => b.nested_blocks_mut(),
-            Self::CompoundDelimited(b) => b.nested_blocks_mut(),
-            Self::Admonition(b) => b.nested_blocks_mut(),
-            Self::Quote(b) => b.nested_blocks_mut(),
-            Self::Table(b) => b.nested_blocks_mut(),
-            Self::Preamble(b) => b.nested_blocks_mut(),
-            Self::Break(b) => b.nested_blocks_mut(),
-            Self::DocumentAttribute(b) => b.nested_blocks_mut(),
+            Self::Simple(b) => b.child_blocks_mut(),
+            Self::Media(b) => b.child_blocks_mut(),
+            Self::Section(b) => b.child_blocks_mut(),
+            Self::List(b) => b.child_blocks_mut(),
+            Self::ListItem(b) => b.child_blocks_mut(),
+            Self::RawDelimited(b) => b.child_blocks_mut(),
+            Self::CompoundDelimited(b) => b.child_blocks_mut(),
+            Self::Admonition(b) => b.child_blocks_mut(),
+            Self::Quote(b) => b.child_blocks_mut(),
+            Self::Table(b) => b.child_blocks_mut(),
+            Self::Preamble(b) => b.child_blocks_mut(),
+            Self::Break(b) => b.child_blocks_mut(),
+            Self::DocumentAttribute(b) => b.child_blocks_mut(),
         }
     }
 

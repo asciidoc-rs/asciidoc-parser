@@ -12,13 +12,42 @@ use crate::{
 /// the basic raw text of a simple block to the format which will ultimately be
 /// presented in the final converted output.
 ///
-/// An implementation is provided for HTML output; alternative implementations
-/// (not provided in this crate) could support other output formats.
+/// An implementation is provided for HTML output
+/// ([`HtmlSubstitutionRenderer`]); alternative implementations (not provided in
+/// this crate) could support other output formats.
+///
+/// ## Overriding only what differs
+///
+/// Every method has a default body, so an implementation only needs to override
+/// the substitutions whose output it wants to change and inherits the built-in
+/// HTML output for the rest. In particular, [`image_uri`](Self::image_uri) and
+/// [`render_image`](Self::render_image) inherit the crate's `data-uri`
+/// embedding and `opts=inline` SVG handling – which read bytes through the
+/// [`ImageFileHandler`](crate::parser::ImageFileHandler) and
+/// [`SvgFileHandler`](crate::parser::SvgFileHandler) registered on the
+/// [`Parser`] – so a downstream renderer gets that behavior without needing to
+/// reproduce it.
+///
+/// Note that these defaults delegate to the HTML renderer's *own* methods
+/// rather than routing back through `self`: an override of one method does not
+/// change what a still-defaulted sibling emits. For example, overriding
+/// [`image_uri`](Self::image_uri) alone does not change the URI that the
+/// inherited [`render_image`](Self::render_image) or
+/// [`render_icon`](Self::render_icon) produces – override that method too
+/// (calling `self.image_uri(…)`) if the two must agree. The sole exception is
+/// [`icon_uri`](Self::icon_uri): its default derives an icon path and then
+/// calls `self.image_uri(…)`, so it alone *does* reflect an `image_uri`
+/// override. A renderer that resolves asset URIs itself can reach the
+/// registered handlers through
+/// [`Parser::image_file_handler`](crate::Parser::image_file_handler) and
+/// [`Parser::svg_file_handler`](crate::Parser::svg_file_handler).
 pub trait InlineSubstitutionRenderer: Debug {
     /// Renders the substitution for a special character.
     ///
     /// The renderer should write the appropriate rendering to `dest`.
-    fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String);
+    fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_special_character(type_, dest);
+    }
 
     /// Renders the restored content of a passthrough (`+…+`, `+++…+++`,
     /// `pass:[…]`, …) that carries no quote formatting of its own.
@@ -38,7 +67,7 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// The renderer should write the appropriate rendering to `dest`.
     ///
     /// [quote substitution]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
-    fn render_quoted_substitition(
+    fn render_quoted_substitution(
         &self,
         type_: QuoteType,
         scope: QuoteScope,
@@ -46,14 +75,18 @@ pub trait InlineSubstitutionRenderer: Debug {
         id: Option<String>,
         body: &str,
         dest: &mut String,
-    );
+    ) {
+        DEFAULT_HTML_RENDERER.render_quoted_substitution(type_, scope, attrlist, id, body, dest);
+    }
 
     /// Renders the content of a [character replacement].
     ///
     /// The renderer should write the appropriate rendering to `dest`.
     ///
     /// [character replacement]: https://docs.asciidoctor.org/asciidoc/latest/subs/replacements/
-    fn render_character_replacement(&self, type_: CharacterReplacementType, dest: &mut String);
+    fn render_character_replacement(&self, type_: CharacterReplacementType, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_character_replacement(type_, dest);
+    }
 
     /// Renders a line break.
     ///
@@ -63,13 +96,17 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// This is used in the implementation of [post-replacement substitutions].
     ///
     /// [post-replacement substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/post-replacements/
-    fn render_line_break(&self, dest: &mut String);
+    fn render_line_break(&self, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_line_break(dest);
+    }
 
     /// Renders an image.
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// image to `dest`.
-    fn render_image(&self, params: &ImageRenderParams, dest: &mut String);
+    fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_image(params, dest);
+    }
 
     /// Construct a URI reference or data URI to the target image.
     ///
@@ -102,13 +139,17 @@ pub trait InlineSubstitutionRenderer: Debug {
         target_image_path: &str,
         parser: &Parser,
         asset_dir_key: Option<&str>,
-    ) -> String;
+    ) -> String {
+        DEFAULT_HTML_RENDERER.image_uri(target_image_path, parser, asset_dir_key)
+    }
 
     /// Renders an icon.
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// icon to `dest`.
-    fn render_icon(&self, params: &IconRenderParams, dest: &mut String);
+    fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_icon(params, dest);
+    }
 
     /// Construct a reference or data URI to an icon image for the specified
     /// icon name.
@@ -146,13 +187,17 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// link, to `dest`.
-    fn render_link(&self, params: &LinkRenderParams, dest: &mut String);
+    fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_link(params, dest);
+    }
 
     /// Renders an anchor.
     ///
     /// The rendered should write an appropriate rendering of the specified
     /// anchor with ID and possible ref text (only used by some renderers).
-    fn render_anchor(&self, id: &str, reftext: Option<String>, dest: &mut String);
+    fn render_anchor(&self, id: &str, reftext: Option<String>, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_anchor(id, reftext, dest);
+    }
 
     /// Renders a cross-reference.
     ///
@@ -160,7 +205,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// a destination; the renderer should link to it. When it is `None`, the
     /// reference could not be resolved and the renderer should emit a sensible
     /// fallback (e.g. a link to the raw target with bracketed text).
-    fn render_xref(&self, params: &XrefRenderParams, dest: &mut String);
+    fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_xref(params, dest);
+    }
 
     /// Renders a [callout] number that annotates a line in a verbatim block.
     ///
@@ -169,7 +216,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// image-based icons are enabled (via the `icons` document attribute).
     ///
     /// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
-    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String);
+    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_callout(params, dest);
+    }
 
     /// Renders an [index term].
     ///
@@ -185,7 +234,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
     /// [`visible_term`]: IndexTermRenderParams::visible_term
-    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String);
+    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_index_term(params, dest);
+    }
 
     /// Renders a [button] UI macro (`btn:[label]`).
     ///
@@ -193,7 +244,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// an appropriate rendering (e.g. `<b class="button">label</b>`) to `dest`.
     ///
     /// [button]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
-    fn render_button(&self, text: &str, dest: &mut String);
+    fn render_button(&self, text: &str, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_button(text, dest);
+    }
 
     /// Renders a [keyboard] UI macro (`kbd:[keys]`).
     ///
@@ -204,14 +257,18 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// `dest`.
     ///
     /// [keyboard]: https://docs.asciidoctor.org/asciidoc/latest/macros/keyboard-macro/
-    fn render_keyboard(&self, keys: &[String], dest: &mut String);
+    fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_keyboard(keys, dest);
+    }
 
     /// Renders a [menu] UI macro (`menu:menu[submenu > … > item]`).
     ///
     /// The renderer should write an appropriate rendering to `dest`.
     ///
     /// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
-    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String);
+    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_menu(params, dest);
+    }
 
     /// Renders the inline reference produced by a [`footnote`] macro.
     ///
@@ -224,7 +281,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// an unresolved reference).
     ///
     /// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
-    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String);
+    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_footnote(params, dest);
+    }
 }
 
 /// Specifies which special character is being replaced in a call to
@@ -389,10 +448,7 @@ pub struct LinkRenderParams<'a> {
     pub extra_roles: Vec<&'a str>,
 
     /// Target window selection (passed through to `window` function in HTML).
-    pub window: Option<&'static str>,
-
-    /// What type of link is being rendered?
-    pub type_: LinkRenderType,
+    pub window: Option<&'a str>,
 
     /// Attribute list.
     pub attrlist: &'a Attrlist<'a>,
@@ -400,13 +456,6 @@ pub struct LinkRenderParams<'a> {
     /// Parser. The rendered may find document settings (such as an image
     /// directory) in the parser's document attributes.
     pub parser: &'a Parser,
-}
-
-/// What type of link is being rendered?
-#[derive(Clone, Debug)]
-pub enum LinkRenderType {
-    /// TEMPORARY: I don't know the different types of links yet.
-    Link,
 }
 
 /// Provides parameters for rendering a [callout] number.
@@ -554,6 +603,11 @@ pub struct FootnoteRenderParams<'a> {
 #[derive(Debug)]
 pub struct HtmlSubstitutionRenderer {}
 
+/// The shared HTML renderer to which [`InlineSubstitutionRenderer`]'s default
+/// method bodies delegate. It is stateless, so a single `const` instance serves
+/// every delegation.
+const DEFAULT_HTML_RENDERER: HtmlSubstitutionRenderer = HtmlSubstitutionRenderer {};
+
 impl HtmlSubstitutionRenderer {
     /// Resolve an image target to a `src`/`data` reference, honoring a
     /// macro-level `imagesdir` attribute.
@@ -588,7 +642,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         }
     }
 
-    fn render_quoted_substitition(
+    fn render_quoted_substitution(
         &self,
         type_: QuoteType,
         _scope: QuoteScope,
@@ -747,11 +801,17 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         let mut dimension_attrs = String::new();
 
         if let Some(width) = params.width {
-            dimension_attrs.push_str(&format!(r#" width="{width}""#));
+            dimension_attrs.push_str(&format!(
+                r#" width="{width}""#,
+                width = encode_attribute_value(width.to_owned())
+            ));
         }
 
         if let Some(height) = params.height {
-            dimension_attrs.push_str(&format!(r#" height="{height}""#));
+            dimension_attrs.push_str(&format!(
+                r#" height="{height}""#,
+                height = encode_attribute_value(height.to_owned())
+            ));
         }
 
         if let Some(title) = params.attrlist.named_attribute("title") {
@@ -792,21 +852,41 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // display the object.
             let fallback = if let Some(fallback) = params.attrlist.named_attribute("fallback") {
                 let fallback_src = self.image_src(fallback.value(), params.attrlist, params.parser);
-                format!(r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#)
+                format!(
+                    r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#,
+                    fallback_src = encode_attribute_value(fallback_src)
+                )
             } else {
                 format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt)
             };
 
             format!(
-                r#"<object type="image/svg+xml" data="{src}"{dimension_attrs}>{fallback}</object>"#
+                r#"<object type="image/svg+xml" data="{src}"{dimension_attrs}>{fallback}</object>"#,
+                src = encode_attribute_value(src.clone())
             )
         } else {
-            format!(r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#)
+            format!(
+                r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#,
+                src = encode_attribute_value(src.clone())
+            )
         };
 
         let link_self_href = if inline_svg { None } else { Some(src.as_str()) };
 
-        render_icon_or_image(params.attrlist, &img, "image", link_self_href, dest);
+        // A URI-ish target passes through to `src` verbatim (it is never
+        // embedded), so a `link=self` resolving to it is author-supplied and
+        // subject to the stricter SVG-data-URI check; a plain path target is
+        // resolved to a web path or a trusted embedded `data-uri`.
+        let self_href_from_uri_target = is_uri_ish(params.target);
+
+        render_icon_or_image(
+            params.attrlist,
+            &img,
+            "image",
+            link_self_href,
+            self_href_from_uri_target,
+            dest,
+        );
     }
 
     fn image_uri(
@@ -859,33 +939,55 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             if let Some(icons) = icons.as_maybe_str()
                 && icons == "font"
             {
+                // Every fragment interpolated into the `class`/`title`
+                // attributes below is escaped for the `"` delimiter, mirroring
+                // the `alt` handling in the image branch. These values are
+                // already special-character-escaped (`< > &`) upstream, but a
+                // stray `"` in an author-supplied `target`, `size`, `flip`,
+                // `rotate`, or `title` would otherwise break out of its
+                // attribute.
                 let mut i_class_attrs: Vec<String> = vec![
                     "fa".to_owned(),
-                    format!("fa-{target}", target = params.target),
+                    format!(
+                        "fa-{target}",
+                        target = encode_attribute_value(params.target.to_owned())
+                    ),
                 ];
 
                 if let Some(size) = params.attrlist.named_or_positional_attribute("size", 1) {
-                    i_class_attrs.push(format!("fa-{size}", size = size.value()));
+                    i_class_attrs.push(format!(
+                        "fa-{size}",
+                        size = encode_attribute_value(size.value().to_owned())
+                    ));
                 }
 
                 if let Some(flip) = params.attrlist.named_attribute("flip") {
-                    i_class_attrs.push(format!("fa-flip-{flip}", flip = flip.value()));
+                    i_class_attrs.push(format!(
+                        "fa-flip-{flip}",
+                        flip = encode_attribute_value(flip.value().to_owned())
+                    ));
                 } else if let Some(rotate) = params.attrlist.named_attribute("rotate") {
-                    i_class_attrs.push(format!("fa-rotate-{rotate}", rotate = rotate.value()));
+                    i_class_attrs.push(format!(
+                        "fa-rotate-{rotate}",
+                        rotate = encode_attribute_value(rotate.value().to_owned())
+                    ));
                 }
 
                 format!(
                     r##"<i class="{i_class_attr_val}"{title_attr}></i>"##,
                     i_class_attr_val = i_class_attrs.join(" "),
                     title_attr = if let Some(title) = params.attrlist.named_attribute("title") {
-                        format!(r#" title="{title}""#, title = title.value())
+                        format!(
+                            r#" title="{title}""#,
+                            title = encode_attribute_value(title.value().to_owned())
+                        )
                     } else {
                         "".to_owned()
                     }
                 )
             } else {
                 let mut attrs: Vec<String> = vec![
-                    format!(r#"src="{src}""#),
+                    format!(r#"src="{src}""#, src = encode_attribute_value(src.clone())),
                     format!(
                         r#"alt="{alt}""#,
                         alt = encode_attribute_value(params.alt.to_string())
@@ -893,15 +995,24 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 ];
 
                 if let Some(width) = params.attrlist.named_attribute("width") {
-                    attrs.push(format!(r#"width="{width}""#, width = width.value()));
+                    attrs.push(format!(
+                        r#"width="{width}""#,
+                        width = encode_attribute_value(width.value().to_owned())
+                    ));
                 }
 
                 if let Some(height) = params.attrlist.named_attribute("height") {
-                    attrs.push(format!(r#"height="{height}""#, height = height.value()));
+                    attrs.push(format!(
+                        r#"height="{height}""#,
+                        height = encode_attribute_value(height.value().to_owned())
+                    ));
                 }
 
                 if let Some(title) = params.attrlist.named_attribute("title") {
-                    attrs.push(format!(r#"title="{title}""#, title = title.value()));
+                    attrs.push(format!(
+                        r#"title="{title}""#,
+                        title = encode_attribute_value(title.value().to_owned())
+                    ));
                 }
 
                 format!(
@@ -926,7 +1037,19 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             None
         };
 
-        render_icon_or_image(params.attrlist, &img, "icon", link_self_href, dest);
+        // As in `render_image`: a URI-ish target passes through to the icon
+        // `src` verbatim, so a `link=self` resolving to it is author-supplied
+        // and gets the stricter SVG-data-URI check.
+        let self_href_from_uri_target = is_uri_ish(params.target);
+
+        render_icon_or_image(
+            params.attrlist,
+            &img,
+            "icon",
+            link_self_href,
+            self_href_from_uri_target,
+            dest,
+        );
     }
 
     fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
@@ -938,7 +1061,13 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let link = format!(
             r##"<a href="{target}"{id}{class}{title}{link_constraint_attrs}>{link_text}</a>"##,
-            target = params.target,
+            // The target arrives here already special-character-escaped (`< > &`)
+            // by the substitution pipeline, but that step leaves `"` intact. A
+            // stray `"` in the target would otherwise close the `href` attribute
+            // and let an author inject further attributes (e.g. an event
+            // handler), so escape the quote delimiter here – mirroring the
+            // image `alt`/`title` handling.
+            target = encode_attribute_value(params.target.clone()),
             id = if let Some(id) = id {
                 format!(r#" id="{id}""#)
             } else {
@@ -989,6 +1118,11 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let constraint_attrs = xref_constraint_attrs(params.window);
 
+        // Each `href` below is escaped for the `"` delimiter before it is
+        // interpolated into the attribute. The destinations are already
+        // special-character-escaped (`< > &`) upstream, but a stray `"` in a
+        // crafted or unresolved target would otherwise break out of the `href`
+        // attribute (see the `class`/roles escaping above).
         match (params.resolved, params.derived) {
             (Some(resolved), _) => {
                 // Explicit link text always wins; otherwise use the target's
@@ -1018,7 +1152,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
-                    href = resolved.href
+                    href = encode_attribute_value(resolved.href.clone())
                 ));
             }
 
@@ -1032,7 +1166,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
-                    href = derived.href
+                    href = encode_attribute_value(derived.href.clone())
                 ));
             }
 
@@ -1046,7 +1180,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r##"<a href="#{target}"{class}{constraint_attrs}>{text}</a>"##,
-                    target = params.target
+                    target = encode_attribute_value(params.target.to_owned())
                 ));
             }
         }
@@ -1210,6 +1344,7 @@ fn render_icon_or_image(
     img: &str,
     type_: &'static str,
     link_self_href: Option<&str>,
+    self_href_from_uri_target: bool,
     dest: &mut String,
 ) {
     let mut img = img.to_string();
@@ -1222,16 +1357,42 @@ fn render_icon_or_image(
     // instead drops the anchor entirely; this crate keeps it with the literal
     // `self` target.)
     if let Some(link) = attrlist.named_attribute("link") {
-        let href = if link.value() == "self" {
+        let is_self = link.value() == "self";
+
+        let href = if is_self {
             link_self_href.unwrap_or("self")
         } else {
             link.value()
         };
 
-        img = format!(
-            r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
-            link_constraint_attrs = link_constraint_attrs(attrlist, None)
-        );
+        // An explicit `link=` destination whose scheme could execute script is
+        // not turned into a live link; the image is rendered without the
+        // wrapping anchor. Escaping the `"` delimiter alone would still leave a
+        // live `javascript:` URI, so the destination is rejected outright – the
+        // same policy the explicit `link:` macro applies, and the macro layer
+        // records the accompanying warning. `link=self` resolves to the image's
+        // own `src`, which may legitimately be a `data:image/*` URI, so it is
+        // checked with the more permissive [`has_dangerous_self_href`] (a
+        // `javascript:` or non-image `data:` src – or an author-supplied SVG
+        // data URI target – still resolves to a live script URI here and is
+        // rejected).
+        let rejected = if is_self {
+            has_dangerous_self_href(href, self_href_from_uri_target)
+        } else {
+            has_dangerous_scheme(link.value())
+        };
+
+        if !rejected {
+            img = format!(
+                r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
+                // Both sources of `href` – the image's own `src` (a resolved web
+                // path that can carry a stray `"`) and an author-supplied
+                // `link=` value – are escaped for the `"` delimiter so neither
+                // can break out of the attribute.
+                href = encode_attribute_value(href.to_owned()),
+                link_constraint_attrs = link_constraint_attrs(attrlist, None)
+            );
+        }
     }
 
     let mut roles: Vec<&str> = attrlist.roles();
@@ -1253,13 +1414,101 @@ fn encode_attribute_value(value: String) -> String {
     value.replace('"', "&quot;")
 }
 
+/// Reports whether `target` begins with a URI scheme that can execute script
+/// when placed in an `href` – `javascript:`, `data:`, or `vbscript:`.
+///
+/// Leading control and space characters are ignored first, because a browser
+/// strips them before it parses the scheme (so `"\u{1}javascript:…"` is still
+/// live). The comparison is ASCII-case-insensitive.
+///
+/// Escaping the quote delimiter (see [`encode_attribute_value`]) stops an
+/// author from breaking out of an attribute, but not from placing a live
+/// script URI in an `href`; that requires rejecting the scheme outright. This
+/// guards the explicit `link:` macro and the `image:`/`icon:` `link=`
+/// attribute. The auto-linker already restricts bare URLs to a safe scheme set
+/// (`https?`/`file`/`ftp`/`irc`).
+pub(crate) fn has_dangerous_scheme(target: &str) -> bool {
+    let target = target.trim_start_matches(|c: char| c <= ' ');
+
+    const DANGEROUS_SCHEMES: [&str; 3] = ["javascript:", "data:", "vbscript:"];
+
+    DANGEROUS_SCHEMES.iter().any(|scheme| {
+        target
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    })
+}
+
+/// Reports whether `href` – the `src` a `link=self` image/icon resolves to –
+/// would place a script-capable URI in the wrapping anchor's `href`.
+///
+/// `link=self` names the image's own `src`, so it cannot simply be run through
+/// [`has_dangerous_scheme`]: an embedded image (`data-uri`) legitimately
+/// resolves to a `data:image/*` URI, and there is an Asciidoctor-parity test
+/// for exactly that. A `data:image/*` source is therefore exempt. Every other
+/// dangerous scheme – `javascript:`, `vbscript:`, or a non-image `data:` such
+/// as `data:text/html,…` – is never a valid image source, so promoting it into
+/// an `href` is rejected: only the anchor is dropped (the harmless `<img src>`
+/// is left intact), mirroring the `link=` policy above.
+///
+/// `from_uri_target` narrows that exemption. It is set when the `src` was
+/// passed through verbatim from an author-supplied URI target, rather than
+/// resolved from a local file path (a plain web path, or a crate-embedded
+/// `data-uri`). A `data:image/svg+xml` document *executes* its embedded script
+/// when it is navigated to – which following the `href` on click does – unlike
+/// a raster image data URI, which merely displays. An embedded SVG comes from a
+/// trusted local file (the parity case) and stays exempt; an author-supplied
+/// `data:image/svg…` target is script-navigable and is rejected.
+pub(crate) fn has_dangerous_self_href(href: &str, from_uri_target: bool) -> bool {
+    if !has_dangerous_scheme(href) {
+        return false;
+    }
+
+    // A dangerous scheme that is not a `data:image/*` source (`javascript:`,
+    // `vbscript:`, `data:text/html`, …) is always rejected.
+    if !is_image_data_uri(href) {
+        return true;
+    }
+
+    // A `data:image/*` source is exempt, except an author-supplied SVG data URI,
+    // whose script runs when the anchor is followed.
+    from_uri_target && is_svg_data_uri(href)
+}
+
+/// Reports whether `href` is a `data:image/*` URI (the leading control/space
+/// characters are ignored and the comparison is ASCII-case-insensitive, as in
+/// [`has_dangerous_scheme`]). This is the one `data:` form that is a legitimate
+/// image source, so it is exempt from the `link=self` rejection above.
+fn is_image_data_uri(href: &str) -> bool {
+    let href = href.trim_start_matches(|c: char| c <= ' ');
+
+    const IMAGE_DATA_PREFIX: &str = "data:image/";
+
+    href.get(..IMAGE_DATA_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(IMAGE_DATA_PREFIX))
+}
+
+/// Reports whether `href` is a `data:image/svg…` URI. SVG is the one image
+/// media type that executes embedded script when the URI is opened as a
+/// top-level document, so an author-supplied SVG data URI is not a safe
+/// `link=self` target (see [`has_dangerous_self_href`]). Raster image data URIs
+/// never begin with `svg`, so they are unaffected.
+fn is_svg_data_uri(href: &str) -> bool {
+    let href = href.trim_start_matches(|c: char| c <= ' ');
+
+    const SVG_DATA_PREFIX: &str = "data:image/svg";
+
+    href.get(..SVG_DATA_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(SVG_DATA_PREFIX))
+}
+
 /// Escapes a value for safe interpolation into an HTML attribute.
 ///
 /// Unlike [`encode_attribute_value`] (which only guards the quote delimiter to
 /// mirror Asciidoctor's image-alt handling), this escapes the full set of
 /// characters that could break out of, or corrupt, an attribute value. It is
-/// used for author-supplied `xref` `window`/`role` values, which — unlike the
-/// hard-coded `window` strings the link macro passes — can contain arbitrary
+/// used for author-supplied `xref` `window`/`role` values, which – unlike the
+/// hard-coded `window` strings the link macro passes – can contain arbitrary
 /// text.
 fn encode_html_attribute(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -1288,7 +1537,7 @@ fn normalize_web_path(
     }
 }
 
-fn is_uri_ish(path: &str) -> bool {
+pub(crate) fn is_uri_ish(path: &str) -> bool {
     path.contains(':') && URI_SNIFF.is_match(path)
 }
 
@@ -1322,6 +1571,7 @@ fn has_extname(path: &str) -> bool {
 fn data_uri_mimetype(target: &str) -> String {
     match extname(target) {
         Some(".svg") => "image/svg+xml".to_string(),
+
         // `extname` always includes the leading `.`, which is dropped here.
         Some(ext) => format!("image/{ext}", ext = ext.strip_prefix('.').unwrap_or(ext)),
         None => "application/octet-stream".to_string(),
@@ -1440,12 +1690,12 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
 /// between them.
 ///
 /// Used when a cross-reference's link text is drawn from its target's reference
-/// text and that reftext itself contains an anchor — an inline link, or a
+/// text and that reftext itself contains an anchor – an inline link, or a
 /// cross-reference embedded in the target's title. HTML forbids nesting an
 /// `<a>` inside another, so the inner anchor tags are stripped, leaving their
 /// text in place. Mirrors Asciidoctor's `DropAnchorRx = /<(?:a\b[^>]*|\/a)>/`.
 fn drop_anchor_tags(text: &str) -> String {
-    // The common case — a reftext with no anchor at all — allocates a plain
+    // The common case – a reftext with no anchor at all – allocates a plain
     // copy and does no scanning.
     if !text.contains("<a") {
         return text.to_string();
@@ -1513,7 +1763,7 @@ fn xref_constraint_attrs(window: Option<&str>) -> String {
     )
 }
 
-fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) -> String {
+fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&str>) -> String {
     let rel = if attrlist.has_option("nofollow") {
         Some("nofollow")
     } else {

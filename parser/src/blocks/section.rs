@@ -1,4 +1,4 @@
-use std::{fmt, slice::Iter, sync::LazyLock};
+use std::{fmt, sync::LazyLock};
 
 use regex::Regex;
 
@@ -6,7 +6,8 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
+        Block, ChildBlocks, ContentModel, IsBlock, metadata::BlockMetadata,
+        parse_utils::parse_blocks_until,
     },
     content::{
         Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans,
@@ -24,7 +25,7 @@ use crate::{
 /// implicit enclosure. Each section begins with a title and ends at the next
 /// sibling section, ancestor section, or end of document. Nested section levels
 /// must be sequential.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct SectionBlock<'src> {
     level: usize,
     section_title: Content<'src>,
@@ -42,6 +43,17 @@ pub struct SectionBlock<'src> {
 }
 
 impl<'src> SectionBlock<'src> {
+    /// Returns a document-order iterator over this section's direct child
+    /// blocks.
+    ///
+    /// For the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(&self.blocks)
+    }
+
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,
@@ -53,8 +65,8 @@ impl<'src> SectionBlock<'src> {
 
         // The heading's effective level folds in the running `leveloffset`
         // document attribute. A positive offset (the usual case, from
-        // `include::[leveloffset=+1]`) pushes headings down — notably promoting
-        // an included file's level-0 document title (`=`) into a real section —
+        // `include::[leveloffset=+1]`) pushes headings down – notably promoting
+        // an included file's level-0 document title (`=`) into a real section –
         // while a negative offset pulls them up. A heading whose effective level
         // is below 1 is rejected as an unsupported level-0 heading (the warning
         // is raised inside `parse_title_line`).
@@ -112,7 +124,7 @@ impl<'src> SectionBlock<'src> {
         // Appendix sections are lettered (A, B, ...) independently of `sectnums`
         // because their title prefix is governed by the `appendix-caption`
         // attribute (see the "Appendix label" section of the spec). An appendix
-        // root — the section that directly carries the `appendix` style —
+        // root – the section that directly carries the `appendix` style –
         // therefore always advances the appendix counter so it (and the numbering
         // of any subsection) can derive its letter, even when `sectnums` is unset.
         let sectnums_active =
@@ -138,8 +150,8 @@ impl<'src> SectionBlock<'src> {
         // on {platform-name}]]`), whether the anchor sits above the heading
         // (`metadata.anchor_reftext`) or is embedded in the title
         // (`embedded_reftext`). Resolve them against the attributes in effect at
-        // the anchor's location — captured here, before the section body is
-        // parsed and can itself redefine those attributes — mirroring how the
+        // the anchor's location – captured here, before the section body is
+        // parsed and can itself redefine those attributes – mirroring how the
         // anchor ID and a `reftext=` attribute are already substituted when the
         // attribute list is parsed.
         let anchor_reftext = metadata
@@ -209,7 +221,7 @@ impl<'src> SectionBlock<'src> {
         // A footnote in the title is a real, document-order footnote, but its
         // marker must not leak into the section's reference text (an xref's link
         // text) or auto-generated ID. Marking the title's footnote markers with
-        // sentinels lets those be excised below from a single render — no second
+        // sentinels lets those be excised below from a single render – no second
         // substitution pass, so counters and attribute-expanded footnotes are
         // processed exactly once.
         let mut section_title = Content::from(title_span);
@@ -244,7 +256,7 @@ impl<'src> SectionBlock<'src> {
         // A block title above a section heading does not become the section's
         // title; it is carried over to the first block inside the section
         // (matching Asciidoctor). Stash it on the parser: the next block parsed
-        // claims it — usually the section's first child, or (when the section
+        // claims it – usually the section's first child, or (when the section
         // body is empty) the sibling section that follows, which re-stashes it
         // for its own first block. A discrete heading is an ordinary block, not
         // a section, so it keeps its title. See `Block::parse_internal` for the
@@ -472,7 +484,7 @@ fn appendix_caption(parser: &Parser, number: &SectionNumber) -> String {
 /// Combines a reference signifier with a reference number for the
 /// `full`/`short` xrefstyle label. When the signifier is set the label is
 /// `"<signifier> <number>"` (e.g. `"Section 2.3"`); when it is unset (or empty)
-/// — as after `:!section-refsig:` — the signifier is dropped and only the
+/// – as after `:!section-refsig:` – the signifier is dropped and only the
 /// number remains.
 fn join_signifier(signifier: Option<&str>, number: &str) -> String {
     match signifier {
@@ -488,7 +500,7 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
 
     // `content_mut` keeps the default `None`: the section's own resolvable
     // content is its heading, which is resolved by the document-order title
-    // pass (see `document::title_refs`) rather than the per-content pass —
+    // pass (see `document::title_refs`) rather than the per-content pass –
     // that pass coordinates cross-references *between* titles (forward and
     // circular), which per-content resolution cannot see.
 
@@ -496,12 +508,8 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
         "section".into()
     }
 
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
-    }
-
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.blocks.iter()
     }
 
     fn title_source(&'src self) -> Option<Span<'src>> {
@@ -530,7 +538,7 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
 
     fn id(&'src self) -> Option<&'src str> {
         // An explicit ID above the heading wins, and an attribute-list ID
-        // (`[id=…]`/`[#id]`) takes precedence over a `[[id]]` block anchor —
+        // (`[id=…]`/`[#id]`) takes precedence over a `[[id]]` block anchor –
         // matching the precedence used when the section registers itself in the
         // catalog (see `attr_or_anchor_id` in `SectionBlock::parse`), so this
         // accessor reports the same ID the section is cross-referenced under.
@@ -582,7 +590,7 @@ const MAX_SECTION_LEVEL: i32 = 5;
 /// `(?: +\1)?` group of Asciidoctor's section-title regex.
 pub(crate) fn strip_symmetric_title_close(title: Span<'_>, marker: char, count: usize) -> Span<'_> {
     // The close must be separated from the title by an ASCII blank (space or
-    // tab), matching Asciidoctor's `CG_BLANK` (`[ \t]`) — not arbitrary Unicode
+    // tab), matching Asciidoctor's `CG_BLANK` (`[ \t]`) – not arbitrary Unicode
     // whitespace, so e.g. `== Title<NBSP>==` keeps its `==` as title text.
     const BLANK: [char; 2] = [' ', '\t'];
     let close = marker.to_string().repeat(count);
@@ -627,9 +635,9 @@ static EMBEDDED_SECTION_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 /// absent).
 ///
 /// The `title` span must already have had any symmetric ATX close stripped. An
-/// *escaped* anchor (`Title \[[id]]`) is intentionally left intact — the ID is
+/// *escaped* anchor (`Title \[[id]]`) is intentionally left intact – the ID is
 /// not adopted and the title is returned unchanged so the inline-anchor
-/// substitution can unescape it — mirroring Ruby Asciidoctor.
+/// substitution can unescape it – mirroring Ruby Asciidoctor.
 fn match_embedded_section_anchor<'src>(
     title: Span<'src>,
 ) -> (Span<'src>, Option<&'src str>, Option<Span<'src>>) {
@@ -715,7 +723,7 @@ fn parse_title_line<'src>(
 
     // Fold in the running `leveloffset`. `saturating_add` keeps a hostile
     // offset (e.g. an absolute `:leveloffset:` near `i32::MAX`) from
-    // overflowing — a panic in debug builds and a wrap in release builds — the
+    // overflowing – a panic in debug builds and a wrap in release builds – the
     // syntactic level itself is at most 5.
     let syntactic_level = (count - 1) as i32;
     let effective_level = syntactic_level.saturating_add(offset);
@@ -793,7 +801,7 @@ fn peer_or_ancestor_section<'src>(
     // (see `skip_comments_before_section`): a bare `=` counts as a section only
     // when a positive offset promotes it. Mirror the live parser's offset onto
     // the temporary parser so the boundary look-ahead makes the same decision
-    // the real parse will — otherwise a peer/ancestor section reached across
+    // the real parse will – otherwise a peer/ancestor section reached across
     // such a comment would be missed and wrongly nested. The stored offset is
     // already an absolute integer, so it needs no further resolution.
     let level_offset = parser.level_offset();
@@ -822,13 +830,13 @@ fn peer_or_ancestor_section<'src>(
     // `:leveloffset:` attribute entry, has already been applied), while `level`
     // is the current section's own effective level. A heading whose effective
     // level is below 1 has no section representation, so `parse_title_line`
-    // returns `None` and it is treated as ordinary content — exactly as an
+    // returns `None` and it is treated as ordinary content – exactly as an
     // un-offset level-0 heading would be.
     //
     // Any warnings the heading would raise (a clamped level, an unsupported
     // level-0 heading, ...) are discarded here: this is only a look-ahead to
-    // find the section boundary, and the heading is parsed again — recording
-    // those warnings once — either as a child block of this section or in the
+    // find the section boundary, and the heading is parsed again – recording
+    // those warnings once – either as a child block of this section or in the
     // enclosing scope once this section ends.
     let mut ignored_warnings = vec![];
     if let Some(mi) = parse_title_line(
@@ -855,7 +863,7 @@ fn peer_or_ancestor_section<'src>(
 }
 
 /// Records a "section title out of sequence" warning for a *top-level* section
-/// whose level skips ahead of level 1 — the document root's expected first
+/// whose level skips ahead of level 1 – the document root's expected first
 /// child level. The nested case (a section skipping a level under its *parent
 /// section*) is handled during parsing by [`peer_or_ancestor_section`]; this
 /// covers the document-root case (e.g. `= Doc` followed directly by `=== X`),
@@ -969,7 +977,7 @@ fn generate_section_id(title: &str, parser: &Parser) -> String {
 /// This crate currently supports the `appendix` section style, which results in
 /// special section numbering. All other sections are treated as `Normal`
 /// sections.
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, Eq, Hash, PartialEq)]
 pub enum SectionType {
     /// Most sections are of this type.
     #[default]
@@ -999,7 +1007,7 @@ impl std::fmt::Debug for SectionType {
 /// `sectnums` and `sectnumlevels` attributes as described in [Section Numbers].
 ///
 /// [Section Numbers]: https://docs.asciidoctor.org/asciidoc/latest/sections/numbers/
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct SectionNumber {
     pub(crate) section_type: SectionType,
     pub(crate) components: Vec<usize>,
@@ -1922,7 +1930,7 @@ mod tests {
         #[test]
         fn comment_transfer_boundary_respects_leveloffset() {
             // Under `:leveloffset: +2`, `== Parent` is level 3 and a bare
-            // `= Child` is level 2 — an ancestor that must end Parent. The
+            // `= Child` is level 2 – an ancestor that must end Parent. The
             // `[[x]]` anchor and the `// comment` before `= Child` transfer to
             // it, and the section-boundary look-ahead must apply the active
             // `leveloffset` (rather than a default offset of zero) so `= Child`
@@ -1933,7 +1941,7 @@ mod tests {
                 "= Doc\n:leveloffset: +2\n\n== Parent\n\npara\n\n[[x]]\n// comment\n= Child\n\nbody",
             );
 
-            let top: Vec<_> = doc.nested_blocks().collect();
+            let top: Vec<_> = doc.child_blocks().collect();
             assert_eq!(top.len(), 2, "Child must be a sibling of Parent");
 
             let parent = top.first().unwrap();
@@ -1945,7 +1953,7 @@ mod tests {
             assert_eq!(child.id(), Some("x"));
             assert!(
                 parent
-                    .nested_blocks()
+                    .child_blocks()
                     .all(|b| b.raw_context().as_ref() != "section")
             );
         }
@@ -2100,7 +2108,7 @@ mod tests {
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Level 1");
             assert_eq!(mi.item.section_type(), SectionType::Normal);
-            assert_eq!(mi.item.nested_blocks().len(), 1);
+            assert_eq!(mi.item.child_blocks().count(), 1);
             assert_eq!(mi.item.id().unwrap(), "_level_1");
 
             assert_eq!(
@@ -3035,7 +3043,7 @@ mod tests {
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Level 1");
             assert_eq!(mi.item.section_type(), SectionType::Normal);
-            assert_eq!(mi.item.nested_blocks().len(), 1);
+            assert_eq!(mi.item.child_blocks().count(), 1);
             assert_eq!(mi.item.id().unwrap(), "_level_1");
 
             assert_eq!(
@@ -3068,7 +3076,7 @@ mod tests {
         assert_eq!(mi.item.level(), 1);
         assert_eq!(mi.item.section_title(), "Level 1");
         assert_eq!(mi.item.section_type(), SectionType::Normal);
-        assert_eq!(mi.item.nested_blocks().len(), 1);
+        assert_eq!(mi.item.child_blocks().count(), 1);
         assert_eq!(mi.item.id().unwrap(), "_level_1");
 
         assert_eq!(
@@ -3100,7 +3108,7 @@ mod tests {
         assert_eq!(mi.item.level(), 1);
         assert_eq!(mi.item.section_title(), "Level 1");
         assert_eq!(mi.item.section_type(), SectionType::Normal);
-        assert_eq!(mi.item.nested_blocks().len(), 1);
+        assert_eq!(mi.item.child_blocks().count(), 1);
         assert_eq!(mi.item.id().unwrap(), "_level_1");
 
         assert!(warnings.is_empty());
@@ -3112,7 +3120,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section_one"));
         } else {
             panic!("Expected section block");
@@ -3125,7 +3133,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_were_back_company"));
         } else {
             panic!("Expected section block");
@@ -3138,7 +3146,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_ben_jerry_ice_cream"));
         } else {
             panic!("Expected section block");
@@ -3151,7 +3159,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), None);
         } else {
             panic!("Expected section block");
@@ -3164,7 +3172,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("id_section_one"));
         } else {
             panic!("Expected section block");
@@ -3177,7 +3185,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section-one"));
         } else {
             panic!("Expected section block");
@@ -3190,7 +3198,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("section_one"));
         } else {
             panic!("Expected section block");
@@ -3203,7 +3211,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section-title"));
         } else {
             panic!("Expected section block");
@@ -3216,7 +3224,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("section-title"));
         } else {
             panic!("Expected section block");
@@ -3229,7 +3237,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_title_with_multiple_dots"));
         } else {
             panic!("Expected section block");
@@ -3266,7 +3274,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section_title"));
         } else {
             panic!("Expected section block");
@@ -3287,7 +3295,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section_title"));
         } else {
             panic!("Expected section block");
@@ -3308,7 +3316,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            if let Some(Block::Section(section)) = document.nested_blocks().next() {
+            if let Some(Block::Section(section)) = document.child_blocks().next() {
                 let section_number = section.section_number();
                 assert!(section_number.is_some());
                 assert_eq!(section_number.unwrap().to_string(), "1");
@@ -3324,7 +3332,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            let mut sections = document.nested_blocks().filter_map(|block| {
+            let mut sections = document.child_blocks().filter_map(|block| {
                 if let Block::Section(section) = block {
                     Some(section)
                 } else {
@@ -3347,13 +3355,13 @@ mod tests {
             let input = ":sectnums:\n\n== Level 1\n\n=== Level 2\n\n==== Level 3";
             let document = Parser::default().parse(input);
 
-            if let Some(Block::Section(level1)) = document.nested_blocks().next() {
+            if let Some(Block::Section(level1)) = document.child_blocks().next() {
                 assert_eq!(level1.section_number().unwrap().to_string(), "1");
 
-                if let Some(Block::Section(level2)) = level1.nested_blocks().next() {
+                if let Some(Block::Section(level2)) = level1.child_blocks().next() {
                     assert_eq!(level2.section_number().unwrap().to_string(), "1.1");
 
-                    if let Some(Block::Section(level3)) = level2.nested_blocks().next() {
+                    if let Some(Block::Section(level3)) = level2.child_blocks().next() {
                         assert_eq!(level3.section_number().unwrap().to_string(), "1.1.1");
                     } else {
                         panic!("Expected level 3 section");
@@ -3371,7 +3379,7 @@ mod tests {
             let input = ":sectnums:\n\n== First\n\n=== First.One\n\n=== First.Two\n\n== Second\n\n=== Second.One";
             let document = Parser::default().parse(input);
 
-            let mut sections = document.nested_blocks().filter_map(|block| {
+            let mut sections = document.child_blocks().filter_map(|block| {
                 if let Block::Section(section) = block {
                     Some(section)
                 } else {
@@ -3383,7 +3391,7 @@ mod tests {
             assert_eq!(first.section_number().unwrap().to_string(), "1");
 
             let first_one = first
-                .nested_blocks()
+                .child_blocks()
                 .filter_map(|block| {
                     if let Block::Section(section) = block {
                         Some(section)
@@ -3396,7 +3404,7 @@ mod tests {
             assert_eq!(first_one.section_number().unwrap().to_string(), "1.1");
 
             let first_two = first
-                .nested_blocks()
+                .child_blocks()
                 .filter_map(|block| {
                     if let Block::Section(section) = block {
                         Some(section)
@@ -3412,7 +3420,7 @@ mod tests {
             assert_eq!(second.section_number().unwrap().to_string(), "2");
 
             let second_one = second
-                .nested_blocks()
+                .child_blocks()
                 .filter_map(|block| {
                     if let Block::Section(section) = block {
                         Some(section)
@@ -3431,7 +3439,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            for block in document.nested_blocks() {
+            for block in document.child_blocks() {
                 if let Block::Section(section) = block {
                     assert!(section.section_number().is_none());
                 }
@@ -3444,7 +3452,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            for block in document.nested_blocks() {
+            for block in document.child_blocks() {
                 if let Block::Section(section) = block {
                     assert!(section.section_number().is_none());
                 }
@@ -3462,7 +3470,7 @@ mod tests {
 
             assert!(parser.is_attribute_set("sectnums"));
 
-            let mut sections = document.nested_blocks().filter_map(|block| {
+            let mut sections = document.child_blocks().filter_map(|block| {
                 if let Block::Section(section) = block {
                     Some(section)
                 } else {
@@ -3499,7 +3507,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            let mut sections = document.nested_blocks().filter_map(|block| {
+            let mut sections = document.child_blocks().filter_map(|block| {
                 if let Block::Section(section) = block {
                     Some(section)
                 } else {
@@ -3525,19 +3533,19 @@ mod tests {
             let input = ":sectnums:\n:sectnumlevels: 5\n\n== Level 1\n\n=== Level 2\n\n==== Level 3\n\n===== Level 4\n\n====== Level 5";
             let document = Parser::default().parse(input);
 
-            if let Some(Block::Section(l1)) = document.nested_blocks().next() {
+            if let Some(Block::Section(l1)) = document.child_blocks().next() {
                 assert_eq!(l1.section_number().unwrap().to_string(), "1");
 
-                if let Some(Block::Section(l2)) = l1.nested_blocks().next() {
+                if let Some(Block::Section(l2)) = l1.child_blocks().next() {
                     assert_eq!(l2.section_number().unwrap().to_string(), "1.1");
 
-                    if let Some(Block::Section(l3)) = l2.nested_blocks().next() {
+                    if let Some(Block::Section(l3)) = l2.child_blocks().next() {
                         assert_eq!(l3.section_number().unwrap().to_string(), "1.1.1");
 
-                        if let Some(Block::Section(l4)) = l3.nested_blocks().next() {
+                        if let Some(Block::Section(l4)) = l3.child_blocks().next() {
                             assert_eq!(l4.section_number().unwrap().to_string(), "1.1.1.1");
 
-                            if let Some(Block::Section(l5)) = l4.nested_blocks().next() {
+                            if let Some(Block::Section(l5)) = l4.child_blocks().next() {
                                 assert_eq!(l5.section_number().unwrap().to_string(), "1.1.1.1.1");
                             } else {
                                 panic!("Expected level 5 section");
@@ -3851,7 +3859,7 @@ mod tests {
             let doc = Parser::default().parse("[appendix]\n== One\n\nLetter {appendix-number}.\n");
 
             let section = first_section(&doc);
-            let Some(Block::Simple(paragraph)) = section.nested_blocks().next() else {
+            let Some(Block::Simple(paragraph)) = section.child_blocks().next() else {
                 panic!("expected a simple block");
             };
             assert_eq!(paragraph.content().rendered(), "Letter A.");
@@ -3883,7 +3891,7 @@ mod tests {
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Discrete Heading");
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
             assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
             assert!(mi.item.title().is_none());
             assert!(mi.item.anchor().is_none());
@@ -3937,7 +3945,7 @@ mod tests {
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Floating Heading");
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
             assert!(warnings.is_empty());
         }
 
@@ -3958,7 +3966,7 @@ mod tests {
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
 
             // Discrete headings should have no nested blocks.
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
 
             // The paragraph should be left unparsed.
             assert_eq!(
@@ -3980,7 +3988,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            let mut blocks = document.nested_blocks();
+            let mut blocks = document.child_blocks();
 
             // First should be "Section 1".
             if let Some(crate::blocks::Block::Section(section)) = blocks.next() {
@@ -3988,14 +3996,14 @@ mod tests {
                 assert_eq!(section.level(), 1);
                 assert_eq!(section.section_type(), SectionType::Normal);
 
-                let mut children = section.nested_blocks();
+                let mut children = section.child_blocks();
 
                 // First child should be the discrete heading.
                 if let Some(crate::blocks::Block::Section(discrete)) = children.next() {
                     assert_eq!(discrete.section_title(), "Discrete");
                     assert_eq!(discrete.level(), 2);
                     assert_eq!(discrete.section_type(), SectionType::Discrete);
-                    assert!(discrete.nested_blocks().next().is_none());
+                    assert!(discrete.child_blocks().next().is_none());
                 } else {
                     panic!("Expected discrete heading block");
                 }
@@ -4019,7 +4027,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+            if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
                 // Discrete headings should generate auto IDs.
                 assert_eq!(section.id(), Some("_discrete_heading"));
             } else {
@@ -4033,7 +4041,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+            if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
                 // Manual IDs should still work with discrete headings.
                 assert_eq!(section.id(), Some("my-id"));
             } else {
@@ -4047,13 +4055,13 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            let mut blocks = document.nested_blocks();
+            let mut blocks = document.child_blocks();
 
             if let Some(crate::blocks::Block::Section(section)) = blocks.next() {
                 assert_eq!(section.section_title(), "Section 1");
                 assert!(section.section_number().is_some());
 
-                let mut children = section.nested_blocks();
+                let mut children = section.child_blocks();
 
                 // Discrete heading should not have a section number.
                 if let Some(crate::blocks::Block::Section(discrete)) = children.next() {
@@ -4206,7 +4214,7 @@ mod tests {
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
 
             // Should have no child blocks.
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
 
             // The paragraph and next section should be unparsed.
             assert!(mi.after.data().contains("paragraph"));

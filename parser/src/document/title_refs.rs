@@ -1,8 +1,8 @@
 //! Document-order resolution of cross-references embedded in titles.
 //!
 //! A cross-reference in a section (or block) title renders the *target's*
-//! reference text as its link text. When targets reference each other — a
-//! forward reference, or a circular one — the reference text of one title
+//! reference text as its link text. When targets reference each other – a
+//! forward reference, or a circular one – the reference text of one title
 //! depends on another, so the per-content resolution pass (which resolves each
 //! [`Content`](crate::content::Content) in isolation) cannot get this right on
 //! its own: it would resolve every title's cross-references independently,
@@ -39,7 +39,7 @@ struct TitleNode<'src> {
     xrefs: Vec<XrefSegment>,
 
     /// The ID under which other cross-references reach this title's reference
-    /// text — present only when the title *is* the target's reference text (no
+    /// text – present only when the title *is* the target's reference text (no
     /// explicit `reftext`), so a cross-reference to it should render this
     /// resolved title. `None` for a title that is not referenceable this way
     /// (no ID, or an explicit reftext that shadows the title).
@@ -146,7 +146,7 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
             }
         }
 
-        collect(block.nested_blocks_mut(), nodes);
+        collect(block.child_blocks_mut(), nodes);
     }
 }
 
@@ -170,7 +170,7 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<String>], index: 
             *index += 1;
         }
 
-        write_back(block.nested_blocks_mut(), memo, index);
+        write_back(block.child_blocks_mut(), memo, index);
     }
 }
 
@@ -178,7 +178,7 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<String>], index: 
 ///
 /// A cross-reference in the title whose target is itself a referenceable title
 /// renders that target's resolved title (recursively), unless the target is
-/// currently being computed — a cycle — in which case its link text falls back
+/// currently being computed – a cycle – in which case its link text falls back
 /// to the bracketed `[target]` form, exactly as Asciidoctor breaks the cycle.
 /// The nested anchor that results when a resolved title is used as link text is
 /// dropped by the renderer.
@@ -219,14 +219,14 @@ fn compute<'src>(
         // The resolver is authoritative: only a reference it resolved is
         // eligible for local title text, and then only when its destination is
         // the local target itself (the `#id` fragment). A resolver that mapped
-        // the target anywhere else — e.g. an Antora-style resolver pointing at
-        // another document — keeps its result untouched, even when its display
+        // the target anywhere else – e.g. an Antora-style resolver pointing at
+        // another document – keeps its result untouched, even when its display
         // text happens to coincide with this document's reference text.
         //
         // For a locally-resolved reference, a display text the resolver chose
         // itself is likewise kept; the locally computed title only replaces
         // text that is absent or that merely echoes the catalog's frozen
-        // (parse-time) reference text — the stale value this pass exists to
+        // (parse-time) reference text – the stale value this pass exists to
         // correct.
         if !has_explicit_text
             && let Some(reference) = resolved.as_mut()
@@ -245,7 +245,7 @@ fn compute<'src>(
 
             if !resolver_chose_text {
                 // The target's reference text is its own (resolved) title.
-                // Recurse, unless the target is mid-computation — a cycle — in
+                // Recurse, unless the target is mid-computation – a cycle – in
                 // which case its link text is the bracketed fallback.
                 let target_in_progress = in_progress.get(target_index).copied().unwrap_or(false);
                 reference.text = if target_in_progress {
@@ -266,8 +266,8 @@ fn compute<'src>(
             }
         }
 
-        // A target that resolved to nothing — and did not carry its own derived
-        // destination — is an unresolved reference, reported against the title.
+        // A target that resolved to nothing – and did not carry its own derived
+        // destination – is an unresolved reference, reported against the title.
         if resolved.is_none() && xref.derived.is_none() {
             warnings.unresolved(&xref.target, node.source);
         }

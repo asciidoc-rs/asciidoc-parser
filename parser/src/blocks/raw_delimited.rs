@@ -1,7 +1,9 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
-    blocks::{ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata},
+    blocks::{
+        ChildBlocks, ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata,
+    },
     content::{Content, SubstitutionGroup},
     span::MatchedItem,
     strings::CowStr,
@@ -26,8 +28,8 @@ use crate::{
 /// or more backticks are not a fence.
 ///
 /// A language may be declared on the opening fence (`` ```ruby ``). This is a
-/// shorthand for a source block — equivalent to `[source,ruby]` over a listing
-/// block — so the synthesized attribute list carries the `source` block style
+/// shorthand for a source block – equivalent to `[source,ruby]` over a listing
+/// block – so the synthesized attribute list carries the `source` block style
 /// and the language, and the closing fence is a bare `` ``` ``. This parser
 /// records the language for a downstream renderer but performs no syntax
 /// highlighting itself.
@@ -37,7 +39,7 @@ use crate::{
 /// listing block) or `literal` (parsed as a literal block). Every other open
 /// block is handled by
 /// [`CompoundDelimitedBlock`](crate::blocks::CompoundDelimitedBlock).
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RawDelimitedBlock<'src> {
     content: Content<'src>,
     content_model: ContentModel,
@@ -54,6 +56,16 @@ pub struct RawDelimitedBlock<'src> {
 }
 
 impl<'src> RawDelimitedBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// A raw delimited block (listing, literal, or passthrough) holds verbatim
+    /// or raw content rather than child blocks, so this iterator is always
+    /// empty. See [`FindBlocks`](crate::blocks::FindBlocks) to search from a
+    /// [`Block`](crate::blocks::Block) or [`Document`](crate::Document).
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::empty()
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -110,7 +122,7 @@ impl<'src> RawDelimitedBlock<'src> {
 
         // The line that closes the block. Every delimiter closes on a line that
         // matches it exactly, except a language-aware fenced code block
-        // (```ruby), whose closing fence is a bare ``` — set below.
+        // (```ruby), whose closing fence is a bare ``` – set below.
         let mut close_delimiter = delimiter_data;
 
         // The attribute list synthesized for a language-aware fenced code block.
@@ -323,11 +335,11 @@ fn fenced_code_language<'src>(line: &Span<'src>) -> Option<Span<'src>> {
 /// other delimited block keeps its own context). This parser claims an open
 /// block whose style turns it into a raw delimited block:
 ///
-/// * the verbatim contexts — `source` and `listing` (both rendered as a listing
-///   block), or `literal` — make the open block a verbatim raw block;
+/// * the verbatim contexts – `source` and `listing` (both rendered as a listing
+///   block), or `literal` – make the open block a verbatim raw block;
 /// * the `pass` context makes the open block a passthrough (raw) block, whose
 ///   content is emitted with no substitutions and no block parsing; and
-/// * the `comment` context makes the open block a comment block — the alternate
+/// * the `comment` context makes the open block a comment block – the alternate
 ///   open-block form of a `////` comment block. Its content is retained in the
 ///   parsed model (this parser deliberately does not discard comments) but is
 ///   raw: no substitutions are applied and no AsciiDoc syntax within it,
@@ -1612,7 +1624,7 @@ mod tests {
         #[test]
         fn stem_style_block() {
             let doc = Parser::default().parse("[stem]\n++++\na < b\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.content_model(), ContentModel::Raw);
             assert_eq!(block.raw_context().as_ref(), "stem");
@@ -1626,7 +1638,7 @@ mod tests {
         #[test]
         fn asciimath_style_block() {
             let doc = Parser::default().parse("[asciimath]\n++++\nx^2\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("asciimath"));
@@ -1636,7 +1648,7 @@ mod tests {
         #[test]
         fn latexmath_style_block() {
             let doc = Parser::default().parse("[latexmath]\n++++\nC = \\alpha\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("latexmath"));
@@ -1648,7 +1660,7 @@ mod tests {
         #[test]
         fn unstyled_block_is_still_pass() {
             let doc = Parser::default().parse("++++\na < b\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "pass");
             assert_eq!(block.rendered_content(), Some("a < b"));
@@ -1660,7 +1672,7 @@ mod tests {
         #[test]
         fn subs_attribute_overrides_stem_default() {
             let doc = Parser::default().parse("[stem,subs=none]\n++++\na < b\n++++");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.rendered_content(), Some("a < b"));

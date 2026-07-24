@@ -1,7 +1,7 @@
 //! Integration tests for cross-reference resolution (issue #461).
 //!
 //! These exercise the parse/resolution split: parsing records cross-references
-//! as deferred, and a later pass resolves them against a complete catalog —
+//! as deferred, and a later pass resolves them against a complete catalog –
 //! including the cross-document (Antora-style) workflow via
 //! [`Parser::parse_deferred`] and [`Document::resolve_references`].
 //!
@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use crate::{
     Document, Parser,
-    blocks::{Block, IsBlock, SimpleBlock},
+    blocks::{Block, FindBlocks, SimpleBlock},
     parser::{
         CatalogResolver, HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext,
         ResolvedReference, XrefSignifier,
@@ -26,12 +26,12 @@ fn first_simple<'a>(doc: &'a Document<'a>) -> &'a SimpleBlock<'a> {
             if let Block::Simple(simple) = block {
                 Some(simple)
             } else {
-                walk(block.nested_blocks())
+                walk(block.child_blocks())
             }
         })
     }
 
-    walk(doc.nested_blocks()).expect("expected at least one simple block")
+    walk(doc.child_blocks()).expect("expected at least one simple block")
 }
 
 /// Returns the rendered text of the first paragraph in `doc`.
@@ -49,12 +49,12 @@ fn first_section<'a>(doc: &'a Document<'a>) -> &'a crate::blocks::SectionBlock<'
             if let Block::Section(section) = block {
                 Some(section)
             } else {
-                walk(block.nested_blocks())
+                walk(block.child_blocks())
             }
         })
     }
 
-    walk(doc.nested_blocks()).expect("expected at least one section block")
+    walk(doc.child_blocks()).expect("expected at least one section block")
 }
 
 #[test]
@@ -75,10 +75,10 @@ fn backward_reference_resolves() {
             if let Block::Simple(simple) = block {
                 out.push(simple.content().rendered().to_string());
             }
-            collect(block.nested_blocks(), out);
+            collect(block.child_blocks(), out);
         }
     }
-    collect(doc.nested_blocks(), &mut paragraphs);
+    collect(doc.child_blocks(), &mut paragraphs);
 
     assert!(
         paragraphs
@@ -107,7 +107,7 @@ fn natural_reference_by_reftext() {
 fn block_anchor_reftext_substitutes_attributes() {
     // A `[[id,reftext]]` block anchor may carry attribute references in its
     // reftext. They are resolved before the reftext is registered, so a natural
-    // cross reference matches — and renders — the substituted text.
+    // cross reference matches – and renders – the substituted text.
     let doc = Parser::default().parse(concat!(
         ":os: Linux\n",
         "\n",
@@ -225,7 +225,7 @@ fn footnote_reaching_a_heading_via_attribute_is_kept_out_of_xref_text() {
     // The footnote enters the title through an attribute reference, so it is not
     // visible in the raw title source. Because markers are annotated during the
     // single title render (not gated on the source text), the footnote is still
-    // kept out of the reference text — and remains a real, numbered footnote.
+    // kept out of the reference text – and remains a real, numbered footnote.
     let doc = Parser::default().parse(concat!(
         ":disclaimer: footnote:[Not legal advice.]\n",
         "\n",
@@ -301,10 +301,10 @@ fn footnote_in_heading_does_not_advance_a_counter_twice() {
             if let Block::Simple(simple) = block {
                 out.push(simple.content().rendered().to_string());
             }
-            collect(block.nested_blocks(), out);
+            collect(block.child_blocks(), out);
         }
     }
-    collect(doc.nested_blocks(), &mut paragraphs);
+    collect(doc.child_blocks(), &mut paragraphs);
 
     assert!(
         paragraphs.iter().any(|p| p == "Next is 2."),
@@ -341,7 +341,7 @@ fn xrefstyle_survives_deferred_resolution() {
     // `window`, and `roles`), while the target's *signifier and number* live in
     // the catalog and are read only when references are resolved (alongside the
     // target's `reftext`). So a forward reference is an unresolved fallback
-    // until resolution, then picks up its full styled text — the same lifecycle
+    // until resolution, then picks up its full styled text – the same lifecycle
     // as a plain reference.
     let src = ":sectnums:\n:xrefstyle: full\n\nSee <<install>>.\n\n\
               == One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n\
@@ -402,7 +402,7 @@ fn host_resolver_can_attach_signifier() {
 fn reference_to_this_document_by_name_resolves_within_it() {
     // A target that names the document being parsed is a reference *into* this
     // document after all, so its fragment resolves against this document's own
-    // catalog — even though the target was written in inter-document form.
+    // catalog – even though the target was written in inter-document form.
     let mut doc = Parser::default()
         .with_primary_file_name("guide.adoc")
         .parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
@@ -451,8 +451,8 @@ fn host_resolver_can_override_a_derived_destination() {
 #[test]
 fn derived_destination_stands_when_the_resolver_declines() {
     // A resolver that returns `None` for a target that names another document
-    // leaves the derived destination in place, and — unlike a target it could
-    // not resolve — that is not reported as an unresolved reference.
+    // leaves the derived destination in place, and – unlike a target it could
+    // not resolve – that is not reported as an unresolved reference.
     let mut doc = Parser::default().parse_deferred("See <<tigers#about>> and <<nope>>.\n");
 
     let catalog = doc.catalog().clone();
@@ -476,7 +476,7 @@ fn escaped_reference_is_not_a_cross_reference() {
     assert_eq!(first_paragraph(&doc), "See &lt;&lt;later&gt;&gt;.");
 }
 
-/// A resolver backed by a combined, cross-document index — the shape a host
+/// A resolver backed by a combined, cross-document index – the shape a host
 /// such as Antora would supply. The crate itself never merges catalogs.
 struct CrossDocResolver {
     index: HashMap<String, ResolvedReference>,
@@ -559,7 +559,7 @@ fn xrefstyle_carries_across_documents() {
 
 #[test]
 fn resolution_is_repeatable() {
-    // Resolving twice against different resolvers yields the second result —
+    // Resolving twice against different resolvers yields the second result –
     // resolution is non-destructive.
     let mut doc = Parser::default().parse_deferred("See <<topic>>.\n");
 
@@ -669,7 +669,7 @@ fn xrefstyle_value_interpretation() {
     // Whether `xrefstyle` is *set* matters, not just its value. An appendix
     // title is emphasized under any set style (its title is italicized rather
     // than shown verbatim), but when `xrefstyle` is unset the target's reftext
-    // is used verbatim — no emphasis. This mirrors Ruby Asciidoctor, whose
+    // is used verbatim – no emphasis. This mirrors Ruby Asciidoctor, whose
     // default `xrefstyle` is nil (not `basic`).
     let with_xrefstyle = |header: &str| {
         Parser::default().parse(&format!(
@@ -759,6 +759,31 @@ mod unresolved_reference_warnings {
         );
 
         assert_eq!(warnings[0].source.line(), 3);
+    }
+
+    #[test]
+    fn sorted_into_source_order_across_categories() {
+        // An unresolved-reference warning is folded into the document's warning
+        // list *after* parsing (by the reference-resolution sweep), yet
+        // `warnings()` is source-ordered: the reference on line 1 must precede
+        // the dangling block-attribute-list warning raised on a later line,
+        // rather than trailing it because of when it was recorded.
+        let doc = Parser::default().parse("See <<nope>>.\n\n== Section\n\n[foo]\n");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 2);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::PossibleInvalidReference("nope".to_string())
+        );
+        assert_eq!(warnings[0].source.line(), 1);
+
+        assert_eq!(
+            warnings[1].warning,
+            WarningType::MissingBlockAfterTitleOrAttributeList
+        );
+        assert_eq!(warnings[1].source.line(), 5);
     }
 
     #[test]
@@ -872,7 +897,7 @@ mod unresolved_reference_warnings {
 }
 
 /// Issue #808: an inter-document cross reference whose target names a file that
-/// was included into this document collapses to a same-document reference — but
+/// was included into this document collapses to a same-document reference – but
 /// only when the file was included in full.
 mod included_file_collapses_to_internal_anchor {
     use super::first_paragraph;
@@ -996,7 +1021,7 @@ mod included_file_collapses_to_internal_anchor {
     #[test]
     fn a_nested_include_does_not_register_and_cannot_falsely_collapse() {
         // The root document includes `part1/chapters.adoc`, which itself
-        // includes `intro.adoc` — a target relative to *that* file, i.e.
+        // includes `intro.adoc` – a target relative to *that* file, i.e.
         // `part1/intro.adoc` on disk. Registering it under the key `intro`
         // would collide with the root-relative path of a *different* file, so
         // a root-level `<<intro.adoc#…>>` would falsely collapse to an
@@ -1059,7 +1084,10 @@ mod included_file_collapses_to_internal_anchor {
 /// title, plus the corners of how a title maps (or does not map) to a
 /// referenceable target.
 mod xrefs_in_titles {
-    use crate::{Parser, blocks::IsBlock};
+    use crate::{
+        Parser,
+        blocks::{FindBlocks, IsBlock},
+    };
 
     /// Collects `(context, title)` for every titled block in the document, in
     /// document order.
@@ -1068,13 +1096,13 @@ mod xrefs_in_titles {
             if let Some(title) = block.title() {
                 out.push((block.raw_context().to_string(), title.to_string()));
             }
-            for child in block.nested_blocks() {
+            for child in block.child_blocks() {
                 walk(child, out);
             }
         }
 
         let mut out = vec![];
-        for block in doc.nested_blocks() {
+        for block in doc.child_blocks() {
             walk(block, &mut out);
         }
         out
@@ -1127,7 +1155,7 @@ mod xrefs_in_titles {
         ];
 
         // The table's context is checked separately below; contexts here are
-        // asserted as a set because the exact list is not the point — each
+        // asserted as a set because the exact list is not the point – each
         // titled block resolving its title is.
         assert_eq!(titles.len(), 9, "titles were: {titles:?}");
 
@@ -1154,13 +1182,13 @@ mod xrefs_in_titles {
     #[test]
     fn section_with_explicit_reftext_still_resolves_its_own_title_xref() {
         // Section `a` carries an explicit `reftext`, so a reference *to* it
-        // renders that reftext — not its (xref-bearing) title. The xref inside
+        // renders that reftext – not its (xref-bearing) title. The xref inside
         // `a`'s own title still resolves normally.
         let doc = Parser::default()
             .parse("[reftext=Custom Text]\n[#a]\n== A <<b>>\n\n[#b]\n== B\n\npara with <<a>>");
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)
@@ -1185,7 +1213,7 @@ mod xrefs_in_titles {
         let doc = Parser::default().parse("== See <<a>>\n\n[[a]]\n== A <<b>>\n\n[#b]\n== B");
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)
@@ -1211,7 +1239,7 @@ mod xrefs_in_titles {
 
         let section = crate::tests::prelude::first_section(&doc);
         let para = section
-            .nested_blocks()
+            .child_blocks()
             .next()
             .expect("expected the section's first child block");
 
@@ -1248,7 +1276,7 @@ mod xrefs_in_titles {
         );
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)
@@ -1267,7 +1295,7 @@ mod xrefs_in_titles {
     #[test]
     fn a_target_the_resolver_does_not_know_stays_unresolved_in_a_title() {
         // When a caller-supplied resolver cannot resolve a target, the title's
-        // reference stays a bracketed fallback and is reported — even though
+        // reference stays a bracketed fallback and is reported – even though
         // this document's own catalog knows the ID. The resolver is
         // authoritative, matching how body content is resolved.
         struct KnowsNothing;
@@ -1287,7 +1315,7 @@ mod xrefs_in_titles {
             doc.resolve_references(&KnowsNothing, &crate::parser::HtmlSubstitutionRenderer {});
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)
@@ -1345,7 +1373,7 @@ mod xrefs_in_titles {
         );
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)

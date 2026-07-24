@@ -28,7 +28,7 @@ use crate::{
 /// attribute. Since it lives between blocks, we treat it as though it was a
 /// block (and thus implement [`IsBlock`] on this type) even though is not
 /// technically a block.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Attribute<'src> {
     name: Span<'src>,
     value_source: Option<Span<'src>>,
@@ -175,7 +175,7 @@ impl<'src> IsBlock<'src> for Attribute<'src> {
 /// If the value contains a textual value, this value will
 /// have any continuation markers resolved, but will no longer
 /// contain a reference to the [`Span`] that contains the value.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub enum InterpretedValue {
     /// A custom value with all necessary interpolations applied.
     Value(String),
@@ -1072,7 +1072,7 @@ mod tests {
         assert_eq!(block.content_model(), ContentModel::Empty);
         assert!(block.rendered_content().is_none());
         assert_eq!(block.raw_context().deref(), "attribute");
-        assert!(block.nested_blocks().next().is_none());
+        assert!(block.child_blocks().next().is_none());
         assert!(block.title_source().is_none());
         assert!(block.title().is_none());
         assert!(block.anchor().is_none());
@@ -1118,7 +1118,7 @@ mod tests {
         let doc =
             parser.parse("We are agreed? {agreed}\n\n:agreed: no\n\nAre we still agreed? {agreed}");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -1198,7 +1198,7 @@ mod tests {
 
         let doc = parser.parse("Hello\n\n:agreed: no\n\nAre we agreed? {agreed}");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
         let _ = blocks.next().unwrap();
         let _ = blocks.next().unwrap();
         let block3 = blocks.next().unwrap();

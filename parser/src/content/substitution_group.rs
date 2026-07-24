@@ -10,7 +10,7 @@ use crate::{
 ///
 /// `SubstitutionGroup` specifies the default or overridden substitution group
 /// to be applied.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum SubstitutionGroup {
     /// The normal substitution group is applied to the majority of the AsciiDoc
     /// block and inline elements except for specific elements described in the
@@ -1096,7 +1096,7 @@ mod tests {
             let mut p = Parser::default();
             let doc = p.parse("[subs=\"bogus,quotes\"]\nabc *bold* &\ndef");
 
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
             assert_eq!(
                 block.rendered_content(),
                 Some("abc <strong>bold</strong> &\ndef")
@@ -1117,7 +1117,7 @@ mod tests {
             let mut p = Parser::default();
             let doc = p.parse("[subs=\",\"]\n....\ncontent <here>\n....");
 
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
             assert_eq!(block.rendered_content(), Some("content <here>"));
 
             assert_eq!(doc.warnings().count(), 0);
@@ -1468,7 +1468,7 @@ mod tests {
             SubstitutionGroup::Title.apply(&mut title_content, &p, None);
             SubstitutionGroup::Normal.apply(&mut normal_content, &p, None);
 
-            // Title should produce exactly the same result as Normal
+            // Title should produce exactly the same result as Normal.
             assert_eq!(title_content.rendered, normal_content.rendered);
         }
     }

@@ -42,7 +42,7 @@ include::example$text.adoc[tag=highlight]
 
     let doc = Parser::default().parse("Mark my words, #automation is essential#.");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {

@@ -345,7 +345,7 @@ fn has_target() {
     assert_eq!(mi.item.content_model(), ContentModel::Empty);
     assert!(mi.item.rendered_content().is_none());
     assert_eq!(mi.item.raw_context().deref(), "image");
-    assert!(mi.item.nested_blocks().next().is_none());
+    assert!(mi.item.child_blocks().next().is_none());
     assert!(mi.item.title_source().is_none());
     assert!(mi.item.title().is_none());
     assert!(mi.item.anchor().is_none());

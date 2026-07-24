@@ -1077,9 +1077,9 @@ mod bulleted_lists {
             // the Ruby test's `refute important_message.attributes.key?
             // 'language'` by checking the list item's last block (the callout
             // list) carries no attrlist of its own.
-            let list = doc.nested_blocks().next().unwrap();
-            let item = list.nested_blocks().next().unwrap().as_list_item().unwrap();
-            let important_message = item.nested_blocks().last().unwrap();
+            let list = doc.child_blocks().next().unwrap();
+            let item = list.child_blocks().next().unwrap().as_list_item().unwrap();
+            let important_message = item.child_blocks().last().unwrap();
             assert!(important_message.attrlist().is_none());
 
             assert_css(&doc, "ul", 1);
@@ -11985,7 +11985,7 @@ mod checklists {
     ///
     /// [`ListBlock`]: crate::blocks::ListBlock
     fn first_list<'a>(doc: &'a crate::Document<'a>) -> &'a crate::blocks::ListBlock<'a> {
-        match doc.nested_blocks().next() {
+        match doc.child_blocks().next() {
             Some(Block::List(list)) => list,
             other => panic!("expected a list block, got {other:?}"),
         }
@@ -12031,7 +12031,7 @@ mod checklists {
         let checklist = first_list(&doc);
         assert!(checklist.is_checklist());
 
-        let items: Vec<_> = checklist.nested_blocks().collect();
+        let items: Vec<_> = checklist.child_blocks().collect();
         assert_eq!(items[0].as_list_item().unwrap().checkbox(), Some(false));
         assert_eq!(items[1].as_list_item().unwrap().checkbox(), Some(true));
         assert_eq!(items[4].as_list_item().unwrap().checkbox(), None);
@@ -12096,7 +12096,7 @@ mod checklists {
         let checklist = first_list(&doc);
         assert!(checklist.is_checklist());
 
-        let items: Vec<_> = checklist.nested_blocks().collect();
+        let items: Vec<_> = checklist.child_blocks().collect();
         assert_eq!(items[0].as_list_item().unwrap().checkbox(), Some(false));
         assert_eq!(items[1].as_list_item().unwrap().checkbox(), Some(true));
         assert_eq!(items[2].as_list_item().unwrap().checkbox(), None);

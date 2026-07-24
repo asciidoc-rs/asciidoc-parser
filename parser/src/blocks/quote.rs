@@ -1,4 +1,4 @@
-use std::{slice::Iter, sync::Arc};
+use std::sync::Arc;
 
 use self_cell::self_cell;
 
@@ -6,8 +6,9 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker, RawDelimitedBlock,
-        SimpleBlock, TableBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
+        Block, ChildBlocks, CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker,
+        RawDelimitedBlock, SimpleBlock, TableBlock, metadata::BlockMetadata,
+        parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
     internal::debug::DebugSliceReference,
@@ -27,7 +28,7 @@ self_cell! {
         dependent: OwnedQuoteBlocksInner,
     }
 
-    impl {Debug, Eq, PartialEq}
+    impl {Debug, Eq, Hash, PartialEq}
 }
 
 /// The parsed blocks of an [`OwnedQuoteBlocks`], borrowing its owned source.
@@ -41,7 +42,7 @@ struct OwnedQuoteBlocksInner<'src> {
 /// Prose excerpts and quotes use the [`Quote`](Self::Quote) type, which does
 /// not preserve line breaks. Verses (e.g., poems or song lyrics) use the
 /// [`Verse`](Self::Verse) type, which preserves line breaks in the output.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum QuoteType {
     /// A prose excerpt or quote. Line breaks are not preserved.
     Quote,
@@ -90,7 +91,7 @@ impl std::fmt::Debug for QuoteType {
 /// * A **quoted paragraph**: a paragraph wrapped in double quotes and followed
 ///   by an attribution line introduced by two hyphens (`-- …`). This produces a
 ///   `quote` block with the [`Simple`](ContentModel::Simple) content model.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct QuoteBlock<'src> {
     type_: QuoteType,
     content_model: ContentModel,
@@ -108,6 +109,18 @@ pub struct QuoteBlock<'src> {
 }
 
 impl<'src> QuoteBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// This reaches the children of a Markdown-style blockquote (which borrow
+    /// the block's own owned source), matching [`blocks()`](Self::blocks). For
+    /// the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(self.blocks())
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -146,7 +159,7 @@ impl<'src> QuoteBlock<'src> {
 
             // A `[quote]`/`[verse]` style also masquerades over an open block
             // (`--`): the open delimiter adopts the quote/verse context. This is
-            // unique to the open block — every other structural container (below)
+            // unique to the open block – every other structural container (below)
             // keeps its own context and ignores the style.
             if first_line.data() == "--" {
                 return Some(Self::parse_delimited(metadata, parser, type_));
@@ -316,13 +329,22 @@ impl<'src> QuoteBlock<'src> {
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,
     ) -> Option<MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>>> {
+        // A quoted paragraph must begin with a double quote. Test that on the
+        // block's first byte *before* scanning the whole paragraph. `read_paragraph`
+        // (below) walks every line up to the next blank line, so testing the first
+        // byte here avoids that scan for the common non-quoted paragraph: without
+        // it, a long run of non-blank lines that never forms a quoted paragraph is
+        // rescanned in full for every block, making the parse O(n²) on pathological
+        // input (e.g. thousands of consecutive delimiter lines with no blank line
+        // between them). `read_paragraph` starts at `block_start`, so a paragraph
+        // beginning with `"` shares this first byte — testing it here loses nothing.
+        if !metadata.block_start.data().starts_with('"') {
+            return None;
+        }
+
         // The paragraph extends to the first blank line.
         let para = read_paragraph(metadata.block_start);
         let data = para.data();
-
-        if !data.starts_with('"') {
-            return None;
-        }
 
         // Locate the attribution line: the first line that begins with `--`
         // followed by whitespace and at least one more character. Splits the
@@ -515,12 +537,11 @@ impl<'src> QuoteBlock<'src> {
         self.content.as_ref()
     }
 
-    /// Returns the nested blocks of a compound blockquote.
+    /// Returns the nested blocks of a compound blockquote as a slice.
     ///
-    /// Unlike [`nested_blocks()`](IsBlock::nested_blocks), this also returns
-    /// the blocks of a Markdown-style blockquote, which borrow the block's
-    /// own owned source rather than the document source and so are not
-    /// exposed through the `'src`-bound trait method.
+    /// This includes the blocks of a Markdown-style blockquote, which borrow
+    /// the block's own owned source rather than the document source. See
+    /// [`child_blocks()`](Self::child_blocks) for the iterator form.
     pub fn blocks(&self) -> &[Block<'_>] {
         match &self.markdown_blocks {
             Some(owned) => &owned.borrow_dependent().blocks,
@@ -532,7 +553,7 @@ impl<'src> QuoteBlock<'src> {
     /// blocks.
     ///
     /// The blocks of a `____`-delimited quote are reached through
-    /// [`nested_blocks_mut()`](IsBlock::nested_blocks_mut) by the generic block
+    /// [`child_blocks_mut()`](IsBlock::child_blocks_mut) by the generic block
     /// walker; this method handles the Markdown-style case, whose blocks borrow
     /// the block's own owned source.
     pub(crate) fn resolve_references(
@@ -698,6 +719,7 @@ fn split_at_attribution_line(data: &str) -> Option<(&str, &str)> {
             && (rest.starts_with(' ') || rest.starts_with('\t'))
         {
             let attribution_text = rest.trim_start_matches([' ', '\t']);
+
             // `line_start > 0` ensures there is at least one line of quoted text
             // before the attribution line.
             if !attribution_text.is_empty() && line_start > 0 {
@@ -748,27 +770,16 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
         self.content.as_ref().map(|content| content.rendered())
     }
 
-    /// Returns the nested blocks of a `____`-delimited quote.
-    ///
-    /// **Note:** a Markdown-style blockquote's nested blocks borrow the block's
-    /// own owned source rather than the document source, so they cannot be
-    /// returned through this `'src`-bound trait method and this iterator is
-    /// empty for them. Use [`QuoteBlock::blocks()`] to read the nested blocks
-    /// of any compound quote, Markdown-style or not. (Rendering and
-    /// reference resolution go through `blocks()` and an explicit
-    /// crate-internal `resolve_references`, so this gap is internal to the
-    /// crate.)
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.blocks.iter()
-    }
-
     /// Returns a mutable slice of the nested blocks of a `____`-delimited
     /// quote.
     ///
-    /// See [the note on `nested_blocks()`](Self::nested_blocks): a
-    /// Markdown-style blockquote's nested blocks are not reachable through
-    /// this method.
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    /// **Note:** a Markdown-style blockquote's nested blocks borrow the block's
+    /// own owned source rather than the document source, so they are not
+    /// reachable through this `'src`-bound hook and this slice is empty for
+    /// them. (Rendering and reference resolution go through
+    /// [`blocks()`](Self::blocks) and an explicit crate-internal
+    /// `resolve_references`, so this gap is internal to the crate.)
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
     }
 
@@ -845,6 +856,7 @@ mod tests {
     fn as_quote<'a>(block: &'a Block<'a>) -> &'a crate::blocks::QuoteBlock<'a> {
         match block {
             Block::Quote(quote) => quote,
+
             // Only reached if a test parses an input that is not a quote block;
             // it exists to fail that test loudly, so it is uncovered while the
             // tests pass.
@@ -888,7 +900,7 @@ mod tests {
         assert!(quote.attribution().is_none());
         assert!(quote.citetitle().is_none());
         assert_eq!(quote.blocks().len(), 2);
-        assert_eq!(quote.nested_blocks().count(), 2);
+        assert_eq!(quote.child_blocks().count(), 2);
     }
 
     #[test]
@@ -948,7 +960,7 @@ mod tests {
             quote.content().unwrap().rendered(),
             "A verse\ndelimited block"
         );
-        assert!(quote.nested_blocks().next().is_none());
+        assert!(quote.child_blocks().next().is_none());
     }
 
     #[test]
@@ -1086,8 +1098,8 @@ mod tests {
 
     #[test]
     fn markdown_blockquote_propagates_nested_warning() {
-        // A warning produced while parsing the (owned, `>`-stripped) body — here
-        // an unterminated nested delimited block — is re-anchored at the
+        // A warning produced while parsing the (owned, `>`-stripped) body – here
+        // an unterminated nested delimited block – is re-anchored at the
         // blockquote's own span and surfaced to the caller, rather than being
         // dropped (or panicking a debug build).
         let mut parser = Parser::default();
@@ -1099,6 +1111,7 @@ mod tests {
             maw.warnings.first().unwrap().warning,
             WarningType::UnterminatedDelimitedBlock
         );
+
         // The warning is anchored at the blockquote's source span.
         assert_eq!(maw.warnings.first().unwrap().source, block.span());
     }
@@ -1120,9 +1133,10 @@ mod tests {
         assert_eq!(quote.type_(), QuoteType::Quote);
         assert_eq!(quote.content_model(), ContentModel::Compound);
         assert_eq!(quote.blocks().len(), 1);
-        // The nested blocks borrow the block's owned source, so they are not
-        // exposed through the `'src`-bound trait accessor.
-        assert!(quote.nested_blocks().next().is_none());
+
+        // A Markdown blockquote's nested blocks borrow the block's owned source,
+        // but `child_blocks()` still exposes them (matching `blocks()`).
+        assert_eq!(quote.child_blocks().count(), 1);
     }
 
     #[test]
@@ -1199,7 +1213,7 @@ mod tests {
         assert!(compound.anchor_reftext().is_none());
         assert!(compound.attrlist().is_none());
         assert_eq!(compound.substitution_group(), SubstitutionGroup::Normal);
-        assert_eq!(compound.nested_blocks().count(), 1);
+        assert_eq!(compound.child_blocks().count(), 1);
         assert!(compound.title().is_none());
         assert!(compound.declared_style().is_none());
         assert!(format!("{compound:?}").starts_with("Block::Quote"));
@@ -1230,8 +1244,50 @@ mod tests {
     fn title_renders_inside_quote_block() {
         let doc = Parser::default()
             .parse(".A title\n[quote,Captain Kirk]\nEverybody remember where we parked.");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let quote = as_quote(block);
         assert_eq!(quote.title(), Some("A title"));
+    }
+
+    /// The quoted-paragraph parser must reject a non-quote paragraph on its
+    /// first byte, before scanning the paragraph to the next blank line. A
+    /// document of many consecutive delimiter lines with no blank line between
+    /// them otherwise makes every block rescan the entire remaining input,
+    /// giving quadratic (O(n²)) parse time and a practical denial of service on
+    /// modestly-sized input. This guards that the parse stays roughly linear.
+    ///
+    /// The bound is deliberately loose (seconds, versus a handful of
+    /// milliseconds when linear) so the test is not flaky on a slow or loaded
+    /// machine, while still failing decisively if the quadratic behavior
+    /// returns — the quadratic parse of this input takes tens of seconds.
+    #[test]
+    fn many_consecutive_delimiters_parse_in_roughly_linear_time() {
+        use std::time::{Duration, Instant};
+
+        // Each of these patterns previously exercised the quadratic path: none
+        // contains a blank line, so the quoted-paragraph scan ran to end of
+        // input on every block.
+        let example_run = "====\n".repeat(20_000);
+
+        let mut example_run_with_text = "====\n".repeat(10_000);
+        example_run_with_text.push_str("text\n");
+        example_run_with_text.push_str(&"====\n".repeat(10_000));
+
+        let open_run = "--\n".repeat(20_000);
+
+        let budget = Duration::from_secs(10);
+
+        for source in [&example_run, &example_run_with_text, &open_run] {
+            let start = Instant::now();
+            let _ = Parser::default().parse(source);
+            let elapsed = start.elapsed();
+
+            assert!(
+                elapsed < budget,
+                "parsing {} delimiter lines took {elapsed:?}, exceeding the {budget:?} budget \
+                 (a sign the quadratic quoted-paragraph rescan has returned)",
+                source.lines().count(),
+            );
+        }
     }
 }

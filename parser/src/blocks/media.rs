@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    blocks::{ContentModel, IsBlock, caption, metadata::BlockMetadata},
+    blocks::{ChildBlocks, ContentModel, IsBlock, caption, metadata::BlockMetadata},
     content::{Content, substitute_attributes_in_macro_target},
     span::MatchedItem,
     strings::CowStr,
@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// A media block is used to represent an image, video, or audio block macro.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct MediaBlock<'src> {
     type_: MediaType,
     target: Span<'src>,
@@ -38,7 +38,7 @@ pub(crate) enum TargetResolution {
 }
 
 /// A media type may be one of three different types.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum MediaType {
     /// Still image
     Image,
@@ -61,6 +61,16 @@ impl std::fmt::Debug for MediaType {
 }
 
 impl<'src> MediaBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// A media block (image, audio, or video) never has child blocks, so this
+    /// iterator is always empty. See [`FindBlocks`](crate::blocks::FindBlocks)
+    /// to search from a [`Block`](crate::blocks::Block) or
+    /// [`Document`](crate::Document).
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::empty()
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -142,6 +152,7 @@ impl<'src> MediaBlock<'src> {
         };
 
         let attrlist = open_brace.after.slice(0..open_brace.after.len() - 1);
+
         // Note that we already checked that this line ends with a close brace.
 
         let macro_attrlist = Attrlist::parse(attrlist, parser, AttrlistContext::Inline);
@@ -154,6 +165,7 @@ impl<'src> MediaBlock<'src> {
                 item: Self {
                     type_,
                     target: target.item,
+
                     // Attribute references in the target are resolved later, in
                     // `resolve_target` (which also decides whether a missing
                     // reference should drop the whole block); until then, the
@@ -163,6 +175,7 @@ impl<'src> MediaBlock<'src> {
                     source,
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
+
                     // The caption (and its number) is assigned later, in
                     // `assign_caption`, which the caller invokes only once the
                     // block survives `resolve_target`. Assigning it here would
@@ -569,7 +582,7 @@ mod tests {
 
         assert_eq!(mi.item.content_model(), ContentModel::Empty);
         assert_eq!(mi.item.raw_context().deref(), "image");
-        assert!(mi.item.nested_blocks().next().is_none());
+        assert!(mi.item.child_blocks().next().is_none());
         assert!(mi.item.title_source().is_none());
         assert!(mi.item.title().is_none());
         assert!(mi.item.anchor().is_none());
@@ -694,7 +707,7 @@ mod tests {
 
         assert_eq!(mi.item.content_model(), ContentModel::Empty);
         assert_eq!(mi.item.raw_context().deref(), "audio");
-        assert!(mi.item.nested_blocks().next().is_none());
+        assert!(mi.item.child_blocks().next().is_none());
         assert!(mi.item.title_source().is_none());
         assert!(mi.item.title().is_none());
         assert!(mi.item.anchor().is_none());
@@ -759,7 +772,7 @@ mod tests {
 
         assert_eq!(mi.item.content_model(), ContentModel::Empty);
         assert_eq!(mi.item.raw_context().deref(), "video");
-        assert!(mi.item.nested_blocks().next().is_none());
+        assert!(mi.item.child_blocks().next().is_none());
         assert!(mi.item.title_source().is_none());
         assert!(mi.item.title().is_none());
         assert!(mi.item.anchor().is_none());

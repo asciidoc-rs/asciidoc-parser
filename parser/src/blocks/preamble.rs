@@ -1,22 +1,31 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Span,
     attributes::Attrlist,
-    blocks::{Block, ContentModel, IsBlock},
+    blocks::{Block, ChildBlocks, ContentModel, IsBlock},
     internal::debug::DebugSliceReference,
     strings::CowStr,
 };
 
 /// Content between the end of the document header and the first section title
 /// in the document body is called the preamble.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Preamble<'src> {
     blocks: Vec<Block<'src>>,
     source: Span<'src>,
 }
 
 impl<'src> Preamble<'src> {
+    /// Returns a document-order iterator over this preamble's direct child
+    /// blocks.
+    ///
+    /// For the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(&self.blocks)
+    }
+
     pub(crate) fn from_blocks(blocks: Vec<Block<'src>>, source: Span<'src>) -> Self {
         let preamble_source = if let Some(last_block) = blocks.last() {
             let after_last = last_block.span().discard_all();
@@ -44,11 +53,7 @@ impl<'src> IsBlock<'src> for Preamble<'src> {
         "preamble".into()
     }
 
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.blocks.iter()
-    }
-
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
     }
 
@@ -102,7 +107,7 @@ mod tests {
     fn fixture_preamble<'src>(
         doc: &'src crate::Document<'src>,
     ) -> &'src crate::blocks::Block<'src> {
-        doc.nested_blocks().next().unwrap()
+        doc.child_blocks().next().unwrap()
     }
 
     #[test]
@@ -217,7 +222,7 @@ mod tests {
         assert_eq!(preamble.resolved_context().as_ref(), "preamble");
         assert!(preamble.declared_style().is_none());
 
-        let mut blocks = preamble.nested_blocks();
+        let mut blocks = preamble.child_blocks();
         assert_eq!(
             blocks.next().unwrap(),
             &Block::Simple(SimpleBlock {

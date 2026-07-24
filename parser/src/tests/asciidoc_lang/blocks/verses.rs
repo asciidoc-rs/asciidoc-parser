@@ -30,7 +30,7 @@ Verses are defined by setting `verse` on a paragraph or an excerpt block delimit
     // first position of the attribute list. Line breaks (and leading indents)
     // are preserved verbatim in the rendered `<pre class="content">`.
     let doc = Parser::default().parse("[verse]\nRoses are red,\n  violets are blue.");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     let quote = as_quote(block);
     assert_eq!(quote.type_(), QuoteType::Verse);
     assert_css(&doc, ".verseblock", 1);
@@ -42,7 +42,7 @@ Verses are defined by setting `verse` on a paragraph or an excerpt block delimit
 
     // A verse can also be set on an excerpt block delimited by four underscores.
     let doc = Parser::default().parse("[verse]\n____\nRoses are red,\n\nviolets are blue.\n____");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     let quote = as_quote(block);
     assert_eq!(quote.type_(), QuoteType::Verse);
     assert_css(&doc, ".verseblock", 1);
@@ -82,7 +82,7 @@ include::example$verse.adoc[tag=para]
         "[verse,Carl Sandburg, two lines from the poem Fog]\nThe fog comes\non little cat feet.",
     );
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     let quote = as_quote(block);
     assert_eq!(quote.type_(), QuoteType::Verse);
 
@@ -140,7 +140,7 @@ include::example$verse.adoc[tag=bl]
         "[verse,Carl Sandburg,Fog]\n____\nThe fog comes\non little cat feet.\n\nIt sits looking\nover harbor and city\non silent haunches\nand then moves on.\n____",
     );
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     let quote = as_quote(block);
     assert_eq!(quote.type_(), QuoteType::Verse);
 

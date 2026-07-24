@@ -26,7 +26,7 @@ That means that any inline formatting in an attribute value isn't interpreted be
     );
 
     let mut parser = Parser::default();
-    parser.parse(":special_chars: <tag_this>\n:y: yes\n:answer: {y}\n:format: *bold*");
+    let _ = parser.parse(":special_chars: <tag_this>\n:y: yes\n:answer: {y}\n:format: *bold*");
 
     assert_eq!(
         parser
@@ -82,7 +82,7 @@ This might be useful if you're referencing the attribute in a place that depends
         );
 
         let mut parser = Parser::default();
-        parser.parse(":cols: pass:[.>2,.>4]");
+        let _ = parser.parse(":cols: pass:[.>2,.>4]");
 
         assert_eq!(
             parser.attribute_value("cols").as_maybe_str().unwrap(),
@@ -125,7 +125,7 @@ You can inspect the value stored in an attribute using this trick:
             "MyApp<sup>2</sup>"
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -210,7 +210,7 @@ If the macro is absent, the value is processed with the header substitution grou
             "MyApp<sup>2</sup>"
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -309,7 +309,7 @@ To play, you'll need {equipment}.
 
         let doc = parser.parse("To play, you'll need {equipment}.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -366,7 +366,7 @@ That's because, in contrast, substitutions are applied to the value of an attrib
 \n\nTo play, you'll need {equipment}.",
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -433,7 +433,7 @@ This strategy is akin to post-processing the attribute value.
         "MyApp^2^"
     );
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
 
