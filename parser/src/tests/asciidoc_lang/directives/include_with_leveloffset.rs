@@ -13,13 +13,13 @@ fn section_levels(doc: &crate::Document<'_>) -> Vec<(usize, String)> {
         if let Block::Section(section) = block {
             out.push((section.level(), section.section_title().to_string()));
         }
-        for child in block.nested_blocks() {
+        for child in block.child_blocks() {
             walk(child, out);
         }
     }
 
     let mut out = vec![];
-    for block in doc.nested_blocks() {
+    for block in doc.child_blocks() {
         walk(block, &mut out);
     }
     out

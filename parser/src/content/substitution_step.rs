@@ -1594,7 +1594,7 @@ mod tests {
             let doc = Parser::default().parse(r#"[#the_id]##marked text##"#);
 
             assert_eq!(
-                doc.nested_blocks()
+                doc.child_blocks()
                     .next()
                     .unwrap()
                     .rendered_content()

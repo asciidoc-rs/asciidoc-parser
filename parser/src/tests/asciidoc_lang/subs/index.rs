@@ -88,7 +88,7 @@ The normal substitution group (`normal`) is applied to the majority of the Ascii
 
         let doc = Parser::default().parse("Normal paragraph text");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         assert_eq!(block1.substitution_group(), SubstitutionGroup::Normal);
     }
@@ -128,19 +128,19 @@ Only special characters are replaced in these blocks.
 
         let doc = Parser::default().parse("....\n....");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         assert_eq!(block1.substitution_group(), SubstitutionGroup::Verbatim);
 
         let doc = Parser::default().parse("----\n----");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         assert_eq!(block1.substitution_group(), SubstitutionGroup::Verbatim);
 
         let doc = Parser::default().parse("[source]\n----\n----");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         assert_eq!(block1.substitution_group(), SubstitutionGroup::Verbatim);
     }
@@ -163,7 +163,7 @@ Only the special characters substitution is applied to these elements.
 
         let doc = Parser::default().parse("++++\n++++");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         assert_eq!(block1.substitution_group(), SubstitutionGroup::Pass);
     }
@@ -183,7 +183,7 @@ No substitutions are applied to comments.
 
         let doc = Parser::default().parse("////\n////");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         assert_eq!(block1.substitution_group(), SubstitutionGroup::None);
     }

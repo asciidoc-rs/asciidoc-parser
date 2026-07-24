@@ -3,7 +3,10 @@
 //! This module provides assertion functions that can be used in tests
 //! to verify the structure of parsed AsciiDoc documents.
 
-use crate::{Document, blocks::IsBlock};
+use crate::{
+    Document,
+    blocks::{FindBlocks, IsBlock},
+};
 
 /// Asserts that an XPath query matches exactly the expected number of nodes.
 ///
@@ -82,14 +85,17 @@ pub(crate) fn assert_output_contains<'src>(doc: &'src Document<'src>, text: &str
     }
 }
 
-fn check_block_contains<'src, B: IsBlock<'src>>(block: &'src B, text: &str) -> bool {
+fn check_block_contains<'src, B: IsBlock<'src> + FindBlocks<'src>>(
+    block: &'src B,
+    text: &str,
+) -> bool {
     if let Some(content) = block.rendered_content()
         && content.contains(text)
     {
         return true;
     }
 
-    block.nested_blocks().any(|b| check_block_contains(b, text))
+    block.child_blocks().any(|b| check_block_contains(b, text))
 }
 
 /// Refutes that any node contains the designated text in its rendered content.
@@ -110,7 +116,7 @@ pub(crate) fn refute_output_contains<'src>(doc: &'src Document<'src>, text: &str
     refute_block_contains(doc, text);
 }
 
-fn refute_block_contains<'src, B: IsBlock<'src>>(block: &'src B, text: &str) {
+fn refute_block_contains<'src, B: IsBlock<'src> + FindBlocks<'src>>(block: &'src B, text: &str) {
     if let Some(content) = block.rendered_content() {
         dbg!(&content);
         if content.contains(text) {
@@ -118,7 +124,7 @@ fn refute_block_contains<'src, B: IsBlock<'src>>(block: &'src B, text: &str) {
         }
     }
 
-    for nested_block in block.nested_blocks() {
+    for nested_block in block.child_blocks() {
         refute_block_contains(nested_block, text);
     }
 }

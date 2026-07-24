@@ -125,7 +125,7 @@ You can inspect the value stored in an attribute using this trick:
             "MyApp<sup>2</sup>"
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -210,7 +210,7 @@ If the macro is absent, the value is processed with the header substitution grou
             "MyApp<sup>2</sup>"
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -309,7 +309,7 @@ To play, you'll need {equipment}.
 
         let doc = parser.parse("To play, you'll need {equipment}.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -366,7 +366,7 @@ That's because, in contrast, substitutions are applied to the value of an attrib
 \n\nTo play, you'll need {equipment}.",
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -433,7 +433,7 @@ This strategy is akin to post-processing the attribute value.
         "MyApp^2^"
     );
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
 

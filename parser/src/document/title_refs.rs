@@ -146,7 +146,7 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
             }
         }
 
-        collect(block.nested_blocks_mut(), nodes);
+        collect(block.child_blocks_mut(), nodes);
     }
 }
 
@@ -170,7 +170,7 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<String>], index: 
             *index += 1;
         }
 
-        write_back(block.nested_blocks_mut(), memo, index);
+        write_back(block.child_blocks_mut(), memo, index);
     }
 }
 

@@ -1,11 +1,9 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        AdmonitionVariant, Block, CompoundDelimitedBlock, ContentModel, IsBlock, RawDelimitedBlock,
-        SimpleBlock, TableBlock, metadata::BlockMetadata,
+        AdmonitionVariant, Block, ChildBlocks, CompoundDelimitedBlock, ContentModel, IsBlock,
+        RawDelimitedBlock, SimpleBlock, TableBlock, metadata::BlockMetadata,
     },
     content::Content,
     document::InterpretedValue,
@@ -48,6 +46,16 @@ pub struct AdmonitionBlock<'src> {
 }
 
 impl<'src> AdmonitionBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// For the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(&self.blocks)
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -368,11 +376,7 @@ impl<'src> IsBlock<'src> for AdmonitionBlock<'src> {
         self.content.as_ref().map(|content| content.rendered())
     }
 
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.blocks.iter()
-    }
-
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
     }
 
@@ -564,7 +568,7 @@ mod tests {
         assert_eq!(admonition.raw_context().deref(), "admonition");
         assert_eq!(admonition.resolved_context().deref(), "admonition");
         assert_eq!(admonition.declared_style(), Some("NOTE"));
-        assert!(admonition.nested_blocks().next().is_none());
+        assert!(admonition.child_blocks().next().is_none());
         assert!(admonition.title().is_none());
         assert!(admonition.attrlist().is_none());
     }
@@ -640,7 +644,7 @@ mod tests {
         assert_eq!(admonition.content_model(), ContentModel::Compound);
         assert!(admonition.content().is_none());
         assert!(admonition.rendered_content().is_none());
-        assert_eq!(admonition.nested_blocks().count(), 1);
+        assert_eq!(admonition.child_blocks().count(), 1);
     }
 
     #[test]
@@ -666,7 +670,7 @@ mod tests {
         let admonition = as_admonition(&block);
         assert_eq!(admonition.variant(), AdmonitionVariant::Warning);
         assert_eq!(admonition.content_model(), ContentModel::Compound);
-        assert_eq!(admonition.nested_blocks().count(), 2);
+        assert_eq!(admonition.child_blocks().count(), 2);
     }
 
     #[test]
@@ -763,12 +767,12 @@ mod tests {
         assert!(simple.title_source().is_none());
         assert!(simple.anchor_reftext().is_none());
         assert_eq!(simple.substitution_group(), SubstitutionGroup::Normal);
-        assert!(simple.nested_blocks().next().is_none());
+        assert!(simple.child_blocks().next().is_none());
         assert!(format!("{simple:?}").starts_with("Block::Admonition"));
 
         let compound = parse_one("[NOTE]\n====\nx\n====");
         assert_eq!(compound.content_model(), ContentModel::Compound);
-        assert_eq!(compound.nested_blocks().count(), 1);
+        assert_eq!(compound.child_blocks().count(), 1);
     }
 
     #[test]
@@ -781,7 +785,7 @@ mod tests {
         assert!(media.declared_style().is_none());
 
         let list = parse_one("* item");
-        let item = list.nested_blocks().next().unwrap();
+        let item = list.child_blocks().next().unwrap();
         assert_eq!(item.raw_context().deref(), "list_item");
         assert!(item.declared_style().is_none());
 

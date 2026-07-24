@@ -89,7 +89,7 @@ fn single_line() {
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
     assert!(mi.item.declared_style().is_none());
-    assert_eq!(mi.item.nested_blocks().next(), None);
+    assert_eq!(mi.item.child_blocks().next(), None);
     assert!(mi.item.id().is_none());
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
@@ -526,7 +526,7 @@ fn with_block_anchor_only() {
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
     assert!(mi.item.declared_style().is_none());
-    assert_eq!(mi.item.nested_blocks().next(), None);
+    assert_eq!(mi.item.child_blocks().next(), None);
     assert_eq!(mi.item.id().unwrap(), "notice");
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
@@ -629,7 +629,7 @@ fn with_block_anchor_trailing_comma() {
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
     assert!(mi.item.declared_style().is_none());
-    assert_eq!(mi.item.nested_blocks().next(), None);
+    assert_eq!(mi.item.child_blocks().next(), None);
     assert!(mi.item.id().is_none());
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
@@ -751,7 +751,7 @@ fn with_block_anchor_and_reftext() {
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
     assert!(mi.item.declared_style().is_none());
-    assert_eq!(mi.item.nested_blocks().next(), None);
+    assert_eq!(mi.item.child_blocks().next(), None);
     assert_eq!(mi.item.id().unwrap(), "notice");
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
@@ -863,7 +863,7 @@ fn err_empty_block_anchor() {
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
     assert!(mi.item.declared_style().is_none());
-    assert_eq!(mi.item.nested_blocks().next(), None);
+    assert_eq!(mi.item.child_blocks().next(), None);
     assert!(mi.item.id().is_none());
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
@@ -956,7 +956,7 @@ fn err_invalid_block_anchor() {
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
     assert!(mi.item.declared_style().is_none());
-    assert_eq!(mi.item.nested_blocks().next(), None);
+    assert_eq!(mi.item.child_blocks().next(), None);
     assert!(mi.item.id().is_none());
     assert!(mi.item.roles().is_empty());
     assert!(mi.item.options().is_empty());
@@ -1049,7 +1049,7 @@ fn unterminated_block_anchor() {
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
     assert_eq!(mi.item.declared_style().unwrap(), "[notice");
-    assert_eq!(mi.item.nested_blocks().next(), None);
+    assert_eq!(mi.item.child_blocks().next(), None);
 
     assert!(mi.item.id().is_none());
     assert!(mi.item.roles().is_empty());

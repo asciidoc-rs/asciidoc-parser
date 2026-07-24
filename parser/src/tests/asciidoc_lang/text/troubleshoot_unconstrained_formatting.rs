@@ -202,7 +202,7 @@ The backticks contribute to making the curved quotation marks, but the word isn'
 
         let doc = Parser::default().parse(r#""`end points`""#);
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -231,7 +231,7 @@ The parser ignores the inner pair of backticks and interprets them as literal ch
 
         let doc = Parser::default().parse(r#""``end points``""#);
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -260,7 +260,7 @@ That's three pairs of backticks in total.
 
         let doc = Parser::default().parse(r#""```end points```""#);
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -292,7 +292,7 @@ For example:
 
         let doc = Parser::default().parse(r#""[.code]``end points``" or \"``end points``""#);
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -331,7 +331,7 @@ The ``class```' static methods make it easy to operate on files and directories.
             r#"The ``class```' static methods make it easy to operate on files and directories."#,
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -363,7 +363,7 @@ The `class`’ static methods make it easy to operate on files and directories.
             r#"The `class`’ static methods make it easy to operate on files and directories."#,
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -425,7 +425,7 @@ The mix of constrained and unconstrained formatting marks in the line is ambiguo
 
         let doc = Parser::default().parse("The __kernel qualifier can be used with the __attribute__ keyword...\n\n#`CB###2`# and #`CB###3`#");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -482,7 +482,7 @@ This works because xref:subs:attributes.adoc[attribute expansion] is performed a
 
         let doc = Parser::default().parse(":scores: __\n:hash3: ###\n\nThe {scores}kernel qualifier can be used with the {scores}attribute{scores} keyword...\n\n#`CB{hash3}2`# and #`CB{hash3}3`#");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -528,7 +528,7 @@ However, the text still receives proper output escaping for xref:subs:special-ch
 
         let doc = Parser::default().parse("The +__kernel+ qualifier can be used with the +__attribute__+ keyword...\n\n#`+CB###2+`# and #`+CB###3+`#");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -566,7 +566,7 @@ Since AsciiDoc offers more advanced formatting, the double enclosure is necessar
 fn first_simple_block<'src>(
     doc: &'src crate::Document<'src>,
 ) -> &'src crate::blocks::SimpleBlock<'src> {
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     let crate::blocks::Block::Simple(sb) = block else {
         panic!("Wrong block type found: {block:#?}");
     };

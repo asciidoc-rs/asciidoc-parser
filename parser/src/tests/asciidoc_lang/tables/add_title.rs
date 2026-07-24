@@ -207,7 +207,7 @@ This title label can be xref:customize-title-label.adoc[customized] or xref:turn
     let see_also = Parser::default().parse(
         "This title label can be xref:customize-title-label.adoc[customized] or xref:turn-off-title-label.adoc[deactivated].",
     );
-    let crate::blocks::Block::Simple(para) = &see_also.nested_blocks().next().unwrap() else {
+    let crate::blocks::Block::Simple(para) = &see_also.child_blocks().next().unwrap() else {
         panic!("expected a paragraph");
     };
     assert_eq!(

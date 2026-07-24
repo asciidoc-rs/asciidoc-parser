@@ -109,7 +109,7 @@ All such syntax is passed through to the STEM processor as is.
         let doc =
             parser.parse("stem:[sqrt(4) = 2]\n\nWater (stem:[H_2O]) is a critical component.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -132,7 +132,7 @@ All such syntax is passed through to the STEM processor as is.
         // escaping inside the passthrough.
         let doc = parser.parse(r"A matrix can be written as stem:[[[a,b\],[c,d\]\]((n),(k))].");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let Block::Simple(sb) = block else {
             panic!("Unexpected block type: {block:?}");
         };
@@ -181,7 +181,7 @@ The AsciiDoc processor handles that for you automatically!
         // added by the converter at render time.
         let doc = Parser::default().parse("[stem]\n++++\nsqrt(4) = 2\n++++");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
 
         assert_eq!(block.content_model(), ContentModel::Raw);
         assert_eq!(block.raw_context().as_ref(), "stem");
@@ -371,7 +371,7 @@ include::example$stem.adoc[tag=multi-a-render]
         // delimiters regardless of the document's default `stem` notation.
         let doc = Parser::default().parse(r"latexmath:[C = \alpha + \beta Y^{\gamma} + \epsilon]");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let Block::Simple(sb) = block else {
             panic!("Unexpected block type: {block:?}");
         };
@@ -386,7 +386,7 @@ include::example$stem.adoc[tag=multi-a-render]
         let doc = Parser::default()
             .parse("[latexmath]\n++++\nx = y\n++++\n\n[asciimath]\n++++\nsqrt(4) = 2\n++++");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         assert_eq!(block1.raw_context().as_ref(), "stem");

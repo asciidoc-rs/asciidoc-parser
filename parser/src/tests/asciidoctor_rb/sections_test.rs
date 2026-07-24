@@ -2474,7 +2474,7 @@ mod discrete_heading {
         assert_eq!(sec.level(), 2);
         assert_eq!(sec.id(), Some("_independent_heading"));
         assert_eq!(sec.section_title(), "Independent Heading!");
-        assert!(sec.nested_blocks().next().is_none());
+        assert!(sec.child_blocks().next().is_none());
         assert!(rendered_paragraphs(&doc).contains(&"not in section".to_string()));
     }
 

@@ -41,7 +41,7 @@ include::example$text.adoc[tag=mono]
         "\"`Wait!`\" Indigo plucked a small vial from her desk's top drawer and held it toward us.\nThe vial's label read: `E=mc^2^`; the `E` represents _energy_,\nbut also pure _genius!_",
     );
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {
@@ -75,7 +75,7 @@ The command will re``link`` all packages.
 
     let doc = Parser::default().parse("The command will re``link`` all packages.");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {
@@ -116,7 +116,7 @@ The result of <<ex-mix>> is rendered below.
 
     let doc = Parser::default().parse("`*_monospaced bold italic_*`");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {
