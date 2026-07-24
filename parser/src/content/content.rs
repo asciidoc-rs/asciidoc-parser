@@ -758,6 +758,31 @@ mod tests {
         }
     }
 
+    mod from_filtered {
+        use crate::{Span, content::Content, strings::CowStr};
+
+        #[test]
+        fn borrows_source_when_filter_is_a_no_op() {
+            // A filtered view byte-identical to the source span is borrowed from
+            // the span rather than allocating an owned copy of text we already
+            // hold.
+            let content = Content::from_filtered(Span::new("plain text"), "plain text");
+
+            assert!(matches!(content.rendered, CowStr::Borrowed(_)));
+            assert_eq!(content.rendered.as_ref(), "plain text");
+        }
+
+        #[test]
+        fn owns_rendered_text_when_filter_changes_it() {
+            // A filtered view that differs from the source is materialized as an
+            // owned copy.
+            let content = Content::from_filtered(Span::new("a|b"), "ab");
+
+            assert!(matches!(content.rendered, CowStr::Boxed(_)));
+            assert_eq!(content.rendered.as_ref(), "ab");
+        }
+    }
+
     mod strip_footnote_marker_spans {
         use super::super::{
             FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, strip_footnote_marker_spans,

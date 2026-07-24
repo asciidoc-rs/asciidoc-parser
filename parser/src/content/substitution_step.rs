@@ -90,14 +90,14 @@ fn apply_special_characters(content: &mut Content<'_>, renderer: &dyn InlineSubs
     let replacer = SpecialCharacterReplacer { renderer };
 
     // The guard above guarantees at least one of `<`, `>`, `&` is present, so
-    // `replace_all` always rewrites the text and returns `Cow::Owned`. Bind that
-    // owned string directly – seeding a working buffer with `to_string()` first
-    // would be a second, wholly redundant heap allocation. A `Cow::Borrowed`
-    // result cannot occur, but if it somehow did we leave the text unchanged.
-    let rendered = match SPECIAL_CHARS.replace_all(content.rendered.as_ref(), replacer) {
-        Cow::Owned(rendered) => rendered,
-        Cow::Borrowed(_) => return,
-    };
+    // `replace_all` always rewrites the text and returns `Cow::Owned`, which
+    // `into_owned` then unwraps without copying. Seeding a working buffer with
+    // `to_string()` first would be a second, wholly redundant heap allocation.
+    // (A `Cow::Borrowed` cannot occur here; were it ever to, `into_owned` would
+    // clone the unchanged text, which is still correct.)
+    let rendered = SPECIAL_CHARS
+        .replace_all(content.rendered.as_ref(), replacer)
+        .into_owned();
 
     content.rendered = rendered.into();
 }
