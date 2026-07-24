@@ -1329,13 +1329,9 @@ fn section_to_node<'a>(section: &'a SectionBlock<'a>) -> VirtualNode {
         node = node.with_class(role);
     }
 
-    // The section id lands on the heading (`<h2>`) only, not on this wrapper
-    // `<div>`, matching Asciidoctor's HTML5 converter. The heading id is added
-    // in the `Block::Section` match arm.
-
-    // TODO: Section title heading is added in the Block::Section match arm
-    // using section.level() to determine the heading level (h2-h6) and
-    // section.section_title() to get the rendered title text (#907).
+    // The section id and title heading both land on the heading (`<h2>`) only,
+    // not on this wrapper `<div>`, matching Asciidoctor's HTML5 converter. The
+    // heading is added in the `Block::Section` match arm.
 
     // Add nested blocks, handling block titles as separate siblings.
     for child in section.nested_blocks() {
