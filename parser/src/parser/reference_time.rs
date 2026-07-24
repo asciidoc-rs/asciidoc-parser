@@ -9,8 +9,8 @@
 /// modification time of the source file (for `doc*`) and the current wall-clock
 /// time (for `local*`). Because those values change from run to run, output
 /// that embeds them is not reproducible. Supplying a `ReferenceTime` pins the
-/// clock to a known instant so that the computed attributes — and any output
-/// derived from them — are stable and reproducible.
+/// clock to a known instant so that the computed attributes – and any output
+/// derived from them – are stable and reproducible.
 ///
 /// A `ReferenceTime` records a *local* wall-clock date and time together with
 /// the UTC offset in effect at that instant. The offset governs how the
@@ -125,14 +125,14 @@ impl ReferenceTime {
         Self::from_unix_timestamp(secs)
     }
 
-    /// Formats the date as `%Y-%m-%d` (e.g. `2019-01-02`) — the value of
+    /// Formats the date as `%Y-%m-%d` (e.g. `2019-01-02`) – the value of
     /// `docdate` / `localdate`.
     pub(crate) fn date(&self) -> String {
         format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
     }
 
     /// Formats the time as `%H:%M:%S <zone>` (e.g. `03:04:05 +0600` or
-    /// `03:04:05 UTC`) — the value of `doctime` / `localtime`.
+    /// `03:04:05 UTC`) – the value of `doctime` / `localtime`.
     pub(crate) fn time(&self) -> String {
         format!(
             "{:02}:{:02}:{:02} {}",
@@ -143,7 +143,7 @@ impl ReferenceTime {
         )
     }
 
-    /// Formats the year (e.g. `2019`) — the value of `docyear` / `localyear`.
+    /// Formats the year (e.g. `2019`) – the value of `docyear` / `localyear`.
     pub(crate) fn year_string(&self) -> String {
         self.year.to_string()
     }
@@ -229,8 +229,8 @@ impl DatetimeInputs {
 /// computed: `now` drives the `local*` family, and `doc` (the source document's
 /// modification time, defaulting to `now`) drives the `doc*` family.
 ///
-/// This is captured once — lazily, the first time a time-dependent attribute is
-/// read — so that a parse which never references one does no clock,
+/// This is captured once – lazily, the first time a time-dependent attribute is
+/// read – so that a parse which never references one does no clock,
 /// environment, or allocation work, and so that repeated reads within one parse
 /// observe a single, consistent instant. It ports Asciidoctor's
 /// `Document#fill_datetime_attributes`, but resolves each attribute on demand
@@ -279,7 +279,7 @@ impl DatetimeContext {
     /// string and an unset/absent attribute as `None`. An explicit value always
     /// wins over the computed one, and the derived `*year` / `*datetime` are
     /// built from whichever value (explicit or computed) each sibling resolves
-    /// to — mirroring Asciidoctor's `||=` semantics.
+    /// to – mirroring Asciidoctor's `||=` semantics.
     pub(crate) fn resolve<F>(&self, name: &str, explicit: F) -> Option<String>
     where
         F: Fn(&str) -> Option<String>,
@@ -328,7 +328,7 @@ impl DatetimeContext {
     }
 
     /// Resolves a year attribute (`localyear` / `docyear`): an explicit value,
-    /// else derived from the date — the reference instant's year when the date
+    /// else derived from the date – the reference instant's year when the date
     /// is computed, or the `YYYY-` prefix of an explicit date (which may yield
     /// no value).
     fn year<F: Fn(&str) -> Option<String>>(
@@ -380,7 +380,7 @@ impl DatetimeContext {
 /// [reproducible builds specification]: https://reproducible-builds.org/specs/source-date-epoch/
 fn source_date_epoch_from_env() -> Option<ReferenceTime> {
     // An unset variable reads as empty, which `parse_source_date_epoch` rejects
-    // just like a set-but-empty value — so the (common) unset path exercises the
+    // just like a set-but-empty value – so the (common) unset path exercises the
     // same line as a set one, without the tests having to mutate the process
     // environment.
     parse_source_date_epoch(&std::env::var("SOURCE_DATE_EPOCH").unwrap_or_default())
@@ -619,8 +619,8 @@ mod tests {
         assert_eq!(ctx.resolve("docyear", explicit), None);
 
         // An explicit year wins outright over both the date-derived and the
-        // instant-derived year. (The reader path never reaches this — an
-        // explicitly-set attribute short-circuits before resolution — so it is
+        // instant-derived year. (The reader path never reaches this – an
+        // explicitly-set attribute short-circuits before resolution – so it is
         // covered here directly.)
         let explicit = |name: &str| match name {
             "docyear" => Some("1999".to_string()),

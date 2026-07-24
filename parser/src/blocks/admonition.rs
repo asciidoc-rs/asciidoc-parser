@@ -110,7 +110,7 @@ impl<'src> AdmonitionBlock<'src> {
         // compound content.
         //
         // For a valid example/open delimiter, `CompoundDelimitedBlock::parse`
-        // always returns `item: Some(..)` — even for an unterminated block, in
+        // always returns `item: Some(..)` – even for an unterminated block, in
         // which case it also reports an `UnterminatedDelimitedBlock` warning.
         // Those `warnings` are bound here and forwarded through `finish`, so no
         // diagnostic is lost on the masquerade path.
@@ -449,6 +449,7 @@ mod tests {
     fn as_admonition<'a>(block: &'a Block<'a>) -> &'a crate::blocks::AdmonitionBlock<'a> {
         match block {
             Block::Admonition(admonition) => admonition,
+
             // Only reached if a test parses an input that is not an admonition;
             // it exists to fail that test loudly, so it is uncovered while the
             // tests pass.

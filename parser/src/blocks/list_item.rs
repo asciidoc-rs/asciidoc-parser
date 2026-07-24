@@ -280,18 +280,31 @@ impl<'src> ListItem<'src> {
                     break;
                 }
 
+                // Bound native recursion before descending into a nested list
+                // (issue #885). If the nesting limit is already reached, stop
+                // here and warn: this list item is finalized without the nested
+                // list, and the deeper markers bubble up to be reparsed as
+                // shallower siblings rather than overflow the stack.
+                if parser.block_nesting_limit_reached() {
+                    parser.warn_block_nesting_exceeded(new_item_marker.span(), warnings);
+                    break;
+                }
+
                 let mut nested_list_markers = parent_list_markers.to_owned();
                 nested_list_markers.push(marker.clone());
 
                 // NOTE: The call to `ListBlock::parse` *should* succeed (as in I can't think of
                 // a test case where it would fail). We use the `?` to provide a safe escape in
                 // case it doesn't.
-                let nested_list_mi = ListBlock::parse_inside_list(
+                parser.block_nesting_depth += 1;
+                let nested_list_result = ListBlock::parse_inside_list(
                     &metadata.item,
                     &nested_list_markers,
                     parser,
                     warnings,
-                )?;
+                );
+                parser.block_nesting_depth -= 1;
+                let nested_list_mi = nested_list_result?;
 
                 blocks.push(Block::List(nested_list_mi.item));
 
@@ -370,15 +383,25 @@ impl<'src> ListItem<'src> {
                         block_start: ext_block_start,
                     };
 
+                    // Bound native recursion before descending into a nested
+                    // list (issue #885); see the matching guard above.
+                    if parser.block_nesting_limit_reached() {
+                        parser.warn_block_nesting_exceeded(new_item_marker.span(), warnings);
+                        break;
+                    }
+
                     let mut nested_list_markers = parent_list_markers.to_owned();
                     nested_list_markers.push(marker.clone());
 
-                    let nested_list_mi = ListBlock::parse_inside_list(
+                    parser.block_nesting_depth += 1;
+                    let nested_list_result = ListBlock::parse_inside_list(
                         &ext_metadata,
                         &nested_list_markers,
                         parser,
                         warnings,
-                    )?;
+                    );
+                    parser.block_nesting_depth -= 1;
+                    let nested_list_mi = nested_list_result?;
 
                     blocks.push(Block::List(nested_list_mi.item));
 
@@ -434,7 +457,7 @@ impl<'src> ListItem<'src> {
             warnings.extend(indented_block_maw.warnings);
 
             // A block dropped at parse time (`attribute-missing=drop-line` on a
-            // block-macro target) attaches nothing, but — like a real block —
+            // block-macro target) attaches nothing, but – like a real block –
             // it consumes any active continuation and requires the next block
             // to be indented or reintroduced with a `+`. (A dropped block is
             // always a block macro, never `+`-prefixed content, so it can't set

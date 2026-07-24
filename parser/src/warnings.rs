@@ -30,7 +30,7 @@ pub struct Warning<'src> {
     /// `source.line()` through [`Document::source_map`].
     ///
     /// It is `Some` only when the warning arises from content that was expanded
-    /// *privately* and never appears in the document source — an `include::`
+    /// *privately* and never appears in the document source – an `include::`
     /// directive buried inside an owned (include-expanded) AsciiDoc table cell.
     /// No document span maps to such a directive, so its true `(file, line)` is
     /// resolved when the warning is raised (against the owning cell's own
@@ -240,11 +240,21 @@ pub enum WarningType {
     /// An include directive was not expanded because the file containing it
     /// already sits at the maximum include depth (the `max-include-depth`
     /// attribute, possibly lowered by an enclosing include directive's `depth`
-    /// attribute). The field is the relative maximum in effect — the number of
-    /// levels that were permitted below the file that established the limit —
+    /// attribute). The field is the relative maximum in effect – the number of
+    /// levels that were permitted below the file that established the limit –
     /// matching the number Asciidoctor reports.
     #[error("maximum include depth of {0} exceeded")]
     MaxIncludeDepthExceeded(usize),
+
+    /// Block parsing reached the maximum nesting depth (the `max-block-nesting`
+    /// attribute, default 32, API-only) before the innermost content was
+    /// parsed, so the over-nested content was truncated rather than descended
+    /// into. This bounds native recursion – a delimited block's body, a section
+    /// body, a table cell, or a nested list each parse on a fresh call stack –
+    /// so a crafted document cannot overflow the stack and abort the process.
+    /// The field is the limit in effect.
+    #[error("maximum block nesting depth of {0} exceeded")]
+    MaxBlockNestingExceeded(usize),
 
     /// An include directive specified an `encoding` attribute whose value is
     /// not UTF-8. The parser only handles UTF-8 content, so the requested
@@ -279,7 +289,7 @@ pub enum WarningType {
 
     /// One or more tags named by an include directive's `tag` / `tags`
     /// attribute were never found in the include file. The field is the
-    /// pre-formatted, pluralized subject — `tag '<name>'` for a single missing
+    /// pre-formatted, pluralized subject – `tag '<name>'` for a single missing
     /// tag, or `tags '<name>, <name>'` (comma-joined, in the order specified)
     /// for several.
     #[error("{0} not found in include file")]
@@ -477,6 +487,11 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::MaxIncludeDepthExceeded(depth) => f
                 .debug_tuple("WarningType::MaxIncludeDepthExceeded")
+                .field(depth)
+                .finish(),
+
+            WarningType::MaxBlockNestingExceeded(depth) => f
+                .debug_tuple("WarningType::MaxBlockNestingExceeded")
                 .field(depth)
                 .finish(),
 
@@ -954,6 +969,13 @@ mod tests {
             }
 
             #[test]
+            fn max_block_nesting_exceeded() {
+                let warning = WarningType::MaxBlockNestingExceeded(64);
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(debug_output, "WarningType::MaxBlockNestingExceeded(64)");
+            }
+
+            #[test]
             fn non_utf8_include_encoding() {
                 let warning = WarningType::NonUtf8IncludeEncoding("iso-8859-1".to_string());
                 let debug_output = format!("{:?}", warning);
@@ -1112,6 +1134,7 @@ mod tests {
             };
 
             let _ = maw.unwrap_if_no_warnings();
+
             // There are warnings so this should panic.
         }
     }

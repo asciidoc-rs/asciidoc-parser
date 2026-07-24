@@ -124,6 +124,7 @@ impl<'src> CompoundDelimitedBlock<'src> {
             "====" => "example",
             "--" => "open",
             "****" => "sidebar",
+
             // Quote-delimited blocks (`____`) are handled by `QuoteBlock`, which
             // intercepts them before this parser is reached. `is_valid_delimiter`
             // still recognizes them so that paragraph and list parsing stop at a

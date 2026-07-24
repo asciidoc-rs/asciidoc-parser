@@ -65,7 +65,7 @@ pub(crate) struct Caption {
 ///
 /// This is the entry point used while parsing a block. It resolves the
 /// captioning context (a block style naming a built-in context, such as
-/// `[example]` over an open block, takes precedence over the raw context —
+/// `[example]` over an open block, takes precedence over the raw context –
 /// mirroring [`resolved_context`]) and the explicit caption override, then
 /// delegates to [`assign_caption`]:
 ///
@@ -107,14 +107,14 @@ pub(crate) fn assign_block_caption(
 /// Computes the caption for a block, following Asciidoctor's `assign_caption`.
 ///
 /// Returns `None` (no caption, no number) when:
-/// * the block has no title (`has_title` is `false`) — untitled blocks are
+/// * the block has no title (`has_title` is `false`) – untitled blocks are
 ///   never captioned or counted;
 /// * an explicit caption override is present but empty (e.g. `[caption=]`, or a
 ///   collapsible example whose caption is suppressed); or
 /// * the context is not captionable, or its caption attribute is unset.
 ///
 /// When a non-empty explicit `caption` override is supplied (from a
-/// `[caption=]` attribute) — or the document-wide `caption` attribute is set —
+/// `[caption=]` attribute) – or the document-wide `caption` attribute is set –
 /// that value is used verbatim as the prefix, with **no** number assigned.
 /// Otherwise the label comes from the context's caption attribute and the
 /// document-wide counter for that context is incremented, producing a `"<label>
@@ -275,13 +275,13 @@ mod tests {
     #[test]
     fn document_caption_attribute_overrides_label() {
         // A document-wide `caption` attribute supplies a verbatim, unnumbered
-        // label for captionable blocks...
+        // label for captionable blocks ...
         assert_eq!(
             first_block_caption(":caption: Sample\n\n.Title\n====\nbody.\n===="),
             (Some("Sample".to_string()), None)
         );
 
-        // ...but it must not leak onto a non-captionable context such as an
+        // ... but it must not leak onto a non-captionable context such as an
         // ordinary titled paragraph.
         assert_eq!(
             first_block_caption(":caption: Sample\n\n.Title\nplain paragraph."),
