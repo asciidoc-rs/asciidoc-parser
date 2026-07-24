@@ -762,6 +762,31 @@ mod unresolved_reference_warnings {
     }
 
     #[test]
+    fn sorted_into_source_order_across_categories() {
+        // An unresolved-reference warning is folded into the document's warning
+        // list *after* parsing (by the reference-resolution sweep), yet
+        // `warnings()` is source-ordered: the reference on line 1 must precede
+        // the dangling block-attribute-list warning raised on a later line,
+        // rather than trailing it because of when it was recorded.
+        let doc = Parser::default().parse("See <<nope>>.\n\n== Section\n\n[foo]\n");
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 2);
+
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::PossibleInvalidReference("nope".to_string())
+        );
+        assert_eq!(warnings[0].source.line(), 1);
+
+        assert_eq!(
+            warnings[1].warning,
+            WarningType::MissingBlockAfterTitleOrAttributeList
+        );
+        assert_eq!(warnings[1].source.line(), 5);
+    }
+
+    #[test]
     fn reported_for_a_reference_inside_a_footnote() {
         // A footnote's text is lifted out of the block it was written in, but the
         // footnote records the location of its defining occurrence, so the

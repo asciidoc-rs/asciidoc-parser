@@ -5531,18 +5531,22 @@ fn should_log_warning_if_endif_is_mismatched() {
 
     assert_eq!(rendered_paragraphs(&doc), vec!["Our quest is complete!"]);
 
+    // `warnings()` yields diagnostics in source order, so the unterminated
+    // conditional (line 1) precedes the mismatch (line 3) here – Asciidoctor
+    // logs them the other way around (in detection order), since the
+    // unterminated conditional is only recognized at end-of-input.
     let warnings: Vec<_> = doc.warnings().collect();
     assert_eq!(warnings.len(), 2);
     assert_eq!(
         warnings[0].warning,
-        WarningType::MismatchedConditionalDirective("endif::on-journey[]".to_owned())
-    );
-    assert_eq!(warnings[0].origin, Some(crate::parser::SourceLine(None, 3)));
-    assert_eq!(
-        warnings[1].warning,
         WarningType::UnterminatedConditionalDirective("ifdef::on-quest[]".to_owned())
     );
-    assert_eq!(warnings[1].origin, Some(crate::parser::SourceLine(None, 1)));
+    assert_eq!(warnings[0].origin, Some(crate::parser::SourceLine(None, 1)));
+    assert_eq!(
+        warnings[1].warning,
+        WarningType::MismatchedConditionalDirective("endif::on-journey[]".to_owned())
+    );
+    assert_eq!(warnings[1].origin, Some(crate::parser::SourceLine(None, 3)));
 }
 
 // An `endif` with bracketed text is malformed (text is not permitted) and
