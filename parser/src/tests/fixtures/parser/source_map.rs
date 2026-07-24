@@ -16,13 +16,16 @@ impl PartialEq<SourceMap> for crate::parser::SourceMap {
 }
 
 fn fixture_eq_observed(fixture: &SourceMap, observed: &crate::parser::SourceMap) -> bool {
-    if fixture.0.len() != observed.0.len() {
+    let observed: Vec<_> = observed.anchors().collect();
+
+    if fixture.0.len() != observed.len() {
         return false;
     }
 
-    for (fixture_source_line, observed_source_line) in fixture.0.iter().zip(&observed.0) {
-        if fixture_source_line.0 != observed_source_line.0
-            || fixture_source_line.1 != observed_source_line.1
+    for (fixture_entry, (output_line, file, source_line)) in fixture.0.iter().zip(observed) {
+        if fixture_entry.0 != output_line
+            || fixture_entry.1.0 != file
+            || fixture_entry.1.1 != source_line
         {
             return false;
         }
