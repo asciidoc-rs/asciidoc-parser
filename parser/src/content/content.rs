@@ -25,8 +25,8 @@ use crate::{
 /// (or, for multi-document workflows, in another document entirely). The
 /// macros substitution therefore records each cross-reference in a deferred
 /// form and leaves an opaque placeholder in the rendered text. The
-/// references are resolved in a later pass — see
-/// [`Document::resolve_references`] — at which point [`rendered()`] reflects
+/// references are resolved in a later pass – see
+/// [`Document::resolve_references`] – at which point [`rendered()`] reflects
 /// the resolved links. Until then, [`rendered()`] shows an unresolved fallback,
 /// so it always returns clean text.
 ///
@@ -132,16 +132,16 @@ const XREF_PLACEHOLDER_END: char = '\u{E001}';
 /// A footnote in a section title is a real, document-order footnote, but its
 /// marker must be kept out of the section's reference text and auto-generated
 /// ID. Marking the marker in a single render (rather than re-rendering the
-/// title with footnotes suppressed) means stateful substitutions — counters,
-/// attribute references that expand into footnotes — run exactly once. See
+/// title with footnotes suppressed) means stateful substitutions – counters,
+/// attribute references that expand into footnotes – run exactly once. See
 /// [`strip_footnote_marker_spans`] and
 /// [`Content::remove_footnote_marker_sentinels`].
 pub(crate) const FOOTNOTE_MARKER_START: char = '\u{E002}';
 pub(crate) const FOOTNOTE_MARKER_END: char = '\u{E003}';
 
-/// Removes each footnote marker span — a [`FOOTNOTE_MARKER_START`] …
+/// Removes each footnote marker span – a [`FOOTNOTE_MARKER_START`] …
 /// [`FOOTNOTE_MARKER_END`] region and everything between, i.e. the sentinels
-/// *and* the marker they bracket — leaving footnote-free text suitable for a
+/// *and* the marker they bracket – leaving footnote-free text suitable for a
 /// section's reference text and auto-generated ID.
 pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -152,7 +152,7 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
         rest = &rest[start + FOOTNOTE_MARKER_START.len_utf8()..];
 
         // Drop through the matching end sentinel (the marker text). A start
-        // without an end cannot occur — the substitution always emits both — but
+        // without an end cannot occur – the substitution always emits both – but
         // if it somehow did, drop the remainder rather than reintroduce the
         // stray sentinel.
         rest = match rest.find(FOOTNOTE_MARKER_END) {
@@ -169,8 +169,8 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
 /// cross-references it carries.
 ///
 /// A block title stashed across a section heading (see
-/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] — the
-/// parser it rides on has no `'src` lifetime — so the title travels in this
+/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] – the
+/// parser it rides on has no `'src` lifetime – so the title travels in this
 /// owned form and is rebuilt into a [`Content`] (via
 /// [`Content::from_owned_title`]) when the next block claims it. Carrying the
 /// deferred template and cross-references along means an embedded `<<id>>`
@@ -631,8 +631,8 @@ fn render_template(
 /// macros substitution step, so any cross-reference (`<<id>>`, `xref:id[…]`)
 /// inside it cannot be resolved by the document-level pass that resolves
 /// references in block content. Instead, the footnote captures its
-/// cross-references here — as a placeholder template plus the references in
-/// placeholder order — and they are resolved alongside the block references
+/// cross-references here – as a placeholder template plus the references in
+/// placeholder order – and they are resolved alongside the block references
 /// (see [`Footnote::resolve_references`]).
 ///
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
@@ -794,6 +794,7 @@ mod tests {
         #[test]
         fn rehomes_a_placeholder_into_a_local_segment() {
             let all = vec![segment("a"), segment("b")];
+
             // Reference only the second segment; it becomes local index 0.
             let text = format!("see {XREF_PLACEHOLDER_START}1{XREF_PLACEHOLDER_END} here");
 

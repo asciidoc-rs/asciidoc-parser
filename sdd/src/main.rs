@@ -20,7 +20,7 @@ use walkdir::{DirEntry, WalkDir};
 // NOTE: The Asciidoctor test suite is being ported one file at a time (see
 // `ref/asciidoctor/README.md`); every `.rb` file vendored under
 // `ref/asciidoctor/test` is picked up here automatically. Coverage grows as
-// more files are ported — at present `attribute_list_test.rb` is the first.
+// more files are ported – at present `attribute_list_test.rb` is the first.
 const SPEC_SOURCES: &[(&str, &str, Option<&str>)] = &[
     ("../ref/asciidoc-lang/docs/modules", ".adoc", None),
     ("../ref/asciidoctor/test", ".rb", None),
@@ -58,6 +58,7 @@ fn main() {
 
     for (count, entry) in spec_files.into_iter().enumerate() {
         let path = entry.path().to_str().unwrap().trim_start_matches("../");
+
         // (unwrap: Should have been filtered out above.)
 
         // if !path.contains("/revision-line.adoc") {

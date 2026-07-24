@@ -146,7 +146,7 @@ impl<'src> QuoteBlock<'src> {
 
             // A `[quote]`/`[verse]` style also masquerades over an open block
             // (`--`): the open delimiter adopts the quote/verse context. This is
-            // unique to the open block — every other structural container (below)
+            // unique to the open block – every other structural container (below)
             // keeps its own context and ignores the style.
             if first_line.data() == "--" {
                 return Some(Self::parse_delimited(metadata, parser, type_));
@@ -316,13 +316,22 @@ impl<'src> QuoteBlock<'src> {
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,
     ) -> Option<MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>>> {
+        // A quoted paragraph must begin with a double quote. Test that on the
+        // block's first byte *before* scanning the whole paragraph. `read_paragraph`
+        // (below) walks every line up to the next blank line, so testing the first
+        // byte here avoids that scan for the common non-quoted paragraph: without
+        // it, a long run of non-blank lines that never forms a quoted paragraph is
+        // rescanned in full for every block, making the parse O(n²) on pathological
+        // input (e.g. thousands of consecutive delimiter lines with no blank line
+        // between them). `read_paragraph` starts at `block_start`, so a paragraph
+        // beginning with `"` shares this first byte — testing it here loses nothing.
+        if !metadata.block_start.data().starts_with('"') {
+            return None;
+        }
+
         // The paragraph extends to the first blank line.
         let para = read_paragraph(metadata.block_start);
         let data = para.data();
-
-        if !data.starts_with('"') {
-            return None;
-        }
 
         // Locate the attribution line: the first line that begins with `--`
         // followed by whitespace and at least one more character. Splits the
@@ -698,6 +707,7 @@ fn split_at_attribution_line(data: &str) -> Option<(&str, &str)> {
             && (rest.starts_with(' ') || rest.starts_with('\t'))
         {
             let attribution_text = rest.trim_start_matches([' ', '\t']);
+
             // `line_start > 0` ensures there is at least one line of quoted text
             // before the attribution line.
             if !attribution_text.is_empty() && line_start > 0 {
@@ -845,6 +855,7 @@ mod tests {
     fn as_quote<'a>(block: &'a Block<'a>) -> &'a crate::blocks::QuoteBlock<'a> {
         match block {
             Block::Quote(quote) => quote,
+
             // Only reached if a test parses an input that is not a quote block;
             // it exists to fail that test loudly, so it is uncovered while the
             // tests pass.
@@ -1086,8 +1097,8 @@ mod tests {
 
     #[test]
     fn markdown_blockquote_propagates_nested_warning() {
-        // A warning produced while parsing the (owned, `>`-stripped) body — here
-        // an unterminated nested delimited block — is re-anchored at the
+        // A warning produced while parsing the (owned, `>`-stripped) body – here
+        // an unterminated nested delimited block – is re-anchored at the
         // blockquote's own span and surfaced to the caller, rather than being
         // dropped (or panicking a debug build).
         let mut parser = Parser::default();
@@ -1099,6 +1110,7 @@ mod tests {
             maw.warnings.first().unwrap().warning,
             WarningType::UnterminatedDelimitedBlock
         );
+
         // The warning is anchored at the blockquote's source span.
         assert_eq!(maw.warnings.first().unwrap().source, block.span());
     }
@@ -1120,6 +1132,7 @@ mod tests {
         assert_eq!(quote.type_(), QuoteType::Quote);
         assert_eq!(quote.content_model(), ContentModel::Compound);
         assert_eq!(quote.blocks().len(), 1);
+
         // The nested blocks borrow the block's owned source, so they are not
         // exposed through the `'src`-bound trait accessor.
         assert!(quote.nested_blocks().next().is_none());
@@ -1233,5 +1246,47 @@ mod tests {
         let block = doc.nested_blocks().next().unwrap();
         let quote = as_quote(block);
         assert_eq!(quote.title(), Some("A title"));
+    }
+
+    /// The quoted-paragraph parser must reject a non-quote paragraph on its
+    /// first byte, before scanning the paragraph to the next blank line. A
+    /// document of many consecutive delimiter lines with no blank line between
+    /// them otherwise makes every block rescan the entire remaining input,
+    /// giving quadratic (O(n²)) parse time and a practical denial of service on
+    /// modestly-sized input. This guards that the parse stays roughly linear.
+    ///
+    /// The bound is deliberately loose (seconds, versus a handful of
+    /// milliseconds when linear) so the test is not flaky on a slow or loaded
+    /// machine, while still failing decisively if the quadratic behavior
+    /// returns — the quadratic parse of this input takes tens of seconds.
+    #[test]
+    fn many_consecutive_delimiters_parse_in_roughly_linear_time() {
+        use std::time::{Duration, Instant};
+
+        // Each of these patterns previously exercised the quadratic path: none
+        // contains a blank line, so the quoted-paragraph scan ran to end of
+        // input on every block.
+        let example_run = "====\n".repeat(20_000);
+
+        let mut example_run_with_text = "====\n".repeat(10_000);
+        example_run_with_text.push_str("text\n");
+        example_run_with_text.push_str(&"====\n".repeat(10_000));
+
+        let open_run = "--\n".repeat(20_000);
+
+        let budget = Duration::from_secs(10);
+
+        for source in [&example_run, &example_run_with_text, &open_run] {
+            let start = Instant::now();
+            let _ = Parser::default().parse(source);
+            let elapsed = start.elapsed();
+
+            assert!(
+                elapsed < budget,
+                "parsing {} delimiter lines took {elapsed:?}, exceeding the {budget:?} budget \
+                 (a sign the quadratic quoted-paragraph rescan has returned)",
+                source.lines().count(),
+            );
+        }
     }
 }

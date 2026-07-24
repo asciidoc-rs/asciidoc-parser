@@ -100,7 +100,7 @@ impl<'src> Span<'src> {
             col: if lines_to_add == 0 {
                 self.col + col
             } else {
-                // When going to a new line, char starts at 1
+                // When going to a new line, char starts at 1.
                 col + 1
             },
             offset: self.offset + offset,

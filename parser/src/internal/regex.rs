@@ -22,7 +22,7 @@ pub fn replace_with_lookahead<'h, LR: LookaheadReplacer>(
         }
 
         for (_i, cap) in it {
-            // unwrap on 0 is OK because captures only reports matches
+            // `unwrap` on 0 is OK because `captures` only reports matches.
             #[allow(clippy::unwrap_used)]
             let m = cap.get(0).unwrap();
             new.push_str(&haystack[last_match..m.start()]);
@@ -60,6 +60,7 @@ pub(crate) enum LookaheadResult {
 }
 
 /// Alternative to
+// TODO: Complete this doc comment (#906).
 pub(crate) trait LookaheadReplacer {
     fn replace_append(
         &mut self,

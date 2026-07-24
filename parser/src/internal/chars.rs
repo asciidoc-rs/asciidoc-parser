@@ -22,7 +22,7 @@ static WORD_CHAR: LazyLock<Regex> = LazyLock::new(|| {
 /// controls (e.g. ZWNJ), so `café`, `سمن`, and `_foo` are all valid names.
 ///
 /// The regexes that match attribute *references* use the same `\w` class, so
-/// an entry name and a reference to it always agree — including on decomposed
+/// an entry name and a reference to it always agree – including on decomposed
 /// forms (`e` + combining acute) and Persian names that embed a ZWNJ.
 pub(crate) fn is_word_char(c: char) -> bool {
     let mut buf = [0u8; 4];
