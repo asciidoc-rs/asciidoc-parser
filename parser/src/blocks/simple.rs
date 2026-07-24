@@ -2,8 +2,8 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker, RawDelimitedBlock,
-        caption::assign_block_caption, metadata::BlockMetadata,
+        ChildBlocks, CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker,
+        RawDelimitedBlock, caption::assign_block_caption, metadata::BlockMetadata,
     },
     content::{Content, SubstitutionGroup},
     span::MatchedItem,
@@ -62,6 +62,15 @@ pub struct SimpleBlock<'src> {
 }
 
 impl<'src> SimpleBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// A simple (paragraph) block never has child blocks, so this iterator is
+    /// always empty. See [`FindBlocks`](crate::blocks::FindBlocks) to search
+    /// from a [`Block`](crate::blocks::Block) or [`Document`](crate::Document).
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::empty()
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///

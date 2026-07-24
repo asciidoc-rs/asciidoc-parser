@@ -783,7 +783,7 @@ This is necessary since the `.` character in the shorthand syntax is the delimit
         let doc = Parser::default()
             .parse("[id=classname.propertyname1]\nprop1\n\n[[classname.propertyname2]]\nprop2");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         assert_eq!(block1.id().unwrap(), "classname.propertyname1");
@@ -1724,7 +1724,7 @@ include::example$id.adoc[tag=anchor-wrong]
         // and registered, and the `*` is left as literal text.
         let doc = Parser::default().parse("[[anchor-point]]* list item with invalid anchor");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.rendered_content().unwrap(),
             "<a id=\"anchor-point\"></a>* list item with invalid anchor"
@@ -1859,7 +1859,7 @@ include::example$id.adoc[tag=inline-anchor-brackets]
         // immediately before the image and registered as a referenceable ID.
         let doc = Parser::default().parse("[[tiger-image]]image:tiger.png[Image of a tiger]");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.rendered_content().unwrap(),
             "<a id=\"tiger-image\"></a><span class=\"image\"><img src=\"tiger.png\" alt=\"Image of a tiger\"></span>"
@@ -1887,7 +1887,7 @@ include::example$id.adoc[tag=inline-anchor-macro]
         // the shorthand form.
         let doc = Parser::default().parse("anchor:tiger-image[]image:tiger.png[Image of a tiger]");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.rendered_content().unwrap(),
             "<a id=\"tiger-image\"></a><span class=\"image\"><img src=\"tiger.png\" alt=\"Image of a tiger\"></span>"
@@ -1984,7 +1984,7 @@ include::example$id.adoc[tag=anchor-xreflabel]
         );
 
         let xref_paragraph = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| block.rendered_content())
             .find(|rendered| rendered.contains("href"))
             .unwrap();

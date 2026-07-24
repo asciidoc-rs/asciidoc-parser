@@ -44,7 +44,7 @@ The names of those substitution steps and groups are as follows:
             "[subs=none]\nThis & _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -69,7 +69,7 @@ The names of those substitution steps and groups are as follows:
             "[subs=normal]\nThis & _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -94,7 +94,7 @@ The names of those substitution steps and groups are as follows:
             "[subs=verbatim]\nThis & _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -120,7 +120,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
             "[subs=verbatim]\nThis & _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -145,7 +145,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
             "[subs=verbatim]\nThis & _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -172,7 +172,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
             "[subs=quotes]\nThis & _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -197,7 +197,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
             "[subs=attributes]\nThis & _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -223,7 +223,7 @@ The output of `replacements` may depend on whether the `specialcharacters` subst
             "[subs=replacements]\nThis &#169; _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -248,7 +248,7 @@ The output of `replacements` may depend on whether the `specialcharacters` subst
             "[subs=macros]\nThis &#169; _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -273,7 +273,7 @@ The output of `replacements` may depend on whether the `specialcharacters` subst
             "[subs=post_replacements]\nThis &#169; _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -300,7 +300,7 @@ The value also specifies the order in which the substitutions are applied.
             "[subs=+macros]\n----\nThis &#169; _that_ and icon:github[] +\nanother line with a{sp}space there ...\n----",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -315,7 +315,7 @@ The value also specifies the order in which the substitutions are applied.
             "[subs=-macros]\nThis &#169; _that_ and icon:github[] +\nanother line with a{sp}space there ...",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -341,13 +341,13 @@ It can only be applied to a leaf block, which is any block that cannot have chil
             ":icons:\n\n[subs=none]\n****\nThis &#169; _that_ and icon:github[] +\nanother line with a{sp}space there ...\n****",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -406,7 +406,7 @@ include::example$subs.adoc[tag=subs-out]
             "[source,java,subs=\"verbatim,quotes\"]\n----\nSystem.out.println(\"Hello *<name>*\")\n----",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -441,7 +441,7 @@ pass:c,q[System.out.println("Hello *<name>*");] <1>
             "[source,java,subs=\"verbatim,macros\"]\n----\nSystem.out.println(\"No bold *here*\");\npass:c,q[System.out.println(\"Hello *<name>*\");]\n----",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -497,7 +497,7 @@ Prepends the substitution to the default list.
             "[source,java,subs=\"+attributes\"]\n----\nSystem.out.println(\"Hello{sp}*<name>*\")\n----",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -523,7 +523,7 @@ Appends the substitution to the default list.
             "[source,java,subs=\"attributes+\"]\n----\nSystem.out.println(\"Hello{sp}*<name>*\")\n----",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -549,7 +549,7 @@ Removes the substitution from the default list.
             "[source,java,subs=\"-specialchars\"]\n----\nSystem.out.println(\"Hello <name>\")\n----",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -580,7 +580,7 @@ include::example$subs.adoc[tag=subs-add]
             ":version: 1.42\n\n[source,xml,subs=\"attributes+\"]\n----\n<version>{version}</version>\n----",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -622,7 +622,7 @@ include::example$subs.adoc[tag=subs-sub]
             .with_include_file_handler(handler);
         let doc = parser.parse("include::example$subs.adoc[tag=subs-sub]\n");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let Block::RawDelimited(block) = block else {
             panic!("Unexpected block type: {block:?}");
         };
@@ -669,7 +669,7 @@ In the above example, the `attributes` substitution step is added to the beginni
             .with_include_file_handler(handler);
         let doc = parser.parse("include::example$subs.adoc[tag=subs-multi]\n");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let Block::RawDelimited(block) = block else {
             panic!("Unexpected block type: {block:?}");
         };

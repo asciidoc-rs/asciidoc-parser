@@ -29,10 +29,9 @@ use crate::{
 ///
 /// The walk is depth-first and yields blocks in **document order**. It reaches
 /// every block reachable through the tree, including the children of
-/// Markdown-style blockquotes (whose children are not exposed through the
-/// `'src`-bound [`IsBlock::nested_blocks`] because they borrow the block's own
-/// owned source). AsciiDoc table cells are separate nested documents and are
-/// **not** entered by default; opt in with
+/// Markdown-style blockquotes (whose children borrow the block's own owned
+/// source rather than the document source). AsciiDoc table cells are separate
+/// nested documents and are **not** entered by default; opt in with
 /// [`BlockSelector::traverse_documents`] (the analog of Asciidoctor's
 /// `traverse_documents` selector key).
 ///
@@ -89,6 +88,24 @@ use crate::{
 /// [`find_blocks`]: Self::find_blocks
 /// [`traverse_blocks`]: Self::traverse_blocks
 pub trait FindBlocks<'a>: sealed::Sealed<'a> {
+    /// Returns a document-order iterator over this node's **direct** child
+    /// blocks (one level deep; it does not recurse).
+    ///
+    /// This is the complete direct-children accessor: it reaches the children
+    /// of a Markdown-style blockquote, which borrow the block's own owned
+    /// source. AsciiDoc table cells are separate nested documents and are not
+    /// entered here; use [`find_blocks`] with
+    /// [`BlockSelector::traverse_documents`] to reach them.
+    ///
+    /// For the full subtree rather than the immediate children, use
+    /// [`descendant_blocks`].
+    ///
+    /// [`find_blocks`]: Self::find_blocks
+    /// [`descendant_blocks`]: Self::descendant_blocks
+    fn child_blocks(&'a self) -> ChildBlocks<'a> {
+        ChildBlocks(self.seed_children(false))
+    }
+
     /// Returns a depth-first, document-order iterator over every descendant
     /// block.
     ///
@@ -158,26 +175,26 @@ impl<'a> FindBlocks<'a> for Document<'a> {}
 impl<'a> FindBlocks<'a> for Block<'a> {}
 
 mod sealed {
-    use super::{ChildBlocks, children_of};
-    use crate::{Document, blocks::IsBlock};
+    use super::{ChildBlocksInner, children_of};
+    use crate::Document;
 
     /// Seals [`FindBlocks`](super::FindBlocks) and supplies the traversal seed:
     /// the receiver's direct child blocks.
     pub trait Sealed<'a> {
-        fn seed_children(&'a self, traverse_documents: bool) -> ChildBlocks<'a>;
+        fn seed_children(&'a self, traverse_documents: bool) -> ChildBlocksInner<'a>;
     }
 
     impl<'a> Sealed<'a> for Document<'a> {
-        fn seed_children(&'a self, _traverse_documents: bool) -> ChildBlocks<'a> {
+        fn seed_children(&'a self, _traverse_documents: bool) -> ChildBlocksInner<'a> {
             // A document's direct children are never table cells, so the flag
             // does not affect the seed; any tables among the children are
             // expanded with the flag during the walk itself.
-            ChildBlocks::Slice(self.nested_blocks())
+            ChildBlocksInner::Slice(self.top_level_blocks().iter())
         }
     }
 
     impl<'a> Sealed<'a> for super::Block<'a> {
-        fn seed_children(&'a self, traverse_documents: bool) -> ChildBlocks<'a> {
+        fn seed_children(&'a self, traverse_documents: bool) -> ChildBlocksInner<'a> {
             children_of(self, traverse_documents)
         }
     }
@@ -326,7 +343,7 @@ pub enum Descend {
 /// A depth-first, document-order iterator over descendant blocks, returned by
 /// [`FindBlocks::descendant_blocks`].
 pub struct Descendants<'a> {
-    stack: Vec<ChildBlocks<'a>>,
+    stack: Vec<ChildBlocksInner<'a>>,
     traverse_documents: bool,
 }
 
@@ -368,7 +385,7 @@ impl<'a> Iterator for FindBlocksIter<'a> {
 /// An iterator that walks descendant blocks under the control of a closure,
 /// returned by [`FindBlocks::traverse_blocks`].
 pub struct TraverseBlocks<'a, F> {
-    stack: Vec<ChildBlocks<'a>>,
+    stack: Vec<ChildBlocksInner<'a>>,
     control: F,
 }
 
@@ -403,15 +420,50 @@ where
     }
 }
 
+/// A document-order iterator over the direct child blocks of a single node.
+///
+/// This is the return type of [`FindBlocks::child_blocks`] and of each block
+/// type's inherent `child_blocks()` accessor. It yields `&Block` for the
+/// receiver's immediate children only (it does not recurse – use
+/// [`FindBlocks::descendant_blocks`] for the full subtree). Unlike a raw
+/// structural walk, it reaches the children of a Markdown-style blockquote
+/// (which borrow the block's own owned source); AsciiDoc table cells are
+/// separate nested documents and are not entered.
+///
+/// The concrete container behind this iterator is deliberately hidden so it can
+/// change without breaking callers.
+pub struct ChildBlocks<'a>(ChildBlocksInner<'a>);
+
+impl<'a> ChildBlocks<'a> {
+    /// Builds a child-block iterator over a contiguous slice of blocks.
+    pub(crate) fn from_slice(blocks: &'a [Block<'a>]) -> Self {
+        ChildBlocks(ChildBlocksInner::Slice(blocks.iter()))
+    }
+
+    /// Builds an empty child-block iterator, for block types that never have
+    /// children.
+    pub(crate) fn empty() -> Self {
+        ChildBlocks(ChildBlocksInner::Empty)
+    }
+}
+
+impl<'a> Iterator for ChildBlocks<'a> {
+    type Item = &'a Block<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
 /// An iterator over the direct child blocks of a single node.
 ///
-/// This is the traversal frame the depth-first walkers push and pop. It is not
-/// part of the public API surface: it appears only in the signature of the
-/// sealed `Sealed` trait (hence `pub` to satisfy the privacy lint), and the
-/// enclosing `find` module is private, so it cannot be named from outside this
-/// crate.
+/// This is the traversal frame the depth-first walkers push and pop, and the
+/// value wrapped by the public [`ChildBlocks`]. It is not part of the public
+/// API surface: it appears only in the signature of the sealed `Sealed` trait
+/// (hence `pub` to satisfy the privacy lint), and the enclosing `find` module
+/// is private, so it cannot be named from outside this crate.
 #[doc(hidden)]
-pub enum ChildBlocks<'a> {
+pub enum ChildBlocksInner<'a> {
     /// Children stored contiguously in a slice (the common case).
     Slice(Iter<'a, Block<'a>>),
 
@@ -424,35 +476,35 @@ pub enum ChildBlocks<'a> {
     Empty,
 }
 
-impl<'a> Iterator for ChildBlocks<'a> {
+impl<'a> Iterator for ChildBlocksInner<'a> {
     type Item = &'a Block<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            ChildBlocks::Slice(iter) => iter.next(),
-            ChildBlocks::Boxed(iter) => iter.next(),
-            ChildBlocks::Empty => None,
+            ChildBlocksInner::Slice(iter) => iter.next(),
+            ChildBlocksInner::Boxed(iter) => iter.next(),
+            ChildBlocksInner::Empty => None,
         }
     }
 }
 
 /// Returns the direct child blocks of `block`, in document order.
 ///
-/// This is the one place that knows how to reach each block type's children,
-/// including the two kinds that the `'src`-bound [`IsBlock::nested_blocks`]
-/// cannot expose:
+/// This is the one place that knows how to reach the children the plain
+/// per-type accessors cannot, or that depend on `traverse_documents`:
 ///
-/// * A Markdown-style blockquote's children borrow the block's own owned
-///   source, so they are read through [`QuoteBlock::blocks`] rather than
-///   `nested_blocks`. (For a `____`-delimited quote the two agree.)
 /// * An AsciiDoc table cell is a nested document; its blocks are reached only
-///   when `traverse_documents` is set.
+///   when `traverse_documents` is set. A table's own inherent
+///   [`child_blocks`](crate::blocks::TableBlock::child_blocks) reports no
+///   children, so the cell walk lives here.
+/// * Every other block type defers to its inherent
+///   [`child_blocks`](FindBlocks::child_blocks)-style accessor, which already
+///   handles the Markdown-blockquote case (whose children borrow the block's
+///   own owned source and are read through [`QuoteBlock::blocks`]).
 ///
 /// [`QuoteBlock::blocks`]: crate::blocks::QuoteBlock::blocks
-fn children_of<'a>(block: &'a Block<'a>, traverse_documents: bool) -> ChildBlocks<'a> {
+fn children_of<'a>(block: &'a Block<'a>, traverse_documents: bool) -> ChildBlocksInner<'a> {
     match block {
-        Block::Quote(quote) => ChildBlocks::Slice(quote.blocks().iter()),
-
         Block::Table(table) => {
             if traverse_documents {
                 let blocks = table
@@ -467,13 +519,25 @@ fn children_of<'a>(block: &'a Block<'a>, traverse_documents: bool) -> ChildBlock
                     })
                     .flatten();
 
-                ChildBlocks::Boxed(Box::new(blocks))
+                ChildBlocksInner::Boxed(Box::new(blocks))
             } else {
-                ChildBlocks::Empty
+                ChildBlocksInner::Empty
             }
         }
 
-        other => ChildBlocks::Slice(other.nested_blocks()),
+        Block::Quote(quote) => quote.child_blocks().0,
+        Block::Admonition(admonition) => admonition.child_blocks().0,
+        Block::Section(section) => section.child_blocks().0,
+        Block::List(list) => list.child_blocks().0,
+        Block::ListItem(list_item) => list_item.child_blocks().0,
+        Block::Preamble(preamble) => preamble.child_blocks().0,
+        Block::CompoundDelimited(compound) => compound.child_blocks().0,
+
+        Block::Simple(_)
+        | Block::Media(_)
+        | Block::RawDelimited(_)
+        | Block::Break(_)
+        | Block::DocumentAttribute(_) => ChildBlocksInner::Empty,
     }
 }
 
@@ -685,8 +749,8 @@ mod tests {
     #[test]
     fn markdown_quote_children_are_reached() {
         // Regression: a Markdown-style blockquote's children borrow the block's
-        // own owned source and are invisible to `nested_blocks()`, but the search
-        // API must still reach them (via `QuoteBlock::blocks()`).
+        // own owned source rather than the document source, but the search API
+        // must still reach them (via `QuoteBlock::blocks()`).
         let doc = Parser::default().parse("> A quoted paragraph.\n");
 
         let contexts = contexts(&doc);
@@ -745,5 +809,59 @@ mod tests {
             contexts(section),
             vec!["list", "list_item", "paragraph", "list_item", "paragraph"]
         );
+    }
+
+    #[test]
+    fn child_blocks_yields_direct_children_only() {
+        // `child_blocks()` is one level deep: the document's only direct child
+        // is the section, not the list and paragraphs nested inside it.
+        let doc = Parser::default().parse("== Section\n\n* one\n* two\n");
+
+        let child_contexts: Vec<_> = doc
+            .child_blocks()
+            .map(|b| b.resolved_context().as_ref().to_string())
+            .collect();
+
+        assert_eq!(child_contexts, vec!["section"]);
+
+        // On a `Block`, `child_blocks()` returns that block's own direct
+        // children (the section's list), still without recursing.
+        let section = doc.child_blocks().next().unwrap();
+        let section_child_contexts: Vec<_> = section
+            .child_blocks()
+            .map(|b| b.resolved_context().as_ref().to_string())
+            .collect();
+
+        assert_eq!(section_child_contexts, vec!["list"]);
+    }
+
+    #[test]
+    fn child_blocks_reaches_markdown_quote_children() {
+        // Regression for #894: a Markdown-style blockquote's children are not
+        // exposed through a bare structural walk, but `child_blocks()` reaches
+        // them.
+        let doc = Parser::default().parse("> A quoted paragraph.\n");
+
+        let quote = doc.child_blocks().next().unwrap();
+        assert_eq!(quote.resolved_context().as_ref(), "quote");
+
+        let quote_child_contexts: Vec<_> = quote
+            .child_blocks()
+            .map(|b| b.resolved_context().as_ref().to_string())
+            .collect();
+
+        assert_eq!(quote_child_contexts, vec!["paragraph"]);
+    }
+
+    #[test]
+    fn child_blocks_does_not_enter_table_cells() {
+        // A table reports no direct child blocks; its AsciiDoc cell content is a
+        // separate nested document, reachable only through `find_blocks` with
+        // `traverse_documents`.
+        let doc = Parser::default().parse("|===\na| Cell _text_.\n|===\n");
+
+        let table = doc.child_blocks().next().unwrap();
+        assert_eq!(table.resolved_context().as_ref(), "table");
+        assert_eq!(table.child_blocks().count(), 0);
     }
 }

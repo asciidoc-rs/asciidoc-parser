@@ -424,12 +424,12 @@ For example:
     let doc = Parser::default()
         .parse("= Title\n\n[appendix]\n== Data Access Matrix\n\n[appendix]\n== Error Codes");
 
-    let captions: Vec<Option<&str>> = doc.nested_blocks().map(|b| b.caption()).collect();
+    let captions: Vec<Option<&str>> = doc.child_blocks().map(|b| b.caption()).collect();
     assert_eq!(captions, vec![Some("Appendix A: "), Some("Appendix B: ")]);
 
     // The rendered title combines the caption (label + letter + colon) with the
     // section title, e.g. "Appendix A: Data Access Matrix".
-    let first = doc.nested_blocks().next().unwrap();
+    let first = doc.child_blocks().next().unwrap();
     if let crate::blocks::Block::Section(section) = first {
         assert_eq!(
             format!("{}{}", section.caption().unwrap(), section.section_title()),
@@ -455,7 +455,7 @@ The prefix can be modified by setting the `appendix-caption` attribute and overr
         ":appendix-caption: Exhibit\n\n[appendix]\n== Data Access Matrix\n\n[appendix]\n== Error Codes",
     );
 
-    let captions: Vec<Option<&str>> = doc.nested_blocks().map(|b| b.caption()).collect();
+    let captions: Vec<Option<&str>> = doc.child_blocks().map(|b| b.caption()).collect();
     assert_eq!(captions, vec![Some("Exhibit A: "), Some("Exhibit B: ")]);
 
     verifies!(
@@ -475,6 +475,6 @@ Unset the attribute to remove the prefix.
         ":appendix-caption!:\n\n[appendix]\n== Data Access Matrix\n\n[appendix]\n== Error Codes",
     );
 
-    let captions: Vec<Option<&str>> = doc.nested_blocks().map(|b| b.caption()).collect();
+    let captions: Vec<Option<&str>> = doc.child_blocks().map(|b| b.caption()).collect();
     assert_eq!(captions, vec![Some("A. "), Some("B. ")]);
 }

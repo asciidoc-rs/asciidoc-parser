@@ -1,6 +1,6 @@
 //! Describes the top-level document structure.
 
-use std::{marker::PhantomData, rc::Rc, slice::Iter};
+use std::{marker::PhantomData, rc::Rc};
 
 use self_cell::self_cell;
 
@@ -11,7 +11,7 @@ use crate::{
     document::{
         Author, Catalog, Docinfo, DocinfoLocation, Header, InterpretedValue, TocConfig, TocMode,
     },
-    internal::debug::DebugSliceReference,
+    internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     parser::{
         CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, ReferenceResolver,
         ReferenceWarning, ReferenceWarnings, ResolvedAttributes, SourceMap,
@@ -19,6 +19,12 @@ use crate::{
     strings::CowStr,
     warnings::{Warning, WarningType},
 };
+
+opaque_slice_iter! {
+    /// An iterator over a [`Document`]'s parse-time [`Warning`]s, returned by
+    /// [`Document::warnings`].
+    pub struct Warnings<'a> yielding Warning<'a>;
+}
 
 /// A document represents the top-level block element in AsciiDoc. It consists
 /// of an optional document header and either a) one or more sections preceded
@@ -432,9 +438,19 @@ impl<'src> Document<'src> {
         self.internal.borrow_dependent().docinfo.content(location)
     }
 
+    /// Returns this document's direct (top-level) child blocks.
+    ///
+    /// This is the internal seed for the
+    /// [`FindBlocks`](crate::blocks::FindBlocks) traversal; the public
+    /// accessor is
+    /// [`FindBlocks::child_blocks`](crate::blocks::FindBlocks::child_blocks).
+    pub(crate) fn top_level_blocks(&'src self) -> &'src [Block<'src>] {
+        &self.internal.borrow_dependent().blocks
+    }
+
     /// Return an iterator over any warnings found during parsing.
-    pub fn warnings(&self) -> Iter<'_, Warning<'_>> {
-        self.internal.borrow_dependent().warnings.iter()
+    pub fn warnings(&self) -> Warnings<'_> {
+        Warnings::new(&self.internal.borrow_dependent().warnings)
     }
 
     /// Return a [`Span`] describing the entire document source.
@@ -594,10 +610,6 @@ impl<'src> IsBlock<'src> for Document<'src> {
 
     fn raw_context(&self) -> CowStr<'src> {
         "document".into()
-    }
-
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.internal.borrow_dependent().blocks.iter()
     }
 
     fn title_source(&'src self) -> Option<Span<'src>> {

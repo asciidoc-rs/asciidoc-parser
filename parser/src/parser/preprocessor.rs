@@ -3006,7 +3006,7 @@ mod tests {
         assert_eq!(parser.attribute_value("n"), InterpretedValue::Value("1"));
 
         let rendered: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|b| b.rendered_content())
             .collect();
 

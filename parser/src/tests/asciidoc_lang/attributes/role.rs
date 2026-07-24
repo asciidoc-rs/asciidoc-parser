@@ -469,7 +469,7 @@ Thus, roles are an ideal way to annotated elements in your document so you can u
             "This sentence contains [.application]*bold inline content* that's assigned a role.\n\nThis sentence contains [.varname]`monospace text` that's assigned a role."
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let crate::blocks::Block::Simple(sb1) = block1 else {

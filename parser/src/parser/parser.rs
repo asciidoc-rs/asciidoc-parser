@@ -3521,7 +3521,7 @@ mod tests {
         assert_eq!(doc.warnings().count(), 0);
 
         // Get the first block from the document.
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
 
         let Block::Simple(simple_block) = block else {
             panic!("Expected simple block, got: {block:?}");
@@ -3544,7 +3544,7 @@ mod tests {
         // [FOOTNOTE:<text>].
         let doc = parser.parse("test.footnote:missing[]");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let Block::Simple(simple_block) = block else {
             panic!("Expected simple block, got: {block:?}");
         };
@@ -3587,7 +3587,7 @@ mod tests {
 
     mod notitle_showtitle_linkage {
         use crate::{
-            blocks::{Block, IsBlock},
+            blocks::{Block, FindBlocks},
             document::InterpretedValue,
             parser::{ModificationContext, Parser},
         };
@@ -3694,7 +3694,7 @@ mod tests {
 
             let mut parser = Parser::default();
             let doc = parser.parse("= Title\n:notitle:\n\n{showtitle}");
-            let block = doc.nested_blocks().next().unwrap();
+            let block = doc.child_blocks().next().unwrap();
             let Block::Simple(simple_block) = block else {
                 panic!("expected a simple block");
             };

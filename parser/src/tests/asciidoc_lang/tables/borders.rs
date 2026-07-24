@@ -25,7 +25,7 @@ fn parse_table(source: &str) -> crate::blocks::TableBlock<'_> {
 ///
 /// [`TableBlock`]: crate::blocks::TableBlock
 fn first_table<'a>(doc: &'a crate::Document<'a>) -> &'a crate::blocks::TableBlock<'a> {
-    doc.nested_blocks()
+    doc.child_blocks()
         .find_map(|block| match block {
             crate::blocks::Block::Table(table) => Some(table),
             _ => None,

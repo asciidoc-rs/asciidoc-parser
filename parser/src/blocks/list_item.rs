@@ -1,11 +1,10 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItemMarker,
-        RawDelimitedBlock, SimpleBlock, block::BlockParseOutcome, metadata::BlockMetadata,
+        Block, ChildBlocks, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock,
+        ListItemMarker, RawDelimitedBlock, SimpleBlock, block::BlockParseOutcome,
+        metadata::BlockMetadata,
     },
     content::Content,
     internal::debug::DebugSliceReference,
@@ -33,6 +32,17 @@ pub struct ListItem<'src> {
 }
 
 impl<'src> ListItem<'src> {
+    /// Returns a document-order iterator over this list item's direct child
+    /// blocks.
+    ///
+    /// For the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(&self.blocks)
+    }
+
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         parent_list_markers: &[ListItemMarker<'src>],
@@ -533,16 +543,12 @@ impl<'src> IsBlock<'src> for ListItem<'src> {
         self.marker.term_mut()
     }
 
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
     }
 
     fn raw_context(&self) -> CowStr<'src> {
         "list_item".into()
-    }
-
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.blocks.iter()
     }
 
     fn title_source(&'src self) -> Option<Span<'src>> {
@@ -673,7 +679,7 @@ mod tests {
         assert_eq!(li.item.content_model(), ContentModel::Compound);
         assert_eq!(li.item.raw_context().as_ref(), "list_item");
 
-        let mut li_blocks = li.item.nested_blocks();
+        let mut li_blocks = li.item.child_blocks();
 
         assert_eq!(
             li_blocks.next().unwrap(),

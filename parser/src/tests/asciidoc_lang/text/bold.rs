@@ -49,7 +49,7 @@ Bold c**hara**cter**s** within a word.
         "A bold *word*, and a bold *phrase of text*.\n\nBold c**hara**cter**s** within a word.",
     );
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {
@@ -102,7 +102,7 @@ The results of <<ex-mix>> are displayed below.
     let doc = Parser::default()
         .parse("`*_monospace bold italic phrase_*` & ``**__char__**``acter``**__s__**``");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {

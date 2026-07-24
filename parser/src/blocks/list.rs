@@ -1,9 +1,10 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
-    blocks::{Block, ContentModel, IsBlock, ListItem, ListItemMarker, metadata::BlockMetadata},
+    blocks::{
+        Block, ChildBlocks, ContentModel, IsBlock, ListItem, ListItemMarker,
+        metadata::BlockMetadata,
+    },
     content::Content,
     internal::debug::DebugSliceReference,
     span::MatchedItem,
@@ -31,6 +32,17 @@ pub struct ListBlock<'src> {
 }
 
 impl<'src> ListBlock<'src> {
+    /// Returns a document-order iterator over this list's direct child blocks
+    /// (its list items).
+    ///
+    /// For the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(&self.items)
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -391,11 +403,7 @@ impl<'src> IsBlock<'src> for ListBlock<'src> {
         "list".into()
     }
 
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.items.iter()
-    }
-
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.items
     }
 
@@ -591,7 +599,7 @@ mod tests {
         assert_eq!(list.item.content_model(), ContentModel::Compound);
         assert_eq!(list.item.raw_context().as_ref(), "list");
 
-        let mut list_blocks = list.item.nested_blocks();
+        let mut list_blocks = list.item.child_blocks();
 
         let list_item = list_blocks.next().unwrap();
 
@@ -644,7 +652,7 @@ mod tests {
         assert_eq!(list_item.content_model(), ContentModel::Compound);
         assert_eq!(list_item.raw_context().as_ref(), "list_item");
 
-        let mut li_blocks = list_item.nested_blocks();
+        let mut li_blocks = list_item.child_blocks();
 
         assert_eq!(
             li_blocks.next().unwrap(),
@@ -739,15 +747,15 @@ mod tests {
         assert_eq!(list.item.type_(), ListType::Callout);
         assert_eq!(list.item.marker_style(), Some("arabic"));
 
-        let items: Vec<_> = list.item.nested_blocks().collect();
+        let items: Vec<_> = list.item.child_blocks().collect();
         assert_eq!(items.len(), 2);
 
         assert_eq!(
-            items[0].nested_blocks().next().unwrap().rendered_content(),
+            items[0].child_blocks().next().unwrap().rendered_content(),
             Some("First")
         );
         assert_eq!(
-            items[1].nested_blocks().next().unwrap().rendered_content(),
+            items[1].child_blocks().next().unwrap().rendered_content(),
             Some("Second")
         );
 
@@ -768,7 +776,7 @@ mod tests {
         let list = list.unwrap();
 
         assert_eq!(list.item.type_(), ListType::Callout);
-        assert_eq!(list.item.nested_blocks().count(), 3);
+        assert_eq!(list.item.child_blocks().count(), 3);
 
         // No preceding verbatim block defines these callouts.
         assert_eq!(warnings.len(), 3);
@@ -1170,36 +1178,36 @@ mod tests {
                 .unwrap();
 
         // Outer list has two * items.
-        assert_eq!(list.item.nested_blocks().count(), 2);
+        assert_eq!(list.item.child_blocks().count(), 2);
         assert_eq!(list.item.type_(), ListType::Unordered);
 
-        let mut outer_items = list.item.nested_blocks();
+        let mut outer_items = list.item.child_blocks();
 
         // First outer item should contain a nested ** list.
         let first_outer = outer_items.next().unwrap();
-        let first_outer_blocks: Vec<_> = first_outer.nested_blocks().collect();
+        let first_outer_blocks: Vec<_> = first_outer.child_blocks().collect();
         assert_eq!(first_outer_blocks.len(), 2); // SimpleBlock + ListBlock
 
         // The nested ** list should have one item.
         let nested_list = &first_outer_blocks[1];
-        assert_eq!(nested_list.nested_blocks().count(), 1);
+        assert_eq!(nested_list.child_blocks().count(), 1);
 
         // That ** item should contain a nested *** list.
-        let parent_item = nested_list.nested_blocks().next().unwrap();
-        let parent_blocks: Vec<_> = parent_item.nested_blocks().collect();
+        let parent_item = nested_list.child_blocks().next().unwrap();
+        let parent_blocks: Vec<_> = parent_item.child_blocks().collect();
         assert_eq!(parent_blocks.len(), 2); // SimpleBlock + ListBlock
 
         // The *** list should have one item.
         let innermost_list = &parent_blocks[1];
-        assert_eq!(innermost_list.nested_blocks().count(), 1);
+        assert_eq!(innermost_list.child_blocks().count(), 1);
 
         // The *** item should have only its principal text.
-        let innermost_item = innermost_list.nested_blocks().next().unwrap();
-        assert_eq!(innermost_item.nested_blocks().count(), 1);
+        let innermost_item = innermost_list.child_blocks().next().unwrap();
+        assert_eq!(innermost_item.child_blocks().count(), 1);
 
         // Second outer item is "back to grandparent".
         let second_outer = outer_items.next().unwrap();
-        assert_eq!(second_outer.nested_blocks().count(), 1);
+        assert_eq!(second_outer.child_blocks().count(), 1);
         assert!(outer_items.next().is_none());
     }
 
@@ -1266,13 +1274,13 @@ mod tests {
         let list = list_parse("* item one\n+\n.Title\n\nsecond paragraph").unwrap();
 
         // The list should have one item.
-        let mut items = list.item.nested_blocks();
+        let mut items = list.item.child_blocks();
         let item = items.next().unwrap();
         assert!(items.next().is_none());
 
         // The item should have two blocks: the principal text and the
         // continuation paragraph. The orphaned `.Title` should be discarded.
-        let blocks: Vec<_> = item.nested_blocks().collect();
+        let blocks: Vec<_> = item.child_blocks().collect();
         assert_eq!(blocks.len(), 2);
 
         // First block is the principal text.
@@ -1349,7 +1357,7 @@ mod tests {
         assert_eq!(mi.item.content_model(), ContentModel::Compound);
         assert!(mi.item.rendered_content().is_none());
         assert_eq!(mi.item.raw_context().as_ref(), "list");
-        assert_eq!(mi.item.nested_blocks().count(), 1);
+        assert_eq!(mi.item.child_blocks().count(), 1);
         assert!(mi.item.title_source().is_none());
         assert!(mi.item.title().is_none());
         assert!(mi.item.anchor().is_none());

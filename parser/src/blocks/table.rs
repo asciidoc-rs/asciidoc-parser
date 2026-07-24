@@ -6,8 +6,8 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata,
-        parse_utils::parse_blocks_until,
+        Block, ChildBlocks, ContentModel, IsBlock, caption::assign_block_caption,
+        metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
     document::{InterpretedValue, TocConfig, TocMode},
@@ -143,6 +143,17 @@ pub struct TableBlock<'src> {
 }
 
 impl<'src> TableBlock<'src> {
+    /// Returns a document-order iterator over this table's direct child blocks.
+    ///
+    /// A table has no direct child blocks: its content lives in cells, and an
+    /// AsciiDoc (`a|`) cell is a separate nested document. This iterator is
+    /// therefore always empty. To reach the blocks inside AsciiDoc cells, use
+    /// [`FindBlocks::find_blocks`](crate::blocks::FindBlocks::find_blocks) with
+    /// [`BlockSelector::traverse_documents`](crate::blocks::BlockSelector::traverse_documents).
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::empty()
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///

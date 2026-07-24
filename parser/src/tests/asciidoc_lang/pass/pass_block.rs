@@ -28,7 +28,7 @@ include::example$pass.adoc[tag=pass-style]
 
     let doc = Parser::default().parse("[pass]\n<del>strike this</del> is marked as deleted.");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::Simple(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -62,7 +62,7 @@ However, a passthrough could come in handy if you need to output more sophistica
     let doc = Parser::default().parse("++++\n<video poster=\"images/movie-reel.png\">\n  <source src=\"videos/writing-zen.webm\" type=\"video/webm\">\n</video>\n++++
 ");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::RawDelimited(rdb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -95,7 +95,7 @@ include::example$pass.adoc[tag=subs-bl]
         ":name: This Is My Name\n\n[subs=attributes]\n++++\n{name}\nimage:tiger.png[]\n++++",
     );
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::RawDelimited(sb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");
@@ -127,7 +127,7 @@ In these cases, you should use conditional preprocessor directives to route pass
     let doc = Parser::default()
         .parse("[subs=normal]\n++++\nNormal content which is not enclosed in a paragraph.\n++++");
 
-    let block1 = doc.nested_blocks().next().unwrap();
+    let block1 = doc.child_blocks().next().unwrap();
 
     let Block::RawDelimited(rdb1) = block1 else {
         panic!("Unexpected block type: {block1:?}");

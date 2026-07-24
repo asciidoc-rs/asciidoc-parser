@@ -1,5 +1,3 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -7,10 +5,22 @@ use crate::{
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RevisionLine, matches_author_pattern,
     },
-    internal::debug::DebugSliceReference,
+    internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
+
+opaque_slice_iter! {
+    /// An iterator over the document attributes declared in a [`Header`],
+    /// returned by [`Header::attributes`].
+    pub struct HeaderAttributes<'a> yielding Attribute<'a>;
+}
+
+opaque_slice_iter! {
+    /// An iterator over the comment lines in a [`Header`], returned by
+    /// [`Header::comments`].
+    pub struct Comments<'a> yielding Span<'a>;
+}
 
 /// An AsciiDoc document may begin with a document header. The document header
 /// encapsulates the document title, author and revision information,
@@ -503,8 +513,8 @@ impl<'src> Header<'src> {
     }
 
     /// Return an iterator over the attributes in this header.
-    pub fn attributes(&'src self) -> Iter<'src, Attribute<'src>> {
-        self.attributes.iter()
+    pub fn attributes(&'src self) -> HeaderAttributes<'src> {
+        HeaderAttributes::new(&self.attributes)
     }
 
     /// Returns the author line, if found.
@@ -530,8 +540,8 @@ impl<'src> Header<'src> {
     }
 
     /// Return an iterator over the comments in this header.
-    pub fn comments(&'src self) -> Iter<'src, Span<'src>> {
-        self.comments.iter()
+    pub fn comments(&'src self) -> Comments<'src> {
+        Comments::new(&self.comments)
     }
 }
 

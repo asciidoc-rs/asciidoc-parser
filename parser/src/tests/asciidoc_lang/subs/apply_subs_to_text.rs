@@ -31,7 +31,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
             "pass:c[This & _that_ and icon:github[\\] +\nanother line with a{sp}space there ...]",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -55,7 +55,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
             "pass:q[This & _that_ and icon:github[\\] +\nanother line with a{sp}space there ...]",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -79,7 +79,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
             "pass:a[This & _that_ and icon:github[\\] +\nanother line with a{sp}space there ...]",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -103,7 +103,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
             "pass:r[This &#169; _that_ and icon:github[\\] +\nanother line with a{sp}space there ...]",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -127,7 +127,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
             "pass:m[This &#169; _that_ and icon:github[\\] +\nanother line with a{sp}space there ...]",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -152,7 +152,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
             "pass:p[This &#169; _that_ and icon:github[\\] +\nanother line with a{sp}space there ...]",
         );
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -201,7 +201,7 @@ include::pass:example$pass.adoc[tag=in-macro]
         let doc =
             Parser::default().parse("The text pass:[<del>strike this</del>] is marked as deleted.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -238,7 +238,7 @@ include::pass:example$pass.adoc[tag=s-macro]
         let doc =
             Parser::default().parse(r#"The text pass:q[<del>strike *this*</del>] is marked as deleted, inside of which the word "`me`" is bold."#);
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -277,7 +277,7 @@ include::pass:example$pass.adoc[tag=sub-out]
         let doc =
             Parser::default().parse("[subs=+macros]\n----\nI better not contain *bold* or _italic_ text.\npass:quotes[But I should contain *bold* text.]\n----");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
