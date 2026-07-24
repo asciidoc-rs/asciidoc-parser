@@ -875,7 +875,7 @@ mod pr498 {
         let doc = Parser::default().parse("See https://example.org> for details.");
 
         let rendered = doc
-            .nested_blocks()
+            .child_blocks()
             .next()
             .unwrap()
             .rendered_content()
@@ -894,7 +894,7 @@ mod pr498 {
         let doc = Parser::default().parse("a https://example.org> b https://example.com> c");
 
         let rendered = doc
-            .nested_blocks()
+            .child_blocks()
             .next()
             .unwrap()
             .rendered_content()

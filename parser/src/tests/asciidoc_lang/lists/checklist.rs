@@ -16,7 +16,7 @@ List items can be marked complete using checklists.
 ///
 /// [`ListBlock`]: crate::blocks::ListBlock
 fn first_list<'a>(doc: &'a crate::Document<'a>) -> &'a crate::blocks::ListBlock<'a> {
-    match doc.nested_blocks().next() {
+    match doc.child_blocks().next() {
         Some(Block::List(list)) => list,
         other => panic!("expected a list block, got {other:?}"),
     }
@@ -54,7 +54,7 @@ TIP: Not all items in the list have to be checklist items, as <<ex-syntax>> show
     // `[*]` and `[x]` are checked; `[ ]` is unchecked; an item with no checkbox
     // syntax (the TIP: not every item has to be a checklist item) carries no
     // checkbox state.
-    let items: Vec<_> = checklist.nested_blocks().collect();
+    let items: Vec<_> = checklist.child_blocks().collect();
     assert_eq!(items[0].as_list_item().unwrap().checkbox(), Some(true));
     assert_eq!(items[1].as_list_item().unwrap().checkbox(), Some(true));
     assert_eq!(items[2].as_list_item().unwrap().checkbox(), Some(false));

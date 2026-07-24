@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use crate::{
     Document, Parser,
-    blocks::{Block, IsBlock, SimpleBlock},
+    blocks::{Block, FindBlocks, SimpleBlock},
     parser::{
         CatalogResolver, HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext,
         ResolvedReference, XrefSignifier,
@@ -26,12 +26,12 @@ fn first_simple<'a>(doc: &'a Document<'a>) -> &'a SimpleBlock<'a> {
             if let Block::Simple(simple) = block {
                 Some(simple)
             } else {
-                walk(block.nested_blocks())
+                walk(block.child_blocks())
             }
         })
     }
 
-    walk(doc.nested_blocks()).expect("expected at least one simple block")
+    walk(doc.child_blocks()).expect("expected at least one simple block")
 }
 
 /// Returns the rendered text of the first paragraph in `doc`.
@@ -49,12 +49,12 @@ fn first_section<'a>(doc: &'a Document<'a>) -> &'a crate::blocks::SectionBlock<'
             if let Block::Section(section) = block {
                 Some(section)
             } else {
-                walk(block.nested_blocks())
+                walk(block.child_blocks())
             }
         })
     }
 
-    walk(doc.nested_blocks()).expect("expected at least one section block")
+    walk(doc.child_blocks()).expect("expected at least one section block")
 }
 
 #[test]
@@ -75,10 +75,10 @@ fn backward_reference_resolves() {
             if let Block::Simple(simple) = block {
                 out.push(simple.content().rendered().to_string());
             }
-            collect(block.nested_blocks(), out);
+            collect(block.child_blocks(), out);
         }
     }
-    collect(doc.nested_blocks(), &mut paragraphs);
+    collect(doc.child_blocks(), &mut paragraphs);
 
     assert!(
         paragraphs
@@ -301,10 +301,10 @@ fn footnote_in_heading_does_not_advance_a_counter_twice() {
             if let Block::Simple(simple) = block {
                 out.push(simple.content().rendered().to_string());
             }
-            collect(block.nested_blocks(), out);
+            collect(block.child_blocks(), out);
         }
     }
-    collect(doc.nested_blocks(), &mut paragraphs);
+    collect(doc.child_blocks(), &mut paragraphs);
 
     assert!(
         paragraphs.iter().any(|p| p == "Next is 2."),
@@ -1084,7 +1084,10 @@ mod included_file_collapses_to_internal_anchor {
 /// title, plus the corners of how a title maps (or does not map) to a
 /// referenceable target.
 mod xrefs_in_titles {
-    use crate::{Parser, blocks::IsBlock};
+    use crate::{
+        Parser,
+        blocks::{FindBlocks, IsBlock},
+    };
 
     /// Collects `(context, title)` for every titled block in the document, in
     /// document order.
@@ -1093,13 +1096,13 @@ mod xrefs_in_titles {
             if let Some(title) = block.title() {
                 out.push((block.raw_context().to_string(), title.to_string()));
             }
-            for child in block.nested_blocks() {
+            for child in block.child_blocks() {
                 walk(child, out);
             }
         }
 
         let mut out = vec![];
-        for block in doc.nested_blocks() {
+        for block in doc.child_blocks() {
             walk(block, &mut out);
         }
         out
@@ -1185,7 +1188,7 @@ mod xrefs_in_titles {
             .parse("[reftext=Custom Text]\n[#a]\n== A <<b>>\n\n[#b]\n== B\n\npara with <<a>>");
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)
@@ -1210,7 +1213,7 @@ mod xrefs_in_titles {
         let doc = Parser::default().parse("== See <<a>>\n\n[[a]]\n== A <<b>>\n\n[#b]\n== B");
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)
@@ -1236,7 +1239,7 @@ mod xrefs_in_titles {
 
         let section = crate::tests::prelude::first_section(&doc);
         let para = section
-            .nested_blocks()
+            .child_blocks()
             .next()
             .expect("expected the section's first child block");
 
@@ -1273,7 +1276,7 @@ mod xrefs_in_titles {
         );
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)
@@ -1312,7 +1315,7 @@ mod xrefs_in_titles {
             doc.resolve_references(&KnowsNothing, &crate::parser::HtmlSubstitutionRenderer {});
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)
@@ -1370,7 +1373,7 @@ mod xrefs_in_titles {
         );
 
         let sections: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter_map(|block| {
                 if let crate::blocks::Block::Section(section) = block {
                     Some(section)

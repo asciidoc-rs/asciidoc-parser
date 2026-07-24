@@ -3627,7 +3627,7 @@ fn should_not_warn_if_specified_negated_tag_is_not_found_in_include_file() {
     assert_eq!(doc.warnings().count(), 0);
 
     // The whole class is included, with the tag-directive lines removed.
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     let content = block.span().data();
     assert!(content.contains("class Dog\n  def initialize breed"));
     assert!(content.contains("      'woof woof woof woof woof'\n    else"));
@@ -3718,7 +3718,7 @@ fn should_not_warn_if_specified_negated_tags_are_not_found_in_include_file() {
 
     assert_eq!(doc.warnings().count(), 0);
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     let content = block.span().data();
     assert!(content.contains("class Dog\n  def initialize breed"));
     assert!(!content.contains("tag::"));
@@ -3756,7 +3756,7 @@ fn should_warn_if_specified_tag_in_include_file_is_not_closed() {
         .with_include_file_handler(handler)
         .parse("++++\ninclude::unclosed-tag.adoc[tag=a]\n++++");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.span().data(), "++++\na\n++++");
 
     let warnings: Vec<_> = doc.warnings().collect();
@@ -3803,7 +3803,7 @@ fn should_warn_if_end_tag_in_included_file_is_mismatched() {
         .with_include_file_handler(handler)
         .parse("++++\ninclude::mismatched-end-tag.adoc[tags=a;b]\n++++");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.span().data(), "++++\na\nb\n++++");
 
     let warnings: Vec<_> = doc.warnings().collect();
@@ -3849,7 +3849,7 @@ fn should_warn_if_unexpected_end_tag_is_found_in_included_file() {
         .with_include_file_handler(handler)
         .parse("++++\ninclude::unexpected-end-tag.adoc[tags=a]\n++++");
 
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.span().data(), "++++\na\n++++");
 
     let warnings: Vec<_> = doc.warnings().collect();

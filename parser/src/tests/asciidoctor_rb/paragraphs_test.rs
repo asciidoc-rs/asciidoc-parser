@@ -3048,7 +3048,7 @@ mod quote {
         );
 
         let doc = Parser::default().parse("[verse]\n_GET /groups/link:#group-id[{group-id}]_");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.rendered_content(),
             Some("<em>GET /groups/<a href=\"#group-id\">{group-id}</a></em>")
@@ -3401,7 +3401,7 @@ mod special {
             // The first paragraph is rendered as bare inline content, with the
             // full inline substitutions applied and no `<div class="paragraph">
             // <p>` wrapper.
-            let first = doc.nested_blocks().next().unwrap();
+            let first = doc.child_blocks().next().unwrap();
             assert_eq!(
                 first.rendered_content(),
                 Some(
@@ -3559,7 +3559,7 @@ mod custom {
 
         // The unknown style is retained on the block, and its content is parsed
         // as an ordinary paragraph.
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.declared_style(), Some("foo"));
         assert_eq!(block.rendered_content(), Some("bar"));
 

@@ -56,7 +56,7 @@ of a shopping list, but I don't think the local bodega sells
 E=mc^2^,`" Lazarus replied."#,
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -89,7 +89,7 @@ include::example$text.adoc[tag=sup-with-spaces]
         let doc = Parser::default()
             .parse("The deepest body of water is Deep Creek Lake.^[citation{sp}needed]^");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {

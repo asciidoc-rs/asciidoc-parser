@@ -40,7 +40,7 @@ If a term has an anchor, the anchor must be defined at the start of the same lin
     let list = top_list(&doc);
     assert_eq!(list.type_(), ListType::Description);
 
-    let items: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+    let items: Vec<&crate::blocks::Block<'_>> = list.child_blocks().collect();
     assert_eq!(items.len(), 1);
 
     // The `::` term is still recognized even though the term line begins with an
@@ -64,7 +64,7 @@ If a term has an anchor, the anchor must be defined at the start of the same lin
     let doc: crate::Document<'_> =
         Parser::default().parse("CPU:: [[cpu]] The brain of the computer.");
 
-    let items: Vec<&crate::blocks::Block<'_>> = top_list(&doc).nested_blocks().collect();
+    let items: Vec<&crate::blocks::Block<'_>> = top_list(&doc).child_blocks().collect();
     assert_eq!(items.len(), 1);
     assert_eq!(term_rendered(items[0]), "CPU");
 }
@@ -87,7 +87,7 @@ The terms for the remaining entries at that level must use the same delimiter.
 
     // Two entries that reuse the same delimiter form a single list of siblings
     // at one level, rather than nesting.
-    let items: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+    let items: Vec<&crate::blocks::Block<'_>> = list.child_blocks().collect();
     assert_eq!(items.len(), 2);
     assert_eq!(term_delimiter(items[0]), "::");
     assert_eq!(term_delimiter(items[1]), "::");
@@ -112,14 +112,14 @@ The available term delimiters you can use for this purpose are as follows:
 
     // Changing the delimiter means the second term is not a sibling; it begins a
     // new description list nested inside the first item.
-    let outer: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+    let outer: Vec<&crate::blocks::Block<'_>> = list.child_blocks().collect();
     assert_eq!(outer.len(), 1);
     assert_eq!(term_delimiter(outer[0]), "::");
 
     let inner = nested_list(outer[0]);
     assert_eq!(inner.type_(), ListType::Description);
 
-    let inner_items: Vec<&crate::blocks::Block<'_>> = inner.nested_blocks().collect();
+    let inner_items: Vec<&crate::blocks::Block<'_>> = inner.child_blocks().collect();
     assert_eq!(inner_items.len(), 1);
     assert_eq!(term_delimiter(inner_items[0]), ";;");
 }
@@ -149,7 +149,7 @@ fn valid_term_delimiters() {
         let list = top_list(&doc);
         assert_eq!(list.type_(), ListType::Description);
 
-        let items: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+        let items: Vec<&crate::blocks::Block<'_>> = list.child_blocks().collect();
         assert_eq!(items.len(), 1);
         assert_eq!(term_delimiter(items[0]), delimiter);
     }
@@ -177,14 +177,14 @@ It's customary to use the delimiters in the order shown above to provide a hint 
     let list = top_list(&doc);
     assert_eq!(list.type_(), ListType::Description);
 
-    let outer: Vec<&crate::blocks::Block<'_>> = list.nested_blocks().collect();
+    let outer: Vec<&crate::blocks::Block<'_>> = list.child_blocks().collect();
     assert_eq!(outer.len(), 1);
     assert_eq!(term_delimiter(outer[0]), "::::");
 
     let inner = nested_list(outer[0]);
     assert_eq!(inner.type_(), ListType::Description);
 
-    let inner_items: Vec<&crate::blocks::Block<'_>> = inner.nested_blocks().collect();
+    let inner_items: Vec<&crate::blocks::Block<'_>> = inner.child_blocks().collect();
     assert_eq!(inner_items.len(), 1);
     assert_eq!(term_delimiter(inner_items[0]), "::");
 }
@@ -2246,7 +2246,7 @@ You can include more xref:continuation.adoc[compound content in a list item] as 
 /// Returns the document's first top-level block as a [`ListBlock`], panicking
 /// if it is absent or not a list.
 fn top_list<'d>(doc: &'d crate::Document<'d>) -> &'d crate::blocks::ListBlock<'d> {
-    match doc.nested_blocks().next() {
+    match doc.child_blocks().next() {
         Some(crate::blocks::Block::List(list)) => list,
         other => panic!("expected a top-level list block, got {other:#?}"),
     }
@@ -2285,7 +2285,7 @@ fn nested_list<'d>(block: &'d crate::blocks::Block<'d>) -> &'d crate::blocks::Li
         panic!("expected a list item, got {block:#?}");
     };
 
-    item.nested_blocks()
+    item.child_blocks()
         .find_map(|b| match b {
             crate::blocks::Block::List(list) => Some(list),
             _ => None,

@@ -8,7 +8,7 @@ pub use author::Author;
 pub(crate) use author::matches_author_pattern;
 
 mod author_line;
-pub use author_line::AuthorLine;
+pub use author_line::{AuthorLine, Authors};
 
 mod catalog;
 #[allow(unused)] // TEMPORARY while building
@@ -20,12 +20,12 @@ pub(crate) use docinfo::Docinfo;
 pub use docinfo::DocinfoLocation;
 
 mod document;
-pub use document::Document;
 #[cfg(test)]
 pub(crate) use document::first_inline_candidate;
+pub use document::{Document, Warnings};
 
 mod header;
-pub use header::Header;
+pub use header::{Comments, Header, HeaderAttributes};
 
 mod revision_line;
 pub use revision_line::RevisionLine;

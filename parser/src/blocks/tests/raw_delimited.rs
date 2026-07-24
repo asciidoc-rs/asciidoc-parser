@@ -567,7 +567,7 @@ mod listing {
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert!(mi.item.declared_style().is_none());
-        assert_eq!(mi.item.nested_blocks().next(), None);
+        assert_eq!(mi.item.child_blocks().next(), None);
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -641,7 +641,7 @@ mod listing {
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert!(mi.item.declared_style().is_none());
-        assert_eq!(mi.item.nested_blocks().next(), None);
+        assert_eq!(mi.item.child_blocks().next(), None);
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -722,7 +722,7 @@ mod listing {
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert!(mi.item.declared_style().is_none());
-        assert_eq!(mi.item.nested_blocks().next(), None);
+        assert_eq!(mi.item.child_blocks().next(), None);
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -1174,7 +1174,7 @@ mod pass {
         assert_eq!(mi.item.raw_context().as_ref(), "pass");
         assert_eq!(mi.item.resolved_context().as_ref(), "pass");
         assert!(mi.item.declared_style().is_none());
-        assert_eq!(mi.item.nested_blocks().next(), None);
+        assert_eq!(mi.item.child_blocks().next(), None);
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -1243,7 +1243,7 @@ mod pass {
         assert_eq!(mi.item.raw_context().as_ref(), "pass");
         assert_eq!(mi.item.resolved_context().as_ref(), "pass");
         assert!(mi.item.declared_style().is_none());
-        assert_eq!(mi.item.nested_blocks().next(), None);
+        assert_eq!(mi.item.child_blocks().next(), None);
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -1317,7 +1317,7 @@ mod pass {
         assert_eq!(mi.item.raw_context().as_ref(), "pass");
         assert_eq!(mi.item.resolved_context().as_ref(), "pass");
         assert!(mi.item.declared_style().is_none());
-        assert_eq!(mi.item.nested_blocks().next(), None);
+        assert_eq!(mi.item.child_blocks().next(), None);
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -1398,7 +1398,7 @@ mod pass {
         assert_eq!(mi.item.raw_context().as_ref(), "pass");
         assert_eq!(mi.item.resolved_context().as_ref(), "pass");
         assert!(mi.item.declared_style().is_none());
-        assert_eq!(mi.item.nested_blocks().next(), None);
+        assert_eq!(mi.item.child_blocks().next(), None);
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());

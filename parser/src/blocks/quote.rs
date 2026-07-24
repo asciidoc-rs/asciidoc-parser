@@ -1,4 +1,4 @@
-use std::{slice::Iter, sync::Arc};
+use std::sync::Arc;
 
 use self_cell::self_cell;
 
@@ -6,8 +6,9 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker, RawDelimitedBlock,
-        SimpleBlock, TableBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
+        Block, ChildBlocks, CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker,
+        RawDelimitedBlock, SimpleBlock, TableBlock, metadata::BlockMetadata,
+        parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
     internal::debug::DebugSliceReference,
@@ -108,6 +109,18 @@ pub struct QuoteBlock<'src> {
 }
 
 impl<'src> QuoteBlock<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// This reaches the children of a Markdown-style blockquote (which borrow
+    /// the block's own owned source), matching [`blocks()`](Self::blocks). For
+    /// the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(self.blocks())
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -524,12 +537,11 @@ impl<'src> QuoteBlock<'src> {
         self.content.as_ref()
     }
 
-    /// Returns the nested blocks of a compound blockquote.
+    /// Returns the nested blocks of a compound blockquote as a slice.
     ///
-    /// Unlike [`nested_blocks()`](IsBlock::nested_blocks), this also returns
-    /// the blocks of a Markdown-style blockquote, which borrow the block's
-    /// own owned source rather than the document source and so are not
-    /// exposed through the `'src`-bound trait method.
+    /// This includes the blocks of a Markdown-style blockquote, which borrow
+    /// the block's own owned source rather than the document source. See
+    /// [`child_blocks()`](Self::child_blocks) for the iterator form.
     pub fn blocks(&self) -> &[Block<'_>] {
         match &self.markdown_blocks {
             Some(owned) => &owned.borrow_dependent().blocks,
@@ -541,7 +553,7 @@ impl<'src> QuoteBlock<'src> {
     /// blocks.
     ///
     /// The blocks of a `____`-delimited quote are reached through
-    /// [`nested_blocks_mut()`](IsBlock::nested_blocks_mut) by the generic block
+    /// [`child_blocks_mut()`](IsBlock::child_blocks_mut) by the generic block
     /// walker; this method handles the Markdown-style case, whose blocks borrow
     /// the block's own owned source.
     pub(crate) fn resolve_references(
@@ -758,27 +770,16 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
         self.content.as_ref().map(|content| content.rendered())
     }
 
-    /// Returns the nested blocks of a `____`-delimited quote.
-    ///
-    /// **Note:** a Markdown-style blockquote's nested blocks borrow the block's
-    /// own owned source rather than the document source, so they cannot be
-    /// returned through this `'src`-bound trait method and this iterator is
-    /// empty for them. Use [`QuoteBlock::blocks()`] to read the nested blocks
-    /// of any compound quote, Markdown-style or not. (Rendering and
-    /// reference resolution go through `blocks()` and an explicit
-    /// crate-internal `resolve_references`, so this gap is internal to the
-    /// crate.)
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.blocks.iter()
-    }
-
     /// Returns a mutable slice of the nested blocks of a `____`-delimited
     /// quote.
     ///
-    /// See [the note on `nested_blocks()`](Self::nested_blocks): a
-    /// Markdown-style blockquote's nested blocks are not reachable through
-    /// this method.
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    /// **Note:** a Markdown-style blockquote's nested blocks borrow the block's
+    /// own owned source rather than the document source, so they are not
+    /// reachable through this `'src`-bound hook and this slice is empty for
+    /// them. (Rendering and reference resolution go through
+    /// [`blocks()`](Self::blocks) and an explicit crate-internal
+    /// `resolve_references`, so this gap is internal to the crate.)
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
     }
 
@@ -899,7 +900,7 @@ mod tests {
         assert!(quote.attribution().is_none());
         assert!(quote.citetitle().is_none());
         assert_eq!(quote.blocks().len(), 2);
-        assert_eq!(quote.nested_blocks().count(), 2);
+        assert_eq!(quote.child_blocks().count(), 2);
     }
 
     #[test]
@@ -959,7 +960,7 @@ mod tests {
             quote.content().unwrap().rendered(),
             "A verse\ndelimited block"
         );
-        assert!(quote.nested_blocks().next().is_none());
+        assert!(quote.child_blocks().next().is_none());
     }
 
     #[test]
@@ -1133,9 +1134,9 @@ mod tests {
         assert_eq!(quote.content_model(), ContentModel::Compound);
         assert_eq!(quote.blocks().len(), 1);
 
-        // The nested blocks borrow the block's owned source, so they are not
-        // exposed through the `'src`-bound trait accessor.
-        assert!(quote.nested_blocks().next().is_none());
+        // A Markdown blockquote's nested blocks borrow the block's owned source,
+        // but `child_blocks()` still exposes them (matching `blocks()`).
+        assert_eq!(quote.child_blocks().count(), 1);
     }
 
     #[test]
@@ -1212,7 +1213,7 @@ mod tests {
         assert!(compound.anchor_reftext().is_none());
         assert!(compound.attrlist().is_none());
         assert_eq!(compound.substitution_group(), SubstitutionGroup::Normal);
-        assert_eq!(compound.nested_blocks().count(), 1);
+        assert_eq!(compound.child_blocks().count(), 1);
         assert!(compound.title().is_none());
         assert!(compound.declared_style().is_none());
         assert!(format!("{compound:?}").starts_with("Block::Quote"));
@@ -1243,7 +1244,7 @@ mod tests {
     fn title_renders_inside_quote_block() {
         let doc = Parser::default()
             .parse(".A title\n[quote,Captain Kirk]\nEverybody remember where we parked.");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let quote = as_quote(block);
         assert_eq!(quote.title(), Some("A title"));
     }

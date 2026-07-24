@@ -18,7 +18,7 @@ You'll want to think about how you want the processor to handle these situations
 /// is what the `attribute-missing` table in the spec describes.
 fn render_first_block(source: &str) -> String {
     let doc = Parser::default().parse(source);
-    doc.nested_blocks()
+    doc.child_blocks()
         .next()
         .and_then(|b| b.rendered_content())
         .unwrap_or_default()
@@ -181,7 +181,7 @@ fn attribute_missing_can_be_changed_mid_document() {
     let doc = Parser::default().parse("one {x}\n\n:attribute-missing: drop\n\ntwo {y}");
 
     let rendered: Vec<&str> = doc
-        .nested_blocks()
+        .child_blocks()
         .filter_map(|b| b.rendered_content())
         .collect();
 

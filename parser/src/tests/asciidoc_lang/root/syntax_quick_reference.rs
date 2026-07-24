@@ -130,7 +130,7 @@ TIP: The default Asciidoctor stylesheet automatically styles the first paragraph
 
     // An indented line is a literal paragraph.
     let doc = Parser::default().parse(" a literal line");
-    let Some(Block::Simple(sb)) = doc.nested_blocks().next() else {
+    let Some(Block::Simple(sb)) = doc.child_blocks().next() else {
         panic!("expected a simple block");
     };
     assert_eq!(sb.style(), SimpleBlockStyle::Literal);
@@ -139,13 +139,7 @@ TIP: The default Asciidoctor stylesheet automatically styles the first paragraph
     // stylesheet/output concern, so only the role is asserted here.)
     let doc =
         Parser::default().parse("[.lead]\nThis text is the lead paragraph.\n\nThis text is not.");
-    assert!(
-        doc.nested_blocks()
-            .next()
-            .unwrap()
-            .roles()
-            .contains(&"lead")
-    );
+    assert!(doc.child_blocks().next().unwrap().roles().contains(&"lead"));
 }
 
 #[test]
@@ -534,13 +528,13 @@ This paragraph is its sibling, not its child.
     // paragraph are siblings at the same level.
     let doc =
         Parser::default().parse("[discrete]\n=== Independent heading\n\nA sibling paragraph.");
-    let blocks: Vec<_> = doc.nested_blocks().collect();
+    let blocks: Vec<_> = doc.child_blocks().collect();
     assert_eq!(blocks.len(), 2);
     let Block::Section(heading) = blocks[0] else {
         panic!("expected a discrete section heading");
     };
     assert_eq!(heading.section_type(), SectionType::Discrete);
-    assert_eq!(heading.nested_blocks().count(), 0);
+    assert_eq!(heading.child_blocks().count(), 0);
     assert!(matches!(blocks[1], Block::Simple(_)));
 }
 
@@ -778,7 +772,7 @@ include::lists:example$complex.adoc[tag=b-complex]
     // A line comment (conventionally `//-`) forces two adjacent lists apart.
     let doc = Parser::default().parse("* Apples\n* Oranges\n\n//-\n\n* Walnuts\n* Almonds");
     assert_eq!(
-        doc.nested_blocks()
+        doc.child_blocks()
             .filter(|b| matches!(b, Block::List(_)))
             .count(),
         2
@@ -787,7 +781,7 @@ include::lists:example$complex.adoc[tag=b-complex]
     // An empty attribute list (`[]`) also separates two adjacent lists.
     let doc = Parser::default().parse("* Apples\n* Oranges\n\n[]\n. Wash\n. Slice");
     assert_eq!(
-        doc.nested_blocks()
+        doc.child_blocks()
             .filter(|b| matches!(b, Block::List(_)))
             .count(),
         2
@@ -796,7 +790,7 @@ include::lists:example$complex.adoc[tag=b-complex]
     // The unordered list marker can be changed with a list style (e.g. `square`),
     // which the parser captures as the list's declared style.
     let doc = Parser::default().parse("[square]\n* one\n* two");
-    let Some(Block::List(list)) = doc.nested_blocks().next() else {
+    let Some(Block::List(list)) = doc.child_blocks().next() else {
         panic!("expected a list");
     };
     assert_eq!(list.type_(), ListType::Unordered);
@@ -805,7 +799,7 @@ include::lists:example$complex.adoc[tag=b-complex]
     // Ordered lists support numeration styles (e.g. `lowergreek`), captured as
     // the list's declared style.
     let doc = Parser::default().parse("[lowergreek]\n. one\n. two");
-    let Some(Block::List(list)) = doc.nested_blocks().next() else {
+    let Some(Block::List(list)) = doc.child_blocks().next() else {
         panic!("expected a list");
     };
     assert_eq!(list.type_(), ListType::Ordered);
@@ -814,28 +808,28 @@ include::lists:example$complex.adoc[tag=b-complex]
     // Lists can be indented; leading whitespace is not significant, so these
     // three items remain a single flat list.
     let doc = Parser::default().parse("* Edgar Allan Poe\n * Sheri S. Tepper\n     * Bill Bryson");
-    let Some(Block::List(list)) = doc.nested_blocks().next() else {
+    let Some(Block::List(list)) = doc.child_blocks().next() else {
         panic!("expected a list");
     };
-    assert_eq!(list.nested_blocks().count(), 3);
+    assert_eq!(list.child_blocks().count(), 3);
 
     // Checklist items expose their checkbox state.
     let doc = Parser::default().parse("* [x] done\n* [ ] todo\n* plain");
-    let Some(Block::List(list)) = doc.nested_blocks().next() else {
+    let Some(Block::List(list)) = doc.child_blocks().next() else {
         panic!("expected a list");
     };
     assert!(list.is_checklist());
 
     // Description lists.
     let doc = Parser::default().parse("CPU:: The brain of the computer.");
-    let Some(Block::List(list)) = doc.nested_blocks().next() else {
+    let Some(Block::List(list)) = doc.child_blocks().next() else {
         panic!("expected a list");
     };
     assert_eq!(list.type_(), ListType::Description);
 
     // Question-and-answer lists are description lists carrying the `qanda` style.
     let doc = Parser::default().parse("[qanda]\nWhat is the answer?::\nThis is the answer.");
-    let Some(Block::List(list)) = doc.nested_blocks().next() else {
+    let Some(Block::List(list)) = doc.child_blocks().next() else {
         panic!("expected a list");
     };
     assert_eq!(list.type_(), ListType::Description);
@@ -940,7 +934,7 @@ You can also pass it as a command line argument using `-a data-uri`.
 
     // `image::` (two colons) is a block image (a standalone media block) ...
     let doc = Parser::default().parse("image::sunset.jpg[]");
-    let Some(Block::Media(m)) = doc.nested_blocks().next() else {
+    let Some(Block::Media(m)) = doc.child_blocks().next() else {
         panic!("expected a media block");
     };
     assert_eq!(m.type_(), MediaType::Image);
@@ -975,7 +969,7 @@ You can control the audio settings using xref:macros:audio-and-video.adoc[additi
 
     // A block audio macro produces an audio media block.
     let doc = Parser::default().parse("audio::ocean-waves.wav[start=60,opts=autoplay]");
-    let Some(Block::Media(m)) = doc.nested_blocks().next() else {
+    let Some(Block::Media(m)) = doc.child_blocks().next() else {
         panic!("expected a media block");
     };
     assert_eq!(m.type_(), MediaType::Audio);
@@ -1017,13 +1011,13 @@ You can control the video settings using xref:macros:audio-and-video.adoc[additi
 
     // Local, YouTube, and Vimeo videos all produce a video media block.
     let doc = Parser::default().parse("video::video-file.mp4[]");
-    let Some(Block::Media(m)) = doc.nested_blocks().next() else {
+    let Some(Block::Media(m)) = doc.child_blocks().next() else {
         panic!("expected a media block");
     };
     assert_eq!(m.type_(), MediaType::Video);
 
     let doc = Parser::default().parse("video::RvRhUHTV_8k[youtube]");
-    let Some(Block::Media(m)) = doc.nested_blocks().next() else {
+    let Some(Block::Media(m)) = doc.child_blocks().next() else {
         panic!("expected a media block");
     };
     assert_eq!(m.type_(), MediaType::Video);
@@ -1288,14 +1282,14 @@ include::verbatim:example$source.adoc[tag=src-para]
 
     // A delimited literal block is verbatim (formatting marks are not applied).
     let doc = Parser::default().parse("....\n*not bold*\n....");
-    let Some(Block::RawDelimited(b)) = doc.nested_blocks().next() else {
+    let Some(Block::RawDelimited(b)) = doc.child_blocks().next() else {
         panic!("expected a raw delimited block");
     };
     assert!(b.content().rendered().contains("*not bold*"));
 
     // A source block parses as a listing-context raw delimited block.
     let doc = Parser::default().parse("[source,ruby]\n----\nputs 'hi'\n----");
-    let Some(Block::RawDelimited(b)) = doc.nested_blocks().next() else {
+    let Some(Block::RawDelimited(b)) = doc.child_blocks().next() else {
         panic!("expected a raw delimited block");
     };
     assert!(b.content().rendered().contains("puts 'hi'"));
@@ -1307,7 +1301,7 @@ include::verbatim:example$source.adoc[tag=src-para]
 
     // A `[source,ruby]` paragraph (no delimiters) is a Source-styled simple block.
     let doc = Parser::default().parse("[source,ruby]\nputs 'hi'");
-    let Some(Block::Simple(sb)) = doc.nested_blocks().next() else {
+    let Some(Block::Simple(sb)) = doc.child_blocks().next() else {
         panic!("expected a simple block");
     };
     assert_eq!(sb.style(), SimpleBlockStyle::Source);
@@ -1353,7 +1347,7 @@ include::blocks:example$admonition.adoc[tag=b-bl]
 
     // An admonition paragraph carries the admonition context and its style.
     let doc = Parser::default().parse("NOTE: Pay attention.");
-    let b = doc.nested_blocks().next().unwrap();
+    let b = doc.child_blocks().next().unwrap();
     assert_eq!(b.resolved_context().as_ref(), "admonition");
     assert_eq!(b.declared_style(), Some("NOTE"));
 
@@ -1478,18 +1472,18 @@ include::verbatim:example$listing.adoc[tag=subs-out]
     // (the dot must not be followed by a space).
     let doc = Parser::default().parse(".Terminal Output\n....\ncode\n....");
     assert_eq!(
-        doc.nested_blocks().next().unwrap().title(),
+        doc.child_blocks().next().unwrap().title(),
         Some("Terminal Output")
     );
 
     // A dot followed by a space is an ordered-list marker, not a block title.
     let doc = Parser::default().parse(". an item\n. another item");
-    assert!(matches!(doc.nested_blocks().next(), Some(Block::List(_))));
+    assert!(matches!(doc.child_blocks().next(), Some(Block::List(_))));
 
     // Sidebar, example, open, and passthrough blocks.
     let doc = Parser::default().parse("****\nAn aside.\n****");
     assert_eq!(
-        doc.nested_blocks()
+        doc.child_blocks()
             .next()
             .unwrap()
             .resolved_context()
@@ -1499,7 +1493,7 @@ include::verbatim:example$listing.adoc[tag=subs-out]
 
     let doc = Parser::default().parse("====\nAn example.\n====");
     assert_eq!(
-        doc.nested_blocks()
+        doc.child_blocks()
             .next()
             .unwrap()
             .resolved_context()
@@ -1509,7 +1503,7 @@ include::verbatim:example$listing.adoc[tag=subs-out]
 
     let doc = Parser::default().parse("--\nGeneric content.\n--");
     assert_eq!(
-        doc.nested_blocks()
+        doc.child_blocks()
             .next()
             .unwrap()
             .resolved_context()
@@ -1518,7 +1512,7 @@ include::verbatim:example$listing.adoc[tag=subs-out]
     );
 
     let doc = Parser::default().parse("++++\n<b>raw</b>\n++++");
-    let Some(Block::RawDelimited(b)) = doc.nested_blocks().next() else {
+    let Some(Block::RawDelimited(b)) = doc.child_blocks().next() else {
         panic!("expected a raw delimited block");
     };
     assert!(b.content().rendered().contains("<b>raw</b>"));
@@ -1527,7 +1521,7 @@ include::verbatim:example$listing.adoc[tag=subs-out]
     let doc = Parser::default().parse(
         "[quote,Abraham Lincoln,Gettysburg Address]\n____\nFour score and seven years ago...\n____",
     );
-    let Some(Block::Quote(q)) = doc.nested_blocks().next() else {
+    let Some(Block::Quote(q)) = doc.child_blocks().next() else {
         panic!("expected a quote block");
     };
     assert_eq!(q.attribution(), Some("Abraham Lincoln"));
@@ -1663,7 +1657,7 @@ include::tables:example$cell.adoc[tag=b-spec]
     // Without `cols`, the column count equals the number of cell separators on
     // the first non-empty line.
     let doc = Parser::default().parse("|===\n|a |b |c\n|d |e |f\n|===");
-    let Some(Block::Table(t)) = doc.nested_blocks().next() else {
+    let Some(Block::Table(t)) = doc.child_blocks().next() else {
         panic!("expected a table");
     };
     assert_eq!(t.columns().len(), 3);
@@ -1671,14 +1665,14 @@ include::tables:example$cell.adoc[tag=b-spec]
     // An empty line immediately after the first non-empty line promotes the
     // first row to the table header.
     let doc = Parser::default().parse("|===\n|H1 |H2\n\n|a |b\n|===");
-    let Some(Block::Table(t)) = doc.nested_blocks().next() else {
+    let Some(Block::Table(t)) = doc.child_blocks().next() else {
         panic!("expected a table");
     };
     assert!(t.header_row().is_some());
 
     // The `*` repeat operator expands a column spec across the columns ...
     let doc = Parser::default().parse("[cols=\"2*\"]\n|===\n|a |b\n|===");
-    let Some(Block::Table(t)) = doc.nested_blocks().next() else {
+    let Some(Block::Table(t)) = doc.child_blocks().next() else {
         panic!("expected a table");
     };
     assert_eq!(t.columns().len(), 2);
@@ -1686,7 +1680,7 @@ include::tables:example$cell.adoc[tag=b-spec]
     // ... and the `%header` option promotes the first row when the header cells
     // are not on a single line.
     let doc = Parser::default().parse("[%header,cols=\"2*\"]\n|===\n|H1\n|H2\n\n|a\n|b\n|===");
-    let Some(Block::Table(t)) = doc.nested_blocks().next() else {
+    let Some(Block::Table(t)) = doc.child_blocks().next() else {
         panic!("expected a table");
     };
     assert!(t.header_row().is_some());
@@ -1694,7 +1688,7 @@ include::tables:example$cell.adoc[tag=b-spec]
     // The `cols` attribute both sets the number of columns and their relative
     // widths.
     let doc = Parser::default().parse("[cols=\"1,1,2\"]\n|===\n|A |B |C\n|===");
-    let Some(Block::Table(t)) = doc.nested_blocks().next() else {
+    let Some(Block::Table(t)) = doc.child_blocks().next() else {
         panic!("expected a table");
     };
     assert_eq!(t.columns().len(), 3);
@@ -1703,7 +1697,7 @@ include::tables:example$cell.adoc[tag=b-spec]
     // A CSV table using the shorthand delimiter.
     let doc =
         Parser::default().parse(",===\nArtist,Track,Genre\n\nBaauer,Harlem Shake,Hip Hop\n,===");
-    let Some(Block::Table(t)) = doc.nested_blocks().next() else {
+    let Some(Block::Table(t)) = doc.child_blocks().next() else {
         panic!("expected a table");
     };
     assert_eq!(t.data_format(), DataFormat::Csv);
@@ -1711,14 +1705,14 @@ include::tables:example$cell.adoc[tag=b-spec]
     // A DSV table using the shorthand delimiter.
     let doc =
         Parser::default().parse(":===\nArtist:Track:Genre\n\nRobyn:Indestructible:Dance\n:===");
-    let Some(Block::Table(t)) = doc.nested_blocks().next() else {
+    let Some(Block::Table(t)) = doc.child_blocks().next() else {
         panic!("expected a table");
     };
     assert_eq!(t.data_format(), DataFormat::Dsv);
 
     // A cell may hold AsciiDoc block content via the `a` cell style.
     let doc = Parser::default().parse("|===\n|Normal |AsciiDoc\n\n|* not a list\na|* a list\n|===");
-    let Some(Block::Table(t)) = doc.nested_blocks().next() else {
+    let Some(Block::Table(t)) = doc.child_blocks().next() else {
         panic!("expected a table");
     };
     assert!(matches!(
@@ -1801,13 +1795,13 @@ fn ids_roles_and_options() {
 
     // Shorthand block ID and role.
     let doc = Parser::default().parse("[#goals.incremental]\n* Goal 1\n* Goal 2");
-    let list = doc.nested_blocks().next().unwrap();
+    let list = doc.child_blocks().next().unwrap();
     assert_eq!(list.id(), Some("goals"));
     assert!(list.roles().contains(&"incremental"));
 
     // Shorthand block options on a table.
     let doc = Parser::default().parse("[%header%footer]\n|===\n|A |B\n\n|c |d\n\n|e |f\n|===");
-    let t = doc.nested_blocks().next().unwrap();
+    let t = doc.child_blocks().next().unwrap();
     assert!(t.has_option("header"));
     assert!(t.has_option("footer"));
 
@@ -2221,7 +2215,7 @@ include::verbatim:example$source.adoc[tag=fence]
     // highlighting itself. (The bare ``` fence is also supported; see the
     // bare-fence assertion at the end of this function.)
     let doc = Parser::default().parse("```ruby\nputs 'hi'\n```");
-    let Some(Block::RawDelimited(b)) = doc.nested_blocks().next() else {
+    let Some(Block::RawDelimited(b)) = doc.child_blocks().next() else {
         panic!("expected a raw delimited (source listing) block");
     };
     assert_eq!(b.resolved_context().as_ref(), "listing");
@@ -2344,7 +2338,7 @@ Line breaks within a paragraph are not displayed.
 
     // Markdown-style (ATX) headings become sections.
     let doc = Parser::default().parse("= Document Title\n\n## Section Level 1\n\ntext");
-    assert!(doc.nested_blocks().any(|b| matches!(b, Block::Section(_))));
+    assert!(doc.child_blocks().any(|b| matches!(b, Block::Section(_))));
 
     // Markdown-style thematic breaks.
     for src in ["---", "- - -", "***", "* * *"] {
@@ -2357,12 +2351,12 @@ Line breaks within a paragraph are not displayed.
     // Markdown-style blockquote.
     let doc = Parser::default()
         .parse("> I hold it that a little rebellion is a good thing.\n> -- Thomas Jefferson");
-    assert!(matches!(doc.nested_blocks().next(), Some(Block::Quote(_))));
+    assert!(matches!(doc.child_blocks().next(), Some(Block::Quote(_))));
 
     // A bare Markdown-style fenced code block (```) is supported: the fence
     // opens a verbatim listing block (#599 / #613).
     let doc = Parser::default().parse("```\nputs 'hi'\n```");
-    let Some(Block::RawDelimited(b)) = doc.nested_blocks().next() else {
+    let Some(Block::RawDelimited(b)) = doc.child_blocks().next() else {
         panic!("expected a raw delimited (listing) block");
     };
     assert_eq!(b.resolved_context().as_ref(), "listing");

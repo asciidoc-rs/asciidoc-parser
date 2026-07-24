@@ -1,4 +1,4 @@
-use std::{fmt, slice::Iter, sync::LazyLock};
+use std::{fmt, sync::LazyLock};
 
 use regex::Regex;
 
@@ -6,7 +6,8 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
     blocks::{
-        Block, ContentModel, IsBlock, metadata::BlockMetadata, parse_utils::parse_blocks_until,
+        Block, ChildBlocks, ContentModel, IsBlock, metadata::BlockMetadata,
+        parse_utils::parse_blocks_until,
     },
     content::{
         Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans,
@@ -42,6 +43,17 @@ pub struct SectionBlock<'src> {
 }
 
 impl<'src> SectionBlock<'src> {
+    /// Returns a document-order iterator over this section's direct child
+    /// blocks.
+    ///
+    /// For the full subtree, or to search from a [`Block`] or [`Document`], use
+    /// [`FindBlocks`](crate::blocks::FindBlocks).
+    ///
+    /// [`Document`]: crate::Document
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::from_slice(&self.blocks)
+    }
+
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,
@@ -496,12 +508,8 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
         "section".into()
     }
 
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut self.blocks
-    }
-
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        self.blocks.iter()
     }
 
     fn title_source(&'src self) -> Option<Span<'src>> {
@@ -1933,7 +1941,7 @@ mod tests {
                 "= Doc\n:leveloffset: +2\n\n== Parent\n\npara\n\n[[x]]\n// comment\n= Child\n\nbody",
             );
 
-            let top: Vec<_> = doc.nested_blocks().collect();
+            let top: Vec<_> = doc.child_blocks().collect();
             assert_eq!(top.len(), 2, "Child must be a sibling of Parent");
 
             let parent = top.first().unwrap();
@@ -1945,7 +1953,7 @@ mod tests {
             assert_eq!(child.id(), Some("x"));
             assert!(
                 parent
-                    .nested_blocks()
+                    .child_blocks()
                     .all(|b| b.raw_context().as_ref() != "section")
             );
         }
@@ -2100,7 +2108,7 @@ mod tests {
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Level 1");
             assert_eq!(mi.item.section_type(), SectionType::Normal);
-            assert_eq!(mi.item.nested_blocks().len(), 1);
+            assert_eq!(mi.item.child_blocks().count(), 1);
             assert_eq!(mi.item.id().unwrap(), "_level_1");
 
             assert_eq!(
@@ -3035,7 +3043,7 @@ mod tests {
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Level 1");
             assert_eq!(mi.item.section_type(), SectionType::Normal);
-            assert_eq!(mi.item.nested_blocks().len(), 1);
+            assert_eq!(mi.item.child_blocks().count(), 1);
             assert_eq!(mi.item.id().unwrap(), "_level_1");
 
             assert_eq!(
@@ -3068,7 +3076,7 @@ mod tests {
         assert_eq!(mi.item.level(), 1);
         assert_eq!(mi.item.section_title(), "Level 1");
         assert_eq!(mi.item.section_type(), SectionType::Normal);
-        assert_eq!(mi.item.nested_blocks().len(), 1);
+        assert_eq!(mi.item.child_blocks().count(), 1);
         assert_eq!(mi.item.id().unwrap(), "_level_1");
 
         assert_eq!(
@@ -3100,7 +3108,7 @@ mod tests {
         assert_eq!(mi.item.level(), 1);
         assert_eq!(mi.item.section_title(), "Level 1");
         assert_eq!(mi.item.section_type(), SectionType::Normal);
-        assert_eq!(mi.item.nested_blocks().len(), 1);
+        assert_eq!(mi.item.child_blocks().count(), 1);
         assert_eq!(mi.item.id().unwrap(), "_level_1");
 
         assert!(warnings.is_empty());
@@ -3112,7 +3120,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section_one"));
         } else {
             panic!("Expected section block");
@@ -3125,7 +3133,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_were_back_company"));
         } else {
             panic!("Expected section block");
@@ -3138,7 +3146,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_ben_jerry_ice_cream"));
         } else {
             panic!("Expected section block");
@@ -3151,7 +3159,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), None);
         } else {
             panic!("Expected section block");
@@ -3164,7 +3172,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("id_section_one"));
         } else {
             panic!("Expected section block");
@@ -3177,7 +3185,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section-one"));
         } else {
             panic!("Expected section block");
@@ -3190,7 +3198,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("section_one"));
         } else {
             panic!("Expected section block");
@@ -3203,7 +3211,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section-title"));
         } else {
             panic!("Expected section block");
@@ -3216,7 +3224,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("section-title"));
         } else {
             panic!("Expected section block");
@@ -3229,7 +3237,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_title_with_multiple_dots"));
         } else {
             panic!("Expected section block");
@@ -3266,7 +3274,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section_title"));
         } else {
             panic!("Expected section block");
@@ -3287,7 +3295,7 @@ mod tests {
         let mut parser = Parser::default();
         let document = parser.parse(input);
 
-        if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+        if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
             assert_eq!(section.id(), Some("_section_title"));
         } else {
             panic!("Expected section block");
@@ -3308,7 +3316,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            if let Some(Block::Section(section)) = document.nested_blocks().next() {
+            if let Some(Block::Section(section)) = document.child_blocks().next() {
                 let section_number = section.section_number();
                 assert!(section_number.is_some());
                 assert_eq!(section_number.unwrap().to_string(), "1");
@@ -3324,7 +3332,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            let mut sections = document.nested_blocks().filter_map(|block| {
+            let mut sections = document.child_blocks().filter_map(|block| {
                 if let Block::Section(section) = block {
                     Some(section)
                 } else {
@@ -3347,13 +3355,13 @@ mod tests {
             let input = ":sectnums:\n\n== Level 1\n\n=== Level 2\n\n==== Level 3";
             let document = Parser::default().parse(input);
 
-            if let Some(Block::Section(level1)) = document.nested_blocks().next() {
+            if let Some(Block::Section(level1)) = document.child_blocks().next() {
                 assert_eq!(level1.section_number().unwrap().to_string(), "1");
 
-                if let Some(Block::Section(level2)) = level1.nested_blocks().next() {
+                if let Some(Block::Section(level2)) = level1.child_blocks().next() {
                     assert_eq!(level2.section_number().unwrap().to_string(), "1.1");
 
-                    if let Some(Block::Section(level3)) = level2.nested_blocks().next() {
+                    if let Some(Block::Section(level3)) = level2.child_blocks().next() {
                         assert_eq!(level3.section_number().unwrap().to_string(), "1.1.1");
                     } else {
                         panic!("Expected level 3 section");
@@ -3371,7 +3379,7 @@ mod tests {
             let input = ":sectnums:\n\n== First\n\n=== First.One\n\n=== First.Two\n\n== Second\n\n=== Second.One";
             let document = Parser::default().parse(input);
 
-            let mut sections = document.nested_blocks().filter_map(|block| {
+            let mut sections = document.child_blocks().filter_map(|block| {
                 if let Block::Section(section) = block {
                     Some(section)
                 } else {
@@ -3383,7 +3391,7 @@ mod tests {
             assert_eq!(first.section_number().unwrap().to_string(), "1");
 
             let first_one = first
-                .nested_blocks()
+                .child_blocks()
                 .filter_map(|block| {
                     if let Block::Section(section) = block {
                         Some(section)
@@ -3396,7 +3404,7 @@ mod tests {
             assert_eq!(first_one.section_number().unwrap().to_string(), "1.1");
 
             let first_two = first
-                .nested_blocks()
+                .child_blocks()
                 .filter_map(|block| {
                     if let Block::Section(section) = block {
                         Some(section)
@@ -3412,7 +3420,7 @@ mod tests {
             assert_eq!(second.section_number().unwrap().to_string(), "2");
 
             let second_one = second
-                .nested_blocks()
+                .child_blocks()
                 .filter_map(|block| {
                     if let Block::Section(section) = block {
                         Some(section)
@@ -3431,7 +3439,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            for block in document.nested_blocks() {
+            for block in document.child_blocks() {
                 if let Block::Section(section) = block {
                     assert!(section.section_number().is_none());
                 }
@@ -3444,7 +3452,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            for block in document.nested_blocks() {
+            for block in document.child_blocks() {
                 if let Block::Section(section) = block {
                     assert!(section.section_number().is_none());
                 }
@@ -3462,7 +3470,7 @@ mod tests {
 
             assert!(parser.is_attribute_set("sectnums"));
 
-            let mut sections = document.nested_blocks().filter_map(|block| {
+            let mut sections = document.child_blocks().filter_map(|block| {
                 if let Block::Section(section) = block {
                     Some(section)
                 } else {
@@ -3499,7 +3507,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            let mut sections = document.nested_blocks().filter_map(|block| {
+            let mut sections = document.child_blocks().filter_map(|block| {
                 if let Block::Section(section) = block {
                     Some(section)
                 } else {
@@ -3525,19 +3533,19 @@ mod tests {
             let input = ":sectnums:\n:sectnumlevels: 5\n\n== Level 1\n\n=== Level 2\n\n==== Level 3\n\n===== Level 4\n\n====== Level 5";
             let document = Parser::default().parse(input);
 
-            if let Some(Block::Section(l1)) = document.nested_blocks().next() {
+            if let Some(Block::Section(l1)) = document.child_blocks().next() {
                 assert_eq!(l1.section_number().unwrap().to_string(), "1");
 
-                if let Some(Block::Section(l2)) = l1.nested_blocks().next() {
+                if let Some(Block::Section(l2)) = l1.child_blocks().next() {
                     assert_eq!(l2.section_number().unwrap().to_string(), "1.1");
 
-                    if let Some(Block::Section(l3)) = l2.nested_blocks().next() {
+                    if let Some(Block::Section(l3)) = l2.child_blocks().next() {
                         assert_eq!(l3.section_number().unwrap().to_string(), "1.1.1");
 
-                        if let Some(Block::Section(l4)) = l3.nested_blocks().next() {
+                        if let Some(Block::Section(l4)) = l3.child_blocks().next() {
                             assert_eq!(l4.section_number().unwrap().to_string(), "1.1.1.1");
 
-                            if let Some(Block::Section(l5)) = l4.nested_blocks().next() {
+                            if let Some(Block::Section(l5)) = l4.child_blocks().next() {
                                 assert_eq!(l5.section_number().unwrap().to_string(), "1.1.1.1.1");
                             } else {
                                 panic!("Expected level 5 section");
@@ -3851,7 +3859,7 @@ mod tests {
             let doc = Parser::default().parse("[appendix]\n== One\n\nLetter {appendix-number}.\n");
 
             let section = first_section(&doc);
-            let Some(Block::Simple(paragraph)) = section.nested_blocks().next() else {
+            let Some(Block::Simple(paragraph)) = section.child_blocks().next() else {
                 panic!("expected a simple block");
             };
             assert_eq!(paragraph.content().rendered(), "Letter A.");
@@ -3883,7 +3891,7 @@ mod tests {
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Discrete Heading");
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
             assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
             assert!(mi.item.title().is_none());
             assert!(mi.item.anchor().is_none());
@@ -3937,7 +3945,7 @@ mod tests {
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Floating Heading");
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
             assert!(warnings.is_empty());
         }
 
@@ -3958,7 +3966,7 @@ mod tests {
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
 
             // Discrete headings should have no nested blocks.
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
 
             // The paragraph should be left unparsed.
             assert_eq!(
@@ -3980,7 +3988,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            let mut blocks = document.nested_blocks();
+            let mut blocks = document.child_blocks();
 
             // First should be "Section 1".
             if let Some(crate::blocks::Block::Section(section)) = blocks.next() {
@@ -3988,14 +3996,14 @@ mod tests {
                 assert_eq!(section.level(), 1);
                 assert_eq!(section.section_type(), SectionType::Normal);
 
-                let mut children = section.nested_blocks();
+                let mut children = section.child_blocks();
 
                 // First child should be the discrete heading.
                 if let Some(crate::blocks::Block::Section(discrete)) = children.next() {
                     assert_eq!(discrete.section_title(), "Discrete");
                     assert_eq!(discrete.level(), 2);
                     assert_eq!(discrete.section_type(), SectionType::Discrete);
-                    assert!(discrete.nested_blocks().next().is_none());
+                    assert!(discrete.child_blocks().next().is_none());
                 } else {
                     panic!("Expected discrete heading block");
                 }
@@ -4019,7 +4027,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+            if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
                 // Discrete headings should generate auto IDs.
                 assert_eq!(section.id(), Some("_discrete_heading"));
             } else {
@@ -4033,7 +4041,7 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            if let Some(crate::blocks::Block::Section(section)) = document.nested_blocks().next() {
+            if let Some(crate::blocks::Block::Section(section)) = document.child_blocks().next() {
                 // Manual IDs should still work with discrete headings.
                 assert_eq!(section.id(), Some("my-id"));
             } else {
@@ -4047,13 +4055,13 @@ mod tests {
             let mut parser = Parser::default();
             let document = parser.parse(input);
 
-            let mut blocks = document.nested_blocks();
+            let mut blocks = document.child_blocks();
 
             if let Some(crate::blocks::Block::Section(section)) = blocks.next() {
                 assert_eq!(section.section_title(), "Section 1");
                 assert!(section.section_number().is_some());
 
-                let mut children = section.nested_blocks();
+                let mut children = section.child_blocks();
 
                 // Discrete heading should not have a section number.
                 if let Some(crate::blocks::Block::Section(discrete)) = children.next() {
@@ -4206,7 +4214,7 @@ mod tests {
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
 
             // Should have no child blocks.
-            assert!(mi.item.nested_blocks().next().is_none());
+            assert!(mi.item.child_blocks().next().is_none());
 
             // The paragraph and next section should be unparsed.
             assert!(mi.after.data().contains("paragraph"));

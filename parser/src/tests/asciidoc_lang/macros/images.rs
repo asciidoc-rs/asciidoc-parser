@@ -516,7 +516,7 @@ To turn off figure caption labels and numbers, unset the `figure-caption` attrib
 
         // By default a titled block image is captioned "Figure N." and numbered.
         let doc = Parser::default().parse(".A mountain sunset\nimage::sunset.jpg[Sunset]");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.title(), Some("A mountain sunset"));
         assert_eq!(block.caption(), Some("Figure 1. "));
         assert_eq!(block.number(), Some(1));
@@ -526,7 +526,7 @@ To turn off figure caption labels and numbers, unset the `figure-caption` attrib
         let doc = Parser::default().parse(
             "= Document Title\n:figure-caption!:\n\n.A mountain sunset\nimage::sunset.jpg[Sunset]",
         );
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.title(), Some("A mountain sunset"));
         assert_eq!(block.caption(), None);
         assert_eq!(block.number(), None);
@@ -571,7 +571,7 @@ include::example$image.adoc[tag=inline]
         let doc = Parser::default()
             .parse("Click image:play.png[] to get the party started.\n\nClick image:pause.png[title=Pause] when you need a break.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -611,7 +611,7 @@ The alt text for an inline image has the same requirements as for a block image,
         // attribute list.
         let doc = Parser::default().parse(r"Click image:play.png[Look \] here] to continue.");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let Block::Simple(sb) = block else {
             panic!("Unexpected block type: {block:?}");
         };

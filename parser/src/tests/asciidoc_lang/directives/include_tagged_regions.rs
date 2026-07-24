@@ -12,13 +12,7 @@ fn tag_select(file: &'static str, spec: &str) -> String {
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse(&source);
-    let span = doc
-        .nested_blocks()
-        .next()
-        .unwrap()
-        .span()
-        .data()
-        .to_string();
+    let span = doc.child_blocks().next().unwrap().span().data().to_string();
     span.strip_prefix("----\n")
         .and_then(|s| s.strip_suffix("\n----"))
         .map(str::to_string)

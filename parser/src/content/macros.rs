@@ -2526,7 +2526,7 @@ mod tests {
             let doc = Parser::default().parse("foo https://example.org>;");
 
             let rendered = doc
-                .nested_blocks()
+                .child_blocks()
                 .next()
                 .unwrap()
                 .rendered_content()
@@ -2547,7 +2547,7 @@ mod tests {
             let doc = Parser::default().parse("See <https://example.org> for details.");
 
             let rendered = doc
-                .nested_blocks()
+                .child_blocks()
                 .next()
                 .unwrap()
                 .rendered_content()

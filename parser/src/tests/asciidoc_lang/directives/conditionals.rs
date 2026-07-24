@@ -72,7 +72,7 @@ If you don't want a conditional preprocessor directive to be processed, you must
     // and the remainder is emitted literally. This holds even inside a verbatim
     // block because the preprocessor is not aware of the surrounding structure.
     let doc = Parser::default().parse("----\n\\ifdef::just-an-example[]\n----");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.span().data(), "----\nifdef::just-an-example[]\n----");
 }
 
