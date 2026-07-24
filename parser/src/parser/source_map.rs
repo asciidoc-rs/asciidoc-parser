@@ -146,8 +146,19 @@ impl SourceMap {
     ) {
         let file = self.intern(file);
 
-        // IMPORTANT: These _should_ be added in increasing order of
-        // `output_line`, but this is not enforced.
+        // Segments must be appended in non-decreasing `output_line` order:
+        // `resolve` binary-searches `segments` by `output_line`, which silently
+        // returns garbage on an unsorted slice. Lock that invariant here so an
+        // out-of-order call site fails loudly in debug builds rather than
+        // corrupting every downstream origin lookup.
+        debug_assert!(
+            self.segments
+                .last()
+                .is_none_or(|last| output_line >= last.output_line),
+            "SourceMap::append called out of order: output_line {output_line} follows {}",
+            self.segments.last().map_or(0, |last| last.output_line),
+        );
+
         self.segments.push(Segment {
             output_line,
             file,
@@ -383,6 +394,27 @@ mod tests {
         assert_eq!(after.file, Some("inc.adoc"));
         assert_eq!(after.line, 5);
         assert_eq!(after.col, Some(2));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "SourceMap::append called out of order")]
+    fn append_out_of_order_panics_in_debug() {
+        let mut sm = SourceMap::default();
+        append(&mut sm, 10, None, 1);
+
+        // An earlier `output_line` than the last segment breaks the ordering
+        // that `resolve`'s binary search relies on, so it must fail loudly.
+        append(&mut sm, 5, None, 1);
+    }
+
+    #[test]
+    fn append_equal_output_line_is_allowed() {
+        let mut sm = SourceMap::default();
+        append(&mut sm, 1, None, 1);
+
+        // Equal `output_line` keeps the slice sorted, so it is permitted.
+        sm.append(1, None, 1, Fidelity::Verbatim);
     }
 
     #[test]
