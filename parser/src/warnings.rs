@@ -14,6 +14,7 @@ use crate::{Span, parser::SourceLine};
 /// In `asciidoc-parser`, all documents are parseable, so this mechanism is used
 /// to convey conditions where the parse result might be unexpected.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct Warning<'src> {
     /// Location where the warning was detected.
     pub source: Span<'src>,
