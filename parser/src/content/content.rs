@@ -190,9 +190,20 @@ impl<'src> Content<'src> {
     /// Constructs a `Content` from a source `Span` and a potentially-filtered
     /// view of that source text.
     pub(crate) fn from_filtered<T: AsRef<str>>(span: Span<'src>, filtered: T) -> Self {
+        let filtered = filtered.as_ref();
+
+        // When filtering was a no-op – the filtered text is byte-identical to
+        // the source span – borrow the span rather than allocating an owned
+        // copy of text we already hold.
+        let rendered = if filtered == span.data() {
+            CowStr::Borrowed(span.data())
+        } else {
+            filtered.to_string().into()
+        };
+
         Self {
             original: span,
-            rendered: filtered.as_ref().to_string().into(),
+            rendered,
             source_lines: None,
             deferred: None,
         }
@@ -237,16 +248,25 @@ impl<'src> Content<'src> {
     /// [`apply_attributes`](crate::content::substitution_step).
     pub(crate) fn from_filtered_lines(
         span: Span<'src>,
-        filtered_lines: &[&str],
+        filtered_lines: &[&'src str],
         line_spans: Vec<Span<'src>>,
     ) -> Self {
         // One source span is required per filtered line; the default
         // `debug_assert_eq!` message reports both counts if this is ever broken.
         debug_assert_eq!(filtered_lines.len(), line_spans.len());
 
+        // A single surviving line needs no join: it is already a contiguous
+        // `'src` slice, so borrow it rather than allocating an owned copy. This
+        // is the common plain-prose paragraph case; only a genuinely multi-line
+        // block pays for the `join`.
+        let rendered = match filtered_lines {
+            [only] => CowStr::Borrowed(only),
+            _ => filtered_lines.join("\n").into(),
+        };
+
         Self {
             original: span,
-            rendered: filtered_lines.join("\n").into(),
+            rendered,
             source_lines: Some(line_spans.into_boxed_slice()),
             deferred: None,
         }
@@ -735,6 +755,31 @@ mod tests {
         fn basic_non_empty_span() {
             let content = crate::content::Content::from(crate::Span::new("blah"));
             assert!(!content.is_empty());
+        }
+    }
+
+    mod from_filtered {
+        use crate::{Span, content::Content, strings::CowStr};
+
+        #[test]
+        fn borrows_source_when_filter_is_a_no_op() {
+            // A filtered view byte-identical to the source span is borrowed from
+            // the span rather than allocating an owned copy of text we already
+            // hold.
+            let content = Content::from_filtered(Span::new("plain text"), "plain text");
+
+            assert!(matches!(content.rendered, CowStr::Borrowed(_)));
+            assert_eq!(content.rendered.as_ref(), "plain text");
+        }
+
+        #[test]
+        fn owns_rendered_text_when_filter_changes_it() {
+            // A filtered view that differs from the source is materialized as an
+            // owned copy.
+            let content = Content::from_filtered(Span::new("a|b"), "ab");
+
+            assert!(matches!(content.rendered, CowStr::Boxed(_)));
+            assert_eq!(content.rendered.as_ref(), "ab");
         }
     }
 
