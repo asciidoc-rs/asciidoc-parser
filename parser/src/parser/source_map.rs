@@ -397,6 +397,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "SourceMap::append called out of order")]
     fn append_out_of_order_panics_in_debug() {
         let mut sm = SourceMap::default();
