@@ -21,7 +21,7 @@ opaque_slice_iter! {
 /// entries, determines whether each entry is a positional or named attribute,
 /// parses the entry accordingly, and assigns the result as an attribute on the
 /// node.
-#[derive(Clone, Eq, PartialEq, Default)]
+#[derive(Clone, Eq, Hash, PartialEq, Default)]
 pub struct Attrlist<'src> {
     attributes: Vec<ElementAttribute<'src>>,
     anchor: Option<CowStr<'src>>,

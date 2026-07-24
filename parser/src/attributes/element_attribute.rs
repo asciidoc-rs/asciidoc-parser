@@ -14,7 +14,7 @@ use crate::{
 /// element in a document (including macros). Although the include directive is
 /// not technically an element, element attributes can also be defined on an
 /// include directive.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ElementAttribute<'src> {
     name: Option<CowStr<'src>>,
     value: CowStr<'src>,

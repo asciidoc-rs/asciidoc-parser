@@ -9,7 +9,7 @@ use crate::document::InterpretedValue;
 ///
 /// [`Parser::with_intrinsic_attribute()`]: crate::Parser::with_intrinsic_attribute
 /// [`Parser::with_intrinsic_attribute_bool()`]: crate::Parser::with_intrinsic_attribute_bool
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct AttributeValue {
     /// Allowable values for the attribute.
     pub(crate) allowable_value: AllowableValue,
@@ -36,7 +36,7 @@ pub(crate) struct AttributeValue {
 }
 
 /// Allowable values for the attribute.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum AllowableValue {
     /// Any value is accepted.
     Any,
@@ -59,7 +59,7 @@ pub enum AllowableValue {
 }
 
 /// Allowable context(s) for modification of this attribute value.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ModificationContext {
     /// Value can only be configured via API.
     ApiOnly,

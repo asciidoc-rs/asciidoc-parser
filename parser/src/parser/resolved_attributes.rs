@@ -84,6 +84,54 @@ pub(crate) struct ResolvedAttributes {
     datetime_inputs: Option<Box<DatetimeInputs>>,
 }
 
+impl std::hash::Hash for ResolvedAttributes {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // `HashMap` is neither `Hash` nor deterministically ordered, so a table
+        // can not feed the hasher directly. Instead fold an order-independent
+        // digest of each table's entries into `state`. This stays consistent
+        // with the derived, content-based `Eq` (equal snapshots hash equally),
+        // while distinguishing snapshots whose tables differ in their keys or
+        // values – not merely in their entry count (hashing the count alone
+        // would collide every cell in a document, since they typically share one
+        // `Arc`-backed, equal-length attribute table).
+        hash_table(self.attribute_values.iter(), state);
+        hash_table(self.default_attribute_values.iter(), state);
+        hash_table(self.counter_values.iter(), state);
+        self.safe.hash(state);
+        self.datetime_inputs.hash(state);
+    }
+}
+
+/// Feeds an order-independent digest of a table's entries into `state`: the
+/// entry count together with the XOR of each entry's `(key, value)` hash.
+///
+/// XOR is commutative, so the digest does not depend on the `HashMap`'s
+/// nondeterministic iteration order, yet it still varies with every key and
+/// value present. Keys of a `HashMap` are unique, so no entry's hash cancels
+/// another's.
+fn hash_table<'a, K, V, H>(entries: impl Iterator<Item = (&'a K, &'a V)>, state: &mut H)
+where
+    K: std::hash::Hash + 'a,
+    V: std::hash::Hash + 'a,
+    H: std::hash::Hasher,
+{
+    use std::hash::{Hash, Hasher};
+
+    let mut count: usize = 0;
+    let mut combined: u64 = 0;
+
+    for (key, value) in entries {
+        let mut entry_hasher = std::hash::DefaultHasher::new();
+        key.hash(&mut entry_hasher);
+        value.hash(&mut entry_hasher);
+        combined ^= entry_hasher.finish();
+        count += 1;
+    }
+
+    count.hash(state);
+    combined.hash(state);
+}
+
 impl ResolvedAttributes {
     pub(crate) fn new(
         attribute_values: Arc<HashMap<String, AttributeValue>>,

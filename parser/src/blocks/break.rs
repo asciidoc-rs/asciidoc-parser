@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// A break block is used to represent a thematic or page break macro.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Break<'src> {
     type_: BreakType,
     source: Span<'src>,
@@ -19,7 +19,7 @@ pub struct Break<'src> {
 }
 
 /// A break may be one of two different types.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum BreakType {
     /// A thematic break (aka horizontal rule).
     Thematic,

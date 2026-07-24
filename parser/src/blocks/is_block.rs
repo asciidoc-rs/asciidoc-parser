@@ -344,7 +344,7 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
 
 /// The content model of a block determines what kind of content the block can
 /// have (if any) and how that content is processed.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum ContentModel {
     /// A block that may only contain other blocks (e.g., a section)
     Compound,
