@@ -199,7 +199,7 @@ mod sealed {
 ///
 /// [`style`](Self::style) matches [`declared_style`](IsBlock::declared_style),
 /// which is the block's resolved style and tracks Asciidoctor's `style` in the
-/// common cases — including variant blocks that report their style even in
+/// common cases – including variant blocks that report their style even in
 /// shorthand form (e.g. an admonition written `NOTE:` matches `style("NOTE")`).
 /// The one divergence: a style that masquerades as a built-in context (e.g.
 /// `[example]`, `[sidebar]`) is promoted to the block's context, so match those
@@ -510,7 +510,7 @@ mod tests {
 
         let contexts = contexts(&doc);
 
-        // section, then the list, then each item and the paragraph it holds,
+        // Section, then the list, then each item and the paragraph it holds,
         // then the listing.
         assert_eq!(
             contexts,

@@ -292,7 +292,7 @@ impl<'src> Block<'src> {
         } = BlockMetadata::parse(source, parser);
 
         // A block title stashed by an enclosing section heading (see
-        // `SectionBlock::parse`) is claimed by the next block parsed — this
+        // `SectionBlock::parse`) is claimed by the next block parsed – this
         // one. A title of the block's own wins, discarding the carried title.
         // The carried title has no source line adjacent to this block, so
         // `title_source` stays `None` (the same shape as a `title=` attribute).
@@ -332,7 +332,7 @@ impl<'src> Block<'src> {
         // Resolve attribute references in a `[[id,reftext]]` anchor reftext now,
         // while the parser still holds the attributes in effect where the anchor
         // appears. A compound block's body (parsed below) can redefine those
-        // attributes, so deferring this to registration — after the body — would
+        // attributes, so deferring this to registration – after the body – would
         // record the wrong value. The result is threaded into `block_reftext`.
         let anchor_reftext = metadata
             .anchor_reftext
@@ -747,7 +747,7 @@ impl<'src> Block<'src> {
     ///
     /// `anchor_reftext` is the block's `[[id,reftext]]` anchor reftext with its
     /// attribute references already resolved (by the caller, against the
-    /// attributes in effect where the anchor appears — captured before the
+    /// attributes in effect where the anchor appears – captured before the
     /// block's body is parsed, since a compound block's body may itself
     /// redefine those attributes). This matches how the anchor ID and a
     /// `reftext=` attribute (both substituted when the attribute list is
@@ -825,7 +825,7 @@ impl<'src> Block<'src> {
         // heading, which `content_mut` deliberately does not expose (see
         // `SectionBlock`). Headings are resolved by the document-order title
         // pass (`title_refs::resolve_title_references`), which coordinates
-        // cross-references *between* titles (forward and circular) — something
+        // cross-references *between* titles (forward and circular) – something
         // per-content resolution cannot see.
         if let Some(content) = self.content_mut() {
             content.resolve_references(resolver, renderer, warnings);

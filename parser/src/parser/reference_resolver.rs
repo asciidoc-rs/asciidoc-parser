@@ -1,8 +1,8 @@
 //! Cross-reference resolution.
 //!
 //! Parsing leaves cross-references (`<<id>>`, `xref:id[…]`) unresolved so they
-//! can be resolved later, once the full document — or, for multi-document
-//! workflows such as Antora, the full corpus — has been parsed and its catalog
+//! can be resolved later, once the full document – or, for multi-document
+//! workflows such as Antora, the full corpus – has been parsed and its catalog
 //! of referenceable elements is complete.
 //!
 //! Resolution is performed through the [`ReferenceResolver`] trait. This crate
@@ -120,7 +120,7 @@ impl ResolvedReference {
     /// across documents: a multi-document (Antora-style) resolver that has
     /// located the target's [`RefEntry`] in some document's [`Catalog`] passes
     /// the `href` it computed for that document, and the target's signifier and
-    /// number — computed while *that* document was parsed — ride along. The
+    /// number – computed while *that* document was parsed – ride along. The
     /// style itself comes from the *referencing* document and is applied later,
     /// so the resolver need not know it. The single-document
     /// [`CatalogResolver`] is built on this same helper.
@@ -149,8 +149,8 @@ impl ResolvedReference {
 /// The destination a cross-reference target resolves to on its own, without
 /// consulting any catalog.
 ///
-/// A target that names a document — another one (an [inter-document cross
-/// reference]) or the current one — carries its own destination. The parser
+/// A target that names a document – another one (an [inter-document cross
+/// reference]) or the current one – carries its own destination. The parser
 /// derives it while substituting the reference, rewriting the path with the
 /// `relfileprefix`, `relfilesuffix`, and `outfilesuffix` attributes in effect
 /// at that point in the document.
@@ -257,7 +257,7 @@ impl<'src> ReferenceWarnings<'src> {
 /// This carries only information the crate itself knows about the reference. A
 /// multi-document host that needs to know which document a reference originates
 /// from binds that "from" context when it constructs its [`ReferenceResolver`],
-/// rather than receiving it here — keeping this seam free of any host-specific
+/// rather than receiving it here – keeping this seam free of any host-specific
 /// coordinate system.
 #[non_exhaustive]
 pub struct ResolutionContext<'a> {

@@ -170,7 +170,7 @@ impl Author {
             }
         } else if names_only {
             // Input comes from an attribute entry (e.g. `:author:`) and does not
-            // match the author pattern — typically a name with four or more parts
+            // match the author pattern – typically a name with four or more parts
             // or one containing punctuation such as a comma. Asciidoctor still
             // partitions it by splitting on whitespace into at most three parts,
             // assigning any trailing parts to `lastname`.
@@ -299,11 +299,11 @@ fn join_name_parts(firstname: &str, middlename: Option<&str>, lastname: Option<&
 /// value such as `:author:`).
 ///
 /// A trailing `<email>` (or URL) is first split off so it is not absorbed into
-/// the name — mirroring the email group of the author pattern and Asciidoctor's
+/// the name – mirroring the email group of the author pattern and Asciidoctor's
 /// XML sanitization of a names-only value. The remaining name is then split on
 /// whitespace into at most three segments (Ruby's `String#split(nil, 3)`, which
 /// also drops leading whitespace). The trailing segment retains its interior
-/// text — so a four-plus-part name keeps its later parts in `lastname` — but
+/// text – so a four-plus-part name keeps its later parts in `lastname` – but
 /// has repeating spaces condensed to a single space. Each segment then has
 /// underscore joiners replaced with spaces.
 ///
@@ -439,7 +439,7 @@ static NAMES_ONLY_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(.*\S)\s+<([^>]+)>$").unwrap()
 });
 
-/// Returns whether `source` matches the author pattern — at most three
+/// Returns whether `source` matches the author pattern – at most three
 /// space-separated names with an optional trailing `<email>`.
 ///
 /// The `:author:` attribute-entry path uses this to tell whether a plain-name
