@@ -12,13 +12,42 @@ use crate::{
 /// the basic raw text of a simple block to the format which will ultimately be
 /// presented in the final converted output.
 ///
-/// An implementation is provided for HTML output; alternative implementations
-/// (not provided in this crate) could support other output formats.
+/// An implementation is provided for HTML output
+/// ([`HtmlSubstitutionRenderer`]); alternative implementations (not provided in
+/// this crate) could support other output formats.
+///
+/// ## Overriding only what differs
+///
+/// Every method has a default body, so an implementation only needs to override
+/// the substitutions whose output it wants to change and inherits the built-in
+/// HTML output for the rest. In particular, [`image_uri`](Self::image_uri) and
+/// [`render_image`](Self::render_image) inherit the crate's `data-uri`
+/// embedding and `opts=inline` SVG handling – which read bytes through the
+/// [`ImageFileHandler`](crate::parser::ImageFileHandler) and
+/// [`SvgFileHandler`](crate::parser::SvgFileHandler) registered on the
+/// [`Parser`] – so a downstream renderer gets that behavior without needing to
+/// reproduce it.
+///
+/// Note that these defaults delegate to the HTML renderer's *own* methods
+/// rather than routing back through `self`: an override of one method does not
+/// change what a still-defaulted sibling emits. For example, overriding
+/// [`image_uri`](Self::image_uri) alone does not change the URI that the
+/// inherited [`render_image`](Self::render_image) or
+/// [`render_icon`](Self::render_icon) produces – override that method too
+/// (calling `self.image_uri(…)`) if the two must agree. The sole exception is
+/// [`icon_uri`](Self::icon_uri): its default derives an icon path and then
+/// calls `self.image_uri(…)`, so it alone *does* reflect an `image_uri`
+/// override. A renderer that resolves asset URIs itself can reach the
+/// registered handlers through
+/// [`Parser::image_file_handler`](crate::Parser::image_file_handler) and
+/// [`Parser::svg_file_handler`](crate::Parser::svg_file_handler).
 pub trait InlineSubstitutionRenderer: Debug {
     /// Renders the substitution for a special character.
     ///
     /// The renderer should write the appropriate rendering to `dest`.
-    fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String);
+    fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_special_character(type_, dest);
+    }
 
     /// Renders the content of a [quote substitution].
     ///
@@ -33,14 +62,18 @@ pub trait InlineSubstitutionRenderer: Debug {
         id: Option<String>,
         body: &str,
         dest: &mut String,
-    );
+    ) {
+        DEFAULT_HTML_RENDERER.render_quoted_substitution(type_, scope, attrlist, id, body, dest);
+    }
 
     /// Renders the content of a [character replacement].
     ///
     /// The renderer should write the appropriate rendering to `dest`.
     ///
     /// [character replacement]: https://docs.asciidoctor.org/asciidoc/latest/subs/replacements/
-    fn render_character_replacement(&self, type_: CharacterReplacementType, dest: &mut String);
+    fn render_character_replacement(&self, type_: CharacterReplacementType, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_character_replacement(type_, dest);
+    }
 
     /// Renders a line break.
     ///
@@ -50,13 +83,17 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// This is used in the implementation of [post-replacement substitutions].
     ///
     /// [post-replacement substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/post-replacements/
-    fn render_line_break(&self, dest: &mut String);
+    fn render_line_break(&self, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_line_break(dest);
+    }
 
     /// Renders an image.
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// image to `dest`.
-    fn render_image(&self, params: &ImageRenderParams, dest: &mut String);
+    fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_image(params, dest);
+    }
 
     /// Construct a URI reference or data URI to the target image.
     ///
@@ -89,13 +126,17 @@ pub trait InlineSubstitutionRenderer: Debug {
         target_image_path: &str,
         parser: &Parser,
         asset_dir_key: Option<&str>,
-    ) -> String;
+    ) -> String {
+        DEFAULT_HTML_RENDERER.image_uri(target_image_path, parser, asset_dir_key)
+    }
 
     /// Renders an icon.
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// icon to `dest`.
-    fn render_icon(&self, params: &IconRenderParams, dest: &mut String);
+    fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_icon(params, dest);
+    }
 
     /// Construct a reference or data URI to an icon image for the specified
     /// icon name.
@@ -133,13 +174,17 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// link, to `dest`.
-    fn render_link(&self, params: &LinkRenderParams, dest: &mut String);
+    fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_link(params, dest);
+    }
 
     /// Renders an anchor.
     ///
     /// The rendered should write an appropriate rendering of the specified
     /// anchor with ID and possible ref text (only used by some renderers).
-    fn render_anchor(&self, id: &str, reftext: Option<String>, dest: &mut String);
+    fn render_anchor(&self, id: &str, reftext: Option<String>, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_anchor(id, reftext, dest);
+    }
 
     /// Renders a cross-reference.
     ///
@@ -147,7 +192,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// a destination; the renderer should link to it. When it is `None`, the
     /// reference could not be resolved and the renderer should emit a sensible
     /// fallback (e.g. a link to the raw target with bracketed text).
-    fn render_xref(&self, params: &XrefRenderParams, dest: &mut String);
+    fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_xref(params, dest);
+    }
 
     /// Renders a [callout] number that annotates a line in a verbatim block.
     ///
@@ -156,7 +203,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// image-based icons are enabled (via the `icons` document attribute).
     ///
     /// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
-    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String);
+    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_callout(params, dest);
+    }
 
     /// Renders an [index term].
     ///
@@ -172,7 +221,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
     /// [`visible_term`]: IndexTermRenderParams::visible_term
-    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String);
+    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_index_term(params, dest);
+    }
 
     /// Renders a [button] UI macro (`btn:[label]`).
     ///
@@ -180,7 +231,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// an appropriate rendering (e.g. `<b class="button">label</b>`) to `dest`.
     ///
     /// [button]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
-    fn render_button(&self, text: &str, dest: &mut String);
+    fn render_button(&self, text: &str, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_button(text, dest);
+    }
 
     /// Renders a [keyboard] UI macro (`kbd:[keys]`).
     ///
@@ -191,14 +244,18 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// `dest`.
     ///
     /// [keyboard]: https://docs.asciidoctor.org/asciidoc/latest/macros/keyboard-macro/
-    fn render_keyboard(&self, keys: &[String], dest: &mut String);
+    fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_keyboard(keys, dest);
+    }
 
     /// Renders a [menu] UI macro (`menu:menu[submenu > … > item]`).
     ///
     /// The renderer should write an appropriate rendering to `dest`.
     ///
     /// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
-    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String);
+    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_menu(params, dest);
+    }
 
     /// Renders the inline reference produced by a [`footnote`] macro.
     ///
@@ -211,7 +268,9 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// an unresolved reference).
     ///
     /// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
-    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String);
+    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_footnote(params, dest);
+    }
 }
 
 /// Specifies which special character is being replaced in a call to
@@ -530,6 +589,11 @@ pub struct FootnoteRenderParams<'a> {
 /// for common HTML-based applications.
 #[derive(Debug)]
 pub struct HtmlSubstitutionRenderer {}
+
+/// The shared HTML renderer to which [`InlineSubstitutionRenderer`]'s default
+/// method bodies delegate. It is stateless, so a single `const` instance serves
+/// every delegation.
+const DEFAULT_HTML_RENDERER: HtmlSubstitutionRenderer = HtmlSubstitutionRenderer {};
 
 impl HtmlSubstitutionRenderer {
     /// Resolve an image target to a `src`/`data` reference, honoring a

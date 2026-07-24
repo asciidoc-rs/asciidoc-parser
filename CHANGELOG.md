@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.26.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.25.0...v0.26.0)
+_24 July 2026_
+
+### Added
+
+* Let a custom InlineSubstitutionRenderer override only what differs (close #896) ([#933](https://github.com/asciidoc-rs/asciidoc-parser/pull/933))
+* [**breaking**] Replace IsBlock::nested_blocks with a complete child_blocks API (close #894) ([#930](https://github.com/asciidoc-rs/asciidoc-parser/pull/930))
+* Map preprocessed spans back to origin file, line, column, and fidelity ([#917](https://github.com/asciidoc-rs/asciidoc-parser/pull/917))
+
+### Documented
+
+* Complete the truncated doc comment on `LookaheadReplacer` (close #906) ([#925](https://github.com/asciidoc-rs/asciidoc-parser/pull/925))
+* Document that untrusted AsciiDoc output requires HTML sanitization (close #889) ([#920](https://github.com/asciidoc-rs/asciidoc-parser/pull/920))
+* Normalize comment and doc prose style across the codebase ([#915](https://github.com/asciidoc-rs/asciidoc-parser/pull/915))
+* Correct SafeMode Safe/Server docstrings to match enforced protection (close #890) ([#913](https://github.com/asciidoc-rs/asciidoc-parser/pull/913))
+
+### Fixed
+
+* Emit document warnings in source order (close #901) ([#932](https://github.com/asciidoc-rs/asciidoc-parser/pull/932))
+* Repair stale nested_blocks() call left by concurrent PR landing ([#936](https://github.com/asciidoc-rs/asciidoc-parser/pull/936))
+* Reject a dangerous image/icon target promoted to an href via link=self (close #919) ([#927](https://github.com/asciidoc-rs/asciidoc-parser/pull/927))
+* Enforce SourceMap append ordering with a debug assertion (close #903) ([#931](https://github.com/asciidoc-rs/asciidoc-parser/pull/931))
+* Make catalog ID iteration deterministic across process runs (close #899) ([#926](https://github.com/asciidoc-rs/asciidoc-parser/pull/926))
+* Reduce allocations in the inline substitution pipeline (close #905) ([#924](https://github.com/asciidoc-rs/asciidoc-parser/pull/924))
+* Fall back to an empty span instead of the whole span on out-of-bounds slice (close #902) ([#923](https://github.com/asciidoc-rs/asciidoc-parser/pull/923))
+* Escape href/target/icon attributes and reject script URIs in link macro (close #888) ([#911](https://github.com/asciidoc-rs/asciidoc-parser/pull/911))
+* Strip a leading UTF-8 BOM before parsing (close #900) ([#918](https://github.com/asciidoc-rs/asciidoc-parser/pull/918))
+* Cap block nesting depth to prevent stack overflow on untrusted input (close #885) ([#910](https://github.com/asciidoc-rs/asciidoc-parser/pull/910))
+* Reset document attribute values between parses on a reused Parser (close #893) ([#909](https://github.com/asciidoc-rs/asciidoc-parser/pull/909))
+* Honor char boundary when skipping constrained-monospace look-ahead (close #887) ([#912](https://github.com/asciidoc-rs/asciidoc-parser/pull/912))
+* Avoid O(n²) parse time on many repeated block delimiters (close #886) ([#914](https://github.com/asciidoc-rs/asciidoc-parser/pull/914))
+
+### Other
+
+* [**breaking**] Make PathResolver a trait with a with_path_resolver builder (close #898) ([#934](https://github.com/asciidoc-rs/asciidoc-parser/pull/934))
+* Give the `link:` prefix its own bracket-required INLINE_LINK branch (close #908) ([#928](https://github.com/asciidoc-rs/asciidoc-parser/pull/928))
+* [**breaking**] Polish public rendering API ahead of 1.0 (close #897) ([#929](https://github.com/asciidoc-rs/asciidoc-parser/pull/929))
+* Avoid per-cell String allocations when locking attributes in AsciiDoc table cells (close #904) ([#922](https://github.com/asciidoc-rs/asciidoc-parser/pull/922))
+
+### Breaking changes
+
+This release settles several pre-1.0 public-API commitments. Each is a source-level rename or reshape of the extension surface; the parser's behavior is unchanged. Downstream code updates as follows:
+
+* **Block traversal** ([#930](https://github.com/asciidoc-rs/asciidoc-parser/pull/930)) — `IsBlock::nested_blocks()` is removed. Use `FindBlocks::child_blocks()` on `Document`/`Block` (or the inherent `child_blocks()` on a concrete block type) as the single, discoverable direct-children accessor. Unlike the old method it is blockquote-complete, and — like `descendant_blocks()` — it does not descend into AsciiDoc table cells unless you opt in with `BlockSelector::traverse_documents`. It returns the new opaque `ChildBlocks` iterator. The internal write-back hook `IsBlock::nested_blocks_mut()` is renamed to `child_blocks_mut()`. Several public iterators — `Document::warnings()`, `AuthorLine::authors()`, `Header::attributes()` / `Header::comments()`, and `Attrlist::attributes()` — no longer leak `std::slice::Iter<…>` in their signatures; they now return named opaque iterator types that remain `ExactSizeIterator` + `DoubleEndedIterator` (so `.len()` and reverse iteration keep working). Only code that named the old `std::slice::Iter` return type explicitly needs to change.
+* **`PathResolver`** ([#934](https://github.com/asciidoc-rs/asciidoc-parser/pull/934)) — `PathResolver` is now a trait, matching the crate's other `Rc<dyn …>` handler seams, so a host can override path/URL resolution. The former concrete struct is now `DefaultPathResolver` (behavior unchanged); replace `PathResolver::default()` or `PathResolver { file_separator }` with `DefaultPathResolver`. `Parser::path_resolver` is no longer a public field — configure a custom resolver via the new `Parser::with_path_resolver(...)` builder, consistent with `with_image_file_handler` and the rest.
+* **Rendering API** ([#929](https://github.com/asciidoc-rs/asciidoc-parser/pull/929)) — the misspelled trait method `InlineSubstitutionRenderer::render_quoted_substitition` is renamed to `render_quoted_substitution`; every implementor must update the method name. The single-variant `LinkRenderType` enum and the `LinkRenderParams::type_` field it backed are removed (the field carried no information; a link-type distinction can be reintroduced deliberately later). `LinkRenderParams::window` changes from `Option<&'static str>` to `Option<&'a str>` to match `XrefRenderParams::window` — a pure signature change, since the only value ever passed is the `"_blank"` literal.
+* **`SourceMap`** ([#917](https://github.com/asciidoc-rs/asciidoc-parser/pull/917)) — `SourceMap` changed from a tuple struct (`SourceMap(pub Vec<(usize, SourceLine)>)`) to a plain struct with private fields, to hold the new interned-origin representation behind the added `origin_at`/`origin_of` lookups. It is obtained from `Document`, not constructed directly, and `original_file_and_line()` and `SourceLine` are unchanged; only code that built a `SourceMap` struct literal or read its `.0` field needs to update.
+
 ## [0.25.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.24.0...v0.25.0)
 _23 July 2026_
 
