@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 use crate::{
     SafeMode,
@@ -14,6 +14,26 @@ use crate::{
         safe_mode::masked_doc_path,
     },
 };
+
+/// Folds an attribute name to the lowercase form used as its lookup key.
+///
+/// Attribute names are stored lower-cased (both an attribute-entry definition
+/// and an API-supplied attribute fold their name), so a case-insensitive lookup
+/// folds the query name the same way. An all-lowercase ASCII name – the
+/// overwhelmingly common case – is already its own lowercase form, so it is
+/// borrowed unchanged rather than allocating a fresh `String`. Any name that
+/// carries an ASCII uppercase letter or a non-ASCII byte falls back to the full
+/// Unicode [`str::to_lowercase`], preserving the previous behavior exactly.
+pub(crate) fn attribute_lookup_name(name: &str) -> Cow<'_, str> {
+    if name
+        .bytes()
+        .all(|b| b.is_ascii() && !b.is_ascii_uppercase())
+    {
+        Cow::Borrowed(name)
+    } else {
+        Cow::Owned(name.to_lowercase())
+    }
+}
 
 /// A snapshot of a [`Parser`]'s fully-resolved document-attribute state, taken
 /// at the end of parsing so it can be retained on a [`Document`] and queried

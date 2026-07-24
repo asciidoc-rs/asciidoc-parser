@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::LazyLock};
+use std::{borrow::Cow, fmt::Write as _, sync::LazyLock};
 
 use regex::{Captures, Regex, Replacer};
 
@@ -115,7 +115,11 @@ impl Passthroughs {
         self.0.push(passthrough);
 
         dest.push('\u{96}');
-        dest.push_str(&format!("{index}"));
+
+        // Append the index in place with `write!`, avoiding the temporary
+        // `String` a `push_str(&format!(...))` would allocate.
+        let _ = write!(dest, "{index}");
+
         dest.push('\u{97}');
     }
 }

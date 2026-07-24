@@ -7,7 +7,7 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::AttributeMissing,
     document::{Attribute, InterpretedValue},
-    parser::{DeferredWarning, SourceLine, SourceMap},
+    parser::{DeferredWarning, SourceLine, SourceMap, attribute_lookup_name},
     span::MatchedItem,
     warnings::{Warning, WarningType},
 };
@@ -936,7 +936,7 @@ impl<'p> PreprocessorState<'p> {
                 // lower-cased, so the lookup name is folded the same way (see the
                 // content-substitution path in `content::substitution_step` and
                 // Asciidoctor's `key = $2.downcase`).
-                let lookup_name = attr_name.to_lowercase();
+                let lookup_name = attribute_lookup_name(attr_name);
 
                 if !self.parser.has_attribute(&lookup_name) {
                     self.missing_reference = true;
@@ -1337,7 +1337,7 @@ impl<'p> PreprocessorState<'p> {
         // Attribute names are case-insensitive: the parser stores them
         // lowercased, so the directive's target names are lowercased to match
         // (`ifdef::showScript[]` resolves the `showscript` attribute).
-        let is_set = |name: &str| self.parser.is_attribute_set(name.to_lowercase());
+        let is_set = |name: &str| self.parser.is_attribute_set(attribute_lookup_name(name));
 
         // Whichever of `,`/`+` appears first in the target selects the
         // combinator; the target is then split on that delimiter alone.

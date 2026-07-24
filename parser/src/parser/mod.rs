@@ -42,7 +42,7 @@ pub use svg_file_handler::SvgFileHandler;
 pub(crate) mod preprocessor;
 
 mod resolved_attributes;
-pub(crate) use resolved_attributes::ResolvedAttributes;
+pub(crate) use resolved_attributes::{ResolvedAttributes, attribute_lookup_name};
 
 mod reference_resolver;
 pub(crate) use reference_resolver::ReferenceWarnings;
