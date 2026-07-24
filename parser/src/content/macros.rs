@@ -1072,6 +1072,29 @@ static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// Reports whether `target` begins with a URI scheme that can execute script
+/// when placed in an `href` — `javascript:`, `data:`, or `vbscript:`.
+///
+/// Leading control and space characters are ignored first, because a browser
+/// strips them before it parses the scheme (so `"\u{1}javascript:…"` is still
+/// live). The comparison is ASCII-case-insensitive.
+///
+/// Used to neutralize such targets in the explicit `link:` macro; the
+/// auto-linker already restricts bare URLs to a safe scheme set
+/// (`https?`/`file`/`ftp`/`irc`), so this only guards the macro form, which
+/// otherwise accepts an arbitrary scheme.
+fn has_dangerous_scheme(target: &str) -> bool {
+    let target = target.trim_start_matches(|c: char| c <= ' ');
+
+    const DANGEROUS_SCHEMES: [&str; 3] = ["javascript:", "data:", "vbscript:"];
+
+    DANGEROUS_SCHEMES.iter().any(|scheme| {
+        target
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    })
+}
+
 #[derive(Debug)]
 struct InlineLinkMacroReplacer<'p>(&'p Parser);
 
@@ -1096,6 +1119,18 @@ impl Replacer for InlineLinkMacroReplacer<'_> {
         } else {
             (None, None, target_str.to_string())
         };
+
+        // Neutralize an explicit `link:` target whose scheme could execute
+        // script (`javascript:`, `data:`, `vbscript:`). Escaping the `href`
+        // delimiter (see `render_link`) stops attribute breakout but not a
+        // script URI, so such a target is not turned into a link at all: the
+        // macro is left as literal source text, matching how an invalid `link:`
+        // macro is handled elsewhere. `mailto:` targets carry their own safe
+        // scheme and are exempt.
+        if mailto.is_none() && has_dangerous_scheme(&target) {
+            dest.push_str(&caps[0]);
+            return;
+        }
 
         let mut attrlist: Option<Attrlist<'_>> = None;
         let link_type = LinkRenderType::Link;

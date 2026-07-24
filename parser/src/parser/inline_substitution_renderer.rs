@@ -846,26 +846,48 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             if let Some(icons) = icons.as_maybe_str()
                 && icons == "font"
             {
+                // Every fragment interpolated into the `class`/`title`
+                // attributes below is escaped for the `"` delimiter, mirroring
+                // the `alt` handling in the image branch. These values are
+                // already special-character-escaped (`< > &`) upstream, but a
+                // stray `"` in an author-supplied `target`, `size`, `flip`,
+                // `rotate`, or `title` would otherwise break out of its
+                // attribute.
                 let mut i_class_attrs: Vec<String> = vec![
                     "fa".to_owned(),
-                    format!("fa-{target}", target = params.target),
+                    format!(
+                        "fa-{target}",
+                        target = encode_attribute_value(params.target.to_owned())
+                    ),
                 ];
 
                 if let Some(size) = params.attrlist.named_or_positional_attribute("size", 1) {
-                    i_class_attrs.push(format!("fa-{size}", size = size.value()));
+                    i_class_attrs.push(format!(
+                        "fa-{size}",
+                        size = encode_attribute_value(size.value().to_owned())
+                    ));
                 }
 
                 if let Some(flip) = params.attrlist.named_attribute("flip") {
-                    i_class_attrs.push(format!("fa-flip-{flip}", flip = flip.value()));
+                    i_class_attrs.push(format!(
+                        "fa-flip-{flip}",
+                        flip = encode_attribute_value(flip.value().to_owned())
+                    ));
                 } else if let Some(rotate) = params.attrlist.named_attribute("rotate") {
-                    i_class_attrs.push(format!("fa-rotate-{rotate}", rotate = rotate.value()));
+                    i_class_attrs.push(format!(
+                        "fa-rotate-{rotate}",
+                        rotate = encode_attribute_value(rotate.value().to_owned())
+                    ));
                 }
 
                 format!(
                     r##"<i class="{i_class_attr_val}"{title_attr}></i>"##,
                     i_class_attr_val = i_class_attrs.join(" "),
                     title_attr = if let Some(title) = params.attrlist.named_attribute("title") {
-                        format!(r#" title="{title}""#, title = title.value())
+                        format!(
+                            r#" title="{title}""#,
+                            title = encode_attribute_value(title.value().to_owned())
+                        )
                     } else {
                         "".to_owned()
                     }
@@ -880,15 +902,24 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 ];
 
                 if let Some(width) = params.attrlist.named_attribute("width") {
-                    attrs.push(format!(r#"width="{width}""#, width = width.value()));
+                    attrs.push(format!(
+                        r#"width="{width}""#,
+                        width = encode_attribute_value(width.value().to_owned())
+                    ));
                 }
 
                 if let Some(height) = params.attrlist.named_attribute("height") {
-                    attrs.push(format!(r#"height="{height}""#, height = height.value()));
+                    attrs.push(format!(
+                        r#"height="{height}""#,
+                        height = encode_attribute_value(height.value().to_owned())
+                    ));
                 }
 
                 if let Some(title) = params.attrlist.named_attribute("title") {
-                    attrs.push(format!(r#"title="{title}""#, title = title.value()));
+                    attrs.push(format!(
+                        r#"title="{title}""#,
+                        title = encode_attribute_value(title.value().to_owned())
+                    ));
                 }
 
                 format!(
@@ -925,7 +956,13 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let link = format!(
             r##"<a href="{target}"{id}{class}{title}{link_constraint_attrs}>{link_text}</a>"##,
-            target = params.target,
+            // The target arrives here already special-character-escaped (`< > &`)
+            // by the substitution pipeline, but that step leaves `"` intact. A
+            // stray `"` in the target would otherwise close the `href` attribute
+            // and let an author inject further attributes (e.g. an event
+            // handler), so escape the quote delimiter here — mirroring the
+            // image `alt`/`title` handling.
+            target = encode_attribute_value(params.target.clone()),
             id = if let Some(id) = id {
                 format!(r#" id="{id}""#)
             } else {
@@ -976,6 +1013,11 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let constraint_attrs = xref_constraint_attrs(params.window);
 
+        // Each `href` below is escaped for the `"` delimiter before it is
+        // interpolated into the attribute. The destinations are already
+        // special-character-escaped (`< > &`) upstream, but a stray `"` in a
+        // crafted or unresolved target would otherwise break out of the `href`
+        // attribute (see the `class`/roles escaping above).
         match (params.resolved, params.derived) {
             (Some(resolved), _) => {
                 // Explicit link text always wins; otherwise use the target's
@@ -1005,7 +1047,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
-                    href = resolved.href
+                    href = encode_attribute_value(resolved.href.clone())
                 ));
             }
 
@@ -1019,7 +1061,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
-                    href = derived.href
+                    href = encode_attribute_value(derived.href.clone())
                 ));
             }
 
@@ -1033,7 +1075,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r##"<a href="#{target}"{class}{constraint_attrs}>{text}</a>"##,
-                    target = params.target
+                    target = encode_attribute_value(params.target.to_owned())
                 ));
             }
         }
