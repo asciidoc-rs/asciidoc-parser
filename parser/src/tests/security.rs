@@ -250,6 +250,23 @@ fn icon_link_self_with_dangerous_target_drops_the_wrapping_link() {
 }
 
 #[test]
+fn font_icon_link_self_with_dangerous_target_keeps_literal_self_without_warning() {
+    // A font icon has no `src`, so `link=self` resolves to the literal `self`
+    // (a harmless relative URL), not to the dangerous target. Nothing is
+    // rejected, so no `UnsafeLinkSchemeRejected` warning is recorded.
+    assert_eq!(
+        render_icon("icon:javascript:alert(1)[link=self]", "font"),
+        r#"<span class="icon"><a class="image" href="self"><i class="fa fa-javascript:alert(1)"></i></a></span>"#
+    );
+
+    let mut parser =
+        Parser::default().with_intrinsic_attribute("icons", "font", ModificationContext::ApiOnly);
+    let doc = parser.parse("icon:javascript:alert(1)[link=self]");
+
+    assert_eq!(doc.warnings().count(), 0);
+}
+
+#[test]
 fn image_link_self_is_not_rejected() {
     // `link=self` names the image's own (safe) `src`, so it stays a live link.
     assert_eq!(

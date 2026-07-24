@@ -260,6 +260,26 @@ struct InlineImageMacroReplacer<'p, 's> {
     source: Span<'s>,
 }
 
+impl InlineImageMacroReplacer<'_, '_> {
+    /// Reports whether `link=self` on the macro `caps0` (the full match text,
+    /// e.g. `image:…` or `icon:…`) resolves to a real image `src` that the
+    /// renderer promotes into the anchor `href`.
+    ///
+    /// Mirrors the `link_self_href` selection in `render_image`/`render_icon`:
+    /// an `image:` has a `src`, while an `icon:` has one only in image-icon
+    /// mode (icons enabled and not font-based). A font (`<i>`) or text
+    /// (`[alt]`) icon keeps the literal `self`, so a dangerous target is
+    /// never promoted there and no warning should be recorded. (An inline
+    /// SVG also keeps the literal `self`, but that path requires a
+    /// `.svg`-ish target below `Secure`, which a script-capable scheme
+    /// never is, so it needs no special case here.)
+    fn link_self_resolves_to_src(&self, caps0: &str) -> bool {
+        caps0.starts_with("image:")
+            || (self.parser.is_attribute_set("icons")
+                && self.parser.attribute_value("icons").as_maybe_str() != Some("font"))
+    }
+}
+
 impl Replacer for InlineImageMacroReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps[0].starts_with('\\') {
@@ -279,10 +299,15 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
         // the warning here, where the parser and a document span are available.
         // `link=self` names the image's own `src`, which resolves from `target`,
         // so it is checked against the target (exempting a legitimately embedded
-        // `data:image/*`) rather than the literal `self`.
+        // `data:image/*`) rather than the literal `self` – but only when the
+        // renderer actually promotes that `src` into the `href`. A font (`<i>`)
+        // or text (`[alt]`) icon has no `src`, so `link=self` stays the literal
+        // `self` there and nothing is rejected (see `render_icon_or_image`); a
+        // warning would be spurious.
         if let Some(link) = attrlist.named_attribute("link") {
             let rejected = if link.value() == "self" {
-                has_dangerous_self_href(target).then_some(target)
+                (self.link_self_resolves_to_src(&caps[0]) && has_dangerous_self_href(target))
+                    .then_some(target)
             } else {
                 has_dangerous_scheme(link.value()).then_some(link.value())
             };
