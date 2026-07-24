@@ -248,7 +248,7 @@ mod example {
         assert_eq!(mi.item.raw_context().as_ref(), "example");
         assert_eq!(mi.item.resolved_context().as_ref(), "example");
         assert!(mi.item.declared_style().is_none());
-        assert!(mi.item.nested_blocks().next().is_none());
+        assert!(mi.item.child_blocks().next().is_none());
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -365,7 +365,7 @@ mod example {
         assert!(mi.item.anchor_reftext().is_none());
         assert!(mi.item.attrlist().is_none());
 
-        let mut blocks = mi.item.nested_blocks();
+        let mut blocks = mi.item.child_blocks();
         assert_eq!(
             blocks.next().unwrap(),
             &Block::Simple(SimpleBlock {
@@ -550,7 +550,7 @@ mod example {
         assert!(mi.item.anchor_reftext().is_none());
         assert!(mi.item.attrlist().is_none());
 
-        let mut blocks = mi.item.nested_blocks();
+        let mut blocks = mi.item.child_blocks();
         assert_eq!(
             blocks.next().unwrap(),
             &Block::Simple(SimpleBlock {
@@ -734,7 +734,7 @@ mod example {
         assert!(mi.item.anchor_reftext().is_none());
         assert!(mi.item.attrlist().is_none());
 
-        let mut blocks = mi.item.nested_blocks();
+        let mut blocks = mi.item.child_blocks();
         assert_eq!(
             blocks.next().unwrap(),
             &Block::Simple(SimpleBlock {
@@ -861,7 +861,7 @@ mod open {
         assert!(mi.item.rendered_content().is_none());
         assert_eq!(mi.item.raw_context().as_ref(), "open");
         assert_eq!(mi.item.resolved_context().as_ref(), "open");
-        assert!(mi.item.nested_blocks().next().is_none());
+        assert!(mi.item.child_blocks().next().is_none());
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -975,7 +975,7 @@ mod open {
         assert!(mi.item.anchor_reftext().is_none());
         assert!(mi.item.attrlist().is_none());
 
-        let mut blocks = mi.item.nested_blocks();
+        let mut blocks = mi.item.child_blocks();
         assert_eq!(
             blocks.next().unwrap(),
             &Block::Simple(SimpleBlock {
@@ -1155,7 +1155,7 @@ mod open {
         assert!(mi.item.anchor_reftext().is_none());
         assert!(mi.item.attrlist().is_none());
 
-        let mut blocks = mi.item.nested_blocks();
+        let mut blocks = mi.item.child_blocks();
         assert_eq!(
             blocks.next().unwrap(),
             &Block::Simple(SimpleBlock {
@@ -1280,7 +1280,7 @@ mod sidebar {
         assert!(mi.item.rendered_content().is_none());
         assert_eq!(mi.item.raw_context().as_ref(), "sidebar");
         assert_eq!(mi.item.resolved_context().as_ref(), "sidebar");
-        assert!(mi.item.nested_blocks().next().is_none());
+        assert!(mi.item.child_blocks().next().is_none());
         assert!(mi.item.id().is_none());
         assert!(mi.item.roles().is_empty());
         assert!(mi.item.options().is_empty());
@@ -1396,7 +1396,7 @@ mod sidebar {
         assert!(mi.item.anchor_reftext().is_none());
         assert!(mi.item.attrlist().is_none());
 
-        let mut blocks = mi.item.nested_blocks();
+        let mut blocks = mi.item.child_blocks();
         assert_eq!(
             blocks.next().unwrap(),
             &Block::Simple(SimpleBlock {
@@ -1580,7 +1580,7 @@ mod sidebar {
         assert!(mi.item.anchor_reftext().is_none());
         assert!(mi.item.attrlist().is_none());
 
-        let mut blocks = mi.item.nested_blocks();
+        let mut blocks = mi.item.child_blocks();
         assert_eq!(
             blocks.next().unwrap(),
             &Block::Simple(SimpleBlock {

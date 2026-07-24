@@ -1371,7 +1371,7 @@ mod structure {
 
         let doc = Parser::default().parse("");
 
-        assert_eq!(doc.nested_blocks().count(), 0);
+        assert_eq!(doc.child_blocks().count(), 0);
         assert_eq!(doc.doctitle(), None);
         assert_eq!(doc.header().title(), None);
     }

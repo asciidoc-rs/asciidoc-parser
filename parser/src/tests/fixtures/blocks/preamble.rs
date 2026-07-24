@@ -2,7 +2,6 @@ use std::fmt;
 
 use crate::{
     HasSpan,
-    blocks::IsBlock,
     tests::fixtures::{Span, blocks::Block},
 };
 
@@ -34,11 +33,11 @@ impl PartialEq<Preamble> for crate::blocks::Preamble<'_> {
 }
 
 fn fixture_eq_observed(fixture: &Preamble, observed: &crate::blocks::Preamble) -> bool {
-    if fixture.blocks.len() != observed.nested_blocks().len() {
+    if fixture.blocks.len() != observed.child_blocks().count() {
         return false;
     }
 
-    for (fixture_block, observed_block) in fixture.blocks.iter().zip(observed.nested_blocks()) {
+    for (fixture_block, observed_block) in fixture.blocks.iter().zip(observed.child_blocks()) {
         if fixture_block != observed_block {
             return false;
         }

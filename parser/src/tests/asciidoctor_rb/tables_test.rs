@@ -3538,7 +3538,7 @@ mod psv {
         // Source-map line numbers: the table starts on line 1; cell 1's
         // separator is on line 2 and its inner document begins on line 3 (the
         // indented `$ command`); cell 2 is on line 4.
-        let table = match doc.nested_blocks().next() {
+        let table = match doc.child_blocks().next() {
             Some(crate::blocks::Block::Table(table)) => table,
             other => panic!("expected a table block, got {other:?}"),
         };
@@ -4125,7 +4125,7 @@ mod psv {
         // AsciiDoc cell (`a|`) and therefore a nested, standalone document. This
         // is the crate's equivalent of Ruby's
         // `doc.blocks[0].find_by context: :document, traverse_documents: true`.
-        let table = match doc.nested_blocks().next() {
+        let table = match doc.child_blocks().next() {
             Some(crate::blocks::Block::Table(table)) => table,
             other => panic!("expected a table block, got {other:?}"),
         };

@@ -16,7 +16,7 @@ track_file!("ref/asciidoc-lang/docs/modules/sections/pages/section-ref.adoc");
 fn first_section<'src>(
     doc: &'src crate::Document<'src>,
 ) -> &'src crate::blocks::SectionBlock<'src> {
-    doc.nested_blocks()
+    doc.child_blocks()
         .find_map(|b| match b {
             crate::blocks::Block::Section(s) => Some(s),
             _ => None,
@@ -52,13 +52,13 @@ fn appendix_caption_attribute() {
     // `appendix-caption` defaults to "Appendix", so the first appendix is
     // labeled "Appendix A: ".
     let doc = Parser::default().parse("[appendix]\n== Data Access Matrix");
-    let captions: Vec<Option<&str>> = doc.nested_blocks().map(|b| b.caption()).collect();
+    let captions: Vec<Option<&str>> = doc.child_blocks().map(|b| b.caption()).collect();
     assert_eq!(captions, vec![Some("Appendix A: ")]);
 
     // A user-defined value overrides the label.
     let doc =
         Parser::default().parse(":appendix-caption: Exhibit\n\n[appendix]\n== Data Access Matrix");
-    let captions: Vec<Option<&str>> = doc.nested_blocks().map(|b| b.caption()).collect();
+    let captions: Vec<Option<&str>> = doc.child_blocks().map(|b| b.caption()).collect();
     assert_eq!(captions, vec![Some("Exhibit A: ")]);
 }
 
@@ -233,7 +233,7 @@ fn sectnums_attribute() {
     // `sectnums` can be toggled on and off in the flow of the document.
     let doc = Parser::default().parse(":sectnums:\n\n== One\n\n:sectnums!:\n\n== Two");
     let numbers: Vec<bool> = doc
-        .nested_blocks()
+        .child_blocks()
         .filter_map(|b| match b {
             crate::blocks::Block::Section(s) => Some(s.section_number().is_some()),
             _ => None,
@@ -281,13 +281,13 @@ fn collect_section_numbering(doc: &crate::Document<'_>) -> Vec<bool> {
         if let crate::blocks::Block::Section(section) = block {
             out.push(section.section_number().is_some());
         }
-        for child in block.nested_blocks() {
+        for child in block.child_blocks() {
             walk(child, out);
         }
     }
 
     let mut out = vec![];
-    for block in doc.nested_blocks() {
+    for block in doc.child_blocks() {
         walk(block, &mut out);
     }
     out

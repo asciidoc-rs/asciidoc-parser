@@ -39,7 +39,7 @@ fn simple_text(cell: &crate::blocks::TableCell<'_>) -> String {
 /// AsciiDoc blocks in its first body cell.
 fn asciidoc_cell_text(doc: &crate::Document<'_>) -> String {
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|b| match b {
             crate::blocks::Block::Table(table) => Some(table),
             _ => None,
@@ -419,7 +419,7 @@ As such, it inherits attributes from the parent document.
     let mut parser = Parser::default();
     let doc = parser.parse(":name: Tester\n\n|===\n|h\n\na|Hello {name}\n|===");
     let table = doc
-        .nested_blocks()
+        .child_blocks()
         .find_map(|b| match b {
             crate::blocks::Block::Table(table) => Some(table),
             _ => None,

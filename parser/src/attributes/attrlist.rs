@@ -1,14 +1,18 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::{ElementAttribute, element_attribute::ParseShorthand},
     content::{Content, SubstitutionStep},
-    internal::debug::DebugSliceReference,
+    internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
+
+opaque_slice_iter! {
+    /// An iterator over the [`ElementAttribute`]s in an [`Attrlist`], returned
+    /// by [`Attrlist::attributes`].
+    pub struct ElementAttributes<'a> yielding ElementAttribute<'a>;
+}
 
 /// The source text that’s used to define attributes for an element is referred
 /// to as an **attrlist.** An attrlist is always enclosed in a pair of square
@@ -399,8 +403,8 @@ impl<'src> Attrlist<'src> {
 
     /// Returns an iterator over the attributes contained within
     /// this attrlist.
-    pub fn attributes(&'src self) -> Iter<'src, ElementAttribute<'src>> {
-        self.attributes.iter()
+    pub fn attributes(&'src self) -> ElementAttributes<'src> {
+        ElementAttributes::new(&self.attributes)
     }
 
     /// Returns the anchor found in this attribute list, if any.

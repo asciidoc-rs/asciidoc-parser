@@ -87,19 +87,19 @@ If an attribute value includes a comma, enclose the value in double or single qu
     // attribute value.
     let doc =
         Parser::default().parse("[quote, Albert Einstein, Riddles of the Sphinx]\n____\nx\n____");
-    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    let quote = as_quote(doc.child_blocks().next().unwrap());
     assert_eq!(quote.attribution(), Some("Albert Einstein"));
     assert_eq!(quote.citetitle(), Some("Riddles of the Sphinx"));
 
     // A value that itself contains a comma is enclosed in double (or single)
     // quotes so the comma is not read as an attribute separator.
     let doc = Parser::default().parse("[quote,\"Doe, Jane\",A Book]\n____\nx\n____");
-    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    let quote = as_quote(doc.child_blocks().next().unwrap());
     assert_eq!(quote.attribution(), Some("Doe, Jane"));
     assert_eq!(quote.citetitle(), Some("A Book"));
 
     let doc = Parser::default().parse("[quote,'Doe, Jane',A Book]\n____\nx\n____");
-    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    let quote = as_quote(doc.child_blocks().next().unwrap());
     assert_eq!(quote.attribution(), Some("Doe, Jane"));
 
     verifies!(
@@ -116,7 +116,7 @@ If the quote is a single line or paragraph (i.e., a styled paragraph), you can p
 
     assert_css(&doc, ".quoteblock", 1);
 
-    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    let quote = as_quote(doc.child_blocks().next().unwrap());
     assert_eq!(quote.content_model(), ContentModel::Simple);
 
     non_normative!(
@@ -150,7 +150,7 @@ include::example$quote.adoc[tag=para2]
     let doc = Parser::default().parse(
         ".After landing the cloaked Klingon bird of prey in Golden Gate park:\n[quote,Captain James T. Kirk,Star Trek IV: The Voyage Home]\nEverybody remember where we parked.",
     );
-    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    let quote = as_quote(doc.child_blocks().next().unwrap());
     assert_eq!(quote.content_model(), ContentModel::Simple);
     assert_eq!(
         quote.title(),
@@ -212,7 +212,7 @@ include::example$quote.adoc[tag=comp]
     let doc = Parser::default().parse(
         "[quote,Monty Python and the Holy Grail]\n____\nDennis: Come and see the violence inherent in the system. Help! Help! I'm being repressed!\n\nKing Arthur: Bloody peasant!\n\nDennis: Oh, what a giveaway!\n____",
     );
-    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    let quote = as_quote(doc.child_blocks().next().unwrap());
     assert_eq!(quote.content_model(), ContentModel::Compound);
     assert_eq!(quote.attribution(), Some("Monty Python and the Holy Grail"));
     assert!(quote.citetitle().is_none());
@@ -288,7 +288,7 @@ include::example$quote.adoc[tag=abbr]
     let doc = Parser::default().parse(
         "\"I hold it that a little rebellion now and then is a good thing,\nand as necessary in the political world as storms in the physical.\"\n-- Thomas Jefferson, Papers of Thomas Jefferson: Volume 11",
     );
-    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    let quote = as_quote(doc.child_blocks().next().unwrap());
     assert_eq!(quote.content_model(), ContentModel::Simple);
     assert_eq!(quote.attribution(), Some("Thomas Jefferson"));
     assert_eq!(
@@ -387,7 +387,7 @@ include::example$quote.adoc[tag=md]
     let doc = Parser::default().parse(
         "> I hold it that a little rebellion now and then is a good thing,\n> and as necessary in the political world as storms in the physical.\n> -- Thomas Jefferson, Papers of Thomas Jefferson: Volume 11",
     );
-    let quote = as_quote(doc.nested_blocks().next().unwrap());
+    let quote = as_quote(doc.child_blocks().next().unwrap());
     assert_eq!(quote.attribution(), Some("Thomas Jefferson"));
     assert_eq!(
         quote.citetitle(),

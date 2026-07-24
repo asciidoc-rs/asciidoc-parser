@@ -1,8 +1,14 @@
-use std::{slice::Iter, sync::LazyLock};
+use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::{HasSpan, Parser, Span, document::Author};
+use crate::{HasSpan, Parser, Span, document::Author, internal::opaque_iter::opaque_slice_iter};
+
+opaque_slice_iter! {
+    /// An iterator over the [`Author`]s in an [`AuthorLine`], returned by
+    /// [`AuthorLine::authors`].
+    pub struct Authors<'a> yielding Author;
+}
 
 /// The author line is directly after the document title line in the document
 /// header. When the content on this line is structured correctly, the processor
@@ -42,8 +48,8 @@ impl<'src> AuthorLine<'src> {
     }
 
     /// Return an iterator over the authors in this author line.
-    pub fn authors(&'src self) -> Iter<'src, Author> {
-        self.authors.iter()
+    pub fn authors(&'src self) -> Authors<'src> {
+        Authors::new(&self.authors)
     }
 }
 

@@ -45,7 +45,7 @@ include::example$text.adoc[tag=literal-mono]
         "You can reference the value of a document attribute using\nthe syntax `+{name}+`, where `name` is the attribute name.",
     );
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {
@@ -81,7 +81,7 @@ include::example$text.adoc[tag=literal-mono-with-plus]
 
     let doc = Parser::default().parse("`pass:[++]` is the increment operator in C.");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {

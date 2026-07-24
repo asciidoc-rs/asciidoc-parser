@@ -579,7 +579,7 @@ If it is unset (`sectnums!`) on the command line or API, then the numbers are di
     let doc = Parser::default().with_intrinsic_attribute_bool("sectnums", false, ModificationContext::ApiOrDocumentBody)
         .parse("= Title\n:sectnums:\n\n== Numbered Section\n\n:sectnums!:\n\n== Unnumbered Section\n\n== Unnumbered Section\n\n=== Unnumbered Section\n\n:sectnums:\n\n== Numbered Section");
 
-    let mut section_blocks = doc.nested_blocks().filter_map(|b| {
+    let mut section_blocks = doc.child_blocks().filter_map(|b| {
         if let crate::blocks::Block::Section(section_block) = b {
             Some(section_block)
         } else {

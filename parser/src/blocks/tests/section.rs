@@ -133,7 +133,7 @@ fn simplest_section_block() {
         })
     );
 
-    assert_eq!(mi.item.nested_blocks().next(), None);
+    assert_eq!(mi.item.child_blocks().next(), None);
 
     assert_eq!(
         mi.after,
@@ -225,7 +225,7 @@ fn has_child_block() {
         })
     );
 
-    let mut nested_blocks = mi.item.nested_blocks();
+    let mut nested_blocks = mi.item.child_blocks();
 
     assert_eq!(
         nested_blocks.next().unwrap(),
@@ -368,7 +368,7 @@ fn title() {
     assert!(mi.item.anchor_reftext().is_none());
     assert!(mi.item.attrlist().is_none());
 
-    let mut nested_blocks = mi.item.nested_blocks();
+    let mut nested_blocks = mi.item.child_blocks();
 
     assert_eq!(
         nested_blocks.next().unwrap(),
@@ -428,19 +428,19 @@ fn title_carries_into_nested_section_first_block() {
     // doesn't claim it) and lands on that section's first block.
     let doc = Parser::default().parse(".carried title\n== Outer\n\n=== Inner\n\nparagraph");
 
-    let Some(crate::blocks::Block::Section(outer)) = doc.nested_blocks().next() else {
+    let Some(crate::blocks::Block::Section(outer)) = doc.child_blocks().next() else {
         panic!("expected outer section");
     };
 
     assert!(outer.title().is_none());
 
-    let Some(crate::blocks::Block::Section(inner)) = outer.nested_blocks().next() else {
+    let Some(crate::blocks::Block::Section(inner)) = outer.child_blocks().next() else {
         panic!("expected inner section");
     };
 
     assert!(inner.title().is_none());
 
-    let paragraph = inner.nested_blocks().next().unwrap();
+    let paragraph = inner.child_blocks().next().unwrap();
     assert_eq!(paragraph.title().unwrap(), "carried title");
     assert!(paragraph.title_source().is_none());
 }
@@ -452,13 +452,13 @@ fn own_title_wins_over_carried_title() {
     let doc = Parser::default()
         .parse(".carried title\n== Section\n\n.own title\nparagraph 1\n\nparagraph 2");
 
-    let Some(crate::blocks::Block::Section(section)) = doc.nested_blocks().next() else {
+    let Some(crate::blocks::Block::Section(section)) = doc.child_blocks().next() else {
         panic!("expected section");
     };
 
     assert!(section.title().is_none());
 
-    let mut blocks = section.nested_blocks();
+    let mut blocks = section.child_blocks();
 
     let paragraph_1 = blocks.next().unwrap();
     assert_eq!(paragraph_1.title().unwrap(), "own title");
@@ -475,14 +475,14 @@ fn title_carries_across_empty_section() {
     // block claims it).
     let doc = Parser::default().parse(".carried title\n== Empty\n\n== Sibling\n\nparagraph");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let Some(crate::blocks::Block::Section(empty)) = blocks.next() else {
         panic!("expected first section");
     };
 
     assert!(empty.title().is_none());
-    assert!(empty.nested_blocks().next().is_none());
+    assert!(empty.child_blocks().next().is_none());
 
     let Some(crate::blocks::Block::Section(sibling)) = blocks.next() else {
         panic!("expected second section");
@@ -490,7 +490,7 @@ fn title_carries_across_empty_section() {
 
     assert!(sibling.title().is_none());
 
-    let paragraph = sibling.nested_blocks().next().unwrap();
+    let paragraph = sibling.child_blocks().next().unwrap();
     assert_eq!(paragraph.title().unwrap(), "carried title");
 }
 
@@ -500,7 +500,7 @@ fn discrete_heading_keeps_its_title() {
     // title above it is not carried over.
     let doc = Parser::default().parse("[discrete]\n.kept title\n== Heading\n\nparagraph");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let Some(crate::blocks::Block::Section(heading)) = blocks.next() else {
         panic!("expected discrete heading");
@@ -522,7 +522,7 @@ fn carried_title_does_not_escape_a_table_cell() {
 
     // The outer paragraph following the table must not have claimed the cell's
     // carried title.
-    let Some(outer_paragraph) = doc.nested_blocks().find_map(|b| match b {
+    let Some(outer_paragraph) = doc.child_blocks().find_map(|b| match b {
         crate::blocks::Block::Simple(s) => Some(s),
         _ => None,
     }) else {

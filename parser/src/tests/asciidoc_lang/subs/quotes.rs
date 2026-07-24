@@ -49,7 +49,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 
         let doc = Parser::default().parse("Happy werewolves are *really* slobbery.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -86,7 +86,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 
         let doc = Parser::default().parse("_word_");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -108,7 +108,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 
         let doc = Parser::default().parse("*word*");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -130,7 +130,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 
         let doc = Parser::default().parse("`word`");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -152,7 +152,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 
         let doc = Parser::default().parse("^word^");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -174,7 +174,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 
         let doc = Parser::default().parse("~word~");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -196,7 +196,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 
         let doc = Parser::default().parse(r#""`word`""#);
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -219,7 +219,7 @@ Happy werewolves are <strong>really</strong> slobbery.
 
         let doc = Parser::default().parse("'`word`'");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -257,7 +257,7 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse(":bar: *bar*\n\nFoo {bar}");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -277,7 +277,7 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("////\nabc *def*\n////");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -297,14 +297,14 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("====\nHello *goodbye.*\n====");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -327,7 +327,7 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("....\nfoo *bar*\n....");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -347,7 +347,7 @@ mod default_quotes_substitution {
         let doc = Parser::default()
             .parse("Click image:pause.png[title=*Pause* and Resume] when you need a break.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -370,7 +370,7 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("Click +++*Pause* and Resume+++ when you need a break.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -393,14 +393,14 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("--\nOpened and *closed!*\n--");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -423,7 +423,7 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("This is a *paragraph.*");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -446,7 +446,7 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("++++\nfoo *bar*\n++++");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -466,14 +466,14 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("____\nThis and *that*\n____");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Quote(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -496,14 +496,14 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse("****\nStuff over _nonsense_\n****");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -525,7 +525,7 @@ mod default_quotes_substitution {
         // literal (`l`) cells, hence "Varies".
         let doc = Parser::default().parse("|===\n|*bold*\nl|*lit*\n|===");
 
-        let Some(Block::Table(table)) = doc.nested_blocks().next() else {
+        let Some(Block::Table(table)) = doc.child_blocks().next() else {
             panic!("expected a table block");
         };
 
@@ -554,7 +554,7 @@ mod default_quotes_substitution {
 
         let doc = Parser::default().parse(".Title and _such_\n****\nStuff > nonsense\n****");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -586,7 +586,7 @@ For blocks, the step's name, `quotes`, can be assigned to the xref:apply-subs-to
 
         let doc = Parser::default().parse("[subs=quotes]\nabc<lt *bold*");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -605,7 +605,7 @@ For inline elements, the built-in values `q` or `quotes` can be applied to xref:
 
         let doc = Parser::default().parse("pass:q[abc<lt *bold*]{sp}and then ...");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
