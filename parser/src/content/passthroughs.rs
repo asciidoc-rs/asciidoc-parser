@@ -99,7 +99,7 @@ impl Passthroughs {
 
         // A deferred cross-reference's explicit text is pulled out of the main
         // rendered string before this point, so any passthrough placeholder it
-        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too —
+        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too –
         // otherwise the placeholder sentinels leak into the link text.
         content.restore_deferred_xref_passthroughs(|text| {
             if let Cow::Owned(restored) =
@@ -526,6 +526,7 @@ impl Replacer for InlineStemMacroReplacer<'_> {
         let type_ = match &caps[2] {
             "latexmath" => QuoteType::LatexMath,
             "asciimath" => QuoteType::AsciiMath,
+
             // `stem`: the notation is resolved from the `stem` document
             // attribute (defaulting to AsciiMath).
             _ => stem_notation(self.parser),

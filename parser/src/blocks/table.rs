@@ -26,7 +26,7 @@ use crate::{
 /// tag-filter diagnostic) raised while expanding a table cell.
 ///
 /// The warning's deferred `origin` carries a line relative to the cell's inner
-/// preprocessing pass — `1` is the cell's first content line. `cell_origin` is
+/// preprocessing pass – `1` is the cell's first content line. `cell_origin` is
 /// that first line's already-resolved location.
 ///
 /// * A `None` deferred origin (e.g. an unresolved include target, located by
@@ -68,8 +68,8 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 ///
 /// A table is introduced by a table delimiter (`|===`, or `!===` for a nested
 /// table) and closed by a matching delimiter. By default cells are separated
-/// using prefix-separated value (PSV) syntax: the table's cell separator — a
-/// vertical bar (`|`) by default — at the start of a line or preceded by
+/// using prefix-separated value (PSV) syntax: the table's cell separator – a
+/// vertical bar (`|`) by default – at the start of a line or preceded by
 /// whitespace begins a new cell. Cells flow, in document order, into rows whose
 /// length is fixed by the number of columns. (The separator defaults to `!`
 /// inside a nested table and can be overridden with the `separator` attribute;
@@ -168,6 +168,7 @@ impl<'src> TableBlock<'src> {
     /// * `:===` is the shorthand for a DSV table.
     pub(crate) fn is_table_delimiter(line: &Span<'src>) -> bool {
         let data = line.data();
+
         // `len() >= 4` plus the leading delimiter character guarantees `rest`
         // holds at least three bytes, so the closure only needs to confirm they
         // are all `=`.
@@ -214,8 +215,8 @@ impl<'src> TableBlock<'src> {
         let data_format = resolve_data_format(metadata, delimiter_text);
 
         // The cell separator partitions each row into cells. In PSV it defaults
-        // to the vertical bar (`|`), except inside an AsciiDoc table cell — a
-        // nested, standalone document — where it defaults to the exclamation
+        // to the vertical bar (`|`), except inside an AsciiDoc table cell – a
+        // nested, standalone document – where it defaults to the exclamation
         // mark (`!`) so a nested table is distinguished from the `|`-separated
         // table that encloses it. Each data format has its own default (CSV =
         // comma, TSV = tab, DSV = colon). The `separator` attribute overrides
@@ -272,10 +273,10 @@ impl<'src> TableBlock<'src> {
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
 
         // An implicit header additionally requires that the first row be complete
-        // on the first line. If the first cell spans multiple lines — for PSV,
+        // on the first line. If the first cell spans multiple lines – for PSV,
         // the first non-blank line after the blank gap continues the cell instead
         // of starting a new one; for CSV/TSV, the first line opens a quoted value
-        // that is not closed on that line — there is no implicit header (matching
+        // that is not closed on that line – there is no implicit header (matching
         // Asciidoctor, which cancels the implicit header in these cases).
         let first_row_complete = match data_format {
             DataFormat::Psv => first_nonblank_line(line1.after)
@@ -556,7 +557,7 @@ impl<'src> IsBlock<'src> for TableBlock<'src> {
 
     // These forward to the inherent `caption()`/`number()` (the documented
     // public accessors) so that the captioned table is reported correctly
-    // through the trait interface too — `dyn IsBlock` / generic `T: IsBlock`
+    // through the trait interface too – `dyn IsBlock` / generic `T: IsBlock`
     // consumers resolve to these rather than the inherent methods.
     fn caption(&self) -> Option<&str> {
         self.caption.as_deref()
@@ -912,6 +913,7 @@ impl TableAttributeValue for Frame {
             "ends" | "topbot" => Frame::Ends,
             "sides" => Frame::Sides,
             "none" => Frame::None,
+
             // `all` and any unrecognized value.
             _ => Frame::All,
         }
@@ -924,6 +926,7 @@ impl TableAttributeValue for Grid {
             "rows" => Grid::Rows,
             "cols" => Grid::Cols,
             "none" => Grid::None,
+
             // `all` and any unrecognized value.
             _ => Grid::All,
         }
@@ -937,6 +940,7 @@ impl TableAttributeValue for Stripes {
             "odd" => Stripes::Odd,
             "all" => Stripes::All,
             "hover" => Stripes::Hover,
+
             // `none` and any unrecognized value.
             _ => Stripes::None,
         }
@@ -971,7 +975,7 @@ fn resolve_table_attribute<B: TableAttributeValue>(
 ///
 /// An explicit, recognized `format` attribute (`psv`, `csv`, `tsv`, or `dsv`)
 /// always wins. Otherwise the lead character of the delimiter selects the
-/// format via its shorthand — `,===` is CSV and `:===` is DSV — and any other
+/// format via its shorthand – `,===` is CSV and `:===` is DSV – and any other
 /// delimiter (`|===`, `!===`) is PSV.
 fn resolve_data_format(metadata: &BlockMetadata<'_>, delimiter_text: &str) -> DataFormat {
     if let Some(attr) = metadata
@@ -984,6 +988,7 @@ fn resolve_data_format(metadata: &BlockMetadata<'_>, delimiter_text: &str) -> Da
             "csv" => return DataFormat::Csv,
             "tsv" => return DataFormat::Tsv,
             "dsv" => return DataFormat::Dsv,
+
             // An unrecognized format value falls through to the shorthand (or
             // the PSV default).
             _ => {}
@@ -1000,8 +1005,8 @@ fn resolve_data_format(metadata: &BlockMetadata<'_>, delimiter_text: &str) -> Da
 /// Resolve the cell separator for a table.
 ///
 /// Each [`DataFormat`] supplies a default separator: PSV uses the vertical bar
-/// (`|`), except inside an AsciiDoc table cell — a nested, standalone document
-/// — where it defaults to the exclamation mark (`!`) so a nested table is
+/// (`|`), except inside an AsciiDoc table cell – a nested, standalone document
+/// – where it defaults to the exclamation mark (`!`) so a nested table is
 /// distinguished from the `|`-separated table that encloses it; CSV defaults to
 /// a comma (`,`), TSV to a tab, and DSV to a colon (`:`). An explicit
 /// `separator` attribute on the table overrides the default; an empty
@@ -1100,8 +1105,8 @@ struct TableBody<'src> {
 /// Asciidoctor. A row whose columns are entirely pre-filled by carried slots
 /// has no cells of its own to close it, so the next cell overruns and is
 /// dropped together with that pre-filled row. A duplicated cell (`<n>*`) is
-/// expanded into `<n>` independent cells — each carrying the original's
-/// content, alignment, and style — before the grid walk, so each clone occupies
+/// expanded into `<n>` independent cells – each carrying the original's
+/// content, alignment, and style – before the grid walk, so each clone occupies
 /// its own column slot exactly like an ordinary cell. A duplication factor of
 /// zero drops the cell entirely.
 fn build_psv_table<'src>(
@@ -1469,7 +1474,7 @@ fn make_csv_field<'src>(
 /// Note: the `continue` intentionally leaves `prev_quote` set, so a run of
 /// *N ≥ 2* consecutive `"` collapses to a single `"` (e.g. `""""` -> `"`), not
 /// to pairs. This deliberately matches Asciidoctor rather than strict RFC 4180,
-/// under which only `""` is a double-quote escape — don't "fix" it to a
+/// under which only `""` is a double-quote escape – don't "fix" it to a
 /// two-character collapse without also changing Asciidoctor.
 fn squeeze_quotes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -1664,7 +1669,7 @@ fn process_content<'src>(
         // restored so it applies only within the cell and nests correctly.
         // An attribute set in the parent is locked, as is one hard set or unset
         // through the API (its modification context is `ApiOnly`) even though it
-        // is unset — matching Asciidoctor, where an API-controlled attribute can
+        // is unset – matching Asciidoctor, where an API-controlled attribute can
         // never be overridden in a cell. An attribute merely unset in the parent
         // document is not locked, so the cell may assign it.
         //
@@ -1741,9 +1746,9 @@ fn process_content<'src>(
             // (the document source at document level, or an enclosing owned
             // cell's expanded source otherwise), so it may itself have
             // originated from an `include::`d file. Look up the file and line
-            // the cell's first line came from — through the document source map
+            // the cell's first line came from – through the document source map
             // at document level, or through the enclosing owned cell's source
-            // map otherwise — so a directive that fails to resolve reports the
+            // map otherwise – so a directive that fails to resolve reports the
             // correct originating file (rather than "(root file)") and so its
             // warning carries the right cursor.
             let cell_origin = if at_document_level {
@@ -1770,7 +1775,7 @@ fn process_content<'src>(
 
             // An AsciiDoc table cell shares the enclosing document's catalog
             // (only its footnote list is cell-local), so a file included by the
-            // cell registers on the document's include registry — as it does in
+            // cell registers on the document's include registry – as it does in
             // Asciidoctor, where the cell's nested document shares the parent's
             // `catalog[:includes]`. Registration is skipped when the cell was
             // itself brought in from an included file: the cell's include
@@ -1791,8 +1796,8 @@ fn process_content<'src>(
 
             // The cell's first line as it appears in the source it was sliced
             // from. Only a directive on that first line reaches this inner
-            // preprocessor — a directive at the start of any later line sits at
-            // column 0 and was already expanded by the enclosing preprocessor —
+            // preprocessor – a directive at the start of any later line sits at
+            // column 0 and was already expanded by the enclosing preprocessor –
             // so every warning the preprocessor just produced belongs to it.
             let directive_line = trimmed.take_line().item;
 
@@ -1857,6 +1862,7 @@ fn process_content<'src>(
                 let owned_root = Span::new(source);
                 for sw in parser.drain_substitution_warnings_since(substitution_warnings_mark) {
                     let warning_source = owned_root.slice(sw.offset..sw.offset + sw.len);
+
                     // A substitution warning locates itself by offset into the
                     // owned source, so it has no pre-resolved origin; resolve it
                     // through this cell's source map (the directive-warning
@@ -1931,8 +1937,8 @@ fn process_content<'src>(
     }
 }
 
-/// Parses the body of an AsciiDoc table cell — a nested, standalone AsciiDoc
-/// document — returning its (shown) title, whether its doctype is `inline`, its
+/// Parses the body of an AsciiDoc table cell – a nested, standalone AsciiDoc
+/// document – returning its (shown) title, whether its doctype is `inline`, its
 /// table-of-contents configuration, its blocks, and a snapshot of the cell's
 /// resolved attribute state.
 ///
@@ -1980,8 +1986,8 @@ fn parse_asciidoc_cell_body<'src>(
 
     // A block title carried over from a section heading (see
     // `SectionBlock::parse`) must not cross this nested-document boundary in
-    // either direction: a title left pending by the cell — e.g. a trailing
-    // titled empty section — must not leak out and be claimed by the enclosing
+    // either direction: a title left pending by the cell – e.g. a trailing
+    // titled empty section – must not leak out and be claimed by the enclosing
     // document's next block, and (defensively) any parent-pending title must
     // not be claimed by the cell's first block. Reset it to `None` for the cell
     // and restore the parent's value afterward, like the footnote registry.
@@ -1991,6 +1997,7 @@ fn parse_asciidoc_cell_body<'src>(
     // duration of the parse, so a table found within defaults its cell separator
     // to `!` rather than `|` (matching Asciidoctor's `Document#nested?`).
     parser.nested_document_depth += 1;
+
     // The cell body parses from its own owned source (whether include-expanded or
     // a borrowed `a|` cell), whose offsets do not map to the document. Mark that
     // so a footnote defined inside records no (misleading) document location; see
@@ -2028,14 +2035,14 @@ fn parse_asciidoc_cell_body<'src>(
     // Snapshot the cell's resolved attribute state while the parser still holds
     // it (the caller restores the parent's snapshot immediately after this
     // returns). The snapshot shares the parser's attribute tables by `Arc`, so
-    // it is cheap. It lets a caller introspect the nested cell document —
-    // including the attributes it inherited from the parent — the same way the
+    // it is cheap. It lets a caller introspect the nested cell document –
+    // including the attributes it inherited from the parent – the same way the
     // top-level `Document` exposes its own.
     let mut attributes = parser.snapshot_attributes();
 
     // Materialize the cell's derived `toc-position` / `toc-placement` /
     // `toc-class` attributes into its snapshot, so it exposes them the same way
-    // the top-level `Document` does — without mutating the parser (whose
+    // the top-level `Document` does – without mutating the parser (whose
     // attribute state the caller restores to the parent's on return anyway).
     attributes.materialize_toc_attributes(toc.mode);
 
@@ -2094,7 +2101,7 @@ impl<'src> TableCell<'src> {
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) the cell holds inline
     /// [`Content`](TableCellContent::Simple): escaped cell separators (the
     /// table's `separator` character preceded by a backslash, e.g. `\|`) are
-    /// unescaped and substitutions are applied — the verbatim group for
+    /// unescaped and substitutions are applied – the verbatim group for
     /// [`Literal`](ColumnStyle::Literal), the normal group otherwise. An
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) cell instead parses its content as a
     /// nested sequence of [blocks](TableCellContent::AsciiDoc).
@@ -2157,6 +2164,7 @@ impl<'src> TableCell<'src> {
             colspan: raw.spec.colspan.max(1),
             rowspan: raw.spec.rowspan.max(1),
             content,
+
             // The cell's source begins at its content, immediately after the
             // separator (before any trimming), so the cell's reported line is
             // the separator's line.
@@ -2188,7 +2196,7 @@ impl<'src> TableCell<'src> {
         };
 
         // A data field carries no cell specifier, so its alignment comes from the
-        // column — except in the header row, which ignores the column's alignment
+        // column – except in the header row, which ignores the column's alignment
         // operators and falls back to the default alignment.
         let (h_align, v_align) = if is_header {
             (HorizontalAlignment::Left, VerticalAlignment::Top)
@@ -2670,7 +2678,7 @@ fn parse_col_spec(spec: &str) -> TableColumn {
     // The style operator, if present, occupies the last position on the
     // specifier, so it is the entire remainder after the width. Matching the
     // whole remainder (rather than just its first byte) means a malformed spec
-    // with trailing junk — e.g. `1em` — falls back to the default style instead
+    // with trailing junk – e.g. `1em` – falls back to the default style instead
     // of silently honoring the first letter and discarding the rest.
     let style = match rest.trim() {
         "a" => ColumnStyle::AsciiDoc,
@@ -2699,8 +2707,8 @@ fn parse_col_spec(spec: &str) -> TableColumn {
 /// absent from the specifier, in which case the cell inherits that alignment
 /// (or style) from its column. `colspan` and `rowspan` are the number of
 /// columns and rows the cell spans; they default to `1` (no span). `repeat` is
-/// the duplication factor — the number of consecutive cells the content is
-/// cloned into — and defaults to `1` (no duplication).
+/// the duplication factor – the number of consecutive cells the content is
+/// cloned into – and defaults to `1` (no duplication).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct CellSpec {
     h_align: Option<HorizontalAlignment>,
@@ -2739,8 +2747,8 @@ struct RawCell<'src> {
 /// is an amplification: a dozen source bytes such as `1000000000*` would
 /// otherwise request a billion `RawCell`s (a multi-gigabyte allocation).
 /// Capping the per-specifier factor bounds that amplification while leaving any
-/// realistic table — which never duplicates a cell more than a handful of times
-/// — untouched. (This is the one point where the implementation diverges from
+/// realistic table – which never duplicates a cell more than a handful of times
+/// – untouched. (This is the one point where the implementation diverges from
 /// Asciidoctor, which expands the literal factor however large.)
 const MAX_DUPLICATION_FACTOR: usize = 1_000;
 
@@ -2748,8 +2756,8 @@ const MAX_DUPLICATION_FACTOR: usize = 1_000;
 ///
 /// A cell specifier with a duplication factor (`<n>*`) clones the cell's
 /// content and properties into `<n>` consecutive cells. Each clone is an
-/// ordinary single-slot cell (colspan and rowspan of 1), so expanding here —
-/// before the grid is walked — lets the clones flow into rows exactly like
+/// ordinary single-slot cell (colspan and rowspan of 1), so expanding here –
+/// before the grid is walked – lets the clones flow into rows exactly like
 /// cells the author typed out by hand. A duplication factor of zero produces no
 /// cells, dropping the original (matching Asciidoctor). A cell with no
 /// duplication factor has a `repeat` of 1 and so passes through unchanged. The
@@ -2790,7 +2798,7 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// A separator immediately preceded by a backslash (e.g. `\|`) is escaped: it
 /// is literal content rather than a boundary, and the backslash is stripped
 /// later in [`TableCell::parse`]. Only the single byte before the separator is
-/// inspected, so `\\|` is also read as an escaped separator — matching
+/// inspected, so `\\|` is also read as an escaped separator – matching
 /// Asciidoctor, whose check is likewise the single-character
 /// `pre_match.end_with? '\'`.
 fn scan_cells<'src>(
@@ -2923,8 +2931,8 @@ fn scan_cells<'src>(
 ///   `2.3`, `.3`) that, when present, must be followed by `+` (span) or `*`
 ///   (duplication). For a span the factor is interpreted as the cell's colspan
 ///   and rowspan (a missing column or row count defaults to 1). For a
-///   duplication the column part of the factor is the duplication count — the
-///   number of consecutive cells the content is cloned into — and any row part
+///   duplication the column part of the factor is the duplication count – the
+///   number of consecutive cells the content is cloned into – and any row part
 ///   is ignored; a duplicated cell keeps a colspan and rowspan of 1.
 /// * The horizontal alignment operator is `<`, `>`, or `^`.
 /// * The vertical alignment operator is a dot followed by `<`, `>`, or `^`.
@@ -3195,7 +3203,7 @@ mod tests {
             None
         );
 
-        // A different file (included content): kept as-is — its line is already
+        // A different file (included content): kept as-is – its line is already
         // absolute within that file.
         assert_eq!(
             absolute_cell_directive_origin(
@@ -3216,7 +3224,7 @@ mod tests {
         );
 
         // The cell's own file, a later line (pass-relative line 3): translated to
-        // two lines past the cell's first line — not collapsed onto line 5.
+        // two lines past the cell's first line – not collapsed onto line 5.
         assert_eq!(
             absolute_cell_directive_origin(
                 Some(SourceLine(Some("outer.adoc".to_owned()), 3)),
@@ -3423,9 +3431,9 @@ mod tests {
                 Some(SourceLine(Some("cell.adoc".to_string()), 2))
             );
 
-            // Its `source` span is a best-effort anchor into the document — the
+            // Its `source` span is a best-effort anchor into the document – the
             // enclosing cell's `include::cell.adoc[]` directive line (line 2 of
-            // the root document) — so it still resolves to a real cursor.
+            // the root document) – so it still resolves to a real cursor.
             assert_eq!(
                 doc.source_map()
                     .original_file_and_line(warnings[0].source.line()),
@@ -3497,7 +3505,7 @@ mod tests {
     // for header and default-style cells by the ported tests in
     // `tests::asciidoctor_rb::tables_test`. Those styled-column fixtures place
     // the anchor in the first (header) row, and a header cell is always parsed
-    // with the default column style — so `cols=1a` never actually parses the
+    // with the default column style – so `cols=1a` never actually parses the
     // anchored value as an AsciiDoc-style cell there. This exercises that
     // missing case directly: a leading anchor in an AsciiDoc-style *body* cell
     // must still be cataloged in the main document.
@@ -3514,7 +3522,7 @@ mod tests {
 
             // Guard the premise: the anchored cell is a genuine AsciiDoc-style
             // body cell (each `a` cell renders its content as a nested document in
-            // `div.content`), not a header cell — no `th` is produced, and the
+            // `div.content`), not a header cell – no `th` is produced, and the
             // anchor renders as a target inside the cell.
             assert_css(&doc, "th", 0);
             assert_css(&doc, "table.tableblock td.tableblock > div.content", 2);

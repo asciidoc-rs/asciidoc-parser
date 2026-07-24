@@ -278,7 +278,7 @@ impl<'src> BlockMetadata<'src> {
 /// comment.
 ///
 /// Returns `None` unless at least one comment was skipped *and* the run lands
-/// on a section heading — every other case (no comment, or a comment that a
+/// on a section heading – every other case (no comment, or a comment that a
 /// metadata line directly decorates with no following section) leaves the
 /// comment in place for normal block dispatch, preserving this crate's
 /// retention of comment blocks as ordinary blocks.
@@ -296,7 +296,7 @@ fn skip_comments_before_section(source: Span<'_>, level_offset: i32) -> Option<S
         let data = line.item.data();
 
         // A comment block (`////`, or a longer run of slashes) is consumed
-        // through its matching closing delimiter — or to end of input if it is
+        // through its matching closing delimiter – or to end of input if it is
         // never closed, matching Asciidoctor's `read_lines_until terminator`.
         if data.len() >= 4 && data.chars().all(|c| c == '/') {
             let mut next = line.after;
@@ -747,7 +747,7 @@ mod tests {
         fn formal_role_replaces_earlier_shorthand_roles() {
             // A formal `role=` entry replaces roles set by an earlier shorthand
             // `.role`; a shorthand `.role` on a still-later line then appends.
-            // (Tracks #732.)
+            // (Regression test for #732.)
             let metadata = crate::blocks::metadata::BlockMetadata::new(
                 "[.role1]\n[role=role2]\n[.role3]\ncontent\n",
             );

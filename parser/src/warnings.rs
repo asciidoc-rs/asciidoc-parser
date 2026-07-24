@@ -30,7 +30,7 @@ pub struct Warning<'src> {
     /// `source.line()` through [`Document::source_map`].
     ///
     /// It is `Some` only when the warning arises from content that was expanded
-    /// *privately* and never appears in the document source — an `include::`
+    /// *privately* and never appears in the document source – an `include::`
     /// directive buried inside an owned (include-expanded) AsciiDoc table cell.
     /// No document span maps to such a directive, so its true `(file, line)` is
     /// resolved when the warning is raised (against the owning cell's own
@@ -240,8 +240,8 @@ pub enum WarningType {
     /// An include directive was not expanded because the file containing it
     /// already sits at the maximum include depth (the `max-include-depth`
     /// attribute, possibly lowered by an enclosing include directive's `depth`
-    /// attribute). The field is the relative maximum in effect — the number of
-    /// levels that were permitted below the file that established the limit —
+    /// attribute). The field is the relative maximum in effect – the number of
+    /// levels that were permitted below the file that established the limit –
     /// matching the number Asciidoctor reports.
     #[error("maximum include depth of {0} exceeded")]
     MaxIncludeDepthExceeded(usize),
@@ -279,7 +279,7 @@ pub enum WarningType {
 
     /// One or more tags named by an include directive's `tag` / `tags`
     /// attribute were never found in the include file. The field is the
-    /// pre-formatted, pluralized subject — `tag '<name>'` for a single missing
+    /// pre-formatted, pluralized subject – `tag '<name>'` for a single missing
     /// tag, or `tags '<name>, <name>'` (comma-joined, in the order specified)
     /// for several.
     #[error("{0} not found in include file")]
@@ -1112,6 +1112,7 @@ mod tests {
             };
 
             let _ = maw.unwrap_if_no_warnings();
+
             // There are warnings so this should panic.
         }
     }

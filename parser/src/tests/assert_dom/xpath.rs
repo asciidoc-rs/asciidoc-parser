@@ -515,6 +515,7 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
                     final_results.extend(siblings);
                 }
             }
+
             // Deduplicate results since the same sibling may be found from multiple nodes.
             return deduplicate_nodes(final_results);
         }
@@ -553,6 +554,7 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
                     final_results.extend(siblings);
                 }
             }
+
             // Deduplicate results since the same sibling may be found from multiple nodes.
             return deduplicate_nodes(final_results);
         }
@@ -667,6 +669,7 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
                     }
                 }
             }
+
             // Deduplicate results since the same sibling may be found from multiple nodes.
             return deduplicate_nodes(final_results);
         }
@@ -699,6 +702,7 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
                     }
                 }
             }
+
             // Deduplicate results since the same sibling may be found from multiple nodes.
             return deduplicate_nodes(final_results);
         }
@@ -793,6 +797,7 @@ fn find_preceding_siblings<'a>(
         if std::ptr::eq(child as *const _, target_ptr) {
             break;
         }
+
         // Add matching siblings.
         if matches_selector(child, selector) {
             results.push(child);
@@ -1092,9 +1097,11 @@ fn matches_single_predicate(node: &VirtualNode, predicate: &str) -> bool {
             let args = args.trim();
             if let Some(args) = args.strip_prefix(',') {
                 let args = args.trim();
+
                 // Find the closing parenthesis for starts-with().
                 if let Some(close_paren) = args.rfind(')') {
                     let value_part = args[..close_paren].trim();
+
                     // Try double-quoted string.
                     if let Some(value) = value_part.strip_prefix('"')
                         && let Some(value) = value.strip_suffix('"')

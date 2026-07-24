@@ -72,6 +72,7 @@ impl<'src> Break<'src> {
             // is deliberate and settled, not a pending gap.
             "---" | "- - -" | "***" | "* * *" | "___" | "_ _ _" => BreakType::Thematic,
             "<<<" => BreakType::Page,
+
             // A run of three or more apostrophes is a thematic break. The
             // AsciiDoc language reference documents the canonical `'''` form,
             // but Asciidoctor recognizes any longer run (`''''`, `'''''`, ...),

@@ -21,8 +21,8 @@ pub struct ElementAttribute<'src> {
     shorthand_item_indices: Vec<usize>,
 
     /// The 1-based position of a *positional* (unnamed) attribute within its
-    /// attribute list, counting every comma-delimited entry — named entries and
-    /// blank slots included — the way Asciidoctor numbers positional keys.
+    /// attribute list, counting every comma-delimited entry – named entries and
+    /// blank slots included – the way Asciidoctor numbers positional keys.
     /// `None` for a named attribute (or an attribute synthesized without a
     /// known position). Consumed by [`Attrlist::nth_attribute`] so that
     /// later positionals keep their index even when earlier entries are
@@ -42,8 +42,8 @@ pub struct ElementAttribute<'src> {
 
     /// `true` when the normal substitution group was already applied to `value`
     /// while parsing this attribute (a single-quoted value in a block attribute
-    /// list). Consumers that would otherwise substitute the value themselves —
-    /// such as deriving a block title from a `title=` attribute — use this to
+    /// list). Consumers that would otherwise substitute the value themselves –
+    /// such as deriving a block title from a `title=` attribute – use this to
     /// avoid substituting it a second time (which would, e.g., double-escape
     /// special characters).
     value_is_substituted: bool,
@@ -78,8 +78,8 @@ impl<'src> ElementAttribute<'src> {
 
             // Skip any leading, non-semantic whitespace before this entry
             // (Asciidoctor's `skip_blank`). Name detection has to run first, so
-            // without this a name with leading blanks — e.g. `[  first = value]`
-            // or the second/third entries once a comma is consumed — would fail
+            // without this a name with leading blanks – e.g. `[  first = value]`
+            // or the second/third entries once a comma is consumed – would fail
             // to be recognized and fall through to a positional literal.
             source = source.take_whitespace_with_newline().after;
 
@@ -89,6 +89,7 @@ impl<'src> ElementAttribute<'src> {
                     match space.after.take_prefix("=") {
                         Some(equals) => {
                             let space = equals.after.take_whitespace_with_newline();
+
                             // `name=` with nothing (or only a comma) after the `=`
                             // is a named attribute with an empty value, not a
                             // positional one. The empty value falls out of the
@@ -496,7 +497,7 @@ impl<'src> ElementAttribute<'src> {
         // (a block style, a non-empty ID, and non-empty roles/options, each
         // separated by a single delimiter). Re-parsing it therefore can never
         // produce a warning, so rather than plumb an always-empty warning list
-        // back to the caller we assert that invariant — turning a silent
+        // back to the caller we assert that invariant – turning a silent
         // discard into an explicit, regression-guarded one.
         let mut warnings: Vec<WarningType> = vec![];
         let shorthand_item_indices = if value.is_empty() {
@@ -514,6 +515,7 @@ impl<'src> ElementAttribute<'src> {
             name: None,
             value: CowStr::from(value),
             shorthand_item_indices,
+
             // The merged shorthand is the first positional of the earlier line,
             // so it keeps that line's position (1).
             positional_index: earlier.positional_index,
@@ -542,7 +544,7 @@ impl<'src> ElementAttribute<'src> {
         // the start offset of each shorthand item as it is appended. The
         // components were validated (and stripped of their delimiters) when the
         // source line was parsed, so these offsets match what
-        // `parse_shorthand_items` would produce for the same string — without
+        // `parse_shorthand_items` would produce for the same string – without
         // re-parsing it (or having to discard its always-empty warnings).
         let mut value = String::new();
         let mut shorthand_item_indices: Vec<usize> = vec![];

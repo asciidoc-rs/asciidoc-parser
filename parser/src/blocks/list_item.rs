@@ -434,7 +434,7 @@ impl<'src> ListItem<'src> {
             warnings.extend(indented_block_maw.warnings);
 
             // A block dropped at parse time (`attribute-missing=drop-line` on a
-            // block-macro target) attaches nothing, but — like a real block —
+            // block-macro target) attaches nothing, but – like a real block –
             // it consumes any active continuation and requires the next block
             // to be indented or reintroduced with a `+`. (A dropped block is
             // always a block macro, never `+`-prefixed content, so it can't set

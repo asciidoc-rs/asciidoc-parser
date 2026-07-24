@@ -35,6 +35,10 @@ name = "inline_macro"
 
 [[bench]]
 harness = false
+name = "repeated_delimiters"
+
+[[bench]]
+harness = false
 name = "section_with_two_blocks"
 
 [[bench]]
