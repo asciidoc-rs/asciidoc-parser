@@ -18,7 +18,7 @@ memchr = "2.6.4"
 percent-encoding = "2.3.2"
 regex = "1.11.1"
 self_cell = "1.2.0"
-serde = { version = "1.0.130", features = ["derive", "rc"], optional = true }
+serde = { version = "1.0.217", features = ["derive", "rc"], optional = true }
 thiserror = "2.0.1"
 
 [features]
@@ -33,7 +33,7 @@ serde = ["dep:serde"]
 codspeed-criterion-compat = "5.0.0"
 criterion = "0.8.0"
 pretty_assertions_sorted = "1.2.3"
-serde_json = "1.0.79"
+serde_json = "1.0.138"
 
 [[bench]]
 harness = false
