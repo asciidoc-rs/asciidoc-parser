@@ -30,8 +30,8 @@ thiserror = "2.0.1"
 serde = ["dep:serde"]
 
 [dev-dependencies]
-codspeed-criterion-compat = "5.0.0"
-criterion = "0.8.0"
+codspeed-criterion-compat = "5.0.1"
+criterion = "0.8.2"
 pretty_assertions_sorted = "1.2.3"
 serde_json = "1.0.138"
 
