@@ -1277,10 +1277,18 @@ fn render_icon_or_image(
         // wrapping anchor. Escaping the `"` delimiter alone would still leave a
         // live `javascript:` URI, so the destination is rejected outright – the
         // same policy the explicit `link:` macro applies, and the macro layer
-        // records the accompanying warning. `link=self` names the image's own
-        // `src` (which may legitimately be a `data:` image URI), so it is
-        // exempt.
-        if is_self || !has_dangerous_scheme(link.value()) {
+        // records the accompanying warning. `link=self` resolves to the image's
+        // own `src`, which may legitimately be a `data:image/*` URI, so it is
+        // checked with the more permissive [`has_dangerous_self_href`] (a
+        // `javascript:` or non-image `data:` target still resolves to a live
+        // script URI here and is rejected).
+        let rejected = if is_self {
+            has_dangerous_self_href(href)
+        } else {
+            has_dangerous_scheme(link.value())
+        };
+
+        if !rejected {
             img = format!(
                 r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
                 // Both sources of `href` – the image's own `src` (a resolved web
@@ -1335,6 +1343,34 @@ pub(crate) fn has_dangerous_scheme(target: &str) -> bool {
             .get(..scheme.len())
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
     })
+}
+
+/// Reports whether `href` – resolved from a `link=self` image/icon target –
+/// would place a script-capable URI in the wrapping anchor's `href`.
+///
+/// `link=self` names the image's own `src`, so it cannot simply be run through
+/// [`has_dangerous_scheme`]: an embedded image (`data-uri`) legitimately
+/// resolves to a `data:image/*` URI, and there is an Asciidoctor-parity test
+/// for exactly that. That one form is therefore exempt. Every other dangerous
+/// scheme – `javascript:`, `vbscript:`, or a non-image `data:` such as
+/// `data:text/html,…` – is never a valid image source, so promoting it into an
+/// `href` is rejected: only the anchor is dropped (the harmless `<img src>` is
+/// left intact), mirroring the `link=` policy above.
+pub(crate) fn has_dangerous_self_href(href: &str) -> bool {
+    has_dangerous_scheme(href) && !is_image_data_uri(href)
+}
+
+/// Reports whether `href` is a `data:image/*` URI (the leading control/space
+/// characters are ignored and the comparison is ASCII-case-insensitive, as in
+/// [`has_dangerous_scheme`]). This is the one `data:` form that is a legitimate
+/// image source, so it is exempt from the `link=self` rejection above.
+fn is_image_data_uri(href: &str) -> bool {
+    let href = href.trim_start_matches(|c: char| c <= ' ');
+
+    const IMAGE_DATA_PREFIX: &str = "data:image/";
+
+    href.get(..IMAGE_DATA_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(IMAGE_DATA_PREFIX))
 }
 
 /// Escapes a value for safe interpolation into an HTML attribute.

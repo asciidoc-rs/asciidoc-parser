@@ -18,6 +18,7 @@ use crate::{
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
         LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle, has_dangerous_scheme,
+        has_dangerous_self_href,
     },
     warnings::WarningType,
 };
@@ -276,15 +277,22 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
         // A `link=` destination whose scheme could execute script is rejected by
         // the renderer (the image is emitted without the wrapping link); record
         // the warning here, where the parser and a document span are available.
-        // `link=self` names the image's own `src`, so it is exempt.
-        if let Some(link) = attrlist.named_attribute("link")
-            && link.value() != "self"
-            && has_dangerous_scheme(link.value())
-        {
-            self.parser.record_substitution_warning(
-                self.source,
-                WarningType::UnsafeLinkSchemeRejected(link.value().to_owned()),
-            );
+        // `link=self` names the image's own `src`, which resolves from `target`,
+        // so it is checked against the target (exempting a legitimately embedded
+        // `data:image/*`) rather than the literal `self`.
+        if let Some(link) = attrlist.named_attribute("link") {
+            let rejected = if link.value() == "self" {
+                has_dangerous_self_href(target).then_some(target)
+            } else {
+                has_dangerous_scheme(link.value()).then_some(link.value())
+            };
+
+            if let Some(rejected) = rejected {
+                self.parser.record_substitution_warning(
+                    self.source,
+                    WarningType::UnsafeLinkSchemeRejected(rejected.to_owned()),
+                );
+            }
         }
 
         let default_alt = basename(&target.replace(['_', '-'], " "));

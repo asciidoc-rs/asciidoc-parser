@@ -239,11 +239,77 @@ fn icon_link_with_dangerous_scheme_drops_the_wrapping_link() {
 }
 
 #[test]
+fn icon_link_self_with_dangerous_target_drops_the_wrapping_link() {
+    // A dangerous `icon:` target that `link=self` would promote into the anchor
+    // `href` is rejected too; the icon `<img>` is left intact. (The resolved
+    // `src` gains the default `.png` icon extension.)
+    assert_eq!(
+        render_icon("icon:javascript:alert(1)[link=self]", ""),
+        r#"<span class="icon"><img src="javascript:alert(1).png" alt="javascript:alert(1)"></span>"#
+    );
+}
+
+#[test]
 fn image_link_self_is_not_rejected() {
     // `link=self` names the image's own (safe) `src`, so it stays a live link.
     assert_eq!(
         render_macros("image:safe.png[alt,link=self]"),
         r#"<span class="image"><a class="image" href="safe.png"><img src="safe.png" alt="alt"></a></span>"#
+    );
+}
+
+#[test]
+fn image_link_self_with_dangerous_target_drops_the_wrapping_link() {
+    // A `javascript:` target is harmless in `<img src>` (a `src` does not
+    // execute script), but `link=self` would otherwise promote it into a live
+    // `href`. The anchor is dropped while the `<img>` is left intact.
+    assert_eq!(
+        render_macros("image:javascript:alert(1)[alt,link=self]"),
+        r#"<span class="image"><img src="javascript:alert(1)" alt="alt"></span>"#
+    );
+}
+
+#[test]
+fn image_link_self_with_dangerous_target_records_a_warning() {
+    let mut parser = Parser::default();
+    let doc = parser.parse("image:javascript:alert(1)[alt,link=self]");
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string())
+    );
+}
+
+#[test]
+fn image_link_self_with_data_text_html_target_drops_the_wrapping_link() {
+    // A `data:` target is dual-use: `data:image/*` is a legitimate image
+    // source, but `data:text/html,…` is not, and would be a live script URI in
+    // the self-href. Only the anchor is dropped. (The `<` `>` reaching the
+    // `src` are escaped by the special-characters step.)
+    assert_eq!(
+        render_macros("image:data:text/html,<script>alert(1)</script>[alt,link=self]"),
+        r#"<span class="image"><img src="data:text/html,&lt;script&gt;alert(1)&lt;/script&gt;" alt="alt"></span>"#
+    );
+}
+
+#[test]
+fn image_link_self_dangerous_target_rejection_is_case_insensitive() {
+    assert_eq!(
+        render_macros("image:JavaScript:alert(1)[alt,link=self]"),
+        r#"<span class="image"><img src="JavaScript:alert(1)" alt="alt"></span>"#
+    );
+}
+
+#[test]
+fn image_link_self_with_inline_data_image_target_stays_a_live_link() {
+    // `data:image/*` is a legitimate image source, so an author-supplied inline
+    // image target keeps its `link=self` anchor (the same exemption that lets
+    // an embedded `data-uri` image link to itself).
+    assert_eq!(
+        render_macros("image:data:image/png;base64,iVBORw0KGgo=[alt,link=self]"),
+        r#"<span class="image"><a class="image" href="data:image/png;base64,iVBORw0KGgo="><img src="data:image/png;base64,iVBORw0KGgo=" alt="alt"></a></span>"#
     );
 }
 
