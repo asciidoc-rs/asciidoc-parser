@@ -1,6 +1,5 @@
-//! Verifies that the public AST / output types requested in
-//! <https://github.com/asciidoc-rs/asciidoc-parser/issues/895> can be used as
-//! `HashMap` / `HashSet` keys.
+//! Verifies that the public AST / output types can be used as `HashMap` /
+//! `HashSet` keys.
 
 use std::collections::{HashMap, HashSet};
 

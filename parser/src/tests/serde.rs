@@ -1,6 +1,5 @@
 //! Verifies that a parsed [`Document`](crate::Document) and the AST / output
-//! types it exposes serialize under the `serde` feature (see
-//! <https://github.com/asciidoc-rs/asciidoc-parser/issues/895>).
+//! types it exposes serialize under the `serde` feature.
 //!
 //! Only serialization is provided: the parsed model is a read-only projection
 //! of the source, so a consumer that needs to reload a parse result re-parses
