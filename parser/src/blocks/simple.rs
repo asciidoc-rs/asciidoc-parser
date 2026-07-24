@@ -344,6 +344,7 @@ fn parse_lines<'src>(
 
     let mut next = source;
     let mut filtered_lines: Vec<&'src str> = vec![];
+
     // Source span of each surviving line, kept in lockstep with `filtered_lines`
     // so the attribute-references substitution can locate an
     // `attribute-missing=warn` warning at the precise source offset of the
@@ -599,7 +600,7 @@ impl<'src> HasSpan<'src> for SimpleBlock<'src> {
 /// more markers (`== `/`## `, effective level 1+, or clamped up to 1 under a
 /// negative offset) is always a section. A single-marker heading (`= `/`# `) is
 /// a document title rather than a section *unless* a positive offset lifts it
-/// to level 1 or beyond — mirroring the level-0 rule in
+/// to level 1 or beyond – mirroring the level-0 rule in
 /// [`parse_title_line`](crate::blocks::section).
 pub(crate) fn is_section_header(line: &str, level_offset: i32) -> bool {
     // AsciiDoc `=` style or Markdown `#` style.
@@ -955,6 +956,7 @@ mod tests {
         #[test]
         fn non_marker_and_over_long_marker_are_not_sections() {
             assert!(!is_section_header("paragraph", 1));
+
             // Seven markers exceed the level-5 maximum, so this is not a heading.
             assert!(!is_section_header("======= Too deep", 0));
         }

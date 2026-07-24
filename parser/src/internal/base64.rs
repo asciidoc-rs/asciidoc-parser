@@ -9,7 +9,7 @@
 //!
 //! The output matches Ruby's `[bytes].pack('m0')` (equivalently
 //! `Base64.strict_encode64`): the standard alphabet, `=` padding, and no line
-//! breaks — exactly what a `data:` URI needs.
+//! breaks – exactly what a `data:` URI needs.
 
 /// The standard base64 alphabet (RFC 4648), indexed by 6-bit value.
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

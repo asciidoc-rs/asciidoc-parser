@@ -177,8 +177,8 @@ fn apply_macros_internal(
     //
     // This runs *before* footnotes so that a cross-reference inside a footnote
     // becomes a (bracket-free) placeholder before the footnote text is
-    // extracted. That lets the footnote text — including the `xref:id[…]` macro
-    // form, whose literal `]` would otherwise truncate the footnote — be
+    // extracted. That lets the footnote text – including the `xref:id[…]` macro
+    // form, whose literal `]` would otherwise truncate the footnote – be
     // captured intact, and lets the footnote re-home the placeholder so it is
     // resolved in the document-level pass too.
     let mut xrefs: Vec<XrefSegment> = vec![];
@@ -265,6 +265,7 @@ impl Replacer for InlineImageMacroReplacer<'_> {
             .item;
 
         let default_alt = basename(&target.replace(['_', '-'], " "));
+
         // IMPORTANT: Implementations of `render_icon` and `render_image` need to
         // remember to use `default_alt` when attrlist doesn't contain a value for
         // `alt`.
@@ -378,7 +379,7 @@ impl Replacer for InlineKbdBtnMacroReplacer<'_> {
 /// Asciidoctor's delimiter handling.
 ///
 /// A single key produces a one-element vector; a key sequence is split on the
-/// first delimiter found — a comma (`,`) or a plus (`+`) — searching from the
+/// first delimiter found – a comma (`,`) or a plus (`+`) – searching from the
 /// *second* character so that a leading delimiter is treated as a literal key
 /// (e.g. `kbd:[,te]` is the single key `,te`). If the argument ends with the
 /// delimiter, that trailing delimiter is preserved as the value of the final
@@ -719,7 +720,7 @@ fn strip_see_and_seealso(term: &str) -> String {
 //
 // The blank alternative in the prefix (`[\ \t\p{Zs}]`) mirrors Asciidoctor's
 // `CG_BLANK` (`\p{Blank}`), which under Ruby's Unicode-aware engine treats any
-// space separator — including a no-break space (U+00A0) — as a boundary before
+// space separator – including a no-break space (U+00A0) – as a boundary before
 // the scheme. A plain ASCII `[\ \t]` would leave such a URL as literal text
 // (see #768).
 //
@@ -762,16 +763,20 @@ static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
 /// replacer doesn't have to special-case the branch numbering everywhere.
 struct NormalizedCaps<'c, 't> {
     caps: &'c Captures<'t>,
+
     /// True when the ANGLE branch matched (prefix was `&lt;`). Corresponds to
     /// the `&lt;` flag (old capture group 2) in the Ruby implementation.
     is_angle: bool,
     prefix: usize,
     scheme: usize,
+
     /// Formal-macro target: the URL preceding a `[…]` attrlist.
     target: usize,
     attrlist: usize,
+
     /// URL captured inside `<…&gt;`; only present in the ANGLE branch.
     angle_url: Option<usize>,
+
     /// Bare (auto-linked) URL.
     bare: usize,
 }
@@ -938,7 +943,7 @@ impl Replacer for InlineLinkReplacer<'_> {
                 // enclosed in quotes).
 
                 // FIXME: We probably shouldn't even get here when the link: prefix is present.
-                // The regex is doing too much.
+                // The regex is doing too much (#908).
                 dest.push_str(&caps[0]);
                 return;
             }
@@ -984,8 +989,8 @@ impl Replacer for InlineLinkReplacer<'_> {
 
                 // Only adopt the parsed result when a real named attribute split
                 // off (the positional value differs from the whole text).
-                // Otherwise the `=` was incidental — e.g. `[What You Need\n=
-                // What You Get]` — and the original wrapped text, newline and
+                // Otherwise the `=` was incidental – e.g. `[What You Need\n=
+                // What You Get]` – and the original wrapped text, newline and
                 // all, is the link text.
                 if lt != link_text_for_attrlist {
                     link_text = lt.replace("\\\"", "\"");
@@ -1208,7 +1213,7 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
         let mut extra_roles: Vec<&str> = vec![];
 
         if link_text.is_empty() {
-            // mailto is a special case; already processed.
+            // `mailto` is a special case; already processed.
             if let Some(_mailto) = mailto {
                 link_text = mailto_text.map(|s| s.to_owned()).unwrap_or_default();
             } else {
@@ -1255,9 +1260,9 @@ fn extract_attributes_from_text<'src>(
     let attrs = attrlist_maw.item.item;
 
     if let Some(resolved_text) = attrs.nth_attribute(1) {
-        // If the resolved text is unchanged from the input — i.e. the attribute
+        // If the resolved text is unchanged from the input – i.e. the attribute
         // list parse produced a single positional value equal to the whole text
-        // and split nothing off as a named attribute — clear the attributes and
+        // and split nothing off as a named attribute – clear the attributes and
         // return the text unparsed. This matches Asciidoctor's
         // `extract_attributes_from_text` (substitutors.rb) and is what makes a
         // macro nested inside a link/xref's text (e.g. `link[image:...[]]`)
@@ -1682,7 +1687,7 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
                         .item;
 
                 // If the attribute-list parse split nothing off as a named
-                // attribute — the sole positional value is the whole text —
+                // attribute – the sole positional value is the whole text –
                 // the `=` was incidental (e.g. an already-rendered inner macro
                 // such as `xref:sec[image:...[]]`, whose HTML contains `=` and
                 // `"`), not a real attribute list. Treat the text as plain link
@@ -1729,7 +1734,7 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
             // path is compared against `docname` and against the include
             // registry the preprocessor populated, matching Asciidoctor's
             // `docname == path || catalog[:includes][path]` test. A merely
-            // *partial* include does not qualify — the referenced anchor may not
+            // *partial* include does not qualify – the referenced anchor may not
             // have been carried across.
             XrefTarget::OtherDocument {
                 path,
@@ -1781,10 +1786,10 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
 ///
 /// ## Examples
 ///
-/// * `footnote:[text]` — an anonymous footnote
-/// * `footnote:id[text]` — a footnote with an ID, so it can be referenced again
-/// * `footnote:id[]` — a reference to a previously-defined footnote
-/// * `footnoteref:[id,text]` / `footnoteref:[id]` — the deprecated equivalents
+/// * `footnote:[text]` – an anonymous footnote
+/// * `footnote:id[text]` – a footnote with an ID, so it can be referenced again
+/// * `footnote:id[]` – a reference to a previously-defined footnote
+/// * `footnoteref:[id,text]` / `footnoteref:[id]` – the deprecated equivalents
 ///
 /// Asciidoctor anchors the match with a `(?!</a>)` look-ahead after the closing
 /// bracket so a `footnote:[…]` that forms the text of an already-rendered link
@@ -3477,8 +3482,8 @@ mod tests {
             );
             assert!(!rendered.contains("<a id=\"mid\"></a>[mid]"));
 
-            // The inner `[[mid]]` is preceded by a `[`, so — like Asciidoctor's
-            // inline-anchor scan (`InlineAnchorScanRx`) — the id is rendered but
+            // The inner `[[mid]]` is preceded by a `[`, so – like Asciidoctor's
+            // inline-anchor scan (`InlineAnchorScanRx`) – the id is rendered but
             // not registered in the catalog, neither as a bibliography anchor nor
             // as a normal one. See #769.
             assert!(doc.catalog().get_ref("mid").is_none());

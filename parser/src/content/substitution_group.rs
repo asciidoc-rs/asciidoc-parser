@@ -1421,7 +1421,7 @@ mod tests {
             SubstitutionGroup::Title.apply(&mut title_content, &p, None);
             SubstitutionGroup::Normal.apply(&mut normal_content, &p, None);
 
-            // Title should produce exactly the same result as Normal
+            // Title should produce exactly the same result as Normal.
             assert_eq!(title_content.rendered, normal_content.rendered);
         }
     }

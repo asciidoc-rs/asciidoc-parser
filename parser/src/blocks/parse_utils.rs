@@ -22,7 +22,7 @@ where
 
     while !source.data().is_empty() {
         // The predicate is given the parser (as a shared borrow) so a stop
-        // condition can consult the running document-attribute state — notably
+        // condition can consult the running document-attribute state – notably
         // `leveloffset`, which shifts the effective level a section boundary is
         // compared against. Every block preceding `source` (including any
         // `:leveloffset:` attribute entry) has already been applied to the

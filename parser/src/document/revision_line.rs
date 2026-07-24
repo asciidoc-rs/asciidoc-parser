@@ -174,7 +174,7 @@ mod tests {
         let result = crate::document::RevisionLine::parse(Span::new("1.2.3"), &mut parser);
 
         // According to Asciidoctor behavior, standalone numbers without "v" are not
-        // revision numbers
+        // revision numbers.
         assert_eq!(result.revnumber(), None);
         assert_eq!(result.revdate(), "1.2.3");
         assert_eq!(result.revremark(), None);
@@ -185,7 +185,7 @@ mod tests {
         let mut parser = Parser::default();
         let result = crate::document::RevisionLine::parse(Span::new("LPR1.2.3"), &mut parser);
 
-        // Other prefixes don't have special standalone treatment
+        // Other prefixes don't have special standalone treatment.
         assert_eq!(result.revnumber(), None);
         assert_eq!(result.revdate(), "LPR1.2.3");
         assert_eq!(result.revremark(), None);
@@ -208,7 +208,7 @@ mod tests {
         let result =
             crate::document::RevisionLine::parse(Span::new("LPR1.2.3, 2023-01-15"), &mut parser);
 
-        // With comma, other prefixes should be stripped from revision number
+        // With comma, other prefixes should be stripped from revision number.
         assert_eq!(result.revnumber(), Some("1.2.3"));
         assert_eq!(result.revdate(), "2023-01-15");
         assert_eq!(result.revremark(), None);
@@ -243,7 +243,7 @@ mod tests {
         let mut parser = Parser::default();
         let result = crate::document::RevisionLine::parse(Span::new("2023-01-15"), &mut parser);
 
-        // Just a date, no revision number
+        // Just a date, no revision number.
         assert_eq!(result.revnumber(), None);
         assert_eq!(result.revdate(), "2023-01-15");
         assert_eq!(result.revremark(), None);
@@ -280,7 +280,7 @@ mod tests {
         let mut parser = Parser::default();
         let result = crate::document::RevisionLine::parse(Span::new("v"), &mut parser);
 
-        // "v" without digits should not be treated as a standalone revision
+        // "v" without digits should not be treated as a standalone revision.
         assert_eq!(result.revnumber(), None);
         assert_eq!(result.revdate(), "v");
         assert_eq!(result.revremark(), None);
@@ -302,7 +302,7 @@ mod tests {
         let result =
             crate::document::RevisionLine::parse(Span::new("abc123def, 2023-01-01"), &mut parser);
 
-        // Non-numeric prefix should be stripped, leaving "123def"
+        // Non-numeric prefix should be stripped, leaving "123def".
         assert_eq!(result.revnumber(), Some("123def"));
         assert_eq!(result.revdate(), "2023-01-01");
         assert_eq!(result.revremark(), None);
@@ -314,7 +314,7 @@ mod tests {
         let result =
             crate::document::RevisionLine::parse(Span::new("nodigits, 2023-01-01"), &mut parser);
 
-        // When there are no digits, the prefix stripping should leave empty string
+        // When there are no digits, the prefix stripping should leave empty string.
         assert_eq!(result.revnumber(), Some(""));
         assert_eq!(result.revdate(), "2023-01-01");
         assert_eq!(result.revremark(), None);
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn comma_form_prefix_absorbs_escape_before_reference() {
         // Also mirrors Asciidoctor: the `[^\d{]*` prefix absorbs any leading
-        // characters up to the first `{` — including a backslash — so
+        // characters up to the first `{` – including a backslash – so
         // `v\{draft}1` yields `{draft}1`, an active reference the header
         // substitutions then resolve when `draft` is defined.
         let mut parser = Parser::default().with_intrinsic_attribute(
