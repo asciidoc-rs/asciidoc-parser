@@ -962,7 +962,7 @@ mod fenced {
 
     #[test]
     fn language_on_fence_closes_on_bare_fence() {
-        // The closing fence of a language-aware fenced block is a bare ``` — the
+        // The closing fence of a language-aware fenced block is a bare ``` – the
         // language appears only on the opening fence, so the closing fence never
         // repeats it.
         let mut parser = Parser::default();

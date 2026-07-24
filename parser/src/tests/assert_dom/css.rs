@@ -112,7 +112,7 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
         // descendant", which by definition excludes the element itself.
         let mut final_results = Vec::new();
         for matched_node in results {
-            // Search only children (descendants), not the matched node itself
+            // Search only children (descendants), not the matched node itself.
             for child in &matched_node.children {
                 let descendants = query_descendant_or_self(child, rest);
                 final_results.extend(descendants);
@@ -402,6 +402,7 @@ fn matches_selector_with_context(
         {
             return false;
         }
+
         // Fall through to check id and class selectors if present.
     } else if !tag_part.is_empty() {
         // Tag name must match.
@@ -518,6 +519,7 @@ fn matches_single_pseudo(node: &VirtualNode, pseudo: &str, parent: Option<&Virtu
                     }
                 }
             }
+
             // If no parent or no matching siblings, consider it first-of-type.
             true
         }

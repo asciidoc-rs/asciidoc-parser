@@ -142,6 +142,7 @@ impl<'src> MediaBlock<'src> {
         };
 
         let attrlist = open_brace.after.slice(0..open_brace.after.len() - 1);
+
         // Note that we already checked that this line ends with a close brace.
 
         let macro_attrlist = Attrlist::parse(attrlist, parser, AttrlistContext::Inline);
@@ -154,6 +155,7 @@ impl<'src> MediaBlock<'src> {
                 item: Self {
                     type_,
                     target: target.item,
+
                     // Attribute references in the target are resolved later, in
                     // `resolve_target` (which also decides whether a missing
                     // reference should drop the whole block); until then, the
@@ -163,6 +165,7 @@ impl<'src> MediaBlock<'src> {
                     source,
                     title_source: metadata.title_source,
                     title: metadata.title.clone(),
+
                     // The caption (and its number) is assigned later, in
                     // `assign_caption`, which the caller invokes only once the
                     // block survives `resolve_target`. Assigning it here would

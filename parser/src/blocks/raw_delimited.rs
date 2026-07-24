@@ -26,8 +26,8 @@ use crate::{
 /// or more backticks are not a fence.
 ///
 /// A language may be declared on the opening fence (`` ```ruby ``). This is a
-/// shorthand for a source block — equivalent to `[source,ruby]` over a listing
-/// block — so the synthesized attribute list carries the `source` block style
+/// shorthand for a source block – equivalent to `[source,ruby]` over a listing
+/// block – so the synthesized attribute list carries the `source` block style
 /// and the language, and the closing fence is a bare `` ``` ``. This parser
 /// records the language for a downstream renderer but performs no syntax
 /// highlighting itself.
@@ -110,7 +110,7 @@ impl<'src> RawDelimitedBlock<'src> {
 
         // The line that closes the block. Every delimiter closes on a line that
         // matches it exactly, except a language-aware fenced code block
-        // (```ruby), whose closing fence is a bare ``` — set below.
+        // (```ruby), whose closing fence is a bare ``` – set below.
         let mut close_delimiter = delimiter_data;
 
         // The attribute list synthesized for a language-aware fenced code block.
@@ -323,11 +323,11 @@ fn fenced_code_language<'src>(line: &Span<'src>) -> Option<Span<'src>> {
 /// other delimited block keeps its own context). This parser claims an open
 /// block whose style turns it into a raw delimited block:
 ///
-/// * the verbatim contexts — `source` and `listing` (both rendered as a listing
-///   block), or `literal` — make the open block a verbatim raw block;
+/// * the verbatim contexts – `source` and `listing` (both rendered as a listing
+///   block), or `literal` – make the open block a verbatim raw block;
 /// * the `pass` context makes the open block a passthrough (raw) block, whose
 ///   content is emitted with no substitutions and no block parsing; and
-/// * the `comment` context makes the open block a comment block — the alternate
+/// * the `comment` context makes the open block a comment block – the alternate
 ///   open-block form of a `////` comment block. Its content is retained in the
 ///   parsed model (this parser deliberately does not discard comments) but is
 ///   raw: no substitutions are applied and no AsciiDoc syntax within it,

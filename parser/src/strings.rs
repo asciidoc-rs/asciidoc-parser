@@ -141,8 +141,10 @@ impl fmt::Display for InlineStr {
 pub enum CowStr<'a> {
     /// An owned, immutable string.
     Boxed(Box<str>),
+
     /// A borrowed string.
     Borrowed(&'a str),
+
     /// A short inline string.
     Inlined(InlineStr),
 }
@@ -375,7 +377,7 @@ mod tests {
         #[test]
         #[allow(clippy::assertions_on_constants)]
         fn max_len_atleast_four() {
-            // we need 4 bytes to store a char
+            // We need 4 bytes to store a char.
             assert!(MAX_INLINE_STR_LEN >= 4);
         }
 

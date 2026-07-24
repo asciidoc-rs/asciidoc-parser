@@ -161,7 +161,7 @@ pub struct Parser {
     /// carried over to the first block inside the section (matching
     /// Asciidoctor, where the block-attribute hash holding the title is passed
     /// through to the section body's first block). `SectionBlock::parse`
-    /// stashes the rendered title here and the next block parsed claims it —
+    /// stashes the rendered title here and the next block parsed claims it –
     /// which may be a nested section, re-stashing it for *its* first block, or
     /// (when the section body is empty) a sibling section reached after the
     /// stashing section ends. A block with a title of its own wins over the
@@ -169,7 +169,7 @@ pub struct Parser {
     ///
     /// The title is carried as an owned snapshot (this struct is lifetime-free
     /// and cannot hold the `.Title` line's source span), so a block claiming a
-    /// carried title has no `title_source` — the same shape as a title
+    /// carried title has no `title_source` – the same shape as a title
     /// supplied via a `title=` attribute. The snapshot keeps any deferred
     /// cross-references, so an embedded `<<id>>` in a carried title still
     /// resolves once the catalog is complete.
@@ -199,7 +199,7 @@ pub struct Parser {
     /// target attribute is *locked* (API-set or a locked built-in).
     ///
     /// Such a counter must keep advancing across repeated references, but it
-    /// must not overwrite the locked attribute's readable value — so its
+    /// must not overwrite the locked attribute's readable value – so its
     /// sequence is tracked here rather than in the readable
     /// [`counter_values`](Self::counter_values) overlay. This mirrors
     /// Asciidoctor's `Document#counter`, which advances `@counters` while
@@ -212,10 +212,10 @@ pub struct Parser {
     /// [`counter_values`](Self::counter_values), so the two sequences diverge
     /// when the *same* locked attribute is advanced both ways in one document
     /// (e.g. an API-locked `example-number` driven by both example blocks and
-    /// inline `{counter:example-number}` references) — Asciidoctor keeps a
+    /// inline `{counter:example-number}` references) – Asciidoctor keeps a
     /// single `@counters` sequence shared across both. This is left unmatched
-    /// deliberately. The scenario — API-locking a `<context>-number` attribute
-    /// *and* mixing caption and inline use — is pathological, and exact parity
+    /// deliberately. The scenario – API-locking a `<context>-number` attribute
+    /// *and* mixing caption and inline use – is pathological, and exact parity
     /// is unreachable regardless: this crate resolves inline counters during
     /// parsing, whereas Asciidoctor advances captions during parsing but inline
     /// references during conversion, so the two sequences interleave
@@ -297,7 +297,7 @@ pub struct Parser {
     /// Each owned cell's own source map (produced by re-running the
     /// preprocessor over its content) is pushed here for the duration of
     /// its parse, so a directive buried inside the owned content can still
-    /// be mapped back to the file and line it *originally* came from —
+    /// be mapped back to the file and line it *originally* came from –
     /// needed to name that file in the "Unresolved directive" message and
     /// to report the warning's true cursor via
     /// [`Warning::origin`](crate::warnings::Warning::origin).
@@ -419,8 +419,8 @@ pub(crate) struct DeferredWarning {
     /// This is `None` for warnings that point at real (emitted) output: their
     /// [`offset`](Self::offset)/[`len`](Self::len) span resolves the location
     /// through the document source map. It is `Some` for a preprocessor
-    /// directive that produces no output of its own — a malformed or
-    /// unterminated conditional directive — where there is no output span to
+    /// directive that produces no output of its own – a malformed or
+    /// unterminated conditional directive – where there is no output span to
     /// resolve against, so the directive's own file and line are recorded here
     /// directly (the `offset`/`len` span is then only a best-effort anchor).
     ///
@@ -746,7 +746,7 @@ impl Parser {
         }
 
         // An unset `relfilesuffix` reads as the *effective* value of
-        // `outfilesuffix` — routed through this same reader so an
+        // `outfilesuffix` – routed through this same reader so an
         // `outfilesuffix` counter overlay is honored too (see
         // [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
         if self.tracks_outfilesuffix(name) {
@@ -784,6 +784,7 @@ impl Parser {
                     av.value.clone()
                 }
             }
+
             // A time-dependent attribute is not materialized in either table; it
             // is resolved on demand from the captured reference instant.
             None => self
@@ -824,6 +825,7 @@ impl Parser {
         if let Some(av) = self.attribute_values.get(name) {
             return Some(av);
         }
+
         // `max-attribute-value-size` carries its `4096` default only under
         // Secure, so it is resolved as a mode-aware synthesized attribute rather
         // than a fixed built-in. It is consulted here *after* the per-parser map
@@ -835,6 +837,7 @@ impl Parser {
                 self.safe == SafeMode::Secure,
             ));
         }
+
         // `user-home` is the user's home directory below `SafeMode::Server` and
         // the masking `.` at `Server`/`Secure`, so it too is resolved as a
         // mode-aware synthesized attribute. Consulted here *after* the
@@ -851,11 +854,11 @@ impl Parser {
 
     /// Reports whether `name` is `relfilesuffix` in its unset state, in which
     /// case a *read* resolves it to the current value of `outfilesuffix` (the
-    /// two diverge for non-HTML backends, e.g. `.xml` for DocBook — see
+    /// two diverge for non-HTML backends, e.g. `.xml` for DocBook – see
     /// [issue #657](https://github.com/asciidoc-rs/asciidoc-parser/issues/657)).
     ///
     /// Returns `false` once `relfilesuffix` is explicitly set or unset (an
-    /// entry — a value or an [unset] tombstone — then lives in the
+    /// entry – a value or an [unset] tombstone – then lives in the
     /// per-parser map), and for every other name. The redirect is
     /// deliberately confined to the value *readers*: the attribute
     /// *writers* consult [`effective_attribute`](Self::effective_attribute)
@@ -880,6 +883,7 @@ impl Parser {
         if self.tracks_outfilesuffix(name) {
             return self.has_attribute("outfilesuffix");
         }
+
         // A derived `basebackend` / `filetype` is present only while `backend`
         // resolves to a non-empty value (see [`derived_backend_value`]).
         if derived_backend_value(name, &self.attribute_values).is_some() {
@@ -939,8 +943,8 @@ impl Parser {
     /// force.
     ///
     /// The value is coerced as Ruby's `String#to_i` would (matching
-    /// Asciidoctor); a non-positive result — including an explicit unset or `0`
-    /// — disables the limit. The `4096` default only exists under
+    /// Asciidoctor); a non-positive result – including an explicit unset or `0`
+    /// – disables the limit. The `4096` default only exists under
     /// `SafeMode::Secure` (see
     /// [`apply_safe_mode_attributes`](Self::apply_safe_mode_attributes)), so in
     /// a relaxed safe mode this resolves to `None` unless the caller sets an
@@ -1016,8 +1020,8 @@ impl Parser {
             // makes the accumulation itself infallible; `saturating_add` then
             // guards the (already absurd) case of a delta near `i64::MIN/MAX`,
             // and the result is clamped back into the `i32` the attribute
-            // stores. This keeps a pathological offset from overflowing —
-            // which would panic in debug builds and wrap in release builds —
+            // stores. This keeps a pathological offset from overflowing –
+            // which would panic in debug builds and wrap in release builds –
             // rather than imposing a real bound the syntax does not otherwise
             // impose.
             Ok(delta) => InterpretedValue::Value(
@@ -1062,7 +1066,7 @@ impl Parser {
     }
 
     /// Captures the parser's fully-resolved document-attribute state so it can
-    /// outlive the parser — for example, retained on a [`Document`] to answer
+    /// outlive the parser – for example, retained on a [`Document`] to answer
     /// [`attribute_value`]/[`has_attribute`]/[`is_attribute_set`] without a
     /// parser in hand (the embed path a renderer uses for `convert_document`).
     ///
@@ -1092,7 +1096,7 @@ impl Parser {
     ///
     /// `showtitle` takes precedence: if present, the title shows precisely when
     /// it is set. Otherwise `notitle`, if present, hides the title when set.
-    /// When neither attribute is present, `default_shown` decides — a
+    /// When neither attribute is present, `default_shown` decides – a
     /// standalone document (such as a nested AsciiDoc table cell) shows its
     /// title, while an embedded document does not.
     pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
@@ -1116,14 +1120,14 @@ impl Parser {
     ///
     /// `attr_name` is the attribute just assigned and `value` its stored value;
     /// the call is a no-op for any other name. Turning the toggle *off* (an
-    /// explicit [unset], e.g. `:!notitle:`) turns the partner *on* — it is
+    /// explicit [unset], e.g. `:!notitle:`) turns the partner *on* – it is
     /// stored [set] with the same `modification_context` and
     /// `silent_when_locked` flag as the triggering assignment. Turning the
     /// toggle *on* (an empty `Set` or an explicit value, e.g. `:notitle:`)
     /// *removes* the partner entirely.
     ///
-    /// The partner is removed — rather than left as an explicit unset
-    /// tombstone — to mirror Asciidoctor's attribute-hash semantics, where an
+    /// The partner is removed – rather than left as an explicit unset
+    /// tombstone – to mirror Asciidoctor's attribute-hash semantics, where an
     /// "off" attribute is simply absent. That keeps every observer consistent:
     /// `has_attribute`, `ifdef`/`ifndef`, and `{partner}` reference
     /// substitution all see the same absence Asciidoctor does (so, e.g., a
@@ -1161,7 +1165,7 @@ impl Parser {
                 },
             );
         } else if self.attribute_values.contains_key(partner) {
-            // The toggle is on, so the partner turns off — and, matching
+            // The toggle is on, so the partner turns off – and, matching
             // Asciidoctor, "off" means absent. (Guarded so the common case of
             // no prior partner entry does not clone the shared map.)
             Arc::make_mut(&mut self.attribute_values).remove(partner);
@@ -1378,7 +1382,7 @@ impl Parser {
     /// cross-reference warning can be anchored at the footnote rather than at
     /// the whole document. When the footnote is defined while substituting a
     /// privately-owned sub-source (a Markdown-style blockquote or an AsciiDoc
-    /// table cell — see
+    /// table cell – see
     /// [`owned_subsource_depth`](Self::owned_subsource_depth)), that offset
     /// does not map to the document, so no location is recorded and
     /// resolution falls back to the whole-document span.
@@ -1541,7 +1545,7 @@ impl Parser {
     /// [`take_owned_cell_warnings`]).
     ///
     /// A no-op when not inside an owned cell source (the line does not resolve
-    /// to an owned origin) — the caller only reaches this from an owned-cell
+    /// to an owned origin) – the caller only reaches this from an owned-cell
     /// parse, but the guard keeps a stray call from recording an unanchorable
     /// warning.
     ///
@@ -1584,7 +1588,7 @@ impl Parser {
     ) -> String {
         // A synthetic ID that collides with an existing one is enumerated using
         // the `idseparator` (e.g. `_section_one`, `_section_one_2`), matching
-        // Ruby Asciidoctor — not a hardcoded hyphen. Mirrors the separator
+        // Ruby Asciidoctor – not a hardcoded hyphen. Mirrors the separator
         // resolution in `generate_section_id`.
         let separator = self
             .attribute_value("idseparator")
@@ -1815,12 +1819,12 @@ impl Parser {
     /// attribute map, as an owned string (a value-less "set" reads as an empty
     /// string), or `None` when it has no such entry.
     ///
-    /// This reads only the stored overrides — never the on-the-fly datetime
-    /// resolution — so it can supply the explicit sibling values
+    /// This reads only the stored overrides – never the on-the-fly datetime
+    /// resolution – so it can supply the explicit sibling values
     /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute) needs
     /// without recursing. It mirrors the Ruby truthiness the datetime
-    /// computation relies on (`attrs['docdate']`), where any present value —
-    /// including an empty string — counts as explicitly supplied.
+    /// computation relies on (`attrs['docdate']`), where any present value –
+    /// including an empty string – counts as explicitly supplied.
     fn stored_datetime_override(&self, name: &str) -> Option<String> {
         self.attribute_values
             .get(name)
@@ -1956,10 +1960,10 @@ impl Parser {
     /// These attributes let a document (or a downstream converter) inspect the
     /// security mode under which it is being processed:
     ///
-    /// * `safe-mode-level` — the numeric level (`0`, `1`, `10`, or `20`).
-    /// * `safe-mode-name` — the lowercase mode name (`unsafe`, `safe`,
+    /// * `safe-mode-level` – the numeric level (`0`, `1`, `10`, or `20`).
+    /// * `safe-mode-name` – the lowercase mode name (`unsafe`, `safe`,
     ///   `server`, or `secure`).
-    /// * `safe-mode-<name>` — a single flag attribute (set to an empty value)
+    /// * `safe-mode-<name>` – a single flag attribute (set to an empty value)
     ///   naming the active mode; the flags for the other modes are absent so
     ///   that a reference to them resolves literally.
     ///
@@ -2035,7 +2039,7 @@ impl Parser {
     }
 
     /// Returns `true` if the AsciiDoc file named by `key` (an inter-document
-    /// xref path — relative to this document, AsciiDoc extension removed) was
+    /// xref path – relative to this document, AsciiDoc extension removed) was
     /// included into this document *in full* by the preprocessor.
     ///
     /// A cross reference to such a file collapses to a same-document reference,
@@ -2053,8 +2057,8 @@ impl Parser {
     ///
     /// `Parser::parse_deferred` seeds the registry with the outermost
     /// document's own includes before parsing begins; this entry point is for
-    /// an include performed while a nested scope with a shared catalog — an
-    /// AsciiDoc table cell — is parsed. Takes `&self` for the same reason as
+    /// an include performed while a nested scope with a shared catalog – an
+    /// AsciiDoc table cell – is parsed. Takes `&self` for the same reason as
     /// [`catalog_include_is_full`](Self::catalog_include_is_full). See
     /// [`Catalog::register_include`](crate::document::Catalog::register_include).
     pub(crate) fn register_include(&self, key: &str, full: bool) {
@@ -2114,7 +2118,7 @@ impl Parser {
         }
 
         // Cap the resolved value at `max-attribute-value-size` bytes (a no-op
-        // unless that limit is in force — by default, only under Secure).
+        // unless that limit is in force – by default, only under Secure).
         value = self.limit_attribute_value_size(value);
 
         // `notitle` and `showtitle` are inverse spellings of one title-
@@ -2173,7 +2177,7 @@ impl Parser {
     /// non-empty value and `iconsdir` was left at its built-in default, the
     /// icons directory is derived as `{imagesdir}/icons`.
     ///
-    /// The derivation is skipped — so an explicit `iconsdir` wins — when either
+    /// The derivation is skipped – so an explicit `iconsdir` wins – when either
     /// the attribute was set in the header (`iconsdir_set_in_header`) or its
     /// resolved value differs from [`DEFAULT_ICONSDIR`] (which is how an
     /// override applied any other way, e.g. via the API, is detected). The one
@@ -2269,7 +2273,7 @@ impl Parser {
         }
 
         // Cap the resolved value at `max-attribute-value-size` bytes (a no-op
-        // unless that limit is in force — by default, only under Secure).
+        // unless that limit is in force – by default, only under Secure).
         value = self.limit_attribute_value_size(value);
 
         // `notitle` and `showtitle` are inverse spellings of one title-
@@ -2362,8 +2366,8 @@ impl Parser {
     /// A counter reads the current value to produce (and display) the next one.
     /// For an unlocked attribute the advanced value is stored in the readable
     /// [`counter_values`](Self::counter_values) overlay, so a later reference
-    /// reads it. For a *locked* attribute — one set via the API, or a locked
-    /// built-in such as `max-include-depth` — the write path depends on the
+    /// reads it. For a *locked* attribute – one set via the API, or a locked
+    /// built-in such as `max-include-depth` – the write path depends on the
     /// caller:
     ///
     /// * `commit_when_locked` (the captioning counter): the value is stored in
@@ -2419,7 +2423,7 @@ impl Parser {
     /// Reports whether `name` currently resolves to an attribute that is
     /// *locked* against modification by a counter: it has an effective value
     /// whose [`ModificationContext`] is
-    /// [`ApiOnly`](ModificationContext::ApiOnly) — an API-set override or a
+    /// [`ApiOnly`](ModificationContext::ApiOnly) – an API-set override or a
     /// locked built-in such as `max-include-depth`.
     ///
     /// This mirrors Asciidoctor's `Document#attribute_locked?`, which is `true`
@@ -2512,6 +2516,7 @@ fn string_succ(current: &str) -> String {
             };
             out_rev.push(next);
             carrying = carry;
+
             // On a carry, remember the class of leading character to prepend if
             // the carry runs off the front; `next` is `0`, `a`, or `A` here.
             lead = match next {
@@ -2580,10 +2585,10 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
 /// would name can become active later in the same parse and the stored override
 /// would then shadow the read-only intrinsic:
 ///
-/// * The bare derived values `basebackend` / `filetype` — always resolved on
+/// * The bare derived values `basebackend` / `filetype` – always resolved on
 ///   the fly from `backend` (see [`derived_backend_value`]), never stored.
 /// * The doctype-keyed flags `backend-<b>-doctype-<d>` /
-///   `basebackend-<bb>-doctype-<d>` — the `doctype` component shifts mid-parse
+///   `basebackend-<bb>-doctype-<d>` – the `doctype` component shifts mid-parse
 ///   (e.g. an AsciiDoc table cell that resets, then changes, its doctype), so
 ///   an assignment to an inactive one (`backend-html5-doctype-article` while
 ///   the doctype is `book`) must not be stored where it could shadow the
@@ -2818,6 +2823,7 @@ mod tests {
             p.attribute_value("docfile"),
             InterpretedValue::Value("sample.adoc")
         );
+
         // The masked `docdir` is still a *set* (present) attribute.
         assert!(p.is_attribute_set("docdir"));
         assert!(p.has_attribute("docfile"));
@@ -3429,7 +3435,7 @@ mod tests {
         // Asciidoctor asciidoctor/asciidoctor#3804: `notitle` and `showtitle`
         // are two spellings of one title-visibility toggle, wired as inverses.
         // Assigning either updates the partner so the resolved document carries
-        // one consistent signal — following Asciidoctor's hash semantics, where
+        // one consistent signal – following Asciidoctor's hash semantics, where
         // turning the toggle *on* sets one spelling and *removes* the other.
 
         fn parse_header(entries: &str) -> Parser {
@@ -3537,7 +3543,7 @@ mod tests {
 
         #[test]
         fn unrelated_attributes_are_untouched() {
-            // A document that never assigns either spelling leaves both absent —
+            // A document that never assigns either spelling leaves both absent –
             // the linkage is a no-op for every other attribute.
             let parser = parse_header(":sectnums:");
             assert!(!parser.has_attribute("notitle"));
@@ -3718,7 +3724,7 @@ mod tests {
             // Author-defined attributes that share a derived-family prefix but
             // name no active flag (and are not the doctype-keyed namespace) are
             // kept, not swallowed by the read-only reservation, so they stay
-            // visible to `ifdef` / attribute references — matching Asciidoctor.
+            // visible to `ifdef` / attribute references – matching Asciidoctor.
             let doc = Parser::default().parse(
                 ":backend-custom: enabled\n:basebackend-custom: on\n:filetype-custom: yes\n:doctype-draft: 1\n\nbody",
             );
@@ -3793,6 +3799,7 @@ mod tests {
                     .as_deref(),
                 Some("mydoc")
             );
+
             // A Windows-style separator is handled too, since the primary file
             // name may be supplied on either platform.
             assert_eq!(
@@ -3860,6 +3867,7 @@ mod tests {
             // parsing, so it is advanced like a string instead.
             assert_eq!(next_counter_value("07"), "08");
             assert_eq!(next_counter_value("+5"), "+6");
+
             // A leading-zero value still carries digit-to-digit like a string.
             assert_eq!(next_counter_value("09"), "10");
             assert_eq!(next_counter_value("099"), "100");
@@ -3914,6 +3922,7 @@ mod tests {
         fn counter_seed_used_only_while_unset() {
             let p = Parser::default();
             assert_eq!(p.counter("c", Some("A")), "A");
+
             // Once set, a later seed is ignored.
             assert_eq!(p.counter("c", Some("Q")), "B");
         }

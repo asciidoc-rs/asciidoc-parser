@@ -1287,8 +1287,8 @@ fn encode_attribute_value(value: String) -> String {
 /// Unlike [`encode_attribute_value`] (which only guards the quote delimiter to
 /// mirror Asciidoctor's image-alt handling), this escapes the full set of
 /// characters that could break out of, or corrupt, an attribute value. It is
-/// used for author-supplied `xref` `window`/`role` values, which — unlike the
-/// hard-coded `window` strings the link macro passes — can contain arbitrary
+/// used for author-supplied `xref` `window`/`role` values, which – unlike the
+/// hard-coded `window` strings the link macro passes – can contain arbitrary
 /// text.
 fn encode_html_attribute(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -1351,6 +1351,7 @@ fn has_extname(path: &str) -> bool {
 fn data_uri_mimetype(target: &str) -> String {
     match extname(target) {
         Some(".svg") => "image/svg+xml".to_string(),
+
         // `extname` always includes the leading `.`, which is dropped here.
         Some(ext) => format!("image/{ext}", ext = ext.strip_prefix('.').unwrap_or(ext)),
         None => "application/octet-stream".to_string(),
@@ -1469,12 +1470,12 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
 /// between them.
 ///
 /// Used when a cross-reference's link text is drawn from its target's reference
-/// text and that reftext itself contains an anchor — an inline link, or a
+/// text and that reftext itself contains an anchor – an inline link, or a
 /// cross-reference embedded in the target's title. HTML forbids nesting an
 /// `<a>` inside another, so the inner anchor tags are stripped, leaving their
 /// text in place. Mirrors Asciidoctor's `DropAnchorRx = /<(?:a\b[^>]*|\/a)>/`.
 fn drop_anchor_tags(text: &str) -> String {
-    // The common case — a reftext with no anchor at all — allocates a plain
+    // The common case – a reftext with no anchor at all – allocates a plain
     // copy and does no scanning.
     if !text.contains("<a") {
         return text.to_string();
