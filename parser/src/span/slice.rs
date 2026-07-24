@@ -168,7 +168,10 @@ mod tests {
             );
         }
 
+        // Out-of-bounds only panics in debug builds, where the `debug_assert!`
+        // fires; release builds fall back to an empty span instead.
         #[test]
+        #[cfg(debug_assertions)]
         #[should_panic(expected = "slice: range 4..8 is out of bounds for data of length 6")]
         fn out_of_bounds_panics() {
             let s = crate::Span::new("abcdef");
@@ -194,7 +197,10 @@ mod tests {
             );
         }
 
+        // Out-of-bounds only panics in debug builds, where the `debug_assert!`
+        // fires; release builds fall back to an empty span instead.
         #[test]
+        #[cfg(debug_assertions)]
         #[should_panic(expected = "slice_from: range 7.. is out of bounds for data of length 6")]
         fn out_of_bounds_panics() {
             let s = crate::Span::new("abcdef");
@@ -220,7 +226,10 @@ mod tests {
             );
         }
 
+        // Out-of-bounds only panics in debug builds, where the `debug_assert!`
+        // fires; release builds fall back to an empty span instead.
         #[test]
+        #[cfg(debug_assertions)]
         #[should_panic(expected = "slice_to: range ..9 is out of bounds for data of length 6")]
         fn out_of_bounds_panics() {
             let s = crate::Span::new("abcdef");
