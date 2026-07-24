@@ -3858,7 +3858,7 @@ mod tests {
         // custom resolver should rewrite it under the content root.
         let doc = parser.parse("image:tiger.png[tiger]");
 
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         let Block::Simple(simple_block) = block else {
             panic!("Expected simple block, got: {block:?}");
         };
