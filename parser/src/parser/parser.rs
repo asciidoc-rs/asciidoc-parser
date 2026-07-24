@@ -2244,6 +2244,41 @@ impl Parser {
         self.safe
     }
 
+    /// Returns the [`ImageFileHandler`] registered on this parser, if any.
+    ///
+    /// A custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
+    /// (rather than inheriting [`image_uri`]'s default `data-uri` embedding)
+    /// can use this to read an image's bytes through the same handler the
+    /// built-in HTML renderer uses. Returns `None` when no handler was
+    /// registered via [`with_image_file_handler`], in which case there is
+    /// no way to embed images and a web path should be used instead.
+    ///
+    /// [`ImageFileHandler`]: crate::parser::ImageFileHandler
+    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    /// [`image_uri`]: crate::parser::InlineSubstitutionRenderer::image_uri
+    /// [`with_image_file_handler`]: Self::with_image_file_handler
+    pub fn image_file_handler(&self) -> Option<&dyn ImageFileHandler> {
+        self.image_file_handler.as_deref()
+    }
+
+    /// Returns the [`SvgFileHandler`] registered on this parser, if any.
+    ///
+    /// A custom [`InlineSubstitutionRenderer`] that renders inline SVG images
+    /// itself (rather than inheriting [`render_image`]'s `opts=inline`
+    /// handling) can use this to read an SVG's contents through the same
+    /// handler the built-in HTML renderer uses. Returns `None` when no
+    /// handler was registered via [`with_svg_file_handler`], in which case
+    /// inline SVG contents are unavailable and the alt text should be used
+    /// instead.
+    ///
+    /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
+    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    /// [`render_image`]: crate::parser::InlineSubstitutionRenderer::render_image
+    /// [`with_svg_file_handler`]: Self::with_svg_file_handler
+    pub fn svg_file_handler(&self) -> Option<&dyn SvgFileHandler> {
+        self.svg_file_handler.as_deref()
+    }
+
     /// Returns the document name (`docname`): the base name of the primary
     /// file, stripped of its directory and final extension.
     ///
