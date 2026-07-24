@@ -197,6 +197,56 @@ fn image_link_self_escapes_src_and_href_without_double_escaping() {
     );
 }
 
+#[test]
+fn image_link_with_dangerous_scheme_drops_the_wrapping_link() {
+    // Escaping the `"` cannot neutralize a script URI, so a dangerous `link=`
+    // destination is rejected: the image is rendered without the wrapping
+    // anchor rather than with a live `javascript:` href.
+    assert_eq!(
+        render_macros("image:safe.png[alt,link=javascript:alert(1)]"),
+        r#"<span class="image"><img src="safe.png" alt="alt"></span>"#
+    );
+}
+
+#[test]
+fn image_link_dangerous_scheme_records_a_warning() {
+    let mut parser = Parser::default();
+    let doc = parser.parse("image:safe.png[alt,link=javascript:alert(1)]");
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string())
+    );
+}
+
+#[test]
+fn image_link_dangerous_scheme_rejection_is_case_insensitive() {
+    assert_eq!(
+        render_macros("image:safe.png[alt,link=JavaScript:alert(1)]"),
+        r#"<span class="image"><img src="safe.png" alt="alt"></span>"#
+    );
+}
+
+#[test]
+fn icon_link_with_dangerous_scheme_drops_the_wrapping_link() {
+    // The same rejection applies to the `icon:` macro's `link=` attribute.
+    assert_eq!(
+        render_icon("icon:home[link=javascript:alert(1)]", ""),
+        r#"<span class="icon"><img src="./images/icons/home.png" alt="home"></span>"#
+    );
+}
+
+#[test]
+fn image_link_self_is_not_rejected() {
+    // `link=self` names the image's own (safe) `src`, so it stays a live link.
+    assert_eq!(
+        render_macros("image:safe.png[alt,link=self]"),
+        r#"<span class="image"><a class="image" href="safe.png"><img src="safe.png" alt="alt"></a></span>"#
+    );
+}
+
 // ---- Dangerous-scheme rejection (explicit `link:` macro) -------------------
 
 #[test]

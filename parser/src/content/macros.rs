@@ -17,7 +17,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle,
+        LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle, has_dangerous_scheme,
     },
     warnings::WarningType,
 };
@@ -98,7 +98,10 @@ fn apply_macros_internal(
     }
 
     if found_macroish && (text.contains("image:") || text.contains("icon:")) {
-        let replacer = InlineImageMacroReplacer(parser);
+        let replacer = InlineImageMacroReplacer {
+            parser,
+            source: content.original(),
+        };
 
         if let Cow::Owned(new_result) = INLINE_IMAGE_MACRO.replace_all(content.rendered(), replacer)
         {
@@ -248,9 +251,15 @@ static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-struct InlineImageMacroReplacer<'p>(&'p Parser);
+struct InlineImageMacroReplacer<'p, 's> {
+    parser: &'p Parser,
 
-impl Replacer for InlineImageMacroReplacer<'_> {
+    /// Span of the content being substituted, used to locate any warning this
+    /// replacer records.
+    source: Span<'s>,
+}
+
+impl Replacer for InlineImageMacroReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps[0].starts_with('\\') {
             // Honor the escape.
@@ -260,9 +269,23 @@ impl Replacer for InlineImageMacroReplacer<'_> {
 
         let target = &caps[1];
         let span = Span::new(&caps[2]);
-        let attrlist = Attrlist::parse(span, self.0, AttrlistContext::Inline)
+        let attrlist = Attrlist::parse(span, self.parser, AttrlistContext::Inline)
             .item
             .item;
+
+        // A `link=` destination whose scheme could execute script is rejected by
+        // the renderer (the image is emitted without the wrapping link); record
+        // the warning here, where the parser and a document span are available.
+        // `link=self` names the image's own `src`, so it is exempt.
+        if let Some(link) = attrlist.named_attribute("link")
+            && link.value() != "self"
+            && has_dangerous_scheme(link.value())
+        {
+            self.parser.record_substitution_warning(
+                self.source,
+                WarningType::UnsafeLinkSchemeRejected(link.value().to_owned()),
+            );
+        }
 
         let default_alt = basename(&target.replace(['_', '-'], " "));
 
@@ -277,9 +300,9 @@ impl Replacer for InlineImageMacroReplacer<'_> {
             // attribute-references step, so `target` is the resolved path, and
             // the catalog stores it alongside the current `imagesdir`. Mirrors
             // Asciidoctor's `doc.register :images, target`.
-            self.0.register_image(
+            self.parser.register_image(
                 target.to_string(),
-                self.0
+                self.parser
                     .attribute_value("imagesdir")
                     .as_maybe_str()
                     .map(str::to_owned),
@@ -299,10 +322,10 @@ impl Replacer for InlineImageMacroReplacer<'_> {
                     .named_or_positional_attribute("height", 3)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.0,
+                parser: self.parser,
             };
 
-            self.0.renderer.render_image(&params, dest);
+            self.parser.renderer.render_image(&params, dest);
         } else {
             let params = IconRenderParams {
                 target,
@@ -313,10 +336,10 @@ impl Replacer for InlineImageMacroReplacer<'_> {
                     .named_or_positional_attribute("size", 1)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.0,
+                parser: self.parser,
             };
 
-            self.0.renderer.render_icon(&params, dest);
+            self.parser.renderer.render_icon(&params, dest);
         }
     }
 }
@@ -1079,29 +1102,6 @@ static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
-
-/// Reports whether `target` begins with a URI scheme that can execute script
-/// when placed in an `href` – `javascript:`, `data:`, or `vbscript:`.
-///
-/// Leading control and space characters are ignored first, because a browser
-/// strips them before it parses the scheme (so `"\u{1}javascript:…"` is still
-/// live). The comparison is ASCII-case-insensitive.
-///
-/// Used to neutralize such targets in the explicit `link:` macro; the
-/// auto-linker already restricts bare URLs to a safe scheme set
-/// (`https?`/`file`/`ftp`/`irc`), so this only guards the macro form, which
-/// otherwise accepts an arbitrary scheme.
-fn has_dangerous_scheme(target: &str) -> bool {
-    let target = target.trim_start_matches(|c: char| c <= ' ');
-
-    const DANGEROUS_SCHEMES: [&str; 3] = ["javascript:", "data:", "vbscript:"];
-
-    DANGEROUS_SCHEMES.iter().any(|scheme| {
-        target
-            .get(..scheme.len())
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
-    })
-}
 
 #[derive(Debug)]
 struct InlineLinkMacroReplacer<'p, 's> {

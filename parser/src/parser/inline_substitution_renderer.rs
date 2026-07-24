@@ -1264,21 +1264,33 @@ fn render_icon_or_image(
     // instead drops the anchor entirely; this crate keeps it with the literal
     // `self` target.)
     if let Some(link) = attrlist.named_attribute("link") {
-        let href = if link.value() == "self" {
+        let is_self = link.value() == "self";
+
+        let href = if is_self {
             link_self_href.unwrap_or("self")
         } else {
             link.value()
         };
 
-        img = format!(
-            r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
-            // Both sources of `href` – the image's own `src` (a resolved web
-            // path that can carry a stray `"`) and an author-supplied `link=`
-            // value – are escaped for the `"` delimiter so neither can break
-            // out of the attribute.
-            href = encode_attribute_value(href.to_owned()),
-            link_constraint_attrs = link_constraint_attrs(attrlist, None)
-        );
+        // An explicit `link=` destination whose scheme could execute script is
+        // not turned into a live link; the image is rendered without the
+        // wrapping anchor. Escaping the `"` delimiter alone would still leave a
+        // live `javascript:` URI, so the destination is rejected outright – the
+        // same policy the explicit `link:` macro applies, and the macro layer
+        // records the accompanying warning. `link=self` names the image's own
+        // `src` (which may legitimately be a `data:` image URI), so it is
+        // exempt.
+        if is_self || !has_dangerous_scheme(link.value()) {
+            img = format!(
+                r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
+                // Both sources of `href` – the image's own `src` (a resolved web
+                // path that can carry a stray `"`) and an author-supplied
+                // `link=` value – are escaped for the `"` delimiter so neither
+                // can break out of the attribute.
+                href = encode_attribute_value(href.to_owned()),
+                link_constraint_attrs = link_constraint_attrs(attrlist, None)
+            );
+        }
     }
 
     let mut roles: Vec<&str> = attrlist.roles();
@@ -1298,6 +1310,31 @@ fn render_icon_or_image(
 
 fn encode_attribute_value(value: String) -> String {
     value.replace('"', "&quot;")
+}
+
+/// Reports whether `target` begins with a URI scheme that can execute script
+/// when placed in an `href` – `javascript:`, `data:`, or `vbscript:`.
+///
+/// Leading control and space characters are ignored first, because a browser
+/// strips them before it parses the scheme (so `"\u{1}javascript:…"` is still
+/// live). The comparison is ASCII-case-insensitive.
+///
+/// Escaping the quote delimiter (see [`encode_attribute_value`]) stops an
+/// author from breaking out of an attribute, but not from placing a live
+/// script URI in an `href`; that requires rejecting the scheme outright. This
+/// guards the explicit `link:` macro and the `image:`/`icon:` `link=`
+/// attribute. The auto-linker already restricts bare URLs to a safe scheme set
+/// (`https?`/`file`/`ftp`/`irc`).
+pub(crate) fn has_dangerous_scheme(target: &str) -> bool {
+    let target = target.trim_start_matches(|c: char| c <= ' ');
+
+    const DANGEROUS_SCHEMES: [&str; 3] = ["javascript:", "data:", "vbscript:"];
+
+    DANGEROUS_SCHEMES.iter().any(|scheme| {
+        target
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    })
 }
 
 /// Escapes a value for safe interpolation into an HTML attribute.
