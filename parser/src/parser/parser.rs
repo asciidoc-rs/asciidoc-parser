@@ -290,6 +290,21 @@ pub struct Parser {
     /// crate::warnings::WarningType::MaxBlockNestingExceeded
     pub(crate) block_nesting_depth: usize,
 
+    /// The block-nesting cap ([`max_block_nesting`](Self::max_block_nesting))
+    /// resolved once per document, so the guard consulted on *every*
+    /// [`parse_blocks_until`] scope entry is a plain integer compare rather
+    /// than a document-attribute lookup (a `RefCell` borrow, several map
+    /// lookups, a string clone, and a parse) on that hot path.
+    ///
+    /// `max-block-nesting` is API-only, so its value cannot change mid-parse;
+    /// [`parse_deferred`](Self::parse_deferred) refreshes this from the
+    /// resolved attribute at the start of each parse. It is seeded with the
+    /// built-in default so a block parser invoked directly in a unit test
+    /// (bypassing `parse_deferred`) still sees the right cap.
+    ///
+    /// [`parse_blocks_until`]: crate::blocks::parse_utils::parse_blocks_until
+    pub(crate) block_nesting_limit: usize,
+
     /// Source map of the document currently being parsed, populated by
     /// [`Document::parse`] for the duration of the parse (and `None` outside
     /// it).
@@ -516,6 +531,7 @@ impl Default for Parser {
             nested_document_depth: 0,
             owned_subsource_depth: 0,
             block_nesting_depth: 0,
+            block_nesting_limit: Self::DEFAULT_MAX_BLOCK_NESTING,
             source_map: None,
             owned_cell_source_maps: vec![],
             owned_cell_warnings: RefCell::new(vec![]),
@@ -529,6 +545,11 @@ impl Default for Parser {
 }
 
 impl Parser {
+    /// The default value of [`max_block_nesting`](Self::max_block_nesting),
+    /// mirroring the `max-block-nesting` built-in default (see
+    /// [`built_in_attrs`](super::built_in_attrs)).
+    pub(crate) const DEFAULT_MAX_BLOCK_NESTING: usize = 32;
+
     /// Parse a UTF-8 string as an AsciiDoc document.
     ///
     /// The [`Document`] data structure returned by this call has a '`static`
@@ -643,6 +664,11 @@ impl Parser {
         // here (rather than in the recursive cell/blockquote paths) because
         // `parse_deferred` runs only for the top-level document.
         self.block_nesting_depth = 0;
+
+        // Resolve the block-nesting cap once, now, so the guard on the hot
+        // `parse_blocks_until` path is a plain integer compare. The attribute is
+        // API-only and so cannot change mid-parse.
+        self.block_nesting_limit = self.max_block_nesting();
 
         Document::parse(
             &preprocessed_source,
@@ -967,9 +993,16 @@ impl Parser {
         }
     }
 
-    /// Returns the maximum block-nesting depth in effect (the
-    /// `max-block-nesting` attribute, default 32). See
+    /// Resolves the maximum block-nesting depth in effect from the
+    /// `max-block-nesting` attribute (default
+    /// [`DEFAULT_MAX_BLOCK_NESTING`](Self::DEFAULT_MAX_BLOCK_NESTING)). See
     /// [`block_nesting_depth`](Self::block_nesting_depth).
+    ///
+    /// This walks the document-attribute machinery, so it is resolved once per
+    /// parse into [`block_nesting_limit`](Self::block_nesting_limit) rather
+    /// than consulted on the hot [`parse_blocks_until`] path; use
+    /// [`block_nesting_limit_reached`](Self::block_nesting_limit_reached)
+    /// there.
     ///
     /// The attribute is API-only, so a hostile document cannot raise its own
     /// limit. The value is coerced as Ruby's `String#to_i` would (matching how
@@ -977,6 +1010,8 @@ impl Parser {
     /// permits only the outermost, document-level block scope – while a
     /// positive value too large for `usize` saturates rather than wrapping to
     /// the "disabled" sentinel.
+    ///
+    /// [`parse_blocks_until`]: crate::blocks::parse_utils::parse_blocks_until
     pub(crate) fn max_block_nesting(&self) -> usize {
         match self.attribute_value("max-block-nesting") {
             InterpretedValue::Value(value) => {
@@ -991,16 +1026,21 @@ impl Parser {
             // An explicit empty `Set` coerces to 0; an explicit unset falls back
             // to the built-in default.
             InterpretedValue::Set => 0,
-            InterpretedValue::Unset => 32,
+            InterpretedValue::Unset => Self::DEFAULT_MAX_BLOCK_NESTING,
         }
     }
 
     /// Reports whether descending into another nested block scope would exceed
-    /// the [`max_block_nesting`](Self::max_block_nesting) limit, so the caller
-    /// must stop nesting and truncate instead. See
-    /// [`block_nesting_depth`](Self::block_nesting_depth).
+    /// the block-nesting limit, so the caller must stop nesting and truncate
+    /// instead. See [`block_nesting_depth`](Self::block_nesting_depth).
+    ///
+    /// This compares against the per-parse cached
+    /// [`block_nesting_limit`](Self::block_nesting_limit), so it stays cheap on
+    /// the hot [`parse_blocks_until`] path.
+    ///
+    /// [`parse_blocks_until`]: crate::blocks::parse_utils::parse_blocks_until
     pub(crate) fn block_nesting_limit_reached(&self) -> bool {
-        self.block_nesting_depth > self.max_block_nesting()
+        self.block_nesting_depth > self.block_nesting_limit
     }
 
     /// Records a [`MaxBlockNestingExceeded`] warning anchored at `source`,
@@ -1016,7 +1056,7 @@ impl Parser {
     ) {
         warnings.push(Warning {
             source,
-            warning: WarningType::MaxBlockNestingExceeded(self.max_block_nesting()),
+            warning: WarningType::MaxBlockNestingExceeded(self.block_nesting_limit),
             origin: None,
         });
     }
