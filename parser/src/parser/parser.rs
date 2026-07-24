@@ -2744,7 +2744,7 @@ mod tests {
         // Publish a cell source map (output line 1 came from `cell.adoc` line 2,
         // the way the preprocessor would record an include-expanded cell).
         let mut sm = SourceMap::default();
-        sm.append(1, SourceLine(Some("cell.adoc".to_owned()), 2));
+        sm.append(1, Some("cell.adoc"), 2, crate::parser::Fidelity::Verbatim);
         p.push_owned_cell_source_map(Rc::new(sm));
         assert!(p.is_in_owned_cell_source());
 
