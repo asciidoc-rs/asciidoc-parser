@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom, parser::XrefSignifier};
 
@@ -11,10 +11,16 @@ use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom, parser
 #[derive(Clone, Eq, PartialEq)]
 pub struct Catalog {
     /// Primary registry mapping IDs to reference entries.
-    pub(crate) refs: HashMap<String, RefEntry>,
+    ///
+    /// A [`BTreeMap`] (rather than a `HashMap`) so that iteration – and thus
+    /// the public [`ids`](Self::ids)/[`entries`](Self::entries) accessors – is
+    /// deterministic (sorted by ID) across process runs, which a
+    /// multi-document pipeline relies on for reproducible output.
+    pub(crate) refs: BTreeMap<String, RefEntry>,
 
-    /// Reverse lookup cache: reftext -> ID.
-    pub(crate) reftext_to_id: HashMap<String, String>,
+    /// Reverse lookup cache: reftext -> ID. A [`BTreeMap`] for the same
+    /// determinism reason as [`refs`](Self::refs).
+    pub(crate) reftext_to_id: BTreeMap<String, String>,
 
     /// Footnotes registered (in document order) while substituting inline
     /// macros. Each entry corresponds to a `footnote:[…]` macro that *defined*
@@ -72,8 +78,8 @@ impl Default for Catalog {
 impl Catalog {
     pub(crate) fn new() -> Self {
         Self {
-            refs: HashMap::new(),
-            reftext_to_id: HashMap::new(),
+            refs: BTreeMap::new(),
+            reftext_to_id: BTreeMap::new(),
             footnotes: Vec::new(),
             images: Vec::new(),
             links: Vec::new(),
@@ -196,21 +202,21 @@ impl Catalog {
         }
     }
 
-    /// Returns an iterator over all registered reference IDs, in an
-    /// unspecified order.
+    /// Returns an iterator over all registered reference IDs, sorted by ID.
     ///
     /// This lets a multi-document pipeline enumerate a document's anchors and
     /// section IDs (for example, to build a global cross-reference index)
-    /// without re-walking the block tree.
+    /// without re-walking the block tree. The order is deterministic across
+    /// process runs, so any output derived from it is reproducible.
     pub fn ids(&self) -> impl Iterator<Item = &str> {
         self.refs.keys().map(String::as_str)
     }
 
-    /// Returns an iterator over all registered reference entries, in an
-    /// unspecified order.
+    /// Returns an iterator over all registered reference entries, sorted by ID.
     ///
     /// Each item pairs an ID with its [`RefEntry`] (which also carries the
-    /// entry's reftext and [`RefType`]).
+    /// entry's reftext and [`RefType`]). The order is deterministic across
+    /// process runs, so any output derived from it is reproducible.
     pub fn entries(&self) -> impl Iterator<Item = (&str, &RefEntry)> {
         self.refs.iter().map(|(id, entry)| (id.as_str(), entry))
     }
@@ -612,9 +618,8 @@ mod tests {
             .register_ref("fig-1", None, RefType::Anchor)
             .unwrap();
 
-        // `ids()` enumerates every registered ID (order is unspecified).
-        let mut ids: Vec<&str> = catalog.ids().collect();
-        ids.sort_unstable();
+        // `ids()` enumerates every registered ID, sorted by ID.
+        let ids: Vec<&str> = catalog.ids().collect();
         assert_eq!(ids, vec!["fig-1", "intro"]);
 
         // `entries()` pairs each ID with its full entry.
@@ -630,6 +635,24 @@ mod tests {
         let (_, intro_entry) = entries.iter().find(|(id, _)| *id == "intro").unwrap();
         assert_eq!(intro_entry.reftext, Some("Introduction".to_string()));
         assert_eq!(intro_entry.ref_type, RefType::Section);
+    }
+
+    #[test]
+    fn ids_and_entries_are_sorted_regardless_of_registration_order() {
+        // Register IDs out of sorted order; `ids()`/`entries()` must still
+        // yield them sorted, so output derived from the catalog is
+        // reproducible across process runs.
+        let mut catalog = Catalog::new();
+
+        for id in ["zebra", "apple", "mango", "banana"] {
+            catalog.register_ref(id, None, RefType::Anchor).unwrap();
+        }
+
+        let ids: Vec<&str> = catalog.ids().collect();
+        assert_eq!(ids, vec!["apple", "banana", "mango", "zebra"]);
+
+        let entry_ids: Vec<&str> = catalog.entries().map(|(id, _)| id).collect();
+        assert_eq!(entry_ids, vec!["apple", "banana", "mango", "zebra"]);
     }
 
     #[test]
