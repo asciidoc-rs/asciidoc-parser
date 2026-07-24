@@ -316,13 +316,22 @@ impl<'src> QuoteBlock<'src> {
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,
     ) -> Option<MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>>> {
+        // A quoted paragraph must begin with a double quote. Test that on the
+        // block's first byte *before* scanning the whole paragraph. `read_paragraph`
+        // (below) walks every line up to the next blank line, so testing the first
+        // byte here avoids that scan for the common non-quoted paragraph: without
+        // it, a long run of non-blank lines that never forms a quoted paragraph is
+        // rescanned in full for every block, making the parse O(n²) on pathological
+        // input (e.g. thousands of consecutive delimiter lines with no blank line
+        // between them). `read_paragraph` starts at `block_start`, so a paragraph
+        // beginning with `"` shares this first byte — testing it here loses nothing.
+        if !metadata.block_start.data().starts_with('"') {
+            return None;
+        }
+
         // The paragraph extends to the first blank line.
         let para = read_paragraph(metadata.block_start);
         let data = para.data();
-
-        if !data.starts_with('"') {
-            return None;
-        }
 
         // Locate the attribution line: the first line that begins with `--`
         // followed by whitespace and at least one more character. Splits the
@@ -1233,5 +1242,47 @@ mod tests {
         let block = doc.nested_blocks().next().unwrap();
         let quote = as_quote(block);
         assert_eq!(quote.title(), Some("A title"));
+    }
+
+    /// The quoted-paragraph parser must reject a non-quote paragraph on its
+    /// first byte, before scanning the paragraph to the next blank line. A
+    /// document of many consecutive delimiter lines with no blank line between
+    /// them otherwise makes every block rescan the entire remaining input,
+    /// giving quadratic (O(n²)) parse time and a practical denial of service on
+    /// modestly-sized input. This guards that the parse stays roughly linear.
+    ///
+    /// The bound is deliberately loose (seconds, versus a handful of
+    /// milliseconds when linear) so the test is not flaky on a slow or loaded
+    /// machine, while still failing decisively if the quadratic behavior
+    /// returns — the quadratic parse of this input takes tens of seconds.
+    #[test]
+    fn many_consecutive_delimiters_parse_in_roughly_linear_time() {
+        use std::time::{Duration, Instant};
+
+        // Each of these patterns previously exercised the quadratic path: none
+        // contains a blank line, so the quoted-paragraph scan ran to end of
+        // input on every block.
+        let example_run = "====\n".repeat(20_000);
+
+        let mut example_run_with_text = "====\n".repeat(10_000);
+        example_run_with_text.push_str("text\n");
+        example_run_with_text.push_str(&"====\n".repeat(10_000));
+
+        let open_run = "--\n".repeat(20_000);
+
+        let budget = Duration::from_secs(10);
+
+        for source in [&example_run, &example_run_with_text, &open_run] {
+            let start = Instant::now();
+            let _ = Parser::default().parse(source);
+            let elapsed = start.elapsed();
+
+            assert!(
+                elapsed < budget,
+                "parsing {} delimiter lines took {elapsed:?}, exceeding the {budget:?} budget \
+                 (a sign the quadratic quoted-paragraph rescan has returned)",
+                source.lines().count(),
+            );
+        }
     }
 }
