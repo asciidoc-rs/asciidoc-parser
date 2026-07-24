@@ -21,7 +21,8 @@ use crate::{
 /// document is processed, up to six substitution types may be carried out
 /// depending on the block or inline element’s assigned substitution group. The
 /// processor runs the substitutions in the following order:
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum SubstitutionStep {
     /// Searches for three characters (`<`, `>`, `&`) and replaces them with
     /// their named character references.

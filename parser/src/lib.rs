@@ -1,4 +1,3 @@
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![allow(clippy::module_inception)]
 #![deny(clippy::expect_used)]
 #![deny(clippy::indexing_slicing)]

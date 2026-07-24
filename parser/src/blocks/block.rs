@@ -28,6 +28,7 @@ use crate::{
 /// This enum represents all of the block types that are understood directly by
 /// this parser and also implements the [`IsBlock`] trait.
 #[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[allow(clippy::large_enum_variant)] // TEMPORARY: review later
 #[non_exhaustive]
 pub enum Block<'src> {

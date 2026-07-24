@@ -47,6 +47,7 @@ pub struct Document<'src> {
 /// Internal dependent struct containing the actual data members that reference
 /// the owned source.
 #[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 struct InternalDependent<'src> {
     header: Header<'src>,
     blocks: Vec<Block<'src>>,
@@ -67,6 +68,19 @@ self_cell! {
         dependent: InternalDependent,
     }
     impl {Debug, Eq, PartialEq}
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Document<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // `Document` is a `self_cell` wrapping the owned source and the parsed
+        // model that borrows from it; `self_cell` can not derive `Serialize`, so
+        // delegate to the dependent (the parsed model), which carries every
+        // public field. Only `Serialize` is provided: the model is a read-only
+        // projection of the source, so a consumer that needs to reload a parse
+        // result re-parses the original AsciiDoc rather than deserializing.
+        self.internal.borrow_dependent().serialize(serializer)
+    }
 }
 
 impl<'src> Document<'src> {

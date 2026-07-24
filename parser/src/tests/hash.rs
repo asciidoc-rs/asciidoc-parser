@@ -1,0 +1,46 @@
+//! Verifies that the public AST / output types requested in
+//! <https://github.com/asciidoc-rs/asciidoc-parser/issues/895> can be used as
+//! `HashMap` / `HashSet` keys.
+
+use std::collections::{HashMap, HashSet};
+
+use crate::{
+    Parser, Span,
+    blocks::{Block, FindBlocks},
+    warnings::WarningType,
+};
+
+#[test]
+fn span_is_hashable() {
+    let mut spans = HashSet::new();
+    spans.insert(Span::new("abc"));
+    spans.insert(Span::new("abc"));
+    spans.insert(Span::new("def"));
+
+    assert_eq!(spans.len(), 2);
+}
+
+#[test]
+fn warning_type_buckets_by_variant() {
+    let mut counts: HashMap<WarningType, usize> = HashMap::new();
+
+    *counts.entry(WarningType::EmptyAttributeValue).or_default() += 1;
+    *counts.entry(WarningType::EmptyAttributeValue).or_default() += 1;
+    *counts.entry(WarningType::EmptyShorthandName).or_default() += 1;
+
+    assert_eq!(counts[&WarningType::EmptyAttributeValue], 2);
+    assert_eq!(counts[&WarningType::EmptyShorthandName], 1);
+}
+
+#[test]
+fn blocks_and_content_key_a_hashset() {
+    let doc = Parser::default().parse("Para one.\n\nPara two.\n");
+
+    // `Block` (and, transitively, the `Content` it holds) can key a `HashSet`.
+    let mut blocks: HashSet<&Block<'_>> = HashSet::new();
+    for block in doc.child_blocks() {
+        blocks.insert(block);
+    }
+
+    assert_eq!(blocks.len(), 2);
+}

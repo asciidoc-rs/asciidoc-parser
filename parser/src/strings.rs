@@ -161,6 +161,16 @@ impl Hash for CowStr<'_> {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for CowStr<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // A `CowStr` is just a string with different ownership; serialize it as
+        // its text so the borrowed / boxed / inlined distinction (an internal
+        // storage detail) does not leak into the serialized form.
+        serializer.serialize_str(self.deref())
+    }
+}
+
 impl std::clone::Clone for CowStr<'_> {
     fn clone(&self) -> Self {
         match self {

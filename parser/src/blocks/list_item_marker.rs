@@ -11,7 +11,8 @@ use crate::{
 };
 
 /// A list item is signaled by one of several designated marker sequences.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum ListItemMarker<'src> {
     /// Unordered list (hyphen).
     Hyphen(Span<'src>),

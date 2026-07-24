@@ -9,6 +9,7 @@ use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom, parser
 /// It provides functionality for registering new references, resolving
 /// reference text to IDs, and detecting duplicate IDs.
 #[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Catalog {
     /// Primary registry mapping IDs to reference entries.
     ///
@@ -336,6 +337,7 @@ impl Catalog {
 /// occurrence and repeating that ID (with empty text) afterward; only the
 /// defining occurrence produces a `Footnote` entry.
 #[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Footnote {
     /// The footnote's number, assigned in document order via the
     /// `footnote-number` counter. Normally a consecutive integer (`1`, `2`, …),
@@ -446,6 +448,7 @@ impl std::fmt::Debug for Catalog {
 /// [`target`](Self::target) with the value of the `imagesdir` attribute in
 /// effect where the image was referenced.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ImageReference {
     /// The image target as written in the macro, after attribute references in
     /// the target have been substituted (e.g. `fixtures/dot.gif`).
@@ -466,6 +469,7 @@ impl std::fmt::Display for ImageReference {
 
 /// Type of referenceable element in the document.
 #[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum RefType {
     /// Standard anchor element (`[[id]]` or `[[id,reftext]]`).
     Anchor,
@@ -489,6 +493,7 @@ impl std::fmt::Debug for RefType {
 
 /// Entry in the document catalog representing a referenceable element.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct RefEntry {
     /// The unique identifier for this element.
     pub id: String,

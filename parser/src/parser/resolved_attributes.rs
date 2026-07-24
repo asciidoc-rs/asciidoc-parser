@@ -52,6 +52,7 @@ pub(crate) fn attribute_lookup_name(name: &str) -> Cow<'_, str> {
 /// [`Parser`]: crate::Parser
 /// [`Document`]: crate::Document
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub(crate) struct ResolvedAttributes {
     /// Attribute values as of the end of parsing (shared with the parser via
     /// [`Arc`]).
@@ -82,6 +83,22 @@ pub(crate) struct ResolvedAttributes {
     /// costs only a pointer here – this snapshot is embedded in a
     /// size-sensitive cell enum.
     datetime_inputs: Option<Box<DatetimeInputs>>,
+}
+
+impl std::hash::Hash for ResolvedAttributes {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // `HashMap` is not `Hash`, and its iteration order is nondeterministic,
+        // so the attribute tables can not feed the hasher directly. The `Hash` /
+        // `Eq` contract only requires that equal values hash equally, so hash an
+        // order-independent summary – each table's entry count – alongside the
+        // scalar fields. Two snapshots that differ only in their table contents
+        // may then share a hash, which is a permitted collision.
+        self.attribute_values.len().hash(state);
+        self.default_attribute_values.len().hash(state);
+        self.counter_values.len().hash(state);
+        self.safe.hash(state);
+        self.datetime_inputs.hash(state);
+    }
 }
 
 impl ResolvedAttributes {

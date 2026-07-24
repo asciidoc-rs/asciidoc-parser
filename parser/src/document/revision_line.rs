@@ -12,6 +12,7 @@ use crate::{
 /// assigns the content to the built-in `revnumber`, `revdate`, and `revremark`
 /// attributes.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct RevisionLine<'src> {
     revnumber: Option<String>,
     revdate: String,

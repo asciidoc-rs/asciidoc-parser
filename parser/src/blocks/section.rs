@@ -25,7 +25,8 @@ use crate::{
 /// implicit enclosure. Each section begins with a title and ends at the next
 /// sibling section, ancestor section, or end of document. Nested section levels
 /// must be sequential.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SectionBlock<'src> {
     level: usize,
     section_title: Content<'src>,
@@ -977,7 +978,8 @@ fn generate_section_id(title: &str, parser: &Parser) -> String {
 /// This crate currently supports the `appendix` section style, which results in
 /// special section numbering. All other sections are treated as `Normal`
 /// sections.
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum SectionType {
     /// Most sections are of this type.
     #[default]
@@ -1007,7 +1009,8 @@ impl std::fmt::Debug for SectionType {
 /// `sectnums` and `sectnumlevels` attributes as described in [Section Numbers].
 ///
 /// [Section Numbers]: https://docs.asciidoctor.org/asciidoc/latest/sections/numbers/
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SectionNumber {
     pub(crate) section_type: SectionType,
     pub(crate) components: Vec<usize>,
@@ -3636,7 +3639,10 @@ mod tests {
             #[test]
             fn default() {
                 let sn = SectionNumber::default();
-                assert_eq!(sn.components(), []);
+
+                // `serde_json` (a dev-dependency) adds `PartialEq<Value> for
+                // usize`, so annotate the empty array's element type here.
+                assert_eq!(sn.components(), [] as [usize; 0]);
                 assert_eq!(sn.to_string(), "");
                 assert_eq!(
                     format!("{sn:?}"),
@@ -3706,7 +3712,10 @@ mod tests {
                     components: vec![],
                     appendix_letter: None,
                 };
-                assert_eq!(sn.components(), []);
+
+                // `serde_json` (a dev-dependency) adds `PartialEq<Value> for
+                // usize`, so annotate the empty array's element type here.
+                assert_eq!(sn.components(), [] as [usize; 0]);
                 assert_eq!(sn.to_string(), "");
                 assert_eq!(
                     format!("{sn:?}"),

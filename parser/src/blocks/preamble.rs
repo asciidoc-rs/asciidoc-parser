@@ -8,7 +8,8 @@ use crate::{
 
 /// Content between the end of the document header and the first section title
 /// in the document body is called the preamble.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Preamble<'src> {
     blocks: Vec<Block<'src>>,
     source: Span<'src>,

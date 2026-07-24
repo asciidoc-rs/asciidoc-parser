@@ -21,6 +21,7 @@ use crate::{Parser, document::InterpretedValue};
 /// [`toc` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/
 /// [AsciiDoc table cell]: crate::blocks::TableCellContent::AsciiDoc
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum TocMode {
     /// The `toc` attribute is unset: no table of contents is generated.
     Disabled,
@@ -190,7 +191,8 @@ pub(crate) const DEFAULT_TOC_CLASS_SIDE: &str = "toc2";
 /// `toc-title`, `toc-class`) are header-only, so this value is captured once
 /// the header has been processed and the parser still holds the document's
 /// resolved attribute state.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub(crate) struct TocConfig {
     /// Where (and whether) the TOC is placed.
     pub(crate) mode: TocMode,

@@ -28,13 +28,23 @@ self_cell! {
         dependent: OwnedQuoteBlocksInner,
     }
 
-    impl {Debug, Eq, PartialEq}
+    impl {Debug, Eq, Hash, PartialEq}
 }
 
 /// The parsed blocks of an [`OwnedQuoteBlocks`], borrowing its owned source.
 #[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 struct OwnedQuoteBlocksInner<'src> {
     blocks: Vec<Block<'src>>,
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for OwnedQuoteBlocks {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // `self_cell` can not derive `Serialize`; delegate to the dependent
+        // (the parsed blocks that borrow this cell's owned source).
+        self.borrow_dependent().serialize(serializer)
+    }
 }
 
 /// Distinguishes the two block types that share the blockquote syntax.
@@ -42,7 +52,8 @@ struct OwnedQuoteBlocksInner<'src> {
 /// Prose excerpts and quotes use the [`Quote`](Self::Quote) type, which does
 /// not preserve line breaks. Verses (e.g., poems or song lyrics) use the
 /// [`Verse`](Self::Verse) type, which preserves line breaks in the output.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum QuoteType {
     /// A prose excerpt or quote. Line breaks are not preserved.
     Quote,
@@ -91,7 +102,8 @@ impl std::fmt::Debug for QuoteType {
 /// * A **quoted paragraph**: a paragraph wrapped in double quotes and followed
 ///   by an attribution line introduced by two hyphens (`-- …`). This produces a
 ///   `quote` block with the [`Simple`](ContentModel::Simple) content model.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct QuoteBlock<'src> {
     type_: QuoteType,
     content_model: ContentModel,

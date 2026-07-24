@@ -122,7 +122,8 @@ const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
 /// nested table is opened with `!===` and separates its cells with `!`. The
 /// `separator` attribute overrides the default separator with an explicit
 /// character at any level.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct TableBlock<'src> {
     columns: Vec<TableColumn>,
     data_format: DataFormat,
@@ -602,7 +603,8 @@ impl<'src> HasSpan<'src> for TableBlock<'src> {
 /// A column carries its proportional width, the horizontal and vertical
 /// alignment applied to its cells' content, and the [style](ColumnStyle) used
 /// to process and render that content.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct TableColumn {
     width: usize,
     autowidth: bool,
@@ -707,7 +709,8 @@ impl Default for TableColumn {
 /// whitespace surrounding each value is stripped, and a "ragged" table (whose
 /// rows do not all have the same number of cells) has its cells flowed into
 /// fixed-width rows, dropping any cells left over at the end.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum DataFormat {
     /// Prefix-separated values: the default format. The separator (a vertical
     /// bar, `|`, by default) is placed in front of each cell.
@@ -747,7 +750,8 @@ pub enum DataFormat {
 ///
 /// The verse operator (`v`) recognized by older versions of AsciiDoc has been
 /// deprecated and is not modeled here.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum ColumnStyle {
     /// Block elements (lists, delimited blocks, and block macros) are
     /// supported; the content is parsed as a nested, standalone AsciiDoc
@@ -785,7 +789,8 @@ pub enum ColumnStyle {
 /// [`Left`](Self::Left), the greater-than sign (`>`) for
 /// [`Right`](Self::Right), and the caret (`^`) for [`Center`](Self::Center).
 /// The default is [`Left`](Self::Left).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum HorizontalAlignment {
     /// Content is aligned to the left side of the column (the `<` operator).
     /// This is the default horizontal alignment.
@@ -804,7 +809,8 @@ pub enum HorizontalAlignment {
 /// [column specifier](TableColumn), always introduced by a dot (`.`): `.<` for
 /// [`Top`](Self::Top), `.>` for [`Bottom`](Self::Bottom), and `.^` for
 /// [`Middle`](Self::Middle). The default is [`Top`](Self::Top).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum VerticalAlignment {
     /// Content is aligned to the top of the column's cells (the `.<` operator).
     /// This is the default vertical alignment.
@@ -827,7 +833,8 @@ pub enum VerticalAlignment {
 /// An unrecognized value falls back to [`All`](Self::All). (Asciidoctor instead
 /// passes an unrecognized value straight through to a CSS class, which the
 /// stylesheet ignores; this parser models only the four documented values.)
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Frame {
     /// A border is drawn on every side of the table (the `all` value). This is
     /// the default frame.
@@ -856,7 +863,8 @@ pub enum Frame {
 /// An unrecognized value falls back to [`All`](Self::All). (Asciidoctor instead
 /// passes an unrecognized value straight through to a CSS class, which the
 /// stylesheet ignores; this parser models only the four documented values.)
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Grid {
     /// A border is drawn between all cells (the `all` value). This is the
     /// default grid.
@@ -889,7 +897,8 @@ pub enum Grid {
 /// An unrecognized value falls back to [`None`](Self::None). (Asciidoctor
 /// instead passes an unrecognized value straight through to a CSS class, which
 /// the stylesheet ignores; this parser models only the five documented values.)
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Stripes {
     /// No rows are shaded (the `none` value). This is the default.
     #[default]
@@ -2074,7 +2083,8 @@ fn content_has_directive(content: &str) -> bool {
 }
 
 /// A row of cells in a [`TableBlock`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct TableRow<'src> {
     cells: Vec<TableCell<'src>>,
 }
@@ -2087,7 +2097,8 @@ impl<'src> TableRow<'src> {
 }
 
 /// A single cell in a [`TableBlock`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct TableCell<'src> {
     h_align: HorizontalAlignment,
     v_align: VerticalAlignment,
@@ -2327,7 +2338,8 @@ impl<'src> HasSpan<'src> for TableCell<'src> {
 /// an [`AsciiDoc`](ColumnStyle::AsciiDoc) column produces
 /// [`AsciiDoc`](Self::AsciiDoc) content, and every other style produces
 /// [`Simple`](Self::Simple) inline content.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum TableCellContent<'src> {
     /// Inline content: the cell's text after its substitutions (normal for most
     /// styles, verbatim for [`Literal`](ColumnStyle::Literal)) have been
@@ -2354,7 +2366,8 @@ pub enum TableCellContent<'src> {
 /// expands an `include::` directive owns its preprocessed source
 /// ([`Owned`](Self::Owned)); the owned store is shared behind an [`Arc`] so the
 /// cell stays cheaply cloneable.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum AsciiDocCell<'src> {
     /// Parsed in place from the parent document's source.
     Borrowed(BorrowedCell<'src>),
@@ -2523,7 +2536,8 @@ impl<'src> AsciiDocCell<'src> {
 
 /// An [`AsciiDoc`](TableCellContent::AsciiDoc) cell parsed in place from the
 /// parent document's source.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct BorrowedCell<'src> {
     title: Option<String>,
     inline: bool,
@@ -2542,11 +2556,21 @@ self_cell! {
         dependent: OwnedCellInner,
     }
 
-    impl {Debug, Eq, PartialEq}
+    impl {Debug, Eq, Hash, PartialEq}
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for OwnedCell {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // `self_cell` can not derive `Serialize`; delegate to the dependent
+        // (the parsed cell contents that borrow this cell's owned source).
+        self.borrow_dependent().serialize(serializer)
+    }
 }
 
 /// The parsed contents of an [`OwnedCell`], borrowing its owned source.
 #[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 struct OwnedCellInner<'src> {
     title: Option<String>,
     inline: bool,

@@ -19,6 +19,7 @@ use crate::Span;
 ///
 /// [`Span`]: crate::Span
 #[derive(Clone, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SourceMap {
     /// Interned origin file names. A [`Segment::file`] of `Some(i)` indexes
     /// here; `None` means the root document passed to `Parser::parse`.
@@ -34,6 +35,7 @@ pub struct SourceMap {
 /// [`fidelity`](Self::fidelity). Preprocessed lines after it map by offset
 /// (`source_line + n` for `output_line + n`) until the next segment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 struct Segment {
     output_line: usize,
     file: Option<u32>,
@@ -51,6 +53,7 @@ struct Segment {
 /// [include file]: https://docs.asciidoctor.org/asciidoc/latest/directives/include/
 /// [conditional]: https://docs.asciidoctor.org/asciidoc/latest/directives/conditionals/
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SourceLine(pub Option<String>, pub usize);
 
 /// The origin of a position in the preprocessed source: the input file, line,
@@ -74,6 +77,7 @@ pub struct SourceLine(pub Option<String>, pub usize);
 /// [include file]: https://docs.asciidoctor.org/asciidoc/latest/directives/include/
 /// [`Span::col`]: crate::Span::col
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Origin<'a> {
     /// The origin file, or `None` for the root document.
     pub file: Option<&'a str>,
@@ -94,6 +98,7 @@ pub struct Origin<'a> {
 /// a consumer can tell whether a column (and the line content itself) can be
 /// trusted to match the original file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Fidelity {
     /// The preprocessed line is byte-for-byte identical to the origin line. Its
     /// line and column map straight back to the original file.
@@ -113,6 +118,7 @@ pub enum Fidelity {
 /// Identifies which preprocessor transform is responsible for a non-verbatim
 /// line. Informational: it tells a consumer *why* a column is unavailable.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Transform {
     /// Tabs were expanded to spaces per the `tabsize` attribute.
     TabExpansion,

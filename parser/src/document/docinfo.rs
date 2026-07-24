@@ -13,6 +13,7 @@ use crate::{Parser, SafeMode, content::substitute_attributes_in_text, document::
 ///
 /// [docinfo]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum DocinfoLocation {
     /// Head docinfo: injected into the top of the document (appended to the
     /// HTML `<head>` element, or the DocBook root `<info>` element).
@@ -59,6 +60,7 @@ impl DocinfoLocation {
 /// handler was configured, the `docinfo` attribute did not enable it, or no
 /// matching file was found).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub(crate) struct Docinfo {
     head: String,
     header: String,

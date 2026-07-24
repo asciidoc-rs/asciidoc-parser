@@ -26,7 +26,8 @@ use crate::{
 /// paragraph and list parsing stop at it), but a `____` block is parsed as a
 /// [`QuoteBlock`](crate::blocks::QuoteBlock) rather than a
 /// `CompoundDelimitedBlock`.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct CompoundDelimitedBlock<'src> {
     blocks: Vec<Block<'src>>,
     context: CowStr<'src>,
@@ -287,6 +288,7 @@ impl std::fmt::Debug for CompoundDelimitedBlock<'_> {
 /// making dispatch over them exhaustive and self-documenting. Use
 /// [`CompoundDelimitedBlock::context_kind`] to obtain it.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum CompoundDelimitedContext {
     /// An example block (`====`).
     Example,

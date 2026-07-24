@@ -26,6 +26,7 @@ opaque_slice_iter! {
 /// encapsulates the document title, author and revision information,
 /// document-wide attributes, and other document metadata.
 #[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Header<'src> {
     title_source: Option<Span<'src>>,
     title: Option<String>,

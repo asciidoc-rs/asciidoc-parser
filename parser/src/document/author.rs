@@ -17,6 +17,7 @@ use crate::{Parser, Span, content::Content};
 ///
 /// [author line]: https://docs.asciidoctor.org/asciidoc/latest/document/author-line/
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Author {
     name: String,
     firstname: String,

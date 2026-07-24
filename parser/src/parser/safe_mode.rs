@@ -36,6 +36,7 @@ use crate::document::InterpretedValue;
 ///
 /// [Ruby Asciidoctor]: https://docs.asciidoctor.org/asciidoc/latest/safe-modes/
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum SafeMode {
     /// A safe mode level that disables any of the security features enforced by
     /// Asciidoctor (Ruby or otherwise). This mode is intended for use when the

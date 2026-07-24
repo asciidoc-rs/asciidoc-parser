@@ -10,6 +10,7 @@ use crate::document::InterpretedValue;
 /// [`Parser::with_intrinsic_attribute()`]: crate::Parser::with_intrinsic_attribute
 /// [`Parser::with_intrinsic_attribute_bool()`]: crate::Parser::with_intrinsic_attribute_bool
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub(crate) struct AttributeValue {
     /// Allowable values for the attribute.
     pub(crate) allowable_value: AllowableValue,
@@ -37,6 +38,7 @@ pub(crate) struct AttributeValue {
 
 /// Allowable values for the attribute.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum AllowableValue {
     /// Any value is accepted.
     Any,
@@ -60,6 +62,7 @@ pub enum AllowableValue {
 
 /// Allowable context(s) for modification of this attribute value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum ModificationContext {
     /// Value can only be configured via API.
     ApiOnly,

@@ -25,7 +25,8 @@
 ///
 /// [`Parser::with_reference_time`]: crate::Parser::with_reference_time
 /// [`Parser::with_input_mtime`]: crate::Parser::with_input_mtime
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ReferenceTime {
     /// Year (e.g. `2019`).
     year: i64,
@@ -191,7 +192,8 @@ pub(crate) fn is_datetime_attribute(name: &str) -> bool {
 /// it can resolve them on demand. Both fields are commonly `None` (no clock
 /// pinned), so a snapshot stores this behind a single `Option<Box<…>>` that
 /// adds only a pointer and allocates nothing in the common case.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub(crate) struct DatetimeInputs {
     /// The pinned reference time (`Parser::with_reference_time`), if any.
     pub(crate) reference_time: Option<ReferenceTime>,

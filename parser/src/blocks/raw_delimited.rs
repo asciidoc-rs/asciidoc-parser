@@ -39,7 +39,8 @@ use crate::{
 /// listing block) or `literal` (parsed as a literal block). Every other open
 /// block is handled by
 /// [`CompoundDelimitedBlock`](crate::blocks::CompoundDelimitedBlock).
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct RawDelimitedBlock<'src> {
     content: Content<'src>,
     content_model: ContentModel,

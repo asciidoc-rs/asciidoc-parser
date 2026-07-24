@@ -50,6 +50,7 @@ use std::ops::Deref;
 ///
 /// [`data()`]: Self::data
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Span<'src> {
     data: &'src str,
     line: usize,

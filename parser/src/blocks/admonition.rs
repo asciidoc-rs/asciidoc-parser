@@ -29,7 +29,8 @@ use crate::{
 ///
 /// [`Simple`]: ContentModel::Simple
 /// [`Compound`]: ContentModel::Compound
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct AdmonitionBlock<'src> {
     variant: AdmonitionVariant,
     label: String,

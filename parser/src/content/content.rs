@@ -36,6 +36,7 @@ use crate::{
 /// [`Document::resolve_references`]: crate::Document::resolve_references
 /// [`rendered()`]: Self::rendered
 #[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Content<'src> {
     /// The original [`Span`] from which this content was derived.
     original: Span<'src>,
@@ -72,7 +73,8 @@ pub struct Content<'src> {
 }
 
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 struct DeferredContent {
     /// The locally-substituted text with opaque placeholder tokens marking
     /// where each cross-reference will be spliced in. This is the source of
@@ -85,7 +87,8 @@ struct DeferredContent {
 }
 
 /// A single deferred cross-reference.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub(crate) struct XrefSegment {
     /// The raw, uninterpreted target as written in the source.
     pub(crate) target: String,
@@ -657,6 +660,7 @@ fn render_template(
 ///
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
 #[derive(Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub(crate) struct FootnoteDeferred {
     /// The footnote text with opaque placeholder tokens marking where each
     /// cross-reference will be spliced in.

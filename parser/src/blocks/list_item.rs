@@ -20,7 +20,8 @@ use crate::{
 /// is the immediate parent of this block.
 ///
 /// [`SimpleBlock`]: crate::blocks::SimpleBlock
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ListItem<'src> {
     marker: ListItemMarker<'src>,
     blocks: Vec<Block<'src>>,

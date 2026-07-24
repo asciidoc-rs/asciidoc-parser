@@ -14,6 +14,7 @@ opaque_slice_iter! {
 /// header. When the content on this line is structured correctly, the processor
 /// assigns the content to the built-in author and email attributes.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct AuthorLine<'src> {
     authors: Vec<Author>,
     source: Span<'src>,

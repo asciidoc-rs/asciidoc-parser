@@ -21,6 +21,7 @@ pub(crate) fn is_built_in_context(context: &str) -> bool {
 /// [`IsBlock::resolved_context`]: crate::blocks::IsBlock::resolved_context
 /// [`resolved_context`]: crate::blocks::IsBlock::resolved_context
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[non_exhaustive]
 pub enum BuiltInContext {
     /// The `admonition` context.
@@ -271,7 +272,8 @@ impl std::fmt::Debug for BuiltInContext {
 /// the assigned type (i.e., the uppercase label), which is specified either as
 /// a special paragraph prefix (e.g., `NOTE:`) or as the block style in an
 /// attribute list (e.g., `[NOTE]`).
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum AdmonitionVariant {
     /// The `NOTE` admonition type.
     Note,
