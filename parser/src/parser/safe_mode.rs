@@ -14,6 +14,26 @@ use crate::document::InterpretedValue;
 /// conservative setting. A client may relax it via
 /// [`Parser::with_safe_mode`](crate::Parser::with_safe_mode).
 ///
+/// # This crate performs no path-jail enforcement
+///
+/// Unlike Ruby Asciidoctor, this crate performs **no filesystem I/O of its
+/// own**. Reading `include::` targets, images, and SVGs is delegated to the
+/// client via [`IncludeFileHandler`](crate::parser::IncludeFileHandler),
+/// [`ImageFileHandler`](crate::parser::ImageFileHandler), and
+/// [`SvgFileHandler`](crate::parser::SvgFileHandler). As a consequence, the
+/// path-traversal jail that Ruby Asciidoctor applies through
+/// `PathResolver#system_path` – rejecting or clamping `../`, absolute paths,
+/// `file://` URIs, and symlinks that escape a jail root – is **deliberately not
+/// ported** (see [`PathResolver`](crate::parser::PathResolver)). Below
+/// [`Secure`](Self::Secure), the raw include/image/SVG target is handed to the
+/// client handler verbatim, with no traversal check and without communicating
+/// any jail boundary.
+///
+/// **Enforcing a jail is therefore the client handler's responsibility.** A
+/// handler that resolves untrusted targets against the filesystem must itself
+/// reject `../`, absolute paths, and `file://` targets and resolve symlinks
+/// against its own jail root; the safe mode alone will not do this for it.
+///
 /// [Ruby Asciidoctor]: https://docs.asciidoctor.org/asciidoc/latest/safe-modes/
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum SafeMode {
@@ -22,26 +42,56 @@ pub enum SafeMode {
     /// document is entirely trusted.
     Unsafe = 0,
 
-    /// A safe mode level that closely parallels [`Unsafe`](Self::Unsafe),
-    /// except it prevents access to files which reside outside of the
+    /// In Ruby Asciidoctor, this level parallels [`Unsafe`](Self::Unsafe)
+    /// except that it prevents access to files which reside outside of the
     /// parent directory of the source file.
+    ///
+    /// **This crate does not enforce that jail.** Because path resolution is
+    /// delegated to the client handlers (see the [type-level
+    /// docs](SafeMode#this-crate-performs-no-path-jail-enforcement)), `Safe`
+    /// currently imposes no restriction beyond [`Unsafe`](Self::Unsafe): the
+    /// include/image/SVG handlers are consulted and their contents embedded
+    /// exactly as under `Unsafe`, and no `../`/absolute/`file://` traversal
+    /// check is applied. Keeping untrusted targets inside a directory is the
+    /// handler's responsibility.
     Safe = 1,
 
-    /// A safe mode level that disallows the document from attempting to read
-    /// files from the file system and including their contents into the
-    /// document. It also disables certain macros that pose a security risk.
+    /// A safe mode level intended for server deployments (hence the name).
     ///
-    /// This is the most fitting safe mode for server deployments (hence the
-    /// name).
+    /// In this crate, `Server` masks host-revealing intrinsic attributes so
+    /// they cannot leak into rendered output: `docdir` reads as empty,
+    /// `docfile` is relativized against `docdir`, and `user-home` reads as `.`
+    /// rather than the real home directory.
+    ///
+    /// **`Server` does not by itself disable include or asset embedding.**
+    /// Unlike what its name might suggest, at `Server` (and every level below
+    /// [`Secure`](Self::Secure)) the include/image/SVG handlers *are* consulted
+    /// and file contents *are* embedded: `include::` directives pull in file
+    /// contents, `data-uri` images are base64-embedded, and inline/interactive
+    /// SVGs are embedded. Disabling that embedding – and applying any path jail
+    /// – happens only at [`Secure`](Self::Secure) (for embedding) or in the
+    /// client handler (for the jail). A server-side integrator that must not
+    /// embed arbitrary file contents should use [`Secure`](Self::Secure), not
+    /// `Server`.
     Server = 10,
 
-    /// A safe mode level that disallows the document from attempting to read
-    /// files from the file system and including their contents into the
-    /// document, and it prevents access to file system paths.
+    /// A safe mode level that disables the embedding of file contents into the
+    /// output.
+    ///
+    /// At `Secure` (and above), `include::` directives are converted to links
+    /// to their targets rather than embedding file contents, `data-uri` image
+    /// embedding is disabled, inline and interactive SVGs render as ordinary
+    /// `<img>` elements, and docinfo files are ignored. This is the level at
+    /// which the include/image/SVG handlers stop being consulted for embedding.
     ///
     /// This mode allows the AsciiDoc document to be processed in a shared,
     /// server-side environment, such as a wiki, where the document should not
-    /// be able to embed the contents of arbitrary files.
+    /// be able to embed the contents of arbitrary files. Note that `Secure`
+    /// still enforces no path-traversal jail of its own (there is nothing left
+    /// for a jail to guard, since embedding is off); a client that resolves
+    /// targets against the filesystem at a lower safe mode must jail them
+    /// itself (see the [type-level
+    /// docs](SafeMode#this-crate-performs-no-path-jail-enforcement)).
     ///
     /// This is the default safe mode.
     #[default]
