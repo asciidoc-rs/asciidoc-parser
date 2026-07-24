@@ -24,7 +24,7 @@ User Manual: Blocks
 fn facts(src: &str) -> (String, ContentModel, Option<String>) {
     let doc = Parser::default().parse(src);
     let block = doc
-        .nested_blocks()
+        .child_blocks()
         .next()
         .expect("expected at least one block");
 
@@ -73,7 +73,7 @@ Often used as a shorthand for a literal delimited block when the content does no
     // An indented paragraph is a literal paragraph: it keeps the simple content
     // model but is styled as a literal block and uses verbatim substitutions.
     let doc = Parser::default().parse("  literal output text");
-    let block = doc.nested_blocks().next().expect("expected a block");
+    let block = doc.child_blocks().next().expect("expected a block");
     assert_eq!(block.resolved_context().as_ref(), "paragraph");
     assert_eq!(block.content_model(), ContentModel::Simple);
     assert_eq!(block.substitution_group(), SubstitutionGroup::Verbatim);

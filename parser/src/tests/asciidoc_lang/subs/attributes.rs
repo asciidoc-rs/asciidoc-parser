@@ -45,7 +45,7 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse(":lt-attr: abc{sp}def\n\nGoodbye {lt-attr} hello");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -65,7 +65,7 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("////\nabc {sp} def\n////");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -85,14 +85,14 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("====\nHello{sp}goodbye.\n====");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -127,7 +127,7 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("....\nfoo{sp}bar\n....");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -147,7 +147,7 @@ mod default_attributes_substitution {
         let doc = Parser::default()
             .parse("Click image:pause.png[title=Pause{sp}Resume] when you need a break.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -170,7 +170,7 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("Click +++Pause{sp}Resume+++ when you need a break.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -193,14 +193,14 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("--\nOpened{sp}closed!\n--");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -220,7 +220,7 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("This is a{sp}<paragraph>.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -243,7 +243,7 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("++++\nfoo{sp}bar\n++++");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -263,14 +263,14 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("____\nThis{sp}that\n____");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Quote(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -290,14 +290,14 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse("****\nStuff{sp}nonsense\n****");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -319,7 +319,7 @@ mod default_attributes_substitution {
         // literal (`l`) cells, hence "Varies".
         let doc = Parser::default().parse(":val: subd\n\n|===\n|{val}\nl|{val}\n|===");
 
-        let Some(Block::Table(table)) = doc.nested_blocks().next() else {
+        let Some(Block::Table(table)) = doc.child_blocks().next() else {
             panic!("expected a table block");
         };
 
@@ -348,7 +348,7 @@ mod default_attributes_substitution {
 
         let doc = Parser::default().parse(".Title{sp}such\n****\nStuff > nonsense\n****");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -379,7 +379,7 @@ For blocks, the step's name, `attributes`, can be assigned to the xref:apply-sub
 
         let doc = Parser::default().parse("[subs=attributes]\nabc<lt{sp}space");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -398,7 +398,7 @@ For an inline passthrough, the built-in values `a` or `attributes` can be applie
 
         let doc = Parser::default().parse("pass:a[abc<lt{sp}space]{sp}and then ...");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -420,7 +420,7 @@ Single occurrences of an attribute reference can be escaped by prefixing the exp
 
         let doc = Parser::default().parse(r#"This is not a\{sp}space."#);
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");

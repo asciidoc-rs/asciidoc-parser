@@ -157,7 +157,7 @@ mod assignment {
         let doc = Parser::default().parse(":foo:bar: baz");
         assert!(!doc.has_attribute("foo:bar"));
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
         let block = blocks.next().unwrap();
         assert_eq!(block.raw_context().as_ref(), "paragraph");
         assert!(blocks.next().is_none());
@@ -190,7 +190,7 @@ mod assignment {
         let doc = Parser::default().parse(":foo:: bar");
         assert!(!doc.has_attribute("foo:"));
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
         let block = blocks.next().unwrap();
 
         let crate::blocks::Block::List(list) = block else {
@@ -2341,7 +2341,7 @@ mod interpolation {
                 ":gem_name: asciidoctor\n\n.Require the +{gem_name}+ gem\nTo use {gem_name}, the first thing to do is to import it in your Ruby source file.",
             );
         assert_eq!(
-            doc.nested_blocks().next().unwrap().title(),
+            doc.child_blocks().next().unwrap().title(),
             Some("Require the {gem_name} gem")
         );
 
@@ -2349,7 +2349,7 @@ mod interpolation {
             ":gem_name: asciidoctor\n\n.Require the `{gem_name}` gem\nTo use {gem_name}, the first thing to do is to import it in your Ruby source file.",
         );
         assert_eq!(
-            doc.nested_blocks().next().unwrap().title(),
+            doc.child_blocks().next().unwrap().title(),
             Some("Require the <code>asciidoctor</code> gem")
         );
     }
@@ -2695,7 +2695,7 @@ mod intrinsic_attributes {
     /// passthrough block, so the output is that block's substituted text split
     /// into lines (Asciidoctor's `output.lines.map(&:rstrip)`).
     fn raw_block_lines(doc: &crate::Document<'_>) -> Vec<String> {
-        for b in doc.nested_blocks() {
+        for b in doc.child_blocks() {
             if let crate::blocks::Block::RawDelimited(raw) = b {
                 return raw
                     .content()
@@ -3227,7 +3227,7 @@ mod intrinsic_attributes {
         // The figure counter is shared with the nested table-cell documents: the
         // two top-level images are numbered 1 and 4, leaving 2 and 3 for the
         // images inside the table cells.
-        let blocks: Vec<_> = doc.nested_blocks().collect();
+        let blocks: Vec<_> = doc.child_blocks().collect();
         assert_eq!(blocks[0].title(), Some("Title for Foo"));
         assert_eq!(blocks[0].caption(), Some("Figure 1. "));
         assert_eq!(blocks[2].title(), Some("Title for Qux"));
@@ -3353,7 +3353,7 @@ mod block_attributes {
 
     /// The document's first top-level block.
     fn first_block<'src>(doc: &'src crate::Document) -> &'src crate::blocks::Block<'src> {
-        doc.nested_blocks().next().expect("expected a block")
+        doc.child_blocks().next().expect("expected a block")
     }
 
     /// The document's first top-level block, as a [`QuoteBlock`].
@@ -4388,7 +4388,7 @@ mod block_attributes {
         let sec = first_block(&doc);
         assert_eq!(sec.id(), Some("foo"));
 
-        let subsec = sec.nested_blocks().last().expect("expected a sub-section");
+        let subsec = sec.child_blocks().last().expect("expected a sub-section");
         assert_eq!(subsec.id(), Some("coolio"));
     }
 
@@ -4440,13 +4440,13 @@ mod block_attributes {
             "[[one]]\n\n== Section One\n\nparagraph\n\n[[sub]]\n// try to mess this up!\n\n=== Sub-section\n\nparagraph\n\n[role='classy']\n\n////\nblock comment\n////\n\n== Section Two\n\ncontent",
         );
 
-        let blocks: Vec<_> = doc.nested_blocks().collect();
+        let blocks: Vec<_> = doc.child_blocks().collect();
 
         let section_one = blocks.first().expect("expected Section One");
         assert_eq!(section_one.id(), Some("one"));
 
         let subsection = section_one
-            .nested_blocks()
+            .child_blocks()
             .last()
             .expect("expected a sub-section");
         assert_eq!(subsection.id(), Some("sub"));

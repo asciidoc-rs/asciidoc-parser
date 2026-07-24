@@ -8,7 +8,7 @@ track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/counters.adoc");
 /// the sequence it produces.
 fn rendered_blocks(input: &str) -> Vec<String> {
     let doc = Parser::default().parse(input);
-    doc.nested_blocks()
+    doc.child_blocks()
         .filter_map(|b| b.rendered_content().map(str::to_string))
         .collect()
 }

@@ -47,7 +47,7 @@ In this case, since `underline` is a built-in role, the style is provided for yo
 
     let doc = Parser::default().parse("The text [.underline]#underline me# is underlined.");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {

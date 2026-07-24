@@ -423,7 +423,7 @@ The following table lists the blocks that support captioned titles and the attri
     // automatically assigned number, followed by a dot and a space (e.g.
     // `Example 1. `).
     let doc = Parser::default().parse(".Block content title\n====\nBlock content.\n====");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.caption(), Some("Example 1. "));
     assert_eq!(block.number(), Some(1));
 
@@ -431,13 +431,13 @@ The following table lists the blocks that support captioned titles and the attri
     // set. The `listing-caption` attribute is unset by default, so a titled
     // listing keeps just its original title with no caption...
     let doc = Parser::default().parse(".Terminal\n----\ncode\n----");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.title(), Some("Terminal"));
     assert_eq!(block.caption(), None);
 
     // ...whereas setting `listing-caption` enables the captioned title.
     let doc = Parser::default().parse(":listing-caption: Listing\n\n.Terminal\n----\ncode\n----");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.caption(), Some("Listing 1. "));
 }
 
@@ -480,18 +480,18 @@ The number is sequential, computed automatically, and stored in a corresponding 
     // appendix -> appendix-caption: a level-1 `[appendix]` section is captioned
     // with the `appendix-caption` label ("Appendix" by default).
     let doc = Parser::default().parse("= Doc\n\n[appendix]\n== Acknowledgements\n\nThanks.");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.caption(), Some("Appendix A: "));
 
     // example -> example-caption, counted via example-number (set by default).
     let doc = Parser::default().parse(".Onomatopoeia\n====\nboom\n====");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.caption(), Some("Example 1. "));
     assert_eq!(block.number(), Some(1));
 
     // image -> figure-caption, counted via figure-number (set by default).
     let doc = Parser::default().parse(".Sunset\nimage::sunset.jpg[]");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.caption(), Some("Figure 1. "));
     assert_eq!(block.number(), Some(1));
 
@@ -499,33 +499,33 @@ The number is sequential, computed automatically, and stored in a corresponding 
     // `listing-caption` is *not* set by default, so a titled listing or source
     // block has no caption until the attribute is set...
     let doc = Parser::default().parse(".Output\n----\ncode\n----");
-    assert_eq!(doc.nested_blocks().next().unwrap().caption(), None);
+    assert_eq!(doc.child_blocks().next().unwrap().caption(), None);
     let doc = Parser::default().parse(".Output\n[source,ruby]\n----\ncode\n----");
-    assert_eq!(doc.nested_blocks().next().unwrap().caption(), None);
+    assert_eq!(doc.child_blocks().next().unwrap().caption(), None);
     // ...whereupon both the listing and source contexts are captioned via
     // `listing-caption` (a source block resolves to the `listing` context).
     let doc = Parser::default().parse(":listing-caption: Listing\n\n.Output\n----\ncode\n----");
     assert_eq!(
-        doc.nested_blocks().next().unwrap().caption(),
+        doc.child_blocks().next().unwrap().caption(),
         Some("Listing 1. ")
     );
     let doc = Parser::default()
         .parse(":listing-caption: Listing\n\n.Output\n[source,ruby]\n----\ncode\n----");
     assert_eq!(
-        doc.nested_blocks().next().unwrap().caption(),
+        doc.child_blocks().next().unwrap().caption(),
         Some("Listing 1. ")
     );
 
     // table -> table-caption, counted via table-number (set by default).
     let doc = Parser::default().parse(".Properties\n|===\n|Name |Value\n|===");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.caption(), Some("Table 1. "));
     assert_eq!(block.number(), Some(1));
 
     // The number is sequential and computed automatically: two titled examples
     // are numbered 1 and 2 in document order.
     let doc = Parser::default().parse(".One\n====\na\n====\n\n.Two\n====\nb\n====");
-    let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+    let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
     assert_eq!(numbers, vec![Some(1), Some(2)]);
 
     // The number is stored in the context's counter attribute (here
@@ -560,7 +560,7 @@ The block title will be displayed with a caption label and number, as shown here
 
     let doc =
         Parser::default().parse(".Block that supports captioned title\n====\nBlock content\n====");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.title(), Some("Block that supports captioned title"));
     assert_eq!(block.caption(), Some("Example 1. "));
     assert_eq!(block.number(), Some(1));
@@ -596,7 +596,7 @@ ifdef::prev-example-number[:example-number: {prev-example-number}]
     let doc = Parser::default().parse(
         ":example-caption: Example\nifdef::example-number[:prev-example-number: {example-number}]\n:example-number: 0\n\n.Block that supports captioned title\n====\nBlock content\n====\n\n:!example-caption:\nifdef::prev-example-number[:example-number: {prev-example-number}]\n:!prev-example-number:",
     );
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.title(), Some("Block that supports captioned title"));
     assert_eq!(block.caption(), Some("Example 1. "));
     assert_eq!(block.number(), Some(1));
@@ -607,7 +607,7 @@ ifdef::prev-example-number[:example-number: {prev-example-number}]
     let doc = Parser::default().parse(
         ":example-number: 7\n\n:example-caption: Example\nifdef::example-number[:prev-example-number: {example-number}]\n:example-number: 0\n\n.Saved\n====\nx\n====\n\nifdef::prev-example-number[:example-number: {prev-example-number}]\n\n.Restored\n====\ny\n====",
     );
-    let mut examples = doc.nested_blocks().filter(|b| b.title().is_some());
+    let mut examples = doc.child_blocks().filter(|b| b.title().is_some());
     // The first conditional fired (`example-number` was set), saving 7 into
     // `prev-example-number`; the counter was then reset to 0, so this example is 1.
     let saved = examples.next().unwrap();
@@ -635,7 +635,7 @@ Block content
     let doc = Parser::default().parse(
         ":!example-caption:\n\n.Block that supports captioned title\n====\nBlock content\n====",
     );
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.title(), Some("Block that supports captioned title"));
     assert_eq!(block.caption(), None);
     assert_eq!(block.number(), None);
@@ -654,7 +654,7 @@ However, this practice should be used judiciously.
     // Seeding `example-number` influences the next number in the sequence: with
     // the counter set to 5, the following example is numbered 6.
     let doc = Parser::default().parse(":example-number: 5\n\n.Later\n====\nx\n====");
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.caption(), Some("Example 6. "));
     assert_eq!(block.number(), Some(6));
 }
@@ -691,7 +691,7 @@ Block content
     let doc = Parser::default().parse(
         ".Block Title\n[caption=\"Example {counter:my-example-number:A}: \"]\n====\nBlock content\n====",
     );
-    let block = doc.nested_blocks().next().unwrap();
+    let block = doc.child_blocks().next().unwrap();
     assert_eq!(block.title(), Some("Block Title"));
 
     // The custom caption replaces the entire caption verbatim (the counter

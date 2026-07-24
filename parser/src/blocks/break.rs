@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
-    blocks::{ContentModel, IsBlock, metadata::BlockMetadata},
+    blocks::{ChildBlocks, ContentModel, IsBlock, metadata::BlockMetadata},
     content::Content,
     span::MatchedItem,
     strings::CowStr,
@@ -38,6 +38,15 @@ impl std::fmt::Debug for BreakType {
 }
 
 impl<'src> Break<'src> {
+    /// Returns a document-order iterator over this block's direct child blocks.
+    ///
+    /// A thematic break never has child blocks, so this iterator is always
+    /// empty. See [`FindBlocks`](crate::blocks::FindBlocks) to search from a
+    /// [`Block`](crate::blocks::Block) or [`Document`](crate::Document).
+    pub fn child_blocks(&'src self) -> ChildBlocks<'src> {
+        ChildBlocks::empty()
+    }
+
     /// Returns the block's title as a mutable [`Content`], if the block has
     /// one.
     ///
@@ -227,7 +236,7 @@ mod tests {
         assert_eq!(mi.item.content_model(), ContentModel::Empty);
         assert_eq!(mi.item.raw_context().deref(), "thematic_break");
         assert_eq!(mi.item.type_(), BreakType::Thematic);
-        assert!(mi.item.nested_blocks().next().is_none());
+        assert!(mi.item.child_blocks().next().is_none());
         assert!(mi.item.title_source().is_none());
         assert!(mi.item.title().is_none());
         assert!(mi.item.anchor().is_none());
@@ -479,7 +488,7 @@ mod tests {
         assert_eq!(mi.item.content_model(), ContentModel::Empty);
         assert_eq!(mi.item.raw_context().deref(), "page_break");
         assert_eq!(mi.item.type_(), BreakType::Page);
-        assert!(mi.item.nested_blocks().next().is_none());
+        assert!(mi.item.child_blocks().next().is_none());
         assert!(mi.item.title_source().is_none());
         assert!(mi.item.title().is_none());
         assert!(mi.item.anchor().is_none());

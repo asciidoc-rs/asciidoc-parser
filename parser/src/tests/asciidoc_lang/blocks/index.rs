@@ -596,7 +596,7 @@ The `appendix` block style (e.g., `[appendix]`) above the section title speciali
         // `appendix` style and specializes the section as an appendix (a
         // special section).
         let doc = Parser::default().parse("[appendix]\n== My Appendix\n\nContent.");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
 
         assert_eq!(block.declared_style(), Some("appendix"));
         assert_eq!(block.raw_context().as_ref(), "section");
@@ -630,7 +630,7 @@ One of the five admonition styles (e.g., `[TIP]`) above an example block transfo
         // A `[TIP]` block style above an example structural container transforms
         // the example block into an admonition block whose label is `Tip`.
         let doc = Parser::default().parse("[TIP]\n====\nPay attention.\n====");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
 
         assert_eq!(block.raw_context().as_ref(), "admonition");
 
@@ -661,14 +661,14 @@ A block style (e.g., `[circle]` or `[loweralpha]`) above an unordered or ordered
         // A `[circle]` block style above an unordered list declares the `circle`
         // style on the list.
         let doc = Parser::default().parse("[circle]\n* one\n* two");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
         assert_eq!(block.raw_context().as_ref(), "list");
         assert_eq!(block.declared_style(), Some("circle"));
 
         // A `[loweralpha]` block style above an ordered list declares the
         // `loweralpha` style on the list.
         let doc = Parser::default().parse("[loweralpha]\n. one\n. two");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
         assert_eq!(block.raw_context().as_ref(), "list");
         assert_eq!(block.declared_style(), Some("loweralpha"));
 
@@ -689,7 +689,7 @@ A block style (e.g., `[qanda]` and `[horizontal]`) above a description list can 
         // A `[qanda]` block style above a description list declares the `qanda`
         // style on the list.
         let doc = Parser::default().parse("[qanda]\nQuestion::\n  Answer.");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
         assert_eq!(block.raw_context().as_ref(), "list");
         assert_eq!(block.declared_style(), Some("qanda"));
 
@@ -697,7 +697,7 @@ A block style (e.g., `[qanda]` and `[horizontal]`) above a description list can 
         // `horizontal` style on the list.
         let doc =
             Parser::default().parse("[horizontal]\nCPU:: The brain.\nRAM:: The short-term memory.");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
         assert_eq!(block.raw_context().as_ref(), "list");
         assert_eq!(block.declared_style(), Some("horizontal"));
 
@@ -733,7 +733,7 @@ To learn more about how to change the context of a block using the declared bloc
         // so the resolved context becomes `listing` and the resolved block style
         // is left unset.
         let doc = Parser::default().parse("[listing]\n....\na > b\n....");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
 
         assert_eq!(block.raw_context().as_ref(), "literal");
         assert_eq!(block.resolved_context().as_ref(), "listing");
@@ -786,7 +786,7 @@ These metadata lines are as follows:
         // populates the corresponding block properties.
         let doc = Parser::default()
             .parse(".Styles of music\n[#music-styles.feature%collapsible]\n****\nAn aside.\n****");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
 
         assert!(block.attrlist().is_some());
         assert_eq!(block.title(), Some("Styles of music"));
@@ -813,7 +813,7 @@ To workaround this interpretation of the source, you need to move the trailing `
         // list (declaring the `sidebar` style) rather than as a description list
         // term/definition.
         let doc = Parser::default().parse("[sidebar]\nAn aside.");
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
 
         assert_eq!(block.resolved_context().as_ref(), "sidebar");
         assert_eq!(block.declared_style(), Some("sidebar"));
@@ -839,7 +839,7 @@ Go off on a tangent to describe what a style of music is.
         let doc = Parser::default().parse(
             ".Styles of music\n[#music-styles]\n****\nGo off on a tangent to describe what a style of music is.\n****",
         );
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
 
         assert_eq!(block.resolved_context().as_ref(), "sidebar");
         assert_eq!(block.title(), Some("Styles of music"));
@@ -867,20 +867,20 @@ Substitutions do not apply to compound blocks (i.e., blocks that may contain nes
         // A paragraph block (simple content model) has the normal substitution
         // group.
         let doc = Parser::default().parse("A normal paragraph.");
-        let paragraph = doc.nested_blocks().next().expect("expected a block");
+        let paragraph = doc.child_blocks().next().expect("expected a block");
         assert_eq!(paragraph.content_model(), ContentModel::Simple);
         assert_eq!(paragraph.substitution_group(), SubstitutionGroup::Normal);
 
         // A verbatim block has the verbatim substitution group.
         let doc = Parser::default().parse("....\nliteral text\n....");
-        let verbatim = doc.nested_blocks().next().expect("expected a block");
+        let verbatim = doc.child_blocks().next().expect("expected a block");
         assert_eq!(verbatim.content_model(), ContentModel::Verbatim);
         assert_eq!(verbatim.substitution_group(), SubstitutionGroup::Verbatim);
 
         // A compound block (a section) contains nested blocks; substitutions do
         // not apply to it.
         let doc = Parser::default().parse("== Section Title\n\nContent of section.");
-        let compound = doc.nested_blocks().next().expect("expected a block");
+        let compound = doc.child_blocks().next().expect("expected a block");
         assert_eq!(compound.content_model(), ContentModel::Compound);
     }
 }

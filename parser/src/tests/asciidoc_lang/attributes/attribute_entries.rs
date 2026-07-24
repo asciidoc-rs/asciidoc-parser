@@ -466,7 +466,7 @@ For attributes that allow it (which includes general purpose attributes), the at
         let doc =
             parser.parse("We are agreed? {agreed}\n\n:agreed: no\n\nAre we still agreed? {agreed}");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 
@@ -603,7 +603,7 @@ pass:a,q[{attribute-with-formatted-text}]
         let doc =
             parser.parse("formatting applied: pass:a,q[{attribute-with-formatted-text}]\n\nformatting suppressed: {attribute-with-formatted-text}");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
 

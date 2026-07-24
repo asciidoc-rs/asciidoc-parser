@@ -42,7 +42,7 @@ include::example$text.adoc[tag=straight-quotes]
 
         let doc = Parser::default().parse("In Ruby, '\\n' represents a backslash followed by the letter n.\nSingle quotes prevent escape sequences from being interpreted.\nIn contrast, \"\\n\" represents a newline.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -84,7 +84,7 @@ include::example$text.adoc[tag=c-quote]
 
         let doc = Parser::default().parse("\"`What kind of charm?`\" Lazarus asked.\n\"`An odoriferous one or a mineral one?`\"\n\nKizmet shrugged.\n\"`The note from Olaf's desk says '`wormwood and licorice,`'\nbut these could be normal groceries for werewolves.`\"");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -152,7 +152,7 @@ Olaf's desk was a mess.
 
         let doc = Parser::default().parse("Olaf's desk was a mess.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -187,7 +187,7 @@ Olaf\'s desk ...
 
         let doc = Parser::default().parse("Olaf\\'s desk ...");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -232,7 +232,7 @@ include::example$text.adoc[tag=apos]
 
         let doc = Parser::default().parse("Olaf had been with the company since the `'00s.\nHis desk overflowed with heaps of paper, apple cores and squeaky toys.\nWe couldn't find Olaf's keyboard.\nThe state of his desk was replicated, in triplicate, across all of\nthe werewolves`' desks.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -276,7 +276,7 @@ A ``std::vector```'s size is the number of items it contains.
 
         let doc = Parser::default().parse("``npm```'s job is to manage the dependencies for your application.\n\nA ``std::vector```'s size is the number of items it contains.");
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {
@@ -334,7 +334,7 @@ The `class`’ static methods make it easy to operate on files and directories.
             "This ``class```' static methods make it easy to operate on files and directories.",
         );
 
-        let mut blocks = doc.nested_blocks();
+        let mut blocks = doc.child_blocks();
 
         let block1 = blocks.next().unwrap();
         let Block::Simple(sb1) = block1 else {

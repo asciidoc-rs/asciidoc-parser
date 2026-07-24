@@ -55,7 +55,7 @@ You would define the bibliography as a level 1 section (`==`) when:
 
     // The `bibliography` section style is recognized as a level 1 section.
     let doc = Parser::default().parse("[bibliography]\n== Bibliography\n\n* [[[a]]] An entry.\n");
-    let section = doc.nested_blocks().next().unwrap();
+    let section = doc.child_blocks().next().unwrap();
     assert_eq!(section.declared_style(), Some("bibliography"));
 
     // Treating the remaining guidance as non-normative because it concerns

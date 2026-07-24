@@ -191,7 +191,7 @@ mod tests {
     /// Returns the (caption, number) of the first nested block in `input`.
     fn first_block_caption(input: &str) -> (Option<String>, Option<usize>) {
         let doc = Parser::default().parse(input);
-        let block = doc.nested_blocks().next().expect("expected a block");
+        let block = doc.child_blocks().next().expect("expected a block");
         (block.caption().map(str::to_string), block.number())
     }
 
@@ -236,7 +236,7 @@ mod tests {
         // them consumes no number.
         let doc =
             Parser::default().parse(".One\n====\na\n====\n\n====\nb\n====\n\n.Two\n====\nc\n====");
-        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![Some(1), None, Some(2)]);
     }
 
@@ -295,7 +295,7 @@ mod tests {
         // consume a counter value, so a following example is still "Example 1".
         let doc = Parser::default()
             .parse("[%collapsible]\n====\nhidden\n====\n\n.Title\n====\nbody.\n====");
-        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![None, Some(1)]);
     }
 
@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn image_numbering_is_sequential() {
         let doc = Parser::default().parse(".First\nimage::a.jpg[]\n\n.Second\nimage::b.jpg[]");
-        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![Some(1), Some(2)]);
     }
 
@@ -419,7 +419,7 @@ mod tests {
     fn listing_numbering_is_sequential_when_captioned() {
         let doc = Parser::default()
             .parse(":listing-caption: Listing\n\n.First\n----\na\n----\n\n.Second\n----\nb\n----");
-        let numbers: Vec<_> = doc.nested_blocks().map(|b| b.number()).collect();
+        let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
         assert_eq!(numbers, vec![Some(1), Some(2)]);
     }
 
@@ -446,7 +446,7 @@ mod tests {
             ":attribute-missing: drop-line\n\n.Gone\nimage::{undefined}.jpg[]\n\n.Kept\nimage::ok.jpg[]",
         );
         let captions: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .map(|b| b.caption().map(str::to_string))
             .collect();
         assert_eq!(captions, vec![Some("Figure 1. ".to_string())]);

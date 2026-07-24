@@ -49,7 +49,7 @@ Italic c__hara__cter__s__ within a word.
         "An italic _word_, and an italic _phrase of text_.\n\nItalic c__hara__cter__s__ within a word.",
     );
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {
@@ -103,7 +103,7 @@ The result of <<ex-mix>> is rendered below.
     let doc = Parser::default()
         .parse("`*_monospace bold italic phrase_*` & ``**__char__**``acter``**__s__**``");
 
-    let mut blocks = doc.nested_blocks();
+    let mut blocks = doc.child_blocks();
 
     let block1 = blocks.next().unwrap();
     let Block::Simple(sb1) = block1 else {

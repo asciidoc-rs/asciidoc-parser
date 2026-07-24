@@ -12,12 +12,7 @@ fn listing_include(attrs: &str, content: &'static str) -> String {
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(handler)
         .parse(&source);
-    doc.nested_blocks()
-        .next()
-        .unwrap()
-        .span()
-        .data()
-        .to_string()
+    doc.child_blocks().next().unwrap().span().data().to_string()
 }
 
 const INDENTED: &str = "    def names\n      @name.split ' '\n    end";
@@ -81,12 +76,7 @@ fn listing_include_with_tabsize(attrs: &str, content: &'static str) -> String {
         .with_intrinsic_attribute("tabsize", "4", ModificationContext::Anywhere)
         .with_include_file_handler(handler)
         .parse(&source);
-    doc.nested_blocks()
-        .next()
-        .unwrap()
-        .span()
-        .data()
-        .to_string()
+    doc.child_blocks().next().unwrap().span().data().to_string()
 }
 
 #[test]

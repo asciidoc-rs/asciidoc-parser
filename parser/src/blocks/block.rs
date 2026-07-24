@@ -1,5 +1,3 @@
-use std::slice::Iter;
-
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
@@ -813,7 +811,7 @@ impl<'src> Block<'src> {
     /// the resulting links. Unresolved targets are reported in `warnings`.
     ///
     /// This drives the recursion uniformly via the [`IsBlock::content_mut`] and
-    /// [`IsBlock::nested_blocks_mut`] accessors, so it needs no per-block-type
+    /// [`IsBlock::child_blocks_mut`] accessors, so it needs no per-block-type
     /// special casing.
     pub(crate) fn resolve_references(
         &mut self,
@@ -838,13 +836,13 @@ impl<'src> Block<'src> {
         }
 
         // A Markdown-style blockquote holds its nested blocks in its own owned
-        // source, which the generic `nested_blocks_mut()` walk below does not
+        // source, which the generic `child_blocks_mut()` walk below does not
         // reach, so they are resolved explicitly here.
         if let Self::Quote(quote) = self {
             quote.resolve_references(resolver, renderer, warnings);
         }
 
-        for child in self.nested_blocks_mut() {
+        for child in self.child_blocks_mut() {
             child.resolve_references(resolver, renderer, warnings);
         }
     }
@@ -946,39 +944,21 @@ impl<'src> IsBlock<'src> for Block<'src> {
         }
     }
 
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         match self {
-            Self::Simple(b) => b.nested_blocks(),
-            Self::Media(b) => b.nested_blocks(),
-            Self::Section(b) => b.nested_blocks(),
-            Self::List(b) => b.nested_blocks(),
-            Self::ListItem(b) => b.nested_blocks(),
-            Self::RawDelimited(b) => b.nested_blocks(),
-            Self::CompoundDelimited(b) => b.nested_blocks(),
-            Self::Admonition(b) => b.nested_blocks(),
-            Self::Quote(b) => b.nested_blocks(),
-            Self::Table(b) => b.nested_blocks(),
-            Self::Preamble(b) => b.nested_blocks(),
-            Self::Break(b) => b.nested_blocks(),
-            Self::DocumentAttribute(b) => b.nested_blocks(),
-        }
-    }
-
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
-        match self {
-            Self::Simple(b) => b.nested_blocks_mut(),
-            Self::Media(b) => b.nested_blocks_mut(),
-            Self::Section(b) => b.nested_blocks_mut(),
-            Self::List(b) => b.nested_blocks_mut(),
-            Self::ListItem(b) => b.nested_blocks_mut(),
-            Self::RawDelimited(b) => b.nested_blocks_mut(),
-            Self::CompoundDelimited(b) => b.nested_blocks_mut(),
-            Self::Admonition(b) => b.nested_blocks_mut(),
-            Self::Quote(b) => b.nested_blocks_mut(),
-            Self::Table(b) => b.nested_blocks_mut(),
-            Self::Preamble(b) => b.nested_blocks_mut(),
-            Self::Break(b) => b.nested_blocks_mut(),
-            Self::DocumentAttribute(b) => b.nested_blocks_mut(),
+            Self::Simple(b) => b.child_blocks_mut(),
+            Self::Media(b) => b.child_blocks_mut(),
+            Self::Section(b) => b.child_blocks_mut(),
+            Self::List(b) => b.child_blocks_mut(),
+            Self::ListItem(b) => b.child_blocks_mut(),
+            Self::RawDelimited(b) => b.child_blocks_mut(),
+            Self::CompoundDelimited(b) => b.child_blocks_mut(),
+            Self::Admonition(b) => b.child_blocks_mut(),
+            Self::Quote(b) => b.child_blocks_mut(),
+            Self::Table(b) => b.child_blocks_mut(),
+            Self::Preamble(b) => b.child_blocks_mut(),
+            Self::Break(b) => b.child_blocks_mut(),
+            Self::DocumentAttribute(b) => b.child_blocks_mut(),
         }
     }
 

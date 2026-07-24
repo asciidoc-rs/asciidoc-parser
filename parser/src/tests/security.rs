@@ -20,7 +20,7 @@
 
 use crate::{
     Parser,
-    blocks::{Block, IsBlock, SimpleBlock},
+    blocks::{Block, FindBlocks, SimpleBlock},
     content::{Content, SubstitutionStep},
     parser::ModificationContext,
     warnings::WarningType,
@@ -36,12 +36,12 @@ fn render_paragraph(src: &str) -> String {
             if let Block::Simple(simple) = block {
                 Some(simple)
             } else {
-                walk(block.nested_blocks())
+                walk(block.child_blocks())
             }
         })
     }
 
-    walk(doc.nested_blocks())
+    walk(doc.child_blocks())
         .expect("expected at least one simple block")
         .content()
         .rendered()

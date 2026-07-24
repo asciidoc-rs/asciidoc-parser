@@ -1,4 +1,4 @@
-use std::{fmt::Debug, slice::Iter};
+use std::fmt::Debug;
 
 use crate::{
     Span,
@@ -122,25 +122,16 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
             .and_then(|attr| attr.block_style())
     }
 
-    /// Returns an iterator over the nested blocks contained within
-    /// this block.
+    /// Returns a mutable slice of the child blocks contained within this block.
     ///
-    /// Many block types do not have nested blocks so the default implementation
-    /// returns an empty iterator.
-    fn nested_blocks(&'src self) -> Iter<'src, Block<'src>> {
-        const NO_BLOCKS: &[Block<'static>] = &[];
-        NO_BLOCKS.iter()
-    }
-
-    /// Returns a mutable slice of the nested blocks contained within this
-    /// block.
+    /// The default returns an empty slice; container blocks override it to
+    /// expose their children for in-place passes such as cross-reference
+    /// resolution. This is a low-level extension hook; to read a block's
+    /// children, use its inherent `child_blocks()` accessor or
+    /// [`FindBlocks::child_blocks()`].
     ///
-    /// This is the mutable counterpart of [`nested_blocks()`]. The default
-    /// returns an empty slice; container blocks override it to expose their
-    /// children for in-place passes such as cross-reference resolution.
-    ///
-    /// [`nested_blocks()`]: Self::nested_blocks
-    fn nested_blocks_mut(&mut self) -> &mut [Block<'src>] {
+    /// [`FindBlocks::child_blocks()`]: crate::blocks::FindBlocks::child_blocks
+    fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
         &mut []
     }
 

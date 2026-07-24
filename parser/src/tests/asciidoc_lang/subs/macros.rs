@@ -46,7 +46,7 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse(":not-icon: icon:heart[]\n:only: pass:q[*bold*]\n\nNot icon: pass:a[{not-icon}]\nOnly: pass:a[{only}]");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -69,7 +69,7 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse("////\nicon:heart[]\n////");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -89,14 +89,14 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse(":icons:\n\n====\nHello icon:heart[] Asciidoc.\n====");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -134,7 +134,7 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse("....\nfoo icon:heart[] bar\n....");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -159,7 +159,7 @@ mod default_macros_substitution {
         // substituted into an image span, which then becomes the link's content.
         let doc = Parser::default().parse("https://example.org[image:logo.png[Logo]]");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -175,7 +175,7 @@ mod default_macros_substitution {
         let doc =
             Parser::default().parse("See https://example.org[the image:logo.png[Logo] here].");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -191,7 +191,7 @@ mod default_macros_substitution {
         let doc =
             Parser::default().parse("[[sec]]Target.\n\nSee xref:sec[image:logo.png[Logo]] now.");
 
-        let block2 = doc.nested_blocks().nth(1).unwrap();
+        let block2 = doc.child_blocks().nth(1).unwrap();
 
         let Block::Simple(block2) = block2 else {
             panic!("Unexpected block type: {block2:?}");
@@ -214,14 +214,14 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse(":icons:\n\n--\nOpened icon:heart[] closed!\n--");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -244,7 +244,7 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse(":icons:\n\nThis is a icon:heart[] paragraph.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -267,7 +267,7 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse(":icons:\n\n++++\nfoo icon:heart[] bar\n++++");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::RawDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -287,14 +287,14 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse(":icons:\n\n____\nThis icon:heart[] that\n____");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Quote(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -317,14 +317,14 @@ mod default_macros_substitution {
 
         let doc = Parser::default().parse(":icons:\n\n****\nStuff icon:heart[] nonsense\n****");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
 
         // Dig an extra level deeper to get the simple block that has the content.
-        let block1 = block1.nested_blocks().next().unwrap();
+        let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -350,7 +350,7 @@ mod default_macros_substitution {
         let doc = Parser::default()
             .parse("|===\n|https://example.org[Example]\nl|https://example.org[Example]\n|===");
 
-        let Some(Block::Table(table)) = doc.nested_blocks().next() else {
+        let Some(Block::Table(table)) = doc.child_blocks().next() else {
             panic!("expected a table block");
         };
 
@@ -383,7 +383,7 @@ mod default_macros_substitution {
         let doc = Parser::default()
             .parse(":icons:\n\n.Title icon:heart[] such\n****\nStuff > nonsense\n****");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::CompoundDelimited(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -418,7 +418,7 @@ For blocks, the step's name, `macros`, can be assigned to the xref:apply-subs-to
         let doc =
             Parser::default().parse(":icons:\n\n[subs=macros]\nHello icon:heart[] *Asciidoc*.");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
@@ -441,7 +441,7 @@ For inline elements, the built-in values `m` or `macros` can be applied to xref:
         let doc = Parser::default()
             .parse(":icons:\n\npass:m[Hello icon:heart[\\] *Asciidoc*] and then ...");
 
-        let block1 = doc.nested_blocks().next().unwrap();
+        let block1 = doc.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
             panic!("Unexpected block type: {block1:?}");

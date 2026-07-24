@@ -439,7 +439,7 @@ mod comments {
         // test checks — that the trailing newlines do not create a spurious
         // paragraph — holds: only one `<p>` is rendered.
         let doc = Parser::default().parse("paragraph\n\n////\nblock comment\n////\n\n\n");
-        let blocks: Vec<_> = doc.nested_blocks().collect();
+        let blocks: Vec<_> = doc.child_blocks().collect();
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[1].raw_context().as_ref(), "comment");
         assert_xpath(&doc, "//p", 1);
@@ -1700,7 +1700,7 @@ mod example_blocks {
     // blocks this crate emits for mid-document attribute entries (Asciidoctor
     // does not model those as blocks).
     fn example_blocks<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::Block<'a>> {
-        doc.nested_blocks()
+        doc.child_blocks()
             .filter(|b| b.raw_context().as_ref() == "example")
             .collect()
     }
@@ -2124,7 +2124,7 @@ mod example_blocks {
         // The open block does not support a caption, so `caption()` is `None`
         // even though the `caption` attribute is present on the block. (Ruby
         // additionally reads the raw `caption` attribute back off the block.)
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.caption(), None);
         assert_xpath(
             &doc,
@@ -3396,7 +3396,7 @@ mod preformatted_blocks {
         );
 
         let doc = Parser::default().parse("[,ruby]\n----\nputs 'Hello, Ruby!'\n----\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.declared_style(), Some("source"));
         assert_eq!(
             block
@@ -3435,7 +3435,7 @@ mod preformatted_blocks {
         let doc =
             Parser::default().parse(":source-language: ruby\n\n----\nputs 'Hello, Ruby!'\n----\n");
         let block = doc
-            .nested_blocks()
+            .child_blocks()
             .find(|b| b.raw_context().as_ref() == "listing")
             .unwrap();
         assert_eq!(block.declared_style(), Some("source"));
@@ -3464,7 +3464,7 @@ mod preformatted_blocks {
 
         let doc = Parser::default().parse("[listing,ruby]\n----\nputs 'Hello, Ruby!'\n----\n");
         let matches: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter(|b| b.raw_context().as_ref() == "listing")
             .collect();
         assert_eq!(matches.len(), 1);
@@ -3503,7 +3503,7 @@ mod preformatted_blocks {
         let doc = Parser::default()
             .parse(":source-language: ruby\n\n[listing]\n----\nputs 'Hello, Ruby!'\n----\n");
         let matches: Vec<_> = doc
-            .nested_blocks()
+            .child_blocks()
             .filter(|b| b.raw_context().as_ref() == "listing")
             .collect();
         assert_eq!(matches.len(), 1);
@@ -4652,7 +4652,7 @@ mod math_blocks {
 
         let doc = Parser::default()
             .parse(":stem: latexmath\n\n[stem,asciimath]\n++++\nsqrt(3x-1)+(1+x)^2 < y\n++++\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.declared_style(), Some("asciimath"));
         assert_css(&doc, ".stemblock", 1);
         assert_eq!(stem_pre_text(&doc), "\\$sqrt(3x-1)+(1+x)^2 < y\\$");
@@ -5376,7 +5376,7 @@ mod images {
         // NOTE: divergence — Asciidoctor also removes the `style` key from the
         // block's attributes; this crate retains it as a plain named attribute.
         let doc = Parser::default().parse("[style=value]\nimage::images/tiger.png[Tiger]\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.declared_style(), None);
     }
 
@@ -5615,7 +5615,7 @@ mod images {
         );
 
         let doc = Parser::default().parse(".The AsciiDoc Tiger\nimage::images/tiger.png[Tiger]\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.number(), Some(1));
         assert_xpath(
             &doc,
@@ -5657,7 +5657,7 @@ mod images {
 
         let doc = Parser::default()
             .parse("[caption=\"Voila! \"]\n.The AsciiDoc Tiger\nimage::images/tiger.png[Tiger]\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.number(), None);
         assert_xpath(
             &doc,
@@ -7251,7 +7251,7 @@ mod source_code {
 
         let doc = Parser::default()
             .parse("```ruby\nputs \"Hello, World!\"\n```\n\n``` javascript\nalert(\"Hello, World!\")\n```\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.raw_context().as_ref(), "listing");
         assert_eq!(block.declared_style(), Some("source"));
         assert_css(&doc, ".listingblock", 2);
@@ -7340,7 +7340,7 @@ mod source_code {
         );
 
         let doc = Parser::default().parse("[source]\n....\nconsole.log('Hello, World!')\n....\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.declared_style(), Some("source"));
         assert_css(&doc, ".listingblock", 1);
         assert_css(&doc, ".listingblock pre", 1);
@@ -7377,7 +7377,7 @@ mod source_code {
 
         let doc =
             Parser::default().parse("[source,js]\n....\nconsole.log('Hello, World!')\n....\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.declared_style(), Some("source"));
         assert_css(&doc, ".listingblock", 1);
         assert_css(&doc, ".listingblock pre", 1);
@@ -7815,7 +7815,7 @@ mod substitutions {
         );
 
         let doc = Parser::default().parse("[subs=\",\"]\n....\ncontent\n....\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.substitution_group(),
             SubstitutionGroup::Custom(vec![])
@@ -7852,7 +7852,7 @@ mod substitutions {
 
         let doc = Parser::default()
             .parse(":application: Asciidoctor\n\n[subs=\"+attributes,+macros\"]\n....\n{application}\n....\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.substitution_group(),
             SubstitutionGroup::Custom(vec![
@@ -7893,7 +7893,7 @@ mod substitutions {
         let doc = Parser::default().parse(
             ":application: Asciidoctor\n\n[subs=\"attributes+\"]\n....\n{application}\n....\n",
         );
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.substitution_group(),
             SubstitutionGroup::Custom(vec![
@@ -7922,7 +7922,7 @@ mod substitutions {
         );
 
         let doc = Parser::default().parse("[subs=\"-quotes,-replacements\"]\ncontent\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.substitution_group(),
             SubstitutionGroup::Custom(vec![
@@ -7967,7 +7967,7 @@ mod substitutions {
         let doc = Parser::default().parse(
             ":application: asciidoctor\n\n[subs=\"attributes+,-verbatim,+specialcharacters,+macros\"]\n....\nhttps://{application}.org[{gt}{gt}] <1>\n....\n",
         );
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.substitution_group(),
             SubstitutionGroup::Custom(vec![
@@ -8000,7 +8000,7 @@ mod substitutions {
         );
 
         let doc = Parser::default().parse("[subs=\"verbatim,-callouts\"]\n_hey now_ <1>\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.substitution_group(),
             SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters])
@@ -8050,7 +8050,7 @@ mod references {
         );
 
         let doc = Parser::default().parse("[[illegal$id,Reference Text]]\n----\ncontent\n----\n");
-        let block = doc.nested_blocks().next().unwrap();
+        let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.id(), None);
         assert!(!doc.catalog().contains_id("illegal$id"));
     }
