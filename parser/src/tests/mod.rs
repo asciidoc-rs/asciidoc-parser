@@ -10,5 +10,6 @@ mod block_nesting_depth;
 pub(crate) mod fixtures;
 pub(crate) mod prelude;
 pub(crate) mod sdd;
+mod security;
 mod table_cell_directive_warnings;
 mod xref;

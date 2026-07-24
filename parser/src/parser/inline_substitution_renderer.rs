@@ -734,11 +734,17 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         let mut dimension_attrs = String::new();
 
         if let Some(width) = params.width {
-            dimension_attrs.push_str(&format!(r#" width="{width}""#));
+            dimension_attrs.push_str(&format!(
+                r#" width="{width}""#,
+                width = encode_attribute_value(width.to_owned())
+            ));
         }
 
         if let Some(height) = params.height {
-            dimension_attrs.push_str(&format!(r#" height="{height}""#));
+            dimension_attrs.push_str(&format!(
+                r#" height="{height}""#,
+                height = encode_attribute_value(height.to_owned())
+            ));
         }
 
         if let Some(title) = params.attrlist.named_attribute("title") {
@@ -779,16 +785,23 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // display the object.
             let fallback = if let Some(fallback) = params.attrlist.named_attribute("fallback") {
                 let fallback_src = self.image_src(fallback.value(), params.attrlist, params.parser);
-                format!(r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#)
+                format!(
+                    r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#,
+                    fallback_src = encode_attribute_value(fallback_src)
+                )
             } else {
                 format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt)
             };
 
             format!(
-                r#"<object type="image/svg+xml" data="{src}"{dimension_attrs}>{fallback}</object>"#
+                r#"<object type="image/svg+xml" data="{src}"{dimension_attrs}>{fallback}</object>"#,
+                src = encode_attribute_value(src.clone())
             )
         } else {
-            format!(r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#)
+            format!(
+                r#"<img src="{src}" alt="{alt_encoded}"{dimension_attrs}>"#,
+                src = encode_attribute_value(src.clone())
+            )
         };
 
         let link_self_href = if inline_svg { None } else { Some(src.as_str()) };
@@ -846,33 +859,55 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             if let Some(icons) = icons.as_maybe_str()
                 && icons == "font"
             {
+                // Every fragment interpolated into the `class`/`title`
+                // attributes below is escaped for the `"` delimiter, mirroring
+                // the `alt` handling in the image branch. These values are
+                // already special-character-escaped (`< > &`) upstream, but a
+                // stray `"` in an author-supplied `target`, `size`, `flip`,
+                // `rotate`, or `title` would otherwise break out of its
+                // attribute.
                 let mut i_class_attrs: Vec<String> = vec![
                     "fa".to_owned(),
-                    format!("fa-{target}", target = params.target),
+                    format!(
+                        "fa-{target}",
+                        target = encode_attribute_value(params.target.to_owned())
+                    ),
                 ];
 
                 if let Some(size) = params.attrlist.named_or_positional_attribute("size", 1) {
-                    i_class_attrs.push(format!("fa-{size}", size = size.value()));
+                    i_class_attrs.push(format!(
+                        "fa-{size}",
+                        size = encode_attribute_value(size.value().to_owned())
+                    ));
                 }
 
                 if let Some(flip) = params.attrlist.named_attribute("flip") {
-                    i_class_attrs.push(format!("fa-flip-{flip}", flip = flip.value()));
+                    i_class_attrs.push(format!(
+                        "fa-flip-{flip}",
+                        flip = encode_attribute_value(flip.value().to_owned())
+                    ));
                 } else if let Some(rotate) = params.attrlist.named_attribute("rotate") {
-                    i_class_attrs.push(format!("fa-rotate-{rotate}", rotate = rotate.value()));
+                    i_class_attrs.push(format!(
+                        "fa-rotate-{rotate}",
+                        rotate = encode_attribute_value(rotate.value().to_owned())
+                    ));
                 }
 
                 format!(
                     r##"<i class="{i_class_attr_val}"{title_attr}></i>"##,
                     i_class_attr_val = i_class_attrs.join(" "),
                     title_attr = if let Some(title) = params.attrlist.named_attribute("title") {
-                        format!(r#" title="{title}""#, title = title.value())
+                        format!(
+                            r#" title="{title}""#,
+                            title = encode_attribute_value(title.value().to_owned())
+                        )
                     } else {
                         "".to_owned()
                     }
                 )
             } else {
                 let mut attrs: Vec<String> = vec![
-                    format!(r#"src="{src}""#),
+                    format!(r#"src="{src}""#, src = encode_attribute_value(src.clone())),
                     format!(
                         r#"alt="{alt}""#,
                         alt = encode_attribute_value(params.alt.to_string())
@@ -880,15 +915,24 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 ];
 
                 if let Some(width) = params.attrlist.named_attribute("width") {
-                    attrs.push(format!(r#"width="{width}""#, width = width.value()));
+                    attrs.push(format!(
+                        r#"width="{width}""#,
+                        width = encode_attribute_value(width.value().to_owned())
+                    ));
                 }
 
                 if let Some(height) = params.attrlist.named_attribute("height") {
-                    attrs.push(format!(r#"height="{height}""#, height = height.value()));
+                    attrs.push(format!(
+                        r#"height="{height}""#,
+                        height = encode_attribute_value(height.value().to_owned())
+                    ));
                 }
 
                 if let Some(title) = params.attrlist.named_attribute("title") {
-                    attrs.push(format!(r#"title="{title}""#, title = title.value()));
+                    attrs.push(format!(
+                        r#"title="{title}""#,
+                        title = encode_attribute_value(title.value().to_owned())
+                    ));
                 }
 
                 format!(
@@ -925,7 +969,13 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let link = format!(
             r##"<a href="{target}"{id}{class}{title}{link_constraint_attrs}>{link_text}</a>"##,
-            target = params.target,
+            // The target arrives here already special-character-escaped (`< > &`)
+            // by the substitution pipeline, but that step leaves `"` intact. A
+            // stray `"` in the target would otherwise close the `href` attribute
+            // and let an author inject further attributes (e.g. an event
+            // handler), so escape the quote delimiter here – mirroring the
+            // image `alt`/`title` handling.
+            target = encode_attribute_value(params.target.clone()),
             id = if let Some(id) = id {
                 format!(r#" id="{id}""#)
             } else {
@@ -976,6 +1026,11 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         let constraint_attrs = xref_constraint_attrs(params.window);
 
+        // Each `href` below is escaped for the `"` delimiter before it is
+        // interpolated into the attribute. The destinations are already
+        // special-character-escaped (`< > &`) upstream, but a stray `"` in a
+        // crafted or unresolved target would otherwise break out of the `href`
+        // attribute (see the `class`/roles escaping above).
         match (params.resolved, params.derived) {
             (Some(resolved), _) => {
                 // Explicit link text always wins; otherwise use the target's
@@ -1005,7 +1060,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
-                    href = resolved.href
+                    href = encode_attribute_value(resolved.href.clone())
                 ));
             }
 
@@ -1019,7 +1074,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r#"<a href="{href}"{class}{constraint_attrs}>{text}</a>"#,
-                    href = derived.href
+                    href = encode_attribute_value(derived.href.clone())
                 ));
             }
 
@@ -1033,7 +1088,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
                 dest.push_str(&format!(
                     r##"<a href="#{target}"{class}{constraint_attrs}>{text}</a>"##,
-                    target = params.target
+                    target = encode_attribute_value(params.target.to_owned())
                 ));
             }
         }
@@ -1209,16 +1264,33 @@ fn render_icon_or_image(
     // instead drops the anchor entirely; this crate keeps it with the literal
     // `self` target.)
     if let Some(link) = attrlist.named_attribute("link") {
-        let href = if link.value() == "self" {
+        let is_self = link.value() == "self";
+
+        let href = if is_self {
             link_self_href.unwrap_or("self")
         } else {
             link.value()
         };
 
-        img = format!(
-            r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
-            link_constraint_attrs = link_constraint_attrs(attrlist, None)
-        );
+        // An explicit `link=` destination whose scheme could execute script is
+        // not turned into a live link; the image is rendered without the
+        // wrapping anchor. Escaping the `"` delimiter alone would still leave a
+        // live `javascript:` URI, so the destination is rejected outright – the
+        // same policy the explicit `link:` macro applies, and the macro layer
+        // records the accompanying warning. `link=self` names the image's own
+        // `src` (which may legitimately be a `data:` image URI), so it is
+        // exempt.
+        if is_self || !has_dangerous_scheme(link.value()) {
+            img = format!(
+                r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
+                // Both sources of `href` – the image's own `src` (a resolved web
+                // path that can carry a stray `"`) and an author-supplied
+                // `link=` value – are escaped for the `"` delimiter so neither
+                // can break out of the attribute.
+                href = encode_attribute_value(href.to_owned()),
+                link_constraint_attrs = link_constraint_attrs(attrlist, None)
+            );
+        }
     }
 
     let mut roles: Vec<&str> = attrlist.roles();
@@ -1238,6 +1310,31 @@ fn render_icon_or_image(
 
 fn encode_attribute_value(value: String) -> String {
     value.replace('"', "&quot;")
+}
+
+/// Reports whether `target` begins with a URI scheme that can execute script
+/// when placed in an `href` – `javascript:`, `data:`, or `vbscript:`.
+///
+/// Leading control and space characters are ignored first, because a browser
+/// strips them before it parses the scheme (so `"\u{1}javascript:…"` is still
+/// live). The comparison is ASCII-case-insensitive.
+///
+/// Escaping the quote delimiter (see [`encode_attribute_value`]) stops an
+/// author from breaking out of an attribute, but not from placing a live
+/// script URI in an `href`; that requires rejecting the scheme outright. This
+/// guards the explicit `link:` macro and the `image:`/`icon:` `link=`
+/// attribute. The auto-linker already restricts bare URLs to a safe scheme set
+/// (`https?`/`file`/`ftp`/`irc`).
+pub(crate) fn has_dangerous_scheme(target: &str) -> bool {
+    let target = target.trim_start_matches(|c: char| c <= ' ');
+
+    const DANGEROUS_SCHEMES: [&str; 3] = ["javascript:", "data:", "vbscript:"];
+
+    DANGEROUS_SCHEMES.iter().any(|scheme| {
+        target
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    })
 }
 
 /// Escapes a value for safe interpolation into an HTML attribute.
