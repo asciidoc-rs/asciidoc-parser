@@ -17,7 +17,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle, has_dangerous_scheme,
+        LinkRenderParams, MenuRenderParams, XrefStyle, has_dangerous_scheme,
     },
     warnings::WarningType,
 };
@@ -747,8 +747,13 @@ fn strip_see_and_seealso(term: &str) -> String {
 // the scheme. A plain ASCII `[\ \t]` would leave such a URL as literal text
 // (see #768).
 //
-// `InlineLinkReplacer` normalizes the two capture-group sets into a single view
-// (see `NormalizedCaps`), so the numbering below is only referenced there.
+// The `link:` prefix is broken out into its own branch (below) that *requires*
+// a trailing `[…]`, so a `link:` with no brackets simply fails to match here
+// rather than matching as a bare link and then being rejected as invalid macro
+// syntax in the replacer.
+//
+// `InlineLinkReplacer` normalizes the three capture-group sets into a single
+// view (see `NormalizedCaps`), so the numbering below is only referenced there.
 static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
@@ -765,14 +770,24 @@ static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
                                                               # group 7: trailing char
             )
           |
-            #### NON-ANGLE branch: no `&gt;` alternative (unreachable without `&lt;`).
-            ( ^ | link: | [\ \t\p{Zs}] | [>\(\)\[\];"'] )     # group 8: prefix
+            #### LINK-MACRO branch: a `link:` prefix, which REQUIRES a trailing
+            #### `[…]`. Because this branch has no bare-link alternative, a
+            #### `link:` followed by a URL but no brackets does not match at all
+            #### (it is left as literal text), so it can never reach the
+            #### invalid-macro-syntax path in the replacer.
+            ( link: )                                         # group 8: prefix
             ( \\? (?: https? | file | ftp | irc ):// )        # group 9: scheme
+            ( [^\s\[\]]+ )                                    # group 10: target
+            \[ ( | .*?[^\\] ) \]                              # group 11: attrlist
+          |
+            #### NON-ANGLE branch: no `&gt;` alternative (unreachable without `&lt;`).
+            ( ^ | [\ \t\p{Zs}] | [>\(\)\[\];"'] )             # group 12: prefix
+            ( \\? (?: https? | file | ftp | irc ):// )        # group 13: scheme
             (?:
-                ( [^\s\[\]]+ )                                # group 10: target
-                \[ ( | .*?[^\\] ) \]                          # group 11: attrlist
-              | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )          # group 12: bare link,
-                                                              # group 13: trailing char
+                ( [^\s\[\]]+ )                                # group 14: target
+                \[ ( | .*?[^\\] ) \]                          # group 15: attrlist
+              | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )          # group 16: bare link,
+                                                              # group 17: trailing char
             )
         )
     "#,
@@ -781,9 +796,10 @@ static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// A branch-agnostic view over the capture groups of [`INLINE_LINK`], which has
-/// two parallel top-level branches (angle / non-angle). Exactly one branch
-/// participates in any given match; this resolves the relevant groups so the
-/// replacer doesn't have to special-case the branch numbering everywhere.
+/// three parallel top-level branches (angle / link-macro / non-angle). Exactly
+/// one branch participates in any given match; this resolves the relevant
+/// groups so the replacer doesn't have to special-case the branch numbering
+/// everywhere.
 struct NormalizedCaps<'c, 't> {
     caps: &'c Captures<'t>,
 
@@ -800,13 +816,15 @@ struct NormalizedCaps<'c, 't> {
     /// URL captured inside `<…&gt;`; only present in the ANGLE branch.
     angle_url: Option<usize>,
 
-    /// Bare (auto-linked) URL.
-    bare: usize,
+    /// Bare (auto-linked) URL; absent in the LINK-MACRO branch, which always
+    /// has a trailing attrlist.
+    bare: Option<usize>,
 }
 
 impl<'c, 't> NormalizedCaps<'c, 't> {
     fn new(caps: &'c Captures<'t>) -> Self {
         if caps.get(1).is_some() {
+            // ANGLE branch.
             NormalizedCaps {
                 caps,
                 is_angle: true,
@@ -815,9 +833,11 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
                 target: 3,
                 attrlist: 4,
                 angle_url: Some(5),
-                bare: 6,
+                bare: Some(6),
             }
-        } else {
+        } else if caps.get(8).is_some() {
+            // LINK-MACRO branch: a `link:` prefix always paired with a trailing
+            // attrlist, so there is no bare-link group.
             NormalizedCaps {
                 caps,
                 is_angle: false,
@@ -826,7 +846,19 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
                 target: 10,
                 attrlist: 11,
                 angle_url: None,
-                bare: 12,
+                bare: None,
+            }
+        } else {
+            // NON-ANGLE branch.
+            NormalizedCaps {
+                caps,
+                is_angle: false,
+                prefix: 12,
+                scheme: 13,
+                target: 14,
+                attrlist: 15,
+                angle_url: None,
+                bare: Some(16),
             }
         }
     }
@@ -852,7 +884,7 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
     }
 
     fn bare(&self) -> Option<Match<'t>> {
-        self.caps.get(self.bare)
+        self.bare.and_then(|g| self.caps.get(g))
     }
 }
 
@@ -865,9 +897,9 @@ impl Replacer for InlineLinkReplacer<'_> {
             .item
             .item;
 
-        // `INLINE_LINK` has two parallel top-level branches (angle / non-angle);
-        // resolve which one matched so the logic below can stay branch-agnostic.
-        // See the note on `INLINE_LINK` and issue #503.
+        // `INLINE_LINK` has three parallel top-level branches (angle /
+        // link-macro / non-angle); resolve which one matched so the logic below
+        // can stay branch-agnostic. See the note on `INLINE_LINK` and issue #503.
         let n = NormalizedCaps::new(caps);
         let prefix_match = n.prefix();
         let scheme_match = n.scheme();
@@ -909,7 +941,6 @@ impl Replacer for InlineLinkReplacer<'_> {
                 link_text,
                 extra_roles: vec!["bare"],
                 window: None,
-                type_: LinkRenderType::Link,
                 attrlist: &attrlist,
                 parser: self.0,
             };
@@ -959,14 +990,12 @@ impl Replacer for InlineLinkReplacer<'_> {
                 link_text = Some(attrlist.as_str().to_owned());
             }
         } else {
-            if prefix == "link:" || prefix == "\"" || prefix == "'" {
-                // Note from the Ruby implementation which also applies to this if clause:
-
-                // Invalid macro syntax (link: prefix w/o trailing square brackets or URL
-                // enclosed in quotes).
-
-                // FIXME: We probably shouldn't even get here when the link: prefix is present.
-                // The regex is doing too much (#908).
+            // Invalid macro syntax: a URL enclosed in quotes (a `"` or `'`
+            // prefix with no trailing square brackets). Asciidoctor also lists
+            // a bracket-less `link:` prefix here, but our `INLINE_LINK` routes
+            // that through a dedicated branch that requires a trailing `[…]`, so
+            // a `link:` prefix can never reach this point.
+            if prefix == "\"" || prefix == "'" {
                 dest.push_str(&caps[0]);
                 return;
             }
@@ -1060,7 +1089,6 @@ impl Replacer for InlineLinkReplacer<'_> {
             link_text,
             extra_roles,
             window,
-            type_: LinkRenderType::Link,
             attrlist: &attrlist,
             parser: self.0,
         };
@@ -1151,7 +1179,6 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
         }
 
         let mut attrlist: Option<Attrlist<'_>> = None;
-        let link_type = LinkRenderType::Link;
 
         let mut link_text = caps
             .get(5)
@@ -1235,7 +1262,6 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
             link_text: link_text.clone(),
             extra_roles,
             window,
-            type_: link_type,
             attrlist: &attrlist,
             parser: self.parser,
         };
@@ -1384,7 +1410,6 @@ impl Replacer for InlineEmailReplacer<'_> {
             link_text: caps[2].to_owned(),
             extra_roles: vec![],
             window: None,
-            type_: LinkRenderType::Link,
             attrlist: &attrlist,
             parser: self.0,
         };

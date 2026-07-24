@@ -25,7 +25,7 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// The renderer should write the appropriate rendering to `dest`.
     ///
     /// [quote substitution]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
-    fn render_quoted_substitition(
+    fn render_quoted_substitution(
         &self,
         type_: QuoteType,
         scope: QuoteScope,
@@ -376,10 +376,7 @@ pub struct LinkRenderParams<'a> {
     pub extra_roles: Vec<&'a str>,
 
     /// Target window selection (passed through to `window` function in HTML).
-    pub window: Option<&'static str>,
-
-    /// What type of link is being rendered?
-    pub type_: LinkRenderType,
+    pub window: Option<&'a str>,
 
     /// Attribute list.
     pub attrlist: &'a Attrlist<'a>,
@@ -387,13 +384,6 @@ pub struct LinkRenderParams<'a> {
     /// Parser. The rendered may find document settings (such as an image
     /// directory) in the parser's document attributes.
     pub parser: &'a Parser,
-}
-
-/// What type of link is being rendered?
-#[derive(Clone, Debug)]
-pub enum LinkRenderType {
-    /// TEMPORARY: I don't know the different types of links yet.
-    Link,
 }
 
 /// Provides parameters for rendering a [callout] number.
@@ -575,7 +565,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         }
     }
 
-    fn render_quoted_substitition(
+    fn render_quoted_substitution(
         &self,
         type_: QuoteType,
         _scope: QuoteScope,
@@ -1598,7 +1588,7 @@ fn xref_constraint_attrs(window: Option<&str>) -> String {
     )
 }
 
-fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&'static str>) -> String {
+fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&str>) -> String {
     let rel = if attrlist.has_option("nofollow") {
         Some("nofollow")
     } else {
