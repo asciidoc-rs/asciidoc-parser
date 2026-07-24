@@ -22,8 +22,8 @@ pub(crate) use inline_substitution_renderer::has_dangerous_scheme;
 pub use inline_substitution_renderer::{
     CalloutGuard, CalloutRenderParams, CharacterReplacementType, FootnoteRenderParams,
     HtmlSubstitutionRenderer, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-    InlineSubstitutionRenderer, LinkRenderParams, LinkRenderType, MenuRenderParams, QuoteScope,
-    QuoteType, SpecialCharacter, XrefRenderParams,
+    InlineSubstitutionRenderer, LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType,
+    SpecialCharacter, XrefRenderParams,
 };
 
 mod parser;

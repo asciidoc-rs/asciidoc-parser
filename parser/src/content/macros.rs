@@ -17,7 +17,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, LinkRenderType, MenuRenderParams, XrefStyle, has_dangerous_scheme,
+        LinkRenderParams, MenuRenderParams, XrefStyle, has_dangerous_scheme,
     },
     warnings::WarningType,
 };
@@ -909,7 +909,6 @@ impl Replacer for InlineLinkReplacer<'_> {
                 link_text,
                 extra_roles: vec!["bare"],
                 window: None,
-                type_: LinkRenderType::Link,
                 attrlist: &attrlist,
                 parser: self.0,
             };
@@ -1060,7 +1059,6 @@ impl Replacer for InlineLinkReplacer<'_> {
             link_text,
             extra_roles,
             window,
-            type_: LinkRenderType::Link,
             attrlist: &attrlist,
             parser: self.0,
         };
@@ -1151,7 +1149,6 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
         }
 
         let mut attrlist: Option<Attrlist<'_>> = None;
-        let link_type = LinkRenderType::Link;
 
         let mut link_text = caps
             .get(5)
@@ -1235,7 +1232,6 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
             link_text: link_text.clone(),
             extra_roles,
             window,
-            type_: link_type,
             attrlist: &attrlist,
             parser: self.parser,
         };
@@ -1384,7 +1380,6 @@ impl Replacer for InlineEmailReplacer<'_> {
             link_text: caps[2].to_owned(),
             extra_roles: vec![],
             window: None,
-            type_: LinkRenderType::Link,
             attrlist: &attrlist,
             parser: self.0,
         };
