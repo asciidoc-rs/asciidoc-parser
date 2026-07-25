@@ -13,6 +13,9 @@ impl<'src> Span<'src> {
     ///
     /// Please use more specific functions, such as `take_attr_name` or
     /// `take_user_attr_name`, when possible.
+    ///
+    /// TODO: Define identifier semantics from the AsciiDoc spec, or migrate the
+    /// remaining callers to the specific helpers and remove this (#948).
     pub(crate) fn take_ident(self) -> Option<MatchedItem<'src, Self>> {
         let mut chars = self.data.char_indices();
 

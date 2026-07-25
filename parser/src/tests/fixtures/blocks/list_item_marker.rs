@@ -6,10 +6,10 @@ use crate::tests::fixtures::{content::Content, span::Span};
 pub(crate) enum ListItemMarker {
     Hyphen(Span),
     Asterisks(Span),
-    #[allow(unused)] // TEMPORARY while building
+    #[allow(unused)] // TODO: Remove once this variant is used (#949).
     Bullet(Span),
     Dots(Span),
-    #[allow(unused)] // TEMPORARY while building
+    #[allow(unused)] // TODO: Remove once this variant is used (#949).
     AlphaListCapital(Span),
     AlphaListLower(Span),
     RomanNumeralLower(Span),
@@ -17,7 +17,7 @@ pub(crate) enum ListItemMarker {
     ArabicNumeral(Span),
     Callout(Span),
 
-    #[allow(unused)] // TEMPORARY while building
+    #[allow(unused)] // TODO: Remove once this variant is used (#949).
     DefinedTerm {
         term: Content,
         marker: Span,

@@ -104,7 +104,8 @@ impl<'src> ListBlock<'src> {
                 }
             }
 
-            // TEMPORARY: Ignore block metadata for list items.
+            // TODO: Attach real block metadata to list items instead of
+            // ignoring it (#946).
             let list_item_metadata = BlockMetadata {
                 title_source: None,
                 title: None,
