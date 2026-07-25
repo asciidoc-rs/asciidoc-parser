@@ -1356,3 +1356,44 @@ fn comment_then_hashes_without_space_does_not_terminate_paragraph() {
         }
     );
 }
+
+// A paragraph consisting solely of line comments carries no content, so it is
+// discarded rather than emitted as an empty block (issue #956). These tests pin
+// that a lone `// ...` line drops entirely at the block and document levels.
+
+#[test]
+fn lone_line_comment_is_dropped() {
+    // A bare comment paragraph parses to no block: `Block::parse` flattens the
+    // dropped outcome to `None`, and no `MissingBlockAfterTitleOrAttributeList`
+    // warning fires because there is no metadata attached.
+    let mut parser = Parser::default();
+
+    let maw = crate::blocks::Block::parse(crate::Span::new("// line comment\n"), &mut parser);
+
+    assert!(maw.item.is_none());
+    assert!(maw.warnings.is_empty());
+}
+
+#[test]
+fn line_comment_between_paragraphs_yields_two_blocks() {
+    // The repro from issue #956: a lone line comment offset by blank lines
+    // between two paragraphs must not surface as a spurious empty paragraph.
+    let doc = Parser::default().parse("first paragraph\n\n// line comment\n\nsecond paragraph\n");
+
+    let blocks: Vec<_> = doc.child_blocks().collect();
+    assert_eq!(blocks.len(), 2);
+
+    assert_eq!(
+        rendered_paragraphs(&doc),
+        &["first paragraph", "second paragraph"]
+    );
+}
+
+#[test]
+fn multi_line_all_comment_paragraph_is_dropped() {
+    // Every line of the paragraph is a comment, so the whole block is dropped
+    // and the surrounding paragraphs remain adjacent.
+    let doc = Parser::default().parse("before\n\n// one\n// two\n\nafter\n");
+
+    assert_eq!(rendered_paragraphs(&doc), &["before", "after"]);
+}

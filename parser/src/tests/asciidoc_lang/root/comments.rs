@@ -122,12 +122,12 @@ Line comments can be used strategically to separate blocks that otherwise have a
     );
 
     // A lone `//` between two lists forces them apart into two separate lists.
+    // The comment itself is dropped, so the only blocks are the two lists (no
+    // spurious empty paragraph sits between them – issue #956).
     let doc = Parser::default().parse("* first list\n\n//\n\n* second list");
-    let lists = doc
-        .child_blocks()
-        .filter(|b| matches!(b, Block::List(_)))
-        .count();
-    assert_eq!(lists, 2);
+    let blocks: Vec<_> = doc.child_blocks().collect();
+    assert_eq!(blocks.len(), 2);
+    assert!(blocks.iter().all(|b| matches!(b, Block::List(_))));
 
     non_normative!(
         r#"
@@ -143,9 +143,9 @@ Line comments can be used strategically to separate blocks that otherwise have a
 "#
     );
 
-    // DEVIATION: the comment line is retained as an empty-rendered paragraph
-    // rather than dropped, but it still serves as the block boundary described
-    // here.
+    // The single line comment serves as a block boundary between the two lists
+    // and is then dropped from the parsed document, matching the spec text below
+    // (verified by the block count above – issue #956).
     non_normative!(
         r#"
 In this case, the single line comment effectively acts as an empty paragraph that's dropped from the parsed document.

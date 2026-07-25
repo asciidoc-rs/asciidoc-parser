@@ -241,14 +241,6 @@ mod comments {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor. Asciidoctor drops a line comment
-    // entirely, leaving two paragraphs; this crate currently emits an empty
-    // paragraph where the blank-line-delimited `// line comment` sits, so
-    // `//p` counts 3 rather than 2. The comment text itself is removed. Kept
-    // `#[ignore]`d with the Ruby-intended assertions until the empty paragraph
-    // is suppressed.
-    // TODO: suppress the empty paragraph left by a standalone line comment.
-    #[ignore]
     #[test]
     fn line_comment_between_paragraphs_offset_by_blank_lines() {
         verifies!(

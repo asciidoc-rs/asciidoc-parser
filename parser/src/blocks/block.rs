@@ -131,10 +131,12 @@ pub(crate) enum BlockParseOutcome<'src> {
     /// A block was parsed.
     Parsed(MatchedItem<'src, Block<'src>>),
 
-    /// The input was recognized as a block macro but dropped at parse time
-    /// because its target referenced a missing attribute under
-    /// `attribute-missing=drop-line`. The contained span is where parsing
-    /// should resume (the dropped block's `after`).
+    /// The input was recognized as a block but deliberately discarded at parse
+    /// time, contributing no block to the tree. This covers a block macro whose
+    /// target referenced a missing attribute under
+    /// `attribute-missing=drop-line` as well as an all-comment paragraph
+    /// (issue #956). The contained span is where parsing should resume (the
+    /// dropped block's `after`).
     Dropped(Span<'src>),
 
     /// No block matched. This happens only for empty or all-blank input.
@@ -646,6 +648,23 @@ impl<'src> Block<'src> {
                 }
             }
         };
+
+        // A paragraph that is nothing but line comments (e.g. a lone `// ...`
+        // line offset by blank lines) carries no content. Asciidoctor discards
+        // such a block entirely rather than emitting an empty paragraph, so drop
+        // it here rather than surface a spurious empty block (issue #956). Only a
+        // bare, unstyled paragraph is dropped: a title, anchor, or attribute list
+        // (including `[comment]`) keeps the block, and `Dropped` advances parsing
+        // past the comment so the collection loop does not spin.
+        if let Some(ref mi) = simple_block_mi
+            && metadata.is_empty()
+            && mi.item.is_line_comment_only()
+        {
+            return MatchAndWarnings {
+                item: BlockParseOutcome::Dropped(mi.after),
+                warnings,
+            };
+        }
 
         let mut result = MatchAndWarnings {
             item: match simple_block_mi {

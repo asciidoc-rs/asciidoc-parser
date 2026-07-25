@@ -275,6 +275,39 @@ impl<'src> SimpleBlock<'src> {
     pub fn style(&self) -> SimpleBlockStyle {
         self.style
     }
+
+    /// Reports whether this block is nothing but AsciiDoc line comments (`//`,
+    /// but not a `///`+ delimiter), i.e. an all-comment paragraph that carries
+    /// no content.
+    ///
+    /// Asciidoctor discards such a paragraph entirely rather than emitting an
+    /// empty block, so the block dispatch drops it (issue #956). Only an
+    /// unstyled paragraph qualifies: a `[comment]`, literal, listing, or source
+    /// block retains its `//` lines as content, so its content is non-empty and
+    /// this returns `false`.
+    pub(crate) fn is_line_comment_only(&self) -> bool {
+        if self.style != SimpleBlockStyle::Paragraph || !self.content.is_empty() {
+            return false;
+        }
+
+        // Every non-empty line of the block's source must be a line comment.
+        // The same `//` / `///` test used to strip comment lines in
+        // `parse_lines` is applied here so the two stay in lockstep.
+        let mut next = self.source;
+        let mut saw_line = false;
+
+        while let Some(line_mi) = next.take_non_empty_line() {
+            let line = line_mi.item;
+            if !line.starts_with("//") || line.starts_with("///") {
+                return false;
+            }
+
+            saw_line = true;
+            next = line_mi.after;
+        }
+
+        saw_line
+    }
 }
 
 /// Parse the content-bearing lines for this block.

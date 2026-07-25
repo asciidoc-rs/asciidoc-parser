@@ -772,31 +772,6 @@ See xref:separating.adoc[] for more details.
                         anchor_reftext: None,
                         attrlist: None,
                     },),
-                    Block::Simple(SimpleBlock {
-                        content: Content {
-                            original: Span {
-                                data: "//-",
-                                line: 4,
-                                col: 1,
-                                offset: 20,
-                            },
-                            rendered: "",
-                        },
-                        source: Span {
-                            data: "//-",
-                            line: 4,
-                            col: 1,
-                            offset: 20,
-                        },
-                        style: SimpleBlockStyle::Paragraph,
-                        title_source: None,
-                        title: None,
-                        caption: None,
-                        number: None,
-                        anchor: None,
-                        anchor_reftext: None,
-                        attrlist: None,
-                    },),
                     Block::List(ListBlock {
                         type_: ListType::Unordered,
                         items: &[
