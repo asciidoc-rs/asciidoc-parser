@@ -984,14 +984,20 @@ impl<'p> PreprocessorState<'p> {
 
         impl Replacer for AttributeReplacer<'_> {
             fn replace_append(&mut self, caps: &regex::Captures<'_>, dest: &mut String) {
-                let attr_name = &caps[1];
+                let attr_name = &caps[2];
 
-                // An escaped reference (e.g. `\{id}`) is emitted literally with
-                // the escaping backslash removed, whether or not the attribute
-                // is set. This mirrors the content-substitution path and
-                // Asciidoctor's `sub_attributes` (see issue #667).
-                if caps[0].starts_with('\\') {
-                    dest.push_str(&caps[0][1..]);
+                // A backslash immediately before the opening brace (`\{id}`) or
+                // before the closing brace (`{id\}`) – or both, as in `\{id\}` –
+                // escapes the reference: it is emitted literally with the
+                // escaping backslash(es) removed, whether or not the attribute is
+                // set. This mirrors the content-substitution path and
+                // Asciidoctor's `sub_attributes`, which returns `{#{name}}` when
+                // either its leading or trailing backslash capture is present
+                // (see issue #667).
+                if caps.get(1).is_some() || caps.get(3).is_some() {
+                    dest.push('{');
+                    dest.push_str(attr_name);
+                    dest.push('}');
                     return;
                 }
 
@@ -2334,8 +2340,13 @@ static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     // preprocessor contexts too (e.g. `include::{café}[]` and conditional
     // directives), consistent with the main substitution matcher and with
     // `is_word_char`.
+    //
+    // Groups 1 and 3 capture the optional escaping backslash before the opening
+    // (`\{name}`) and closing (`{name\}`) brace, respectively; either one marks
+    // the reference escaped. This mirrors Asciidoctor's `(\\)?\{…(\\)?\}` and
+    // the main substitution matcher in `content::substitution_step`.
     #[allow(clippy::unwrap_used)]
-    Regex::new(r#"\\?\{(\w[\w-]*)\}"#).unwrap()
+    Regex::new(r#"(\\)?\{(\w[\w-]*)(\\)?\}"#).unwrap()
 });
 
 static CONDITIONAL_DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
@@ -3276,6 +3287,31 @@ mod tests {
 
         let handler = InlineFileHandler::from_pairs([(
             "pre{missing}post.adoc",
+            "Included via escaped literal target.",
+        )]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(processed_source, "Included via escaped literal target.\n");
+    }
+
+    #[test]
+    fn escaped_closing_brace_in_include_target_drops_backslash() {
+        // A backslash before the closing brace (`{missing\}`) – or both braces
+        // (`\{missing\}`) – escapes the reference the same way a leading
+        // backslash does: every escaping backslash is removed and the reference
+        // is left unexpanded, so the include target resolves against the literal
+        // `{missing}` form. This matches the content-substitution path and
+        // Asciidoctor.
+        let source = "include::pre{missing\\}mid\\{missing\\}post.adoc[]";
+
+        let handler = InlineFileHandler::from_pairs([(
+            "pre{missing}mid{missing}post.adoc",
             "Included via escaped literal target.",
         )]);
 

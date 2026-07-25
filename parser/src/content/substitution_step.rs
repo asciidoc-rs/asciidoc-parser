@@ -500,9 +500,18 @@ fn apply_quotes(content: &mut Content<'_>, parser: &Parser) {
 }
 
 static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
-    // Either a `counter`/`counter2` directive (group 1) with its `name[:seed]`
-    // expression (group 2), or a plain attribute name (group 3). This mirrors
+    // Either a `counter`/`counter2` directive (group 2) with its `name[:seed]`
+    // expression (group 3), or a plain attribute name (group 4). This mirrors
     // the `counter2?:` branch of Asciidoctor's `AttributeReferenceRx`.
+    //
+    // Groups 1 and 5 capture the optional escaping backslash before the opening
+    // (`\{name}`) and closing (`{name\}`) brace, respectively; either one marks
+    // the reference escaped. This mirrors Asciidoctor's
+    // `(\\)?\{…(\\)?\}`, whose `$1`/`$4` capture the same two backslashes.
+    //
+    // The counter expression is matched non-greedily (`+?`) so a trailing
+    // escape backslash (`{counter:n\}`) is left for group 5 rather than being
+    // swallowed into the expression, again matching Asciidoctor's `#{CC_ANY}+?`.
     //
     // The attribute-name class `\w` (Unicode `\p{Word}`) accepts any Unicode
     // word character, matching Asciidoctor's `#{CG_WORD}[#{CC_WORD}-]*`, so
@@ -510,7 +519,7 @@ static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     // used to recognize and sanitize an attribute-entry name (see
     // `is_word_char`), so a name and a reference to it always agree.
     #[allow(clippy::unwrap_used)]
-    Regex::new(r#"\\?\{(?:(counter2?):([^{}]+)|(\w[\w-]*))\}"#).unwrap()
+    Regex::new(r#"(\\)?\{(?:(counter2?):([^{}]+?)|(\w[\w-]*))(\\)?\}"#).unwrap()
 });
 
 /// How the processor handles a reference to a missing attribute, controlled by
@@ -669,7 +678,7 @@ impl<'p> AttributeReplacer<'p> {
 
     /// Returns the source span to attribute a `warn` warning to for the
     /// reference at `index` on this line, whose matched text (including any
-    /// leading escape backslash) is `matched`.
+    /// escape backslash) is `matched`.
     ///
     /// Falls back to [`fallback_source`](Self::fallback_source) unless a
     /// retained source-line match at `index` exists *and* its text equals
@@ -694,21 +703,39 @@ impl Replacer for AttributeReplacer<'_> {
         let match_index = self.match_index;
         self.match_index += 1;
 
-        let escaped = caps[0].starts_with('\\');
+        // A backslash immediately before the opening brace (`\{name}`) or before
+        // the closing brace (`{name\}`) – or both, as in `\{name\}` – escapes
+        // the reference: it is emitted literally with the escaping backslash(es)
+        // removed and left unexpanded, whether or not the attribute is set. An
+        // escaped reference is never treated as a missing reference, so it
+        // neither drops the line nor warns, and an escaped counter directive
+        // does not advance the counter. This mirrors Asciidoctor, whose
+        // `sub_attributes` returns `{#{name}}` when either its leading (`$1`) or
+        // trailing (`$4`) backslash capture is present, before any counter,
+        // missing-attribute, or resolution handling runs.
+        if caps.get(1).is_some() || caps.get(5).is_some() {
+            dest.push('{');
+
+            // Groups 2 (the `counter`/`counter2` directive) and 3 (its
+            // expression) participate together; a plain reference is group 4.
+            if let Some(directive) = caps.get(2) {
+                dest.push_str(directive.as_str());
+                dest.push(':');
+                dest.push_str(&caps[3]);
+            } else {
+                dest.push_str(&caps[4]);
+            }
+
+            dest.push('}');
+            return;
+        }
 
         // A `counter`/`counter2` directive resolves (and advances) a counter
         // rather than looking up an existing attribute.
-        if let Some(directive) = caps.get(1) {
-            if escaped {
-                // An escaped counter reference is emitted literally (without the
-                // backslash) and does not advance the counter.
-                dest.push_str(&caps[0][1..]);
-                return;
-            }
-
-            // Group 2 always participates when group 1 does (same alternation
+        if let Some(directive) = caps.get(2) {
+            // Group 3 always participates when group 2 does (same alternation
             // branch). The expression is `name` or `name:seed`.
-            let mut parts = caps[2].splitn(2, ':');
+            let mut parts = caps[3].splitn(2, ':');
             let name = parts.next().unwrap_or_default();
             let seed = parts.next();
 
@@ -721,19 +748,8 @@ impl Replacer for AttributeReplacer<'_> {
             return;
         }
 
-        // Otherwise this is a plain attribute reference (group 3).
-        let attr_name = &caps[3];
-
-        // An escaped reference (e.g. `\{id}`) is emitted literally with the
-        // escaping backslash removed, whether or not the attribute is set. It is
-        // never treated as a missing reference, so it neither drops the line nor
-        // warns. This mirrors Asciidoctor, whose `sub_attributes` returns the
-        // match minus its leading backslash before any missing-attribute
-        // handling runs.
-        if escaped {
-            dest.push_str(&caps[0][1..]);
-            return;
-        }
+        // Otherwise this is a plain attribute reference (group 4).
+        let attr_name = &caps[4];
 
         // Resolve the reference case-insensitively: attribute names are stored
         // lower-cased (both an attribute-entry definition and an API-supplied
@@ -1743,6 +1759,58 @@ mod tests {
         #[test]
         fn escaped_counter_directive_is_literal_and_does_not_advance() {
             let mut content = Content::from(crate::Span::new("\\{counter:n} {counter:n}"));
+            let p = Parser::default();
+            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed("{counter:n} 1".to_string().into_boxed_str())
+            );
+        }
+
+        #[test]
+        fn escaped_reference_with_both_braces_escaped_drops_backslashes() {
+            // `\{name\}` escapes the reference the same way `\{name}` does: both
+            // backslashes are removed and the reference is left unexpanded, even
+            // when the attribute is set. This is the form Asciidoctor produces
+            // for `\{group-id\}`.
+            let p = Parser::default().with_intrinsic_attribute(
+                "group-id",
+                "42",
+                crate::parser::ModificationContext::Anywhere,
+            );
+
+            let mut content = Content::from(crate::Span::new("\\{group-id\\}"));
+            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed("{group-id}".to_string().into_boxed_str())
+            );
+        }
+
+        #[test]
+        fn escaped_reference_with_only_trailing_brace_escaped_drops_backslash() {
+            // A backslash before the closing brace alone (`{name\}`) also escapes
+            // the reference, matching Asciidoctor's trailing-backslash capture.
+            let p = Parser::default().with_intrinsic_attribute(
+                "group-id",
+                "42",
+                crate::parser::ModificationContext::Anywhere,
+            );
+
+            let mut content = Content::from(crate::Span::new("{group-id\\}"));
+            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed("{group-id}".to_string().into_boxed_str())
+            );
+        }
+
+        #[test]
+        fn escaped_counter_with_trailing_backslash_is_literal_and_does_not_advance() {
+            // A trailing escape backslash on a counter directive (`{counter:n\}`)
+            // emits the reference literally (without the backslash) and does not
+            // advance the counter, so the following unescaped reference is `1`.
+            let mut content = Content::from(crate::Span::new("{counter:n\\} {counter:n}"));
             let p = Parser::default();
             SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
             assert_eq!(
