@@ -2,30 +2,28 @@ use super::{MatchedItem, Span};
 use crate::internal::is_word_char;
 
 impl<'src> Span<'src> {
-    /// Split the span, consuming an identifier if found.
+    /// Split the span, consuming a [block macro] name if found.
     ///
-    /// IMPORTANT: This function is not quite deprecated yet, but its use is
-    /// strongly discouraged. The concept of "identifier" is not crisply defined
-    /// in the Asciidoc documentation, so – for now – we're borrowing the
-    /// definition from Rust, which is a single alphabetic character or
-    /// underscore, followed by any number of alphanumeric characters or
-    /// underscores.
+    /// A macro name begins with a word character (a letter, numeral, or
+    /// underscore) and continues with any number of word or `-` characters
+    /// (e.g., `image`, `toc`, or `foo-bar`). This mirrors the name capture of
+    /// Asciidoctor's `BlockMacroRx` (`#{CG_WORD}[#{CC_WORD}-]*`), except that –
+    /// as elsewhere in this crate – a "word character" is restricted to ASCII
+    /// (`[A-Za-z0-9_]`); accepting the full Unicode word class is tracked
+    /// separately. (The same name grammar governs inline macros, but the sole
+    /// caller today parses block macros.)
     ///
-    /// Please use more specific functions, such as `take_attr_name` or
-    /// `take_user_attr_name`, when possible.
-    ///
-    /// TODO: Define identifier semantics from the AsciiDoc spec, or migrate the
-    /// remaining callers to the specific helpers and remove this (#948).
-    pub(crate) fn take_ident(self) -> Option<MatchedItem<'src, Self>> {
+    /// [block macro]: https://docs.asciidoctor.org/asciidoc/latest/macros/block-macro-processor/
+    pub(crate) fn take_block_macro_name(self) -> Option<MatchedItem<'src, Self>> {
         let mut chars = self.data.char_indices();
 
         let (_, c) = chars.next()?;
-        if !c.is_ascii_alphabetic() && c != '_' {
+        if !is_attr_name_start(c) {
             return None;
         }
 
         for (index, c) in chars {
-            if !c.is_ascii_alphanumeric() && c != '_' {
+            if !is_block_macro_name_continuation(c) {
                 return Some(self.into_parse_result(index));
             }
         }
@@ -193,41 +191,69 @@ fn is_attr_name_continuation(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'
 }
 
+/// Returns `true` when `c` may continue a macro name token: an ASCII word
+/// character or a hyphen. See [`Span::take_block_macro_name`].
+fn is_block_macro_name_continuation(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    mod take_ident {
+    mod take_block_macro_name {
         use crate::tests::prelude::*;
 
         #[test]
         fn empty_source() {
             let span = crate::Span::default();
-            assert!(span.take_ident().is_none());
+            assert!(span.take_block_macro_name().is_none());
         }
 
         #[test]
         fn starts_with_non_word() {
             let span = crate::Span::new("#not-a-proper-name");
-            assert!(span.take_ident().is_none());
+            assert!(span.take_block_macro_name().is_none());
         }
 
         #[test]
         fn starts_with_hyphen() {
             let span = crate::Span::new("-not-a-proper-name");
-            assert!(span.take_ident().is_none());
+            assert!(span.take_block_macro_name().is_none());
         }
 
         #[test]
         fn starts_with_number() {
-            let span = crate::Span::new("9not-a-proper-name");
-            assert!(span.take_ident().is_none());
+            // A numeral is a word character, so it may begin a macro name
+            // (Asciidoctor's `BlockMacroRx` accepts a leading digit).
+            let span = crate::Span::new("9x!");
+            let mi = span.take_block_macro_name().unwrap();
+
+            assert_eq!(
+                mi.item,
+                Span {
+                    data: "9x",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+
+            assert_eq!(
+                mi.after,
+                Span {
+                    data: "!",
+                    line: 1,
+                    col: 3,
+                    offset: 2
+                }
+            );
         }
 
         #[test]
-        fn stops_at_non_ident() {
+        fn stops_at_non_name_char() {
             let span = crate::Span::new("x#");
-            let mi = span.take_ident().unwrap();
+            let mi = span.take_block_macro_name().unwrap();
 
             assert_eq!(
                 mi.item,
@@ -251,9 +277,37 @@ mod tests {
         }
 
         #[test]
+        fn stops_at_dot() {
+            // Unlike an attribute name, a macro name does not include `.`, so
+            // the dot terminates the name.
+            let span = crate::Span::new("foo.bar::baz[]");
+            let mi = span.take_block_macro_name().unwrap();
+
+            assert_eq!(
+                mi.item,
+                Span {
+                    data: "foo",
+                    line: 1,
+                    col: 1,
+                    offset: 0
+                }
+            );
+
+            assert_eq!(
+                mi.after,
+                Span {
+                    data: ".bar::baz[]",
+                    line: 1,
+                    col: 4,
+                    offset: 3
+                }
+            );
+        }
+
+        #[test]
         fn alpha_numeric() {
             let span = crate::Span::new("i94!");
-            let mi = span.take_ident().unwrap();
+            let mi = span.take_block_macro_name().unwrap();
 
             assert_eq!(
                 mi.item,
@@ -279,7 +333,7 @@ mod tests {
         #[test]
         fn starts_with_underscore() {
             let span = crate::Span::new("_i94!");
-            let mi = span.take_ident().unwrap();
+            let mi = span.take_block_macro_name().unwrap();
 
             assert_eq!(
                 mi.item,
@@ -305,7 +359,7 @@ mod tests {
         #[test]
         fn contains_underscores() {
             let span = crate::Span::new("blah_blah_94 = foo");
-            let mi = span.take_ident().unwrap();
+            let mi = span.take_block_macro_name().unwrap();
 
             assert_eq!(
                 mi.item,
@@ -330,13 +384,15 @@ mod tests {
 
         #[test]
         fn contains_hyphens() {
+            // Hyphens are valid continuation characters, so `blah-blah-94` is a
+            // single macro name token.
             let span = crate::Span::new("blah-blah-94 = foo");
-            let mi = span.take_ident().unwrap();
+            let mi = span.take_block_macro_name().unwrap();
 
             assert_eq!(
                 mi.item,
                 Span {
-                    data: "blah",
+                    data: "blah-blah-94",
                     line: 1,
                     col: 1,
                     offset: 0
@@ -346,10 +402,10 @@ mod tests {
             assert_eq!(
                 mi.after,
                 Span {
-                    data: "-blah-94 = foo",
+                    data: " = foo",
                     line: 1,
-                    col: 5,
-                    offset: 4
+                    col: 13,
+                    offset: 12
                 }
             );
         }
@@ -357,7 +413,7 @@ mod tests {
         #[test]
         fn stops_at_eof() {
             let span = crate::Span::new("xyz");
-            let mi = span.take_ident().unwrap();
+            let mi = span.take_block_macro_name().unwrap();
 
             assert_eq!(
                 mi.item,
