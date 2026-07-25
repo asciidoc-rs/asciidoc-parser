@@ -3047,7 +3047,7 @@ mod quote {
 "##
         );
 
-        let doc = Parser::default().parse("[verse]\n_GET /groups/link:#group-id[{group-id}]_");
+        let doc = Parser::default().parse("[verse]\n_GET /groups/link:#group-id[\\{group-id\\}]_");
         let block = doc.child_blocks().next().unwrap();
         assert_eq!(
             block.rendered_content(),

@@ -1670,12 +1670,9 @@ mod quote_and_verse_blocks {
 
         let doc = Parser::default()
             .parse("[verse]\n____\n_GET /groups/link:#group-id[\\{group-id\\}]_\n____\n");
-        // NOTE: divergence from Asciidoctor: this crate leaves the escaped
-        // braces as `\{group-id\}` rather than rendering literal `{group-id}`;
-        // the em and link substitutions are otherwise applied as normal.
         assert_rendered_contains(
             &doc,
-            "<em>GET /groups/<a href=\"#group-id\">\\{group-id\\}</a></em>",
+            "<em>GET /groups/<a href=\"#group-id\">{group-id}</a></em>",
         );
     }
 
