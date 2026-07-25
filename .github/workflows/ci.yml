@@ -14,19 +14,15 @@ on:
 # Every job below is gated on the same condition: run automatically for
 # pushes, for pull requests whose head branch lives in this repository
 # (pushing a branch here already requires write access, so those are
-# trusted – this covers Claude Code and other agent-authored PRs), and for
-# maintainer- or dependabot-authored PRs. Pull requests from forks await a
-# human adding the "safe to test" label.
+# trusted – this covers maintainers, dependabot, and Claude Code and
+# other agent-authored PRs alike). Pull requests from forks await a human
+# adding the "safe to test" label.
 jobs:
   tests:
     name: Unit tests
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ${{ matrix.os }}
@@ -64,11 +60,7 @@ jobs:
       - name: Upload code coverage results
         if: |
           github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository ||
-          github.event.pull_request.author_association == 'OWNER' ||
-          github.event.pull_request.author_association == 'COLLABORATOR' ||
-          github.event.pull_request.author_association == 'MEMBER' ||
-          github.event.pull_request.user.login == 'dependabot[bot]'
+          github.event.pull_request.head.repo.full_name == github.repository
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -81,10 +73,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ${{ matrix.os }}
@@ -112,10 +100,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ${{ matrix.os }}
@@ -147,10 +131,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ubuntu-latest
@@ -175,10 +155,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ubuntu-latest
@@ -200,10 +176,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ubuntu-latest
@@ -225,10 +197,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ubuntu-latest
@@ -258,10 +226,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ubuntu-latest
@@ -283,10 +247,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ubuntu-latest
@@ -315,10 +275,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ubuntu-latest
@@ -343,10 +299,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     permissions:
@@ -379,10 +331,6 @@ jobs:
     if: |
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.user.login == 'dependabot[bot]' ||
       contains(github.event.pull_request.labels.*.name, 'safe to test')
 
     runs-on: ubuntu-latest
@@ -409,11 +357,7 @@ jobs:
       - name: Upload code coverage results
         if: |
           github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository ||
-          github.event.pull_request.author_association == 'OWNER' ||
-          github.event.pull_request.author_association == 'COLLABORATOR' ||
-          github.event.pull_request.author_association == 'MEMBER' ||
-          github.event.pull_request.user.login == 'dependabot[bot]'
+          github.event.pull_request.head.repo.full_name == github.repository
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
