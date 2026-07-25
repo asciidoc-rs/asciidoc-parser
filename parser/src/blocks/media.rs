@@ -96,7 +96,7 @@ impl<'src> MediaBlock<'src> {
             };
         }
 
-        let Some(name) = line.item.take_ident() else {
+        let Some(name) = line.item.take_block_macro_name() else {
             return MatchAndWarnings {
                 item: None,
                 warnings: vec![],
@@ -403,10 +403,12 @@ mod tests {
     }
 
     #[test]
-    fn err_macro_name_not_ident() {
+    fn err_macro_name_not_word_char() {
+        // A macro name must begin with a word character; a leading `#` is
+        // rejected before any name is captured (see `take_block_macro_name`).
         let mut parser = Parser::default();
         let maw = crate::blocks::MediaBlock::parse(
-            &BlockMetadata::new("98xyz::bar[blah,blap]"),
+            &BlockMetadata::new("#xyz::bar[blah,blap]"),
             &mut parser,
         );
 
