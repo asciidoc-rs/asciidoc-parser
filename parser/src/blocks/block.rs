@@ -28,7 +28,6 @@ use crate::{
 /// This enum represents all of the block types that are understood directly by
 /// this parser and also implements the [`IsBlock`] trait.
 #[derive(Clone, Eq, Hash, PartialEq)]
-#[allow(clippy::large_enum_variant)] // TODO: Reduce variant size or box the large variant (#947).
 #[non_exhaustive]
 pub enum Block<'src> {
     /// A block that’s treated as contiguous lines of paragraph text (and
