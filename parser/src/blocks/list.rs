@@ -95,7 +95,18 @@ impl<'src> ListBlock<'src> {
         loop {
             let next_line_mi = next_item_source.take_normalized_line();
 
-            if next_line_mi.item.data().is_empty() || next_line_mi.item.data() == "+" {
+            // A leading blank line ends the list. `ListItem::parse` discards the
+            // blank lines that merely separate items of the same list, so a blank
+            // line surfacing here means it deliberately stopped short of
+            // blank-separated block metadata, which decorates a new, separate
+            // block rather than the next item (matching Asciidoctor).
+            if next_line_mi.item.data().is_empty() {
+                break;
+            }
+
+            // A stray `+` continuation line between items is skipped at the top
+            // level; inside a nested list it ends the list.
+            if next_line_mi.item.data() == "+" {
                 if next_item_source.is_empty() || !parent_list_markers.is_empty() {
                     break;
                 } else {
@@ -104,16 +115,39 @@ impl<'src> ListBlock<'src> {
                 }
             }
 
-            // TODO: Attach real block metadata to list items instead of
-            // ignoring it (#946).
-            let list_item_metadata = BlockMetadata {
-                title_source: None,
-                title: None,
-                anchor: None,
-                anchor_reftext: None,
-                attrlist: None,
-                source: next_item_source,
-                block_start: next_item_source,
+            // Parse any block metadata (title, anchor, attribute list) that
+            // precedes this item's marker so it is captured on the item rather
+            // than dropped. A metadata line with no intervening blank line keeps
+            // the item in this list (matching Asciidoctor); the blank-separated
+            // case is handled in `ListItem::parse`, which finalizes the previous
+            // item before such metadata.
+            //
+            // Only subsequent items can carry their own metadata: the caller has
+            // already consumed any that precedes the list, so the first item's
+            // marker sits at `next_item_source`. Skipping the parse there keeps
+            // the common speculative `ListBlock::parse` on a non-list paragraph
+            // (tried and rejected for every such block) from re-parsing metadata
+            // it has already parsed once.
+            //
+            // The metadata's own warnings are held until the item is actually
+            // committed below, since a rejected speculative parse must not leak
+            // them.
+            let (list_item_metadata, mut list_item_metadata_warnings) = if first_marker.is_none() {
+                (
+                    BlockMetadata {
+                        title_source: None,
+                        title: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                        source: next_item_source,
+                        block_start: next_item_source,
+                    },
+                    vec![],
+                )
+            } else {
+                let maw = BlockMetadata::parse(next_item_source, parser);
+                (maw.item, maw.warnings)
             };
 
             let Some(list_item_marker_mi) =
@@ -191,6 +225,10 @@ impl<'src> ListBlock<'src> {
             ) else {
                 break;
             };
+
+            // The item is now committed, so its preceding metadata's warnings
+            // are real and can be surfaced.
+            warnings.append(&mut list_item_metadata_warnings);
 
             items.push(Block::ListItem(list_item_mi.item));
             next_item_source = list_item_mi.after;
@@ -1210,6 +1248,45 @@ mod tests {
         let second_outer = outer_items.next().unwrap();
         assert_eq!(second_outer.child_blocks().count(), 1);
         assert!(outer_items.next().is_none());
+    }
+
+    #[test]
+    fn block_metadata_on_a_subsequent_item_is_captured() {
+        // A block anchor and attribute list written directly before a later
+        // item (no intervening blank line) keep the item in this list and
+        // attach to it, rather than being dropped or splitting the list.
+        let list = list_parse("* one\n[[second]]\n[.special]\n* two").unwrap();
+
+        let items: Vec<_> = list.item.child_blocks().collect();
+        assert_eq!(items.len(), 2);
+
+        // The metadata attaches to the second item.
+        assert_eq!(items[1].anchor().unwrap().data(), "second");
+        assert_eq!(items[1].attrlist().unwrap().roles(), vec!["special"]);
+
+        // The first item carries none of it.
+        assert!(items[0].anchor().is_none());
+        assert!(items[0].attrlist().is_none());
+    }
+
+    #[test]
+    fn blank_line_before_metadata_starts_a_new_list() {
+        // A blank line followed by block metadata ends the list; that metadata
+        // decorates a new, separate list rather than the next item (matching
+        // Asciidoctor).
+        let doc = crate::Parser::default().parse("* one\n\n[[second]]\n* two");
+
+        let lists: Vec<_> = doc
+            .child_blocks()
+            .filter(|b| b.raw_context().as_ref() == "list")
+            .collect();
+        assert_eq!(lists.len(), 2);
+
+        // Each list holds a single item, and the blank-separated anchor
+        // attaches to the second list.
+        assert_eq!(lists[0].child_blocks().count(), 1);
+        assert_eq!(lists[1].child_blocks().count(), 1);
+        assert_eq!(lists[1].anchor().unwrap().data(), "second");
     }
 
     #[test]

@@ -231,7 +231,28 @@ impl<'src> ListItem<'src> {
 
             if next_line_mi.item.data().is_empty() {
                 if parent_list_markers.is_empty() {
-                    next = next.discard_empty_lines();
+                    let after_blanks = next.discard_empty_lines();
+
+                    // A blank line that genuinely separates this item's content
+                    // from following block metadata (a title, anchor, or
+                    // attribute list) ends the list: that metadata decorates a
+                    // new, separate block rather than the next item (matching
+                    // Asciidoctor). Leave `next` at the blank line so
+                    // `ListBlock::parse` stops here.
+                    //
+                    // Existing content is required so the phantom line-end after
+                    // an empty description-list term - not a real blank line -
+                    // still lets that term's own metadata-prefixed nested list
+                    // attach. A continuation marker likewise keeps such metadata
+                    // as part of this item.
+                    if !continuation_active
+                        && !blocks.is_empty()
+                        && !BlockMetadata::parse(after_blanks, parser).item.is_empty()
+                    {
+                        break;
+                    }
+
+                    next = after_blanks;
                     next_block_must_be_indented = true;
                     continue;
                 } else if blocks.len() > 1 {
