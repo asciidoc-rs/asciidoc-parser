@@ -462,7 +462,6 @@ pub struct VirtualNode {
     pub children: Vec<VirtualNode>,
 }
 
-#[allow(dead_code)] // TODO: Remove once these helpers are used (#949).
 impl VirtualNode {
     /// Creates a new virtual node with the specified tag.
     pub fn new(tag: impl Into<String>) -> Self {
