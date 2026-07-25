@@ -68,16 +68,18 @@ impl<'src> BlockMetadata<'src> {
         loop {
             let original_block_start = block_start;
 
-            // Try to parse a title.
+            // Try to parse a title. A block title is a line introduced by a
+            // single `.` marker followed by the title text. Per Asciidoctor's
+            // `BlockTitleRx` (`^\.(\.?[^ \t.]…)$`), the title text may itself
+            // begin with a single period as long as that period is not
+            // followed by a space, tab, or another period – so `..gitignore`
+            // is the block title `.gitignore`.
             if title_source.is_none() {
                 let maybe_title = block_start.take_normalized_line();
-                if maybe_title.item.starts_with('.') && !maybe_title.item.starts_with("..") {
-                    let title = maybe_title.item.discard(1);
-                    if title.take_whitespace().item.is_empty() {
-                        title_source = Some(title);
-                        block_start = maybe_title.after;
-                        continue;
-                    }
+                if let Some(title) = block_title_text(maybe_title.item) {
+                    title_source = Some(title);
+                    block_start = maybe_title.after;
+                    continue;
                 }
             }
 
@@ -323,6 +325,33 @@ fn skip_comments_before_section(source: Span<'_>, level_offset: i32) -> Option<S
         // A non-comment line ends the run. The metadata transfers across the
         // skipped comments only when they precede a section heading.
         return (skipped_any && is_section_header(data, level_offset)).then_some(probe);
+    }
+}
+
+/// Determine whether `line` is a block title – a line introduced by a single
+/// `.` marker – and, if so, return the span of the title text that follows the
+/// marker.
+///
+/// Mirrors Asciidoctor's `BlockTitleRx` (`^\.(\.?[^ \t.]…)$`): the marker `.`
+/// must be followed by title text whose first character may itself be a single
+/// `.`, provided that period is not followed by a space, tab, or a further `.`.
+/// So `.Title` yields `Title` and `..gitignore` yields `.gitignore`, while a
+/// leading `. ` (dot then space) or `..` alone is not a title.
+fn block_title_text(line: Span<'_>) -> Option<Span<'_>> {
+    if !line.starts_with('.') {
+        return None;
+    }
+
+    // Drop the leading `.` marker; what remains is the candidate title text.
+    let title = line.discard(1);
+
+    // Skip the title's own optional leading period, then require a character
+    // that is not a space, tab, or period.
+    let rest = title.data();
+    let after_optional_period = rest.strip_prefix('.').unwrap_or(rest);
+    match after_optional_period.chars().next() {
+        Some(c) if c != ' ' && c != '\t' && c != '.' => Some(title),
+        _ => None,
     }
 }
 
@@ -648,6 +677,56 @@ mod tests {
                 },
             }
         );
+    }
+
+    mod block_title {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn plain_title() {
+            let metadata = crate::blocks::metadata::BlockMetadata::new(".My Title\ncontent\n");
+            assert_eq!(metadata.title_str(), Some("My Title"));
+        }
+
+        #[test]
+        fn leading_period_title() {
+            // A block title whose first character is a period (`..gitignore`)
+            // is a title of `.gitignore`, not a paragraph.
+            let metadata = crate::blocks::metadata::BlockMetadata::new("..gitignore\ncontent\n");
+            assert_eq!(metadata.title_str(), Some(".gitignore"));
+        }
+
+        #[test]
+        fn leading_period_title_attaches_to_following_block() {
+            let doc = Parser::default().parse("..gitignore\n----\n/.bundle/\n----\n");
+
+            let block = doc.child_blocks().next().unwrap();
+            assert_eq!(block.title(), Some(".gitignore"));
+        }
+
+        #[test]
+        fn period_followed_by_space_is_not_a_title() {
+            // A leading `.` followed by a space is not a title marker, so the
+            // line is an ordinary paragraph with no title.
+            let metadata = crate::blocks::metadata::BlockMetadata::new(". not a title\ncontent\n");
+            assert!(metadata.title.is_none());
+        }
+
+        #[test]
+        fn double_period_alone_is_not_a_title() {
+            // `..` with no following text (the second period is not followed by
+            // a non-space, non-period character) is not a title.
+            let metadata = crate::blocks::metadata::BlockMetadata::new("..\ncontent\n");
+            assert!(metadata.title.is_none());
+        }
+
+        #[test]
+        fn triple_period_is_not_a_title() {
+            // After the marker `.`, the title's optional leading period must be
+            // followed by a non-period character, so `...x` is not a title.
+            let metadata = crate::blocks::metadata::BlockMetadata::new("...x\ncontent\n");
+            assert!(metadata.title.is_none());
+        }
     }
 
     mod merge_attribute_lines {
