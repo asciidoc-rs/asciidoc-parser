@@ -122,13 +122,33 @@ impl<'src> ListBlock<'src> {
             // case is handled in `ListItem::parse`, which finalizes the previous
             // item before such metadata.
             //
+            // Only subsequent items can carry their own metadata: the caller has
+            // already consumed any that precedes the list, so the first item's
+            // marker sits at `next_item_source`. Skipping the parse there keeps
+            // the common speculative `ListBlock::parse` on a non-list paragraph
+            // (tried and rejected for every such block) from re-parsing metadata
+            // it has already parsed once.
+            //
             // The metadata's own warnings are held until the item is actually
-            // committed below: this parse is also run speculatively (e.g. on a
-            // plain paragraph, where `ListBlock::parse` is tried and rejected),
-            // and leaking its warnings there would double-report them.
-            let list_item_metadata_maw = BlockMetadata::parse(next_item_source, parser);
-            let mut list_item_metadata_warnings = list_item_metadata_maw.warnings;
-            let list_item_metadata = list_item_metadata_maw.item;
+            // committed below, since a rejected speculative parse must not leak
+            // them.
+            let (list_item_metadata, mut list_item_metadata_warnings) = if first_marker.is_none() {
+                (
+                    BlockMetadata {
+                        title_source: None,
+                        title: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                        source: next_item_source,
+                        block_start: next_item_source,
+                    },
+                    vec![],
+                )
+            } else {
+                let maw = BlockMetadata::parse(next_item_source, parser);
+                (maw.item, maw.warnings)
+            };
 
             let Some(list_item_marker_mi) =
                 ListItemMarker::parse(list_item_metadata.block_start, parser)
