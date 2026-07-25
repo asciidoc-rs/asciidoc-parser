@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.27.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.26.0...v0.27.0)
+_25 July 2026_
+
+### Added
+
+* [**breaking**] Derive Hash on the public AST/output types; mark Warning non_exhaustive ([#940](https://github.com/asciidoc-rs/asciidoc-parser/pull/940))
+
+### Fixed
+
+* Capture block metadata on list items instead of dropping it ([#954](https://github.com/asciidoc-rs/asciidoc-parser/pull/954))
+
+### Other
+
+* Replace Span::take_ident with spec-grounded take_block_macro_name ([#953](https://github.com/asciidoc-rs/asciidoc-parser/pull/953))
+
 ## [0.26.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.25.0...v0.26.0)
 _24 July 2026_
 
