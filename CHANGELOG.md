@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.27.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.27.0...v0.27.1)
+_25 July 2026_
+
+### Fixed
+
+* Unescape `\{` and `\}` in attribute reference substitution ([#963](https://github.com/asciidoc-rs/asciidoc-parser/pull/963))
+* Recognize block title with a leading period (`..name`) ([#958](https://github.com/asciidoc-rs/asciidoc-parser/pull/958))
+
 ## [0.27.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.26.0...v0.27.0)
 _25 July 2026_
 
