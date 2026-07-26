@@ -1305,10 +1305,13 @@ mod levels {
 
         // NOTE: A document-level ID (`[[idname]]`/`[#idname]` above the document
         // title, or a block ID above it) sets the `id` on the standalone
-        // `<body>` and registers the document in the catalog. This crate does
-        // not model a document-level ID / body element / document self-entry, so
-        // the remaining Level-0 tests — which assert `body#id`, `doc.id`, and
-        // document catalog registration — are out of scope.
+        // `<body>` and registers the document in the catalog. This crate models
+        // the document-level ID itself — exposed through `Header::id` /
+        // `Document::id`, and exercised directly in the `header` unit tests for
+        // both the shorthand and `[[id]]` anchor forms — but does not
+        // model the standalone `<body>` element or the document self-entry in
+        // the catalog. The remaining Level-0 tests below assert `body#id` and
+        // catalog registration, so they stay out of scope.
         non_normative!(
             r##"
       test 'should assign id on document title to body' do
