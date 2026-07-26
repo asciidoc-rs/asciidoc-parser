@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.27.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.27.1...v0.27.2)
+_26 July 2026_
+
+### Fixed
+
+* Resolve cross-references to the document title (issues #965, #968) ([#970](https://github.com/asciidoc-rs/asciidoc-parser/pull/970))
+* Report `floating_title` context for discrete headings ([#967](https://github.com/asciidoc-rs/asciidoc-parser/pull/967))
+
 ## [0.27.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.27.0...v0.27.1)
 _25 July 2026_
 
