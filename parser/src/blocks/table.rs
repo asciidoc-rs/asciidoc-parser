@@ -10,7 +10,7 @@ use crate::{
         metadata::BlockMetadata, parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
-    document::{InterpretedValue, TocConfig, TocMode},
+    document::{Footnote, InterpretedValue, TocConfig, TocMode},
     parser::{
         AttributeValue, InlineSubstitutionRenderer, ModificationContext, ReferenceResolver,
         ReferenceWarnings, ResolvedAttributes, SourceLine, built_in_attr, built_in_attrs_iter,
@@ -1873,7 +1873,7 @@ fn process_content<'src>(
                 // (file, line), and so a table nested within cannot mis-map its
                 // spans against the document source map.
                 parser.push_owned_cell_source_map(cell_source_map);
-                let (title, inline, toc, blocks, attributes) =
+                let (title, inline, toc, blocks, attributes, footnotes) =
                     parse_asciidoc_cell_body(Span::new(source), parser, &mut owned_warnings);
 
                 let owned_root = Span::new(source);
@@ -1900,6 +1900,7 @@ fn process_content<'src>(
                     toc,
                     blocks,
                     attributes,
+                    footnotes,
                 }
             });
 
@@ -1923,15 +1924,16 @@ fn process_content<'src>(
 
             AsciiDocCell::Owned(Arc::new(owned))
         } else {
-            let (title, inline, toc, blocks, attributes) =
+            let (title, inline, toc, blocks, attributes, footnotes) =
                 parse_asciidoc_cell_body(trimmed, parser, warnings);
-            AsciiDocCell::Borrowed(BorrowedCell {
+            AsciiDocCell::Borrowed(Box::new(BorrowedCell {
                 title,
                 inline,
                 toc,
                 blocks,
                 attributes,
-            })
+                footnotes,
+            }))
         };
 
         parser.locked_attribute_names = saved_locks;
@@ -1956,8 +1958,8 @@ fn process_content<'src>(
 
 /// Parses the body of an AsciiDoc table cell – a nested, standalone AsciiDoc
 /// document – returning its (shown) title, whether its doctype is `inline`, its
-/// table-of-contents configuration, its blocks, and a snapshot of the cell's
-/// resolved attribute state.
+/// table-of-contents configuration, its blocks, a snapshot of the cell's
+/// resolved attribute state, and the footnotes defined within the cell.
 ///
 /// A leading level-0 title line (`= Title`) is the nested document's title
 /// rather than a section, so it is split off and rendered here (a level-0
@@ -1981,6 +1983,7 @@ fn parse_asciidoc_cell_body<'src>(
     TocConfig,
     Vec<Block<'src>>,
     ResolvedAttributes,
+    Vec<Footnote>,
 ) {
     let first_line = content.take_line();
     let (title_source, body) = if first_line.item.data().starts_with("= ") {
@@ -1995,9 +1998,10 @@ fn parse_asciidoc_cell_body<'src>(
     // A nested document keeps its own footnote registry: footnotes defined
     // inside this cell must not be shared with (or numbered into the list of)
     // the enclosing document. We swap in a fresh, empty footnote list for the
-    // duration of the cell parse and restore the parent's afterward, discarding
-    // the cell's footnotes (see issue #544). The `footnote-number` counter is a
-    // document-wide attribute and is deliberately *not* reset, so footnote
+    // duration of the cell parse and restore the parent's afterward (see issue
+    // #544). The cell's own footnotes are retained and returned so a renderer
+    // can emit the cell-local `#footnotes` block. The `footnote-number` counter
+    // is a document-wide attribute and is deliberately *not* reset, so footnote
     // numbering continues across the cell as Asciidoctor does.
     let saved_footnotes = parser.take_footnotes();
 
@@ -2026,6 +2030,10 @@ fn parse_asciidoc_cell_body<'src>(
     warnings.append(&mut maw.warnings);
 
     parser.pending_block_title = saved_pending_block_title;
+
+    // Take the cell's own footnotes (leaving the registry empty) before
+    // restoring the parent's, so they can be returned for the cell to expose.
+    let footnotes = parser.take_footnotes();
     parser.restore_footnotes(saved_footnotes);
 
     let inline = matches!(
@@ -2063,7 +2071,7 @@ fn parse_asciidoc_cell_body<'src>(
     // attribute state the caller restores to the parent's on return anyway).
     attributes.materialize_toc_attributes(toc.mode);
 
-    (title, inline, toc, maw.item.item, attributes)
+    (title, inline, toc, maw.item.item, attributes, footnotes)
 }
 
 /// Returns `true` when the cell content holds an `include::` preprocessor
@@ -2357,7 +2365,10 @@ pub enum TableCellContent<'src> {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum AsciiDocCell<'src> {
     /// Parsed in place from the parent document's source.
-    Borrowed(BorrowedCell<'src>),
+    ///
+    /// Boxed to keep the two variants' sizes close (the [`Owned`](Self::Owned)
+    /// variant is a single [`Arc`]).
+    Borrowed(Box<BorrowedCell<'src>>),
 
     /// Parsed from an owned, include-expanded source the cell carries.
     Owned(Arc<OwnedCell>),
@@ -2431,6 +2442,22 @@ impl<'src> AsciiDocCell<'src> {
         }
     }
 
+    /// Returns the footnotes defined within the cell, in document order.
+    ///
+    /// An AsciiDoc (`a`) cell is a nested, standalone document that keeps its
+    /// own footnote registry, isolated from the enclosing document (see issue
+    /// #544). These are the footnotes the cell defined, letting a renderer emit
+    /// the cell-local `#footnotes` block the way Asciidoctor renders the cell's
+    /// nested document. It mirrors
+    /// [`Catalog::footnotes`](crate::document::Catalog::footnotes), which
+    /// exposes the top-level document's own footnotes.
+    pub fn footnotes(&self) -> &[Footnote] {
+        match self {
+            Self::Borrowed(cell) => &cell.footnotes,
+            Self::Owned(cell) => &cell.borrow_dependent().footnotes,
+        }
+    }
+
     /// Returns `true` because an AsciiDoc table cell is always a nested,
     /// standalone document.
     ///
@@ -2481,9 +2508,9 @@ impl<'src> AsciiDocCell<'src> {
         }
     }
 
-    /// Resolves any deferred cross-references in the cell's blocks. `source` is
-    /// the enclosing cell's span, used to anchor warnings raised from an
-    /// [owned](Self::Owned) cell's private source.
+    /// Resolves any deferred cross-references in the cell's blocks and
+    /// footnotes. `source` is the enclosing cell's span, used to anchor
+    /// warnings raised from an [owned](Self::Owned) cell's private source.
     fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
@@ -2496,6 +2523,13 @@ impl<'src> AsciiDocCell<'src> {
                 for block in &mut cell.blocks {
                     block.resolve_references(resolver, renderer, warnings);
                 }
+
+                // A cell footnote records no document location (it is defined in
+                // an owned sub-source), so resolution falls back to `source`,
+                // the cell's span, for any unresolved-reference warning.
+                for footnote in &mut cell.footnotes {
+                    footnote.resolve_references(resolver, renderer, warnings, source);
+                }
             }
 
             // The owned store is shared behind an `Arc`, but references are
@@ -2503,14 +2537,29 @@ impl<'src> AsciiDocCell<'src> {
             // owner, so `get_mut` succeeds.
             Self::Owned(cell) => {
                 if let Some(cell) = Arc::get_mut(cell) {
-                    cell.with_dependent_mut(|_, dependent| {
-                        // These blocks borrow the cell's own owned source, so
-                        // their warnings are collected separately and then
-                        // re-anchored to the cell's span in the document.
+                    cell.with_dependent_mut(|owned_source, dependent| {
+                        // These blocks (and footnotes) borrow the cell's own
+                        // owned source, so their warnings are collected
+                        // separately and then re-anchored to the cell's span in
+                        // the document.
                         let mut owned_warnings = ReferenceWarnings::default();
 
                         for block in &mut dependent.blocks {
                             block.resolve_references(resolver, renderer, &mut owned_warnings);
+                        }
+
+                        // A cell footnote records no document location, so its
+                        // resolution falls back to the owned source span for any
+                        // warning; those warnings are re-homed to the cell's span
+                        // in the document below regardless.
+                        let owned_root = Span::new(owned_source);
+                        for footnote in &mut dependent.footnotes {
+                            footnote.resolve_references(
+                                resolver,
+                                renderer,
+                                &mut owned_warnings,
+                                owned_root,
+                            );
                         }
 
                         owned_warnings.rehome_into(warnings, source);
@@ -2530,6 +2579,7 @@ pub struct BorrowedCell<'src> {
     toc: TocConfig,
     blocks: Vec<Block<'src>>,
     attributes: ResolvedAttributes,
+    footnotes: Vec<Footnote>,
 }
 
 self_cell! {
@@ -2553,6 +2603,7 @@ struct OwnedCellInner<'src> {
     toc: TocConfig,
     blocks: Vec<Block<'src>>,
     attributes: ResolvedAttributes,
+    footnotes: Vec<Footnote>,
 }
 
 /// Parse the value of the `cols` attribute into a list of columns, mirroring
@@ -3282,6 +3333,7 @@ mod tests {
                 toc: TocConfig::disabled(),
                 blocks: vec![],
                 attributes: ResolvedAttributes::default(),
+                footnotes: vec![],
             }
         })));
 

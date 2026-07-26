@@ -656,7 +656,7 @@ fn render_template(
 /// (see [`Footnote::resolve_references`]).
 ///
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub(crate) struct FootnoteDeferred {
     /// The footnote text with opaque placeholder tokens marking where each
     /// cross-reference will be spliced in.
