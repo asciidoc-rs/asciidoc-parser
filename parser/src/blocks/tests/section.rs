@@ -513,6 +513,37 @@ fn discrete_heading_keeps_its_title() {
 }
 
 #[test]
+fn discrete_heading_reports_floating_title_context() {
+    // A discrete (floating) heading reports the `floating_title` context so a
+    // consumer switching on block context can distinguish it from an ordinary
+    // section, which reports `section`. Both the `float` and `discrete` styles
+    // produce a discrete heading.
+    for style in ["float", "discrete"] {
+        let doc = Parser::default().parse(&format!(
+            "[{style}]\n=== Independent Heading!\n\nnot in section"
+        ));
+
+        let Some(crate::blocks::Block::Section(heading)) = doc.child_blocks().next() else {
+            panic!("expected discrete heading");
+        };
+
+        assert_eq!(heading.raw_context().deref(), "floating_title");
+        assert_eq!(heading.resolved_context().deref(), "floating_title");
+        assert_eq!(heading.section_type(), SectionType::Discrete);
+    }
+
+    // An ordinary section still reports the `section` context.
+    let doc = Parser::default().parse("== Real Section\n\nin section");
+
+    let Some(crate::blocks::Block::Section(section)) = doc.child_blocks().next() else {
+        panic!("expected section");
+    };
+
+    assert_eq!(section.raw_context().deref(), "section");
+    assert_eq!(section.resolved_context().deref(), "section");
+}
+
+#[test]
 fn carried_title_does_not_escape_a_table_cell() {
     // A titled empty section at the end of an AsciiDoc table cell leaves a
     // block title pending. The cell is a nested standalone document, so that
