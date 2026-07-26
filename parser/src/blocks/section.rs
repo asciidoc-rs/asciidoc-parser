@@ -505,7 +505,16 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
     // circular), which per-content resolution cannot see.
 
     fn raw_context(&self) -> CowStr<'src> {
-        "section".into()
+        // A discrete (floating) heading is modeled by Asciidoctor as a block
+        // with the `floating_title` context rather than a section, so a
+        // consumer that switches on block context can tell it apart from an
+        // ordinary section – for instance, to exclude it from the table of
+        // contents or to pick a converter method.
+        if self.section_type == SectionType::Discrete {
+            "floating_title".into()
+        } else {
+            "section".into()
+        }
     }
 
     fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
@@ -3887,7 +3896,8 @@ mod tests {
             .unwrap();
 
             assert_eq!(mi.item.content_model(), ContentModel::Compound);
-            assert_eq!(mi.item.raw_context().deref(), "section");
+            assert_eq!(mi.item.raw_context().deref(), "floating_title");
+            assert_eq!(mi.item.resolved_context().deref(), "floating_title");
             assert_eq!(mi.item.level(), 1);
             assert_eq!(mi.item.section_title(), "Discrete Heading");
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
