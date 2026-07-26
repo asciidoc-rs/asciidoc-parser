@@ -1303,12 +1303,14 @@ mod levels {
 "##
         );
 
-        // NOTE: A document-level ID (`[[idname]]`/`[#idname]` above the document
-        // title, or a block ID above it) sets the `id` on the standalone
-        // `<body>` and registers the document in the catalog. This crate does
-        // not model a document-level ID / body element / document self-entry, so
-        // the remaining Level-0 tests — which assert `body#id`, `doc.id`, and
-        // document catalog registration — are out of scope.
+        // NOTE: A document-level ID above the document title sets the `id` on
+        // the standalone `<body>` and (in Asciidoctor) registers the document
+        // itself in the catalog. This crate models neither the `<body>` element
+        // nor a document `id` for the `[[idname]]` bracket form, so the tests
+        // that assert `body#id` or `doc.id` stay out of scope. It *does*
+        // register a document title carrying a shorthand ID (`[#id]`) in the
+        // catalog, so `should compute xreftext to document title` is verified as
+        // a real test below.
         non_normative!(
             r##"
       test 'should assign id on document title to body' do
@@ -1372,6 +1374,20 @@ mod levels {
         assert_equal doc, doc.catalog[:refs]['manual']
       end
 
+"##
+        );
+
+        // A cross-reference to a document title carrying an explicit shorthand
+        // ID (`[#id]`) resolves to the title's reference text. The crate
+        // registers the document title in the catalog under its ID (as a
+        // [`Section`](crate::document::RefType::Section) whose reference text is
+        // the doctitle), so an `<<id>>` to it renders the title rather than the
+        // bracketed `[id]` fallback – matching a cross-reference to an ordinary
+        // section.
+        #[test]
+        fn should_compute_xreftext_to_document_title() {
+            verifies!(
+                r##"
       test 'should compute xreftext to document title' do
         input = <<~'EOS'
         [#manual]
@@ -1384,6 +1400,21 @@ mod levels {
         assert_xpath '//a[text()="Reference Manual"]', output, 1
       end
 
+"##
+            );
+
+            let doc = Parser::default().parse(
+                "[#manual]\n= Reference Manual\n:xrefstyle: full\n\nThis is the <<manual>>.\n",
+            );
+
+            assert_eq!(
+                rendered_paragraphs(&doc),
+                vec![r##"This is the <a href="#manual">Reference Manual</a>."##]
+            );
+        }
+
+        non_normative!(
+            r##"
       test 'should discard style, role and options shorthand attributes defined on document title' do
         input = <<~'EOS'
         [style#idname.rolename%optionname]

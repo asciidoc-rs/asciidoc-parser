@@ -424,6 +424,50 @@ fn reference_to_this_document_by_name_resolves_within_it() {
 }
 
 #[test]
+fn reference_to_document_title_resolves_to_its_title() {
+    // A document title carrying an explicit ID is registered in the catalog
+    // under that ID (mirroring Asciidoctor, which registers the document itself
+    // under its ID). A cross-reference to it therefore renders the title's text
+    // rather than the bracketed `[id]` fallback – matching the behavior of a
+    // cross-reference to an ordinary section.
+    let doc = Parser::default()
+        .parse("[#manual]\n= Reference Manual\n:xrefstyle: full\n\nThis is the <<manual>>.\n");
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "This is the <a href=\"#manual\">Reference Manual</a>."
+    );
+}
+
+#[test]
+fn natural_reference_to_document_title_resolves() {
+    // The document title's reference text (its title) also feeds the reverse
+    // lookup, so a natural cross-reference by that text resolves to the same
+    // destination.
+    let doc = Parser::default()
+        .parse("[#manual]\n= Reference Manual\n\nThis is the <<Reference Manual>>.\n");
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "This is the <a href=\"#manual\">Reference Manual</a>."
+    );
+}
+
+#[test]
+fn explicit_reftext_wins_for_document_title_reference() {
+    // An explicit `reftext` attribute on the document takes precedence over the
+    // title as the cross-reference text, mirroring a whole-document
+    // self-reference.
+    let doc = Parser::default()
+        .parse("[#manual,reftext=The Manual]\n= Reference Manual\n\nThis is the <<manual>>.\n");
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "This is the <a href=\"#manual\">The Manual</a>."
+    );
+}
+
+#[test]
 fn host_resolver_can_override_a_derived_destination() {
     // The destination the parser derives for a target that names a document is
     // only a default: it is offered to the resolver (as

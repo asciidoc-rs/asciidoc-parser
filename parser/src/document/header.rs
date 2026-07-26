@@ -3,7 +3,8 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{Content, SubstitutionGroup},
     document::{
-        Attribute, Author, AuthorLine, InterpretedValue, RevisionLine, matches_author_pattern,
+        Attribute, Author, AuthorLine, InterpretedValue, RefType, RevisionLine,
+        matches_author_pattern,
     },
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
@@ -391,6 +392,27 @@ impl<'src> Header<'src> {
             InterpretedValue::Set => Some(String::new()),
             InterpretedValue::Unset => title.clone(),
         };
+
+        // A document title carrying an explicit ID (`[#id]` above `= Title`)
+        // registers that ID in the catalog, mirroring Asciidoctor, which
+        // registers the document itself under its ID. Without this, a
+        // cross-reference to the document (`<<id>>`) finds no catalog entry and
+        // falls back to the bracketed `[id]` form instead of the title's
+        // reference text. The reference text follows the same precedence as a
+        // whole-document self-reference (see
+        // [`this_document_reference`](crate::content::this_document_reference)):
+        // an explicit `reftext` attribute, otherwise the document title. The
+        // header is parsed before the body, so this ID registers ahead of any
+        // body anchor; a later duplicate is ignored here and reported by the
+        // body parse.
+        if let Some(doc_id) = id.as_deref() {
+            let reftext = match parser.attribute_value("reftext") {
+                InterpretedValue::Value(reftext) if !reftext.is_empty() => Some(reftext),
+                _ => doctitle.clone().filter(|title| !title.is_empty()),
+            };
+
+            let _ = parser.register_ref(doc_id, reftext.as_deref(), RefType::Section);
+        }
 
         // Resolve the document's author list. The author line, when present, is
         // the source of truth; otherwise the list is derived from the `author`,
