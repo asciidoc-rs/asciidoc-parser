@@ -548,6 +548,38 @@ impl<'src> Attrlist<'src> {
         roles
     }
 
+    /// Recovers the role from a quote-delimited first positional attribute (for
+    /// example `['role']`) in a quoted-text attribute list.
+    ///
+    /// This mirrors the `else` branch of Asciidoctor's
+    /// `parse_quoted_text_attributes`: when the first positional attribute is
+    /// not shorthand (it does not begin with `.` or `#`), Asciidoctor treats
+    /// the entire first positional – verbatim, quote characters included –
+    /// as the role. The shorthand parser used for the general attribute
+    /// list instead strips the surrounding quotes and records no role or
+    /// block style for such a value, so a quoted role would otherwise be
+    /// dropped.
+    ///
+    /// Returns the verbatim role only when the first positional attribute was
+    /// genuinely quote-delimited; otherwise the normal shorthand path already
+    /// produced the role, id, and block style, so this returns `None`.
+    pub(crate) fn quoted_text_fallback_role(&'src self) -> Option<&'src str> {
+        if !self.nth_attribute(1)?.value_is_quoted() {
+            return None;
+        }
+
+        // Asciidoctor considers only the first positional attribute, which is the
+        // source up to the first comma.
+        let raw = self.source.data();
+        let segment = raw.split(',').next().unwrap_or(raw).trim();
+
+        if segment.is_empty() {
+            None
+        } else {
+            Some(segment)
+        }
+    }
+
     /// Returns any option attributes that were found.
     ///
     /// The `options` attribute (often abbreviated as `opts`) is a versatile
@@ -2381,6 +2413,37 @@ mod tests {
                     offset: 17
                 }
             );
+        }
+
+        #[test]
+        fn quoted_first_positional_becomes_verbatim_role() {
+            let p = Parser::default();
+
+            // A quote-delimited first positional carries no shorthand role or
+            // block style, so `quoted_text_fallback_role` recovers it verbatim
+            // (quotes included), mirroring Asciidoctor's
+            // `parse_quoted_text_attributes`.
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'role'"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert!(mi.item.roles().is_empty());
+            assert!(mi.item.block_style().is_none());
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'role'");
+
+            // An unquoted positional is handled by the normal block-style path,
+            // so there is no fallback role to recover.
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("role"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert!(mi.item.quoted_text_fallback_role().is_none());
         }
     }
 

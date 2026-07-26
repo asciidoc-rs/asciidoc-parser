@@ -656,6 +656,19 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 .map(|id| id.to_owned())
         }
 
+        // A quote-delimited first positional attribute (e.g. `['role']`) carries
+        // no shorthand role or block style, so the derivation above leaves it
+        // out. Asciidoctor treats such a value as a verbatim role – quotes
+        // included – so recover it here rather than dropping the role.
+        if roles.is_empty()
+            && id.is_none()
+            && let Some(role) = attrlist
+                .as_ref()
+                .and_then(|a| a.quoted_text_fallback_role())
+        {
+            roles.push(role);
+        }
+
         match type_ {
             QuoteType::Strong => {
                 wrap_body_in_html_tag(attrlist.as_ref(), "strong", id, roles, body, dest);
