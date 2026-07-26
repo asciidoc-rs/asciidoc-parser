@@ -468,6 +468,34 @@ fn explicit_reftext_wins_for_document_title_reference() {
 }
 
 #[test]
+fn reference_to_document_title_with_bracket_anchor_resolves() {
+    // A document title whose ID comes from a `[[id]]` block anchor (rather than
+    // the `[#id]` shorthand) is registered the same way, so a cross-reference to
+    // it renders the title text.
+    let doc =
+        Parser::default().parse("[[manual]]\n= Reference Manual\n\nThis is the <<manual>>.\n");
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "This is the <a href=\"#manual\">Reference Manual</a>."
+    );
+}
+
+#[test]
+fn reference_to_document_title_uses_bracket_anchor_reftext() {
+    // The reference text of a `[[id,reftext]]` block anchor on the document
+    // title is used as the cross-reference text, taking precedence over the
+    // title just as an explicit `reftext` attribute does.
+    let doc = Parser::default()
+        .parse("[[manual,The Manual]]\n= Reference Manual\n\nThis is the <<manual>>.\n");
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "This is the <a href=\"#manual\">The Manual</a>."
+    );
+}
+
+#[test]
 fn host_resolver_can_override_a_derived_destination() {
     // The destination the parser derives for a target that names a document is
     // only a default: it is offered to the resolver (as

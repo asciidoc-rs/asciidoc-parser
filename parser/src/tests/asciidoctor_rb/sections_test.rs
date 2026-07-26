@@ -1304,13 +1304,11 @@ mod levels {
         );
 
         // NOTE: A document-level ID above the document title sets the `id` on
-        // the standalone `<body>` and (in Asciidoctor) registers the document
-        // itself in the catalog. This crate models neither the `<body>` element
-        // nor a document `id` for the `[[idname]]` bracket form, so the tests
-        // that assert `body#id` or `doc.id` stay out of scope. It *does*
-        // register a document title carrying a shorthand ID (`[#id]`) in the
-        // catalog, so `should compute xreftext to document title` is verified as
-        // a real test below.
+        // the standalone `<body>`. This crate models embedded output, which has
+        // no `<body>` element, so the `body#id` assertions below are out of
+        // scope. The document `id` itself *is* recognized for both the `[[id]]`
+        // and `[#id]` forms (see the promoted tests further down that assert
+        // `doc.id` and the catalog registration through the crate's accessors).
         non_normative!(
             r##"
       test 'should assign id on document title to body' do
@@ -1346,6 +1344,19 @@ mod levels {
         assert_css 'body#idname-block', output, 1
       end
 
+"##
+        );
+
+        // The crate recognizes a document ID from a `[[id]]` block anchor above
+        // the document title, folding it into the header the same way the `[#id]`
+        // shorthand is. `doc.id` and any accompanying attribute entry are exposed
+        // through the header/document accessors; only the
+        // `assert_css 'body#reference'` (which needs a standalone `<body>`) is
+        // out of scope.
+        #[test]
+        fn block_id_above_document_title_sets_id_on_document() {
+            verifies!(
+                r##"
       test 'block id above document title sets id on document' do
         input = <<~'EOS'
         [[reference]]
@@ -1361,6 +1372,32 @@ mod levels {
         assert_css 'body#reference', output, 1
       end
 
+"##
+            );
+
+            use crate::document::InterpretedValue;
+
+            let doc = Parser::default()
+                .parse("[[reference]]\n= Reference Manual\n:css-signature: refguide\n\npreamble\n");
+
+            assert_eq!(doc.header().id(), Some("reference"));
+            assert_eq!(doc.header().title(), Some("Reference Manual"));
+            assert_eq!(
+                doc.attribute_value("css-signature"),
+                InterpretedValue::Value("refguide".to_string())
+            );
+        }
+
+        // A document title carrying an ID registers the document in the catalog
+        // under that ID, with its reference text (the `[[id,reftext]]` reftext
+        // here). This crate exposes the registration through
+        // [`Catalog::get_ref`](crate::document::Catalog::get_ref) rather than a
+        // `doc` self-entry, so the `catalog[:refs]['manual'] == doc` identity
+        // check becomes a lookup of the registered [`RefEntry`].
+        #[test]
+        fn should_register_document_in_catalog_if_id_is_set() {
+            verifies!(
+                r##"
       test 'should register document in catalog if id is set' do
         input = <<~'EOS'
         [[manual,Manual]]
@@ -1375,7 +1412,25 @@ mod levels {
       end
 
 "##
-        );
+            );
+
+            use crate::document::InterpretedValue;
+
+            let doc =
+                Parser::default().parse("[[manual,Manual]]\n= Reference Manual\n\npreamble\n");
+
+            assert_eq!(doc.header().id(), Some("manual"));
+            assert_eq!(
+                doc.attribute_value("reftext"),
+                InterpretedValue::Value("Manual".to_string())
+            );
+
+            let entry = doc
+                .catalog()
+                .get_ref("manual")
+                .expect("document registered in the catalog under its id");
+            assert_eq!(entry.reftext.as_deref(), Some("Manual"));
+        }
 
         // A cross-reference to a document title carrying an explicit shorthand
         // ID (`[#id]`) resolves to the title's reference text. The crate

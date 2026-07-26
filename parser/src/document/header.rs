@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{Content, SubstitutionGroup},
+    content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RefType, RevisionLine,
         matches_author_pattern,
@@ -210,8 +210,7 @@ impl<'src> Header<'src> {
                 && line.starts_with('[')
                 && line.ends_with(']')
                 && document_title_follows_block_metadata(line_mi.after)
-                && let Some((metadata, metadata_warnings)) =
-                    parse_document_metadata_attrlist(line, parser)
+                && let Some((metadata, metadata_warnings)) = parse_document_metadata(line, parser)
             {
                 warnings.extend(metadata_warnings);
 
@@ -665,12 +664,10 @@ fn document_title_follows_block_metadata(after: Span<'_>) -> bool {
 ///
 /// This captures the purely syntactic acceptance rules shared by the lookahead
 /// ([`document_title_follows_block_metadata`]) and the folding step
-/// ([`parse_document_metadata_attrlist`]): the line must be bracket-delimited
-/// and its contents must not be empty, must not begin with whitespace, and must
-/// not be a `[[anchor]]` block anchor. The legacy double-bracket anchor above
-/// the document title is left unsupported (it terminates the header, as
-/// before); the single-bracket `[#id]` shorthand is the supported way to set a
-/// document ID.
+/// ([`parse_document_metadata`]): the line must be bracket-delimited and its
+/// contents must not be empty and must not begin with whitespace. Both a block
+/// attribute list (`[#id]`, `[reftext=…]`, …) and a `[[id]]` / `[[id,reftext]]`
+/// block anchor are accepted; an empty `[[]]` anchor is not.
 fn is_document_metadata_line(line: Span<'_>) -> bool {
     if !(line.starts_with('[') && line.ends_with(']')) {
         return false;
@@ -678,10 +675,18 @@ fn is_document_metadata_line(line: Span<'_>) -> bool {
 
     let inner = line.slice(1..line.len() - 1);
 
-    !(inner.is_empty()
-        || inner.starts_with(' ')
-        || inner.starts_with('\t')
-        || (inner.starts_with('[') && inner.ends_with(']')))
+    if inner.is_empty() || inner.starts_with(' ') || inner.starts_with('\t') {
+        return false;
+    }
+
+    // A `[[anchor]]` block anchor is document metadata when it names a non-empty
+    // anchor; the empty `[[]]` form is not (`inner` would be the two-character
+    // `[]`).
+    if inner.starts_with('[') && inner.ends_with(']') {
+        return inner.len() > 2;
+    }
+
+    true
 }
 
 /// Document metadata folded from a block attribute line appearing directly
@@ -697,31 +702,37 @@ struct DocumentMetadata {
     options: Vec<String>,
 }
 
-/// Parse a block attribute line (e.g. `[reftext="…"]`, `[#id]`, `[role=…]`,
-/// `[separator=::]`) appearing above the document title into
-/// [`DocumentMetadata`].
+/// Parse a metadata line appearing directly above the document title into
+/// [`DocumentMetadata`], dispatching on its form: a `[[id]]` / `[[id,reftext]]`
+/// block anchor, or a block attribute list (e.g. `[reftext="…"]`, `[#id]`,
+/// `[role=…]`, `[separator=::]`).
 ///
 /// The `line` is expected to begin with `[` and end with `]`. Returns the
-/// folded metadata together with any warnings raised while parsing the
-/// attribute list when the line is a well-formed block attribute list, and
-/// `None` otherwise (so the caller can fall through to its normal handling of
-/// the line, which then terminates the header). The warnings are only surfaced
-/// when the line is actually consumed as document metadata; otherwise the line
-/// is left for the block parser, which reports them on its own path.
-fn parse_document_metadata_attrlist<'src>(
+/// folded metadata together with any warnings raised while parsing when the
+/// line is a well-formed metadata line, and `None` otherwise (so the caller can
+/// fall through to its normal handling of the line, which then terminates the
+/// header). The warnings are only surfaced when the line is actually consumed
+/// as document metadata; otherwise the line is left for the block parser, which
+/// reports them on its own path.
+fn parse_document_metadata<'src>(
     line: Span<'src>,
     parser: &Parser,
 ) -> Option<(DocumentMetadata, Vec<Warning<'src>>)> {
-    // Reject forms that are not block attribute lists (a leading space or tab,
-    // an empty list, or a `[[anchor]]` block anchor); see
-    // [`is_document_metadata_line`] for the shared acceptance rules. The caller
-    // has already confirmed the enclosing square brackets are present.
+    // Reject forms that are not document metadata (a leading space or tab, an
+    // empty list, or an empty `[[]]` anchor); see [`is_document_metadata_line`]
+    // for the shared acceptance rules. The caller has already confirmed the
+    // enclosing square brackets are present.
     if !is_document_metadata_line(line) {
         return None;
     }
 
     // Drop the enclosing square brackets.
     let inner = line.slice(1..line.len() - 1);
+
+    // A `[[id]]` / `[[id,reftext]]` block anchor still has its inner brackets.
+    if inner.starts_with('[') && inner.ends_with(']') {
+        return parse_document_metadata_anchor(inner.slice(1..inner.len() - 1), parser);
+    }
 
     let MatchAndWarnings {
         item: MatchedItem {
@@ -744,6 +755,49 @@ fn parse_document_metadata_attrlist<'src>(
     };
 
     Some((metadata, warnings))
+}
+
+/// Fold a `[[id]]` / `[[id,reftext]]` block anchor above the document title
+/// into [`DocumentMetadata`]. `anchor` is the text *between* the inner brackets
+/// (`id` or `id,reftext`).
+///
+/// The anchor ID must be a valid XML name (as the block parser requires of any
+/// block anchor); otherwise `None` is returned so the line falls through and
+/// ends the header. Attribute references in the reftext are resolved against
+/// the attributes in effect at the anchor, mirroring the section/block anchor
+/// path (see [`substitute_attributes_in_reftext`]) rather than the doctitle's
+/// `SpecialCharacters`-plus-references header substitution.
+fn parse_document_metadata_anchor<'src>(
+    anchor: Span<'src>,
+    parser: &Parser,
+) -> Option<(DocumentMetadata, Vec<Warning<'src>>)> {
+    // Split an optional reftext off at the first comma (`id,reftext`). A comma
+    // in the final position leaves the whole span – trailing comma included – as
+    // the ID, which then fails XML-name validation, matching the block parser.
+    let (id, reftext) = match anchor.position(|c| c == ',') {
+        Some(comma) if comma < anchor.len() - 1 => (
+            anchor.slice(0..comma),
+            Some(substitute_attributes_in_reftext(
+                anchor.slice(comma + 1..anchor.len()),
+                parser,
+            )),
+        ),
+        _ => (anchor, None),
+    };
+
+    if !id.is_xml_name() {
+        return None;
+    }
+
+    let metadata = DocumentMetadata {
+        id: Some(id.data().to_string()),
+        separator: None,
+        reftext: reftext.map(|r| r.to_string()),
+        roles: vec![],
+        options: vec![],
+    };
+
+    Some((metadata, vec![]))
 }
 
 /// Partition a document title into its main title and optional subtitle.
@@ -2113,6 +2167,45 @@ mod tests {
     }
 
     #[test]
+    fn bracket_anchor_above_title() {
+        // A `[[id]]` block anchor above the title assigns the document ID and
+        // recovers the title, exactly as the `[#id]` shorthand does.
+        let doc = Parser::default().parse("[[idname]]\n= Document Title\n\ncontent");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("Document Title"));
+        assert_eq!(header.id(), Some("idname"));
+        assert_eq!(doc.id(), Some("idname"));
+        assert_eq!(rendered_paragraphs(&doc), vec!["content"]);
+
+        // The `[[id,reftext]]` form additionally folds its reference text into
+        // the document's `reftext` attribute, resolving attribute references the
+        // way a section/block anchor reftext does.
+        let doc = Parser::default()
+            .parse(":product: Widgets\n[[guide,{product} Guide]]\n= User Guide\n\ncontent");
+        let header = doc.header();
+
+        assert_eq!(header.title(), Some("User Guide"));
+        assert_eq!(header.id(), Some("guide"));
+        assert_eq!(
+            doc.attribute_value("reftext"),
+            InterpretedValue::Value("Widgets Guide")
+        );
+    }
+
+    #[test]
+    fn bracket_anchor_above_title_requires_a_valid_name() {
+        // A `[[…]]` line whose anchor name is not a valid XML name is not folded
+        // as document metadata; the header terminates as it does for any other
+        // unrecognized line.
+        let doc = Parser::default().parse("[[bad name]]\n= Document Title\n\ncontent");
+        let header = doc.header();
+
+        assert_eq!(header.title(), None);
+        assert_eq!(header.id(), None);
+    }
+
+    #[test]
     fn stacked_block_attributes_above_title() {
         // Multiple block attribute lines may stack above the document title;
         // each folds into the document's metadata and the title is still
@@ -2163,16 +2256,16 @@ mod tests {
     }
 
     #[test]
-    fn stacked_block_attributes_stop_at_a_block_anchor() {
-        // A `[[anchor]]` line breaks the run of foldable metadata lines: the
-        // scan stops there without seeing the title, so nothing above it is
-        // folded and the header terminates (matching the single-line anchor
-        // rejection).
+    fn stacked_block_attributes_fold_a_block_anchor() {
+        // A `[[anchor]]` line is a foldable metadata line like the attribute
+        // lists around it, so a run mixing the two still folds and the title is
+        // recognized. The ID follows last-wins semantics across the run (the
+        // block anchor overrides the earlier `[#docid]`), matching Asciidoctor.
         let doc = Parser::default().parse("[#docid]\n[[anchor]]\n= Some Title");
         let header = doc.header();
 
-        assert_eq!(header.title(), None);
-        assert_eq!(header.id(), None);
+        assert_eq!(header.title(), Some("Some Title"));
+        assert_eq!(header.id(), Some("anchor"));
     }
 
     #[test]
@@ -2180,20 +2273,20 @@ mod tests {
         // A block attribute line above the title is only parsed as document
         // metadata once a title is confirmed to follow it (via
         // `document_title_follows_block_metadata`, which scans structurally and
-        // never parses an attribute list). Here the `[[anchor]]` breaks the run
-        // before any title, so the lookahead fails and the `[reftext=…]` line's
-        // attribute list is never parsed during header parsing – its embedded
-        // `{counter:item}` must not fire at header time.
+        // never parses an attribute list). Here no title follows, so the
+        // lookahead fails and the `[reftext=…]` line's attribute list is never
+        // parsed during header parsing – its embedded `{counter:item}` must not
+        // fire at header time.
         //
         // The `reftext` line advances the counter exactly once when the block
         // parser reaches it (yielding 1), so the following `{counter:item}`
         // reference renders 2 – not 3, which is what a leaked header-time
         // evaluation would produce.
-        let doc = Parser::default()
-            .parse("[reftext=\"See {counter:item}\"]\n[[anchor]]\n= Title\n\n{counter:item}");
+        let doc =
+            Parser::default().parse("[reftext=\"See {counter:item}\"]\nBody.\n\n{counter:item}");
 
         assert_eq!(doc.header().title(), None);
-        assert_eq!(rendered_paragraphs(&doc), vec!["= Title", "2"]);
+        assert_eq!(rendered_paragraphs(&doc), vec!["Body.", "2"]);
     }
 
     #[test]
@@ -2250,11 +2343,11 @@ mod tests {
     #[test]
     fn bracketed_line_that_is_not_a_separator_attribute_list() {
         // A `[...]` line above the title that isn't a well-formed block
-        // attribute list carrying `separator` is not consumed as a separator. A
-        // block anchor (`[[...]]`) and a leading-space form are both rejected,
+        // attribute list carrying `separator` is not consumed as a separator. An
+        // empty block anchor (`[[]]`) and a leading-space form are both rejected,
         // so the line terminates the header exactly as any other unrecognized
         // line would.
-        let doc = Parser::default().parse("[[anchor]]\n= Some Title: Subtitle");
+        let doc = Parser::default().parse("[[]]\n= Some Title: Subtitle");
         let header = doc.header();
 
         assert_eq!(header.title(), None);
