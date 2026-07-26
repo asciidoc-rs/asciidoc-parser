@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{Content, SubstitutionGroup},
+    content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RevisionLine, matches_author_pattern,
     },
@@ -225,6 +225,13 @@ impl<'src> Header<'src> {
                 id = Some(anchor_id);
 
                 if let Some(reftext) = anchor_reftext {
+                    // Resolve attribute references in the reftext now, while the
+                    // attributes in effect at the anchor are still current –
+                    // mirroring the block parser and the `[reftext=…]` attribute
+                    // form, whose values are expanded as the attribute list is
+                    // parsed. Without this, `[[id,See {label}]]` would store the
+                    // literal `{label}`.
+                    let reftext = substitute_attributes_in_reftext(reftext, parser);
                     parser.set_attribute_by_value_from_header("reftext", reftext);
                 }
 
@@ -765,15 +772,20 @@ fn parse_document_metadata_attrlist<'src>(
 }
 
 /// Parse a `[[id]]` or `[[id,reftext]]` block anchor line appearing directly
-/// above the document title, returning the (owned) id and optional reftext.
+/// above the document title, returning the (owned) id and the raw reftext span.
 ///
 /// Mirrors the block-anchor handling in [`crate::blocks::metadata`]: the id may
 /// be followed by a comma and a reftext, and the id must be a valid XML name.
+/// The reftext is returned as a raw [`Span`] (not yet attribute-substituted);
+/// the caller resolves its attribute references with
+/// [`substitute_attributes_in_reftext`], exactly as the block parser does,
+/// while the attributes in effect at the anchor are still current.
+///
 /// Returns `None` when `line` is not a well-formed anchor with a valid id (an
 /// empty `[[]]`, a `[[,reftext]]` with no id, or a non-XML-name id), so the
 /// caller leaves the line for the block parser (which reports any warning on
 /// its own path) rather than folding it as document metadata.
-fn parse_document_block_anchor(line: Span<'_>) -> Option<(String, Option<String>)> {
+fn parse_document_block_anchor(line: Span<'_>) -> Option<(String, Option<Span<'_>>)> {
     if !(line.starts_with("[[") && line.ends_with("]]")) {
         return None;
     }
@@ -799,7 +811,7 @@ fn parse_document_block_anchor(line: Span<'_>) -> Option<(String, Option<String>
         return None;
     }
 
-    Some((id.data().to_string(), reftext.map(|r| r.data().to_string())))
+    Some((id.data().to_string(), reftext))
 }
 
 /// Partition a document title into its main title and optional subtitle.
@@ -2208,6 +2220,23 @@ mod tests {
         assert_eq!(
             doc.attribute_value("reftext"),
             InterpretedValue::Value("Manual")
+        );
+    }
+
+    #[test]
+    fn block_anchor_reftext_resolves_attribute_references() {
+        // Attribute references in a `[[id,reftext]]` reftext are expanded
+        // against the attributes in effect at the anchor, just like the block
+        // parser and the `[reftext="…"]` attribute form – so the stored
+        // `reftext` holds the resolved text, not the literal `{label}`.
+        let doc = Parser::default()
+            .parse(":label: The Manual\n[[manual,See {label}]]\n= Reference Manual\n\npreamble");
+        let header = doc.header();
+
+        assert_eq!(header.id(), Some("manual"));
+        assert_eq!(
+            doc.attribute_value("reftext"),
+            InterpretedValue::Value("See The Manual")
         );
     }
 
