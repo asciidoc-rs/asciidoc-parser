@@ -8914,6 +8914,9 @@ mod passthroughs {
 "#
         );
 
+        // The quote-delimited role (`['role']`) is preserved as a verbatim role
+        // on the passthrough span, so the rendered output includes
+        // `<span class="'role'">` – exactly matching Asciidoctor here.
         let mut p = Parser::default();
         let maw =
             crate::blocks::Block::parse(crate::Span::new("['role']\\++This++++++++++++"), &mut p);
@@ -8930,7 +8933,7 @@ mod passthroughs {
                         col: 1,
                         offset: 0,
                     },
-                    rendered: "+This+",
+                    rendered: "<span class=\"'role'\">+This</span>+",
                 },
                 source: Span {
                     data: "['role']\\++This++++++++++++",
@@ -8952,6 +8955,13 @@ mod passthroughs {
 
     #[test]
     fn should_not_crash_if_role_on_passthrough_is_enclosed_in_quotes_2() {
+        // As in the first case, the quoted role is preserved, so the rendered
+        // output includes `<span class="'role'">` (the only thing the upstream
+        // Ruby test asserts). The exact tail after the span (`+This+` here vs.
+        // Asciidoctor's `++This++`) still differs because the two
+        // implementations tokenize the surrounding run of `+` characters
+        // differently – a separate passthrough-extraction nuance (tracked in
+        // issue #979), not the role handling exercised by this robustness test.
         let mut p = Parser::default();
         let maw = crate::blocks::Block::parse(
             crate::Span::new("['role']\\+++++++++This++++++++++++"),
@@ -8970,7 +8980,7 @@ mod passthroughs {
                         col: 1,
                         offset: 0,
                     },
-                    rendered: "++This+",
+                    rendered: "<span class=\"'role'\">+</span>+This+",
                 },
                 source: Span {
                     data: "['role']\\+++++++++This++++++++++++",
@@ -8987,6 +8997,42 @@ mod passthroughs {
                 anchor_reftext: None,
                 attrlist: None,
             },)
+        );
+    }
+
+    #[test]
+    fn passthrough_role_resolves_attribute_reference() {
+        // An attribute reference embedded in a passthrough role is resolved
+        // before the role is applied, mirroring Asciidoctor's
+        // `parse_quoted_text_attributes` (which runs `sub_attributes` on the
+        // attribute list). This is a crate-specific regression test, not a port.
+        let render = |input: &str| {
+            let mut p = Parser::default().with_intrinsic_attribute(
+                "myrole",
+                "highlight",
+                ModificationContext::Anywhere,
+            );
+
+            let maw = crate::blocks::Block::parse(crate::Span::new(input), &mut p);
+
+            let crate::blocks::Block::Simple(block) = maw.item.unwrap().item else {
+                panic!("expected a simple block");
+            };
+
+            block.content().rendered().to_string()
+        };
+
+        // Unquoted role via the normal block-style path.
+        assert_eq!(
+            render("[{myrole}]++text++"),
+            r#"<span class="highlight">text</span>"#
+        );
+
+        // Quote-delimited role via the verbatim-role fallback (the case flagged
+        // in review): the reference resolves inside the retained quotes.
+        assert_eq!(
+            render("['{myrole}']++text++"),
+            r#"<span class="'highlight'">text</span>"#
         );
     }
 
