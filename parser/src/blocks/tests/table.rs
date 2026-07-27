@@ -773,9 +773,8 @@ fn include_expanded_asciidoc_cell_exposes_inherited_attributes_for_introspection
 #[test]
 fn asciidoc_cell_exposes_its_own_footnotes() {
     // An AsciiDoc cell keeps its own footnote registry, isolated from the
-    // enclosing document (see issue #544). Its footnotes are retained and
-    // exposed via `footnotes()`, so a renderer can emit the cell-local
-    // `#footnotes` block.
+    // enclosing document. Its footnotes are retained and exposed via
+    // `footnotes()`, so a renderer can emit the cell-local `#footnotes` block.
     let doc =
         Parser::default().parse("|===\na|AsciiDoc footnote:[A lightweight markup language.]\n|===");
 
@@ -799,7 +798,7 @@ fn asciidoc_cell_exposes_its_own_footnotes() {
     assert_eq!(footnotes[0].text, "A lightweight markup language.");
 
     // It is *not* shared with the enclosing document: the main document's
-    // footnote registry stays empty (see issue #544).
+    // footnote registry stays empty.
     assert!(doc.catalog().footnotes().is_empty());
 }
 

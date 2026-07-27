@@ -1998,10 +1998,10 @@ fn parse_asciidoc_cell_body<'src>(
     // A nested document keeps its own footnote registry: footnotes defined
     // inside this cell must not be shared with (or numbered into the list of)
     // the enclosing document. We swap in a fresh, empty footnote list for the
-    // duration of the cell parse and restore the parent's afterward (see issue
-    // #544). The cell's own footnotes are retained and returned so a renderer
-    // can emit the cell-local `#footnotes` block. The `footnote-number` counter
-    // is a document-wide attribute and is deliberately *not* reset, so footnote
+    // duration of the cell parse and restore the parent's afterward. The cell's
+    // own footnotes are retained and returned so a renderer can emit the
+    // cell-local `#footnotes` block. The `footnote-number` counter is a
+    // document-wide attribute and is deliberately *not* reset, so footnote
     // numbering continues across the cell as Asciidoctor does.
     let saved_footnotes = parser.take_footnotes();
 
@@ -2445,10 +2445,10 @@ impl<'src> AsciiDocCell<'src> {
     /// Returns the footnotes defined within the cell, in document order.
     ///
     /// An AsciiDoc (`a`) cell is a nested, standalone document that keeps its
-    /// own footnote registry, isolated from the enclosing document (see issue
-    /// #544). These are the footnotes the cell defined, letting a renderer emit
-    /// the cell-local `#footnotes` block the way Asciidoctor renders the cell's
-    /// nested document. It mirrors
+    /// own footnote registry, isolated from the enclosing document. These are
+    /// the footnotes the cell defined, letting a renderer emit the cell-local
+    /// `#footnotes` block the way Asciidoctor renders the cell's nested
+    /// document. It mirrors
     /// [`Catalog::footnotes`](crate::document::Catalog::footnotes), which
     /// exposes the top-level document's own footnotes.
     pub fn footnotes(&self) -> &[Footnote] {
