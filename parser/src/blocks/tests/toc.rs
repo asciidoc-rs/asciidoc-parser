@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::{blocks::ContentModel, tests::prelude::*};
+use crate::{blocks::ContentModel, tests::prelude::*, warnings::MatchAndWarnings};
 
 #[test]
 fn simplest_toc_macro() {
@@ -50,6 +50,21 @@ fn simplest_toc_macro() {
     assert_eq!(mi.item.content_model(), ContentModel::Empty);
     assert_eq!(mi.item.raw_context().deref(), "toc");
     assert_eq!(mi.item.resolved_context().deref(), "toc");
+
+    // Exercise the remaining `Block::Toc` accessor delegations.
+    assert!(mi.item.rendered_content().is_none());
+    assert!(mi.item.declared_style().is_none());
+    assert!(mi.item.title_source().is_none());
+    assert!(mi.item.title().is_none());
+    assert!(mi.item.caption().is_none());
+    assert!(mi.item.number().is_none());
+    assert!(mi.item.id().is_none());
+    assert!(mi.item.roles().is_empty());
+    assert!(mi.item.options().is_empty());
+    assert!(mi.item.anchor().is_none());
+    assert!(mi.item.anchor_reftext().is_none());
+    assert!(mi.item.attrlist().is_none());
+    assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Normal);
 }
 
 #[test]
@@ -63,6 +78,33 @@ fn not_a_toc_macro_becomes_paragraph() {
         .unwrap();
 
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
+}
+
+#[test]
+fn macro_attrlist_warning_is_surfaced() {
+    // A warning raised while parsing the macro's attribute list (here, an empty
+    // attribute value from the doubled comma) is propagated even though the TOC
+    // block still parses.
+    let mut parser = Parser::default();
+
+    let MatchAndWarnings { item: mi, warnings } =
+        crate::blocks::Block::parse(crate::Span::new("toc::[blah,,blap]"), &mut parser);
+
+    let mi = mi.unwrap();
+    assert_eq!(mi.item.raw_context().deref(), "toc");
+
+    assert_eq!(
+        warnings,
+        vec![Warning {
+            source: Span {
+                data: "blah,,blap",
+                line: 1,
+                col: 7,
+                offset: 6,
+            },
+            warning: WarningType::EmptyAttributeValue,
+        }]
+    );
 }
 
 #[test]

@@ -86,16 +86,7 @@ impl<'src> TocBlock<'src> {
         // followed immediately by the attribute list. Anything else (e.g.
         // `toc::foo[]`) is not a TOC block macro, so quietly decline and let it
         // fall through to a paragraph.
-        let target = colons.after.take_while(|c| c != '[');
-
-        if !target.item.is_empty() {
-            return MatchAndWarnings {
-                item: None,
-                warnings: vec![],
-            };
-        }
-
-        let Some(open_brace) = target.after.take_prefix("[") else {
+        let Some(open_brace) = colons.after.take_prefix("[") else {
             return MatchAndWarnings {
                 item: None,
                 warnings: vec![],
@@ -233,6 +224,30 @@ mod tests {
         let mut parser = Parser::default();
         assert!(
             crate::blocks::TocBlock::parse(&BlockMetadata::new("image::foo.png[]"), &mut parser)
+                .unwrap_if_no_warnings()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn err_macro_name_not_word_char() {
+        // A macro name must begin with a word character; a leading `#` is
+        // rejected before any name is captured (see `take_block_macro_name`).
+        let mut parser = Parser::default();
+        assert!(
+            crate::blocks::TocBlock::parse(&BlockMetadata::new("#toc::[]"), &mut parser)
+                .unwrap_if_no_warnings()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn err_macro_name_not_exactly_toc() {
+        // A name that merely starts with `toc` (e.g. `tocx`) is a different
+        // macro and is not recognized as a TOC block.
+        let mut parser = Parser::default();
+        assert!(
+            crate::blocks::TocBlock::parse(&BlockMetadata::new("tocx::[]"), &mut parser)
                 .unwrap_if_no_warnings()
                 .is_none()
         );
