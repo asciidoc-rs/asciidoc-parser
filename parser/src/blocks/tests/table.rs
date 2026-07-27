@@ -770,6 +770,103 @@ fn include_expanded_asciidoc_cell_exposes_inherited_attributes_for_introspection
     assert!(!cell.has_attribute("no-such-attr"));
 }
 
+#[test]
+fn asciidoc_cell_exposes_its_own_footnotes() {
+    // An AsciiDoc cell keeps its own footnote registry, isolated from the
+    // enclosing document. Its footnotes are retained and exposed via
+    // `footnotes()`, so a renderer can emit the cell-local `#footnotes` block.
+    let doc =
+        Parser::default().parse("|===\na|AsciiDoc footnote:[A lightweight markup language.]\n|===");
+
+    let table = doc
+        .child_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let TableCellContent::AsciiDoc(cell) = table.body_rows()[0].cells()[0].content() else {
+        panic!("expected AsciiDoc cell content");
+    };
+
+    // The footnote defined inside the cell is retained on the cell.
+    let footnotes = cell.footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(footnotes[0].index, "1");
+    assert_eq!(footnotes[0].id, None);
+    assert_eq!(footnotes[0].text, "A lightweight markup language.");
+
+    // It is *not* shared with the enclosing document: the main document's
+    // footnote registry stays empty.
+    assert!(doc.catalog().footnotes().is_empty());
+}
+
+#[test]
+fn include_expanded_asciidoc_cell_exposes_its_own_footnotes() {
+    // A cell whose first line is an `include::` directive is parsed from an
+    // owned, include-expanded source (the `AsciiDocCell::Owned` variant). Its
+    // footnotes reach through the owned store the same way, exercising the
+    // owned-store branch of `footnotes()`.
+    use crate::{SafeMode, tests::fixtures::inline_file_handler::InlineFileHandler};
+
+    let handler = InlineFileHandler::from_pairs([(
+        "fixtures/cell.adoc",
+        "AsciiDoc footnote:[A lightweight markup language.]",
+    )]);
+
+    let doc = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler)
+        .parse("|===\na|include::fixtures/cell.adoc[]\n|===");
+
+    let table = doc
+        .child_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let TableCellContent::AsciiDoc(cell) = table.body_rows()[0].cells()[0].content() else {
+        panic!("expected AsciiDoc cell content");
+    };
+
+    let footnotes = cell.footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(footnotes[0].text, "A lightweight markup language.");
+
+    assert!(doc.catalog().footnotes().is_empty());
+}
+
+#[test]
+fn asciidoc_cell_footnote_resolves_cross_reference() {
+    // A cross-reference inside a cell footnote is resolved during the document's
+    // reference-resolution pass, against the shared catalog. The resolved link
+    // is reflected in the exposed footnote text.
+    let doc = Parser::default()
+        .parse("[[target]]Anchored text.\n\n|===\na|Cell footnote:[See <<target>>.]\n|===");
+
+    let table = doc
+        .child_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let TableCellContent::AsciiDoc(cell) = table.body_rows()[0].cells()[0].content() else {
+        panic!("expected AsciiDoc cell content");
+    };
+
+    let footnotes = cell.footnotes();
+    assert_eq!(footnotes.len(), 1);
+    assert_eq!(
+        footnotes[0].text,
+        r##"See <a href="#target">[target]</a>."##
+    );
+}
+
 /// Collect the rendered text of every block in an AsciiDoc cell.
 fn asciidoc_cell_text(table: &TableBlock<'_>, row: usize, col: usize) -> String {
     match table.body_rows()[row].cells()[col].content() {
