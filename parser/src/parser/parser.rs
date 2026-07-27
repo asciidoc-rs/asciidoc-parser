@@ -1435,7 +1435,7 @@ impl Parser {
         value: V,
         modification_context: ModificationContext,
     ) -> Self {
-        let name = name.as_ref().to_lowercase();
+        let name = alias_attr_name(name.as_ref().to_lowercase());
         let value = InterpretedValue::Value(value.as_ref().to_string());
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
@@ -1485,7 +1485,7 @@ impl Parser {
         value: V,
         modification_context: ModificationContext,
     ) -> Self {
-        let name = name.as_ref().to_lowercase();
+        let name = alias_attr_name(name.as_ref().to_lowercase());
         let value = InterpretedValue::Value(value.as_ref().to_string());
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
@@ -1888,7 +1888,7 @@ impl Parser {
         value: bool,
         modification_context: ModificationContext,
     ) -> Self {
-        let name = name.as_ref().to_lowercase();
+        let name = alias_attr_name(name.as_ref().to_lowercase());
         let value = if value {
             InterpretedValue::Set
         } else {
@@ -1938,7 +1938,7 @@ impl Parser {
         value: bool,
         modification_context: ModificationContext,
     ) -> Self {
-        let name = name.as_ref().to_lowercase();
+        let name = alias_attr_name(name.as_ref().to_lowercase());
         let value = if value {
             InterpretedValue::Set
         } else {
@@ -2860,10 +2860,22 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
         .to_lowercase();
 
     // Some attribute names have aliases. Remap to the primary name.
-    //
-    // `numbered` is a legacy alias for `sectnums`, so setting `numbered` sets
-    // `sectnums` (and `numbered!` unsets it). Mirrors Asciidoctor's
-    // `Parser.store_attribute`, which renames the attribute before storing it.
+    alias_attr_name(attr_name)
+}
+
+/// Remaps an attribute name that is a legacy alias to its primary name,
+/// returning any other name unchanged.
+///
+/// `numbered` is a legacy alias for `sectnums`, and `hardbreaks` for
+/// `hardbreaks-option`, so setting `numbered` sets `sectnums` (and `numbered!`
+/// unsets it), and setting `hardbreaks` sets `hardbreaks-option`. Mirrors both
+/// Asciidoctor's `Parser.store_attribute` (which renames a header/body
+/// attribute entry before storing it) and its `Document#initialize` (which
+/// renames the same two API-supplied attribute overrides: `attr_overrides`
+/// `sectnums`/`hardbreaks-option` reassignment). Applying it on both paths is
+/// what lets `-a hardbreaks` supplied through the API enable hard line breaks,
+/// exactly as `:hardbreaks:` in the header does.
+fn alias_attr_name(attr_name: String) -> String {
     match attr_name.as_str() {
         "hardbreaks" => "hardbreaks-option".to_string(),
         "numbered" => "sectnums".to_string(),
@@ -3083,6 +3095,15 @@ mod tests {
         }
 
         #[test]
+        fn remaps_legacy_aliases() {
+            // `hardbreaks` and `numbered` are legacy aliases remapped to their
+            // primary names, matching Asciidoctor's `Parser.store_attribute`.
+            assert_eq!(remap_attr_name("hardbreaks"), "hardbreaks-option");
+            assert_eq!(remap_attr_name("Hardbreaks"), "hardbreaks-option");
+            assert_eq!(remap_attr_name("numbered"), "sectnums");
+        }
+
+        #[test]
         fn preserves_unicode_word_characters() {
             // Unicode letters and digits are word characters, so they survive
             // sanitization; the `{café}` / `{سمن}` references then resolve.
@@ -3246,6 +3267,30 @@ mod tests {
         assert!(p.is_attribute_set("foo"));
         assert!(!p.is_attribute_set("foo2"));
         assert!(!p.is_attribute_set("xyz"));
+    }
+
+    #[test]
+    fn with_intrinsic_attribute_remaps_legacy_aliases() {
+        // An API-supplied `hardbreaks` (Asciidoctor's `-a hardbreaks`) is a
+        // legacy alias remapped to `hardbreaks-option`, exactly as the same
+        // attribute written as a header entry (`:hardbreaks:`) is. Without the
+        // remap the API form is stored verbatim as `hardbreaks` and the
+        // paragraph's post-replacement check (which consults
+        // `hardbreaks-option`) never sees it.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "hardbreaks",
+            "",
+            ModificationContext::Anywhere,
+        );
+
+        assert!(p.is_attribute_set("hardbreaks-option"));
+
+        // The end-to-end effect: each unwrapped line gains a hard line break.
+        let doc = p.parse("First line\nSecond line");
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec!["First line<br>\nSecond line"]
+        );
     }
 
     // Under `SafeMode::Server` or greater, `docdir` reads as empty and
