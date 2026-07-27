@@ -335,7 +335,7 @@ impl Catalog {
 /// be referenced from multiple locations by assigning it an ID at the first
 /// occurrence and repeating that ID (with empty text) afterward; only the
 /// defining occurrence produces a `Footnote` entry.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Footnote {
     /// The footnote's number, assigned in document order via the
     /// `footnote-number` counter. Normally a consecutive integer (`1`, `2`, …),
