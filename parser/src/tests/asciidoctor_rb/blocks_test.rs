@@ -1941,13 +1941,6 @@ mod example_blocks {
         );
     }
 
-    // NOTE: divergence from Asciidoctor. Asciidoctor honors an empty `:caption:`
-    // attribute to disable the automatic block caption (so the second example's
-    // title is just "second example"); this crate keeps numbering it
-    // ("Example 2. second example"). Kept `#[ignore]`d with the Ruby-intended
-    // assertions until the empty-`:caption:` toggle is honored.
-    // TODO: honor an empty `:caption:` to suppress the block caption.
-    #[ignore]
     #[test]
     fn automatic_caption_can_be_turned_off_and_on_and_modified() {
         verifies!(

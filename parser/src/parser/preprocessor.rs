@@ -612,20 +612,33 @@ impl<'p> PreprocessorState<'p> {
 
                 let attrlist = parse_attrlist(&caps, self.parser);
 
-                // A URI target is only honored when the URI read permission has
+                // A URI target is only fetched when the URI read permission has
                 // been granted (`allow-uri-read`). This is disabled by default,
-                // so a URI include that is not permitted is treated as an
-                // unresolved directive. (At `SafeMode::Secure` and above the
-                // include was already converted to a link above; `allow-uri-read`
-                // is meaningful only below that level.) See `include-uri.adoc`.
+                // so a URI include that is not permitted is not fetched; instead
+                // the directive is converted to a `link:` macro to its target –
+                // the same rewrite applied at `SafeMode::Secure` above – and no
+                // warning is recorded (matching Asciidoctor). See
+                // `include-uri.adoc`.
                 if is_uri(&target) && !self.parser.is_attribute_set("allow-uri-read") {
-                    self.emit_unresolved_directive(
-                        line.data(),
-                        WarningType::IncludeFileNotFound(target),
+                    self.record_origin(
                         file_name,
                         source_line_number,
+                        Fidelity::Synthetic(Transform::SecureLinkRewrite),
                         &mut has_reported_file,
                     );
+
+                    // A target containing a space would break the link macro,
+                    // so it is wrapped in a `pass:c[…]` macro (matching
+                    // Asciidoctor).
+                    let replacement = if target.contains(' ') {
+                        format!("link:pass:c[{target}][role=include]")
+                    } else {
+                        format!("link:{target}[role=include]")
+                    };
+                    self.output_line_number += 1;
+                    self.output.push_str(&replacement);
+                    self.output.push('\n');
+
                     continue;
                 }
 
@@ -4018,9 +4031,10 @@ mod tests {
     }
 
     #[test]
-    fn uri_include_disabled_without_allow_uri_read() {
-        // A URI target is not resolved unless `allow-uri-read` is set; it is
-        // reported as an unresolved directive.
+    fn uri_include_falls_back_to_link_without_allow_uri_read() {
+        // A URI target is not fetched unless `allow-uri-read` is set; below
+        // secure safe mode it falls back to a `link:` macro (the same rewrite
+        // applied at `SafeMode::Secure`), with no warning.
         let source = "include::https://example.org/frag.adoc[]";
         let handler =
             InlineFileHandler::from_pairs([("https://example.org/frag.adoc", "SHOULD NOT APPEAR")]);
@@ -4031,11 +4045,26 @@ mod tests {
 
         let (output, _source_map, warnings, _includes) = preprocess(source, &parser);
 
+        assert_eq!(output, "link:https://example.org/frag.adoc[role=include]\n");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    }
+
+    #[test]
+    fn uri_include_with_space_falls_back_to_passthrough_link() {
+        // A remote target containing a space is wrapped in `pass:c[…]` so the
+        // link macro parses correctly (matching Asciidoctor).
+        let source = "include::https://example.org/no such file.adoc[]";
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc");
+
+        let (output, _source_map, warnings, _includes) = preprocess(source, &parser);
+
         assert_eq!(
             output,
-            "Unresolved directive in main.adoc - include::https://example.org/frag.adoc[]\n"
+            "link:pass:c[https://example.org/no such file.adoc][role=include]\n"
         );
-        assert_eq!(warnings.len(), 1);
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
     }
 
     #[test]

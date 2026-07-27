@@ -68,13 +68,20 @@ To allow content to be read from a URI, you must enable the URI read permission 
 "#
     );
 
-    // Without `allow-uri-read`, a URI target is not resolved even in server
-    // mode; it becomes an unresolved directive and the handler is not consulted.
+    // Without `allow-uri-read`, a URI target is not fetched even in server
+    // mode; the handler is not consulted. Rather than report an unresolved
+    // directive, the directive falls back to a `link:` macro to the target
+    // (matching Asciidoctor at safe mode `SERVER` or below), so its content is
+    // never read.
     let paras = uri_include(SafeMode::Server, false, "SHOULD NOT APPEAR");
     assert_eq!(paras.len(), 1);
     assert!(
-        paras[0].starts_with("Unresolved directive in main.adoc - include::"),
-        "was: {paras:?}"
+        !paras[0].contains("SHOULD NOT APPEAR"),
+        "URI content was fetched: {paras:?}"
+    );
+    assert!(
+        paras[0].contains(&format!("href=\"{URI}\"")) && paras[0].contains("include"),
+        "expected a link fallback, was: {paras:?}"
     );
 }
 
@@ -142,3 +149,27 @@ To enable the built-in cache, you must:
 When these two conditions are satisfied, Asciidoctor caches content read from a URI according the to {url-http}[HTTP caching recommendations^].
 "#
 );
+
+// A remote target containing a space is wrapped in `pass:c[…]` by the
+// preprocessor fallback (see `reader_test.rs`); this confirms that wrapper is
+// extracted correctly downstream, so the rendered link carries the full URI as
+// its `href` (spaces and all) rather than leaving `pass:c` as the destination.
+#[test]
+fn space_in_remote_target_renders_full_uri() {
+    const SPACE_URI: &str = "https://example.org/no such file.adoc";
+
+    let mut parser = Parser::default()
+        .with_safe_mode(SafeMode::Safe)
+        .with_primary_file_name("main.adoc");
+
+    let source = format!("include::{SPACE_URI}[]");
+    let doc = parser.parse(&source);
+    let paras = rendered_paragraphs(&doc);
+
+    assert_eq!(
+        paras,
+        vec![format!(
+            "<a href=\"{SPACE_URI}\" class=\"bare include\">{SPACE_URI}</a>"
+        )]
+    );
+}

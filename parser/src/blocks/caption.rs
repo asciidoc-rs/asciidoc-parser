@@ -110,15 +110,17 @@ pub(crate) fn assign_block_caption(
 /// * the block has no title (`has_title` is `false`) – untitled blocks are
 ///   never captioned or counted;
 /// * an explicit caption override is present but empty (e.g. `[caption=]`, or a
-///   collapsible example whose caption is suppressed); or
+///   collapsible example whose caption is suppressed);
+/// * a document-wide `caption` attribute is present but empty (bare `:caption:`
+///   or `:caption:` with an empty value); or
 /// * the context is not captionable, or its caption attribute is unset.
 ///
 /// When a non-empty explicit `caption` override is supplied (from a
-/// `[caption=]` attribute) – or the document-wide `caption` attribute is set –
-/// that value is used verbatim as the prefix, with **no** number assigned.
-/// Otherwise the label comes from the context's caption attribute and the
-/// document-wide counter for that context is incremented, producing a `"<label>
-/// <n>. "` prefix.
+/// `[caption=]` attribute) – or a non-empty document-wide `caption` attribute
+/// is present – that value is used verbatim as the prefix, with **no** number
+/// assigned. Otherwise the label comes from the context's caption attribute and
+/// the document-wide counter for that context is incremented, producing a
+/// `"<label> <n>. "` prefix.
 pub(crate) fn assign_caption(
     parser: &mut Parser,
     context: &str,
@@ -149,15 +151,27 @@ pub(crate) fn assign_caption(
         };
     }
 
-    // A document-wide `caption` attribute, if set, overrides the per-context
-    // label and likewise skips the counter.
-    if let InterpretedValue::Value(value) = parser.attribute_value("caption")
-        && !value.is_empty()
-    {
-        return Some(Caption {
-            prefix: value,
-            number: None,
-        });
+    // A *present* document-wide `caption` attribute overrides the per-context
+    // label and likewise skips the counter, mirroring Asciidoctor, which treats
+    // the attribute as present-or-not (an empty string is truthy in Ruby). A
+    // non-empty value is used verbatim as the prefix; an empty one (bare
+    // `:caption:`, resolving to `Set`, or `:caption:` with an empty value,
+    // resolving to `Value("")`) suppresses the caption entirely – exactly like
+    // an empty `[caption=]` override. Only a truly unset (`:caption!:`) or
+    // absent attribute falls through to auto-numbering.
+    match parser.attribute_value("caption") {
+        InterpretedValue::Value(value) if !value.is_empty() => {
+            return Some(Caption {
+                prefix: value,
+                number: None,
+            });
+        }
+
+        InterpretedValue::Value(_) | InterpretedValue::Set => {
+            return None;
+        }
+
+        InterpretedValue::Unset => {}
     }
 
     // Otherwise build "<label> <n>. " from the context's caption attribute,
@@ -286,6 +300,76 @@ mod tests {
         assert_eq!(
             first_block_caption(":caption: Sample\n\n.Title\nplain paragraph."),
             (None, None)
+        );
+    }
+
+    #[test]
+    fn empty_document_caption_does_not_produce_xref_signifier() {
+        // A block suppressed by an empty document `caption` has no caption at
+        // all, so a cross-reference to it falls back to the block title rather
+        // than a "<label> <n>" signifier: the block was never numbered, so no
+        // signifier must be registered for it.
+        assert_eq!(
+            rendered_paragraphs(&Parser::default().parse(concat!(
+                ":caption:\n\n",
+                "[#ex]\n.second example\n====\nbody.\n====\n\n",
+                "See <<ex>>.",
+            ))),
+            vec![
+                "body.".to_string(),
+                "See <a href=\"#ex\">second example</a>.".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_document_caption_attribute_suppresses_caption() {
+        // A *present* but empty document `caption` attribute suppresses the
+        // caption entirely, matching Asciidoctor. Both the bare form (resolving
+        // to `Set`) ...
+        assert_eq!(
+            first_block_caption(":caption:\n\n.Title\n====\nbody.\n===="),
+            (None, None)
+        );
+
+        // ... and an explicitly empty value (resolving to `Value("")`) leave the
+        // block with just its title and no number.
+        assert_eq!(
+            first_block_caption(":caption: \n\n.Title\n====\nbody.\n===="),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn empty_document_caption_attribute_consumes_no_counter() {
+        // A block suppressed by an empty document `caption` must not advance the
+        // context counter: toggling `caption` on, then off, then relabeling must
+        // number the surviving example blocks 1 and 2 (not 1 and 3). This
+        // mirrors Asciidoctor's `blocks_test.rb` "automatic caption can be turned
+        // off and on and modified".
+        let doc = Parser::default().parse(concat!(
+            ".first example\n====\nan example\n====\n\n",
+            ":caption:\n\n",
+            ".second example\n====\nanother example\n====\n\n",
+            ":caption!:\n:example-caption: Exhibit\n\n",
+            ".third example\n====\nyet another example\n====",
+        ));
+
+        // The mid-document attribute entries also surface as (uncaptioned)
+        // child blocks, so restrict this to the example blocks.
+        let captions: Vec<_> = doc
+            .child_blocks()
+            .filter(|b| b.raw_context().as_ref() == "example")
+            .map(|b| b.caption().map(str::to_string))
+            .collect();
+
+        assert_eq!(
+            captions,
+            vec![
+                Some("Example 1. ".to_string()),
+                None,
+                Some("Exhibit 2. ".to_string())
+            ]
         );
     }
 

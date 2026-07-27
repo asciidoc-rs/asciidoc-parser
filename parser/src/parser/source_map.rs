@@ -123,7 +123,9 @@ pub enum Transform {
     /// A synthetic `:leveloffset:` attribute entry wrapping an include.
     LevelOffsetWrapper,
 
-    /// A secure-mode rewrite of an `include::` directive into a `link:` macro.
+    /// A rewrite of an `include::` directive into a `link:` macro: applied to
+    /// every target at `SafeMode::Secure` and above, and to a remote (URI)
+    /// target below secure when `allow-uri-read` is unset.
     SecureLinkRewrite,
 
     /// A synthetic "Unresolved directive" line replacing an include that could
