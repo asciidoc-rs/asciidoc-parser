@@ -149,3 +149,27 @@ To enable the built-in cache, you must:
 When these two conditions are satisfied, Asciidoctor caches content read from a URI according the to {url-http}[HTTP caching recommendations^].
 "#
 );
+
+// A remote target containing a space is wrapped in `pass:c[…]` by the
+// preprocessor fallback (see `reader_test.rs`); this confirms that wrapper is
+// extracted correctly downstream, so the rendered link carries the full URI as
+// its `href` (spaces and all) rather than leaving `pass:c` as the destination.
+#[test]
+fn space_in_remote_target_renders_full_uri() {
+    const SPACE_URI: &str = "https://example.org/no such file.adoc";
+
+    let mut parser = Parser::default()
+        .with_safe_mode(SafeMode::Safe)
+        .with_primary_file_name("main.adoc");
+
+    let source = format!("include::{SPACE_URI}[]");
+    let doc = parser.parse(&source);
+    let paras = rendered_paragraphs(&doc);
+
+    assert_eq!(
+        paras,
+        vec![format!(
+            "<a href=\"{SPACE_URI}\" class=\"bare include\">{SPACE_URI}</a>"
+        )]
+    );
+}
