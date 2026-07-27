@@ -68,13 +68,20 @@ To allow content to be read from a URI, you must enable the URI read permission 
 "#
     );
 
-    // Without `allow-uri-read`, a URI target is not resolved even in server
-    // mode; it becomes an unresolved directive and the handler is not consulted.
+    // Without `allow-uri-read`, a URI target is not fetched even in server
+    // mode; the handler is not consulted. Rather than report an unresolved
+    // directive, the directive falls back to a `link:` macro to the target
+    // (matching Asciidoctor at safe mode `SERVER` or below), so its content is
+    // never read.
     let paras = uri_include(SafeMode::Server, false, "SHOULD NOT APPEAR");
     assert_eq!(paras.len(), 1);
     assert!(
-        paras[0].starts_with("Unresolved directive in main.adoc - include::"),
-        "was: {paras:?}"
+        !paras[0].contains("SHOULD NOT APPEAR"),
+        "URI content was fetched: {paras:?}"
+    );
+    assert!(
+        paras[0].contains(&format!("href=\"{URI}\"")) && paras[0].contains("include"),
+        "expected a link fallback, was: {paras:?}"
     );
 }
 

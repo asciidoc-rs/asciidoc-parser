@@ -1185,7 +1185,11 @@ fn should_escape_spaces_in_target_when_generating_link_from_include_directive() 
     );
 }
 
-// A remote (URI) target is link-replaced the same way at secure safe mode.
+// A remote (URI) target below secure safe mode is not fetched when
+// `allow-uri-read` is unset; it falls back to the same `link:` rewrite applied
+// at secure mode, with an empty logger. A `SafeMode::Safe` parser is used (not
+// `Parser::default()`, which is secure) so the below-secure fallback branch —
+// not the secure-mode rewrite — is exercised.
 #[test]
 fn should_replace_include_directive_with_link_macro_if_safe_mode_allows_it_but_allow_uri_read_is_not_set()
  {
@@ -1204,13 +1208,18 @@ fn should_replace_include_directive_with_link_macro_if_safe_mode_allows_it_but_a
 "#
     );
 
-    assert_eq!(
-        reader_read(
-            &Parser::default(),
-            "include::https://example.org/dist/info.adoc[]"
-        ),
-        "link:https://example.org/dist/info.adoc[role=include]"
+    let parser = Parser::default().with_safe_mode(SafeMode::Safe);
+
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
+        "include::https://example.org/dist/info.adoc[]",
+        &parser,
     );
+
+    assert_eq!(
+        output,
+        "link:https://example.org/dist/info.adoc[role=include]\n"
+    );
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
 }
 
 non_normative!(
@@ -1225,6 +1234,9 @@ non_normative!(
 "#
 );
 
+// A remote target containing a space, below secure safe mode, is wrapped in
+// `pass:c[…]` by the same fallback. As above, a `SafeMode::Safe` parser is used
+// so the below-secure branch is exercised.
 #[test]
 fn should_escape_spaces_in_target_when_generating_link_from_remote_include_directive() {
     verifies!(
@@ -1241,7 +1253,7 @@ fn should_escape_spaces_in_target_when_generating_link_from_remote_include_direc
 
     assert_eq!(
         reader_read(
-            &Parser::default(),
+            &Parser::default().with_safe_mode(SafeMode::Safe),
             "include::https://example.org/no such file.adoc[]"
         ),
         "link:pass:c[https://example.org/no such file.adoc][role=include]"
