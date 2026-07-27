@@ -108,6 +108,13 @@ impl<'src> Document<'src> {
             let iconsdir_set_in_header = header.attributes().any(|a| a.name().data() == "iconsdir");
             parser.apply_iconsdir_default(iconsdir_set_in_header);
 
+            // Unfreeze any "flexible" attribute (`sectnums`) that was supplied
+            // *set* through the API, now that the header is parsed, so the body
+            // may still toggle it. An API-supplied *unset* stays locked. This
+            // mirrors the timing of Asciidoctor's `finalize_header` (see
+            // `Parser::unlock_flexible_attributes`).
+            parser.unlock_flexible_attributes();
+
             let mut maw_blocks = parse_blocks_until(after_header, |_, _| false, parser);
 
             if !maw_blocks.warnings.is_empty() {

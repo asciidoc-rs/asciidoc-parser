@@ -3676,13 +3676,10 @@ mod section_numbering {
         );
     }
 
-    // NOTE: These two tests additionally exercise Asciidoctor's API attribute
-    // soft-set / hard-lock semantics (`attributes: { 'numbered' => '' }` vs
-    // `{ 'numbered!' => '' }`) — beyond the `numbered` document alias — which
-    // this crate models via `with_intrinsic_attribute` on the raw name, so they
-    // are left out of scope here.
-    non_normative!(
-        r##"
+    #[test]
+    fn section_numbers_can_be_toggled_even_if_numbered_attribute_is_enabled_via_the_api() {
+        verifies!(
+            r##"
     test 'section numbers can be toggled even if numbered attribute is enable via the API' do
       input = <<~'EOS'
       = Document Title
@@ -3717,6 +3714,45 @@ mod section_numbering {
       assert_xpath '//h2[@id="_section_three"][text()="3. Section Three"]', output, 1
     end
 
+"##
+        );
+
+        // An API-*enabled* `numbered` (`attributes: { 'numbered' => '' }`,
+        // modeled here as an `ApiOnly` `with_intrinsic_attribute` on the raw
+        // `numbered` alias) seeds `sectnums` *set*, but a flexible attribute set
+        // through the API is unlocked once the header is parsed – so the body's
+        // `:numbered!:` / `:numbered:` toggles still take effect. The colophon
+        // sections are unnumbered and numbering restarts at `1` after
+        // `:numbered:`.
+        let doc = Parser::default()
+            .with_intrinsic_attribute("numbered", "", ModificationContext::ApiOnly)
+            .parse(
+                "= Document Title\n\n:numbered!:\n\n== Colophon Section\n\n== Another Colophon Section\n\n== Final Colophon Section\n\n:numbered:\n\n== Section One\n\n=== Section One Subsection\n\n== Section Two\n\n== Section Three\n",
+            );
+
+        let nums: Vec<(&str, Option<String>)> = all_sections(&doc)
+            .iter()
+            .map(|s| (s.section_title(), s.section_number().map(|n| n.to_string())))
+            .collect();
+
+        assert_eq!(
+            nums,
+            vec![
+                ("Colophon Section", None),
+                ("Another Colophon Section", None),
+                ("Final Colophon Section", None),
+                ("Section One", Some("1".to_string())),
+                ("Section One Subsection", Some("1.1".to_string())),
+                ("Section Two", Some("2".to_string())),
+                ("Section Three", Some("3".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn section_numbers_cannot_be_toggled_even_if_numbered_attribute_is_disabled_via_the_api() {
+        verifies!(
+            r##"
     test 'section numbers cannot be toggled even if numbered attribute is disabled via the API' do
       input = <<~'EOS'
       = Document Title
@@ -3752,7 +3788,37 @@ mod section_numbering {
     end
 
 "##
-    );
+        );
+
+        // An API-*disabled* `numbered!` (`attributes: { 'numbered!' => '' }`,
+        // modeled here as an `ApiOnly` `with_intrinsic_attribute_bool` `false`
+        // on the raw `numbered` alias) seeds `sectnums` *unset*. An unset
+        // flexible attribute stays locked – so the body's `:numbered:` cannot
+        // re-enable numbering and every section is unnumbered.
+        let doc = Parser::default()
+            .with_intrinsic_attribute_bool("numbered", false, ModificationContext::ApiOnly)
+            .parse(
+                "= Document Title\n\n:numbered!:\n\n== Colophon Section\n\n== Another Colophon Section\n\n== Final Colophon Section\n\n:numbered:\n\n== Section One\n\n=== Section One Subsection\n\n== Section Two\n\n== Section Three\n",
+            );
+
+        let nums: Vec<(&str, Option<String>)> = all_sections(&doc)
+            .iter()
+            .map(|s| (s.section_title(), s.section_number().map(|n| n.to_string())))
+            .collect();
+
+        assert_eq!(
+            nums,
+            vec![
+                ("Colophon Section", None),
+                ("Another Colophon Section", None),
+                ("Final Colophon Section", None),
+                ("Section One", None),
+                ("Section One Subsection", None),
+                ("Section Two", None),
+                ("Section Three", None),
+            ]
+        );
+    }
 
     #[test]
     fn section_numbers_should_not_increment_until_numbered_attribute_is_turned_back_on() {
