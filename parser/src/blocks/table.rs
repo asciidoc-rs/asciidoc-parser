@@ -3255,6 +3255,8 @@ mod tests {
     };
     use crate::{
         Span,
+        content::FootnoteDeferred,
+        document::Footnote,
         parser::{
             HtmlSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
             ResolvedReference, SourceLine,
@@ -3324,6 +3326,11 @@ mod tests {
     /// panicking. Production code resolves while the cell is its sole
     /// owner, so this defensive branch is exercised here by deliberately
     /// holding a second reference.
+    ///
+    /// The cell's footnotes are resolved in the *same* guarded branch as its
+    /// blocks, so they share this behavior exactly: a shared owned cell leaves
+    /// both its blocks and its footnotes untouched – they never diverge (one
+    /// re-resolved while the other stays stale).
     #[test]
     fn resolve_references_skips_shared_owned_cell() {
         let mut cell = AsciiDocCell::Owned(Arc::new(OwnedCell::new(String::new(), |_source| {
@@ -3333,7 +3340,21 @@ mod tests {
                 toc: TocConfig::disabled(),
                 blocks: vec![],
                 attributes: ResolvedAttributes::default(),
-                footnotes: vec![],
+
+                // A footnote that still carries deferred cross-reference state:
+                // resolving it would rebuild `text` from the template
+                // (`RESOLVED`), so the sentinel `text` below changes if – and
+                // only if – the shared cell is mistakenly resolved.
+                footnotes: vec![Footnote {
+                    index: "1".to_string(),
+                    id: None,
+                    text: "UNRESOLVED".to_string(),
+                    deferred: Some(Box::new(FootnoteDeferred::new(
+                        "RESOLVED".to_string(),
+                        vec![],
+                    ))),
+                    location: None,
+                }],
             }
         })));
 
@@ -3354,6 +3375,11 @@ mod tests {
         assert!(warnings.host.is_empty());
         assert!(warnings.doc.is_empty());
         assert_eq!(cell, shared);
+
+        // The footnote was left untouched too: its text keeps the
+        // pre-resolution sentinel rather than the rebuilt `RESOLVED` value.
+        let footnote_texts: Vec<&str> = cell.footnotes().iter().map(|f| f.text.as_str()).collect();
+        assert_eq!(footnote_texts, ["UNRESOLVED"]);
     }
 
     mod unresolved_directive_in_asciidoc_cell {
