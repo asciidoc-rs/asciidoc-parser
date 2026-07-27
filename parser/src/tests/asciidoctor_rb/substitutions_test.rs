@@ -8960,8 +8960,8 @@ mod passthroughs {
         // Ruby test asserts). The exact tail after the span (`+This+` here vs.
         // Asciidoctor's `++This++`) still differs because the two
         // implementations tokenize the surrounding run of `+` characters
-        // differently – a separate passthrough-extraction nuance, not the role
-        // handling exercised by this robustness test.
+        // differently – a separate passthrough-extraction nuance (tracked in
+        // issue #979), not the role handling exercised by this robustness test.
         let mut p = Parser::default();
         let maw = crate::blocks::Block::parse(
             crate::Span::new("['role']\\+++++++++This++++++++++++"),

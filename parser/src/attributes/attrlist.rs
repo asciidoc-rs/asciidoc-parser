@@ -568,16 +568,13 @@ impl<'src> Attrlist<'src> {
             return None;
         }
 
-        // Asciidoctor considers only the first positional attribute, which is the
-        // source up to the first comma.
+        // Asciidoctor's `parse_quoted_text_attributes` considers only the first
+        // positional attribute – the source up to the first comma – and uses it
+        // verbatim (quote characters included) as the role. A quote-delimited
+        // first positional always leaves at least its opening quote here, so the
+        // slice is never empty.
         let raw = self.source.data();
-        let segment = raw.split(',').next().unwrap_or(raw).trim();
-
-        if segment.is_empty() {
-            None
-        } else {
-            Some(segment)
-        }
+        Some(raw.split_once(',').map_or(raw, |(first, _)| first).trim())
     }
 
     /// Returns any option attributes that were found.
@@ -2434,10 +2431,32 @@ mod tests {
             assert!(mi.item.block_style().is_none());
             assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'role'");
 
+            // Only the first positional (the source up to the first comma) is
+            // considered, mirroring Asciidoctor's `parse_quoted_text_attributes`.
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'role',keep=dropped"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'role'");
+
             // An unquoted positional is handled by the normal block-style path,
             // so there is no fallback role to recover.
             let mi = crate::attributes::Attrlist::parse(
                 crate::Span::new("role"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert!(mi.item.quoted_text_fallback_role().is_none());
+
+            // A named-only or otherwise position-1-less attribute list has no
+            // first positional attribute, so there is nothing to recover.
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("id=x"),
                 &p,
                 AttrlistContext::Inline,
             )
