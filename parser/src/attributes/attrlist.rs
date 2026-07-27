@@ -2445,6 +2445,19 @@ mod tests {
 
             assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'role'");
 
+            // The comma boundary is applied to the raw source, matching
+            // Asciidoctor's `str.slice 0, (str.index ',')`, so a comma inside the
+            // quotes truncates the role there too rather than being kept as
+            // quoted content.
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'a,b'"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'a");
+
             // An unquoted positional is handled by the normal block-style path,
             // so there is no fallback role to recover.
             let mi = crate::attributes::Attrlist::parse(

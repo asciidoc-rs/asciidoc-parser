@@ -9001,6 +9001,42 @@ mod passthroughs {
     }
 
     #[test]
+    fn passthrough_role_resolves_attribute_reference() {
+        // An attribute reference embedded in a passthrough role is resolved
+        // before the role is applied, mirroring Asciidoctor's
+        // `parse_quoted_text_attributes` (which runs `sub_attributes` on the
+        // attribute list). This is a crate-specific regression test, not a port.
+        let render = |input: &str| {
+            let mut p = Parser::default().with_intrinsic_attribute(
+                "myrole",
+                "highlight",
+                ModificationContext::Anywhere,
+            );
+
+            let maw = crate::blocks::Block::parse(crate::Span::new(input), &mut p);
+
+            let crate::blocks::Block::Simple(block) = maw.item.unwrap().item else {
+                panic!("expected a simple block");
+            };
+
+            block.content().rendered().to_string()
+        };
+
+        // Unquoted role via the normal block-style path.
+        assert_eq!(
+            render("[{myrole}]++text++"),
+            r#"<span class="highlight">text</span>"#
+        );
+
+        // Quote-delimited role via the verbatim-role fallback (the case flagged
+        // in review): the reference resolves inside the retained quotes.
+        assert_eq!(
+            render("['{myrole}']++text++"),
+            r#"<span class="'highlight'">text</span>"#
+        );
+    }
+
+    #[test]
     fn should_allow_inline_double_plus_passthrough_to_be_escaped_using_backslash() {
         verifies!(
             r#"

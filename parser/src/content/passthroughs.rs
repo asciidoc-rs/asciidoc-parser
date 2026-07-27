@@ -5,7 +5,7 @@ use regex::{Captures, Regex, Replacer};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{Content, SubstitutionGroup},
+    content::{Content, SubstitutionGroup, substitution_step::substitute_attributes_in_text},
     parser::{QuoteScope, QuoteType},
     warnings::WarningType,
 };
@@ -615,12 +615,20 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
         pass.subs.apply(&mut subbed_text, self.1, None);
 
         if let Some(type_) = pass.type_ {
-            // NOTE: The stored attrlist is parsed here without applying attribute
-            // reference substitution, so a reference embedded in a passthrough
-            // role (e.g. `['{myrole}']++x++`) is not resolved – unlike the inline
-            // quoted-text path, whose attrlist comes from the already-substituted
-            // buffer. Tracked in issue #987.
-            let attrlist = pass.attrlist.as_ref().map(|attrlist_body| {
+            // Resolve attribute references in the stored attrlist before parsing
+            // it. Inline passthroughs are extracted before the substitution
+            // pipeline runs, so – unlike the inline quoted-text path, whose
+            // attrlist is a slice of the already-substituted buffer – a reference
+            // embedded in a passthrough role (e.g. `['{myrole}']++x++`) would
+            // otherwise render verbatim. This mirrors Asciidoctor's
+            // `parse_quoted_text_attributes`, which runs `sub_attributes` on the
+            // attribute list.
+            let attrlist_body = pass
+                .attrlist
+                .as_ref()
+                .map(|attrlist_body| substitute_attributes_in_text(attrlist_body, self.1));
+
+            let attrlist = attrlist_body.as_ref().map(|attrlist_body| {
                 let span = Span::new(attrlist_body);
                 let maw = Attrlist::parse(span, self.1, AttrlistContext::Inline);
                 maw.item.item
