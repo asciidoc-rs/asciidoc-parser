@@ -537,6 +537,7 @@ fn children_of<'a>(block: &'a Block<'a>, traverse_documents: bool) -> ChildBlock
         | Block::Media(_)
         | Block::RawDelimited(_)
         | Block::Break(_)
+        | Block::Toc(_)
         | Block::DocumentAttribute(_) => ChildBlocksInner::Empty,
     }
 }

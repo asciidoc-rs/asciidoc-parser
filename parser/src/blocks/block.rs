@@ -4,7 +4,7 @@ use crate::{
     blocks::{
         AdmonitionBlock, Break, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItem,
         ListItemMarker, MediaBlock, Preamble, QuoteBlock, RawDelimitedBlock, SectionBlock,
-        SimpleBlock, TableBlock, media::TargetResolution, metadata::BlockMetadata,
+        SimpleBlock, TableBlock, TocBlock, media::TargetResolution, metadata::BlockMetadata,
         starts_with_admonition_label,
     },
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
@@ -78,6 +78,10 @@ pub enum Block<'src> {
     /// A thematic or page break.
     Break(Break<'src>),
 
+    /// The `toc::[]` block macro, marking where a table of contents should be
+    /// rendered under `toc-placement: macro`.
+    Toc(TocBlock<'src>),
+
     /// When an attribute is defined in the document body using an attribute
     /// entry, that’s simply referred to as a document attribute.
     DocumentAttribute(Attribute<'src>),
@@ -106,6 +110,7 @@ impl<'src> std::fmt::Debug for Block<'src> {
             Block::Table(block) => f.debug_tuple("Block::Table").field(block).finish(),
             Block::Preamble(block) => f.debug_tuple("Block::Preamble").field(block).finish(),
             Block::Break(break_) => f.debug_tuple("Block::Break").field(break_).finish(),
+            Block::Toc(block) => f.debug_tuple("Block::Toc").field(block).finish(),
 
             Block::DocumentAttribute(block) => f
                 .debug_tuple("Block::DocumentAttribute")
@@ -551,6 +556,41 @@ impl<'src> Block<'src> {
                 // automatically error out on a parse failure.
             }
 
+            if line.item.starts_with("toc::") {
+                let mut toc_block_maw = TocBlock::parse(&metadata, parser);
+
+                if let Some(toc_block) = toc_block_maw.item {
+                    // Only propagate warnings from TOC block parsing if we think
+                    // this *is* a TOC block. Otherwise, there would likely be too
+                    // many false positives.
+                    if !toc_block_maw.warnings.is_empty() {
+                        warnings.append(&mut toc_block_maw.warnings);
+                    }
+
+                    let block = Self::Toc(toc_block.item);
+
+                    Self::register_block_id(
+                        block.id(),
+                        Self::block_reftext(&block, anchor_reftext.as_deref()).as_deref(),
+                        Self::block_signifier(&block, parser),
+                        block.span(),
+                        parser,
+                        &mut warnings,
+                    );
+
+                    return MatchAndWarnings {
+                        item: BlockParseOutcome::Parsed(MatchedItem {
+                            item: block,
+                            after: toc_block.after,
+                        }),
+                        warnings,
+                    };
+                }
+
+                // This might be some other kind of block, so we don't
+                // automatically error out on a parse failure.
+            }
+
             if (line.item.starts_with('=') || line.item.starts_with('#'))
                 && let Some(mi_section_block) =
                     SectionBlock::parse(&metadata, parser, &mut warnings)
@@ -865,6 +905,7 @@ impl<'src> Block<'src> {
             Self::Quote(b) => b.title_content_mut(),
             Self::Table(b) => b.title_content_mut(),
             Self::Break(b) => b.title_content_mut(),
+            Self::Toc(b) => b.title_content_mut(),
             _ => None,
         }
     }
@@ -885,6 +926,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.content_model(),
             Self::Preamble(b) => b.content_model(),
             Self::Break(b) => b.content_model(),
+            Self::Toc(b) => b.content_model(),
             Self::DocumentAttribute(b) => b.content_model(),
         }
     }
@@ -903,6 +945,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.declared_style(),
             Self::Preamble(b) => b.declared_style(),
             Self::Break(b) => b.declared_style(),
+            Self::Toc(b) => b.declared_style(),
             Self::DocumentAttribute(b) => b.declared_style(),
         }
     }
@@ -921,6 +964,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.rendered_content(),
             Self::Preamble(b) => b.rendered_content(),
             Self::Break(b) => b.rendered_content(),
+            Self::Toc(b) => b.rendered_content(),
             Self::DocumentAttribute(b) => b.rendered_content(),
         }
     }
@@ -939,6 +983,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.raw_context(),
             Self::Preamble(b) => b.raw_context(),
             Self::Break(b) => b.raw_context(),
+            Self::Toc(b) => b.raw_context(),
             Self::DocumentAttribute(b) => b.raw_context(),
         }
     }
@@ -957,6 +1002,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.child_blocks_mut(),
             Self::Preamble(b) => b.child_blocks_mut(),
             Self::Break(b) => b.child_blocks_mut(),
+            Self::Toc(b) => b.child_blocks_mut(),
             Self::DocumentAttribute(b) => b.child_blocks_mut(),
         }
     }
@@ -975,6 +1021,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.content_mut(),
             Self::Preamble(b) => b.content_mut(),
             Self::Break(b) => b.content_mut(),
+            Self::Toc(b) => b.content_mut(),
             Self::DocumentAttribute(b) => b.content_mut(),
         }
     }
@@ -993,6 +1040,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.title_source(),
             Self::Preamble(b) => b.title_source(),
             Self::Break(b) => b.title_source(),
+            Self::Toc(b) => b.title_source(),
             Self::DocumentAttribute(b) => b.title_source(),
         }
     }
@@ -1011,6 +1059,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.title(),
             Self::Preamble(b) => b.title(),
             Self::Break(b) => b.title(),
+            Self::Toc(b) => b.title(),
             Self::DocumentAttribute(b) => b.title(),
         }
     }
@@ -1029,6 +1078,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.caption(),
             Self::Preamble(b) => b.caption(),
             Self::Break(b) => b.caption(),
+            Self::Toc(b) => b.caption(),
             Self::DocumentAttribute(b) => b.caption(),
         }
     }
@@ -1047,15 +1097,19 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.number(),
             Self::Preamble(b) => b.number(),
             Self::Break(b) => b.number(),
+            Self::Toc(b) => b.number(),
             Self::DocumentAttribute(b) => b.number(),
         }
     }
 
     fn id(&'src self) -> Option<&'src str> {
-        // Two variants override the trait default:
+        // Three variants override the trait default:
         //
         // * A `MediaBlock` additionally recognizes a named `id=` _inside_ its macro
         //   attribute list (e.g. `image::sunset.jpg[id=sunset-img]`).
+        //
+        // * A `TocBlock` likewise recognizes a named `id=` _inside_ its macro attribute
+        //   list (e.g. `toc::[id=contents]`).
         //
         // * A `SectionBlock` falls back to its auto-generated (`_slug`) ID when no
         //   explicit ID was supplied, so `block.id()` yields the same ID the section is
@@ -1068,6 +1122,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
         match self {
             Self::Media(b) => b.id(),
             Self::Section(b) => b.id(),
+            Self::Toc(b) => b.id(),
             _ => self
                 .anchor()
                 .map(|a| a.data())
@@ -1089,6 +1144,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.anchor(),
             Self::Preamble(b) => b.anchor(),
             Self::Break(b) => b.anchor(),
+            Self::Toc(b) => b.anchor(),
             Self::DocumentAttribute(b) => b.anchor(),
         }
     }
@@ -1107,6 +1163,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.anchor_reftext(),
             Self::Preamble(b) => b.anchor_reftext(),
             Self::Break(b) => b.anchor_reftext(),
+            Self::Toc(b) => b.anchor_reftext(),
             Self::DocumentAttribute(b) => b.anchor_reftext(),
         }
     }
@@ -1125,6 +1182,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.attrlist(),
             Self::Preamble(b) => b.attrlist(),
             Self::Break(b) => b.attrlist(),
+            Self::Toc(b) => b.attrlist(),
             Self::DocumentAttribute(b) => b.attrlist(),
         }
     }
@@ -1143,6 +1201,7 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Table(b) => b.substitution_group(),
             Self::Preamble(b) => b.substitution_group(),
             Self::Break(b) => b.substitution_group(),
+            Self::Toc(b) => b.substitution_group(),
             Self::DocumentAttribute(b) => b.substitution_group(),
         }
     }
@@ -1163,6 +1222,7 @@ impl<'src> HasSpan<'src> for Block<'src> {
             Self::Table(b) => b.span(),
             Self::Preamble(b) => b.span(),
             Self::Break(b) => b.span(),
+            Self::Toc(b) => b.span(),
             Self::DocumentAttribute(b) => b.span(),
         }
     }

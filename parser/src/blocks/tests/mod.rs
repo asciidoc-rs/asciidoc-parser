@@ -13,6 +13,7 @@ mod raw_delimited;
 mod section;
 mod simple;
 mod table;
+mod toc;
 
 mod content_model {
     use crate::blocks::ContentModel;
@@ -105,6 +106,17 @@ mod impl_debug {
         let debug_output = format!("{:?}", mi.item);
         assert!(debug_output.starts_with("Block::Break"));
     }
+
+    #[test]
+    fn toc() {
+        let mut parser = Parser::default();
+        let mi = Block::parse(Span::new("toc::[]"), &mut parser)
+            .unwrap_if_no_warnings()
+            .unwrap();
+
+        let debug_output = format!("{:?}", mi.item);
+        assert!(debug_output.starts_with("Block::Toc"));
+    }
 }
 
 mod as_list_item {
@@ -166,6 +178,7 @@ mod caption_and_number {
             "[quote]\n____\nq\n____", // Quote
             "* item",                 // List
             "'''",                    // Break
+            "toc::[]",                // Toc
             ":author: Jane",          // DocumentAttribute
         ];
 

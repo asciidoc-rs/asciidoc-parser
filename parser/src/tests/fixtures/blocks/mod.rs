@@ -42,3 +42,6 @@ pub(crate) use simple::SimpleBlock;
 
 mod table;
 pub(crate) use table::{TableBlock, TableCell, TableCellContent, TableColumn, TableRow};
+
+mod toc;
+pub(crate) use toc::TocBlock;
