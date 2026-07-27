@@ -115,16 +115,9 @@ fn scoped_toc(
     TocScopeGuard { key, prev }
 }
 
-/// A regular expression matching a `toc::[]` block macro line (with any
-/// attributes between the brackets).
-static TOC_MACRO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^toc::\[.*\]$").unwrap());
-
-/// Returns `true` if `block` is a `toc::[]` block macro (which the parser
-/// represents as a plain paragraph, since `toc` is not a media macro).
+/// Returns `true` if `block` is a `toc::[]` block macro.
 fn is_toc_macro(block: &Block) -> bool {
-    matches!(block, Block::Simple(simple)
-        if simple.declared_style().is_none()
-            && TOC_MACRO.is_match(simple.content().original().data().trim()))
+    matches!(block, Block::Toc(_))
 }
 
 /// Renders a `toc::[]` block macro: the table of contents for the active
@@ -813,6 +806,7 @@ impl ToVirtualDom for Block<'_> {
             Block::Table(table) => table_to_node(table),
             Block::Preamble(preamble) => preamble_to_node(preamble),
             Block::Break(break_) => break_to_node(break_),
+            Block::Toc(_) => toc_to_node(self),
             Block::DocumentAttribute(_) => {
                 // Document attributes don't render in HTML.
                 VirtualNode::new("comment")
@@ -2696,6 +2690,14 @@ fn break_to_node<'a>(break_: &'a Break<'a>) -> VirtualNode {
         "page_break" => VirtualNode::new("div").with_class("page-break"),
         _ => VirtualNode::new("hr"),
     }
+}
+
+fn toc_to_node<'a>(toc: &'a Block<'a>) -> VirtualNode {
+    // A `toc::[]` macro renders the table of contents when a `toc: macro` scope
+    // is active, and nothing otherwise (matching Asciidoctor). This arm is the
+    // fallback for a block reached directly rather than through
+    // `add_block_with_title`, which intercepts the macro earlier.
+    toc_macro_node(toc).unwrap_or_else(|| VirtualNode::new("comment"))
 }
 
 #[cfg(test)]
