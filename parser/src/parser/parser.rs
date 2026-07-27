@@ -2593,6 +2593,46 @@ impl Parser {
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
     }
 
+    /// Unlocks each *flexible* document attribute ([`FLEXIBLE_ATTRIBUTES`],
+    /// currently just `sectnums`) that was supplied *set* through the API, so a
+    /// later document-body assignment may still toggle it.
+    ///
+    /// Mirrors the flexible-attribute unfreeze at the end of Asciidoctor's
+    /// `save_attributes` (run by `finalize_header`, after the header is parsed
+    /// and before the body): an API attribute override whose value is *truthy*
+    /// is dropped from the locked overrides, while one whose value is an
+    /// [unset] (from `numbered!` / `sectnums!`) is kept locked. That asymmetry
+    /// is exactly what lets an API-*enabled* `numbered` still be toggled off by
+    /// a body `:numbered!:`, while an API-*disabled* `numbered!` stays
+    /// permanently unnumbered even across a later `:numbered:`.
+    ///
+    /// Called once, for the top-level document only – Asciidoctor guards the
+    /// unfreeze with `unless @parent_document`, and an AsciiDoc table cell
+    /// never reaches this path. This must *not* recapture the attribute
+    /// baseline: the unlock is a per-parse effect, so a `Parser` reused across
+    /// documents re-derives it from the still-locked API override each time.
+    ///
+    /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
+    pub(crate) fn unlock_flexible_attributes(&mut self) {
+        for name in FLEXIBLE_ATTRIBUTES {
+            // Only an API-set (`ApiOnly`, i.e. locked) override with a value
+            // that is not an explicit unset is unfrozen; everything else is
+            // left exactly as it stands.
+            if let Some(existing) = self.attribute_values.get(name)
+                && existing.modification_context == ModificationContext::ApiOnly
+                && existing.value != InterpretedValue::Unset
+            {
+                let unlocked = AttributeValue {
+                    modification_context: ModificationContext::Anywhere,
+                    silent_when_locked: false,
+                    ..existing.clone()
+                };
+
+                Arc::make_mut(&mut self.attribute_values).insert(name.to_string(), unlocked);
+            }
+        }
+    }
+
     /// Assign the next section number for a given level.
     pub(crate) fn assign_section_number(&mut self, level: usize) -> SectionNumber {
         match self.topmost_section_type {
@@ -2862,6 +2902,16 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
     // Some attribute names have aliases. Remap to the primary name.
     alias_attr_name(attr_name)
 }
+
+/// Document attributes that are *flexible*: an API-supplied *set* value is
+/// unlocked once the header is parsed so the document body may still toggle it,
+/// while an API-supplied [unset] stays locked (see
+/// [`unlock_flexible_attributes`](Parser::unlock_flexible_attributes)). Mirrors
+/// Asciidoctor's `FLEXIBLE_ATTRIBUTES` constant, currently just `sectnums` (the
+/// primary name of the `numbered` alias).
+///
+/// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
+const FLEXIBLE_ATTRIBUTES: [&str; 1] = ["sectnums"];
 
 /// Remaps an attribute name that is a legacy alias to its primary name,
 /// returning any other name unchanged.
@@ -3291,6 +3341,53 @@ mod tests {
             rendered_paragraphs(&doc),
             vec!["First line<br>\nSecond line"]
         );
+    }
+
+    #[test]
+    fn api_set_flexible_attribute_is_unlocked_after_the_header() {
+        // An API-*set* `sectnums` (here via the `numbered` alias) is a flexible
+        // attribute: it seeds numbering on, but is unlocked once the header is
+        // parsed so a body `:sectnums!:` still takes effect. Modeled as the
+        // html5 converter applies it: an `ApiOnly` override on `numbered`.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "numbered",
+            "",
+            ModificationContext::ApiOnly,
+        );
+
+        // Before any parse the alias is stored, locked, under `sectnums`.
+        assert!(p.is_attribute_set("sectnums"));
+
+        // A body `:sectnums!:` turns numbering back off for the sections that
+        // follow it: the unlock let the assignment through.
+        let doc = p.parse("= Title\n\n== On\n\n:sectnums!:\n\n== Off");
+        let nums: Vec<Option<String>> = crate::tests::prelude::all_sections(&doc)
+            .iter()
+            .map(|s| s.section_number().map(|n| n.to_string()))
+            .collect();
+
+        assert_eq!(nums, vec![Some("1".to_string()), None]);
+    }
+
+    #[test]
+    fn api_unset_flexible_attribute_stays_locked() {
+        // An API-*unset* `sectnums` (here via `numbered!`, i.e. the alias set to
+        // `false`) stays locked: a body `:sectnums:` cannot re-enable numbering.
+        let mut p = Parser::default().with_intrinsic_attribute_bool(
+            "numbered",
+            false,
+            ModificationContext::ApiOnly,
+        );
+
+        assert!(!p.is_attribute_set("sectnums"));
+
+        let doc = p.parse("= Title\n\n:sectnums:\n\n== Still Off");
+        let nums: Vec<Option<String>> = crate::tests::prelude::all_sections(&doc)
+            .iter()
+            .map(|s| s.section_number().map(|n| n.to_string()))
+            .collect();
+
+        assert_eq!(nums, vec![None]);
     }
 
     // Under `SafeMode::Server` or greater, `docdir` reads as empty and
