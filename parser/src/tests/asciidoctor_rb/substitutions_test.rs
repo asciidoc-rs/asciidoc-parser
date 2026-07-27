@@ -8957,11 +8957,10 @@ mod passthroughs {
     fn should_not_crash_if_role_on_passthrough_is_enclosed_in_quotes_2() {
         // As in the first case, the quoted role is preserved, so the rendered
         // output includes `<span class="'role'">` (the only thing the upstream
-        // Ruby test asserts). The exact tail after the span (`+This+` here vs.
-        // Asciidoctor's `++This++`) still differs because the two
-        // implementations tokenize the surrounding run of `+` characters
-        // differently – a separate passthrough-extraction nuance (tracked in
-        // issue #979), not the role handling exercised by this robustness test.
+        // Ruby test asserts). The tail after the span (`++This++`) now matches
+        // Asciidoctor exactly: the surrounding run of `+` characters tokenizes
+        // into the same passthrough spans because `INLINE_PASS` consumes one
+        // character before each match, mirroring Asciidoctor's `InlinePassRx`.
         let mut p = Parser::default();
         let maw = crate::blocks::Block::parse(
             crate::Span::new("['role']\\+++++++++This++++++++++++"),
@@ -8980,7 +8979,7 @@ mod passthroughs {
                         col: 1,
                         offset: 0,
                     },
-                    rendered: "<span class=\"'role'\">+</span>+This+",
+                    rendered: "<span class=\"'role'\">+</span>++This++",
                 },
                 source: Span {
                     data: "['role']\\+++++++++This++++++++++++",

@@ -368,23 +368,26 @@ static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
-            \b{start-half}              # Must not follow a word
-
             (?:
                                         # Option 1: [... x-] followed by `xxx`
+                \b{start-half}              # Must not follow a word
                 \[(x-|[^\[\]]+\ x-)\]       # Group 1: [attrlist] with x- suffix
                 \`(\S(?:.*?\S)??)\`         # Group 2: `...` content
-            
+
             |                           # --OR--
                                         # Option 2: [...] followed by +xxx+
+                \b{start-half}              # Must not follow a word
                 \[([^\[\]]+)\]              # Group 3: [attrlist]
                 (\\{0,2})                   # Group 4: optional escapes
                 \+(\S(?:.*?\S)??)\+         # Group 5: +...+ content (surrounded by non-space)
 
             |                           # --OR--
                                         # Option 3: +xxx+ without attrlist
-                (\\)?                       # Group 6: optional escape
-                \+(\S(?:.*?\S)??)\+         # Group 7: +...+ content (surrounded by non-space)
+                (?:^|([^\w;:\\]))           # Group 6: consume a preceding char, so a run
+                                        # of `+` tokenizes like Asciidoctor's `gsub`
+                                        # (which consumes one char before each match)
+                (\\)?                       # Group 7: optional escape
+                \+(\S(?:.*?\S)??)\+         # Group 8: +...+ content (surrounded by non-space)
 
             )
 
@@ -407,7 +410,11 @@ impl Replacer for InlinePassReplacer<'_> {
             // the quoted text is still subject to inline pass replacement.
             let replacer = InlinePassReplacer(self.0);
 
-            let (first, rem) = &caps[0].split_at(1);
+            // Split off the first character (a char boundary, since Option 3
+            // may consume a multi-byte preceding character) and retry on the
+            // remainder.
+            let first_len = caps[0].chars().next().map_or(0, char::len_utf8);
+            let (first, rem) = &caps[0].split_at(first_len);
             dest.push_str(first);
 
             let new_result = INLINE_PASS.replace_all(rem, replacer);
@@ -416,7 +423,14 @@ impl Replacer for InlinePassReplacer<'_> {
             return;
         }
 
-        let escapes = caps.get(4).or_else(|| caps.get(6));
+        // Option 3 consumes one preceding character (mirroring Asciidoctor's
+        // `InlinePassRx`, whose leading group absorbs the character before the
+        // passthrough). Re-emit it verbatim ahead of whatever this match
+        // produces. Options 1 and 2 never capture it, so this is a no-op there.
+        let preceding = caps.get(6).map_or("", |m| m.as_str());
+        dest.push_str(preceding);
+
+        let escapes = caps.get(4).or_else(|| caps.get(7));
         let escape_count = escapes.map_or(0, |m| m.len());
 
         let format_mark = if caps.get(2).is_some() { '`' } else { '+' };
@@ -432,7 +446,7 @@ impl Replacer for InlinePassReplacer<'_> {
             }
         });
 
-        let quoted_text = caps.get(2).or_else(|| caps.get(5)).or_else(|| caps.get(7));
+        let quoted_text = caps.get(2).or_else(|| caps.get(5)).or_else(|| caps.get(8));
         let quoted_text = quoted_text.map_or("", |m| m.as_str());
 
         if let Some(orig_attrlist_body) = orig_attrlist_body {
