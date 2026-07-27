@@ -11596,11 +11596,17 @@ mod post_replacements {
 "#
         );
 
-        let mut p = Parser::default();
-        let maw = crate::blocks::Block::parse(
-            crate::Span::new("[%hardbreaks]\nFirst line\nSecond line"),
-            &mut p,
+        // The `hardbreaks` attribute is supplied through the API (as
+        // Asciidoctor's `attributes: { 'hardbreaks' => '' }`), not via a
+        // `[%hardbreaks]` block option: a document-level `hardbreaks` set
+        // through the API must enable per-line hard breaks.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "hardbreaks",
+            "",
+            ModificationContext::Anywhere,
         );
+
+        let maw = crate::blocks::Block::parse(crate::Span::new("First line\nSecond line"), &mut p);
 
         let block = maw.item.unwrap().item;
 
@@ -11610,14 +11616,14 @@ mod post_replacements {
                 content: Content {
                     original: Span {
                         data: "First line\nSecond line",
-                        line: 2,
+                        line: 1,
                         col: 1,
-                        offset: 14,
+                        offset: 0,
                     },
                     rendered: "First line<br>\nSecond line",
                 },
                 source: Span {
-                    data: "[%hardbreaks]\nFirst line\nSecond line",
+                    data: "First line\nSecond line",
                     line: 1,
                     col: 1,
                     offset: 0,
@@ -11629,20 +11635,7 @@ mod post_replacements {
                 number: None,
                 anchor: None,
                 anchor_reftext: None,
-                attrlist: Some(Attrlist {
-                    attributes: &[ElementAttribute {
-                        name: None,
-                        shorthand_items: &["%hardbreaks"],
-                        value: "%hardbreaks"
-                    },],
-                    anchor: None,
-                    source: Span {
-                        data: "%hardbreaks",
-                        line: 1,
-                        col: 2,
-                        offset: 1,
-                    },
-                },),
+                attrlist: None,
             },)
         );
     }
@@ -11660,11 +11653,16 @@ mod post_replacements {
 "#
         );
 
-        let mut p = Parser::default();
-        let maw = crate::blocks::Block::parse(
-            crate::Span::new("[%hardbreaks]\nFirst line +\nSecond line"),
-            &mut p,
+        // See the note on the API-supplied `hardbreaks` attribute in
+        // `line_break_inserted_after_line_wrap_with_hardbreaks_enabled`.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "hardbreaks",
+            "",
+            ModificationContext::Anywhere,
         );
+
+        let maw =
+            crate::blocks::Block::parse(crate::Span::new("First line +\nSecond line"), &mut p);
 
         let block = maw.item.unwrap().item;
 
@@ -11674,14 +11672,14 @@ mod post_replacements {
                 content: Content {
                     original: Span {
                         data: "First line +\nSecond line",
-                        line: 2,
+                        line: 1,
                         col: 1,
-                        offset: 14,
+                        offset: 0,
                     },
                     rendered: "First line<br>\nSecond line",
                 },
                 source: Span {
-                    data: "[%hardbreaks]\nFirst line +\nSecond line",
+                    data: "First line +\nSecond line",
                     line: 1,
                     col: 1,
                     offset: 0,
@@ -11693,20 +11691,7 @@ mod post_replacements {
                 number: None,
                 anchor: None,
                 anchor_reftext: None,
-                attrlist: Some(Attrlist {
-                    attributes: &[ElementAttribute {
-                        name: None,
-                        shorthand_items: &["%hardbreaks"],
-                        value: "%hardbreaks"
-                    },],
-                    anchor: None,
-                    source: Span {
-                        data: "%hardbreaks",
-                        line: 1,
-                        col: 2,
-                        offset: 1,
-                    },
-                },),
+                attrlist: None,
             },)
         );
     }
@@ -11723,9 +11708,15 @@ mod post_replacements {
 "#
         );
 
-        let mut p = Parser::default();
-        let maw =
-            crate::blocks::Block::parse(crate::Span::new("[%hardbreaks]\nFirst line"), &mut p);
+        // See the note on the API-supplied `hardbreaks` attribute in
+        // `line_break_inserted_after_line_wrap_with_hardbreaks_enabled`.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "hardbreaks",
+            "",
+            ModificationContext::Anywhere,
+        );
+
+        let maw = crate::blocks::Block::parse(crate::Span::new("First line"), &mut p);
 
         let block = maw.item.unwrap().item;
 
@@ -11735,14 +11726,14 @@ mod post_replacements {
                 content: Content {
                     original: Span {
                         data: "First line",
-                        line: 2,
+                        line: 1,
                         col: 1,
-                        offset: 14,
+                        offset: 0,
                     },
                     rendered: "First line",
                 },
                 source: Span {
-                    data: "[%hardbreaks]\nFirst line",
+                    data: "First line",
                     line: 1,
                     col: 1,
                     offset: 0,
@@ -11754,20 +11745,7 @@ mod post_replacements {
                 number: None,
                 anchor: None,
                 anchor_reftext: None,
-                attrlist: Some(Attrlist {
-                    attributes: &[ElementAttribute {
-                        name: None,
-                        shorthand_items: &["%hardbreaks"],
-                        value: "%hardbreaks"
-                    },],
-                    anchor: None,
-                    source: Span {
-                        data: "%hardbreaks",
-                        line: 1,
-                        col: 2,
-                        offset: 1,
-                    },
-                },),
+                attrlist: None,
             },)
         );
     }
