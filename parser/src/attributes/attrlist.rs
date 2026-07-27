@@ -570,9 +570,12 @@ impl<'src> Attrlist<'src> {
 
         // Asciidoctor's `parse_quoted_text_attributes` considers only the first
         // positional attribute – the source up to the first comma – and uses it
-        // verbatim (quote characters included) as the role. A quote-delimited
-        // first positional always leaves at least its opening quote here, so the
-        // slice is never empty.
+        // verbatim (quote characters included) as the role. The comma split is on
+        // the raw source, matching Asciidoctor's `str.slice 0, (str.index ',')`,
+        // so a comma *inside* the quotes truncates the role there too (e.g.
+        // `['a,b']` yields the role `'a`) rather than being treated as quoted
+        // content. A quote-delimited first positional always leaves at least its
+        // opening quote here, so the slice is never empty.
         let raw = self.source.data();
         Some(raw.split_once(',').map_or(raw, |(first, _)| first).trim())
     }
