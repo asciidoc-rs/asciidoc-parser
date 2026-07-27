@@ -304,6 +304,25 @@ mod tests {
     }
 
     #[test]
+    fn empty_document_caption_does_not_produce_xref_signifier() {
+        // A block suppressed by an empty document `caption` has no caption at
+        // all, so a cross-reference to it falls back to the block title rather
+        // than a "<label> <n>" signifier: the block was never numbered, so no
+        // signifier must be registered for it.
+        assert_eq!(
+            rendered_paragraphs(&Parser::default().parse(concat!(
+                ":caption:\n\n",
+                "[#ex]\n.second example\n====\nbody.\n====\n\n",
+                "See <<ex>>.",
+            ))),
+            vec![
+                "body.".to_string(),
+                "See <a href=\"#ex\">second example</a>.".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn empty_document_caption_attribute_suppresses_caption() {
         // A *present* but empty document `caption` attribute suppresses the
         // caption entirely, matching Asciidoctor. Both the bare form (resolving
