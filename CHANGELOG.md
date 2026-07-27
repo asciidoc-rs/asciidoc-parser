@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.27.3](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.27.2...v0.27.3)
+_27 July 2026_
+
+### Added
+
+* Expose an AsciiDoc table cell's own footnotes ([#977](https://github.com/asciidoc-rs/asciidoc-parser/pull/977))
+
+### Fixed
+
+* Tokenize a run of `+` around a passthrough like Asciidoctor ([#988](https://github.com/asciidoc-rs/asciidoc-parser/pull/988))
+* Preserve a quoted role on an inline passthrough span ([#973](https://github.com/asciidoc-rs/asciidoc-parser/pull/973)) ([#978](https://github.com/asciidoc-rs/asciidoc-parser/pull/978))
+* Honor an empty document `caption` attribute to suppress a block's caption ([#984](https://github.com/asciidoc-rs/asciidoc-parser/pull/984))
+* Fall back to link macro for remote include under non-secure safe mode ([#985](https://github.com/asciidoc-rs/asciidoc-parser/pull/985))
+* Parse the `toc::[]` block macro as a `toc`-context block ([#986](https://github.com/asciidoc-rs/asciidoc-parser/pull/986))
+* Honor API-supplied `hardbreaks` document attribute for line breaks ([#976](https://github.com/asciidoc-rs/asciidoc-parser/pull/976))
+
 ## [0.27.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.27.1...v0.27.2)
 _26 July 2026_
 
