@@ -166,9 +166,11 @@ pub(crate) fn assign_caption(
                 number: None,
             });
         }
+
         InterpretedValue::Value(_) | InterpretedValue::Set => {
             return None;
         }
+
         InterpretedValue::Unset => {}
     }
 
