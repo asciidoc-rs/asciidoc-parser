@@ -1308,6 +1308,28 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     }
 }
 
+/// Writes an HTML attribute value to `dest`, escaping the double-quote
+/// delimiter as `&quot;`.
+///
+/// A `"` left raw inside a `"…"`-delimited attribute value would terminate the
+/// value early and let following text be parsed as additional attributes –
+/// attribute injection. Role and id values can carry a literal `"` (for
+/// example a single-quoted positional role such as `['a"b']`, or a
+/// single-quoted `role='a"b'` named attribute), so escape it here. The `<`,
+/// `>`, and `&` characters are left as-is: the surrounding content pipeline
+/// already escapes them for the constrained/inline paths, and Asciidoctor
+/// deliberately leaves them unescaped for a passthrough attribute list, so
+/// re-escaping here would double-escape the former and diverge on the latter.
+fn push_attribute_value(dest: &mut String, value: &str) {
+    for ch in value.chars() {
+        if ch == '"' {
+            dest.push_str("&quot;");
+        } else {
+            dest.push(ch);
+        }
+    }
+}
+
 fn wrap_body_in_html_tag(
     _attrlist: Option<&Attrlist<'_>>,
     tag: &'static str,
@@ -1321,14 +1343,14 @@ fn wrap_body_in_html_tag(
 
     if let Some(id) = id.as_ref() {
         dest.push_str(" id=\"");
-        dest.push_str(id);
+        push_attribute_value(dest, id);
         dest.push('"');
     }
 
     if !roles.is_empty() {
         let roles = roles.join(" ");
         dest.push_str(" class=\"");
-        dest.push_str(&roles);
+        push_attribute_value(dest, &roles);
         dest.push('"');
     }
 

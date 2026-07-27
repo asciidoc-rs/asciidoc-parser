@@ -7,9 +7,10 @@
 //!
 //! Two properties are covered:
 //!
-//!   * every `href`/`target` and the icon `class`/`title`/`width`/`height`
-//!     attributes escape the `"` delimiter, so a stray quote cannot close the
-//!     attribute and inject further markup; and
+//!   * every `href`/`target`, the icon `class`/`title`/`width`/`height`
+//!     attributes, and the quoted-text `class` (role) attribute escape the `"`
+//!     delimiter, so a stray quote cannot close the attribute and inject
+//!     further markup; and
 //!   * the explicit `link:` macro rejects targets whose scheme could execute
 //!     script (`javascript:`, `data:`, `vbscript:`), rendering them as inert
 //!     source text rather than a live link.
@@ -122,6 +123,47 @@ fn xref_unresolved_target_does_not_double_escape_special_characters() {
     assert_eq!(
         render_paragraph("xref:foo<bar>[txt]"),
         r##"<a href="#foo&lt;bar&gt;">txt</a>"##
+    );
+}
+
+// ---- Quoted-text role (class) escaping -------------------------------------
+
+#[test]
+fn quoted_positional_role_class_escapes_quote_delimiter() {
+    // A single-quoted positional role is applied verbatim (quotes included) to
+    // the `class` attribute, so a `"` inside it must not close the attribute
+    // and inject an event handler.
+    assert_eq!(
+        render_paragraph(r#"['x" onmouseover="y']*bold*"#),
+        r#"<strong class="'x&quot; onmouseover=&quot;y'">bold</strong>"#
+    );
+}
+
+#[test]
+fn passthrough_quoted_positional_role_class_escapes_quote_delimiter() {
+    // Same guarantee on the inline-passthrough restore path.
+    assert_eq!(
+        render_paragraph(r#"['x" onmouseover="y']++text++"#),
+        r#"<span class="'x&quot; onmouseover=&quot;y'">text</span>"#
+    );
+}
+
+#[test]
+fn named_role_class_escapes_quote_delimiter() {
+    // A single-quoted `role=` value can also carry a literal `"`.
+    assert_eq!(
+        render_paragraph(r#"[role='a"b']*bold*"#),
+        r#"<strong class="a&quot;b">bold</strong>"#
+    );
+}
+
+#[test]
+fn quoted_positional_role_class_does_not_double_escape_special_characters() {
+    // `< > &` arrive already escaped for the constrained path; the added
+    // quote-escaping must leave them singly escaped.
+    assert_eq!(
+        render_paragraph("['a<b&c']*bold*"),
+        r#"<strong class="'a&lt;b&amp;c'">bold</strong>"#
     );
 }
 
