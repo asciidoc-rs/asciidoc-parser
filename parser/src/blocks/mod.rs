@@ -86,5 +86,8 @@ pub use table::{
     TableCellContent, TableColumn, TableRow, VerticalAlignment,
 };
 
+mod toc;
+pub use toc::TocBlock;
+
 #[cfg(test)]
 mod tests;

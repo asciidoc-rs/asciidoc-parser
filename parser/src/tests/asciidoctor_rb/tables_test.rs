@@ -3868,6 +3868,28 @@ mod psv {
             doc.catalog().footnotes().is_empty(),
             "cell footnote leaked into the main document's registry"
         );
+
+        // The cell instead retains and exposes its own footnote, so a renderer
+        // can emit the cell-local `#footnotes` block (`#_footnotedef_1` in the
+        // Ruby assertion above).
+        let table = doc
+            .child_blocks()
+            .find_map(|block| match block {
+                crate::blocks::Block::Table(table) => Some(table),
+                _ => None,
+            })
+            .expect("expected a table block");
+
+        let crate::blocks::TableCellContent::AsciiDoc(cell) =
+            table.body_rows()[0].cells()[0].content()
+        else {
+            panic!("expected an AsciiDoc cell");
+        };
+
+        let footnotes = cell.footnotes();
+        assert_eq!(footnotes.len(), 1);
+        assert_eq!(footnotes[0].index, "1");
+        assert_eq!(footnotes[0].text, "A lightweight markup language.");
     }
 
     // Out of scope: DocBook backend. ("callout numbers should be globally unique,
