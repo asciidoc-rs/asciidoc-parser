@@ -586,12 +586,13 @@ impl ToVirtualDom for Document<'_> {
         }
 
         // Resolve the table of contents from the `toc` family of attributes.
-        // `auto`/`left`/`right` render the TOC at the top of the body;
-        // `preamble` defers it to the preamble; `macro` stashes it for a
-        // `toc::[]` macro in the body to pick up. (The side-column styling of
-        // `left`/`right` needs the standalone HTML body framing this embeddable
-        // virtual DOM does not model, so they render like `auto` here, which is
-        // also Asciidoctor's documented fallback for embeddable output.)
+        // `auto`/`left`/`right`/`top`/`bottom` render the TOC at the top of the
+        // body; `preamble` defers it to the preamble; `macro` stashes it for a
+        // `toc::[]` macro in the body to pick up. (The side/top/bottom-column
+        // styling of the positional placements needs the standalone HTML body
+        // framing this embeddable virtual DOM does not model, so they render like
+        // `auto` here, which is also Asciidoctor's documented fallback for
+        // embeddable output.)
         let toc_mode = self.toc_mode();
         let toc_data = toc_mode.is_enabled().then(|| {
             TocData::build(
@@ -607,7 +608,7 @@ impl ToVirtualDom for Document<'_> {
         let mut _macro_scope = None;
         let mut _preamble_scope = None;
         match toc_mode {
-            TocMode::Auto | TocMode::Left | TocMode::Right => {
+            TocMode::Auto | TocMode::Left | TocMode::Right | TocMode::Top | TocMode::Bottom => {
                 if let Some(data) = &toc_data {
                     node.children.push(toc_block("toc", false, data));
                 }

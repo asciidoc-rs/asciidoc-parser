@@ -12,11 +12,18 @@ use crate::{Parser, document::InterpretedValue};
 /// behaves as its own standalone document and resolves its own [`TocMode`]
 /// independently – it does **not** inherit the parent document's setting.
 ///
-/// The `auto`, `left`, and `right` placements all render the TOC automatically
-/// near the top of the document; `left` and `right` additionally request a
-/// fixed side column when converting to standalone HTML (a presentation detail
+/// The `auto`, `left`, `right`, `top`, and `bottom` placements all render the
+/// TOC automatically near the top of the document;
+/// `left`/`right`/`top`/`bottom` additionally request a fixed side (or
+/// top/bottom) column when converting to standalone HTML (a presentation detail
 /// outside this crate's scope). `preamble` places the TOC immediately below the
 /// preamble, and `macro` defers placement to a `toc::[]` block macro.
+///
+/// The positional placement can be selected by a keyword or a direction
+/// shorthand in the `toc` value (`<`/`>`/`^`/`v` for `left`/`right`/`top`/
+/// `bottom`), by the separate `toc-position` attribute, or by the legacy `toc2`
+/// alias, mirroring Asciidoctor's header normalization. See
+/// [`TocMode::from_parser`].
 ///
 /// [`toc` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/
 /// [AsciiDoc table cell]: crate::blocks::TableCellContent::AsciiDoc
@@ -39,6 +46,16 @@ pub enum TocMode {
     /// in standalone HTML, is rendered as a fixed right-hand side column.
     Right,
 
+    /// The placement resolves to `top` (via `:toc: top` / `:toc: ^`, or a
+    /// `toc-position` of `top`): an automatically placed TOC rendered as a
+    /// fixed top column in standalone HTML.
+    Top,
+
+    /// The placement resolves to `bottom` (via `:toc: bottom` / `:toc: v`, or a
+    /// `toc-position` of `bottom`): an automatically placed TOC rendered as a
+    /// fixed bottom column in standalone HTML.
+    Bottom,
+
     /// The placement resolves to `preamble` (via `:toc: preamble` or
     /// `:toc-placement: preamble`): the TOC is generated immediately below the
     /// document's preamble.
@@ -52,66 +69,100 @@ pub enum TocMode {
 
 impl TocMode {
     /// Resolves the table-of-contents placement from a parser's current `toc`
-    /// attribute state.
+    /// attribute state, mirroring Asciidoctor's header normalization
+    /// (`lib/asciidoctor/document.rb`, the `toc_val = (attrs.delete 'toc2') …`
+    /// block).
     ///
-    /// This reads the raw stored `toc-placement`, distinguishing a never-set
-    /// attribute from an explicit unset tombstone. The derived `toc-position` /
+    /// This reads the raw stored `toc`, `toc2`, `toc-placement`, and
+    /// `toc-position` attributes, distinguishing a never-set `toc-placement`
+    /// from an explicit unset tombstone. The derived `toc-position` /
     /// `toc-placement` / `toc-class` document attributes are materialized from
     /// the resolved placement *after* this runs – see
     /// [`Parser::materialize_toc_attributes`](crate::Parser).
     pub(crate) fn from_parser(parser: &Parser) -> Self {
-        let value = parser.attribute_value("toc");
-        if value == InterpretedValue::Unset {
-            // `toc2` is a legacy alias that enables a left-positioned table of
-            // contents (equivalent to `:toc: left`). When the `toc` attribute
-            // itself is unset, a set `toc2` still turns the TOC on. (A soft-unset
-            // `toc2!` records an `Unset` tombstone, which does not enable it.)
-            if parser.attribute_value("toc2") != InterpretedValue::Unset {
-                return Self::Left;
+        // Asciidoctor: `toc_val = (attrs.delete 'toc2') ? 'left' : attrs['toc']`.
+        // `toc2` is a legacy alias for a left side-column TOC: when set it
+        // overrides the `toc` value with `left`. (A soft-unset `toc2!` records an
+        // `Unset` tombstone, which does not enable it.)
+        let toc_val = if parser.attribute_value("toc2") != InterpretedValue::Unset {
+            "left".to_string()
+        } else {
+            match parser.attribute_value("toc") {
+                // No `toc` (and no `toc2`): no table of contents is generated.
+                InterpretedValue::Unset => return Self::Disabled,
+                InterpretedValue::Set => String::new(),
+                InterpretedValue::Value(v) => v,
             }
-            return Self::Disabled;
+        };
+
+        // A bare `:toc:` carries this crate's built-in `auto` default; Asciidoctor
+        // treats a bare `toc` as an empty value, so fold `auto` back to empty to
+        // match its `toc_val.empty?` branches below.
+        let toc_val = toc_val.trim();
+        let toc_val = if toc_val == "auto" { "" } else { toc_val };
+
+        // `toc-placement` lets a document separate the *position* of the TOC from
+        // the *slot* it occupies. Asciidoctor fetches it with a `macro` fallback
+        // (`attrs.fetch 'toc-placement', 'macro'`) while its default attribute
+        // normally seeds `auto`; this crate seeds no such default, so a never-set
+        // `toc-placement` reads as `auto`, an explicit value is taken as-is, and a
+        // soft-unset tombstone – which Asciidoctor *deletes*, so its `fetch` yields
+        // the `macro` fallback – reads as `macro`.
+        let toc_placement_val = match parser.attribute_value("toc-placement") {
+            InterpretedValue::Value(v) => v.trim().to_string(),
+            InterpretedValue::Set => String::new(),
+            InterpretedValue::Unset if parser.has_attribute("toc-placement") => "macro".to_string(),
+            InterpretedValue::Unset => "auto".to_string(),
+        };
+
+        // Asciidoctor: `toc_placement_val && toc_placement_val != 'auto' ?
+        // toc_placement_val : attrs['toc-position']`. When `toc-placement` names
+        // anything other than `auto` it *is* the position (so `preamble`/`macro`,
+        // or a side keyword on `toc-placement`, override the `toc` value's own
+        // keyword); otherwise the separate `toc-position` attribute supplies it.
+        let toc_position_val = if toc_placement_val != "auto" {
+            toc_placement_val
+        } else {
+            parser
+                .attribute_value("toc-position")
+                .as_maybe_str()
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string()
+        };
+
+        // With neither a `toc` value nor a resolved position, the TOC is an
+        // ordinary automatically placed top TOC (Asciidoctor skips its
+        // normalization block, leaving `toc-position` unset).
+        if toc_val.is_empty() && toc_position_val.is_empty() {
+            return Self::Auto;
         }
 
-        // `toc` has a built-in default of `auto`, so a bare `:toc:` resolves to
-        // `Value("auto")` (never `Set`). A placement keyword in the `toc` value
-        // itself is a shorthand that wins outright. Otherwise (`auto`, empty, or
-        // any unrecognized value) the placement comes from the separate
-        // `toc-placement` attribute, matching Asciidoctor, which folds the `toc`
-        // shorthand into `toc-placement` and treats the latter as the source of
-        // truth. A bogus `toc-placement` – like a bogus `toc` – falls back to an
-        // automatic placement.
-        match value.as_maybe_str().map(str::trim) {
-            Some("macro") => Self::Macro,
-            Some("left") => Self::Left,
-            Some("right") => Self::Right,
-            Some("preamble") => Self::Preamble,
-            _ => {
-                let placement = parser.attribute_value("toc-placement");
-                match placement.as_maybe_str().map(str::trim) {
-                    Some("macro") => Self::Macro,
-                    Some("left") => Self::Left,
-                    Some("right") => Self::Right,
-                    Some("preamble") => Self::Preamble,
+        // A resolved `toc-position` wins over the `toc` value; otherwise the `toc`
+        // value is the position. (Asciidoctor's `default_toc_position` fallback of
+        // `left` is unreachable once the empty/empty case above returns, but is
+        // preserved here for fidelity.)
+        let position = if toc_position_val.is_empty() {
+            if toc_val.is_empty() { "left" } else { toc_val }
+        } else {
+            toc_position_val.as_str()
+        };
 
-                    // `toc-placement` carries no recognized placement keyword.
-                    // When it has been *explicitly unset* (via `:toc-placement!:`
-                    // or an API unset) while `toc` is enabled, Asciidoctor's
-                    // placement lookup falls through its `auto` default to a
-                    // `macro` fetch fallback, so the TOC defers to a `toc::[]`
-                    // block macro. (Asciidoctor deletes the attribute's default;
-                    // this crate records the unset as an `Unset` tombstone, which
-                    // `has_attribute` still reports as present – distinguishing it
-                    // from a `toc-placement` that was never set.) A `toc-placement`
-                    // that was never set, or set to any other (bogus) value, falls
-                    // back to an automatic placement.
-                    _ if placement == InterpretedValue::Unset
-                        && parser.has_attribute("toc-placement") =>
-                    {
-                        Self::Macro
-                    }
-                    _ => Self::Auto,
-                }
-            }
+        // Map the resolved position to a placement, mirroring Asciidoctor's
+        // `case`. The direction shorthands arrive here already special-character
+        // substituted (`>` as `&gt;`, `<` as `&lt;`), so both spellings are
+        // matched; a literally typed `&gt;`/`&lt;` becomes `&amp;gt;`/`&amp;lt;`
+        // and correctly falls through to an automatic placement, as in
+        // Asciidoctor. An unrecognized position (including `content`, `auto`, or a
+        // bogus value) is an automatic placement.
+        match position {
+            "left" | "<" | "&lt;" => Self::Left,
+            "right" | ">" | "&gt;" => Self::Right,
+            "top" | "^" => Self::Top,
+            "bottom" | "v" => Self::Bottom,
+            "preamble" => Self::Preamble,
+            "macro" => Self::Macro,
+            _ => Self::Auto,
         }
     }
 
@@ -123,15 +174,18 @@ impl TocMode {
 
     /// Returns the value of the derived `toc-position` document attribute for
     /// this placement, or `None` when Asciidoctor leaves it unset (its `nil`
-    /// default). The side-column placements report their side (`left` /
-    /// `right`); the content-flow placements (`preamble` / `macro`) report
-    /// `content`; an automatic top TOC (and a disabled TOC) leave it unset.
+    /// default). The positional placements report their side (`left` / `right`
+    /// / `top` / `bottom`); the content-flow placements (`preamble` /
+    /// `macro`) report `content`; an automatic top TOC (and a disabled TOC)
+    /// leave it unset.
     ///
     /// See [`Parser::materialize_toc_attributes`](crate::Parser).
     pub(crate) fn derived_toc_position(self) -> Option<&'static str> {
         match self {
             Self::Left => Some("left"),
             Self::Right => Some("right"),
+            Self::Top => Some("top"),
+            Self::Bottom => Some("bottom"),
             Self::Preamble | Self::Macro => Some("content"),
             Self::Auto | Self::Disabled => None,
         }
@@ -147,18 +201,18 @@ impl TocMode {
             Self::Disabled => None,
             Self::Preamble => Some("preamble"),
             Self::Macro => Some("macro"),
-            Self::Auto | Self::Left | Self::Right => Some("auto"),
+            Self::Auto | Self::Left | Self::Right | Self::Top | Self::Bottom => Some("auto"),
         }
     }
 
     /// Returns the value the derived `toc-class` document attribute defaults to
     /// for this placement when the author has not set `toc-class`, or `None`
-    /// when Asciidoctor leaves it unset (its `nil` default). Only a `left` /
-    /// `right` side-column TOC introduces a default (`toc2`, the side-column
-    /// class).
+    /// when Asciidoctor leaves it unset (its `nil` default). Only a positional
+    /// (`left` / `right` / `top` / `bottom`) TOC introduces a default (`toc2`,
+    /// the side-column class).
     pub(crate) fn derived_toc_class(self) -> Option<&'static str> {
         match self {
-            Self::Left | Self::Right => Some(DEFAULT_TOC_CLASS_SIDE),
+            Self::Left | Self::Right | Self::Top | Self::Bottom => Some(DEFAULT_TOC_CLASS_SIDE),
             _ => None,
         }
     }
@@ -260,10 +314,10 @@ fn resolve_title(parser: &Parser) -> String {
 }
 
 /// Resolves the `toc-class`. An explicit, non-empty `toc-class` wins outright.
-/// Otherwise the default depends on placement: a `left`/`right` side-column TOC
-/// uses `toc2` (the class that drives the side-column styling), matching
-/// Asciidoctor, which switches the default `toc-class` to `toc2` for those
-/// placements; every other placement uses the plain `toc`.
+/// Otherwise the default depends on placement: a positional (`left`/`right`/
+/// `top`/`bottom`) TOC uses `toc2` (the class that drives the side-column
+/// styling), matching Asciidoctor, which switches the default `toc-class` to
+/// `toc2` for those placements; every other placement uses the plain `toc`.
 fn resolve_class(parser: &Parser, mode: TocMode) -> String {
     match parser.attribute_value("toc-class") {
         InterpretedValue::Value(v) if !v.trim().is_empty() => v,
@@ -272,11 +326,11 @@ fn resolve_class(parser: &Parser, mode: TocMode) -> String {
 }
 
 /// Returns the default `toc-class` for a resolved placement: `toc2` for a
-/// `left`/`right` side-column TOC, and the plain `toc` for every other
-/// placement.
+/// positional (`left`/`right`/`top`/`bottom`) TOC, and the plain `toc` for
+/// every other placement.
 fn default_toc_class(mode: TocMode) -> &'static str {
     match mode {
-        TocMode::Left | TocMode::Right => DEFAULT_TOC_CLASS_SIDE,
+        TocMode::Left | TocMode::Right | TocMode::Top | TocMode::Bottom => DEFAULT_TOC_CLASS_SIDE,
         _ => DEFAULT_TOC_CLASS,
     }
 }
@@ -327,6 +381,70 @@ mod tests {
     }
 
     #[test]
+    fn mode_resolves_direction_shorthands_and_keywords() {
+        // The `<`/`>`/`^`/`v` direction shorthands in the `toc` value resolve to
+        // the `left`/`right`/`top`/`bottom` positions, matching Asciidoctor. (The
+        // `<`/`>` shorthands reach resolution already special-character
+        // substituted to `&lt;`/`&gt;`, but resolve the same.)
+        assert_eq!(doc_with(":toc: <").toc_mode(), TocMode::Left);
+        assert_eq!(doc_with(":toc: >").toc_mode(), TocMode::Right);
+        assert_eq!(doc_with(":toc: ^").toc_mode(), TocMode::Top);
+        assert_eq!(doc_with(":toc: v").toc_mode(), TocMode::Bottom);
+
+        // The `top`/`bottom` keywords resolve likewise.
+        assert_eq!(doc_with(":toc: top").toc_mode(), TocMode::Top);
+        assert_eq!(doc_with(":toc: bottom").toc_mode(), TocMode::Bottom);
+
+        // A literally typed `&gt;`/`&lt;` entity is not a shorthand (it is
+        // special-character substituted to `&amp;gt;`/`&amp;lt;`), so it falls
+        // back to an automatic placement, as in Asciidoctor's header handling.
+        assert_eq!(doc_with(":toc: &gt;").toc_mode(), TocMode::Auto);
+        assert_eq!(doc_with(":toc: &lt;").toc_mode(), TocMode::Auto);
+    }
+
+    #[test]
+    fn toc_position_attribute_selects_the_side() {
+        // The separate `toc-position` attribute selects the side of an otherwise
+        // automatic TOC. It also overrides the `left` implied by the legacy `toc2`
+        // alias, and a bare side keyword in the `toc` value.
+        assert_eq!(
+            doc_with(":toc:\n:toc-position: right").toc_mode(),
+            TocMode::Right
+        );
+        assert_eq!(
+            doc_with(":toc2:\n:toc-position: right").toc_mode(),
+            TocMode::Right
+        );
+        assert_eq!(
+            doc_with(":toc: left\n:toc-position: right").toc_mode(),
+            TocMode::Right
+        );
+        assert_eq!(doc_with(":toc:\n:toc-position: ^").toc_mode(), TocMode::Top);
+    }
+
+    #[test]
+    fn toc_placement_side_resolves_the_position() {
+        // `toc-placement` is resolved into the position ahead of the `toc` value,
+        // so a `preamble`/`macro` placement (or a side keyword on `toc-placement`)
+        // wins over a conflicting keyword in the `toc` value.
+        assert_eq!(
+            doc_with(":toc: left\n:toc-placement: macro").toc_mode(),
+            TocMode::Macro
+        );
+        assert_eq!(
+            doc_with(":toc:\n:toc-placement: right").toc_mode(),
+            TocMode::Right
+        );
+
+        // A `toc-position` (consulted when `toc-placement` is `auto`) likewise
+        // wins over a `preamble` keyword in the `toc` value.
+        assert_eq!(
+            doc_with(":toc: preamble\n:toc-position: right").toc_mode(),
+            TocMode::Right
+        );
+    }
+
+    #[test]
     fn toc2_alias_enables_a_left_placed_toc() {
         // `toc2` is a legacy alias for `:toc: left`: setting the bare attribute
         // enables a left-positioned table of contents even though the `toc`
@@ -359,10 +477,13 @@ mod tests {
             TocMode::Preamble
         );
 
-        // A placement keyword in the `toc` value wins over `toc-placement`.
+        // A non-`auto` `toc-placement` supplies the position and wins over the
+        // `toc` value's own keyword (Asciidoctor resolves `toc-placement` into the
+        // position before consulting the `toc` value), so `toc-placement:
+        // preamble` overrides `toc: macro`.
         assert_eq!(
             doc_with(":toc: macro\n:toc-placement: preamble").toc_mode(),
-            TocMode::Macro
+            TocMode::Preamble
         );
 
         // A bogus `toc-placement` falls back to an automatic placement.
@@ -387,11 +508,13 @@ mod tests {
             TocMode::Macro
         );
 
-        // A placement keyword in the `toc` value still wins over an unset
-        // `toc-placement`.
+        // A soft-unset `toc-placement` resolves to `macro` even when the `toc`
+        // value names a different placement keyword: Asciidoctor deletes the
+        // attribute, so its `fetch` yields the `macro` fallback, which supplies
+        // the position and overrides `toc: preamble`.
         assert_eq!(
             doc_with(":toc: preamble\n:toc-placement!:").toc_mode(),
-            TocMode::Preamble
+            TocMode::Macro
         );
     }
 
@@ -540,6 +663,66 @@ mod tests {
         assert_eq!(doc.attribute_value("toc-placement"), Value("macro".into()));
     }
 
+    /// The derived `toc-position` / `toc-placement` / `toc-class` attributes
+    /// for the direction shorthands, the separate `toc-position` attribute,
+    /// and the `toc2` + `toc-position` override – all of which resolve a
+    /// side-column TOC (`toc2` class) in Asciidoctor.
+    #[test]
+    fn toc_position_normalization_derives_side_column() {
+        use InterpretedValue::Value;
+
+        let derived = |header: &str| {
+            let doc = doc_with(header);
+            (
+                doc.attribute_value("toc-position"),
+                doc.attribute_value("toc-placement"),
+                doc.attribute_value("toc-class"),
+            )
+        };
+        let right = || {
+            (
+                Value("right".into()),
+                Value("auto".into()),
+                Value("toc2".into()),
+            )
+        };
+
+        // A `>` direction shorthand derives a right side-column TOC.
+        assert_eq!(derived(":toc: >"), right());
+
+        // `:toc:` + `:toc-position: right` derives a right side column and defaults
+        // the class to `toc2` (was previously left as the plain `toc`).
+        assert_eq!(derived(":toc:\n:toc-position: right"), right());
+
+        // `:toc2:` + `:toc-position: right`: the explicit `toc-position` overrides
+        // the `left` implied by the `toc2` alias (was previously left).
+        assert_eq!(derived(":toc2:\n:toc-position: right"), right());
+
+        // The `^` shorthand derives a top column, likewise defaulting to `toc2`.
+        assert_eq!(
+            derived(":toc: ^"),
+            (
+                Value("top".into()),
+                Value("auto".into()),
+                Value("toc2".into())
+            )
+        );
+    }
+
+    #[test]
+    fn automatic_toc_clears_unrecognized_toc_position() {
+        // An enabled automatic TOC drops an author `toc-position` that resolves to
+        // no side: Asciidoctor's normalization deletes it in its `else` arm, so a
+        // bogus (or `content`) value does not leak into the derived state.
+        let doc = doc_with(":toc:\n:toc-position: bogus");
+        assert_eq!(doc.toc_mode(), TocMode::Auto);
+        assert!(!doc.has_attribute("toc-position"));
+
+        let doc = doc_with(":toc:\n:toc-position: content");
+        assert_eq!(doc.toc_mode(), TocMode::Auto);
+        assert!(!doc.has_attribute("toc-position"));
+    }
+
     #[test]
     fn explicit_toc_class_survives_side_column_default() {
         // The side-column `toc2` default only fills in an *unset* `toc-class`;
@@ -603,6 +786,8 @@ mod tests {
             (TocMode::Auto, None, Some("auto"), None),
             (TocMode::Left, Some("left"), Some("auto"), Some("toc2")),
             (TocMode::Right, Some("right"), Some("auto"), Some("toc2")),
+            (TocMode::Top, Some("top"), Some("auto"), Some("toc2")),
+            (TocMode::Bottom, Some("bottom"), Some("auto"), Some("toc2")),
             (TocMode::Preamble, Some("content"), Some("preamble"), None),
             (TocMode::Macro, Some("content"), Some("macro"), None),
         ] {
