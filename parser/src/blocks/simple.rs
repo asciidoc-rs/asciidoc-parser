@@ -3,7 +3,9 @@ use crate::{
     attributes::Attrlist,
     blocks::{
         ChildBlocks, CompoundDelimitedBlock, ContentModel, IsBlock, ListItemMarker,
-        RawDelimitedBlock, caption::assign_block_caption, metadata::BlockMetadata,
+        RawDelimitedBlock, TableBlock,
+        caption::assign_block_caption,
+        metadata::{BlockMetadata, block_title_text},
     },
     content::{Content, SubstitutionGroup},
     span::MatchedItem,
@@ -406,6 +408,34 @@ fn parse_lines<'src>(
             && skipped_comment_line
             && style == SimpleBlockStyle::Paragraph
             && is_section_header(line.data(), parser.level_offset())
+        {
+            break;
+        }
+
+        // A leading line comment sitting directly above a line that begins a new
+        // block – block metadata (a `.Title`, or a `[...]` attribute list or
+        // `[[...]]` anchor) or a block delimiter (a delimited block or a table)
+        // – must not absorb that line as paragraph content. Terminate the
+        // comment-only block here so the following line gets a fresh dispatch
+        // and can attach as metadata to (or open) the block it decorates.
+        // Without this, the first such line after the comment is swallowed as
+        // paragraph text. This is scoped to the case where only comment lines
+        // have been consumed so far (`filtered_lines` still empty); once real
+        // content has accumulated, the general stop conditions below take over.
+        // Like the section-heading case above, it applies at the top level and
+        // in paragraph style only. The `[...]` test mirrors the general
+        // attribute-line stop below (it treats any bracketed line as a block
+        // boundary, valid metadata or not), so a comment directly above such a
+        // line is split the same way `text` directly above it already is.
+        if !stop_for_list_items
+            && skipped_comment_line
+            && filtered_lines.is_empty()
+            && style == SimpleBlockStyle::Paragraph
+            && (block_title_text(line).is_some()
+                || (line.starts_with('[') && line.ends_with(']'))
+                || RawDelimitedBlock::is_valid_delimiter(&line)
+                || CompoundDelimitedBlock::is_valid_delimiter(&line)
+                || TableBlock::is_table_delimiter(&line))
         {
             break;
         }
