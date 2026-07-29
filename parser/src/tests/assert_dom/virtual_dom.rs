@@ -2420,8 +2420,10 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                     )
                 });
 
-                if matches!(toc_mode, TocMode::Auto | TocMode::Left | TocMode::Right)
-                    && let Some(data) = &toc_data
+                if matches!(
+                    toc_mode,
+                    TocMode::Auto | TocMode::Left | TocMode::Right | TocMode::Top | TocMode::Bottom
+                ) && let Some(data) = &toc_data
                 {
                     content.children.push(toc_block("toc", false, data));
                 }
