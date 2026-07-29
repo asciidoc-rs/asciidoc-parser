@@ -22,8 +22,7 @@ use crate::{Parser, document::InterpretedValue};
 /// The positional placement can be selected by a keyword or a direction
 /// shorthand in the `toc` value (`<`/`>`/`^`/`v` for `left`/`right`/`top`/
 /// `bottom`), by the separate `toc-position` attribute, or by the legacy `toc2`
-/// alias, mirroring Asciidoctor's header normalization. See
-/// [`TocMode::from_parser`].
+/// alias, mirroring Asciidoctor's header normalization.
 ///
 /// [`toc` attribute]: https://docs.asciidoctor.org/asciidoc/latest/toc/
 /// [AsciiDoc table cell]: crate::blocks::TableCellContent::AsciiDoc
@@ -87,12 +86,17 @@ impl TocMode {
         let toc_val = if parser.attribute_value("toc2") != InterpretedValue::Unset {
             "left".to_string()
         } else {
-            match parser.attribute_value("toc") {
-                // No `toc` (and no `toc2`): no table of contents is generated.
-                InterpretedValue::Unset => return Self::Disabled,
-                InterpretedValue::Set => String::new(),
-                InterpretedValue::Value(v) => v,
+            let toc = parser.attribute_value("toc");
+
+            // No `toc` (and no `toc2`): no table of contents is generated.
+            if toc == InterpretedValue::Unset {
+                return Self::Disabled;
             }
+
+            // `toc` carries a built-in `auto` default, so a bare `:toc:` reads as
+            // `Value("auto")` (never `Set`); any other value is taken as-is, and a
+            // set-but-empty value folds to empty.
+            toc.as_maybe_str().unwrap_or_default().to_string()
         };
 
         // A bare `:toc:` carries this crate's built-in `auto` default; Asciidoctor
@@ -138,12 +142,13 @@ impl TocMode {
             return Self::Auto;
         }
 
-        // A resolved `toc-position` wins over the `toc` value; otherwise the `toc`
-        // value is the position. (Asciidoctor's `default_toc_position` fallback of
-        // `left` is unreachable once the empty/empty case above returns, but is
-        // preserved here for fidelity.)
+        // A resolved `toc-position` wins over the `toc` value; when `toc-position`
+        // is empty the empty/empty early return above guarantees a non-empty `toc`
+        // value, which then supplies the position. (Asciidoctor's
+        // `default_toc_position` fallback of `left` is likewise unreachable once
+        // that case has returned.)
         let position = if toc_position_val.is_empty() {
-            if toc_val.is_empty() { "left" } else { toc_val }
+            toc_val
         } else {
             toc_position_val.as_str()
         };
@@ -442,6 +447,10 @@ mod tests {
             doc_with(":toc: preamble\n:toc-position: right").toc_mode(),
             TocMode::Right
         );
+
+        // A bare `:toc-placement:` (set with no value) supplies an empty position,
+        // so an otherwise-bare `:toc:` stays an automatic top TOC.
+        assert_eq!(doc_with(":toc:\n:toc-placement:").toc_mode(), TocMode::Auto);
     }
 
     #[test]
