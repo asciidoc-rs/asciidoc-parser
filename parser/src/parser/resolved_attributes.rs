@@ -163,11 +163,13 @@ impl ResolvedAttributes {
     /// of the raw `toc-placement`.
     ///
     /// `toc-placement` and `toc-position` are fully derived and overwrite any
-    /// author-supplied value; `toc-class` only *defaults* (to `toc2` for a
-    /// side-column TOC), leaving an explicit author value untouched. Nothing is
-    /// materialized when no TOC is generated ([`TocMode::Disabled`], for which
-    /// every derived value is `None`), matching Asciidoctor – and avoiding a
-    /// map clone for the common no-TOC document.
+    /// author-supplied value – including clearing `toc-position` for an
+    /// automatic TOC whose author value resolves to no side; `toc-class`
+    /// only *defaults* (to `toc2` for a positional TOC), leaving an
+    /// explicit author value untouched. Nothing is materialized when no TOC
+    /// is generated ([`TocMode::Disabled`], for which every derived value
+    /// is `None`), matching Asciidoctor – and avoiding a map clone for the
+    /// common no-TOC document.
     pub(crate) fn materialize_toc_attributes(&mut self, mode: TocMode) {
         let placement = mode.derived_toc_placement();
         let position = mode.derived_toc_position();
@@ -195,6 +197,13 @@ impl ResolvedAttributes {
         }
         if let Some(position) = position {
             attrs.insert("toc-position".to_string(), derived(position));
+        } else {
+            // An enabled automatic (top) TOC clears any author-supplied
+            // `toc-position`: Asciidoctor's normalization falls into its `else`
+            // arm and deletes the attribute, so an unrecognized author value
+            // (e.g. a bogus side) does not leak into the derived state. A disabled
+            // TOC returns early above and leaves the author value untouched.
+            attrs.remove("toc-position");
         }
         if let Some(class) = class {
             attrs.insert("toc-class".to_string(), derived(class));

@@ -4247,6 +4247,24 @@ mod psv {
     }
 
     #[test]
+    fn asciidoc_table_cell_renders_a_positional_toc() {
+        // A cell that enables an automatically placed *positional* TOC (`top` /
+        // `bottom`, like `left` / `right`) still renders it: the nested-cell path
+        // must treat these the same as an `auto` TOC, not silently drop them. The
+        // positional placement gives the container the `toc2` class.
+        for value in ["^", "v", "top", "bottom", "<", ">"] {
+            let doc = Parser::default().parse(&format!(
+                "= Document Title\n\n== Section A\n\n|===\na|\n= Subdocument Title\n:toc: {value}\n\n== Subdocument Section A\n\ncontent\n|==="
+            ));
+
+            // The outer document has no TOC; the cell's positional TOC is the
+            // single one, and it renders inside the table with the `toc2` class.
+            assert_css(&doc, "#toc.toc2", 1);
+            assert_css(&doc, "table #toc.toc2", 1);
+        }
+    }
+
+    #[test]
     fn should_be_able_to_enable_toc_in_an_asciidoc_table_cell_even_if_hard_unset_by_api() {
         verifies!(
             r#"
