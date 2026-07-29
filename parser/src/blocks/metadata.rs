@@ -337,7 +337,7 @@ fn skip_comments_before_section(source: Span<'_>, level_offset: i32) -> Option<S
 /// `.`, provided that period is not followed by a space, tab, or a further `.`.
 /// So `.Title` yields `Title` and `..gitignore` yields `.gitignore`, while a
 /// leading `. ` (dot then space) or `..` alone is not a title.
-fn block_title_text(line: Span<'_>) -> Option<Span<'_>> {
+pub(crate) fn block_title_text(line: Span<'_>) -> Option<Span<'_>> {
     if !line.starts_with('.') {
         return None;
     }

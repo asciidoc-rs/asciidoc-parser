@@ -1422,6 +1422,52 @@ mod comment_directly_above_metadata {
     }
 
     #[test]
+    fn title_before_listing() {
+        // A `.Title` line directly under the comment attaches as the following
+        // block's title rather than being surfaced as paragraph text.
+        let doc = Parser::default().parse("= T\n\n// note\n.Title\n----\nputs 1\n----\n");
+        let blocks = top_blocks(&doc);
+
+        assert_eq!(blocks[0].raw_context().as_ref(), "paragraph");
+        assert_eq!(blocks[0].span().data(), "// note");
+
+        assert_eq!(blocks[1].raw_context().as_ref(), "listing");
+        assert_eq!(blocks[1].title(), Some("Title"));
+    }
+
+    #[test]
+    fn title_before_paragraph() {
+        // The title also attaches when the decorated block is itself a
+        // paragraph.
+        let doc = Parser::default().parse("= T\n\nfirst\n\n// note\n.Title\ntext\n");
+        let blocks = top_blocks(&doc);
+
+        // blocks[0] is `first`; blocks[1] is the retained comment.
+        assert_eq!(blocks[2].raw_context().as_ref(), "paragraph");
+        assert_eq!(blocks[2].title(), Some("Title"));
+        assert_eq!(blocks[2].rendered_content(), Some("text"));
+    }
+
+    #[test]
+    fn bracketed_line_after_comment_is_a_block_boundary() {
+        // A bracketed line that is not valid block metadata (a leading space is
+        // rejected by attribute-line parsing) is still treated as a block
+        // boundary, exactly as it is when it directly follows ordinary
+        // paragraph text. The comment is retained as its own block and the
+        // bracketed line renders as its own paragraph – the same rendered
+        // output the pre-existing merged form produced, just as a distinct
+        // block.
+        let doc = Parser::default().parse("= T\n\nfirst\n\n// note\n[ foo]\n");
+        let blocks = top_blocks(&doc);
+
+        assert_eq!(blocks[1].raw_context().as_ref(), "paragraph");
+        assert_eq!(blocks[1].span().data(), "// note");
+
+        assert_eq!(blocks[2].raw_context().as_ref(), "paragraph");
+        assert_eq!(blocks[2].rendered_content(), Some("[ foo]"));
+    }
+
+    #[test]
     fn bare_table_delimiter_after_comment() {
         // A comment directly above a bare table delimiter opens the table rather
         // than swallowing the whole table as paragraph text.
