@@ -22,9 +22,23 @@ pub trait IncludeFileHandler: Debug {
     /// - `parser`: An implementation may read document attribute values from
     ///   the [`Parser`] state.
     ///
-    /// Return the content of the include file (wrapped in [`IncludeContent`])
-    /// if found. If no file is found, return `None` and an appropriate warning
-    /// message will be generated.
+    /// Return the outcome as an [`IncludeResolution`]:
+    ///
+    /// - [`IncludeResolution::Found`] carries the content of the include file
+    ///   (wrapped in [`IncludeContent`]).
+    /// - [`IncludeResolution::NotFound`] signals that no such file exists; the
+    ///   parser records a [`WarningType::IncludeFileNotFound`] warning.
+    /// - [`IncludeResolution::NotReadable`] signals that the file exists but
+    ///   could not be read (for example a permission or other IO error); the
+    ///   parser records a [`WarningType::IncludeFileNotReadable`] warning.
+    ///
+    /// The rendered replacement (`Unresolved directive …`) is identical for the
+    /// two failure reasons; only the warning differs, mirroring Asciidoctor's
+    /// separate `include file not found` and `include file not readable`
+    /// messages.
+    ///
+    /// [`WarningType::IncludeFileNotFound`]: crate::warnings::WarningType::IncludeFileNotFound
+    /// [`WarningType::IncludeFileNotReadable`]: crate::warnings::WarningType::IncludeFileNotReadable
     ///
     /// # Options
     /// With the exception of `encoding` (see below), the implementation should
@@ -49,14 +63,51 @@ pub trait IncludeFileHandler: Debug {
     /// include-encoding warning in that case.
     ///
     /// If the implementation finds a file that is not encoded in UTF-8 and is
-    /// incapable of transcoding it, it should return `None`.
+    /// incapable of transcoding it, it should return
+    /// [`IncludeResolution::NotFound`].
     fn resolve_target<'src>(
         &self,
         source: Option<&str>,
         target: &str,
         attrlist: &Attrlist<'src>,
         parser: &Parser,
-    ) -> Option<IncludeContent>;
+    ) -> IncludeResolution;
+}
+
+/// The outcome of an [`IncludeFileHandler::resolve_target`] call: either the
+/// resolved content, or the reason resolution failed.
+///
+/// The two failure reasons map to distinct warnings – mirroring Asciidoctor,
+/// which distinguishes a missing include file (`include file not found`) from
+/// one that is present but unreadable (`include file not readable`).
+///
+/// This enum is `non_exhaustive`: future resolution reasons may be recognized
+/// as the parser grows, so a host matching on it needs a catch-all arm. New
+/// variants can still be returned by an [`IncludeFileHandler`] implementation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum IncludeResolution {
+    /// The include file was resolved; its content is carried here.
+    Found(IncludeContent),
+
+    /// No file could be found for the directive's target. The parser records a
+    /// [`WarningType::IncludeFileNotFound`] warning.
+    ///
+    /// [`WarningType::IncludeFileNotFound`]: crate::warnings::WarningType::IncludeFileNotFound
+    NotFound,
+
+    /// A file was found for the directive's target but could not be read (for
+    /// example a permission or other IO error). The parser records a
+    /// [`WarningType::IncludeFileNotReadable`] warning.
+    ///
+    /// [`WarningType::IncludeFileNotReadable`]: crate::warnings::WarningType::IncludeFileNotReadable
+    NotReadable,
+}
+
+impl From<IncludeContent> for IncludeResolution {
+    fn from(content: IncludeContent) -> Self {
+        IncludeResolution::Found(content)
+    }
 }
 
 /// The content returned by an [`IncludeFileHandler`] for an `include::`
@@ -131,7 +182,14 @@ impl From<&str> for IncludeContent {
 
 #[cfg(test)]
 mod tests {
-    use super::IncludeContent;
+    use super::{IncludeContent, IncludeResolution};
+
+    #[test]
+    fn resolution_from_include_content_is_found() {
+        let content = IncludeContent::new("Content.");
+        let resolution: IncludeResolution = content.clone().into();
+        assert_eq!(resolution, IncludeResolution::Found(content));
+    }
 
     #[test]
     fn new_does_not_mark_encoding_handled() {

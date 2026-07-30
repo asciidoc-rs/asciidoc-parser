@@ -231,6 +231,14 @@ pub enum WarningType {
     #[error("include file not found: {0}")]
     IncludeFileNotFound(String),
 
+    /// An `include::` directive named a file that exists but the configured
+    /// include file handler could not read (for example a permission or other
+    /// IO error). The field is the target as written. Asciidoctor distinguishes
+    /// this from [`IncludeFileNotFound`](Self::IncludeFileNotFound), logging
+    /// `include file not readable` rather than `include file not found`.
+    #[error("include file not readable: {0}")]
+    IncludeFileNotReadable(String),
+
     /// An include directive's target referenced a missing attribute while
     /// `attribute-missing` was set to `warn`, so the directive was dropped
     /// without being resolved. (Under `drop-line` the directive line is
@@ -486,6 +494,11 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::IncludeFileNotFound(target) => f
                 .debug_tuple("WarningType::IncludeFileNotFound")
+                .field(target)
+                .finish(),
+
+            WarningType::IncludeFileNotReadable(target) => f
+                .debug_tuple("WarningType::IncludeFileNotReadable")
                 .field(target)
                 .finish(),
 
@@ -958,6 +971,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::IncludeFileNotFound(\"content.adoc\")"
+                );
+            }
+
+            #[test]
+            fn include_file_not_readable() {
+                let warning = WarningType::IncludeFileNotReadable("content.adoc".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeFileNotReadable(\"content.adoc\")"
                 );
             }
 
