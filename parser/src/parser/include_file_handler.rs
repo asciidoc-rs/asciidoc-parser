@@ -182,7 +182,14 @@ impl From<&str> for IncludeContent {
 
 #[cfg(test)]
 mod tests {
-    use super::IncludeContent;
+    use super::{IncludeContent, IncludeResolution};
+
+    #[test]
+    fn resolution_from_include_content_is_found() {
+        let content = IncludeContent::new("Content.");
+        let resolution: IncludeResolution = content.clone().into();
+        assert_eq!(resolution, IncludeResolution::Found(content));
+    }
 
     #[test]
     fn new_does_not_mark_encoding_handled() {
