@@ -27,21 +27,36 @@ impl<'src> AuthorLine<'src> {
             .collect();
 
         for (index, author) in authors.iter().enumerate() {
-            set_nth_attribute(parser, "author", index, author.name());
-            set_nth_attribute(parser, "authorinitials", index, author.initials());
-            set_nth_attribute(parser, "firstname", index, author.firstname());
+            let suffix = if index == 0 {
+                String::new()
+            } else {
+                format!("_{count}", count = index + 1)
+            };
 
-            if let Some(middlename) = author.middlename() {
-                set_nth_attribute(parser, "middlename", index, middlename);
-            }
+            set_author_attributes(parser, author, &suffix);
+        }
 
-            if let Some(lastname) = author.lastname() {
-                set_nth_attribute(parser, "lastname", index, lastname);
-            }
+        // When the implicit author line names more than one author, Asciidoctor
+        // also exposes the first author's attributes under explicit
+        // `_1`-suffixed names (`author_1`, `firstname_1`, ...) in addition to
+        // the unsuffixed forms set above. For a single author only the
+        // unsuffixed names are set.
+        if let Some(first) = authors.first()
+            && authors.len() > 1
+        {
+            set_author_attributes(parser, first, "_1");
+        }
 
-            if let Some(email) = author.email() {
-                set_nth_attribute(parser, "email", index, email);
-            }
+        // Asciidoctor exposes the combined, comma-joined `authors` attribute
+        // whenever the implicit author line names at least one author.
+        if !authors.is_empty() {
+            let combined = authors
+                .iter()
+                .map(Author::name)
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            parser.set_attribute_by_value_from_header("authors", combined);
         }
 
         Self { authors, source }
@@ -114,14 +129,28 @@ fn split_authors(data: &str) -> Vec<&str> {
     authors
 }
 
-fn set_nth_attribute<V: AsRef<str>>(parser: &mut Parser, name: &str, index: usize, value: V) {
-    let name = if index == 0 {
-        name.to_string()
-    } else {
-        format!("{name}_{count}", count = index + 1)
-    };
+/// Set the built-in author attributes for a single author, appending `suffix`
+/// (e.g. `""` for the first author or `"_2"` for the second) to each attribute
+/// name. Optional parts (middle name, last name, email) are set only when the
+/// author supplies them.
+fn set_author_attributes(parser: &mut Parser, author: &Author, suffix: &str) {
+    parser.set_attribute_by_value_from_header(format!("author{suffix}"), author.name());
 
-    parser.set_attribute_by_value_from_header(name, value);
+    parser.set_attribute_by_value_from_header(format!("authorinitials{suffix}"), author.initials());
+
+    parser.set_attribute_by_value_from_header(format!("firstname{suffix}"), author.firstname());
+
+    if let Some(middlename) = author.middlename() {
+        parser.set_attribute_by_value_from_header(format!("middlename{suffix}"), middlename);
+    }
+
+    if let Some(lastname) = author.lastname() {
+        parser.set_attribute_by_value_from_header(format!("lastname{suffix}"), lastname);
+    }
+
+    if let Some(email) = author.email() {
+        parser.set_attribute_by_value_from_header(format!("email{suffix}"), email);
+    }
 }
 
 impl<'src> HasSpan<'src> for AuthorLine<'src> {
@@ -874,6 +903,29 @@ mod tests {
             InterpretedValue::Value("jane@example.com")
         );
 
+        // First author, also exposed under explicit `_1`-suffixed names because
+        // more than one author is present.
+        assert_eq!(
+            parser.attribute_value("author_1"),
+            InterpretedValue::Value("Jane Smith")
+        );
+        assert_eq!(
+            parser.attribute_value("firstname_1"),
+            InterpretedValue::Value("Jane")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname_1"),
+            InterpretedValue::Value("Smith")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials_1"),
+            InterpretedValue::Value("JS")
+        );
+        assert_eq!(
+            parser.attribute_value("email_1"),
+            InterpretedValue::Value("jane@example.com")
+        );
+
         // Second author
         assert_eq!(
             parser.attribute_value("author_2"),
@@ -896,13 +948,48 @@ mod tests {
             InterpretedValue::Value("john@example.com")
         );
 
-        // Verify middlename attributes are unset for both authors.
+        // Verify middlename attributes are unset for all authors.
         assert_eq!(
             parser.attribute_value("middlename"),
             InterpretedValue::Unset
         );
         assert_eq!(
+            parser.attribute_value("middlename_1"),
+            InterpretedValue::Unset
+        );
+        assert_eq!(
             parser.attribute_value("middlename_2"),
+            InterpretedValue::Unset
+        );
+
+        // The combined, comma-joined `authors` attribute lists every author.
+        assert_eq!(
+            parser.attribute_value("authors"),
+            InterpretedValue::Value("Jane Smith, John Doe")
+        );
+    }
+
+    #[test]
+    fn single_author_sets_combined_authors_but_no_indexed_names() {
+        let mut parser = Parser::default();
+        let _doc = parser.parse("= Document Title\nKismet R. Lee <kismet@asciidoctor.org>");
+
+        // For a single author, the combined `authors` attribute equals the
+        // primary `author` attribute ...
+        assert_eq!(
+            parser.attribute_value("authors"),
+            InterpretedValue::Value("Kismet R. Lee")
+        );
+
+        // ... and no `_1`-suffixed names are derived (those appear only when
+        // more than one author is present).
+        assert_eq!(parser.attribute_value("author_1"), InterpretedValue::Unset);
+        assert_eq!(
+            parser.attribute_value("firstname_1"),
+            InterpretedValue::Unset
+        );
+        assert_eq!(
+            parser.attribute_value("lastname_1"),
             InterpretedValue::Unset
         );
     }

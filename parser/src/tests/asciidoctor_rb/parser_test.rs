@@ -62,10 +62,11 @@
 //! * **`parse_header_metadata`** author parsing — driven through
 //!   [`AuthorLine::parse`](crate::document::AuthorLine), asserting on the
 //!   parsed [`Author`](crate::document::Author) list (name / firstname /
-//!   middlename / lastname / email / initials). This crate does not derive
-//!   Ruby's `authors` (comma-joined) or `authorcount` document attributes, and
-//!   numbers the first author's attributes unsuffixed (`author`, not
-//!   `author_1`), so assertions on those are dropped. The Ruby `metadata.size`
+//!   middlename / lastname / email / initials). This crate derives the combined
+//!   `authors` (comma-joined) attribute and, when more than one author is
+//!   present, the first author's `_1`-suffixed names (`author_1`, ...) as well
+//!   as the unsuffixed forms; it does not derive Ruby's `authorcount` document
+//!   attribute, so assertions on that are dropped. The Ruby `metadata.size`
 //!   (hash cardinality) has no crate analog and is likewise not asserted.
 //! * **`parse_header_metadata`** revision parsing — driven through a full
 //!   [`Parser::parse`] over the header (title, author line, revision line) and
@@ -159,6 +160,17 @@ fn parse_authors(line: &str) -> Vec<ParsedAuthor> {
             initials: a.initials(),
         })
         .collect()
+}
+
+/// Parse an implicit author line through [`AuthorLine::parse`] and return the
+/// [`Parser`] so the caller can assert on the document attributes it derives:
+/// the combined, comma-joined `authors` attribute and – when more than one
+/// author is present – the first author's `_1`-suffixed names (`author_1`,
+/// `firstname_1`, ...) alongside the `author_2`, `author_3`, ... family.
+fn parse_authors_deriving_attributes(line: &str) -> Parser {
+    let mut parser = Parser::default();
+    let _author_line = crate::document::AuthorLine::parse(crate::Span::new(line), &mut parser);
+    parser
 }
 
 /// Define a document attribute entry whose raw (as-written) name is `raw_name`
@@ -1065,9 +1077,9 @@ fn parse_multiple_authors() {
 "#
     );
 
-    // This crate does not derive the `authors` (comma-joined) or `authorcount`
-    // attributes and numbers the first author unsuffixed, so we assert on the
-    // parsed author list directly.
+    // This crate does not derive the `authorcount` attribute, so that
+    // assertion is dropped. The combined `authors` attribute and the `author_1`
+    // / `author_2` family match Asciidoctor exactly.
     let a =
         parse_authors("Doc Writer <doc.writer@asciidoc.org>; John Smith <john.smith@asciidoc.org>");
     assert_eq!(a.len(), 2);
@@ -1075,6 +1087,27 @@ fn parse_multiple_authors() {
     assert_eq!(a[0].email.as_deref(), Some("doc.writer@asciidoc.org"));
     assert_eq!(a[1].name, "John Smith");
     assert_eq!(a[1].email.as_deref(), Some("john.smith@asciidoc.org"));
+
+    let parser = parse_authors_deriving_attributes(
+        "Doc Writer <doc.writer@asciidoc.org>; John Smith <john.smith@asciidoc.org>",
+    );
+
+    assert_eq!(
+        parser.attribute_value("authors"),
+        InterpretedValue::Value("Doc Writer, John Smith")
+    );
+    assert_eq!(
+        parser.attribute_value("author"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author_2"),
+        InterpretedValue::Value("John Smith")
+    );
 }
 
 #[test]
@@ -1118,6 +1151,20 @@ fn skips_blank_author_entries_in_implicit_author_line() {
     assert_eq!(a[0].name, "Doc Writer");
     assert_eq!(a[1].name, "John Smith");
     assert_eq!(a[1].email.as_deref(), Some("john.smith@asciidoc.org"));
+
+    // The two surviving authors are numbered `author_1` / `author_2`, matching
+    // Asciidoctor. This crate does not derive `authorcount`.
+    let parser =
+        parse_authors_deriving_attributes("Doc Writer; ; John Smith <john.smith@asciidoc.org>;");
+
+    assert_eq!(
+        parser.attribute_value("author_1"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author_2"),
+        InterpretedValue::Value("John Smith")
+    );
 }
 
 #[test]
@@ -1289,12 +1336,33 @@ fn does_not_drop_name_joiner_when_using_multiple_authors() {
     );
 
     // The `het_Draeke` name-joiner underscore becomes a space (`het Draeke`)
-    // rather than being dropped.
+    // rather than being dropped. This crate does not derive `authorcount`, but
+    // the combined `authors` attribute and the indexed author names match
+    // Asciidoctor exactly.
     let a = parse_authors("Kismet Chameleon; Lazarus het_Draeke");
     assert_eq!(a.len(), 2);
     assert_eq!(a[0].name, "Kismet Chameleon");
     assert_eq!(a[1].name, "Lazarus het Draeke");
     assert_eq!(a[1].lastname.as_deref(), Some("het Draeke"));
+
+    let parser = parse_authors_deriving_attributes("Kismet Chameleon; Lazarus het_Draeke");
+
+    assert_eq!(
+        parser.attribute_value("authors"),
+        InterpretedValue::Value("Kismet Chameleon, Lazarus het Draeke")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
+        InterpretedValue::Value("Kismet Chameleon")
+    );
+    assert_eq!(
+        parser.attribute_value("author_2"),
+        InterpretedValue::Value("Lazarus het Draeke")
+    );
+    assert_eq!(
+        parser.attribute_value("lastname_2"),
+        InterpretedValue::Value("het Draeke")
+    );
 }
 
 #[test]
@@ -1320,15 +1388,22 @@ fn allows_authors_to_be_overridden_using_explicit_author_attributes() {
     );
 
     // The `:author_2:` entry overrides the second author computed from the
-    // implicit author line. (This crate names the first author unsuffixed
-    // `author` rather than `author_1`, and does not derive `authorcount` /
-    // `authors`.)
+    // implicit author line. The first author is now exposed both unsuffixed
+    // (`author`) and as `author_1`. This crate does not derive
+    // `authorcount`, and – unlike Asciidoctor – it does not re-derive the
+    // combined `authors` attribute after the explicit override, so `authors`
+    // still reflects the implicit line (`... Johnny Bravo ...`, not `... Danger
+    // Mouse ...`).
     let mut parser = Parser::default();
     let _ = parser.parse(
         "= Document Title\nKismet Chameleon; Johnny Bravo; Lazarus het_Draeke\n:author_2: Danger Mouse",
     );
     assert_eq!(
         parser.attribute_value("author"),
+        InterpretedValue::Value("Kismet Chameleon")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
         InterpretedValue::Value("Kismet Chameleon")
     );
     assert_eq!(
