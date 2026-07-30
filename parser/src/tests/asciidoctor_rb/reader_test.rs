@@ -1907,6 +1907,31 @@ fn should_replace_include_directive_that_references_unreadable_file_with_message
     );
 }
 
+// `opts=optional` suppresses the unresolved-directive replacement and the
+// warning for an *unreadable* target just as it does for a missing one: the
+// directive is dropped silently, leaving only the trailing content. There is no
+// dedicated Asciidoctor test for the optional + unreadable combination; this
+// guards the crate's intentional behavior against regression (twin of
+// `should_skip_include_directive_that_references_missing_file_if_optional_option_is_set`).
+#[test]
+fn should_skip_include_directive_that_references_unreadable_file_if_optional_option_is_set() {
+    let handler = RecordingIncludeFileHandler::unreadable();
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/chapter-a.adoc[opts=optional]\n\ntrailing content",
+        &parser,
+    );
+    assert_eq!(output, "\ntrailing content\n");
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/chapter-a.adoc".to_owned(), None)]
+    );
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+}
+
 non_normative!(
     r#"
 

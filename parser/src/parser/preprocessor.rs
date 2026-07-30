@@ -658,10 +658,15 @@ impl<'p> PreprocessorState<'p> {
                         ifh.resolve_target(file_name, &target, &attrlist, self.parser)
                     });
 
+                // Matched exhaustively (no catch-all) on purpose: although
+                // `IncludeResolution` is `non_exhaustive` for downstream crates,
+                // within this crate a new reason must be handled here
+                // deliberately – likely with its own warning – rather than
+                // silently collapsing into "not found".
                 let (include_content, not_readable) = match resolution {
                     IncludeResolution::Found(content) => (Some(content), false),
                     IncludeResolution::NotReadable => (None, true),
-                    _ => (None, false),
+                    IncludeResolution::NotFound => (None, false),
                 };
 
                 if let Some(include_content) = include_content {
