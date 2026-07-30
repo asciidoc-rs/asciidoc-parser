@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.28.1...v0.29.0)
+_30 July 2026_
+
+### Added
+
+* [**breaking**] Distinguish an unreadable include file from a missing one ([#999](https://github.com/asciidoc-rs/asciidoc-parser/pull/999))
+
 ## [0.28.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.28.0...v0.28.1)
 _29 July 2026_
 
