@@ -73,7 +73,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     attributes::Attrlist,
-    parser::{IncludeContent, IncludeFileHandler},
+    parser::{IncludeContent, IncludeFileHandler, IncludeResolution},
     tests::prelude::{inline_file_handler::InlineFileHandler, *},
 };
 
@@ -93,21 +93,34 @@ type RecordedInclude = (Option<String>, String, Option<String>);
 /// naming the including file as `source`, and forwarding the `encoding`
 /// attribute — before delegating. This handler lets a test assert exactly what
 /// the parser hands off.
+/// What a [`RecordingIncludeFileHandler`] returns from `resolve_target`.
+#[derive(Clone, Copy, Debug)]
+enum MockResolution {
+    /// A resolved file whose content is returned via
+    /// [`IncludeContent::transcoded`] when the flag is set, otherwise
+    /// [`IncludeContent::new`].
+    Found(&'static str, bool),
+
+    /// A target for which no file could be found.
+    NotFound,
+
+    /// A target whose file exists but could not be read.
+    NotReadable,
+}
+
 #[derive(Clone, Debug)]
 struct RecordingIncludeFileHandler {
     calls: Rc<RefCell<Vec<RecordedInclude>>>,
-    /// What the handler returns from `resolve_target`: `Some((content,
-    /// transcoded))` for a resolved file (returned via
-    /// [`IncludeContent::transcoded`] when `transcoded` is set, otherwise
-    /// [`IncludeContent::new`]), or `None` for a file that could not be found.
-    result: Option<(&'static str, bool)>,
+
+    /// What the handler returns from `resolve_target`.
+    result: MockResolution,
 }
 
 impl RecordingIncludeFileHandler {
     fn new(content: &'static str) -> Self {
         Self {
             calls: Rc::new(RefCell::new(Vec::new())),
-            result: Some((content, false)),
+            result: MockResolution::Found(content, false),
         }
     }
 
@@ -116,16 +129,27 @@ impl RecordingIncludeFileHandler {
     /// file and reencoded it per the `encoding` attribute.
     fn transcoding(content: &'static str) -> Self {
         Self {
-            result: Some((content, true)),
+            result: MockResolution::Found(content, true),
             ..Self::new(content)
         }
     }
 
     /// A handler that records the call but reports the file as not found
-    /// (returns `None`), as a real handler would for a missing target.
+    /// (returns [`IncludeResolution::NotFound`]), as a real handler would for a
+    /// missing target.
     fn missing() -> Self {
         Self {
-            result: None,
+            result: MockResolution::NotFound,
+            ..Self::new("")
+        }
+    }
+
+    /// A handler that records the call but reports the file as present yet
+    /// unreadable (returns [`IncludeResolution::NotReadable`]), as a real
+    /// handler would for a file it could not read (e.g. a permission error).
+    fn unreadable() -> Self {
+        Self {
+            result: MockResolution::NotReadable,
             ..Self::new("")
         }
     }
@@ -145,20 +169,28 @@ impl IncludeFileHandler for RecordingIncludeFileHandler {
         target: &str,
         attrlist: &Attrlist<'src>,
         _parser: &Parser,
-    ) -> Option<IncludeContent> {
+    ) -> IncludeResolution {
         let encoding = attrlist
             .named_attribute("encoding")
             .map(|a| a.value().to_string());
         self.calls
             .borrow_mut()
             .push((source.map(str::to_owned), target.to_owned(), encoding));
-        self.result.map(|(content, transcoded)| {
-            if transcoded {
-                IncludeContent::transcoded(content)
-            } else {
-                IncludeContent::new(content)
+        match self.result {
+            MockResolution::Found(content, transcoded) => {
+                let content = if transcoded {
+                    IncludeContent::transcoded(content)
+                } else {
+                    IncludeContent::new(content)
+                };
+
+                IncludeResolution::Found(content)
             }
-        })
+
+            MockResolution::NotFound => IncludeResolution::NotFound,
+
+            MockResolution::NotReadable => IncludeResolution::NotReadable,
+        }
     }
 }
 
@@ -1814,11 +1846,12 @@ fn should_replace_include_directive_that_references_missing_file_with_message() 
     );
 }
 
-// This crate delegates file access to the handler, which signals both a
-// missing and an unreadable file the same way (by returning `None`), so an
-// unreadable target is reported with the same `IncludeFileNotFound` warning
-// as a missing one — it does not distinguish Asciidoctor's separate "include
-// file not readable" message.
+// This crate delegates file access to the handler, which distinguishes a
+// missing file ([`IncludeResolution::NotFound`]) from one that exists but can't
+// be read ([`IncludeResolution::NotReadable`]). An unreadable target is
+// therefore reported with an `IncludeFileNotReadable` warning – matching
+// Asciidoctor's separate "include file not readable" message – while the
+// rendered "Unresolved directive" replacement is identical to the missing case.
 #[test]
 fn should_replace_include_directive_that_references_unreadable_file_with_message() {
     verifies!(
@@ -1850,7 +1883,7 @@ fn should_replace_include_directive_that_references_unreadable_file_with_message
 "#
     );
 
-    let handler = RecordingIncludeFileHandler::missing();
+    let handler = RecordingIncludeFileHandler::unreadable();
     let probe = handler.clone();
     let parser = Parser::default()
         .with_safe_mode(SafeMode::Server)
@@ -1870,7 +1903,7 @@ fn should_replace_include_directive_that_references_unreadable_file_with_message
     assert_eq!(warnings.len(), 1);
     assert_eq!(
         warnings[0].warning,
-        WarningType::IncludeFileNotFound("fixtures/chapter-a.adoc".to_owned())
+        WarningType::IncludeFileNotReadable("fixtures/chapter-a.adoc".to_owned())
     );
 }
 

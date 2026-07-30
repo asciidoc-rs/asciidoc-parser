@@ -7,7 +7,10 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::AttributeMissing,
     document::{Attribute, InterpretedValue},
-    parser::{DeferredWarning, Fidelity, SourceLine, SourceMap, Transform, attribute_lookup_name},
+    parser::{
+        DeferredWarning, Fidelity, IncludeResolution, SourceLine, SourceMap, Transform,
+        attribute_lookup_name,
+    },
     span::MatchedItem,
     warnings::{Warning, WarningType},
 };
@@ -642,11 +645,26 @@ impl<'p> PreprocessorState<'p> {
                     continue;
                 }
 
-                if let Some(include_content) =
-                    self.parser.include_file_handler.as_ref().and_then(|ifh| {
+                // Ask the handler to resolve the target. With no handler
+                // configured, the target is treated as not found. The failure
+                // reason (`NotFound` vs `NotReadable`) selects the warning
+                // recorded below, mirroring Asciidoctor's distinct `include file
+                // not found` and `include file not readable` messages.
+                let resolution = self
+                    .parser
+                    .include_file_handler
+                    .as_ref()
+                    .map_or(IncludeResolution::NotFound, |ifh| {
                         ifh.resolve_target(file_name, &target, &attrlist, self.parser)
-                    })
-                {
+                    });
+
+                let (include_content, not_readable) = match resolution {
+                    IncludeResolution::Found(content) => (Some(content), false),
+                    IncludeResolution::NotReadable => (None, true),
+                    _ => (None, false),
+                };
+
+                if let Some(include_content) = include_content {
                     // Apply `lines`/`tag(s)` selection and `indent` normalization
                     // to the raw included content before it is merged, matching
                     // Asciidoctor. Any nested include/conditional directives in an
@@ -848,10 +866,18 @@ impl<'p> PreprocessorState<'p> {
                     has_reported_file = false;
                 } else {
                     // The target could not be resolved. Replace the directive with
-                    // an "Unresolved directive" message and record a warning.
+                    // an "Unresolved directive" message and record a warning. A
+                    // file that exists but can't be read is reported distinctly
+                    // from a missing one, matching Asciidoctor.
+                    let warning = if not_readable {
+                        WarningType::IncludeFileNotReadable(target)
+                    } else {
+                        WarningType::IncludeFileNotFound(target)
+                    };
+
                     self.emit_unresolved_directive(
                         line.data(),
-                        WarningType::IncludeFileNotFound(target),
+                        warning,
                         file_name,
                         source_line_number,
                         &mut has_reported_file,
@@ -2402,7 +2428,10 @@ mod tests {
     use crate::{
         SafeMode,
         attributes::Attrlist,
-        parser::{IncludeContent, IncludeFileHandler, SourceLine, preprocessor::preprocess},
+        parser::{
+            IncludeContent, IncludeFileHandler, IncludeResolution, SourceLine,
+            preprocessor::preprocess,
+        },
         tests::{fixtures::inline_file_handler::InlineFileHandler, prelude::*},
     };
 
@@ -4147,10 +4176,10 @@ mod tests {
                 _target: &str,
                 _attrlist: &Attrlist<'src>,
                 _parser: &Parser,
-            ) -> Option<IncludeContent> {
+            ) -> IncludeResolution {
                 // Pretend the bytes on disk were `iso-8859-1` and we decoded
                 // them; the returned content is valid UTF-8.
-                Some(IncludeContent::transcoded("Résumé."))
+                IncludeResolution::Found(IncludeContent::transcoded("Résumé."))
             }
         }
 

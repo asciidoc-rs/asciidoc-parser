@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     attributes::Attrlist,
-    parser::{IncludeContent, IncludeFileHandler},
+    parser::{IncludeContent, IncludeFileHandler, IncludeResolution},
     tests::prelude::*,
 };
 
@@ -22,7 +22,9 @@ impl IncludeFileHandler for InlineFileHandler {
         target: &str,
         _attrlist: &Attrlist<'src>,
         _parser: &Parser,
-    ) -> Option<IncludeContent> {
-        self.0.get(target).map(|v| IncludeContent::new(*v))
+    ) -> IncludeResolution {
+        self.0.get(target).map_or(IncludeResolution::NotFound, |v| {
+            IncludeResolution::Found(IncludeContent::new(*v))
+        })
     }
 }

@@ -15,7 +15,7 @@ mod image_file_handler;
 pub use image_file_handler::ImageFileHandler;
 
 mod include_file_handler;
-pub use include_file_handler::{IncludeContent, IncludeFileHandler};
+pub use include_file_handler::{IncludeContent, IncludeFileHandler, IncludeResolution};
 
 mod inline_substitution_renderer;
 pub use inline_substitution_renderer::{
