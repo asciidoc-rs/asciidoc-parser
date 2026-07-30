@@ -14,6 +14,10 @@ _30 July 2026_
 
 * [**breaking**] Distinguish an unreadable include file from a missing one ([#999](https://github.com/asciidoc-rs/asciidoc-parser/pull/999))
 
+### Breaking changes
+
+* **`IncludeFileHandler`** ([#999](https://github.com/asciidoc-rs/asciidoc-parser/pull/999)) — `IncludeFileHandler::resolve_target` now returns the new `IncludeResolution` enum instead of `Option<IncludeContent>`, so a handler can signal *why* resolution failed. A file that exists but cannot be read (e.g. a permission error) now reports the new `WarningType::IncludeFileNotReadable` warning, matching Asciidoctor's `include file not readable`, rather than being conflated with a missing file. To migrate an `IncludeFileHandler` implementation: map what was `Some(content)` to `IncludeResolution::Found(content)` (or `content.into()`, via the provided `From<IncludeContent>` conversion), and what was `None` to `IncludeResolution::NotFound`; a handler that reads from the filesystem should additionally return `IncludeResolution::NotReadable` when the file exists but the read fails (e.g. distinguish `io::ErrorKind::NotFound` from other IO errors). The rendered `Unresolved directive` replacement and the `opts=optional` short-circuit are unchanged for both failure reasons — only the emitted warning differs. `IncludeResolution` is `#[non_exhaustive]`, leaving room for future reasons.
+
 ## [0.28.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.28.0...v0.28.1)
 _29 July 2026_
 
