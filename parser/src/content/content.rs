@@ -5,6 +5,7 @@
 
 use crate::{
     Span,
+    content::Passthrough,
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
         XrefRenderParams,
@@ -69,6 +70,19 @@ pub struct Content<'src> {
     /// `None` for the overwhelming majority of content, which contains no
     /// cross-references.
     deferred: Option<Box<DeferredContent>>,
+
+    /// Inline passthroughs (`+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, inline
+    /// STEM macros) extracted from this content during substitution, in the
+    /// order they were extracted.
+    ///
+    /// The substitution pipeline pulls each passthrough out before running the
+    /// other substitutions and splices it back in afterward; this retains the
+    /// collection so it is observable after the fact (see
+    /// [`passthroughs`](Self::passthroughs)), analogous to Asciidoctor's
+    /// internal `@passthroughs` array. Empty for the common case of content
+    /// with no passthroughs, and for content whose substitution group does not
+    /// extract them.
+    passthroughs: Vec<Passthrough>,
 }
 
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
@@ -206,6 +220,7 @@ impl<'src> Content<'src> {
             rendered,
             source_lines: None,
             deferred: None,
+            passthroughs: Vec::new(),
         }
     }
 
@@ -233,6 +248,7 @@ impl<'src> Content<'src> {
             deferred: title
                 .deferred
                 .map(|(template, xrefs)| Box::new(DeferredContent { template, xrefs })),
+            passthroughs: Vec::new(),
         }
     }
 
@@ -269,6 +285,7 @@ impl<'src> Content<'src> {
             rendered,
             source_lines: Some(line_spans.into_boxed_slice()),
             deferred: None,
+            passthroughs: Vec::new(),
         }
     }
 
@@ -319,6 +336,33 @@ impl<'src> Content<'src> {
     /// Returns `true` if `self` contains no text.
     pub fn is_empty(&self) -> bool {
         self.rendered.as_ref().is_empty()
+    }
+
+    /// Returns the inline passthroughs extracted from this content during
+    /// substitution, in extraction order.
+    ///
+    /// An inline passthrough (`+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or an
+    /// inline STEM macro) is pulled out of the text before the other
+    /// substitutions run and spliced back in afterward. This exposes that
+    /// collection – each entry's stored [`text`](Passthrough::text) and
+    /// resolved [`subs`](Passthrough::subs) – for inspection, analogous to
+    /// Asciidoctor's internal `@passthroughs` array.
+    ///
+    /// The slice is empty when the content has no passthroughs, and when the
+    /// content's substitution group does not extract passthroughs at all (only
+    /// groups that include the
+    /// [macros](crate::content::SubstitutionStep::Macros) step, or the
+    /// header group, do).
+    pub fn passthroughs(&self) -> &[Passthrough] {
+        &self.passthroughs
+    }
+
+    /// Records the inline passthroughs extracted from this content during
+    /// substitution, so they remain observable via
+    /// [`passthroughs`](Self::passthroughs) after the restore pass has spliced
+    /// them back in.
+    pub(crate) fn set_passthroughs(&mut self, passthroughs: Vec<Passthrough>) {
+        self.passthroughs = passthroughs;
     }
 
     /// Removes the [`FOOTNOTE_MARKER_START`]/[`FOOTNOTE_MARKER_END`] sentinels
@@ -718,6 +762,7 @@ impl<'src> From<Span<'src>> for Content<'src> {
             rendered: CowStr::from(span.data()),
             source_lines: None,
             deferred: None,
+            passthroughs: Vec::new(),
         }
     }
 }
