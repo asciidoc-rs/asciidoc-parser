@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.0...v0.29.1)
+_31 July 2026_
+
+### Added
+
+* Expose the inline passthrough collection on a block's content ([#1008](https://github.com/asciidoc-rs/asciidoc-parser/pull/1008))
+
+### Fixed
+
+* Run :author: attribute value through substitutions before name partitioning ([#1009](https://github.com/asciidoc-rs/asciidoc-parser/pull/1009))
+* Emit a diagnostic for lines dropped under attribute-missing=drop-line ([#1012](https://github.com/asciidoc-rs/asciidoc-parser/pull/1012))
+* Populate combined `authors` and `author_1` attributes from the implicit author line ([#1007](https://github.com/asciidoc-rs/asciidoc-parser/pull/1007))
+* Reconcile an explicit `:authors:` entry against the implicit author line ([#1006](https://github.com/asciidoc-rs/asciidoc-parser/pull/1006))
+
 ## [0.29.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.28.1...v0.29.0)
 _30 July 2026_
 
