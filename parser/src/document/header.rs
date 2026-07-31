@@ -891,6 +891,17 @@ fn resolve_authors(
             if authors_value != computed
                 && let Some(authors) = authors_from_authors_attribute(&authors_value, parser)
             {
+                // `set_author_metadata` overwrites the derived attributes for
+                // the replacement authors but does not clear ones the implicit
+                // list set that the replacement does not (a shorter list leaves
+                // a stale trailing `author_N`; a replacement author lacking a
+                // middle name / email leaves the implicit `middlename` /
+                // `email`). This mirrors Asciidoctor's `doc_attrs.update
+                // author_metadata` – a merge that overwrites present keys and
+                // never deletes absent ones – so `{author_3}` and friends can
+                // outlive an `authorcount` that reflects the shorter list. The
+                // divergence is Asciidoctor's; see the shrinking-replacement
+                // regression test in this module.
                 set_author_metadata(parser, &authors);
                 return authors;
             }
@@ -2042,6 +2053,71 @@ mod tests {
 
         assert_eq!(doc.attribute_value("author"), InterpretedValue::Unset);
         assert!(doc.authors().is_empty());
+    }
+
+    #[test]
+    fn authors_entry_replacing_a_longer_implicit_list_leaves_stale_attributes() {
+        // When a differing `:authors:` entry replaces a *longer* implicit author
+        // line, the reconciliation re-derives only the replacement authors'
+        // attributes. Attributes the implicit line set that the replacement does
+        // not are left in place: a trailing `author_N` (and its name parts)
+        // beyond the shorter list, and the base `email` / `middlename` when the
+        // replacement's first author omits them.
+        //
+        // This is not a gap in the port – it is exactly Asciidoctor's behavior.
+        // Its `parse_header_metadata` reconciles with `doc_attrs.update
+        // author_metadata`, a merge that overwrites the keys the replacement
+        // supplies and never deletes the ones it omits, so `{author_3}` (and the
+        // stale `email` / `middlename`) survive alongside an `authorcount` that
+        // reflects the shorter list. Verified byte-for-byte against Asciidoctor
+        // 2.0.26; there is no upstream test for this shrinking case, so this one
+        // pins the parity to guard against a future "cleanup" that would clear
+        // the stale keys and diverge.
+        let mut parser = Parser::default();
+        let doc = parser.parse(
+            "= T\nKismet R. Lee <kismet@example.com>; Junior Writer; Third Author\n:authors: Stuart Rackham; Dan Allen\n",
+        );
+
+        // The typed author list and `authorcount` reflect the two-author
+        // replacement.
+        let authors = doc.header().authors();
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors.first().unwrap().name(), "Stuart Rackham");
+        assert_eq!(authors.get(1).unwrap().name(), "Dan Allen");
+        assert_eq!(
+            parser.attribute_value("authorcount"),
+            InterpretedValue::Value("2")
+        );
+
+        // The replacement authors' attributes are re-derived.
+        assert_eq!(
+            parser.attribute_value("authors"),
+            InterpretedValue::Value("Stuart Rackham, Dan Allen")
+        );
+        assert_eq!(
+            parser.attribute_value("author_1"),
+            InterpretedValue::Value("Stuart Rackham")
+        );
+        assert_eq!(
+            parser.attribute_value("author_2"),
+            InterpretedValue::Value("Dan Allen")
+        );
+
+        // Stale attributes from the longer/richer implicit list survive, exactly
+        // as they do in Asciidoctor: the third author, the first implicit
+        // author's email, and its middle name.
+        assert_eq!(
+            parser.attribute_value("author_3"),
+            InterpretedValue::Value("Third Author")
+        );
+        assert_eq!(
+            parser.attribute_value("email"),
+            InterpretedValue::Value("kismet@example.com")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("R.")
+        );
     }
 
     #[test]
