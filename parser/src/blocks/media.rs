@@ -950,6 +950,15 @@ mod tests {
         fn drop_line_drops_the_whole_block() {
             let mut p = parser_with_mode("drop-line");
             assert!(resolve("image::a{missing}b.png[]", &mut p).is_none());
+
+            // Dropping the block is surfaced as a diagnostic naming the missing
+            // attribute (the crate's analogue of Asciidoctor's INFO log).
+            let warnings = p.take_substitution_warnings();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::SkippingReferenceToMissingAttribute("missing".to_string())
+            );
         }
 
         #[test]
