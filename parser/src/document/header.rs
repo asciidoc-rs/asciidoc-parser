@@ -143,7 +143,7 @@ impl<'src> Header<'src> {
                 // When the value is a plain name, the partitioned name replaces
                 // the stored `author` value. This condenses repeated interior
                 // whitespace and joins a name with four or more parts, matching
-                // Asciidoctor (issue #758).
+                // Asciidoctor.
                 //
                 // Asciidoctor runs an attribute-entry value through the
                 // substitution pipeline *before* partitioning it into name parts
@@ -196,7 +196,7 @@ impl<'src> Header<'src> {
                     // punctuation such as a comma); a value that matches the
                     // pattern, carries an inline email (`<…>`), or holds an
                     // attribute reference (`{…}`) keeps the substituted entry
-                    // value set below (issue #758).
+                    // value set below.
                     let has_markup = attr
                         .item
                         .value()
@@ -1498,11 +1498,10 @@ mod tests {
 
     #[test]
     fn author_attribute_with_four_or_more_parts_is_partitioned() {
-        // https://github.com/asciidoc-rs/asciidoc-parser/issues/758: a value
-        // with more than three parts does not match the author pattern, so it is
-        // partitioned by splitting on whitespace into at most three parts. The
-        // trailing parts are assigned to `lastname` and repeated interior
-        // whitespace is condensed.
+        // A value with more than three parts does not match the author pattern,
+        // so it is partitioned by splitting on whitespace into at most three
+        // parts. The trailing parts are assigned to `lastname` and repeated
+        // interior whitespace is condensed.
         let mut parser = Parser::default();
         let _doc = parser.parse(":author: Leroy  Harold  Scherer,  Jr.");
 
