@@ -4,7 +4,7 @@ use crate::{
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RefType, RevisionLine,
-        matches_author_pattern, set_author_metadata,
+        is_attribute_entry_pass_macro, matches_author_pattern, set_author_metadata,
     },
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
@@ -188,29 +188,24 @@ impl<'src> Header<'src> {
 
                     // Override the stored `author` value with the reconstructed
                     // name when the value was partitioned rather than kept
-                    // verbatim. When substitution produced inline markup the
-                    // reconstructed name is that rendered markup with name-joiner
-                    // underscores turned to spaces. Otherwise it is only
-                    // overridden for a plain name that was partitioned by the
-                    // fallback whitespace split (four or more parts, or
-                    // punctuation such as a comma); a value that matches the
-                    // pattern, carries an inline email (`<…>`), or holds an
-                    // attribute reference (`{…}`) keeps the substituted entry
-                    // value set below.
-                    let has_markup = attr
-                        .item
-                        .value()
-                        .as_maybe_str()
-                        .is_some_and(|value| value.contains('<'));
+                    // verbatim. A resolved whole-value `pass:[…]` macro is
+                    // partitioned from its substituted value, so the
+                    // reconstructed name (the rendered markup with name-joiner
+                    // underscores turned to spaces) replaces the stored value.
+                    // Otherwise the value is overridden only for a plain name
+                    // that was partitioned by the fallback whitespace split (four
+                    // or more parts, or punctuation such as a comma); a value that
+                    // matches the pattern, carries an inline email (`<…>`), or
+                    // holds an attribute reference (`{…}`) keeps the substituted
+                    // entry value set below.
+                    let raw = raw_value.data();
 
-                    if has_markup {
+                    if is_attribute_entry_pass_macro(raw)
+                        || (!raw.contains('<')
+                            && !raw.contains('{')
+                            && !matches_author_pattern(raw))
+                    {
                         author_name_override = Some(author.name().to_string());
-                    } else {
-                        let raw = raw_value.data();
-                        if !raw.contains('<') && !raw.contains('{') && !matches_author_pattern(raw)
-                        {
-                            author_name_override = Some(author.name().to_string());
-                        }
                     }
 
                     // Retain the author parsed from the entry value so the

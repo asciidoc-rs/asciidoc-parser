@@ -1588,6 +1588,34 @@ fn removes_formatting_before_partitioning_author_defined_using_author_attribute(
 }
 
 #[test]
+fn author_pass_macro_resolving_to_plain_text_is_partitioned_from_the_substituted_value() {
+    // A whole-value `pass:[…]` macro whose result carries no markup must still
+    // be partitioned from its resolved (substituted) value, not the raw macro
+    // syntax – otherwise `pass:n[Doc Writer]` would leak `pass:n[Doc` into
+    // `firstname`.
+    let doc = Parser::default().parse(":author: pass:n[Doc Writer]");
+
+    assert_eq!(
+        doc.attribute_value("author"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        doc.attribute_value("firstname"),
+        InterpretedValue::Value("Doc")
+    );
+    assert_eq!(
+        doc.attribute_value("lastname"),
+        InterpretedValue::Value("Writer")
+    );
+
+    let authors = doc.authors();
+    assert_eq!(authors.len(), 1);
+    assert_eq!(authors[0].name(), "Doc Writer");
+    assert_eq!(authors[0].firstname(), "Doc");
+    assert_eq!(authors[0].lastname(), Some("Writer"));
+}
+
+#[test]
 fn parse_rev_number_date_remark() {
     verifies!(
         r#"

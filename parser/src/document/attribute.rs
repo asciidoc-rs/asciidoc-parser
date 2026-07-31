@@ -268,6 +268,16 @@ static ATTRIBUTE_ENTRY_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)\Apass:([a-z]+(?:,[a-z-]+)*)?\[(.*)\]\z").unwrap()
 });
 
+/// Returns whether `value` is *entirely* a `pass:subs[…]` attribute-entry macro
+/// (see [`ATTRIBUTE_ENTRY_PASS_MACRO`]).
+///
+/// The `:author:` handling uses this to decide whether the stored attribute
+/// value is a *resolved* pass macro. When it is, that substituted value – not
+/// the raw macro syntax – is what should be partitioned into name parts.
+pub(crate) fn is_attribute_entry_pass_macro(value: &str) -> bool {
+    ATTRIBUTE_ENTRY_PASS_MACRO.is_match(value)
+}
+
 /// ASCII whitespace stripped by Ruby's `String#lstrip` / `#rstrip`, which
 /// Asciidoctor applies while fusing a continued attribute value. Unicode
 /// whitespace (e.g. a non-breaking space) is significant and is preserved.

@@ -195,11 +195,13 @@ impl Author {
     /// Parse the single author described by an `:author:` attribute entry.
     ///
     /// `raw` is the entry's raw (pre-substitution) value and `substituted` is
-    /// its substituted value (the stored attribute value). When substitution
-    /// produced inline HTML the substituted value is partitioned with its
-    /// markup stripped (see [`parse_substituted_names_only`]); otherwise
-    /// the raw value is partitioned as before, so plain names, attribute
-    /// references, and inline emails are unaffected.
+    /// its substituted value (the stored attribute value). When the entry is a
+    /// whole-value `pass:[…]` macro its substituted value is the resolved
+    /// content, so that value is partitioned – with any generated markup
+    /// stripped – rather than the raw macro syntax (see
+    /// [`parse_substituted_names_only`]). Every other value is partitioned from
+    /// the raw value as before, so plain names, attribute references, and
+    /// inline emails are unaffected.
     ///
     /// [`parse_substituted_names_only`]: Self::parse_substituted_names_only
     pub(crate) fn parse_from_entry(
@@ -207,9 +209,10 @@ impl Author {
         substituted: Option<&str>,
         parser: &Parser,
     ) -> Option<Self> {
-        match substituted.filter(|value| value.contains('<')) {
-            Some(value) => Self::parse_substituted_names_only(value),
-            None => Self::parse(raw, parser, true),
+        if crate::document::is_attribute_entry_pass_macro(raw) {
+            substituted.and_then(Self::parse_substituted_names_only)
+        } else {
+            Self::parse(raw, parser, true)
         }
     }
 
@@ -713,18 +716,22 @@ mod tests {
         }
     }
 
-    // The entry dispatcher routes a value whose substitution produced markup to
-    // the tag-stripping path, and any other value to the raw-value partitioning.
+    // The entry dispatcher routes a *whole-value* `pass:[…]` macro to its
+    // substituted value (the resolved content) and every other value to the
+    // raw-value partitioning, so the literal macro syntax never leaks into the
+    // name parts.
     mod parse_from_entry {
         use super::Author;
         use crate::Parser;
 
         #[test]
-        fn markup_value_is_partitioned_after_stripping_tags() {
+        fn pass_macro_with_markup_is_partitioned_from_the_substituted_value() {
+            // The raw is the macro syntax; the substituted value is its rendered
+            // output, which is what gets partitioned (tags stripped).
             let parser = Parser::default();
             let author = Author::parse_from_entry(
-                "pass:n[<ignored raw>]",
-                Some("<strong>Ze</strong> team"),
+                "pass:n[https://example.org/x[Ze *team*]]",
+                Some("<a href=\"https://example.org/x\">Ze <strong>team</strong></a>"),
                 &parser,
             )
             .unwrap();
@@ -734,8 +741,23 @@ mod tests {
         }
 
         #[test]
-        fn plain_value_uses_raw_partitioning() {
-            // With no generated markup the raw value is partitioned as before.
+        fn pass_macro_resolving_to_plain_text_uses_the_substituted_value() {
+            // A pass macro whose result has no markup must still be partitioned
+            // from the substituted value, never the raw `pass:…[…]` syntax.
+            let parser = Parser::default();
+            let author =
+                Author::parse_from_entry("pass:n[Doc Writer]", Some("Doc Writer"), &parser)
+                    .unwrap();
+
+            assert_eq!(author.name(), "Doc Writer");
+            assert_eq!(author.firstname(), "Doc");
+            assert_eq!(author.lastname(), Some("Writer"));
+        }
+
+        #[test]
+        fn non_pass_value_uses_raw_partitioning() {
+            // A value that is not a whole-value pass macro is partitioned from
+            // the raw value as before (the substituted value is not consulted).
             let parser = Parser::default();
             let author =
                 Author::parse_from_entry("Doc Writer", Some("Doc Writer"), &parser).unwrap();
@@ -745,12 +767,10 @@ mod tests {
         }
 
         #[test]
-        fn missing_substituted_value_falls_back_to_raw() {
+        fn empty_pass_macro_yields_no_author() {
+            // `pass:[]` resolves to an empty value, which describes no author.
             let parser = Parser::default();
-            let author = Author::parse_from_entry("Doc Writer", None, &parser).unwrap();
-
-            assert_eq!(author.firstname(), "Doc");
-            assert_eq!(author.lastname(), Some("Writer"));
+            assert!(Author::parse_from_entry("pass:[]", Some(""), &parser).is_none());
         }
     }
 }
