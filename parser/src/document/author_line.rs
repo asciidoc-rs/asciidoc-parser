@@ -2,7 +2,11 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::{HasSpan, Parser, Span, document::Author, internal::opaque_iter::opaque_slice_iter};
+use crate::{
+    HasSpan, Parser, Span,
+    document::{Author, set_author_metadata},
+    internal::opaque_iter::opaque_slice_iter,
+};
 
 opaque_slice_iter! {
     /// An iterator over the [`Author`]s in an [`AuthorLine`], returned by
@@ -26,37 +30,15 @@ impl<'src> AuthorLine<'src> {
             .filter_map(|raw_author| Author::parse(raw_author, parser, false))
             .collect();
 
-        for (index, author) in authors.iter().enumerate() {
-            let suffix = if index == 0 {
-                String::new()
-            } else {
-                format!("_{count}", count = index + 1)
-            };
-
-            set_author_attributes(parser, author, &suffix);
-        }
-
-        // When the implicit author line names more than one author, Asciidoctor
-        // also exposes the first author's attributes under explicit
-        // `_1`-suffixed names (`author_1`, `firstname_1`, ...) in addition to
-        // the unsuffixed forms set above. For a single author only the
-        // unsuffixed names are set.
-        if let Some(first) = authors.first()
-            && authors.len() > 1
-        {
-            set_author_attributes(parser, first, "_1");
-        }
-
-        // Asciidoctor exposes the combined, comma-joined `authors` attribute
-        // whenever the implicit author line names at least one author.
+        // Populate the derived author document attributes from the implicit
+        // author line – the unsuffixed first-author keys (`author`,
+        // `firstname`, ...), the `author_N` companions, the `_1` companions
+        // (mirrored once a second author appears), and the combined,
+        // comma-joined `authors` attribute – exactly as Asciidoctor's
+        // `process_authors` does. Setting them here, during header parsing,
+        // keeps `{author}`, `{authors}`, etc. available to later header lines.
         if !authors.is_empty() {
-            let combined = authors
-                .iter()
-                .map(Author::name)
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            parser.set_attribute_by_value_from_header("authors", combined);
+            set_author_metadata(parser, &authors);
         }
 
         Self { authors, source }
@@ -127,30 +109,6 @@ fn split_authors(data: &str) -> Vec<&str> {
 
     authors.push(&data[start..]);
     authors
-}
-
-/// Set the built-in author attributes for a single author, appending `suffix`
-/// (e.g. `""` for the first author or `"_2"` for the second) to each attribute
-/// name. Optional parts (middle name, last name, email) are set only when the
-/// author supplies them.
-fn set_author_attributes(parser: &mut Parser, author: &Author, suffix: &str) {
-    parser.set_attribute_by_value_from_header(format!("author{suffix}"), author.name());
-
-    parser.set_attribute_by_value_from_header(format!("authorinitials{suffix}"), author.initials());
-
-    parser.set_attribute_by_value_from_header(format!("firstname{suffix}"), author.firstname());
-
-    if let Some(middlename) = author.middlename() {
-        parser.set_attribute_by_value_from_header(format!("middlename{suffix}"), middlename);
-    }
-
-    if let Some(lastname) = author.lastname() {
-        parser.set_attribute_by_value_from_header(format!("lastname{suffix}"), lastname);
-    }
-
-    if let Some(email) = author.email() {
-        parser.set_attribute_by_value_from_header(format!("email{suffix}"), email);
-    }
 }
 
 impl<'src> HasSpan<'src> for AuthorLine<'src> {
