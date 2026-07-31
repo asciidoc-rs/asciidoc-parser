@@ -10,14 +10,46 @@ use crate::{
     warnings::WarningType,
 };
 
-/// Saves the content of one passthrough (`+++` or similarly bracketed) passage
-/// for later re-expansion.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Passthrough {
+/// Records one inline passthrough (`+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or
+/// an inline STEM macro) that the substitution pipeline extracted from a
+/// block's content before running the other substitutions, and restores
+/// afterward.
+///
+/// The collection of these for a block is observable via
+/// [`Content::passthroughs`](crate::content::Content::passthroughs), analogous
+/// to Asciidoctor's internal `@passthroughs` array. It exposes, for each
+/// entry, the stored (unescaped) source [`text`](Self::text) and the resolved
+/// [`subs`](Self::subs) that are applied to that text on restore.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Passthrough {
     pub(crate) text: String,
     pub(crate) subs: SubstitutionGroup,
     pub(crate) type_: Option<QuoteType>,
     pub(crate) attrlist: Option<String>,
+}
+
+impl Passthrough {
+    /// Returns the stored, unescaped source text of this passthrough – the text
+    /// that is substituted back in (after applying [`subs`](Self::subs)) when
+    /// the passthrough is restored.
+    ///
+    /// This mirrors the `:text` of an entry in Asciidoctor's `@passthroughs`
+    /// array.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Returns the resolved substitution group applied to this passthrough's
+    /// [`text`](Self::text) when it is restored, i.e. the ordered set of
+    /// substitution steps in effect for it.
+    ///
+    /// For example, `+++…+++` resolves to [`SubstitutionGroup::None`] (no
+    /// substitutions), while `++…++` and `$$…$$` resolve to
+    /// [`SubstitutionGroup::Verbatim`] (special characters). This mirrors the
+    /// resolved `:subs` of an entry in Asciidoctor's `@passthroughs` array.
+    pub fn subs(&self) -> &SubstitutionGroup {
+        &self.subs
+    }
 }
 
 /// Saves content of passthrough (`+++`-bracketed) passages for later
@@ -681,6 +713,7 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing)]
+    #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
     use crate::{
@@ -723,6 +756,54 @@ mod tests {
                 attrlist: None,
             },)
         );
+    }
+
+    #[test]
+    fn content_exposes_extracted_passthrough_collection() {
+        // The inline passthroughs extracted while substituting a block's
+        // content are retained on the `Content` and observable afterward via
+        // the public `passthroughs()` accessor, exposing each entry's stored
+        // (unescaped) text and its resolved substitution list. (Not a direct
+        // port of a Ruby test; it exercises the accessor surfaced for spec
+        // verification.)
+        let mut p = Parser::default();
+
+        let maw = crate::blocks::Block::parse(
+            crate::Span::new("some ++<code>{code}</code>++ and +++{raw}+++ text"),
+            &mut p,
+        );
+
+        let crate::blocks::Block::Simple(block) = maw.item.unwrap().item else {
+            panic!("expected a simple block");
+        };
+
+        let passthroughs = block.content().passthroughs();
+
+        assert_eq!(passthroughs.len(), 2);
+
+        // `++…++` stores the text verbatim and applies the special-characters
+        // substitution on restore.
+        assert_eq!(passthroughs[0].text(), "<code>{code}</code>");
+        assert_eq!(passthroughs[0].subs(), &SubstitutionGroup::Verbatim);
+
+        // `+++…+++` stores the text verbatim and applies no substitutions.
+        assert_eq!(passthroughs[1].text(), "{raw}");
+        assert_eq!(passthroughs[1].subs(), &SubstitutionGroup::None);
+    }
+
+    #[test]
+    fn content_without_passthroughs_exposes_an_empty_collection() {
+        // Plain content – and content whose substitution group never extracts
+        // passthroughs – exposes an empty collection rather than any sentinel.
+        let mut p = Parser::default();
+
+        let maw = crate::blocks::Block::parse(crate::Span::new("just plain prose"), &mut p);
+
+        let crate::blocks::Block::Simple(block) = maw.item.unwrap().item else {
+            panic!("expected a simple block");
+        };
+
+        assert!(block.content().passthroughs().is_empty());
     }
 
     #[test]

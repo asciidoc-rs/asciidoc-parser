@@ -863,10 +863,13 @@ fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
 
 /// Resolves the document's author list.
 ///
-/// When an [`AuthorLine`] is present it is authoritative (and has already
-/// populated the `author_N` attributes). Otherwise the list is reconstructed
-/// from document attributes, mirroring Asciidoctor's `parse_header_metadata`
-/// reconciliation in precedence order: a directly-assigned `author` attribute
+/// When an [`AuthorLine`] is present it is normally authoritative (and has
+/// already populated the `author_N` attributes), except that an explicit
+/// `:authors:` entry whose value differs from the computed implicit value
+/// replaces the implicit list. Otherwise the list is
+/// reconstructed from document attributes, mirroring Asciidoctor's
+/// `parse_header_metadata` reconciliation in precedence order: a
+/// directly-assigned `author` attribute
 /// stands in for a single author; failing that a semicolon-separated `authors`
 /// attribute is split into individual authors; and failing that a contiguous
 /// run of indexed `author_N` attributes (`author_1`, `author_2`, …) each
@@ -894,7 +897,46 @@ fn resolve_authors(
     parser: &mut Parser,
 ) -> Vec<Author> {
     if let Some(author_line) = author_line {
-        return author_line.authors().cloned().collect();
+        let implicit_authors: Vec<Author> = author_line.authors().cloned().collect();
+
+        // Reconcile an explicit `:authors:` entry against the implicit author
+        // line, mirroring Asciidoctor's `parse_header_metadata`. When the
+        // entry's value differs from the computed (comma-joined) value of the
+        // implicit list, the entry *replaces* that list – re-splitting on `;`,
+        // updating `authorcount`, and repopulating the derived `author_N` (and
+        // per-author name-part) attributes. A value that matches the computed
+        // value leaves the implicit list untouched.
+        //
+        // Only the multi-author `:authors:` path is reconciled here; the single
+        // `:author:` and indexed `:author_N:` entry paths keep their existing
+        // inline handling.
+        if let Some(authors_value) = attribute_string(parser, "authors") {
+            let computed = implicit_authors
+                .iter()
+                .map(Author::name)
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            if authors_value != computed
+                && let Some(authors) = authors_from_authors_attribute(&authors_value, parser)
+            {
+                // `set_author_metadata` overwrites the derived attributes for
+                // the replacement authors but does not clear ones the implicit
+                // list set that the replacement does not (a shorter list leaves
+                // a stale trailing `author_N`; a replacement author lacking a
+                // middle name / email leaves the implicit `middlename` /
+                // `email`). This mirrors Asciidoctor's `doc_attrs.update
+                // author_metadata` – a merge that overwrites present keys and
+                // never deletes absent ones – so `{author_3}` and friends can
+                // outlive an `authorcount` that reflects the shorter list. The
+                // divergence is Asciidoctor's; see the shrinking-replacement
+                // regression test in this module.
+                set_author_metadata(parser, &authors);
+                return authors;
+            }
+        }
+
+        return implicit_authors;
     }
 
     if !header_has_attributes {
@@ -915,18 +957,11 @@ fn resolve_authors(
 
     // A semicolon-separated `authors` attribute entry contributes one author
     // per entry (Asciidoctor's `process_authors` with `multiple` set).
-    if let Some(authors_value) = attribute_string(parser, "authors") {
-        let authors = collect_indexed_authors(
-            split_author_entries(&authors_value)
-                .into_iter()
-                .filter_map(|entry| Author::parse(entry, parser, true)),
-            parser,
-        );
-
-        if !authors.is_empty() {
-            set_author_metadata(parser, &authors);
-            return authors;
-        }
+    if let Some(authors_value) = attribute_string(parser, "authors")
+        && let Some(authors) = authors_from_authors_attribute(&authors_value, parser)
+    {
+        set_author_metadata(parser, &authors);
+        return authors;
     }
 
     // Otherwise, walk the indexed `author_N` attributes until one is missing.
@@ -950,6 +985,26 @@ fn resolve_authors(
     }
 
     authors
+}
+
+/// Builds the author list described by an `authors` attribute value, splitting
+/// it into individual authors (Asciidoctor's `process_authors` with `multiple`
+/// set) and attaching each author's companion `email_N`. Returns `None` when
+/// the value yields no authors (so the caller can fall through to its next
+/// resolution step).
+fn authors_from_authors_attribute(value: &str, parser: &Parser) -> Option<Vec<Author>> {
+    let authors = collect_indexed_authors(
+        split_author_entries(value)
+            .into_iter()
+            .filter_map(|entry| Author::parse(entry, parser, true)),
+        parser,
+    );
+
+    if authors.is_empty() {
+        None
+    } else {
+        Some(authors)
+    }
 }
 
 /// Reads the string value of a document attribute, or `None` when it is unset
@@ -2026,6 +2081,71 @@ mod tests {
 
         assert_eq!(doc.attribute_value("author"), InterpretedValue::Unset);
         assert!(doc.authors().is_empty());
+    }
+
+    #[test]
+    fn authors_entry_replacing_a_longer_implicit_list_leaves_stale_attributes() {
+        // When a differing `:authors:` entry replaces a *longer* implicit author
+        // line, the reconciliation re-derives only the replacement authors'
+        // attributes. Attributes the implicit line set that the replacement does
+        // not are left in place: a trailing `author_N` (and its name parts)
+        // beyond the shorter list, and the base `email` / `middlename` when the
+        // replacement's first author omits them.
+        //
+        // This is not a gap in the port – it is exactly Asciidoctor's behavior.
+        // Its `parse_header_metadata` reconciles with `doc_attrs.update
+        // author_metadata`, a merge that overwrites the keys the replacement
+        // supplies and never deletes the ones it omits, so `{author_3}` (and the
+        // stale `email` / `middlename`) survive alongside an `authorcount` that
+        // reflects the shorter list. Verified byte-for-byte against Asciidoctor
+        // 2.0.26; there is no upstream test for this shrinking case, so this one
+        // pins the parity to guard against a future "cleanup" that would clear
+        // the stale keys and diverge.
+        let mut parser = Parser::default();
+        let doc = parser.parse(
+            "= T\nKismet R. Lee <kismet@example.com>; Junior Writer; Third Author\n:authors: Stuart Rackham; Dan Allen\n",
+        );
+
+        // The typed author list and `authorcount` reflect the two-author
+        // replacement.
+        let authors = doc.header().authors();
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors.first().unwrap().name(), "Stuart Rackham");
+        assert_eq!(authors.get(1).unwrap().name(), "Dan Allen");
+        assert_eq!(
+            parser.attribute_value("authorcount"),
+            InterpretedValue::Value("2")
+        );
+
+        // The replacement authors' attributes are re-derived.
+        assert_eq!(
+            parser.attribute_value("authors"),
+            InterpretedValue::Value("Stuart Rackham, Dan Allen")
+        );
+        assert_eq!(
+            parser.attribute_value("author_1"),
+            InterpretedValue::Value("Stuart Rackham")
+        );
+        assert_eq!(
+            parser.attribute_value("author_2"),
+            InterpretedValue::Value("Dan Allen")
+        );
+
+        // Stale attributes from the longer/richer implicit list survive, exactly
+        // as they do in Asciidoctor: the third author, the first implicit
+        // author's email, and its middle name.
+        assert_eq!(
+            parser.attribute_value("author_3"),
+            InterpretedValue::Value("Third Author")
+        );
+        assert_eq!(
+            parser.attribute_value("email"),
+            InterpretedValue::Value("kismet@example.com")
+        );
+        assert_eq!(
+            parser.attribute_value("middlename"),
+            InterpretedValue::Value("R.")
+        );
     }
 
     #[test]

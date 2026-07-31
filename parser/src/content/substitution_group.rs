@@ -241,6 +241,10 @@ impl SubstitutionGroup {
 
         if let Some(passthroughs) = passthroughs {
             passthroughs.restore_to(content, parser);
+
+            // Retain the extracted passthroughs on the content so they remain
+            // observable after restore (see `Content::passthroughs`).
+            content.set_passthroughs(passthroughs.0);
         }
 
         // Capture any deferred cross-references as a placeholder template and
@@ -310,7 +314,15 @@ impl SubstitutionGroup {
         result
     }
 
-    fn steps(&self) -> &[SubstitutionStep] {
+    /// Returns the ordered list of substitution [steps](SubstitutionStep) this
+    /// group applies, in the order they run.
+    ///
+    /// This is the resolved, expanded form of the group: a named group (e.g.
+    /// [`Normal`](Self::Normal) or [`Verbatim`](Self::Verbatim)) expands to its
+    /// fixed step sequence, and a [`Custom`](Self::Custom) group returns its
+    /// own steps. Useful for inspecting the substitutions in effect for a
+    /// block or an extracted [`Passthrough`](crate::content::Passthrough).
+    pub fn steps(&self) -> &[SubstitutionStep] {
         match self {
             Self::Normal | Self::Title => NORMAL_STEPS,
 
