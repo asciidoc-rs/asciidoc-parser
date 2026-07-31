@@ -669,10 +669,17 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
             // otherwise render verbatim. This mirrors Asciidoctor's
             // `parse_quoted_text_attributes`, which runs `sub_attributes` on the
             // attribute list.
-            let attrlist_body = pass
-                .attrlist
-                .as_ref()
-                .map(|attrlist_body| substitute_attributes_in_text(attrlist_body, self.1));
+            let attrlist_body = pass.attrlist.as_ref().map(|attrlist_body| {
+                // The stored attrlist is owned text whose offsets do not refer
+                // to the document source, so any `warn`/`drop-line` warning this
+                // substitution records cannot be mapped back to a document span.
+                // Discard such warnings rather than surface them mislocated
+                // against the document root (mirrors the docinfo text path).
+                let saved = self.1.substitution_warnings_len();
+                let substituted = substitute_attributes_in_text(attrlist_body, self.1);
+                self.1.truncate_substitution_warnings(saved);
+                substituted
+            });
 
             let attrlist = attrlist_body.as_ref().map(|attrlist_body| {
                 let span = Span::new(attrlist_body);
@@ -789,6 +796,25 @@ mod tests {
         // `+++…+++` stores the text verbatim and applies no substitutions.
         assert_eq!(passthroughs[1].text(), "{raw}");
         assert_eq!(passthroughs[1].subs(), &SubstitutionGroup::None);
+    }
+
+    #[test]
+    fn passthrough_attrlist_drop_line_does_not_leak_a_mislocated_warning() {
+        // A missing reference in a passthrough's stored attribute list is
+        // substituted against temporary (owned) text, so any warning it records
+        // carries an offset into that text rather than the document source.
+        // Such warnings must be discarded (the offset cannot be mapped back),
+        // not surfaced against the document root. Regression guard for the
+        // `drop-line`/`warn` attrlist path.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "attribute-missing",
+            "drop-line",
+            ModificationContext::ApiOnly,
+        );
+
+        let doc = p.parse("['{missing}']++x++");
+
+        assert_eq!(doc.warnings().count(), 0);
     }
 
     #[test]
