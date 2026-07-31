@@ -497,9 +497,10 @@ mod assignment {
 "#
         );
 
-        // This crate does not surface the INFO "dropping line…" log message, so
-        // only the observable result (the missing reference resolves to empty)
-        // is checked.
+        // The missing `{version}` reference resolves the header attribute value
+        // to empty, and the drop is now surfaced as a
+        // `SkippingReferenceToMissingAttribute` warning naming `version`
+        // (the crate's analogue of Asciidoctor's INFO log).
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "attribute-missing",
@@ -508,6 +509,13 @@ mod assignment {
             )
             .parse(":release: Asciidoctor {version}");
         assert_eq!(doc.attribute_value("release"), InterpretedValue::Value(""));
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::SkippingReferenceToMissingAttribute("version".to_string())
+        );
     }
 
     #[test]
@@ -530,7 +538,9 @@ mod assignment {
         // The legacy `+` continuation fuses the `{version}` line into the header
         // value (`Asciidoctor {version}`); the unresolved `{version}` reference
         // then drops the line under `attribute-missing=drop-line`, leaving the
-        // empty string. (The INFO drop-line log is not modeled.)
+        // empty string and recording the drop as a
+        // `SkippingReferenceToMissingAttribute` warning naming `version`
+        // (the crate's analogue of Asciidoctor's INFO log).
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "attribute-missing",
@@ -539,6 +549,13 @@ mod assignment {
             )
             .parse(":release: Asciidoctor +\n          {version}\n");
         assert_eq!(doc.attribute_value("release"), InterpretedValue::Value(""));
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::SkippingReferenceToMissingAttribute("version".to_string())
+        );
     }
 
     #[test]
@@ -1888,11 +1905,22 @@ mod interpolation {
 "#
         );
 
-        // Only the observable line drop is checked; the INFO log is not modeled.
+        // The line carrying the unresolved `{foobarbaz}` reference is dropped,
+        // and the drop is surfaced as a `SkippingReferenceToMissingAttribute`
+        // warning naming `foobarbaz` (the crate's analogue of Asciidoctor's
+        // INFO log).
         let doc = Parser::default().parse(
             ":attribute-missing: drop-line\n\nThis is\nblah blah {foobarbaz}\nall there is.",
         );
         assert_xpath(&doc, "//p[text()=\"This is\nall there is.\"]", 1);
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::SkippingReferenceToMissingAttribute("foobarbaz".to_string())
+        );
+        assert_eq!(warnings[0].source.line(), 4);
     }
 
     #[test]
