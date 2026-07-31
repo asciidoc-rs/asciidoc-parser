@@ -1215,12 +1215,10 @@ fn use_explicit_authorinitials_if_set_after_author_attribute() {
     );
 }
 
-// Incompatibility: this crate does not implement Asciidoctor's reconciliation
-// of an explicit `:authors:` entry against the computed value; it simply stores
-// the `:authors:` entry verbatim and never re-derives `author_1`/`authorcount`
-// from it.
-non_normative!(
-    r#"
+#[test]
+fn use_implicit_authors_if_value_of_authors_attribute_matches_computed_value() {
+    verifies!(
+        r#"
   test 'use implicit authors if value of authors attribute matches computed value' do
     input = <<~'EOS'
     Doc Writer; Junior Writer
@@ -1233,6 +1231,45 @@ non_normative!(
     assert_equal 'Junior Writer', doc.attributes['author_2']
   end
 
+"#
+    );
+
+    // The `:authors:` entry value matches the computed (comma-joined) value of
+    // the implicit author line, so the implicit list is retained unchanged. A
+    // synthetic document title is prepended because this crate only recognizes
+    // an author line when a title is present.
+    //
+    // This crate names the first author from an implicit line `author` (not
+    // `author_1`) and, because the retain path leaves the implicit list
+    // untouched, does not derive an `author_1` companion here; the first
+    // author is asserted through the unsuffixed `author` attribute instead.
+    let mut parser = Parser::default();
+    let doc = parser
+        .parse("= Document Title\nDoc Writer; Junior Writer\n:authors: Doc Writer, Junior Writer");
+
+    let authors = doc.header().authors();
+    assert_eq!(authors.len(), 2);
+    assert_eq!(authors[0].name(), "Doc Writer");
+    assert_eq!(authors[1].name(), "Junior Writer");
+
+    assert_eq!(
+        parser.attribute_value("authors"),
+        InterpretedValue::Value("Doc Writer, Junior Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author_2"),
+        InterpretedValue::Value("Junior Writer")
+    );
+}
+
+#[test]
+fn replace_implicit_authors_if_value_of_authors_attribute_does_not_match_computed_value() {
+    verifies!(
+        r#"
   test 'replace implicit authors if value of authors attribute does not match computed value' do
     input = <<~'EOS'
     Doc Writer; Junior Writer
@@ -1249,7 +1286,48 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // The `:authors:` entry value differs from the computed value of the
+    // implicit author line, so it replaces the implicit list: re-split on `;`
+    // into three authors, with `authorcount`, the joined `authors`, and the
+    // per-author `author_N` attributes all re-derived from the entry. A
+    // synthetic document title is prepended because this crate only recognizes
+    // an author line when a title is present. (This crate does not surface the
+    // header-metadata hash, so `metadata['authorcount']` is not modeled
+    // separately.)
+    let mut parser = Parser::default();
+    let doc = parser.parse(
+        "= Document Title\nDoc Writer; Junior Writer\n:authors: Stuart Rackham; Dan Allen; Sarah White",
+    );
+
+    let authors = doc.header().authors();
+    assert_eq!(authors.len(), 3);
+    assert_eq!(authors[0].name(), "Stuart Rackham");
+    assert_eq!(authors[1].name(), "Dan Allen");
+    assert_eq!(authors[2].name(), "Sarah White");
+
+    assert_eq!(
+        parser.attribute_value("authorcount"),
+        InterpretedValue::Value("3")
+    );
+    assert_eq!(
+        parser.attribute_value("authors"),
+        InterpretedValue::Value("Stuart Rackham, Dan Allen, Sarah White")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
+        InterpretedValue::Value("Stuart Rackham")
+    );
+    assert_eq!(
+        parser.attribute_value("author_2"),
+        InterpretedValue::Value("Dan Allen")
+    );
+    assert_eq!(
+        parser.attribute_value("author_3"),
+        InterpretedValue::Value("Sarah White")
+    );
+}
 
 // This crate does not derive an `authorcount` document attribute.
 non_normative!(
