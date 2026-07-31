@@ -290,7 +290,7 @@ pub enum SpecialCharacter {
 /// Specifies which [quote type] is being rendered.
 ///
 /// [quote type]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum QuoteType {
     /// Strong (often bold) formatting.
     Strong,
