@@ -192,6 +192,89 @@ impl Author {
         }
     }
 
+    /// Parse the single author described by an `:author:` attribute entry.
+    ///
+    /// `raw` is the entry's raw (pre-substitution) value and `substituted` is
+    /// its substituted value (the stored attribute value). When the entry is a
+    /// whole-value `pass:[…]` macro its substituted value is the resolved
+    /// content, so that value is partitioned – with any generated markup
+    /// stripped – rather than the raw macro syntax (see
+    /// [`parse_substituted_names_only`]). Every other value is partitioned from
+    /// the raw value as before, so plain names, attribute references, and
+    /// inline emails are unaffected.
+    ///
+    /// [`parse_substituted_names_only`]: Self::parse_substituted_names_only
+    pub(crate) fn parse_from_entry(
+        raw: &str,
+        substituted: Option<&str>,
+        parser: &Parser,
+    ) -> Option<Self> {
+        if crate::document::is_attribute_entry_pass_macro(raw) {
+            substituted.and_then(Self::parse_substituted_names_only)
+        } else {
+            Self::parse(raw, parser, true)
+        }
+    }
+
+    /// Parse a single author from a value that has *already* been through
+    /// attribute-value substitution and now carries generated inline HTML –
+    /// typically the rendered output of a `pass:[…]` macro in an `:author:`
+    /// entry.
+    ///
+    /// This mirrors the `<`-branch of Asciidoctor's `process_authors` under
+    /// `names_only`: the full rendered value – with name-joiner underscores
+    /// turned to spaces – becomes the author's `name`, while the name parts are
+    /// partitioned from the value with its HTML tags removed, so the formatting
+    /// does not leak into `firstname`/`middlename`/`lastname`. As in
+    /// Asciidoctor, no email is split off here – an email supplied through a
+    /// companion `:email:` entry is attached later.
+    pub(crate) fn parse_substituted_names_only(substituted: &str) -> Option<Self> {
+        let substituted = substituted.trim();
+        if substituted.is_empty() {
+            return None;
+        }
+
+        let name = replace_underscores_with_spaces(substituted.to_string());
+        let stripped = strip_xml_tags(substituted);
+
+        let mut segments = split_whitespace_max3(&stripped);
+
+        if segments.is_empty() {
+            // The value was nothing but markup: keep the rendered value as the
+            // single name.
+            return Some(Self {
+                firstname: name.clone(),
+                name,
+                middlename: None,
+                lastname: None,
+                email: None,
+            });
+        }
+
+        let firstname = replace_underscores_with_spaces(segments.remove(0));
+        let (middlename, lastname) = match segments.len() {
+            0 => (None, None),
+
+            1 => (
+                None,
+                Some(replace_underscores_with_spaces(segments.remove(0))),
+            ),
+
+            _ => (
+                Some(replace_underscores_with_spaces(segments.remove(0))),
+                Some(replace_underscores_with_spaces(segments.remove(0))),
+            ),
+        };
+
+        Some(Self {
+            name,
+            firstname,
+            middlename,
+            lastname,
+            email: None,
+        })
+    }
+
     /// Overrides the author's email address, unless `email` is `None`.
     ///
     /// Used when an author is assembled from `author_N` document attributes,
@@ -337,6 +420,13 @@ fn replace_underscores_with_spaces(name: String) -> String {
     name.replace('_', " ")
 }
 
+/// Remove HTML tags from `source`, mirroring Asciidoctor's `XmlSanitizeRx`
+/// (`/<[^>]+>/`). Used to partition an author value whose substitution produced
+/// inline markup (see [`Author::parse_substituted_names_only`]).
+fn strip_xml_tags(source: &str) -> String {
+    XML_TAG.replace_all(source, "").into_owned()
+}
+
 /// Join an author's parsed name parts with a single space.
 ///
 /// Asciidoctor reconstructs the full name from its partitioned parts, which
@@ -469,6 +559,12 @@ fn condense_whitespace(s: &str) -> String {
     result
 }
 
+/// Matches a single HTML tag, mirroring Asciidoctor's `XmlSanitizeRx`.
+static XML_TAG: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"<[^>]+>").unwrap()
+});
+
 static AUTHOR: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
@@ -548,4 +644,133 @@ fn apply_author_subs(source: &str, parser: &Parser) -> String {
     }
 
     content.rendered().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::Author;
+
+    // The `<`-branch of Asciidoctor's `process_authors` (`names_only`), reached
+    // when an `:author:` attribute value's substitution produced inline HTML.
+    // The rendered markup – with name-joiner underscores turned to spaces –
+    // becomes `name`, while the name parts are partitioned from the tag-stripped
+    // text so the formatting does not leak into them. No email is split off.
+    mod parse_substituted_names_only {
+        use super::Author;
+
+        #[test]
+        fn empty_input_is_none() {
+            assert!(Author::parse_substituted_names_only("").is_none());
+            assert!(Author::parse_substituted_names_only("   ").is_none());
+        }
+
+        #[test]
+        fn markup_with_no_text_keeps_rendered_value_as_single_name() {
+            // Stripping the tags leaves nothing to partition, so the rendered
+            // markup stands as the whole name and `firstname`.
+            let author = Author::parse_substituted_names_only("<a href=\"x\"></a>").unwrap();
+            assert_eq!(author.name(), "<a href=\"x\"></a>");
+            assert_eq!(author.firstname(), "<a href=\"x\"></a>");
+            assert_eq!(author.middlename(), None);
+            assert_eq!(author.lastname(), None);
+            assert_eq!(author.email(), None);
+        }
+
+        #[test]
+        fn single_name_part() {
+            let author = Author::parse_substituted_names_only("<strong>Solo</strong>").unwrap();
+            assert_eq!(author.name(), "<strong>Solo</strong>");
+            assert_eq!(author.firstname(), "Solo");
+            assert_eq!(author.middlename(), None);
+            assert_eq!(author.lastname(), None);
+        }
+
+        #[test]
+        fn first_and_last_name() {
+            let author = Author::parse_substituted_names_only("<em>Kismet</em> Chameleon").unwrap();
+            assert_eq!(author.firstname(), "Kismet");
+            assert_eq!(author.middlename(), None);
+            assert_eq!(author.lastname(), Some("Chameleon"));
+        }
+
+        #[test]
+        fn first_middle_and_last_name() {
+            let author =
+                Author::parse_substituted_names_only("<em>Kismet</em> R. Chameleon").unwrap();
+            assert_eq!(author.firstname(), "Kismet");
+            assert_eq!(author.middlename(), Some("R."));
+            assert_eq!(author.lastname(), Some("Chameleon"));
+        }
+
+        #[test]
+        fn underscores_join_name_parts_and_the_rendered_name() {
+            // Underscores act as name joiners: within a part they become a
+            // space, and the full `name` has them replaced too.
+            let author = Author::parse_substituted_names_only("<b>Ze_Project</b> team").unwrap();
+            assert_eq!(author.name(), "<b>Ze Project</b> team");
+            assert_eq!(author.firstname(), "Ze Project");
+            assert_eq!(author.lastname(), Some("team"));
+            assert_eq!(author.email(), None);
+        }
+    }
+
+    // The entry dispatcher routes a *whole-value* `pass:[…]` macro to its
+    // substituted value (the resolved content) and every other value to the
+    // raw-value partitioning, so the literal macro syntax never leaks into the
+    // name parts.
+    mod parse_from_entry {
+        use super::Author;
+        use crate::Parser;
+
+        #[test]
+        fn pass_macro_with_markup_is_partitioned_from_the_substituted_value() {
+            // The raw is the macro syntax; the substituted value is its rendered
+            // output, which is what gets partitioned (tags stripped).
+            let parser = Parser::default();
+            let author = Author::parse_from_entry(
+                "pass:n[https://example.org/x[Ze *team*]]",
+                Some("<a href=\"https://example.org/x\">Ze <strong>team</strong></a>"),
+                &parser,
+            )
+            .unwrap();
+
+            assert_eq!(author.firstname(), "Ze");
+            assert_eq!(author.lastname(), Some("team"));
+        }
+
+        #[test]
+        fn pass_macro_resolving_to_plain_text_uses_the_substituted_value() {
+            // A pass macro whose result has no markup must still be partitioned
+            // from the substituted value, never the raw `pass:…[…]` syntax.
+            let parser = Parser::default();
+            let author =
+                Author::parse_from_entry("pass:n[Doc Writer]", Some("Doc Writer"), &parser)
+                    .unwrap();
+
+            assert_eq!(author.name(), "Doc Writer");
+            assert_eq!(author.firstname(), "Doc");
+            assert_eq!(author.lastname(), Some("Writer"));
+        }
+
+        #[test]
+        fn non_pass_value_uses_raw_partitioning() {
+            // A value that is not a whole-value pass macro is partitioned from
+            // the raw value as before (the substituted value is not consulted).
+            let parser = Parser::default();
+            let author =
+                Author::parse_from_entry("Doc Writer", Some("Doc Writer"), &parser).unwrap();
+
+            assert_eq!(author.firstname(), "Doc");
+            assert_eq!(author.lastname(), Some("Writer"));
+        }
+
+        #[test]
+        fn empty_pass_macro_yields_no_author() {
+            // `pass:[]` resolves to an empty value, which describes no author.
+            let parser = Parser::default();
+            assert!(Author::parse_from_entry("pass:[]", Some(""), &parser).is_none());
+        }
+    }
 }

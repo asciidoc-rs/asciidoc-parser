@@ -1,3 +1,7 @@
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use crate::{
     HasSpan, Parser, Span,
     attributes::Attrlist,
@@ -209,8 +213,36 @@ impl InterpretedValue {
         // Fold any soft-wrap (`\`) or legacy (`+`) line continuation. When there
         // is no continuation marker, the value is a plain single line and is
         // left untouched.
-        if let Some(folded) = fold_continuation_value(raw_value.data()) {
-            content.rendered = CowStr::Boxed(folded.into_boxed_str());
+        let folded = fold_continuation_value(raw_value.data());
+        if let Some(ref folded) = folded {
+            content.rendered = CowStr::Boxed(folded.clone().into_boxed_str());
+        }
+
+        // Asciidoctor's `apply_attribute_value_subs`: when the *entire* value is
+        // a `pass:subs[…]` macro, its bracketed content is taken greedily (up to
+        // the final `]`) and only the named substitutions are applied to it.
+        // Because the capture is greedy and anchored to the whole value, content
+        // that itself contains `[…]` – e.g. a link macro – is not truncated at
+        // the first inner bracket, unlike the general inline pass macro. Any
+        // other value gets the normal header substitutions.
+        let value = folded.as_deref().unwrap_or_else(|| raw_value.data());
+
+        if let Some(captures) = ATTRIBUTE_ENTRY_PASS_MACRO.captures(value) {
+            let inner = captures.get(2).map_or("", |m| m.as_str());
+
+            let rendered = match captures.get(1).map(|m| m.as_str()) {
+                // `pass:[…]` with no substitution list keeps its content verbatim.
+                None => inner.to_string(),
+
+                Some(subs) => {
+                    let (group, _invalid) = SubstitutionGroup::from_custom_string(None, subs);
+                    let mut inner_content = Content::from(Span::new(inner));
+                    group.apply(&mut inner_content, parser, None);
+                    inner_content.rendered().to_string()
+                }
+            };
+
+            return InterpretedValue::Value(rendered);
         }
 
         SubstitutionGroup::Header.apply(&mut content, parser, None);
@@ -224,6 +256,26 @@ impl InterpretedValue {
             _ => None,
         }
     }
+}
+
+/// Matches an attribute-entry value that is *entirely* a `pass:subs[…]` macro,
+/// mirroring Asciidoctor's `AttributeEntryPassMacroRx`
+/// (`/\Apass:([a-z]+(?:,[a-z-]+)*)?\[(.*)\]\Z/m`). Group 1 is the optional
+/// substitution list and group 2 is the bracketed content, captured greedily so
+/// that content containing its own `[…]` is kept intact.
+static ATTRIBUTE_ENTRY_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"(?s)\Apass:([a-z]+(?:,[a-z-]+)*)?\[(.*)\]\z").unwrap()
+});
+
+/// Returns whether `value` is *entirely* a `pass:subs[…]` attribute-entry macro
+/// (see [`ATTRIBUTE_ENTRY_PASS_MACRO`]).
+///
+/// The `:author:` handling uses this to decide whether the stored attribute
+/// value is a *resolved* pass macro. When it is, that substituted value – not
+/// the raw macro syntax – is what should be partitioned into name parts.
+pub(crate) fn is_attribute_entry_pass_macro(value: &str) -> bool {
+    ATTRIBUTE_ENTRY_PASS_MACRO.is_match(value)
 }
 
 /// ASCII whitespace stripped by Ruby's `String#lstrip` / `#rstrip`, which
@@ -340,6 +392,33 @@ mod tests {
                 .unwrap();
         let h2 = h1.clone();
         assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn whole_value_pass_macro_keeps_nested_brackets() {
+        // A value that is entirely a `pass:subs[…]` macro captures its content
+        // greedily to the final `]`, so content that itself contains `[…]` – a
+        // link macro here – is not truncated at the first inner bracket. With
+        // the `n` (normal) substitutions the link and its formatting render.
+        let value = |src| {
+            crate::document::Attribute::parse(crate::Span::new(src), &Parser::default())
+                .unwrap()
+                .item
+                .value()
+                .clone()
+        };
+
+        assert_eq!(
+            value(":foo: pass:n[https://example.org/x[a *b* c]]"),
+            InterpretedValue::Value("<a href=\"https://example.org/x\">a <strong>b</strong> c</a>")
+        );
+
+        // `pass:[…]` with no substitution list keeps its content verbatim,
+        // including nested brackets.
+        assert_eq!(
+            value(":foo: pass:[a[b] *c*]"),
+            InterpretedValue::Value("a[b] *c*")
+        );
     }
 
     #[test]

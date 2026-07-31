@@ -1535,11 +1535,10 @@ fn allows_authors_to_be_overridden_using_explicit_author_attributes() {
     );
 }
 
-// Incompatibility: this crate does not strip inline formatting (here a
-// `pass:n[...]` macro) from an `:author:` attribute value before partitioning
-// it into name parts, so the derived `authors`/`firstname`/`lastname` differ.
-non_normative!(
-    r#"
+#[test]
+fn removes_formatting_before_partitioning_author_defined_using_author_attribute() {
+    verifies!(
+        r#"
   test 'removes formatting before partitioning author defined using author attribute' do
     input = ':author: pass:n[http://example.org/community/team.html[Ze_**Project** team]]'
 
@@ -1552,7 +1551,100 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // The `pass:n[…]` macro is resolved and its inline formatting stripped
+    // before the value is partitioned, so `firstname`/`lastname` see
+    // `Ze Project team` (the `_` in `Ze_Project` acting as a name joiner). The
+    // `author` attribute keeps the rendered markup. (This crate assigns the
+    // first author's full value to the unsuffixed `author` attribute and does
+    // not derive `authors` / `authorcount` for a single `:author:` entry.)
+    let doc = Parser::default()
+        .parse(":author: pass:n[http://example.org/community/team.html[Ze_**Project** team]]");
+
+    assert_eq!(
+        doc.attribute_value("author"),
+        InterpretedValue::Value(
+            "<a href=\"http://example.org/community/team.html\">Ze <strong>Project</strong> team</a>"
+        )
+    );
+    assert_eq!(
+        doc.attribute_value("firstname"),
+        InterpretedValue::Value("Ze Project")
+    );
+    assert_eq!(
+        doc.attribute_value("lastname"),
+        InterpretedValue::Value("team")
+    );
+
+    let authors = doc.authors();
+    assert_eq!(authors.len(), 1);
+    assert_eq!(
+        authors[0].name(),
+        "<a href=\"http://example.org/community/team.html\">Ze <strong>Project</strong> team</a>"
+    );
+    assert_eq!(authors[0].firstname(), "Ze Project");
+    assert_eq!(authors[0].lastname(), Some("team"));
+}
+
+#[test]
+fn author_pass_macro_resolving_to_plain_text_is_partitioned_from_the_substituted_value() {
+    // A whole-value `pass:[…]` macro whose result carries no markup must still
+    // be partitioned from its resolved (substituted) value, not the raw macro
+    // syntax – otherwise `pass:n[Doc Writer]` would leak `pass:n[Doc` into
+    // `firstname`.
+    let doc = Parser::default().parse(":author: pass:n[Doc Writer]");
+
+    assert_eq!(
+        doc.attribute_value("author"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        doc.attribute_value("firstname"),
+        InterpretedValue::Value("Doc")
+    );
+    assert_eq!(
+        doc.attribute_value("lastname"),
+        InterpretedValue::Value("Writer")
+    );
+
+    let authors = doc.authors();
+    assert_eq!(authors.len(), 1);
+    assert_eq!(authors[0].name(), "Doc Writer");
+    assert_eq!(authors[0].firstname(), "Doc");
+    assert_eq!(authors[0].lastname(), Some("Writer"));
+}
+
+#[test]
+fn author_pass_macro_with_trailing_email_strips_it_matching_asciidoctor() {
+    // A verbatim `pass:[Name <email>]` :author: value is partitioned by
+    // Asciidoctor's names-only `process_authors`: the `<…>` is removed by its
+    // `XmlSanitizeRx` and no `email` is derived from the author value (the
+    // `unless names_only` guard). The `author` attribute keeps the literal
+    // `<email>`. This crate matches that behavior – an email for an attribute
+    // author comes from a companion `:email:` entry, not the name value.
+    let doc = Parser::default().parse(":author: pass:[Doc Writer <doc@example.com>]");
+
+    assert_eq!(
+        doc.attribute_value("author"),
+        InterpretedValue::Value("Doc Writer <doc@example.com>")
+    );
+    assert_eq!(
+        doc.attribute_value("firstname"),
+        InterpretedValue::Value("Doc")
+    );
+    assert_eq!(
+        doc.attribute_value("lastname"),
+        InterpretedValue::Value("Writer")
+    );
+    assert_eq!(doc.attribute_value("email"), InterpretedValue::Unset);
+
+    let authors = doc.authors();
+    assert_eq!(authors.len(), 1);
+    assert_eq!(authors[0].firstname(), "Doc");
+    assert_eq!(authors[0].lastname(), Some("Writer"));
+    assert_eq!(authors[0].email(), None);
+}
 
 #[test]
 fn parse_rev_number_date_remark() {

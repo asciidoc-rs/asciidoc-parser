@@ -1,6 +1,7 @@
 //! Describes the top-level document structure.
 
 mod attribute;
+pub(crate) use attribute::is_attribute_entry_pass_macro;
 pub use attribute::{Attribute, InterpretedValue};
 
 mod author;

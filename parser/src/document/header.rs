@@ -4,7 +4,7 @@ use crate::{
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RefType, RevisionLine,
-        matches_author_pattern, set_author_metadata,
+        is_attribute_entry_pass_macro, matches_author_pattern, set_author_metadata,
     },
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
@@ -143,11 +143,26 @@ impl<'src> Header<'src> {
                 // When the value is a plain name, the partitioned name replaces
                 // the stored `author` value. This condenses repeated interior
                 // whitespace and joins a name with four or more parts, matching
-                // Asciidoctor (issue #758).
+                // Asciidoctor.
+                //
+                // Asciidoctor runs an attribute-entry value through the
+                // substitution pipeline *before* partitioning it into name parts
+                // (`process_authors`, `names_only`). When that substitution
+                // produced inline HTML – for example a `pass:[…]` macro whose
+                // content resolves to a link and inline formatting – the rendered
+                // markup is stripped before partitioning so it does not leak into
+                // `firstname`/`middlename`/`lastname`, while the `author` value
+                // keeps the rendered markup. A value that produced no markup
+                // keeps the original raw-value partitioning, so every other form
+                // is unchanged.
                 let mut author_name_override: Option<String> = None;
                 if attr.item.name().data().eq_ignore_ascii_case("author")
                     && let Some(raw_value) = attr.item.raw_value()
-                    && let Some(author) = Author::parse(raw_value.data(), parser, true)
+                    && let Some(author) = Author::parse_from_entry(
+                        raw_value.data(),
+                        attr.item.value().as_maybe_str(),
+                        parser,
+                    )
                 {
                     // Set individual author attributes.
                     parser.set_attribute_by_value_from_header("firstname", author.firstname());
@@ -171,23 +186,32 @@ impl<'src> Header<'src> {
                         parser.set_attribute_by_value_from_header("email", email);
                     }
 
-                    // Only override the `author` value when the name was
-                    // partitioned by the fallback whitespace split – a plain name
-                    // that does not match the author pattern (four or more parts,
-                    // or punctuation such as a comma). A value that matches the
-                    // pattern, carries an inline email (`<…>`), or holds an
-                    // attribute reference (`{…}`) keeps the substituted entry
-                    // value set below, so the handling of those forms is
-                    // unchanged.
+                    // Override the stored `author` value with the reconstructed
+                    // name when the value was partitioned rather than kept
+                    // verbatim. A resolved whole-value `pass:[…]` macro is
+                    // partitioned from its substituted value, so the
+                    // reconstructed name (the rendered markup with name-joiner
+                    // underscores turned to spaces) replaces the stored value.
+                    // Otherwise the value is overridden only for a plain name
+                    // that was partitioned by the fallback whitespace split (four
+                    // or more parts, or punctuation such as a comma); a value that
+                    // matches the pattern, carries an inline email (`<…>`), or
+                    // holds an attribute reference (`{…}`) keeps the substituted
+                    // entry value set below.
                     let raw = raw_value.data();
-                    if !raw.contains('<') && !raw.contains('{') && !matches_author_pattern(raw) {
+
+                    if is_attribute_entry_pass_macro(raw)
+                        || (!raw.contains('<')
+                            && !raw.contains('{')
+                            && !matches_author_pattern(raw))
+                    {
                         author_name_override = Some(author.name().to_string());
                     }
 
-                    // Retain the author parsed from the raw (pre-substitution)
-                    // value so the resolved author list does not have to
-                    // re-parse the HTML-encoded `author` attribute. A later
-                    // `:author:` entry overrides an earlier one.
+                    // Retain the author parsed from the entry value so the
+                    // resolved author list does not have to re-parse the stored
+                    // `author` attribute. A later `:author:` entry overrides an
+                    // earlier one.
                     author_attribute = Some(author);
                 }
 
@@ -1461,11 +1485,10 @@ mod tests {
 
     #[test]
     fn author_attribute_with_four_or_more_parts_is_partitioned() {
-        // https://github.com/asciidoc-rs/asciidoc-parser/issues/758: a value
-        // with more than three parts does not match the author pattern, so it is
-        // partitioned by splitting on whitespace into at most three parts. The
-        // trailing parts are assigned to `lastname` and repeated interior
-        // whitespace is condensed.
+        // A value with more than three parts does not match the author pattern,
+        // so it is partitioned by splitting on whitespace into at most three
+        // parts. The trailing parts are assigned to `lastname` and repeated
+        // interior whitespace is condensed.
         let mut parser = Parser::default();
         let _doc = parser.parse(":author: Leroy  Harold  Scherer,  Jr.");
 
