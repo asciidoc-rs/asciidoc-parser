@@ -1616,6 +1616,37 @@ fn author_pass_macro_resolving_to_plain_text_is_partitioned_from_the_substituted
 }
 
 #[test]
+fn author_pass_macro_with_trailing_email_strips_it_matching_asciidoctor() {
+    // A verbatim `pass:[Name <email>]` :author: value is partitioned by
+    // Asciidoctor's names-only `process_authors`: the `<…>` is removed by its
+    // `XmlSanitizeRx` and no `email` is derived from the author value (the
+    // `unless names_only` guard). The `author` attribute keeps the literal
+    // `<email>`. This crate matches that behavior – an email for an attribute
+    // author comes from a companion `:email:` entry, not the name value.
+    let doc = Parser::default().parse(":author: pass:[Doc Writer <doc@example.com>]");
+
+    assert_eq!(
+        doc.attribute_value("author"),
+        InterpretedValue::Value("Doc Writer <doc@example.com>")
+    );
+    assert_eq!(
+        doc.attribute_value("firstname"),
+        InterpretedValue::Value("Doc")
+    );
+    assert_eq!(
+        doc.attribute_value("lastname"),
+        InterpretedValue::Value("Writer")
+    );
+    assert_eq!(doc.attribute_value("email"), InterpretedValue::Unset);
+
+    let authors = doc.authors();
+    assert_eq!(authors.len(), 1);
+    assert_eq!(authors[0].firstname(), "Doc");
+    assert_eq!(authors[0].lastname(), Some("Writer"));
+    assert_eq!(authors[0].email(), None);
+}
+
+#[test]
 fn parse_rev_number_date_remark() {
     verifies!(
         r#"
