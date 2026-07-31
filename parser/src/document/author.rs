@@ -192,6 +192,27 @@ impl Author {
         }
     }
 
+    /// Parse the single author described by an `:author:` attribute entry.
+    ///
+    /// `raw` is the entry's raw (pre-substitution) value and `substituted` is
+    /// its substituted value (the stored attribute value). When substitution
+    /// produced inline HTML the substituted value is partitioned with its
+    /// markup stripped (see [`parse_substituted_names_only`]); otherwise
+    /// the raw value is partitioned as before, so plain names, attribute
+    /// references, and inline emails are unaffected.
+    ///
+    /// [`parse_substituted_names_only`]: Self::parse_substituted_names_only
+    pub(crate) fn parse_from_entry(
+        raw: &str,
+        substituted: Option<&str>,
+        parser: &Parser,
+    ) -> Option<Self> {
+        match substituted.filter(|value| value.contains('<')) {
+            Some(value) => Self::parse_substituted_names_only(value),
+            None => Self::parse(raw, parser, true),
+        }
+    }
+
     /// Parse a single author from a value that has *already* been through
     /// attribute-value substitution and now carries generated inline HTML –
     /// typically the rendered output of a `pass:[…]` macro in an `:author:`
@@ -556,4 +577,116 @@ fn apply_author_subs(source: &str, parser: &Parser) -> String {
     }
 
     content.rendered().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::Author;
+
+    // The `<`-branch of Asciidoctor's `process_authors` (`names_only`), reached
+    // when an `:author:` attribute value's substitution produced inline HTML.
+    // The rendered markup – with name-joiner underscores turned to spaces –
+    // becomes `name`, while the name parts are partitioned from the tag-stripped
+    // text so the formatting does not leak into them. No email is split off.
+    mod parse_substituted_names_only {
+        use super::Author;
+
+        #[test]
+        fn empty_input_is_none() {
+            assert!(Author::parse_substituted_names_only("").is_none());
+            assert!(Author::parse_substituted_names_only("   ").is_none());
+        }
+
+        #[test]
+        fn markup_with_no_text_keeps_rendered_value_as_single_name() {
+            // Stripping the tags leaves nothing to partition, so the rendered
+            // markup stands as the whole name and `firstname`.
+            let author = Author::parse_substituted_names_only("<a href=\"x\"></a>").unwrap();
+            assert_eq!(author.name(), "<a href=\"x\"></a>");
+            assert_eq!(author.firstname(), "<a href=\"x\"></a>");
+            assert_eq!(author.middlename(), None);
+            assert_eq!(author.lastname(), None);
+            assert_eq!(author.email(), None);
+        }
+
+        #[test]
+        fn single_name_part() {
+            let author = Author::parse_substituted_names_only("<strong>Solo</strong>").unwrap();
+            assert_eq!(author.name(), "<strong>Solo</strong>");
+            assert_eq!(author.firstname(), "Solo");
+            assert_eq!(author.middlename(), None);
+            assert_eq!(author.lastname(), None);
+        }
+
+        #[test]
+        fn first_and_last_name() {
+            let author = Author::parse_substituted_names_only("<em>Kismet</em> Chameleon").unwrap();
+            assert_eq!(author.firstname(), "Kismet");
+            assert_eq!(author.middlename(), None);
+            assert_eq!(author.lastname(), Some("Chameleon"));
+        }
+
+        #[test]
+        fn first_middle_and_last_name() {
+            let author =
+                Author::parse_substituted_names_only("<em>Kismet</em> R. Chameleon").unwrap();
+            assert_eq!(author.firstname(), "Kismet");
+            assert_eq!(author.middlename(), Some("R."));
+            assert_eq!(author.lastname(), Some("Chameleon"));
+        }
+
+        #[test]
+        fn underscores_join_name_parts_and_the_rendered_name() {
+            // Underscores act as name joiners: within a part they become a
+            // space, and the full `name` has them replaced too.
+            let author = Author::parse_substituted_names_only("<b>Ze_Project</b> team").unwrap();
+            assert_eq!(author.name(), "<b>Ze Project</b> team");
+            assert_eq!(author.firstname(), "Ze Project");
+            assert_eq!(author.lastname(), Some("team"));
+            assert_eq!(author.email(), None);
+        }
+    }
+
+    // The entry dispatcher routes a value whose substitution produced markup to
+    // the tag-stripping path, and any other value to the raw-value partitioning.
+    mod parse_from_entry {
+        use super::Author;
+        use crate::Parser;
+
+        #[test]
+        fn markup_value_is_partitioned_after_stripping_tags() {
+            let parser = Parser::default();
+            let author = Author::parse_from_entry(
+                "pass:n[<ignored raw>]",
+                Some("<strong>Ze</strong> team"),
+                &parser,
+            )
+            .unwrap();
+
+            assert_eq!(author.firstname(), "Ze");
+            assert_eq!(author.lastname(), Some("team"));
+        }
+
+        #[test]
+        fn plain_value_uses_raw_partitioning() {
+            // With no generated markup the raw value is partitioned as before.
+            let parser = Parser::default();
+            let author =
+                Author::parse_from_entry("Doc Writer", Some("Doc Writer"), &parser).unwrap();
+
+            assert_eq!(author.firstname(), "Doc");
+            assert_eq!(author.lastname(), Some("Writer"));
+        }
+
+        #[test]
+        fn missing_substituted_value_falls_back_to_raw() {
+            let parser = Parser::default();
+            let author = Author::parse_from_entry("Doc Writer", None, &parser).unwrap();
+
+            assert_eq!(author.firstname(), "Doc");
+            assert_eq!(author.lastname(), Some("Writer"));
+        }
+    }
 }
