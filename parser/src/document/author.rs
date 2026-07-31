@@ -340,6 +340,70 @@ impl Author {
     }
 }
 
+/// Populates the derived author document attributes from a resolved author
+/// list, mirroring Asciidoctor's `process_authors`.
+///
+/// The first author sets the unsuffixed keys (`author`, `firstname`,
+/// `authorinitials`, …); each subsequent author sets its `_N` companions. Once
+/// a second author appears, the first author is also mirrored onto its `_1`
+/// companions. The `authors` attribute is rewritten to the comma-joined list of
+/// resolved author names.
+///
+/// This intentionally does **not** honor `authorinitials_from_entry`: the
+/// derived `authorinitials` always overwrites an explicit `:authorinitials:`
+/// entry for the `authors` and `author_N` forms. Only a single `:author:` entry
+/// (handled inline in [`Header::parse`](crate::document::Header)) preserves an
+/// explicit override, exactly as Asciidoctor does – its `authorinitials`
+/// deletion guard lives only in the `author` branch of `process_authors`, not
+/// the `authors`/indexed branches.
+pub(crate) fn set_author_metadata(parser: &mut Parser, authors: &[Author]) {
+    for (idx, author) in authors.iter().enumerate() {
+        set_author_keys(parser, author, if idx == 0 { None } else { Some(idx + 1) });
+
+        // The `_1` companions are only assigned once a second author is seen.
+        if idx == 1
+            && let Some(first) = authors.first()
+        {
+            set_author_keys(parser, first, Some(1));
+        }
+    }
+
+    let joined = authors
+        .iter()
+        .map(Author::name)
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    parser.set_attribute_by_value_from_header("authors", joined);
+}
+
+/// Sets the author attributes for a single author, either as the unsuffixed
+/// keys (`index` is `None`) or the `_N` companions (`index` is `Some(n)`).
+fn set_author_keys(parser: &mut Parser, author: &Author, index: Option<usize>) {
+    let key = |name: &str| match index {
+        None => name.to_string(),
+        Some(n) => format!("{name}_{n}"),
+    };
+
+    parser.set_attribute_by_value_from_header(key("author"), author.name());
+
+    parser.set_attribute_by_value_from_header(key("firstname"), author.firstname());
+
+    if let Some(middlename) = author.middlename() {
+        parser.set_attribute_by_value_from_header(key("middlename"), middlename);
+    }
+
+    if let Some(lastname) = author.lastname() {
+        parser.set_attribute_by_value_from_header(key("lastname"), lastname);
+    }
+
+    parser.set_attribute_by_value_from_header(key("authorinitials"), author.initials());
+
+    if let Some(email) = author.email() {
+        parser.set_attribute_by_value_from_header(key("email"), email);
+    }
+}
+
 fn first_char_or_empty_string(s: &str) -> String {
     s.chars().next().map_or(String::new(), |c| c.to_string())
 }
