@@ -16,6 +16,7 @@ pub(crate) use macros::apply_macros_with_leading_anchor_registered;
 mod xref_target;
 
 pub(crate) mod passthroughs;
+pub use passthroughs::Passthrough;
 pub(crate) use passthroughs::Passthroughs;
 
 mod substitution_group;
