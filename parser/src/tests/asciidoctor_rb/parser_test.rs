@@ -1345,11 +1345,10 @@ fn allows_authors_to_be_overridden_using_explicit_author_attributes() {
     );
 }
 
-// Incompatibility: this crate does not strip inline formatting (here a
-// `pass:n[...]` macro) from an `:author:` attribute value before partitioning
-// it into name parts, so the derived `authors`/`firstname`/`lastname` differ.
-non_normative!(
-    r#"
+#[test]
+fn removes_formatting_before_partitioning_author_defined_using_author_attribute() {
+    verifies!(
+        r#"
   test 'removes formatting before partitioning author defined using author attribute' do
     input = ':author: pass:n[http://example.org/community/team.html[Ze_**Project** team]]'
 
@@ -1362,7 +1361,41 @@ non_normative!(
   end
 
 "#
-);
+    );
+
+    // The `pass:n[…]` macro is resolved and its inline formatting stripped
+    // before the value is partitioned, so `firstname`/`lastname` see
+    // `Ze Project team` (the `_` in `Ze_Project` acting as a name joiner). The
+    // `author` attribute keeps the rendered markup. (This crate assigns the
+    // first author's full value to the unsuffixed `author` attribute and does
+    // not derive `authors` / `authorcount` for a single `:author:` entry.)
+    let doc = Parser::default()
+        .parse(":author: pass:n[http://example.org/community/team.html[Ze_**Project** team]]");
+
+    assert_eq!(
+        doc.attribute_value("author"),
+        InterpretedValue::Value(
+            "<a href=\"http://example.org/community/team.html\">Ze <strong>Project</strong> team</a>"
+        )
+    );
+    assert_eq!(
+        doc.attribute_value("firstname"),
+        InterpretedValue::Value("Ze Project")
+    );
+    assert_eq!(
+        doc.attribute_value("lastname"),
+        InterpretedValue::Value("team")
+    );
+
+    let authors = doc.authors();
+    assert_eq!(authors.len(), 1);
+    assert_eq!(
+        authors[0].name(),
+        "<a href=\"http://example.org/community/team.html\">Ze <strong>Project</strong> team</a>"
+    );
+    assert_eq!(authors[0].firstname(), "Ze Project");
+    assert_eq!(authors[0].lastname(), Some("team"));
+}
 
 #[test]
 fn parse_rev_number_date_remark() {

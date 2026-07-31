@@ -147,48 +147,78 @@ impl<'src> Header<'src> {
                 let mut author_name_override: Option<String> = None;
                 if attr.item.name().data().eq_ignore_ascii_case("author")
                     && let Some(raw_value) = attr.item.raw_value()
-                    && let Some(author) = Author::parse(raw_value.data(), parser, true)
                 {
-                    // Set individual author attributes.
-                    parser.set_attribute_by_value_from_header("firstname", author.firstname());
-                    if let Some(middlename) = author.middlename() {
-                        parser.set_attribute_by_value_from_header("middlename", middlename);
-                    }
-                    if let Some(lastname) = author.lastname() {
-                        parser.set_attribute_by_value_from_header("lastname", lastname);
-                    }
+                    // Asciidoctor runs an attribute-entry value through the
+                    // substitution pipeline *before* partitioning it into name
+                    // parts (`process_authors`, `names_only`). When that
+                    // substitution produced inline HTML – for example a
+                    // `pass:[…]` macro whose content resolves to a link and
+                    // inline formatting – the rendered markup is stripped before
+                    // partitioning so it does not leak into
+                    // `firstname`/`middlename`/`lastname`, while the `author`
+                    // value keeps the rendered markup. A value that produced no
+                    // markup keeps the original raw-value partitioning, so every
+                    // other form is unchanged.
+                    let substituted_markup =
+                        attr.item.value().as_maybe_str().filter(|v| v.contains('<'));
 
-                    // Do not re-derive `authorinitials` when the document has
-                    // supplied its own via an explicit entry (see above).
-                    if !authorinitials_from_entry {
-                        parser.set_attribute_by_value_from_header(
-                            "authorinitials",
-                            author.initials(),
-                        );
-                    }
+                    let author = match substituted_markup {
+                        Some(value) => Author::parse_substituted_names_only(value),
+                        None => Author::parse(raw_value.data(), parser, true),
+                    };
 
-                    if let Some(email) = author.email() {
-                        parser.set_attribute_by_value_from_header("email", email);
-                    }
+                    if let Some(author) = author {
+                        // Set individual author attributes.
+                        parser.set_attribute_by_value_from_header("firstname", author.firstname());
+                        if let Some(middlename) = author.middlename() {
+                            parser.set_attribute_by_value_from_header("middlename", middlename);
+                        }
+                        if let Some(lastname) = author.lastname() {
+                            parser.set_attribute_by_value_from_header("lastname", lastname);
+                        }
 
-                    // Only override the `author` value when the name was
-                    // partitioned by the fallback whitespace split – a plain name
-                    // that does not match the author pattern (four or more parts,
-                    // or punctuation such as a comma). A value that matches the
-                    // pattern, carries an inline email (`<…>`), or holds an
-                    // attribute reference (`{…}`) keeps the substituted entry
-                    // value set below, so the handling of those forms is
-                    // unchanged.
-                    let raw = raw_value.data();
-                    if !raw.contains('<') && !raw.contains('{') && !matches_author_pattern(raw) {
-                        author_name_override = Some(author.name().to_string());
-                    }
+                        // Do not re-derive `authorinitials` when the document has
+                        // supplied its own via an explicit entry (see above).
+                        if !authorinitials_from_entry {
+                            parser.set_attribute_by_value_from_header(
+                                "authorinitials",
+                                author.initials(),
+                            );
+                        }
 
-                    // Retain the author parsed from the raw (pre-substitution)
-                    // value so the resolved author list does not have to
-                    // re-parse the HTML-encoded `author` attribute. A later
-                    // `:author:` entry overrides an earlier one.
-                    author_attribute = Some(author);
+                        if let Some(email) = author.email() {
+                            parser.set_attribute_by_value_from_header("email", email);
+                        }
+
+                        // Override the stored `author` value with the
+                        // reconstructed name when the value was partitioned
+                        // rather than kept verbatim. For the substituted-markup
+                        // case the reconstructed name is the rendered markup with
+                        // name-joiner underscores turned to spaces. Otherwise it
+                        // is only overridden for a plain name that
+                        // was partitioned by the fallback whitespace split (four
+                        // or more parts, or punctuation such as a comma); a value
+                        // that matches the pattern, carries an inline email
+                        // (`<…>`), or holds an attribute reference (`{…}`) keeps
+                        // the substituted entry value set below (issue #758).
+                        if substituted_markup.is_some() {
+                            author_name_override = Some(author.name().to_string());
+                        } else {
+                            let raw = raw_value.data();
+                            if !raw.contains('<')
+                                && !raw.contains('{')
+                                && !matches_author_pattern(raw)
+                            {
+                                author_name_override = Some(author.name().to_string());
+                            }
+                        }
+
+                        // Retain the author parsed from the entry value so the
+                        // resolved author list does not have to re-parse the
+                        // stored `author` attribute. A later `:author:` entry
+                        // overrides an earlier one.
+                        author_attribute = Some(author);
+                    }
                 }
 
                 parser.set_attribute_from_header(&attr.item, &mut warnings);

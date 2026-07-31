@@ -192,6 +192,65 @@ impl Author {
         }
     }
 
+    /// Parse a single author from a value that has *already* been through
+    /// attribute-value substitution and now carries generated inline HTML –
+    /// typically the rendered output of a `pass:[…]` macro in an `:author:`
+    /// entry.
+    ///
+    /// This mirrors the `<`-branch of Asciidoctor's `process_authors` under
+    /// `names_only`: the full rendered value – with name-joiner underscores
+    /// turned to spaces – becomes the author's `name`, while the name parts are
+    /// partitioned from the value with its HTML tags removed, so the formatting
+    /// does not leak into `firstname`/`middlename`/`lastname`. As in
+    /// Asciidoctor, no email is split off here – an email supplied through a
+    /// companion `:email:` entry is attached later.
+    pub(crate) fn parse_substituted_names_only(substituted: &str) -> Option<Self> {
+        let substituted = substituted.trim();
+        if substituted.is_empty() {
+            return None;
+        }
+
+        let name = replace_underscores_with_spaces(substituted.to_string());
+        let stripped = strip_xml_tags(substituted);
+
+        let mut segments = split_whitespace_max3(&stripped);
+
+        if segments.is_empty() {
+            // The value was nothing but markup: keep the rendered value as the
+            // single name.
+            return Some(Self {
+                firstname: name.clone(),
+                name,
+                middlename: None,
+                lastname: None,
+                email: None,
+            });
+        }
+
+        let firstname = replace_underscores_with_spaces(segments.remove(0));
+        let (middlename, lastname) = match segments.len() {
+            0 => (None, None),
+
+            1 => (
+                None,
+                Some(replace_underscores_with_spaces(segments.remove(0))),
+            ),
+
+            _ => (
+                Some(replace_underscores_with_spaces(segments.remove(0))),
+                Some(replace_underscores_with_spaces(segments.remove(0))),
+            ),
+        };
+
+        Some(Self {
+            name,
+            firstname,
+            middlename,
+            lastname,
+            email: None,
+        })
+    }
+
     /// Overrides the author's email address, unless `email` is `None`.
     ///
     /// Used when an author is assembled from `author_N` document attributes,
@@ -271,6 +330,13 @@ fn opt_first_char_or_empty_string(s: Option<&str>) -> String {
 /// Replace underscores with spaces in a name component.
 fn replace_underscores_with_spaces(name: String) -> String {
     name.replace('_', " ")
+}
+
+/// Remove HTML tags from `source`, mirroring Asciidoctor's `XmlSanitizeRx`
+/// (`/<[^>]+>/`). Used to partition an author value whose substitution produced
+/// inline markup (see [`Author::parse_substituted_names_only`]).
+fn strip_xml_tags(source: &str) -> String {
+    XML_TAG.replace_all(source, "").into_owned()
 }
 
 /// Join an author's parsed name parts with a single space.
@@ -404,6 +470,12 @@ fn condense_whitespace(s: &str) -> String {
 
     result
 }
+
+/// Matches a single HTML tag, mirroring Asciidoctor's `XmlSanitizeRx`.
+static XML_TAG: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"<[^>]+>").unwrap()
+});
 
 static AUTHOR: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
