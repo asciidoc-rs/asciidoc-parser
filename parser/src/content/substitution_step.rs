@@ -612,9 +612,10 @@ struct AttributeReplacer<'p> {
     /// How to handle a reference to a missing attribute.
     mode: AttributeMissing,
 
-    /// Source span used to locate a `warn` warning when a precise per-reference
-    /// span cannot be recovered. This is the whole content (or line/target)
-    /// span – the coarse fallback described in the type-level docs.
+    /// Source span used to locate a recorded warning when a precise
+    /// per-reference span cannot be recovered. This is the whole content (or
+    /// line/target) span – the coarse fallback described in the type-level
+    /// docs.
     fallback_source: Span<'p>,
 
     /// Source `Span` of the line currently being processed, when known. Every
@@ -625,7 +626,8 @@ struct AttributeReplacer<'p> {
 
     /// Byte ranges (into [`source_line`](Self::source_line)'s data) of every
     /// `ATTRIBUTE_REFERENCE` match on the source line, in order. Populated only
-    /// in [`AttributeMissing::Warn`] mode and only when `source_line` is set.
+    /// in the diagnostic-recording modes ([`AttributeMissing::Warn`] and
+    /// [`AttributeMissing::DropLine`]) and only when `source_line` is set.
     source_matches: Vec<Range<usize>>,
 
     /// Index of the next reference to be processed on this line, into
@@ -655,13 +657,17 @@ impl<'p> AttributeReplacer<'p> {
         fallback_source: Span<'p>,
         source_line: Option<Span<'p>>,
     ) -> Self {
-        // The per-reference ranges are only consulted in `warn` mode, so skip the
-        // extra scan otherwise.
+        // The per-reference ranges are only consulted when a warning may be
+        // recorded – `warn` mode, and `drop-line` mode (which records a
+        // diagnostic for each dropped reference) – so skip the extra scan
+        // otherwise.
         let source_matches = match (mode, source_line) {
-            (AttributeMissing::Warn, Some(line)) => ATTRIBUTE_REFERENCE
-                .find_iter(line.data())
-                .map(|m| m.range())
-                .collect(),
+            (AttributeMissing::Warn | AttributeMissing::DropLine, Some(line)) => {
+                ATTRIBUTE_REFERENCE
+                    .find_iter(line.data())
+                    .map(|m| m.range())
+                    .collect()
+            }
             _ => Vec::new(),
         };
 
@@ -676,7 +682,7 @@ impl<'p> AttributeReplacer<'p> {
         }
     }
 
-    /// Returns the source span to attribute a `warn` warning to for the
+    /// Returns the source span to attribute a recorded warning to for the
     /// reference at `index` on this line, whose matched text (including any
     /// escape backslash) is `matched`.
     ///
@@ -771,8 +777,15 @@ impl Replacer for AttributeReplacer<'_> {
                 }
                 AttributeMissing::DropLine => {
                     // Mark the line for removal; whatever is written to `dest`
-                    // here is discarded with it.
+                    // here is discarded with it. Asciidoctor logs an `INFO`
+                    // message ("dropping line containing reference to missing
+                    // attribute") for each reference that triggers a drop, so
+                    // record the matching diagnostic here.
                     self.missing_on_line = true;
+                    self.parser.record_substitution_warning(
+                        self.warning_source(match_index, &caps[0]),
+                        WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
+                    );
                 }
                 AttributeMissing::Warn => {
                     dest.push_str(&caps[0]);
@@ -815,13 +828,14 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
     let mode = AttributeMissing::from_parser(parser);
     let source = content.original();
 
-    // In `warn` mode, anchor each rendered line to the source `Span` it came
-    // from so a warning can name the precise offset of the offending reference
-    // (see `AttributeReplacer`). The retained line spans are only trustworthy
-    // when they still line up one-to-one with the rendered lines; a mismatch
-    // (e.g. a multi-line passthrough that collapsed lines during extraction)
-    // withholds them, falling back to the coarse whole-content span.
-    let source_lines = if mode == AttributeMissing::Warn {
+    // In the modes that record a diagnostic (`warn` and `drop-line`), anchor
+    // each rendered line to the source `Span` it came from so the warning can
+    // name the precise offset of the offending reference (see
+    // `AttributeReplacer`). The retained line spans are only trustworthy when
+    // they still line up one-to-one with the rendered lines; a mismatch (e.g. a
+    // multi-line passthrough that collapsed lines during extraction) withholds
+    // them, falling back to the coarse whole-content span.
+    let source_lines = if mode == AttributeMissing::Warn || mode == AttributeMissing::DropLine {
         content
             .source_lines()
             .filter(|lines| lines.len() == content.rendered.split('\n').count())
@@ -1969,6 +1983,80 @@ mod tests {
                 assert_eq!(render("{missing}", &p), "");
             }
 
+            #[test]
+            fn drop_line_records_a_warning_for_the_dropped_reference() {
+                // Dropping the line is silent in Asciidoctor's output, but it
+                // logs an `INFO` diagnostic naming the missing attribute; the
+                // parser records the matching warning.
+                let p = parser_with_mode("drop-line");
+                assert_eq!(render("Hello, {name}!\nSecond line.", &p), "Second line.");
+
+                let warnings = p.take_substitution_warnings();
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(
+                    warnings[0].warning,
+                    WarningType::SkippingReferenceToMissingAttribute("name".to_string())
+                );
+            }
+
+            #[test]
+            fn drop_line_records_one_warning_per_missing_reference() {
+                // Two missing references on the same dropped line each produce a
+                // diagnostic, matching Asciidoctor's per-reference logging.
+                let p = parser_with_mode("drop-line");
+                assert_eq!(render("a {x} b {y} c\ntail", &p), "tail");
+                assert_eq!(p.take_substitution_warnings().len(), 2);
+            }
+
+            #[test]
+            fn drop_line_does_not_warn_for_a_line_without_a_missing_reference() {
+                // Only the line carrying the missing reference is dropped and
+                // warned about; a line whose references all resolve is untouched.
+                let p = parser_with_mode("drop-line");
+                assert_eq!(
+                    render("first {sp}line\nsecond {missing} line\nthird line", &p),
+                    "first  line\nthird line"
+                );
+
+                let warnings = p.take_substitution_warnings();
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(
+                    warnings[0].warning,
+                    WarningType::SkippingReferenceToMissingAttribute("missing".to_string())
+                );
+            }
+
+            #[test]
+            fn drop_line_points_at_the_precise_reference() {
+                // With per-line source spans retained, the drop-line diagnostic
+                // names the exact offending reference rather than the whole line.
+                let p = parser_with_mode("drop-line");
+                let text = "first {alpha} line\nsecond {beta} line";
+                let mut content = content_with_source_lines(text);
+                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+
+                let warnings = p.take_substitution_warnings();
+                assert_eq!(warnings.len(), 2);
+                assert_spans(&warnings[0], text, "{alpha}");
+                assert_spans(&warnings[1], text, "{beta}");
+            }
+
+            #[test]
+            fn drop_line_falls_back_to_whole_span_without_source_lines() {
+                // `Content::from` retains no per-line spans, so the drop-line
+                // diagnostic degrades to the whole-content span rather than
+                // misreporting a location.
+                let p = parser_with_mode("drop-line");
+                let text = "x {foo} y";
+                let mut content = Content::from(Span::new(text));
+                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+
+                let warnings = p.take_substitution_warnings();
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(warnings[0].offset, 0);
+                assert_eq!(warnings[0].len, text.len());
+            }
+
             /// Exercises the free-standing text path (used for docinfo file
             /// content), which applies the same `attribute-missing` handling as
             /// [`render`] but through [`substitute_attributes_in_text`] rather
@@ -2010,6 +2098,27 @@ mod tests {
                     assert_eq!(
                         substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
                         "Line 1\nLine 2"
+                    );
+                }
+
+                #[test]
+                fn drop_line_records_a_warning() {
+                    // The diagnostic is recorded on the parser even on the
+                    // free-standing text path; a docinfo caller separately
+                    // discards it via `truncate_substitution_warnings`.
+                    use crate::warnings::WarningType;
+
+                    let p = parser_with_mode("drop-line");
+                    assert_eq!(
+                        substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
+                        "Line 1\nLine 2"
+                    );
+
+                    let warnings = p.take_substitution_warnings();
+                    assert_eq!(warnings.len(), 1);
+                    assert_eq!(
+                        warnings[0].warning,
+                        WarningType::SkippingReferenceToMissingAttribute("missing".to_string())
                     );
                 }
 
