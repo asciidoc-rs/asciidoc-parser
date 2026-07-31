@@ -62,11 +62,13 @@
 //! * **`parse_header_metadata`** author parsing — driven through
 //!   [`AuthorLine::parse`](crate::document::AuthorLine), asserting on the
 //!   parsed [`Author`](crate::document::Author) list (name / firstname /
-//!   middlename / lastname / email / initials). This crate does not derive
-//!   Ruby's `authors` (comma-joined) or `authorcount` document attributes, and
-//!   numbers the first author's attributes unsuffixed (`author`, not
-//!   `author_1`), so assertions on those are dropped. The Ruby `metadata.size`
-//!   (hash cardinality) has no crate analog and is likewise not asserted.
+//!   middlename / lastname / email / initials). This crate derives the combined
+//!   `authors` (comma-joined) attribute, the `authorcount` count (including `0`
+//!   for an author-less document, via the built-in default), and – when more
+//!   than one author is present – the first author's `_1`-suffixed names
+//!   (`author_1`, ...) as well as the unsuffixed forms. The Ruby
+//!   `metadata.size` (hash cardinality) has no crate analog and is not
+//!   asserted.
 //! * **`parse_header_metadata`** revision parsing — driven through a full
 //!   [`Parser::parse`] over the header (title, author line, revision line) and
 //!   asserting on `doc.header().revision_line()`'s `revnumber()` / `revdate()`
@@ -1065,9 +1067,7 @@ fn parse_multiple_authors() {
 "#
     );
 
-    // This crate does not derive the `authors` (comma-joined) or `authorcount`
-    // attributes and numbers the first author unsuffixed, so we assert on the
-    // parsed author list directly.
+    // The parsed author list carries the per-author name parts ...
     let a =
         parse_authors("Doc Writer <doc.writer@asciidoc.org>; John Smith <john.smith@asciidoc.org>");
     assert_eq!(a.len(), 2);
@@ -1075,6 +1075,35 @@ fn parse_multiple_authors() {
     assert_eq!(a[0].email.as_deref(), Some("doc.writer@asciidoc.org"));
     assert_eq!(a[1].name, "John Smith");
     assert_eq!(a[1].email.as_deref(), Some("john.smith@asciidoc.org"));
+
+    // ... and the derived document attributes match Asciidoctor exactly. A
+    // synthetic document title is prepended because this crate only recognizes
+    // an author line when a title is present.
+    let mut parser = Parser::default();
+    let _doc = parser.parse(
+        "= Document Title\nDoc Writer <doc.writer@asciidoc.org>; John Smith <john.smith@asciidoc.org>",
+    );
+
+    assert_eq!(
+        parser.attribute_value("authorcount"),
+        InterpretedValue::Value("2")
+    );
+    assert_eq!(
+        parser.attribute_value("authors"),
+        InterpretedValue::Value("Doc Writer, John Smith")
+    );
+    assert_eq!(
+        parser.attribute_value("author"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author_2"),
+        InterpretedValue::Value("John Smith")
+    );
 }
 
 #[test]
@@ -1118,6 +1147,26 @@ fn skips_blank_author_entries_in_implicit_author_line() {
     assert_eq!(a[0].name, "Doc Writer");
     assert_eq!(a[1].name, "John Smith");
     assert_eq!(a[1].email.as_deref(), Some("john.smith@asciidoc.org"));
+
+    // The two surviving authors are counted and numbered `author_1` /
+    // `author_2`, matching Asciidoctor. A synthetic document title is prepended
+    // because this crate only recognizes an author line when a title is present.
+    let mut parser = Parser::default();
+    let _doc =
+        parser.parse("= Document Title\nDoc Writer; ; John Smith <john.smith@asciidoc.org>;");
+
+    assert_eq!(
+        parser.attribute_value("authorcount"),
+        InterpretedValue::Value("2")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author_2"),
+        InterpretedValue::Value("John Smith")
+    );
 }
 
 #[test]
@@ -1237,12 +1286,8 @@ fn use_implicit_authors_if_value_of_authors_attribute_matches_computed_value() {
     // The `:authors:` entry value matches the computed (comma-joined) value of
     // the implicit author line, so the implicit list is retained unchanged. A
     // synthetic document title is prepended because this crate only recognizes
-    // an author line when a title is present.
-    //
-    // This crate names the first author from an implicit line `author` (not
-    // `author_1`) and, because the retain path leaves the implicit list
-    // untouched, does not derive an `author_1` companion here; the first
-    // author is asserted through the unsuffixed `author` attribute instead.
+    // an author line when a title is present. The implicit line exposes the
+    // first author both unsuffixed (`author`) and as `author_1`.
     let mut parser = Parser::default();
     let doc = parser
         .parse("= Document Title\nDoc Writer; Junior Writer\n:authors: Doc Writer, Junior Writer");
@@ -1258,6 +1303,10 @@ fn use_implicit_authors_if_value_of_authors_attribute_matches_computed_value() {
     );
     assert_eq!(
         parser.attribute_value("author"),
+        InterpretedValue::Value("Doc Writer")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
         InterpretedValue::Value("Doc Writer")
     );
     assert_eq!(
@@ -1329,9 +1378,10 @@ fn replace_implicit_authors_if_value_of_authors_attribute_does_not_match_compute
     );
 }
 
-// This crate does not derive an `authorcount` document attribute.
-non_normative!(
-    r#"
+#[test]
+fn sets_authorcount_to_0_if_document_has_no_authors() {
+    verifies!(
+        r#"
   test 'sets authorcount to 0 if document has no authors' do
     input = ''
     doc = empty_document
@@ -1340,6 +1390,34 @@ non_normative!(
     assert_equal 0, metadata['authorcount']
   end
 
+"#
+    );
+
+    // A document with no authors reports `authorcount` as `0`, matching
+    // Asciidoctor. The count resolves through the built-in `authorcount`
+    // default (see `built_in_attrs`); the header parser materializes an
+    // explicit value only for a non-zero count.
+    let doc = Parser::default().parse("");
+
+    assert_eq!(
+        doc.attribute_value("authorcount"),
+        InterpretedValue::Value("0")
+    );
+
+    // The same holds for a document that has a header but no author line.
+    let doc = Parser::default().parse("= Document Title\n\nBody.");
+
+    assert_eq!(
+        doc.attribute_value("authorcount"),
+        InterpretedValue::Value("0")
+    );
+}
+
+// This crate does not surface Asciidoctor's header-metadata hash, so there is
+// no analog for asserting its cardinality when `parse_header_metadata` is
+// invoked without a document.
+non_normative!(
+    r#"
   test 'returns empty hash if document has no authors and invoked without document' do
     metadata, _ = parse_header_metadata ''
     assert_empty metadata
@@ -1367,12 +1445,39 @@ fn does_not_drop_name_joiner_when_using_multiple_authors() {
     );
 
     // The `het_Draeke` name-joiner underscore becomes a space (`het Draeke`)
-    // rather than being dropped.
+    // rather than being dropped. The combined `authors` attribute, the indexed
+    // author names, and `authorcount` all match Asciidoctor exactly.
     let a = parse_authors("Kismet Chameleon; Lazarus het_Draeke");
     assert_eq!(a.len(), 2);
     assert_eq!(a[0].name, "Kismet Chameleon");
     assert_eq!(a[1].name, "Lazarus het Draeke");
     assert_eq!(a[1].lastname.as_deref(), Some("het Draeke"));
+
+    // A synthetic document title is prepended because this crate only
+    // recognizes an author line when a title is present.
+    let mut parser = Parser::default();
+    let _doc = parser.parse("= Document Title\nKismet Chameleon; Lazarus het_Draeke");
+
+    assert_eq!(
+        parser.attribute_value("authorcount"),
+        InterpretedValue::Value("2")
+    );
+    assert_eq!(
+        parser.attribute_value("authors"),
+        InterpretedValue::Value("Kismet Chameleon, Lazarus het Draeke")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
+        InterpretedValue::Value("Kismet Chameleon")
+    );
+    assert_eq!(
+        parser.attribute_value("author_2"),
+        InterpretedValue::Value("Lazarus het Draeke")
+    );
+    assert_eq!(
+        parser.attribute_value("lastname_2"),
+        InterpretedValue::Value("het Draeke")
+    );
 }
 
 #[test]
@@ -1398,15 +1503,22 @@ fn allows_authors_to_be_overridden_using_explicit_author_attributes() {
     );
 
     // The `:author_2:` entry overrides the second author computed from the
-    // implicit author line. (This crate names the first author unsuffixed
-    // `author` rather than `author_1`, and does not derive `authorcount` /
-    // `authors`.)
+    // implicit author line. The first author is now exposed both unsuffixed
+    // (`author`) and as `author_1`. This crate does not derive
+    // `authorcount`, and – unlike Asciidoctor – it does not re-derive the
+    // combined `authors` attribute after the explicit override, so `authors`
+    // still reflects the implicit line (`... Johnny Bravo ...`, not `... Danger
+    // Mouse ...`).
     let mut parser = Parser::default();
     let _ = parser.parse(
         "= Document Title\nKismet Chameleon; Johnny Bravo; Lazarus het_Draeke\n:author_2: Danger Mouse",
     );
     assert_eq!(
         parser.attribute_value("author"),
+        InterpretedValue::Value("Kismet Chameleon")
+    );
+    assert_eq!(
+        parser.attribute_value("author_1"),
         InterpretedValue::Value("Kismet Chameleon")
     );
     assert_eq!(

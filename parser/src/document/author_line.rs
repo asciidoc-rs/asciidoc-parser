@@ -2,7 +2,11 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::{HasSpan, Parser, Span, document::Author, internal::opaque_iter::opaque_slice_iter};
+use crate::{
+    HasSpan, Parser, Span,
+    document::{Author, set_author_metadata},
+    internal::opaque_iter::opaque_slice_iter,
+};
 
 opaque_slice_iter! {
     /// An iterator over the [`Author`]s in an [`AuthorLine`], returned by
@@ -26,22 +30,15 @@ impl<'src> AuthorLine<'src> {
             .filter_map(|raw_author| Author::parse(raw_author, parser, false))
             .collect();
 
-        for (index, author) in authors.iter().enumerate() {
-            set_nth_attribute(parser, "author", index, author.name());
-            set_nth_attribute(parser, "authorinitials", index, author.initials());
-            set_nth_attribute(parser, "firstname", index, author.firstname());
-
-            if let Some(middlename) = author.middlename() {
-                set_nth_attribute(parser, "middlename", index, middlename);
-            }
-
-            if let Some(lastname) = author.lastname() {
-                set_nth_attribute(parser, "lastname", index, lastname);
-            }
-
-            if let Some(email) = author.email() {
-                set_nth_attribute(parser, "email", index, email);
-            }
+        // Populate the derived author document attributes from the implicit
+        // author line – the unsuffixed first-author keys (`author`,
+        // `firstname`, ...), the `author_N` companions, the `_1` companions
+        // (mirrored once a second author appears), and the combined,
+        // comma-joined `authors` attribute – exactly as Asciidoctor's
+        // `process_authors` does. Setting them here, during header parsing,
+        // keeps `{author}`, `{authors}`, etc. available to later header lines.
+        if !authors.is_empty() {
+            set_author_metadata(parser, &authors);
         }
 
         Self { authors, source }
@@ -112,16 +109,6 @@ fn split_authors(data: &str) -> Vec<&str> {
 
     authors.push(&data[start..]);
     authors
-}
-
-fn set_nth_attribute<V: AsRef<str>>(parser: &mut Parser, name: &str, index: usize, value: V) {
-    let name = if index == 0 {
-        name.to_string()
-    } else {
-        format!("{name}_{count}", count = index + 1)
-    };
-
-    parser.set_attribute_by_value_from_header(name, value);
 }
 
 impl<'src> HasSpan<'src> for AuthorLine<'src> {
@@ -874,6 +861,29 @@ mod tests {
             InterpretedValue::Value("jane@example.com")
         );
 
+        // First author, also exposed under explicit `_1`-suffixed names because
+        // more than one author is present.
+        assert_eq!(
+            parser.attribute_value("author_1"),
+            InterpretedValue::Value("Jane Smith")
+        );
+        assert_eq!(
+            parser.attribute_value("firstname_1"),
+            InterpretedValue::Value("Jane")
+        );
+        assert_eq!(
+            parser.attribute_value("lastname_1"),
+            InterpretedValue::Value("Smith")
+        );
+        assert_eq!(
+            parser.attribute_value("authorinitials_1"),
+            InterpretedValue::Value("JS")
+        );
+        assert_eq!(
+            parser.attribute_value("email_1"),
+            InterpretedValue::Value("jane@example.com")
+        );
+
         // Second author
         assert_eq!(
             parser.attribute_value("author_2"),
@@ -896,13 +906,48 @@ mod tests {
             InterpretedValue::Value("john@example.com")
         );
 
-        // Verify middlename attributes are unset for both authors.
+        // Verify middlename attributes are unset for all authors.
         assert_eq!(
             parser.attribute_value("middlename"),
             InterpretedValue::Unset
         );
         assert_eq!(
+            parser.attribute_value("middlename_1"),
+            InterpretedValue::Unset
+        );
+        assert_eq!(
             parser.attribute_value("middlename_2"),
+            InterpretedValue::Unset
+        );
+
+        // The combined, comma-joined `authors` attribute lists every author.
+        assert_eq!(
+            parser.attribute_value("authors"),
+            InterpretedValue::Value("Jane Smith, John Doe")
+        );
+    }
+
+    #[test]
+    fn single_author_sets_combined_authors_but_no_indexed_names() {
+        let mut parser = Parser::default();
+        let _doc = parser.parse("= Document Title\nKismet R. Lee <kismet@asciidoctor.org>");
+
+        // For a single author, the combined `authors` attribute equals the
+        // primary `author` attribute ...
+        assert_eq!(
+            parser.attribute_value("authors"),
+            InterpretedValue::Value("Kismet R. Lee")
+        );
+
+        // ... and no `_1`-suffixed names are derived (those appear only when
+        // more than one author is present).
+        assert_eq!(parser.attribute_value("author_1"), InterpretedValue::Unset);
+        assert_eq!(
+            parser.attribute_value("firstname_1"),
+            InterpretedValue::Unset
+        );
+        assert_eq!(
+            parser.attribute_value("lastname_1"),
             InterpretedValue::Unset
         );
     }
