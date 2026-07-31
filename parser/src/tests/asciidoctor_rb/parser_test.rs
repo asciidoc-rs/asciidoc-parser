@@ -63,13 +63,12 @@
 //!   [`AuthorLine::parse`](crate::document::AuthorLine), asserting on the
 //!   parsed [`Author`](crate::document::Author) list (name / firstname /
 //!   middlename / lastname / email / initials). This crate derives the combined
-//!   `authors` (comma-joined) attribute, the `authorcount` count, and – when
-//!   more than one author is present – the first author's `_1`-suffixed names
-//!   (`author_1`, ...) as well as the unsuffixed forms. The one divergence is
-//!   that an author-less document leaves `authorcount` unset rather than
-//!   materializing Ruby's default of `0`, so that case is left
-//!   `non_normative!`. The Ruby `metadata.size` (hash cardinality) has no crate
-//!   analog and is likewise not asserted.
+//!   `authors` (comma-joined) attribute, the `authorcount` count (including `0`
+//!   for an author-less document, via the built-in default), and – when more
+//!   than one author is present – the first author's `_1`-suffixed names
+//!   (`author_1`, ...) as well as the unsuffixed forms. The Ruby
+//!   `metadata.size` (hash cardinality) has no crate analog and is not
+//!   asserted.
 //! * **`parse_header_metadata`** revision parsing — driven through a full
 //!   [`Parser::parse`] over the header (title, author line, revision line) and
 //!   asserting on `doc.header().revision_line()`'s `revnumber()` / `revdate()`
@@ -1379,9 +1378,10 @@ fn replace_implicit_authors_if_value_of_authors_attribute_does_not_match_compute
     );
 }
 
-// This crate does not derive an `authorcount` document attribute.
-non_normative!(
-    r#"
+#[test]
+fn sets_authorcount_to_0_if_document_has_no_authors() {
+    verifies!(
+        r#"
   test 'sets authorcount to 0 if document has no authors' do
     input = ''
     doc = empty_document
@@ -1390,6 +1390,34 @@ non_normative!(
     assert_equal 0, metadata['authorcount']
   end
 
+"#
+    );
+
+    // A document with no authors reports `authorcount` as `0`, matching
+    // Asciidoctor. The count resolves through the built-in `authorcount`
+    // default (see `built_in_attrs`); the header parser materializes an
+    // explicit value only for a non-zero count.
+    let doc = Parser::default().parse("");
+
+    assert_eq!(
+        doc.attribute_value("authorcount"),
+        InterpretedValue::Value("0")
+    );
+
+    // The same holds for a document that has a header but no author line.
+    let doc = Parser::default().parse("= Document Title\n\nBody.");
+
+    assert_eq!(
+        doc.attribute_value("authorcount"),
+        InterpretedValue::Value("0")
+    );
+}
+
+// This crate does not surface Asciidoctor's header-metadata hash, so there is
+// no analog for asserting its cardinality when `parse_header_metadata` is
+// invoked without a document.
+non_normative!(
+    r#"
   test 'returns empty hash if document has no authors and invoked without document' do
     metadata, _ = parse_header_metadata ''
     assert_empty metadata
