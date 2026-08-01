@@ -821,12 +821,12 @@ fn err_empty_block_anchor() {
         Block::Simple(SimpleBlock {
             content: Content {
                 original: Span {
-                    data: "[[]]\nThis paragraph gets a lot of attention.",
-                    line: 1,
+                    data: "This paragraph gets a lot of attention.",
+                    line: 2,
                     col: 1,
-                    offset: 0,
+                    offset: 5,
                 },
-                rendered: "[[]]\nThis paragraph gets a lot of attention.",
+                rendered: "This paragraph gets a lot of attention.",
             },
             source: Span {
                 data: "[[]]\nThis paragraph gets a lot of attention.",
@@ -858,7 +858,7 @@ fn err_empty_block_anchor() {
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
     assert_eq!(
         mi.item.rendered_content(),
-        Some("[[]]\nThis paragraph gets a lot of attention.")
+        Some("This paragraph gets a lot of attention.")
     );
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
@@ -883,6 +883,39 @@ fn err_empty_block_anchor() {
             offset: 45
         }
     );
+}
+
+#[test]
+fn terminal_empty_block_anchor_does_not_spin() {
+    // A lone empty `[[]]` anchor at the end of a block scope names nothing and
+    // decorates no block, so it is consumed (dropped) and yields no block.
+    // Regression: an empty anchor consumed into empty metadata with no block
+    // following once returned `NoMatch` on a non-blank source, which the
+    // block-collection loop leaves unadvanced – spinning forever.
+    let doc = Parser::default().parse("--\nBlock content\n[[]]\n--\n");
+
+    let block = doc.child_blocks().next().unwrap();
+    assert_eq!(block.raw_context().deref(), "open");
+
+    // Only the paragraph survives inside the open block; the trailing `[[]]`
+    // produces nothing.
+    let mut inner = block.child_blocks();
+    assert_eq!(
+        inner.next().unwrap().rendered_content(),
+        Some("Block content")
+    );
+    assert!(inner.next().is_none());
+
+    assert_eq!(doc.child_blocks().count(), 1);
+}
+
+#[test]
+fn lone_empty_block_anchor_document_does_not_spin() {
+    // An empty `[[]]` anchor as the entire document body is consumed and
+    // produces no block (rather than hanging or rendering the literal `[[]]`).
+    let doc = Parser::default().parse("[[]]\n");
+
+    assert_eq!(doc.child_blocks().count(), 0);
 }
 
 #[test]
