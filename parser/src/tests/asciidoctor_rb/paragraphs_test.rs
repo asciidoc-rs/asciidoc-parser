@@ -3596,7 +3596,9 @@ mod custom {
         // threshold). This crate records it as a single `WarningSeverity::Debug`
         // warning, observable via `Document::warnings()`. The paragraph keeps
         // its default context; the style `foo` is retained but otherwise
-        // ignored.
+        // ignored. The warning anchors at the paragraph's first content line
+        // (`bar`, line 2) – not the `[foo]` style line above it – matching the
+        // `line 2` Asciidoctor reports.
         let doc = Parser::default().parse("[foo]\nbar");
 
         let warning = doc.warnings().next().unwrap();
@@ -3605,10 +3607,10 @@ mod custom {
             warning,
             &Warning {
                 source: Span {
-                    data: "[foo]\nbar",
-                    line: 1,
+                    data: "bar",
+                    line: 2,
                     col: 1,
-                    offset: 0,
+                    offset: 6,
                 },
                 warning: WarningType::UnknownBlockStyle("paragraph".to_string(), "foo".to_string()),
             }

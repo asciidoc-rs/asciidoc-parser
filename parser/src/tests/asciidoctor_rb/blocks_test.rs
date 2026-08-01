@@ -4722,8 +4722,9 @@ mod custom_blocks {
         // threshold). This crate records it as a single `WarningSeverity::Debug`
         // warning, observable via `Document::warnings()`. The block keeps its
         // default `open` context; the style `foo` is retained but otherwise
-        // ignored. The warning anchors at the block (the `[foo]` line), naming
-        // the offending style directly.
+        // ignored. The warning anchors at the block's delimiter line (the `--`,
+        // line 2) – not the `[foo]` style line above it – matching the `line 2`
+        // Asciidoctor reports, and naming the offending style directly.
         let doc = Parser::default().parse("[foo]\n--\nbar\n--\n");
 
         let warning = doc.warnings().next().unwrap();
@@ -4732,10 +4733,10 @@ mod custom_blocks {
             warning,
             &Warning {
                 source: Span {
-                    data: "[foo]\n--\nbar\n--",
-                    line: 1,
+                    data: "--",
+                    line: 2,
                     col: 1,
-                    offset: 0,
+                    offset: 6,
                 },
                 warning: WarningType::UnknownBlockStyle("open".to_string(), "foo".to_string()),
             }
