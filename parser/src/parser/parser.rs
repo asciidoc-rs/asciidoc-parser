@@ -163,11 +163,13 @@ pub struct Parser {
     /// which only creates sections when the parent context is the document
     /// or a section). A discrete heading, by contrast, is an ordinary block
     /// and remains valid in these contexts, so it is not suppressed by this
-    /// flag. The flag is saved and restored around each delimited-block
-    /// body so nesting is handled correctly. An AsciiDoc table cell is a
-    /// nested document (see
-    /// [`nested_document_depth`](Self::nested_document_depth)) where sections
-    /// are allowed, so it deliberately does not set this flag.
+    /// flag. The flag is saved and restored around each delimited-block body so
+    /// nesting is handled correctly. An AsciiDoc table cell is a nested
+    /// document
+    /// (see [`nested_document_depth`](Self::nested_document_depth)) where
+    /// sections are again allowed, so the cell parse clears this flag (also
+    /// saved and restored) rather than inheriting a delimited-block context
+    /// from a table that happens to sit inside one.
     pub(crate) in_delimited_block: bool,
 
     /// True while the principal text of a bibliography list item is being
