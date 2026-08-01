@@ -2496,12 +2496,16 @@ non_normative!(
 mod discrete_heading {
     use crate::tests::prelude::*;
 
-    // NOTE: A `[float]`/`[discrete]` style on a level-0 (`=`) heading is not
-    // recognized as a discrete heading — the crate leaves the line as a
-    // paragraph. (Discrete headings at `==`+ are supported, as the tests below
-    // show.) These three level-0 tests are out of scope.
-    non_normative!(
-        r##"
+    // A `[float]`/`[discrete]` style on a level-0 (`=`) heading suppresses the
+    // doctitle promotion and yields a level-0 discrete (floating-title) heading,
+    // just as `==`+ discrete headings do at their own level. As with
+    // the `==`+ cases below, the crate models the heading as a
+    // `SectionType::Discrete` block and checks the normative facts against the
+    // AST rather than reproducing the Ruby `class`/following-sibling HTML shape.
+    #[test]
+    fn should_create_discrete_heading_instead_of_section_if_style_is_float() {
+        verifies!(
+            r##"
     test 'should create discrete heading instead of section if style is float' do
       input = <<~'EOS'
       [float]
@@ -2520,7 +2524,22 @@ mod discrete_heading {
     end
 
 "##
-    );
+        );
+
+        let doc = Parser::default().parse("[float]\n= Independent Heading!\n\nnot in section\n");
+
+        // The level-0 heading must not have been promoted to the document title.
+        assert!(doc.header().title().is_none());
+        assert_eq!(doc.doctitle(), None);
+
+        let sec = first_section(&doc);
+        assert_eq!(sec.section_type(), SectionType::Discrete);
+        assert_eq!(sec.level(), 0);
+        assert_eq!(sec.id(), Some("_independent_heading"));
+        assert_eq!(sec.section_title(), "Independent Heading!");
+        assert!(sec.child_blocks().next().is_none());
+        assert!(rendered_paragraphs(&doc).contains(&"not in section".to_string()));
+    }
 
     // The crate marks a discrete heading with `SectionType::Discrete` (verified
     // via the AST); its virtual DOM renders it like a normal section rather than
@@ -2592,10 +2611,15 @@ mod discrete_heading {
         assert_eq!(sec.section_title(), " Heading ");
     }
 
-    // Level-0 shorthand-style discrete headings: out of scope for the same
-    // reason as the first test in this context.
-    non_normative!(
-        r##"
+    // Level-0 discrete headings using the shorthand attribute form
+    // (`[float.role#id]` / `[discrete.role#id]`): the `#id` supplies the heading
+    // ID, the `.role` adds a role, and the level-0 doctitle promotion is still
+    // suppressed. As above, the normative facts are checked against
+    // the AST rather than the Ruby `class`/following-sibling HTML shape.
+    #[test]
+    fn should_create_discrete_heading_if_style_is_float_with_shorthand_role_and_id() {
+        verifies!(
+            r##"
     test 'should create discrete heading if style is float with shorthand role and id' do
       input = <<~'EOS'
       [float.independent#first]
@@ -2613,6 +2637,28 @@ mod discrete_heading {
       assert_xpath '/h1/following-sibling::*[@class="paragraph"]/p[text()="not in section"]', output, 1
     end
 
+"##
+        );
+
+        let doc = Parser::default()
+            .parse("[float.independent#first]\n= Independent Heading!\n\nnot in section\n");
+
+        assert!(doc.header().title().is_none());
+
+        let sec = first_section(&doc);
+        assert_eq!(sec.section_type(), SectionType::Discrete);
+        assert_eq!(sec.level(), 0);
+        assert_eq!(sec.id(), Some("first"));
+        assert_eq!(sec.roles(), vec!["independent"]);
+        assert_eq!(sec.section_title(), "Independent Heading!");
+        assert!(sec.child_blocks().next().is_none());
+        assert!(rendered_paragraphs(&doc).contains(&"not in section".to_string()));
+    }
+
+    #[test]
+    fn should_create_discrete_heading_if_style_is_discrete_with_shorthand_role_and_id() {
+        verifies!(
+            r##"
     test 'should create discrete heading if style is discrete with shorthand role and id' do
       input = <<~'EOS'
       [discrete.independent#first]
@@ -2631,7 +2677,22 @@ mod discrete_heading {
     end
 
 "##
-    );
+        );
+
+        let doc = Parser::default()
+            .parse("[discrete.independent#first]\n= Independent Heading!\n\nnot in section\n");
+
+        assert!(doc.header().title().is_none());
+
+        let sec = first_section(&doc);
+        assert_eq!(sec.section_type(), SectionType::Discrete);
+        assert_eq!(sec.level(), 0);
+        assert_eq!(sec.id(), Some("first"));
+        assert_eq!(sec.roles(), vec!["independent"]);
+        assert_eq!(sec.section_title(), "Independent Heading!");
+        assert!(sec.child_blocks().next().is_none());
+        assert!(rendered_paragraphs(&doc).contains(&"not in section".to_string()));
+    }
 
     #[test]
     fn discrete_heading_should_be_a_block_with_context_floating_title() {

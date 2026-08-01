@@ -70,7 +70,7 @@ impl<'src> SectionBlock<'src> {
         // while a negative offset pulls them up. A heading whose effective level
         // is below 1 is rejected as an unsupported level-0 heading (the warning
         // is raised inside `parse_title_line`).
-        let level_and_title = parse_title_line(source, parser.level_offset(), warnings)?;
+        let level_and_title = parse_title_line(source, parser.level_offset(), discrete, warnings)?;
 
         // Take a snapshot of `sectids` value before reading child blocks because
         // the value might be altered while parsing.
@@ -384,7 +384,9 @@ impl<'src> SectionBlock<'src> {
     /// signs represents level 1). A section marker can range from two to six
     /// equal signs and must be followed by a space.
     ///
-    /// This function will return an integer between 1 and 5.
+    /// This function will return an integer between 1 and 5 for an ordinary
+    /// section. A `discrete` (floating) heading may also return 0, for a
+    /// level-0 (`=`) discrete heading rendered as an `<h1>` floating title.
     pub fn level(&self) -> usize {
         self.level
     }
@@ -689,12 +691,15 @@ fn match_embedded_section_anchor<'src>(
 /// * A bare `=` (syntactic level 0) that no positive offset lifts to level 1 or
 ///   beyond has no section representation; it is rejected as an unsupported
 ///   level-0 heading (recording a warning), preserving the single-document-
-///   title rule.
+///   title rule. A `discrete` heading is exempt: it may occupy level 0 (an
+///   `<h1>` floating title) and so is not rejected there.
 /// * Any other heading whose effective level falls outside the supported range
-///   is clamped to the nearest valid level and a warning is recorded.
+///   is clamped to the nearest valid level and a warning is recorded. The lower
+///   bound is [`MIN_SECTION_LEVEL`], or 0 for a `discrete` heading.
 fn parse_title_line<'src>(
     source: Span<'src>,
     offset: i32,
+    discrete: bool,
     warnings: &mut Vec<Warning<'src>>,
 ) -> Option<MatchedItem<'src, (usize, Span<'src>)>> {
     let mi = source.take_non_empty_line()?;
@@ -743,7 +748,11 @@ fn parse_title_line<'src>(
     // un-offset level-0 heading is declined, rather than clamping it into a
     // section. This is checked before the whitespace requirement below so a
     // spaceless `=blah` is still reported, matching a bare level-0 heading.
-    if syntactic_level == 0 && effective_level < MIN_SECTION_LEVEL {
+    //
+    // A `discrete`/`float` heading is exempt: it renders as a floating `<h1>`,
+    // not the document title, so a level-0 discrete heading is legitimate and is
+    // carried through with level 0 rather than rejected.
+    if !discrete && syntactic_level == 0 && effective_level < MIN_SECTION_LEVEL {
         warnings.push(Warning {
             source: source.take_normalized_line().item,
             warning: WarningType::Level0SectionHeadingNotSupported,
@@ -761,18 +770,22 @@ fn parse_title_line<'src>(
     let title_span = strip_symmetric_title_close(title.after, marker_char, count);
 
     // A real section heading whose offset-adjusted level lands outside the
-    // supported 1..=5 range is clamped into range and reported, rather than
-    // producing an out-of-range (or, under a hostile offset, absurd) level.
-    let level = if effective_level < MIN_SECTION_LEVEL {
+    // supported range is clamped into range and reported, rather than producing
+    // an out-of-range (or, under a hostile offset, absurd) level. The lower
+    // bound is [`MIN_SECTION_LEVEL`] normally, but 0 for a `discrete` heading,
+    // which may legitimately occupy level 0.
+    let min_level = if discrete { 0 } else { MIN_SECTION_LEVEL };
+
+    let level = if effective_level < min_level {
         warnings.push(Warning {
             source: source.take_normalized_line().item,
             warning: WarningType::SectionHeadingLevelOutOfRange(
                 effective_level,
-                MIN_SECTION_LEVEL as usize,
+                min_level as usize,
             ),
             origin: None,
         });
-        MIN_SECTION_LEVEL as usize
+        min_level as usize
     } else if effective_level > MAX_SECTION_LEVEL {
         warnings.push(Warning {
             source: source.take_normalized_line().item,
@@ -848,9 +861,14 @@ fn peer_or_ancestor_section<'src>(
     // those warnings once – either as a child block of this section or in the
     // enclosing scope once this section ends.
     let mut ignored_warnings = vec![];
+
+    // A `discrete` heading has already been excluded above, so the boundary
+    // look-ahead never needs the level-0 exemption; pass `discrete = false` so a
+    // bare `=` here is treated as ordinary content, exactly as before.
     if let Some(mi) = parse_title_line(
         source_after_metadata,
         parser.level_offset(),
+        false,
         &mut ignored_warnings,
     ) {
         let found_level = mi.item.0;
@@ -4109,6 +4127,27 @@ mod tests {
                 mi.item.section_title(),
                 "Discrete with <strong>bold</strong> text"
             );
+            assert_eq!(mi.item.section_type(), SectionType::Discrete);
+            assert!(warnings.is_empty());
+        }
+
+        #[test]
+        fn level_0() {
+            // A `[discrete]`/`[float]` style makes a level-0 (`=`) heading a
+            // discrete floating title rather than the (rejected) document title,
+            // so it parses to a level-0 discrete section with no warning.
+            let mut parser = Parser::default();
+            let mut warnings: Vec<crate::warnings::Warning<'_>> = vec![];
+
+            let mi = crate::blocks::SectionBlock::parse(
+                &BlockMetadata::new("[discrete]\n= Level 0 Discrete"),
+                &mut parser,
+                &mut warnings,
+            )
+            .unwrap();
+
+            assert_eq!(mi.item.level(), 0);
+            assert_eq!(mi.item.section_title(), "Level 0 Discrete");
             assert_eq!(mi.item.section_type(), SectionType::Discrete);
             assert!(warnings.is_empty());
         }

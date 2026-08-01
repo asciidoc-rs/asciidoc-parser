@@ -233,6 +233,7 @@ impl<'src> Header<'src> {
             } else if title.is_none()
                 && line.starts_with('[')
                 && line.ends_with(']')
+                && !is_discrete_metadata_line(line)
                 && document_title_follows_block_metadata(line_mi.after)
                 && let Some((metadata, metadata_warnings)) = parse_document_metadata(line, parser)
             {
@@ -662,6 +663,11 @@ fn document_title_marker(line: Span<'_>) -> Option<char> {
 /// form) stops the scan without matching, so the run of foldable lines is only
 /// ever a contiguous prefix of well-formed metadata lines terminated by the
 /// title.
+///
+/// A `[discrete]`/`[float]` style anywhere in the stacked metadata also stops
+/// the scan without matching: it marks the following heading as a discrete
+/// floating title rather than the document title, so neither the metadata nor
+/// the heading is folded here – both are left for the block parser.
 fn document_title_follows_block_metadata(after: Span<'_>) -> bool {
     let mut next = after;
 
@@ -677,10 +683,62 @@ fn document_title_follows_block_metadata(after: Span<'_>) -> bool {
             return false;
         }
 
+        if is_discrete_metadata_line(line) {
+            return false;
+        }
+
         next = line_mi.after;
     }
 
     false
+}
+
+/// Reports whether `line` – already known to be a bracket-delimited
+/// document-metadata line – carries a `discrete` or `float` block style.
+///
+/// Such a style marks a following level-0 (`=`) heading as a discrete floating
+/// title rather than the document title, so the header must decline to fold
+/// both the metadata and the heading and instead leave them for the block
+/// parser, which produces a `SectionType::Discrete` heading. Mirrors
+/// `BlockMetadata::is_discrete` for the block-parser side.
+///
+/// The detection is purely structural – the attribute list is *not* parsed –
+/// so an embedded `{counter:…}` in an attribute *value* is never evaluated at
+/// header time (the same invariant [`document_title_follows_block_metadata`]
+/// relies on; see the `rejected_metadata_run_does_not_fire_counter` test). This
+/// is safe because a block style is always the first positional attribute's
+/// leading shorthand token – a bare name that can never itself be a counter.
+fn is_discrete_metadata_line(line: Span<'_>) -> bool {
+    if !is_document_metadata_line(line) {
+        return false;
+    }
+
+    // Drop the enclosing square brackets.
+    let inner = line.slice(1..line.len() - 1).data();
+
+    // A `[[id]]` / `[[id,reftext]]` block anchor still has its inner brackets
+    // and carries no block style.
+    if inner.starts_with('[') {
+        return false;
+    }
+
+    // The block style is the leading shorthand token of the first positional
+    // attribute: a run of name characters terminated by a shorthand delimiter
+    // (`.`, `#`, `%`), a comma, whitespace, or the end of the attribute. Read it
+    // off the raw text without parsing the attribute list.
+    let token_len = inner
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .unwrap_or(inner.len());
+    let token = &inner[..token_len];
+
+    if token != "discrete" && token != "float" {
+        return false;
+    }
+
+    // The token is a block style only when it is not actually the name of a
+    // named attribute (`[discrete=…]`): the character terminating it, if any,
+    // must not be `=`.
+    !inner[token_len..].starts_with('=')
 }
 
 /// Reports whether `line` is a block attribute line that this crate folds into
