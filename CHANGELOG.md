@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.3](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.2...v0.29.3)
+_01 August 2026_
+
+### Fixed
+
+* Set the combined `authors` attribute from a single `:author:` entry ([#1032](https://github.com/asciidoc-rs/asciidoc-parser/pull/1032))
+* Treat a section heading inside a delimited block as literal content ([#1030](https://github.com/asciidoc-rs/asciidoc-parser/pull/1030))
+* Coerce a leveloffset-shifted level-0 heading to the document title ([#1028](https://github.com/asciidoc-rs/asciidoc-parser/pull/1028))
+* Ignore an empty block anchor `[[]]` instead of rendering it literally ([#1026](https://github.com/asciidoc-rs/asciidoc-parser/pull/1026))
+* Recognize a block title above the document title as document metadata ([#1029](https://github.com/asciidoc-rs/asciidoc-parser/pull/1029))
+
 ## [0.29.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.1...v0.29.2)
 _01 August 2026_
 
