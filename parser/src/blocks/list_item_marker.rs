@@ -229,11 +229,10 @@ impl<'src> ListItemMarker<'src> {
             if let Err(_duplicate_error) =
                 parser.register_ref(id, reftext.as_deref(), RefType::Anchor)
             {
-                warnings.push(Warning {
-                    source: term.original(),
-                    warning: WarningType::DuplicateId(id.to_string()),
-                    origin: None,
-                });
+                warnings.push(Warning::new(
+                    term.original(),
+                    WarningType::DuplicateId(id.to_string()),
+                ));
             }
         }
 

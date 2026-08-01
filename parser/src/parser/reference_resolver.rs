@@ -223,11 +223,10 @@ impl<'src> ReferenceWarnings<'src> {
             kind: ReferenceWarningKind::Unresolved,
         });
 
-        self.doc.push(Warning {
+        self.doc.push(Warning::new(
             source,
-            warning: WarningType::PossibleInvalidReference(target.to_string()),
-            origin: None,
-        });
+            WarningType::PossibleInvalidReference(target.to_string()),
+        ));
     }
 
     /// Folds warnings gathered from a privately-owned sub-parse – the blocks of
@@ -244,11 +243,11 @@ impl<'src> ReferenceWarnings<'src> {
     ) {
         dest.host.extend(self.host);
 
-        dest.doc.extend(self.doc.into_iter().map(|warning| Warning {
-            source: anchor,
-            warning: warning.warning,
-            origin: warning.origin,
-        }));
+        dest.doc.extend(
+            self.doc
+                .into_iter()
+                .map(|warning| Warning::with_origin(anchor, warning.warning, warning.origin)),
+        );
     }
 }
 

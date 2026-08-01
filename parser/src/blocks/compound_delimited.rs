@@ -209,11 +209,7 @@ impl<'src> CompoundDelimitedBlock<'src> {
                 let mut warnings = maw_blocks.warnings;
                 warnings.insert(
                     0,
-                    Warning {
-                        source: delimiter.item,
-                        warning: WarningType::UnterminatedDelimitedBlock,
-                        origin: None,
-                    },
+                    Warning::new(delimiter.item, WarningType::UnterminatedDelimitedBlock),
                 );
                 warnings
             } else {
