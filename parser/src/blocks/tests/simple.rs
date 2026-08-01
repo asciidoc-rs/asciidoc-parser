@@ -821,12 +821,12 @@ fn err_empty_block_anchor() {
         Block::Simple(SimpleBlock {
             content: Content {
                 original: Span {
-                    data: "[[]]\nThis paragraph gets a lot of attention.",
-                    line: 1,
+                    data: "This paragraph gets a lot of attention.",
+                    line: 2,
                     col: 1,
-                    offset: 0,
+                    offset: 5,
                 },
-                rendered: "[[]]\nThis paragraph gets a lot of attention.",
+                rendered: "This paragraph gets a lot of attention.",
             },
             source: Span {
                 data: "[[]]\nThis paragraph gets a lot of attention.",
@@ -858,7 +858,7 @@ fn err_empty_block_anchor() {
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
     assert_eq!(
         mi.item.rendered_content(),
-        Some("[[]]\nThis paragraph gets a lot of attention.")
+        Some("This paragraph gets a lot of attention.")
     );
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
