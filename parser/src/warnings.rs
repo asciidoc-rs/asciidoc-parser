@@ -478,11 +478,22 @@ impl WarningType {
     ///
     /// Almost every type is [`WarningSeverity::Warning`]; the exceptions are
     /// low-severity diagnostics (such as [`UnknownBlockStyle`]) that a host
-    /// suppresses by default. [`Warning::new`] uses this to stamp each
-    /// constructed [`Warning`] with its severity.
+    /// suppresses by default. Each constructed [`Warning`] is stamped with this
+    /// value in its [`severity`](Warning::severity) field, so reading that
+    /// field is usually more convenient; this accessor exists for when a
+    /// host holds a bare [`WarningType`].
+    ///
+    /// ```
+    /// use asciidoc_parser::warnings::{WarningSeverity, WarningType};
+    ///
+    /// assert_eq!(
+    ///     WarningType::EmptyAttributeValue.severity(),
+    ///     WarningSeverity::Warning,
+    /// );
+    /// ```
     ///
     /// [`UnknownBlockStyle`]: Self::UnknownBlockStyle
-    pub(crate) fn severity(&self) -> WarningSeverity {
+    pub fn severity(&self) -> WarningSeverity {
         match self {
             WarningType::UnknownBlockStyle(..) => WarningSeverity::Debug,
             _ => WarningSeverity::Warning,
