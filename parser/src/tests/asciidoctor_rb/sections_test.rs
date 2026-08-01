@@ -2244,12 +2244,11 @@ mod nesting {
         );
     }
 
-    // NOTE: Special sections (glossary, bibliography, etc.) and the rule that
-    // certain kinds do not support nested sections are not modeled, so the crate
-    // emits no error for subsections found within them. These two tests are out
-    // of scope.
-    non_normative!(
-        r##"
+    #[test]
+    fn should_log_error_if_subsections_are_found_in_special_sections_in_article_that_do_not_support_subsections()
+     {
+        verifies!(
+            r##"
     test 'should log error if subsections are found in special sections in article that do not support subsections' do
       input = <<~'EOS'
       = Document Title
@@ -2291,6 +2290,38 @@ mod nesting {
       end
     end
 
+"##
+        );
+
+        let doc = Parser::default().parse(
+            "= Document Title\n\n== Section\n\n=== Subsection of Section\n\nallowed\n\n[appendix]\n== Appendix\n\n=== Subsection of Appendix\n\nallowed\n\n[glossary]\n== Glossary\n\n=== Subsection of Glossary\n\nnot allowed\n\n[bibliography]\n== Bibliography\n\n=== Subsection of Bibliography\n\nnot allowed\n",
+        );
+
+        // A `glossary` and a `bibliography` section do not support nested
+        // sections, so each subsection found directly within one is reported, in
+        // document order. An `appendix` section – and an ordinary section –
+        // support subsections and raise no such error.
+        let warnings: Vec<_> = doc.warnings().collect();
+
+        let special_warnings: Vec<&str> = warnings
+            .iter()
+            .filter_map(|w| match &w.warning {
+                WarningType::SpecialSectionCannotHaveNestedSections(style) => Some(style.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(special_warnings, vec!["glossary", "bibliography"]);
+    }
+
+    // NOTE: The book variant relies on the `book` doctype and its level-0 (`=`)
+    // special sections (colophon, dedication, glossary, bibliography). The crate
+    // does not model the book doctype – a `=` heading outside the document
+    // header is declined as an unsupported level-0 heading rather than parsed as
+    // a section – so the nested-section rule can't be exercised for it. This
+    // test stays out of scope until the book doctype is supported.
+    non_normative!(
+        r##"
     test 'should log error if subsections are found in special sections in book that do not support subsections' do
       input = <<~'EOS'
       = Document Title
