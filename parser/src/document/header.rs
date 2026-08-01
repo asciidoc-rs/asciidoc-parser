@@ -1151,7 +1151,17 @@ fn resolve_authors(
     if attribute_string(parser, "author").is_some()
         && let Some(author) = author_attribute
     {
-        return vec![author.with_email(attribute_string(parser, "email"))];
+        let author = author.with_email(attribute_string(parser, "email"));
+
+        // Mirror Asciidoctor's `process_authors`, which sets the combined
+        // `authors` attribute to the single author's name. The remaining derived
+        // keys (`firstname`, `authorinitials`, …) were populated inline as the
+        // `:author:` entry was parsed – deliberately, so an explicit
+        // `:authorinitials:` override survives – but `authors` was still left
+        // unset there (see issue #1027).
+        parser.set_attribute_by_value_from_header("authors", author.name());
+
+        return vec![author];
     }
 
     // A semicolon-separated `authors` attribute entry contributes one author
@@ -2065,6 +2075,54 @@ mod tests {
             doc.attribute_value("authorinitials"),
             InterpretedValue::Value("DW")
         );
+    }
+
+    #[test]
+    fn single_author_entry_sets_combined_authors_attribute() {
+        // A single `:author:` entry sets the combined `authors` attribute to the
+        // author's name, matching Asciidoctor (`{authors}` equals `{author}`),
+        // just as the implicit author line already does.
+        let doc = Parser::default().parse(":author: Doc Writer\n\nBody.");
+
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Doc Writer")
+        );
+        assert_eq!(
+            doc.attribute_value("authors"),
+            InterpretedValue::Value("Doc Writer")
+        );
+
+        // The name is reconstructed the same way in the `authors` string, and an
+        // explicit `:authorinitials:` override is still preserved (the reason
+        // this path populates `authors` inline rather than via the shared
+        // metadata routine).
+        let doc = Parser::default()
+            .parse("= T\n:authorinitials: DOC\n:author: Kismet R. Chameleon\n\nBody.");
+
+        assert_eq!(
+            doc.attribute_value("author"),
+            InterpretedValue::Value("Kismet R. Chameleon")
+        );
+        assert_eq!(
+            doc.attribute_value("authors"),
+            InterpretedValue::Value("Kismet R. Chameleon")
+        );
+        assert_eq!(
+            doc.attribute_value("authorinitials"),
+            InterpretedValue::Value("DOC")
+        );
+    }
+
+    #[test]
+    fn author_unset_after_entry_leaves_authors_unset() {
+        // A later `:author!:` removes the single author, so the combined
+        // `authors` attribute must not be materialized from the earlier entry.
+        let doc = Parser::default().parse(":author: Jane Doe\n:author!:\n\nBody.");
+
+        assert_eq!(doc.attribute_value("author"), InterpretedValue::Unset);
+        assert_eq!(doc.attribute_value("authors"), InterpretedValue::Unset);
+        assert!(doc.authors().is_empty());
     }
 
     #[test]
