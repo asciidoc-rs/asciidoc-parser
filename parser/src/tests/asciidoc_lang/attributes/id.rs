@@ -71,12 +71,12 @@ All the language requires in this case is that the value be non-empty.
             Block::Simple(SimpleBlock {
                 content: Content {
                     original: Span {
-                        data: "[[]]\nThis paragraph gets a lot of attention.",
-                        line: 1,
+                        data: "This paragraph gets a lot of attention.",
+                        line: 2,
                         col: 1,
-                        offset: 0,
+                        offset: 5,
                     },
-                    rendered: "[[]]\nThis paragraph gets a lot of attention.",
+                    rendered: "This paragraph gets a lot of attention.",
                 },
                 source: Span {
                     data: "[[]]\nThis paragraph gets a lot of attention.",

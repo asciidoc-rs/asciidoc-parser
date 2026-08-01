@@ -4915,12 +4915,6 @@ mod metadata {
         refute_rendered_contains(&doc, "[]");
     }
 
-    // NOTE: divergence from Asciidoctor. An empty block anchor `[[]]` is not
-    // recognized as an (empty) anchor by this crate and is rendered as a
-    // paragraph containing the literal text `[[]]`. Kept `#[ignore]`d with the
-    // Ruby-intended assertions.
-    // TODO: treat an empty block anchor `[[]]` as an ignored anchor.
-    #[ignore]
     #[test]
     fn empty_block_anchor_should_not_appear_in_output() {
         verifies!(

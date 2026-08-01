@@ -123,11 +123,11 @@ impl<'src> std::fmt::Debug for Block<'src> {
 /// Outcome of attempting to parse a single [`Block`].
 ///
 /// Most blocks parse to [`Parsed`](Self::Parsed). [`Dropped`](Self::Dropped)
-/// supports `attribute-missing=drop-line`: when a block-macro target references
-/// a missing attribute, Asciidoctor discards the whole block, which the parser
-/// must distinguish both from a successful parse and from "no block matched"
-/// (so the block-collection loops advance past the dropped source rather than
-/// spinning or mis-parsing it).
+/// covers input that was consumed but yields no block – a drop-line block
+/// macro, or block metadata (such as a lone empty `[[]]` anchor) that decorates
+/// no block – which the parser must distinguish both from a successful parse
+/// and from "no block matched" (so the block-collection loops advance past the
+/// consumed source rather than spinning or mis-parsing it).
 // `Parsed` embeds a `Block`, which is itself a large enum (see the matching
 // allow on `Block`). This outcome is short-lived and returned by value on the
 // hot parse path, so boxing it would just trade the size for an allocation.
@@ -136,10 +136,16 @@ pub(crate) enum BlockParseOutcome<'src> {
     /// A block was parsed.
     Parsed(MatchedItem<'src, Block<'src>>),
 
-    /// The input was recognized as a block macro but dropped at parse time
-    /// because its target referenced a missing attribute under
-    /// `attribute-missing=drop-line`. The contained span is where parsing
-    /// should resume (the dropped block's `after`).
+    /// The input was consumed but yielded no block, so parsing must resume at
+    /// the contained span (where the consumed input ends) rather than treat the
+    /// source as unmatched. Two cases produce this:
+    ///
+    /// * A block macro whose target referenced a missing attribute under
+    ///   `attribute-missing=drop-line`, which Asciidoctor discards entirely.
+    ///
+    /// * Block metadata that named nothing and decorates no block – notably a
+    ///   lone empty `[[]]` anchor at the end of a block scope – which is
+    ///   dropped rather than rendered.
     Dropped(Span<'src>),
 
     /// No block matched. This happens only for empty or all-blank input.
@@ -652,24 +658,39 @@ impl<'src> Block<'src> {
                 SimpleBlock::parse(&metadata, parser)
             };
 
-            if simple_block_mi.is_none() && !metadata.is_empty() {
-                // We have a metadata with no block. Treat it as a simple block but issue a
-                // warning.
+            if simple_block_mi.is_none() {
+                if !metadata.is_empty() {
+                    // We have a metadata with no block. Treat it as a simple block but issue a
+                    // warning.
 
-                warnings.push(Warning {
-                    source: metadata.source,
-                    warning: WarningType::MissingBlockAfterTitleOrAttributeList,
-                    origin: None,
-                });
+                    warnings.push(Warning {
+                        source: metadata.source,
+                        warning: WarningType::MissingBlockAfterTitleOrAttributeList,
+                        origin: None,
+                    });
 
-                // Remove the metadata content so that SimpleBlock will read the title/attrlist
-                // line(s) as regular content. The speculative parse failed, so the
-                // block is re-parsed below with this stripped metadata.
-                metadata.title_source = None;
-                metadata.title = None;
-                metadata.anchor = None;
-                metadata.attrlist = None;
-                metadata.block_start = metadata.source;
+                    // Remove the metadata content so that SimpleBlock will read the title/attrlist
+                    // line(s) as regular content. The speculative parse failed, so the
+                    // block is re-parsed below with this stripped metadata.
+                    metadata.title_source = None;
+                    metadata.title = None;
+                    metadata.anchor = None;
+                    metadata.attrlist = None;
+                    metadata.block_start = metadata.source;
+                } else if !metadata.source.data().is_empty() {
+                    // The metadata scan consumed one or more do-nothing lines
+                    // (e.g. a lone empty `[[]]` anchor) that produced no title,
+                    // anchor, or attribute list, and no block follows them. The
+                    // lines are still consumed, so report the source as dropped
+                    // (resuming at `block_start`) rather than falling through to
+                    // `NoMatch`: a non-blank source left unadvanced would spin
+                    // the block-collection loop. Genuinely empty/blank input
+                    // (nothing consumed) still reaches `NoMatch` below.
+                    return MatchAndWarnings {
+                        item: BlockParseOutcome::Dropped(metadata.block_start),
+                        warnings,
+                    };
+                }
             }
         }
 
