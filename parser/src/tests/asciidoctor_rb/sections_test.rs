@@ -1286,22 +1286,50 @@ mod levels {
             assert_eq!(doc.doctitle(), Some("My Title"));
         }
 
-        // NOTE: A negative `leveloffset` promoting a body heading into the
-        // document title is not modeled — `:leveloffset: -1` above `== Document
-        // Title` leaves it a level-1 section rather than the document title. Out
-        // of scope.
-        non_normative!(
-            r##"
+        // A `:leveloffset:` shift that drives a heading to effective level 0
+        // coerces it to the document title, exactly as a bare `=` would. The
+        // crate models embedded output, which does not frame the doctitle in an
+        // `<h1>`, so the promotion is verified through [`Document::doctitle`]; a
+        // doctitle carries no `id`, matching the `not(@id)` in the Ruby
+        // assertions.
+        #[test]
+        fn document_title_created_from_leveloffset_shift_defined_in_document() {
+            verifies!(
+                r##"
       test 'document title created from leveloffset shift defined in document' do
         assert_xpath "//h1[not(@id)][text() = 'Document Title']", convert_string(%(:leveloffset: -1\n== Document Title))
       end
 
+"##
+            );
+
+            let doc = Parser::default().parse(":leveloffset: -1\n== Document Title");
+            assert_eq!(doc.doctitle(), Some("Document Title"));
+            assert_eq!(doc.header().id(), None);
+            assert!(doc.warnings().next().is_none());
+        }
+
+        #[test]
+        fn document_title_created_from_leveloffset_shift_defined_in_api() {
+            verifies!(
+                r##"
       test 'document title created from leveloffset shift defined in API' do
         assert_xpath "//h1[not(@id)][text() = 'Document Title']", convert_string('== Document Title', attributes: { 'leveloffset' => '-1@' })
       end
 
 "##
-        );
+            );
+
+            // The Ruby `'-1@'` sets `leveloffset` via the API as a soft default
+            // the document may override, which maps to a modification context of
+            // [`ModificationContext::Anywhere`].
+            let doc = Parser::default()
+                .with_intrinsic_attribute("leveloffset", "-1", ModificationContext::Anywhere)
+                .parse("== Document Title");
+            assert_eq!(doc.doctitle(), Some("Document Title"));
+            assert_eq!(doc.header().id(), None);
+            assert!(doc.warnings().next().is_none());
+        }
 
         // NOTE: A document-level ID above the document title sets the `id` on
         // the standalone `<body>`. This crate models embedded output, which has

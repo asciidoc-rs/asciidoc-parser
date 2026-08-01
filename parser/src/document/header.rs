@@ -233,7 +233,7 @@ impl<'src> Header<'src> {
             } else if title.is_none()
                 && line.starts_with('[')
                 && line.ends_with(']')
-                && document_title_follows_block_metadata(source)
+                && document_title_follows_block_metadata(source, parser.level_offset())
                 && let Some((metadata, metadata_warnings)) = parse_document_metadata(line, parser)
             {
                 warnings.extend(metadata_warnings);
@@ -279,14 +279,14 @@ impl<'src> Header<'src> {
                 }
                 source = line_mi.after;
             } else if title.is_none()
-                && let Some(marker) = document_title_marker(line)
+                && let Some((marker, count)) = document_title_marker(line, parser.level_offset())
             {
-                // Strip an optional symmetric close (a trailing ` =` or ` #`
-                // matching the single opening marker), mirroring section titles.
+                // Strip an optional symmetric close (a trailing ` ==` or ` ##`
+                // matching the opening marker run), mirroring section titles.
                 let title_span = crate::blocks::strip_symmetric_title_close(
-                    line.discard(2).discard_whitespace(),
+                    line.discard(count).discard_whitespace(),
                     marker,
-                    1,
+                    count,
                 );
                 saw_implicit_title = true;
 
@@ -630,21 +630,54 @@ fn skip_block_comment<'src>(line: Span<'src>, after: Span<'src>) -> Option<(Span
     Some((next, terminated))
 }
 
-/// Returns the ATX marker character that introduces `line` as a document
-/// title, or `None` if the line is not a document title.
+/// Returns the ATX marker character and its run length for a `line` that is a
+/// document title under the running `level_offset`, or `None` if the line is
+/// not a document title.
 ///
 /// Both the AsciiDoc marker (`=`) and the Markdown-style marker (`#`) are
 /// accepted, mirroring the alternation at the head of Asciidoctor's
-/// section-title regex. The marker character is returned so the caller can
-/// require a symmetric close to use the same marker.
-fn document_title_marker(line: Span<'_>) -> Option<char> {
-    if line.starts_with("= ") {
-        Some('=')
-    } else if line.starts_with("# ") {
-        Some('#')
+/// section-title regex. A line is the document title when its *effective* level
+/// – the syntactic level (marker run length minus one) shifted by
+/// `level_offset` – is 0, mirroring Asciidoctor's `is_next_line_doctitle?`.
+/// With no offset in effect this is exactly a single `=`/`#` marker; a negative
+/// `:leveloffset:` lets a deeper heading (`==` under `-1`) coerce to the
+/// document title, and a positive offset stops a bare `=` from being one.
+///
+/// The marker character and run length are returned so the caller can strip the
+/// markers and require a symmetric close of the same character and width.
+fn document_title_marker(line: Span<'_>, level_offset: i32) -> Option<(char, usize)> {
+    let data = line.data();
+
+    let marker = if data.starts_with('=') {
+        '='
+    } else if data.starts_with('#') {
+        '#'
     } else {
-        None
+        return None;
+    };
+
+    // Count the leading marker run; a run longer than six is not a heading at
+    // all (`======` is the deepest section title).
+    let count = data.chars().take_while(|&c| c == marker).count();
+    if count > 6 {
+        return None;
     }
+
+    // The marker run must be followed by a space, matching the original `"= "` /
+    // `"# "` test (and the whitespace requirement of the section-title regex).
+    if !data[count..].starts_with(' ') {
+        return None;
+    }
+
+    // The effective level – the syntactic level (run length minus one) shifted
+    // by the running `leveloffset` – must be 0 for the line to be the document
+    // title.
+    let syntactic_level = (count as i32) - 1;
+    if syntactic_level.saturating_add(level_offset) != 0 {
+        return None;
+    }
+
+    Some((marker, count))
 }
 
 /// Reports whether a *promotable* document title follows the block metadata run
@@ -674,7 +707,7 @@ fn document_title_marker(line: Span<'_>) -> Option<char> {
 /// none leaves it unchanged – so the header's decision always agrees with the
 /// `BlockMetadata::is_discrete` decision the block parser would make on the
 /// same run.
-fn document_title_follows_block_metadata(source: Span<'_>) -> bool {
+fn document_title_follows_block_metadata(source: Span<'_>, level_offset: i32) -> bool {
     let mut next = source;
     let mut effective_style_is_discrete = false;
 
@@ -682,7 +715,7 @@ fn document_title_follows_block_metadata(source: Span<'_>) -> bool {
         let line_mi = next.take_normalized_line();
         let line = line_mi.item;
 
-        if document_title_marker(line).is_some() {
+        if document_title_marker(line, level_offset).is_some() {
             return !effective_style_is_discrete;
         }
 
