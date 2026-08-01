@@ -160,6 +160,14 @@ pub enum WarningType {
     #[error("leveloffset {0} places every section heading outside the supported range 1-5")]
     LeveloffsetExcludesAllHeadingLevels(i32),
 
+    /// A special section that does not support nested sections (a `glossary`,
+    /// `bibliography`, `colophon`, `dedication`, or `index` section) contains a
+    /// subsection. The field is the section's style name. Mirrors Asciidoctor,
+    /// which permits subsections only within the `appendix`, `preface`, and
+    /// `abstract` special sections.
+    #[error("{0} sections do not support nested sections")]
+    SpecialSectionCannotHaveNestedSections(String),
+
     /// An explicitly-numbered list item does not continue the sequence its list
     /// established. The fields are the expected and actual indexes.
     #[error("list item index: expected {0}, got {1}")]
@@ -439,6 +447,11 @@ impl std::fmt::Debug for WarningType {
             WarningType::LeveloffsetExcludesAllHeadingLevels(offset) => f
                 .debug_tuple("WarningType::LeveloffsetExcludesAllHeadingLevels")
                 .field(offset)
+                .finish(),
+
+            WarningType::SpecialSectionCannotHaveNestedSections(style) => f
+                .debug_tuple("WarningType::SpecialSectionCannotHaveNestedSections")
+                .field(style)
                 .finish(),
 
             WarningType::ListItemOutOfSequence(expected, actual) => f
@@ -861,6 +874,17 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::LeveloffsetExcludesAllHeadingLevels(2147483647)"
+                );
+            }
+
+            #[test]
+            fn special_section_cannot_have_nested_sections() {
+                let warning =
+                    WarningType::SpecialSectionCannotHaveNestedSections("glossary".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::SpecialSectionCannotHaveNestedSections(\"glossary\")"
                 );
             }
 
