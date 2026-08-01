@@ -106,6 +106,10 @@ enum MockResolution {
 
     /// A target whose file exists but could not be read.
     NotReadable,
+
+    /// A target whose file exists and was read but is not valid UTF-8 and could
+    /// not be transcoded.
+    NotDecodable,
 }
 
 #[derive(Clone, Debug)]
@@ -154,6 +158,17 @@ impl RecordingIncludeFileHandler {
         }
     }
 
+    /// A handler that records the call but reports the file as present and
+    /// readable yet not valid UTF-8 and impossible to transcode (returns
+    /// [`IncludeResolution::NotDecodable`]), as a real handler would for an
+    /// undeclared non-UTF-8 include.
+    fn undecodable() -> Self {
+        Self {
+            result: MockResolution::NotDecodable,
+            ..Self::new("")
+        }
+    }
+
     /// The `(source, target, encoding)` of every recorded call, in order. A
     /// clone of the handler shares this record with the copy handed to the
     /// parser.
@@ -190,6 +205,8 @@ impl IncludeFileHandler for RecordingIncludeFileHandler {
             MockResolution::NotFound => IncludeResolution::NotFound,
 
             MockResolution::NotReadable => IncludeResolution::NotReadable,
+
+            MockResolution::NotDecodable => IncludeResolution::NotDecodable,
         }
     }
 }
@@ -1928,6 +1945,65 @@ fn should_skip_include_directive_that_references_unreadable_file_if_optional_opt
     assert_eq!(
         probe.calls(),
         vec![(None, "fixtures/chapter-a.adoc".to_owned(), None)]
+    );
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+}
+
+// An undeclared non-UTF-8 include (a file that exists and is readable but is
+// not valid UTF-8, with no `encoding` attribute the handler can transcode) is
+// reported distinctly from a missing or unreadable one. The handler signals it
+// with [`IncludeResolution::NotDecodable`], which the parser surfaces as an
+// `IncludeFileNotDecodable` warning while rendering the same "Unresolved
+// directive" replacement. Asciidoctor treats this as a fatal `invalid byte
+// sequence in UTF-8` error that aborts the conversion; this crate deliberately
+// favors recoverable warnings, so it drops the include instead.
+#[test]
+fn should_replace_include_directive_that_references_undecodable_file_with_message() {
+    let handler = RecordingIncludeFileHandler::undecodable();
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/iso-8859-1.txt[]\n\ntrailing content",
+        &parser,
+    );
+    assert_eq!(
+        output,
+        "Unresolved directive in (root file) - include::fixtures/iso-8859-1.txt[]\n\ntrailing content\n"
+    );
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/iso-8859-1.txt".to_owned(), None)]
+    );
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::IncludeFileNotDecodable("fixtures/iso-8859-1.txt".to_owned())
+    );
+}
+
+// `opts=optional` suppresses the unresolved-directive replacement and the
+// warning for an *undecodable* target just as it does for a missing or
+// unreadable one: the directive is dropped silently, leaving only the trailing
+// content. This guards the crate's intentional behavior against regression
+// (twin
+// of `should_skip_include_directive_that_references_unreadable_file_if_optional_option_is_set`).
+#[test]
+fn should_skip_include_directive_that_references_undecodable_file_if_optional_option_is_set() {
+    let handler = RecordingIncludeFileHandler::undecodable();
+    let probe = handler.clone();
+    let parser = Parser::default()
+        .with_safe_mode(SafeMode::Server)
+        .with_include_file_handler(handler);
+    let (output, _source_map, warnings, _includes) = crate::parser::preprocessor::preprocess(
+        "include::fixtures/iso-8859-1.txt[opts=optional]\n\ntrailing content",
+        &parser,
+    );
+    assert_eq!(output, "\ntrailing content\n");
+    assert_eq!(
+        probe.calls(),
+        vec![(None, "fixtures/iso-8859-1.txt".to_owned(), None)]
     );
     assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
 }
