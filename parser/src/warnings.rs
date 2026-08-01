@@ -239,6 +239,18 @@ pub enum WarningType {
     #[error("include file not readable: {0}")]
     IncludeFileNotReadable(String),
 
+    /// An `include::` directive named a file that the configured include file
+    /// handler found and read but which is not valid UTF-8, and which the
+    /// handler could not transcode (no `encoding` attribute, or one it does not
+    /// support). The field is the target as written. Asciidoctor treats this as
+    /// a fatal error (`invalid byte sequence in UTF-8`) that aborts the
+    /// conversion; this crate favors recoverable warnings, so it drops the
+    /// include and records this warning instead. This is distinct from
+    /// [`NonUtf8IncludeEncoding`](Self::NonUtf8IncludeEncoding), which reports
+    /// an unsupported `encoding` request for content the handler *did* return.
+    #[error("include file not decodable (invalid byte sequence in UTF-8): {0}")]
+    IncludeFileNotDecodable(String),
+
     /// An include directive's target referenced a missing attribute while
     /// `attribute-missing` was set to `warn`, so the directive was dropped
     /// without being resolved. (Under `drop-line` the directive line is
@@ -499,6 +511,11 @@ impl std::fmt::Debug for WarningType {
 
             WarningType::IncludeFileNotReadable(target) => f
                 .debug_tuple("WarningType::IncludeFileNotReadable")
+                .field(target)
+                .finish(),
+
+            WarningType::IncludeFileNotDecodable(target) => f
+                .debug_tuple("WarningType::IncludeFileNotDecodable")
                 .field(target)
                 .finish(),
 
@@ -981,6 +998,16 @@ mod tests {
                 assert_eq!(
                     debug_output,
                     "WarningType::IncludeFileNotReadable(\"content.adoc\")"
+                );
+            }
+
+            #[test]
+            fn include_file_not_decodable() {
+                let warning = WarningType::IncludeFileNotDecodable("content.adoc".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::IncludeFileNotDecodable(\"content.adoc\")"
                 );
             }
 

@@ -31,14 +31,19 @@ pub trait IncludeFileHandler: Debug {
     /// - [`IncludeResolution::NotReadable`] signals that the file exists but
     ///   could not be read (for example a permission or other IO error); the
     ///   parser records a [`WarningType::IncludeFileNotReadable`] warning.
+    /// - [`IncludeResolution::NotDecodable`] signals that the file exists and
+    ///   was read but is not valid UTF-8 and the handler could not transcode it
+    ///   (see the `# Encoding` section); the parser records a
+    ///   [`WarningType::IncludeFileNotDecodable`] warning.
     ///
     /// The rendered replacement (`Unresolved directive …`) is identical for the
-    /// two failure reasons; only the warning differs, mirroring Asciidoctor's
-    /// separate `include file not found` and `include file not readable`
-    /// messages.
+    /// three failure reasons; only the warning differs, mirroring Asciidoctor's
+    /// separate `include file not found`, `include file not readable`, and
+    /// `invalid byte sequence in UTF-8` messages.
     ///
     /// [`WarningType::IncludeFileNotFound`]: crate::warnings::WarningType::IncludeFileNotFound
     /// [`WarningType::IncludeFileNotReadable`]: crate::warnings::WarningType::IncludeFileNotReadable
+    /// [`WarningType::IncludeFileNotDecodable`]: crate::warnings::WarningType::IncludeFileNotDecodable
     ///
     /// # Options
     /// With the exception of `encoding` (see below), the implementation should
@@ -63,8 +68,14 @@ pub trait IncludeFileHandler: Debug {
     /// include-encoding warning in that case.
     ///
     /// If the implementation finds a file that is not encoded in UTF-8 and is
-    /// incapable of transcoding it, it should return
-    /// [`IncludeResolution::NotFound`].
+    /// incapable of transcoding it (no `encoding` attribute, or one it does not
+    /// support), it should return [`IncludeResolution::NotDecodable`] so the
+    /// parser can name the real cause. Asciidoctor treats this condition as
+    /// fatal (`invalid byte sequence in UTF-8`); this crate favors recoverable
+    /// warnings, so it instead drops the include and records a
+    /// [`WarningType::IncludeFileNotDecodable`] warning.
+    ///
+    /// [`WarningType::IncludeFileNotDecodable`]: crate::warnings::WarningType::IncludeFileNotDecodable
     fn resolve_target<'src>(
         &self,
         source: Option<&str>,
@@ -77,9 +88,10 @@ pub trait IncludeFileHandler: Debug {
 /// The outcome of an [`IncludeFileHandler::resolve_target`] call: either the
 /// resolved content, or the reason resolution failed.
 ///
-/// The two failure reasons map to distinct warnings – mirroring Asciidoctor,
-/// which distinguishes a missing include file (`include file not found`) from
-/// one that is present but unreadable (`include file not readable`).
+/// The failure reasons map to distinct warnings – mirroring Asciidoctor, which
+/// distinguishes a missing include file (`include file not found`) from one
+/// that is present but unreadable (`include file not readable`) or present but
+/// not valid UTF-8 (`invalid byte sequence in UTF-8`).
 ///
 /// This enum is `non_exhaustive`: future resolution reasons may be recognized
 /// as the parser grows, so a host matching on it needs a catch-all arm. New
@@ -102,6 +114,18 @@ pub enum IncludeResolution {
     ///
     /// [`WarningType::IncludeFileNotReadable`]: crate::warnings::WarningType::IncludeFileNotReadable
     NotReadable,
+
+    /// A file was found and read for the directive's target but is not valid
+    /// UTF-8, and the handler was unable to transcode it (no `encoding`
+    /// attribute, or one it does not support). The parser records a
+    /// [`WarningType::IncludeFileNotDecodable`] warning.
+    ///
+    /// See the `# Encoding` section of [`IncludeFileHandler::resolve_target`]
+    /// for how a handler that *can* transcode should instead return
+    /// [`IncludeContent::transcoded`].
+    ///
+    /// [`WarningType::IncludeFileNotDecodable`]: crate::warnings::WarningType::IncludeFileNotDecodable
+    NotDecodable,
 }
 
 impl From<IncludeContent> for IncludeResolution {

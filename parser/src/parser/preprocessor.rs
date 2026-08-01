@@ -647,9 +647,10 @@ impl<'p> PreprocessorState<'p> {
 
                 // Ask the handler to resolve the target. With no handler
                 // configured, the target is treated as not found. The failure
-                // reason (`NotFound` vs `NotReadable`) selects the warning
-                // recorded below, mirroring Asciidoctor's distinct `include file
-                // not found` and `include file not readable` messages.
+                // reason (`NotFound`, `NotReadable`, or `NotDecodable`) selects
+                // the warning recorded below, mirroring Asciidoctor's distinct
+                // `include file not found`, `include file not readable`, and
+                // `invalid byte sequence in UTF-8` messages.
                 let resolution = self
                     .parser
                     .include_file_handler
@@ -661,13 +662,27 @@ impl<'p> PreprocessorState<'p> {
                 // Matched exhaustively (no catch-all) on purpose: although
                 // `IncludeResolution` is `non_exhaustive` for downstream crates,
                 // within this crate a new reason must be handled here
-                // deliberately – likely with its own warning – rather than
-                // silently collapsing into "not found".
-                let (include_content, not_readable) = match resolution {
-                    IncludeResolution::Found(content) => (Some(content), false),
-                    IncludeResolution::NotReadable => (None, true),
-                    IncludeResolution::NotFound => (None, false),
-                };
+                // deliberately – with its own warning – rather than silently
+                // collapsing into "not found". Each failure reason carries the
+                // `WarningType` constructor (a `fn(String) -> WarningType`) used
+                // to build its warning below, once the target is available to
+                // move in. The constructor paired with `Found` is never used.
+                let (include_content, failure_warning): (_, fn(String) -> WarningType) =
+                    match resolution {
+                        IncludeResolution::Found(content) => {
+                            (Some(content), WarningType::IncludeFileNotFound)
+                        }
+
+                        IncludeResolution::NotReadable => {
+                            (None, WarningType::IncludeFileNotReadable)
+                        }
+
+                        IncludeResolution::NotDecodable => {
+                            (None, WarningType::IncludeFileNotDecodable)
+                        }
+
+                        IncludeResolution::NotFound => (None, WarningType::IncludeFileNotFound),
+                    };
 
                 if let Some(include_content) = include_content {
                     // Apply `lines`/`tag(s)` selection and `indent` normalization
@@ -872,13 +887,10 @@ impl<'p> PreprocessorState<'p> {
                 } else {
                     // The target could not be resolved. Replace the directive with
                     // an "Unresolved directive" message and record a warning. A
-                    // file that exists but can't be read is reported distinctly
-                    // from a missing one, matching Asciidoctor.
-                    let warning = if not_readable {
-                        WarningType::IncludeFileNotReadable(target)
-                    } else {
-                        WarningType::IncludeFileNotFound(target)
-                    };
+                    // file that exists but can't be read (or can't be decoded as
+                    // UTF-8) is reported distinctly from a missing one, matching
+                    // Asciidoctor.
+                    let warning = failure_warning(target);
 
                     self.emit_unresolved_directive(
                         line.data(),
