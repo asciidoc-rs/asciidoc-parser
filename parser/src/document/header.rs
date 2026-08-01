@@ -66,7 +66,6 @@ impl<'src> Header<'src> {
 
         let mut id: Option<String> = None;
         let mut roles: Vec<String> = vec![];
-        let mut pending_block_title_source: Option<Span<'src>> = None;
         let mut attributes: Vec<Attribute> = vec![];
         let mut author_line: Option<AuthorLine<'src>> = None;
         let mut author_attribute: Option<Author> = None;
@@ -281,29 +280,36 @@ impl<'src> Header<'src> {
                 }
                 source = line_mi.after;
             } else if title.is_none()
-                && let Some(block_title) = block_title_text(line)
+                && block_title_text(line).is_some()
                 && document_title_follows_block_metadata(source, parser.level_offset())
             {
                 // A block title (`.Title`) directly above the document title is
                 // not a title *of* the document – a document has no block title.
-                // Asciidoctor demotes the following `= …` heading to a level-0
-                // section and carries the block title over to the first block of
-                // content. This crate does not represent a body-level document
-                // title as a level-0 section, so the `= …` heading remains the
-                // document title; the block title is still recognized here (so
-                // the heading is not mistaken for a paragraph) and carried over
-                // to the first body block, matching the block-title carryover
-                // above an ordinary section heading (see #782).
+                // Its presence demotes the following `= …` line: the document
+                // has no title, and `= …` is a level-0 section heading in the
+                // body rather than the document title (matching Asciidoctor,
+                // which logs "level 0 sections can only be used when doctype is
+                // book").
                 //
-                // The line is only intercepted when a document title eventually
-                // follows – possibly after further stacked block metadata lines,
-                // each folded on its own pass through this loop. A later block
-                // title overrides an earlier one (last-wins), mirroring
-                // Asciidoctor's `parse_block_metadata_lines`. Otherwise it is an
-                // ordinary block title for the body and is left for the block
-                // parser.
-                pending_block_title_source = Some(block_title);
-                source = line_mi.after;
+                // Rather than consume anything here, end the header without a
+                // title and rewind so the block parser sees the whole run –
+                // the block title, the demoted `= …`, and the content below.
+                // The body then recognizes the block title as metadata (not
+                // literal text) and carries it over to the following block, and
+                // the `= …` heading is declined as an unsupported level-0
+                // heading (raising `WarningType::Level0SectionHeadingNotSupported`).
+                // This crate does not model a body-level document title as a
+                // level-0 section, so the heading is declined rather than
+                // rendered as `<h1 class="sect0">`; the demotion and the warning
+                // still hold.
+                //
+                // `source` is left pointing at the block-title line (it is not
+                // advanced), so the header span ends above it and the body
+                // begins there. `document_title_follows_block_metadata` confirms
+                // a `= …` title actually follows – possibly past further stacked
+                // block metadata lines – so an ordinary body block title (with
+                // no document title beneath it) is not caught here.
+                break;
             } else if title.is_none()
                 && let Some((marker, count)) = document_title_marker(line, parser.level_offset())
             {
@@ -481,20 +487,6 @@ impl<'src> Header<'src> {
         // author-less parse from touching the attribute map at all.
         if !authors.is_empty() {
             parser.set_attribute_by_value_from_header("authorcount", authors.len().to_string());
-        }
-
-        // A block title recognized directly above the document title is carried
-        // over to the first block of the body. Stash it on the parser as a
-        // pending block title (the same mechanism a section heading uses); the
-        // first block parsed after the header claims it. The title travels as an
-        // owned snapshot with normal (title) substitutions already applied,
-        // matching a `.Title` line on an ordinary block. It is only ever set
-        // when a document title was seen, since the recognizing branch requires
-        // one to follow.
-        if let Some(block_title) = pending_block_title_source {
-            let mut content = Content::from(block_title);
-            SubstitutionGroup::Normal.apply(&mut content, parser, None);
-            parser.pending_block_title = Some(content.to_owned_title());
         }
 
         MatchAndWarnings {

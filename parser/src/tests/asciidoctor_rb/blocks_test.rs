@@ -4758,25 +4758,29 @@ mod metadata {
         assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]", 1);
     }
 
-    // NOTE: partially out of scope. Both tests below depend on demoting a
-    // body-level document title (`= Title`) to a level-0 section – the "level 0
-    // sections can only be used when doctype is book" behavior. This crate does
-    // not support level-0 sections in the document body (with or without
-    // `doctype: book`): a `=` heading is recognized as the *document title*
-    // rather than becoming a level-0 section, so the demoted `<h1>`/`.sect1`
-    // structure and the absent header these tests assert are never produced.
-    // That is a deliberate divergence, not a deferral, so the tests are
-    // reproduced verbatim (`non_normative!`) rather than ported.
+    // NOTE: partially out of scope. Both tests below demote a body-level
+    // document title (`= Title`) to a level-0 section – the "level 0 sections
+    // can only be used when doctype is book" behavior. A block title directly
+    // above a `= …` line means the line is *not* the document title: the header
+    // is empty and `= …` is a level-0 section heading in the body.
+    // This crate honors the demotion – the document has no title and the
+    // `Level0SectionHeadingNotSupported` warning is raised – but does not model
+    // a body-level document title as a level-0 section, so `= …` is *declined*
+    // as an unsupported level-0 heading rather than rendered as `<h1>`/`.sect0`,
+    // and the block title stays on that declined heading rather than being
+    // forwarded into the section it would have opened. The demoted `<h1>`/
+    // `.sect1` structure these tests assert is therefore never produced, a
+    // deliberate divergence rather than a deferral, so the tests are reproduced
+    // verbatim (`non_normative!`) rather than ported.
     //
-    // The block-title recognition and carryover they exercise *is* implemented:
-    // a block title directly above the document title is recognized as document
-    // metadata (rather than titling a paragraph that captures the `= Title` line
-    // as literal text), and is carried over to the first block of the body, the
-    // same way a block title above an ordinary section heading is (#782). The
-    // crate's actual behavior on the first input is asserted by
-    // `block_title_above_document_title_is_carried_over_to_first_body_block`
-    // below; see also
-    // `block_title_above_section_gets_carried_over_to_first_block_in_section`.
+    // The point both tests share – and that this crate honors – is that the
+    // block title above `= …` demotes it (empty header, level-0 warning) instead
+    // of turning the line into the document title or titling a paragraph that
+    // captures the `= …` line as escaped literal text. The crate's actual
+    // behavior on each input is asserted by
+    // `block_title_above_document_title_demotes_it` and
+    // `block_title_above_document_title_demotes_it_in_book_doctype` below; see
+    // also `block_title_above_section_gets_carried_over_to_first_block_in_section`.
     non_normative!(
         r#"
     test 'block title above document title demotes document title to a section title' do
@@ -4816,22 +4820,35 @@ mod metadata {
     );
 
     // The crate-specific counterpart to the first `non_normative!` test above.
-    // Asciidoctor demotes the `= Section Title` heading to a level-0 body
-    // section (leaving the document header empty); this crate does not model a
-    // body-level document title as a level-0 section, so it keeps `= Section
-    // Title` as the document title. The point that both share – and that this
-    // asserts – is that the block title above the title is recognized as
-    // metadata and carried over to the first block of the body, rather than
-    // titling a paragraph whose text is the escaped `= Section Title` line.
+    // A block title directly above `= Section Title` demotes the line: the
+    // document header carries no title and `= Section Title` is a level-0
+    // section heading in the body. Asciidoctor renders that heading as
+    // `<h1 class="sect0">`; this crate does not model a body-level document
+    // title as a level-0 section, so it declines the heading (raising
+    // `Level0SectionHeadingNotSupported`) and it falls back to a paragraph whose
+    // text is the `= Section Title` line. The block title stays on that declined
+    // heading – the block it immediately precedes – matching how block metadata
+    // above any declined level-0 heading behaves elsewhere in the body.
     #[test]
-    fn block_title_above_document_title_is_carried_over_to_first_body_block() {
+    fn block_title_above_document_title_demotes_it() {
         let doc = Parser::default().parse(".Block title\n= Section Title\n\nsection paragraph\n");
 
-        // `= Section Title` is the document title, not literal paragraph text.
-        assert_eq!(doc.header().title(), Some("Section Title"));
+        // The `= Section Title` line is demoted: it is not the document title.
+        assert_eq!(doc.header().title(), None);
 
-        // The block title is carried over to the (single) body paragraph.
-        assert_xpath(&doc, "//*[@class=\"paragraph\"]", 1);
+        // Demoting a level-0 heading into the body raises the level-0 warning,
+        // anchored at the `= Section Title` line.
+        let warnings: Vec<_> = doc
+            .warnings()
+            .filter(|w| w.warning == WarningType::Level0SectionHeadingNotSupported)
+            .collect();
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].source.line(), 2);
+
+        // The block title is recognized as metadata (not turned into literal
+        // text) and stays on the declined `= Section Title` heading, which falls
+        // back to a paragraph carrying the block title.
         assert_xpath(
             &doc,
             "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
@@ -4839,7 +4856,54 @@ mod metadata {
         );
         assert_xpath(
             &doc,
+            "//*[@class=\"paragraph\"]/p[text()=\"= Section Title\"]",
+            1,
+        );
+
+        // The content below the heading remains its own paragraph.
+        assert_xpath(
+            &doc,
             "//*[@class=\"paragraph\"]/p[text()=\"section paragraph\"]",
+            1,
+        );
+    }
+
+    // The crate-specific counterpart to the second `non_normative!` test above
+    // (`:doctype: book`). The demotion is the same: the block title above
+    // `= Document Title` empties the header and demotes the line to a declined
+    // level-0 heading (raising `Level0SectionHeadingNotSupported`). Asciidoctor
+    // forwards the block title into the first real section (`== First Section`);
+    // this crate leaves it on the declined `= Document Title` heading, since that
+    // is the block the metadata immediately precedes.
+    #[test]
+    fn block_title_above_document_title_demotes_it_in_book_doctype() {
+        let doc = Parser::default().parse(
+            ":doctype: book\n.Block title\n= Document Title\n\n== First Section\n\nparagraph\n",
+        );
+
+        // The `= Document Title` line is demoted: the document has no title.
+        assert_eq!(doc.header().title(), None);
+
+        let warnings: Vec<_> = doc
+            .warnings()
+            .filter(|w| w.warning == WarningType::Level0SectionHeadingNotSupported)
+            .collect();
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].source.line(), 3);
+
+        // The block title stays on the declined `= Document Title` heading.
+        assert_xpath(
+            &doc,
+            "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
+            1,
+        );
+
+        // `== First Section` is a normal level-1 section with its own paragraph.
+        assert_xpath(&doc, "//*[@class=\"sect1\"]", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"sect1\"]//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]",
             1,
         );
     }
