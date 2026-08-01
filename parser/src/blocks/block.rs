@@ -4,8 +4,8 @@ use crate::{
     blocks::{
         AdmonitionBlock, Break, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItem,
         ListItemMarker, MediaBlock, Preamble, QuoteBlock, RawDelimitedBlock, SectionBlock,
-        SimpleBlock, TableBlock, TocBlock, media::TargetResolution, metadata::BlockMetadata,
-        starts_with_admonition_label,
+        SimpleBlock, TableBlock, TocBlock, is_built_in_context, media::TargetResolution,
+        metadata::BlockMetadata, starts_with_admonition_label,
     },
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{Attribute, InterpretedValue, RefType},
@@ -1282,36 +1282,33 @@ impl<'src> HasSpan<'src> for Block<'src> {
 /// is always recognized: it turns the block into an admonition.
 const ADMONITION_STYLES: &[&str] = &["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
 
-/// Every block style this parser understands.
+/// Block style keywords this parser understands that are *not* themselves
+/// built-in contexts.
 ///
 /// A declared block style (the first positional attribute, e.g. `[source]`) is
-/// recognized when it names a built-in context this parser can adopt, a style
-/// keyword it interprets (`source`, `abstract`, `normal`, `partintro`, the
-/// `stem` flavors), or – via [`ADMONITION_STYLES`] – an admonition label.
-/// Anything else is an unknown style. This is the union of Asciidoctor's
-/// `PARAGRAPH_STYLES`, its delimited-block masquerade styles, and the built-in
-/// contexts; because this parser lets any built-in context style masquerade
-/// over any delimited block (see
-/// [`resolved_context`](crate::blocks::IsBlock::resolved_context)), a single
-/// shared set – rather than Asciidoctor's per-delimiter masquerade tables –
-/// matches how this parser actually resolves a style.
-const KNOWN_BLOCK_STYLES: &[&str] = &[
+/// recognized when it names a built-in context this parser can adopt (any
+/// [`is_built_in_context`] style – `example`, `listing`, `sidebar`, `image`,
+/// `table`, and so on), one of these interpreting keywords, or – via
+/// [`ADMONITION_STYLES`] – an admonition label. Anything else is an unknown
+/// style.
+///
+/// Deferring the built-in contexts to [`is_built_in_context`] keeps this check
+/// in lock-step with
+/// [`resolved_context`](crate::blocks::IsBlock::resolved_context), which adopts
+/// exactly those styles as the block's context: a style that
+/// `resolved_context` acts on is never reported as unknown. These keywords are
+/// the remaining styles this parser interprets without their being a context –
+/// `source` specializes `listing`, `abstract` an open block, the `stem`
+/// flavors a `stem` block, and `comment`/`normal`/`partintro` round out
+/// Asciidoctor's `PARAGRAPH_STYLES`.
+const KNOWN_STYLE_KEYWORDS: &[&str] = &[
     "abstract",
     "asciimath",
     "comment",
-    "example",
     "latexmath",
-    "listing",
-    "literal",
     "normal",
-    "open",
     "partintro",
-    "pass",
-    "quote",
-    "sidebar",
     "source",
-    "stem",
-    "verse",
 ];
 
 /// The block contexts for which an unknown declared style is diagnosed.
@@ -1369,7 +1366,9 @@ fn unknown_block_style_warning(block: &Block<'_>) -> Option<WarningType> {
         return None;
     }
 
-    if style == context || KNOWN_BLOCK_STYLES.contains(&style) || ADMONITION_STYLES.contains(&style)
+    if is_built_in_context(style)
+        || KNOWN_STYLE_KEYWORDS.contains(&style)
+        || ADMONITION_STYLES.contains(&style)
     {
         return None;
     }
@@ -1461,6 +1460,19 @@ mod tests {
             assert_eq!(only_warning("[verse]\n____\nx\n____\n"), None);
             assert_eq!(only_warning("[abstract]\n--\nx\n--\n"), None);
             assert_eq!(only_warning("[asciimath]\n++++\nx\n++++\n"), None);
+        }
+
+        #[test]
+        fn any_built_in_context_style_does_not_warn() {
+            // Every built-in context this parser can adopt as a block's context
+            // (via `resolved_context`) is a recognized style, even one it does
+            // not otherwise treat as a masquerade keyword (e.g. `image`,
+            // `audio`, `video`, `table`). Reporting these would contradict the
+            // context the parser actually resolved.
+            assert_eq!(only_warning("[image]\nbar\n"), None);
+            assert_eq!(only_warning("[audio]\n--\nx\n--\n"), None);
+            assert_eq!(only_warning("[video]\nbar\n"), None);
+            assert_eq!(only_warning("[table]\nbar\n"), None);
         }
 
         #[test]
