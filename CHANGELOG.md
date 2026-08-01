@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.2](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.1...v0.29.2)
+_01 August 2026_
+
+### Added
+
+* Add IncludeResolution::NotDecodable for a found-but-undecodable include ([#1021](https://github.com/asciidoc-rs/asciidoc-parser/pull/1021))
+
+### Fixed
+
+* Warn when a special section that doesn't support subsections contains a nested section ([#1017](https://github.com/asciidoc-rs/asciidoc-parser/pull/1017))
+* Treat a `[float]`/`[discrete]` level-0 (`=`) heading as a discrete heading ([#1018](https://github.com/asciidoc-rs/asciidoc-parser/pull/1018))
+* Reflect an indexed :author_N: override in the combined authors string ([#1016](https://github.com/asciidoc-rs/asciidoc-parser/pull/1016))
+
 ## [0.29.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.0...v0.29.1)
 _31 July 2026_
 
