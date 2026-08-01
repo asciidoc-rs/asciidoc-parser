@@ -118,11 +118,7 @@ impl<'src> MediaBlock<'src> {
         let Some(colons) = name.after.take_prefix("::") else {
             return MatchAndWarnings {
                 item: None,
-                warnings: vec![Warning {
-                    source: name.after,
-                    warning: WarningType::MacroMissingSeparator,
-                    origin: None,
-                }],
+                warnings: vec![Warning::new(name.after, WarningType::MacroMissingSeparator)],
             };
         };
 
@@ -132,22 +128,20 @@ impl<'src> MediaBlock<'src> {
         if target.item.is_empty() {
             return MatchAndWarnings {
                 item: None,
-                warnings: vec![Warning {
-                    source: target.after,
-                    warning: WarningType::MediaMacroMissingTarget,
-                    origin: None,
-                }],
+                warnings: vec![Warning::new(
+                    target.after,
+                    WarningType::MediaMacroMissingTarget,
+                )],
             };
         }
 
         let Some(open_brace) = target.after.take_prefix("[") else {
             return MatchAndWarnings {
                 item: None,
-                warnings: vec![Warning {
-                    source: target.after,
-                    warning: WarningType::MacroMissingAttributeList,
-                    origin: None,
-                }],
+                warnings: vec![Warning::new(
+                    target.after,
+                    WarningType::MacroMissingAttributeList,
+                )],
             };
         };
 

@@ -4684,12 +4684,23 @@ mod custom_blocks {
         );
 
         let doc = Parser::default().parse("[foo]\n--\nbar\n--\n");
-        assert_eq!(doc.warnings().count(), 0);
+
+        // Asciidoctor asserts no messages at its *default* (WARN) severity. This
+        // crate surfaces the unknown style as a `WarningSeverity::Debug`
+        // diagnostic (see the debug-level test below), which a host suppresses
+        // by default. The default-severity view – warnings at WARN or above – is
+        // therefore empty, mirroring Asciidoctor.
+        assert_eq!(
+            doc.warnings()
+                .filter(|w| w.severity >= WarningSeverity::Warning)
+                .count(),
+            0
+        );
     }
 
     #[test]
     fn should_log_debug_message_if_block_style_is_unknown_and_debug_level_is_enabled() {
-        non_normative!(
+        verifies!(
             r#"
     test 'should log debug message if block style is unknown and debug level is enabled' do
       input = <<~'EOS'
@@ -4707,8 +4718,29 @@ mod custom_blocks {
 "#
         );
 
-        // Not ported: this crate has no DEBUG-severity logging channel for
-        // unknown block styles.
+        // Asciidoctor logs this only at DEBUG severity (below its default WARN
+        // threshold). This crate records it as a single `WarningSeverity::Debug`
+        // warning, observable via `Document::warnings()`. The block keeps its
+        // default `open` context; the style `foo` is retained but otherwise
+        // ignored. The warning anchors at the block (the `[foo]` line), naming
+        // the offending style directly.
+        let doc = Parser::default().parse("[foo]\n--\nbar\n--\n");
+
+        let warning = doc.warnings().next().unwrap();
+        assert_eq!(warning.severity, WarningSeverity::Debug);
+        assert_eq!(
+            warning,
+            &Warning {
+                source: Span {
+                    data: "[foo]\n--\nbar\n--",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warning: WarningType::UnknownBlockStyle("open".to_string(), "foo".to_string()),
+            }
+        );
+        assert_eq!(doc.warnings().count(), 1);
     }
 
     non_normative!(

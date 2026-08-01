@@ -1151,11 +1151,10 @@ impl Parser {
         source: crate::Span<'src>,
         warnings: &mut Vec<Warning<'src>>,
     ) {
-        warnings.push(Warning {
+        warnings.push(Warning::new(
             source,
-            warning: WarningType::MaxBlockNestingExceeded(self.block_nesting_limit),
-            origin: None,
-        });
+            WarningType::MaxBlockNestingExceeded(self.block_nesting_limit),
+        ));
     }
 
     /// Returns the effective `max-attribute-value-size`: the byte limit applied
@@ -1275,11 +1274,10 @@ impl Parser {
             && let Ok(offset) = v.trim().parse::<i32>()
             && !leveloffset_admits_any_heading(offset)
         {
-            warnings.push(Warning {
-                source: span,
-                warning: WarningType::LeveloffsetExcludesAllHeadingLevels(offset),
-                origin: None,
-            });
+            warnings.push(Warning::new(
+                span,
+                WarningType::LeveloffsetExcludesAllHeadingLevels(offset),
+            ));
         }
 
         value
@@ -2418,11 +2416,10 @@ impl Parser {
             // A silently-locked intrinsic rejects the write without recording a
             // warning (see `AttributeValue::silent_when_locked`).
             if !existing_attr.silent_when_locked {
-                warnings.push(Warning {
-                    source: attr.span(),
-                    warning: WarningType::AttributeValueIsLocked(attr_name),
-                    origin: None,
-                });
+                warnings.push(Warning::new(
+                    attr.span(),
+                    WarningType::AttributeValueIsLocked(attr_name),
+                ));
             }
             return;
         }
@@ -2579,11 +2576,10 @@ impl Parser {
             // A silently-locked intrinsic rejects the write without recording a
             // warning (see `AttributeValue::silent_when_locked`).
             if !existing_attr.silent_when_locked {
-                warnings.push(Warning {
-                    source: attr.span(),
-                    warning: WarningType::AttributeValueIsLocked(attr_name),
-                    origin: None,
-                });
+                warnings.push(Warning::new(
+                    attr.span(),
+                    WarningType::AttributeValueIsLocked(attr_name),
+                ));
             }
             return;
         }

@@ -321,16 +321,13 @@ impl<'src> SectionBlock<'src> {
                 if let Block::Section(subsection) = block
                     && subsection.section_type() != SectionType::Discrete
                 {
-                    warnings.push(Warning {
-                        source: subsection
+                    warnings.push(Warning::new(
+                        subsection
                             .section_title_source()
                             .take_normalized_line()
                             .item,
-                        warning: WarningType::SpecialSectionCannotHaveNestedSections(
-                            style.to_string(),
-                        ),
-                        origin: None,
-                    });
+                        WarningType::SpecialSectionCannotHaveNestedSections(style.to_string()),
+                    ));
                 }
             }
         }
@@ -375,11 +372,10 @@ impl<'src> SectionBlock<'src> {
                         }
                     }
                     Err(_duplicate_error) => {
-                        warnings.push(Warning {
-                            source: metadata.source.trim_remainder(level_and_title.after),
-                            warning: WarningType::DuplicateId(manual_id.to_string()),
-                            origin: None,
-                        });
+                        warnings.push(Warning::new(
+                            metadata.source.trim_remainder(level_and_title.after),
+                            WarningType::DuplicateId(manual_id.to_string()),
+                        ));
                     }
                 }
             }
@@ -779,11 +775,10 @@ fn parse_title_line<'src>(
     }
 
     if count > 6 {
-        warnings.push(Warning {
-            source: source.take_normalized_line().item,
-            warning: WarningType::SectionHeadingLevelExceedsMaximum(count - 1),
-            origin: None,
-        });
+        warnings.push(Warning::new(
+            source.take_normalized_line().item,
+            WarningType::SectionHeadingLevelExceedsMaximum(count - 1),
+        ));
 
         return None;
     }
@@ -806,11 +801,10 @@ fn parse_title_line<'src>(
     // not the document title, so a level-0 discrete heading is legitimate and is
     // carried through with level 0 rather than rejected.
     if !discrete && syntactic_level == 0 && effective_level < MIN_SECTION_LEVEL {
-        warnings.push(Warning {
-            source: source.take_normalized_line().item,
-            warning: WarningType::Level0SectionHeadingNotSupported,
-            origin: None,
-        });
+        warnings.push(Warning::new(
+            source.take_normalized_line().item,
+            WarningType::Level0SectionHeadingNotSupported,
+        ));
 
         return None;
     }
@@ -830,24 +824,16 @@ fn parse_title_line<'src>(
     let min_level = if discrete { 0 } else { MIN_SECTION_LEVEL };
 
     let level = if effective_level < min_level {
-        warnings.push(Warning {
-            source: source.take_normalized_line().item,
-            warning: WarningType::SectionHeadingLevelOutOfRange(
-                effective_level,
-                min_level as usize,
-            ),
-            origin: None,
-        });
+        warnings.push(Warning::new(
+            source.take_normalized_line().item,
+            WarningType::SectionHeadingLevelOutOfRange(effective_level, min_level as usize),
+        ));
         min_level as usize
     } else if effective_level > MAX_SECTION_LEVEL {
-        warnings.push(Warning {
-            source: source.take_normalized_line().item,
-            warning: WarningType::SectionHeadingLevelOutOfRange(
-                effective_level,
-                MAX_SECTION_LEVEL as usize,
-            ),
-            origin: None,
-        });
+        warnings.push(Warning::new(
+            source.take_normalized_line().item,
+            WarningType::SectionHeadingLevelOutOfRange(effective_level, MAX_SECTION_LEVEL as usize),
+        ));
         MAX_SECTION_LEVEL as usize
     } else {
         effective_level as usize
@@ -927,11 +913,10 @@ fn peer_or_ancestor_section<'src>(
         let found_level = mi.item.0;
 
         if found_level > *most_recent_level + 1 {
-            warnings.push(Warning {
-                source: source.take_normalized_line().item,
-                warning: WarningType::SectionHeadingLevelSkipped(*most_recent_level, found_level),
-                origin: None,
-            });
+            warnings.push(Warning::new(
+                source.take_normalized_line().item,
+                WarningType::SectionHeadingLevelSkipped(*most_recent_level, found_level),
+            ));
         }
 
         *most_recent_level = found_level;
@@ -987,11 +972,10 @@ pub(crate) fn root_section_sequence_warnings<'src>(blocks: &[Block<'src>]) -> Ve
         let found_level = section.level();
 
         if found_level > most_recent_level + 1 {
-            warnings.push(Warning {
-                source: section.span().take_normalized_line().item,
-                warning: WarningType::SectionHeadingLevelSkipped(most_recent_level, found_level),
-                origin: None,
-            });
+            warnings.push(Warning::new(
+                section.span().take_normalized_line().item,
+                WarningType::SectionHeadingLevelSkipped(most_recent_level, found_level),
+            ));
         }
 
         most_recent_level = found_level;

@@ -91,11 +91,7 @@ impl<'src> Attrlist<'src> {
             // reason, individual attribute parsing only returns the warning type and we
             // then map it back to the entire attrlist source.
             for warning_type in warning_types {
-                warnings.push(Warning {
-                    source,
-                    warning: warning_type,
-                    origin: None,
-                });
+                warnings.push(Warning::new(source, warning_type));
             }
 
             // Shorthand items (the `#id`, `.role`, and `%option` entries) are
@@ -148,11 +144,7 @@ impl<'src> Attrlist<'src> {
                     after = comma.after.take_whitespace().after;
 
                     if after.starts_with(',') {
-                        warnings.push(Warning {
-                            source,
-                            warning: WarningType::EmptyAttributeValue,
-                            origin: None,
-                        });
+                        warnings.push(Warning::new(source, WarningType::EmptyAttributeValue));
 
                         // Consume the blank slot between consecutive commas here,
                         // advancing the position counter past it.
@@ -171,11 +163,10 @@ impl<'src> Attrlist<'src> {
         };
 
         if after_index < source_cow.len() {
-            warnings.push(Warning {
+            warnings.push(Warning::new(
                 source,
-                warning: WarningType::MissingCommaAfterQuotedAttributeValue,
-                origin: None,
-            });
+                WarningType::MissingCommaAfterQuotedAttributeValue,
+            ));
         }
 
         MatchAndWarnings {

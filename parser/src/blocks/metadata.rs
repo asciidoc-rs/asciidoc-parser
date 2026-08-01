@@ -114,11 +114,10 @@ impl<'src> BlockMetadata<'src> {
                             reftext = Some(reftext_span);
                             block_start = mi.after;
                         } else {
-                            warnings.push(Warning {
-                                source: anchor_span,
-                                warning: WarningType::InvalidBlockAnchorName,
-                                origin: None,
-                            });
+                            warnings.push(Warning::new(
+                                anchor_span,
+                                WarningType::InvalidBlockAnchorName,
+                            ));
                         }
                     } else {
                         // Validate anchor name.
@@ -131,11 +130,10 @@ impl<'src> BlockMetadata<'src> {
                             reftext = None;
                             block_start = mi.after;
                         } else {
-                            warnings.push(Warning {
-                                source: anchor_content,
-                                warning: WarningType::InvalidBlockAnchorName,
-                                origin: None,
-                            });
+                            warnings.push(Warning::new(
+                                anchor_content,
+                                WarningType::InvalidBlockAnchorName,
+                            ));
                         }
                     }
                 } else {
@@ -399,11 +397,7 @@ fn parse_maybe_block_anchor(
                 item: None,
                 after: block_start,
             }),
-            warnings: vec![Warning {
-                source: anchor_src,
-                warning: WarningType::EmptyBlockAnchorName,
-                origin: None,
-            }],
+            warnings: vec![Warning::new(anchor_src, WarningType::EmptyBlockAnchorName)],
         };
     }
 

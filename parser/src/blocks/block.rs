@@ -4,8 +4,8 @@ use crate::{
     blocks::{
         AdmonitionBlock, Break, CompoundDelimitedBlock, ContentModel, IsBlock, ListBlock, ListItem,
         ListItemMarker, MediaBlock, Preamble, QuoteBlock, RawDelimitedBlock, SectionBlock,
-        SimpleBlock, TableBlock, TocBlock, media::TargetResolution, metadata::BlockMetadata,
-        starts_with_admonition_label,
+        SimpleBlock, TableBlock, TocBlock, is_built_in_context, media::TargetResolution,
+        metadata::BlockMetadata, starts_with_admonition_label,
     },
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{Attribute, InterpretedValue, RefType},
@@ -211,7 +211,41 @@ impl<'src> Block<'src> {
 
     /// Shared parser for [`parse_with_outcome`](Self::parse_with_outcome) and
     /// [`parse_for_list_item`](Self::parse_for_list_item).
+    ///
+    /// This wraps [`parse_internal_inner`](Self::parse_internal_inner) so that
+    /// every parsed block – whichever branch produced it – passes through the
+    /// unknown-block-style check on the way out. Every block is born here (the
+    /// block-collection loops call one of the public `parse_*` entry points,
+    /// which funnel into this), so this is the single point at which a declared
+    /// style that this parser could not act on is diagnosed.
     fn parse_internal(
+        source: Span<'src>,
+        parser: &mut Parser,
+        parent_list_markers: Option<&[ListItemMarker<'src>]>,
+        is_continuation: bool,
+    ) -> MatchAndWarnings<'src, BlockParseOutcome<'src>> {
+        let mut result =
+            Self::parse_internal_inner(source, parser, parent_list_markers, is_continuation);
+
+        // Record a DEBUG-severity diagnostic when a block declared a style this
+        // parser does not recognize for its context. The block keeps the
+        // default context implied by its syntax (the style is retained but
+        // otherwise ignored); Asciidoctor logs the same condition at debug
+        // level (below its default WARN threshold), so this is surfaced only
+        // for a host that opts in to low-severity diagnostics.
+        if let BlockParseOutcome::Parsed(matched_item) = &result.item
+            && let Some(warning) = unknown_block_style_warning(&matched_item.item)
+        {
+            result
+                .warnings
+                .push(Warning::new(matched_item.item.span(), warning));
+        }
+
+        result
+    }
+
+    /// Shared parser body for [`parse_internal`](Self::parse_internal).
+    fn parse_internal_inner(
         source: Span<'src>,
         parser: &mut Parser,
         parent_list_markers: Option<&[ListItemMarker<'src>]>,
@@ -663,11 +697,10 @@ impl<'src> Block<'src> {
                     // We have a metadata with no block. Treat it as a simple block but issue a
                     // warning.
 
-                    warnings.push(Warning {
-                        source: metadata.source,
-                        warning: WarningType::MissingBlockAfterTitleOrAttributeList,
-                        origin: None,
-                    });
+                    warnings.push(Warning::new(
+                        metadata.source,
+                        WarningType::MissingBlockAfterTitleOrAttributeList,
+                    ));
 
                     // Remove the metadata content so that SimpleBlock will read the title/attrlist
                     // line(s) as regular content. The speculative parse failed, so the
@@ -847,11 +880,7 @@ impl<'src> Block<'src> {
                 }
                 Err(_duplicate_error) => {
                     // If registration fails due to duplicate ID, issue a warning.
-                    warnings.push(Warning {
-                        source: span,
-                        warning: WarningType::DuplicateId(id.to_string()),
-                        origin: None,
-                    });
+                    warnings.push(Warning::new(span, WarningType::DuplicateId(id.to_string())));
                 }
             }
         }
@@ -1245,6 +1274,253 @@ impl<'src> HasSpan<'src> for Block<'src> {
             Self::Break(b) => b.span(),
             Self::Toc(b) => b.span(),
             Self::DocumentAttribute(b) => b.span(),
+        }
+    }
+}
+
+/// The five admonition labels (`NOTE`, `TIP`, …). A style naming one of these
+/// is always recognized: it turns the block into an admonition.
+const ADMONITION_STYLES: &[&str] = &["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
+
+/// Block style keywords this parser understands that are *not* themselves
+/// built-in contexts.
+///
+/// A declared block style (the first positional attribute, e.g. `[source]`) is
+/// recognized when it names a built-in context this parser can adopt (any
+/// [`is_built_in_context`] style – `example`, `listing`, `sidebar`, `image`,
+/// `table`, and so on), one of these interpreting keywords, or – via
+/// [`ADMONITION_STYLES`] – an admonition label. Anything else is an unknown
+/// style.
+///
+/// Deferring the built-in contexts to [`is_built_in_context`] keeps this check
+/// in lock-step with
+/// [`resolved_context`](crate::blocks::IsBlock::resolved_context), which adopts
+/// exactly those styles as the block's context: a style that
+/// `resolved_context` acts on is never reported as unknown. These keywords are
+/// the remaining styles this parser interprets without their being a context –
+/// `source` specializes `listing`, `abstract` an open block, the `stem`
+/// flavors a `stem` block, and `comment`/`normal`/`partintro` round out
+/// Asciidoctor's `PARAGRAPH_STYLES`.
+const KNOWN_STYLE_KEYWORDS: &[&str] = &[
+    "abstract",
+    "asciimath",
+    "comment",
+    "latexmath",
+    "normal",
+    "partintro",
+    "source",
+];
+
+/// The block contexts for which an unknown declared style is diagnosed.
+///
+/// Asciidoctor reports an unknown style only for delimited blocks and
+/// paragraphs; a style on a list, section, media macro, or thematic break is
+/// interpreted differently (a list marker style, a discrete-heading style,
+/// etc.) and is never reported this way. These are the corresponding
+/// [`raw_context`](crate::blocks::IsBlock::raw_context) values.
+///
+/// [`raw_context`]: crate::blocks::IsBlock::raw_context
+const STYLED_BLOCK_CONTEXTS: &[&str] = &[
+    "comment",
+    "example",
+    "listing",
+    "literal",
+    "open",
+    "paragraph",
+    "pass",
+    "quote",
+    "sidebar",
+    "stem",
+    "table",
+    "verse",
+];
+
+/// Diagnose a block that declared a style this parser does not recognize for
+/// its context, returning the [`WarningType`] to record or `None` when the
+/// block has no style, the style is recognized, or the block's context is not
+/// one for which an unknown style is reported.
+///
+/// The block keeps the default context implied by its syntax regardless; the
+/// diagnostic only reports that the declared style had no effect. This mirrors
+/// Asciidoctor, which logs `unknown style for <context> block: <style>` at
+/// debug level and falls back to the block's context.
+fn unknown_block_style_warning(block: &Block<'_>) -> Option<WarningType> {
+    let style = block.declared_style()?;
+    let context = block.raw_context();
+    let context = context.as_ref();
+
+    // Only diagnose something that actually looks like a style name. A malformed
+    // attribute list (for example a mangled `[[anchor]`, or a positional whose
+    // value is `-foo = bar`) can leave debris in the first positional slot that
+    // is not a plausible style; reporting it as an "unknown style" would be
+    // noise. Asciidoctor only reaches this check with a properly-parsed style
+    // token, so a value carrying spaces, brackets, or other punctuation is not
+    // one this diagnostic is meant for.
+    if !is_plausible_style_name(style) {
+        return None;
+    }
+
+    // Only delimited blocks and paragraphs report an unknown style; on any
+    // other block a first positional attribute means something else.
+    if !STYLED_BLOCK_CONTEXTS.contains(&context) {
+        return None;
+    }
+
+    if is_built_in_context(style)
+        || KNOWN_STYLE_KEYWORDS.contains(&style)
+        || ADMONITION_STYLES.contains(&style)
+    {
+        return None;
+    }
+
+    Some(WarningType::UnknownBlockStyle(
+        context.to_string(),
+        style.to_string(),
+    ))
+}
+
+/// Whether `style` looks like an authored block-style name – a non-empty token
+/// of ASCII letters, digits, `_`, or `-`. This screens out the debris a
+/// malformed attribute list can leave in the first positional slot (values
+/// carrying spaces, brackets, `=`, quotes, and so on), which is not a style the
+/// unknown-style diagnostic is meant to report.
+fn is_plausible_style_name(style: &str) -> bool {
+    !style.is_empty()
+        && style
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    mod unknown_block_style {
+        use crate::{
+            Parser,
+            warnings::{WarningSeverity, WarningType},
+        };
+
+        /// The single warning a parse produced, or `None` if there were none.
+        fn only_warning(input: &str) -> Option<(WarningSeverity, WarningType)> {
+            let doc = Parser::default().parse(input);
+            let mut warnings = doc.warnings();
+            let warning = warnings.next()?;
+            assert!(
+                warnings.next().is_none(),
+                "expected at most one warning for {input:?}"
+            );
+
+            Some((warning.severity, warning.warning.clone()))
+        }
+
+        #[test]
+        fn unknown_style_on_open_block_is_debug() {
+            assert_eq!(
+                only_warning("[foo]\n--\nbar\n--\n"),
+                Some((
+                    WarningSeverity::Debug,
+                    WarningType::UnknownBlockStyle("open".to_string(), "foo".to_string())
+                ))
+            );
+        }
+
+        #[test]
+        fn unknown_style_on_paragraph_is_debug() {
+            assert_eq!(
+                only_warning("[foo]\nbar\n"),
+                Some((
+                    WarningSeverity::Debug,
+                    WarningType::UnknownBlockStyle("paragraph".to_string(), "foo".to_string())
+                ))
+            );
+        }
+
+        #[test]
+        fn nested_unknown_style_is_reported() {
+            assert_eq!(
+                only_warning("====\n[bar]\n--\nx\n--\n====\n"),
+                Some((
+                    WarningSeverity::Debug,
+                    WarningType::UnknownBlockStyle("open".to_string(), "bar".to_string())
+                ))
+            );
+        }
+
+        #[test]
+        fn recognized_context_style_does_not_warn() {
+            // A built-in context masquerading over a delimited block.
+            assert_eq!(only_warning("[example]\n--\nx\n--\n"), None);
+            assert_eq!(only_warning("[sidebar]\n--\nx\n--\n"), None);
+        }
+
+        #[test]
+        fn recognized_keyword_style_does_not_warn() {
+            assert_eq!(only_warning("[source]\n----\nx\n----\n"), None);
+            assert_eq!(only_warning("[verse]\n____\nx\n____\n"), None);
+            assert_eq!(only_warning("[abstract]\n--\nx\n--\n"), None);
+            assert_eq!(only_warning("[asciimath]\n++++\nx\n++++\n"), None);
+        }
+
+        #[test]
+        fn any_built_in_context_style_does_not_warn() {
+            // Every built-in context this parser can adopt as a block's context
+            // (via `resolved_context`) is a recognized style, even one it does
+            // not otherwise treat as a masquerade keyword (e.g. `image`,
+            // `audio`, `video`, `table`). Reporting these would contradict the
+            // context the parser actually resolved.
+            assert_eq!(only_warning("[image]\nbar\n"), None);
+            assert_eq!(only_warning("[audio]\n--\nx\n--\n"), None);
+            assert_eq!(only_warning("[video]\nbar\n"), None);
+            assert_eq!(only_warning("[table]\nbar\n"), None);
+        }
+
+        #[test]
+        fn admonition_style_does_not_warn() {
+            assert_eq!(only_warning("[NOTE]\n--\nx\n--\n"), None);
+        }
+
+        #[test]
+        fn style_naming_its_own_context_does_not_warn() {
+            // A `[table]` style on a table names the block's own context.
+            assert_eq!(only_warning("[table]\n|===\n| x\n|===\n"), None);
+        }
+
+        #[test]
+        fn style_on_list_or_section_does_not_warn() {
+            // A first positional on a list or a section heading is not a block
+            // style (a list marker style, a discrete-heading flag, and so on).
+            assert_eq!(only_warning("[square]\n* a\n* b\n"), None);
+            assert_eq!(only_warning("[discrete]\n== Heading\n"), None);
+        }
+
+        #[test]
+        fn malformed_attrlist_debris_does_not_warn() {
+            // A mangled anchor (`[[notice]`) leaves `[notice` in the first
+            // positional slot; it is not a plausible style name.
+            assert_eq!(only_warning("[[notice]\nThis is a paragraph.\n"), None);
+        }
+    }
+
+    mod is_plausible_style_name {
+        use crate::blocks::block::is_plausible_style_name;
+
+        #[test]
+        fn accepts_style_tokens() {
+            assert!(is_plausible_style_name("foo"));
+            assert!(is_plausible_style_name("NOTE"));
+            assert!(is_plausible_style_name("foo-bar"));
+            assert!(is_plausible_style_name("foo_bar"));
+            assert!(is_plausible_style_name("style2"));
+        }
+
+        #[test]
+        fn rejects_debris_and_empty() {
+            assert!(!is_plausible_style_name(""));
+            assert!(!is_plausible_style_name("[notice"));
+            assert!(!is_plausible_style_name("-foo = bar"));
+            assert!(!is_plausible_style_name("a,b"));
+            assert!(!is_plausible_style_name("has space"));
         }
     }
 }

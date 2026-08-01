@@ -150,19 +150,18 @@ impl<'src> Document<'src> {
             // Warnings raised during preprocessing (e.g. an unresolved include
             // directive) are carried the same way and reconstituted here.
             for pw in preprocessor_warnings {
-                warnings.push(Warning {
-                    source: root.slice(pw.offset..pw.offset + pw.len),
-                    warning: pw.warning,
-                    origin: pw.origin,
-                });
+                warnings.push(Warning::with_origin(
+                    root.slice(pw.offset..pw.offset + pw.len),
+                    pw.warning,
+                    pw.origin,
+                ));
             }
 
             for sw in parser.take_substitution_warnings() {
-                warnings.push(Warning {
-                    source: root.slice(sw.offset..sw.offset + sw.len),
-                    warning: sw.warning,
-                    origin: None,
-                });
+                warnings.push(Warning::new(
+                    root.slice(sw.offset..sw.offset + sw.len),
+                    sw.warning,
+                ));
             }
 
             let mut blocks = maw_blocks.item.item;
@@ -211,11 +210,10 @@ impl<'src> Document<'src> {
                     if block.declared_style() == Some("abstract")
                         && block.resolved_context().as_ref() == "open"
                     {
-                        warnings.push(Warning {
-                            source: block.span(),
-                            warning: WarningType::AbstractBlockInBookWithoutDoctitle,
-                            origin: None,
-                        });
+                        warnings.push(Warning::new(
+                            block.span(),
+                            WarningType::AbstractBlockInBookWithoutDoctitle,
+                        ));
                     }
                 }
             }
@@ -237,11 +235,10 @@ impl<'src> Document<'src> {
                     ContentModel::Compound | ContentModel::Empty
                 )
             {
-                warnings.push(Warning {
-                    source: first.span(),
-                    warning: WarningType::NoInlineDoctypeCandidate,
-                    origin: None,
-                });
+                warnings.push(Warning::new(
+                    first.span(),
+                    WarningType::NoInlineDoctypeCandidate,
+                ));
             }
 
             // The `toc` family of attributes is header-only, so the resolved

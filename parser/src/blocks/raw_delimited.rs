@@ -287,11 +287,10 @@ impl<'src> RawDelimitedBlock<'src> {
                 },
                 after: next,
             }),
-            warnings: vec![Warning {
-                source: delimiter.item,
-                warning: WarningType::UnterminatedDelimitedBlock,
-                origin: None,
-            }],
+            warnings: vec![Warning::new(
+                delimiter.item,
+                WarningType::UnterminatedDelimitedBlock,
+            )],
         })
     }
 

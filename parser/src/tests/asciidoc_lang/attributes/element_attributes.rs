@@ -184,13 +184,34 @@ If the text cannot be parsed, an error message will be emitted to the log.
 
         let mut parser = Parser::default();
 
-        let block = crate::blocks::Block::parse(
+        let parsed = crate::blocks::Block::parse(
             crate::Span::new("[style,second-positional,named=\"value of named\"]\nSimple block\n"),
             &mut parser,
-        )
-        .unwrap_if_no_warnings()
-        .unwrap()
-        .item;
+        );
+
+        // `style` is a placeholder for a real style name in this doc example, not
+        // a style this parser recognizes, so it records a DEBUG-severity
+        // unknown-style diagnostic. That is incidental to the attribute-list
+        // parsing this test verifies.
+        assert_eq!(parsed.warnings.len(), 1);
+        assert_eq!(parsed.warnings[0].severity, WarningSeverity::Debug);
+        assert_eq!(
+            parsed.warnings[0],
+            Warning {
+                source: Span {
+                    data: "[style,second-positional,named=\"value of named\"]\nSimple block",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warning: WarningType::UnknownBlockStyle(
+                    "paragraph".to_string(),
+                    "style".to_string()
+                ),
+            }
+        );
+
+        let block = parsed.item.unwrap().item;
 
         assert_eq!(
             block,

@@ -181,14 +181,10 @@ impl<'src> ListBlock<'src> {
                             first_marker.ordinal_to_marker_text(expected),
                             first_marker.ordinal_to_marker_text(actual_ordinal),
                         ) {
-                            warnings.push(Warning {
-                                source: this_item_marker.span(),
-                                warning: WarningType::ListItemOutOfSequence(
-                                    expected_text,
-                                    actual_text,
-                                ),
-                                origin: None,
-                            });
+                            warnings.push(Warning::new(
+                                this_item_marker.span(),
+                                WarningType::ListItemOutOfSequence(expected_text, actual_text),
+                            ));
                         }
                     }
                     expected_ordinal = Some(actual_ordinal + 1);
@@ -274,22 +270,20 @@ impl<'src> ListBlock<'src> {
                     .and_then(|li| li.list_item_marker().callout_number())
                     && marker_number != position
                 {
-                    warnings.push(Warning {
-                        source: item.span(),
-                        warning: WarningType::CalloutListItemOutOfSequence(
+                    warnings.push(Warning::new(
+                        item.span(),
+                        WarningType::CalloutListItemOutOfSequence(
                             position as usize,
                             marker_number as usize,
                         ),
-                        origin: None,
-                    });
+                    ));
                 }
 
                 if !parser.callout_defined(position) {
-                    warnings.push(Warning {
-                        source: item.span(),
-                        warning: WarningType::NoCalloutFound(position as usize),
-                        origin: None,
-                    });
+                    warnings.push(Warning::new(
+                        item.span(),
+                        WarningType::NoCalloutFound(position as usize),
+                    ));
                 }
             }
             parser.close_callout_list();
