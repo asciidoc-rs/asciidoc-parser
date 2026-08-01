@@ -1331,6 +1331,20 @@ mod levels {
             assert!(doc.warnings().next().is_none());
         }
 
+        // A tab (not just a space) may separate the marker run from the title, so
+        // a tab-delimited heading shifted to effective level 0 is coerced to the
+        // document title exactly as its space-delimited form is – matching the
+        // section parser's `[ \t]+` whitespace handling. This edge is not covered
+        // by a Ruby test, but guards against the header recognizer and the body
+        // section parser disagreeing on what counts as a heading.
+        #[test]
+        fn document_title_from_leveloffset_shift_allows_a_tab_after_the_marker() {
+            let doc = Parser::default().parse(":leveloffset: -1\n==\tDocument Title");
+            assert_eq!(doc.doctitle(), Some("Document Title"));
+            assert_eq!(doc.header().id(), None);
+            assert!(doc.warnings().next().is_none());
+        }
+
         // NOTE: A document-level ID above the document title sets the `id` on
         // the standalone `<body>`. This crate models embedded output, which has
         // no `<body>` element, so the `body#id` assertions below are out of

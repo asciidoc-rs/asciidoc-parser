@@ -703,9 +703,12 @@ fn document_title_marker(line: Span<'_>, level_offset: i32) -> Option<(char, usi
         return None;
     }
 
-    // The marker run must be followed by a space, matching the original `"= "` /
-    // `"# "` test (and the whitespace requirement of the section-title regex).
-    if !data[count..].starts_with(' ') {
+    // The marker run must be followed by a blank – a space or a tab – matching
+    // the section parser's `take_required_whitespace` and Asciidoctor's
+    // `[ \t]+` in the section-title regex. Accepting a tab (not just a space)
+    // keeps a tab-delimited heading shifted to effective level 0 on the same
+    // doctitle path as its space-delimited form.
+    if !data[count..].starts_with([' ', '\t']) {
         return None;
     }
 
