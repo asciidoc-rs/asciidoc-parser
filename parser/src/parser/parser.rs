@@ -2974,8 +2974,7 @@ fn alias_attr_name(attr_name: String) -> String {
 /// A single trailing `@` on an attribute value supplied via the API (or the
 /// Asciidoctor CLI) marks the attribute as *soft set*: the effective value is
 /// the string with the `@` removed, and the attribute becomes overridable by a
-/// document `:name:` entry. That maps onto
-/// [`ModificationContext::Anywhere`](crate::parser::ModificationContext::Anywhere).
+/// document `:name:` entry. That maps onto [`ModificationContext::Anywhere`].
 ///
 /// When no trailing `@` is present the value and `modification_context` are
 /// returned unchanged. Only one `@` is stripped, mirroring Ruby's `String#chop`
