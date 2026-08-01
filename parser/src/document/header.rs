@@ -295,13 +295,11 @@ impl<'src> Header<'src> {
                 // title and rewind so the block parser sees the whole run –
                 // the block title, the demoted `= …`, and the content below.
                 // The body then recognizes the block title as metadata (not
-                // literal text) and carries it over to the following block, and
-                // the `= …` heading is declined as an unsupported level-0
-                // heading (raising `WarningType::Level0SectionHeadingNotSupported`).
-                // This crate does not model a body-level document title as a
-                // level-0 section, so the heading is declined rather than
-                // rendered as `<h1 class="sect0">`; the demotion and the warning
-                // still hold.
+                // literal text) and carries it over into the following section,
+                // and the `= …` heading is modeled as a level-0 section
+                // (Asciidoctor's `sect0`, rendered as an `<h1>`). Under any
+                // doctype other than `book`, `SectionBlock::parse` also raises
+                // `WarningType::Level0SectionHeadingNotSupported` for it.
                 //
                 // `source` is left pointing at the block-title line (it is not
                 // advanced), so the header span ends above it and the body

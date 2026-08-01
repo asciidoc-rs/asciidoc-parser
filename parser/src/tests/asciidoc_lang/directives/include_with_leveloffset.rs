@@ -85,7 +85,9 @@ This allows you to publish each chapter as a standalone document (complete with 
     );
 
     // Without the offset the level-0 document title of the included file is not
-    // a valid body heading, so no shifting occurs and the title is rejected.
+    // shifted, so it stays at level 0: a body-level `= Chapter Title` modeled as
+    // a level-0 section (Asciidoctor's `sect0`) that contains the level-1
+    // `== A Section`.
     let handler = InlineFileHandler::from_pairs([(
         "chapter01.adoc",
         "= Chapter Title\n\nChapter intro.\n\n== A Section\n\nSection body.",
@@ -96,7 +98,13 @@ This allows you to publish each chapter as a standalone document (complete with 
         .with_include_file_handler(handler)
         .parse("= My Book\n\ninclude::chapter01.adoc[]");
 
-    assert_eq!(section_levels(&doc), vec![(1, "A Section".to_string())]);
+    assert_eq!(
+        section_levels(&doc),
+        vec![
+            (0, "Chapter Title".to_string()),
+            (1, "A Section".to_string()),
+        ]
+    );
 }
 
 non_normative!(
@@ -392,11 +400,13 @@ fn negative_offset_clamps_real_section_up_to_one() {
 }
 
 #[test]
-fn document_title_with_nonpositive_offset_is_still_rejected() {
-    // The single-document-title rule is preserved: a bare `= Title` in the body
-    // that no positive offset lifts into range is declined (not clamped into a
-    // level-1 section). Offset `-1` is usable, so only the level-0 warning is
-    // raised and no section is produced.
+fn document_title_with_nonpositive_offset_models_a_level_0_section() {
+    // A bare `= Title` in the body that no positive offset lifts into range is
+    // modeled as a level-0 section (Asciidoctor's `sect0`), not the document
+    // title (the single-document-title rule forbids a second one) and not
+    // clamped up into a level-1 section. A negative offset that would push it
+    // below 0 simply floors at level 0, so no out-of-range clamp is reported –
+    // only the level-0 warning, raised because the doctype is not `book`.
     let doc = Parser::default().parse(concat!(
         "= My Book\n\n",
         ":leveloffset: -1\n\n",
@@ -404,7 +414,7 @@ fn document_title_with_nonpositive_offset_is_still_rejected() {
         "body",
     ));
 
-    assert!(section_levels(&doc).is_empty());
+    assert_eq!(section_levels(&doc), vec![(0, "Orphan Title".to_string())]);
     assert_eq!(
         warning_types(&doc),
         vec![WarningType::Level0SectionHeadingNotSupported]
