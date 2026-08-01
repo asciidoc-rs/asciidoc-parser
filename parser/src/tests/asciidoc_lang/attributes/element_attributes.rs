@@ -199,10 +199,10 @@ If the text cannot be parsed, an error message will be emitted to the log.
             parsed.warnings[0],
             Warning {
                 source: Span {
-                    data: "[style,second-positional,named=\"value of named\"]\nSimple block",
-                    line: 1,
+                    data: "Simple block",
+                    line: 2,
                     col: 1,
-                    offset: 0,
+                    offset: 49,
                 },
                 warning: WarningType::UnknownBlockStyle(
                     "paragraph".to_string(),

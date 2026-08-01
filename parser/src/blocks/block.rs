@@ -224,8 +224,19 @@ impl<'src> Block<'src> {
         parent_list_markers: Option<&[ListItemMarker<'src>]>,
         is_continuation: bool,
     ) -> MatchAndWarnings<'src, BlockParseOutcome<'src>> {
-        let mut result =
-            Self::parse_internal_inner(source, parser, parent_list_markers, is_continuation);
+        // The span at which the block's content begins, once its metadata (title,
+        // anchor, attribute list) has been read. `parse_internal_inner` fills this
+        // in so an unknown-style diagnostic can anchor at the block's delimiter or
+        // first content line rather than at the preceding style-attribute line.
+        let mut content_start: Option<Span<'src>> = None;
+
+        let mut result = Self::parse_internal_inner(
+            source,
+            parser,
+            parent_list_markers,
+            is_continuation,
+            &mut content_start,
+        );
 
         // Record a DEBUG-severity diagnostic when a block declared a style this
         // parser does not recognize for its context. The block keeps the
@@ -236,9 +247,18 @@ impl<'src> Block<'src> {
         if let BlockParseOutcome::Parsed(matched_item) = &result.item
             && let Some(warning) = unknown_block_style_warning(&matched_item.item)
         {
-            result
-                .warnings
-                .push(Warning::new(matched_item.item.span(), warning));
+            // Anchor the diagnostic at the block's first content line – the
+            // delimiter of a delimited block, or the opening line of a paragraph
+            // – matching Asciidoctor, which reports `unknown style for …` at that
+            // line rather than at the `[style]` line above it. `content_start` is
+            // always set when a block carries a declared style (that requires an
+            // attribute list, which only the metadata path parses).
+            let span = content_start
+                .unwrap_or_else(|| matched_item.item.span())
+                .take_normalized_line()
+                .item;
+
+            result.warnings.push(Warning::new(span, warning));
         }
 
         result
@@ -250,6 +270,7 @@ impl<'src> Block<'src> {
         parser: &mut Parser,
         parent_list_markers: Option<&[ListItemMarker<'src>]>,
         is_continuation: bool,
+        content_start: &mut Option<Span<'src>>,
     ) -> MatchAndWarnings<'src, BlockParseOutcome<'src>> {
         // Optimization: If the first line doesn't match any of the early indications
         // for delimited blocks, titles, or attrlists, we can skip directly to treating
@@ -370,6 +391,12 @@ impl<'src> Block<'src> {
                 metadata.block_start = after_blanks;
             }
         }
+
+        // Expose the content start (past the metadata) so `parse_internal` can
+        // anchor an unknown-style diagnostic at the block's delimiter or first
+        // content line. Every block-type dispatch below reads its content from
+        // here, so this is the block's true starting line whichever branch wins.
+        *content_start = Some(metadata.block_start);
 
         // Resolve attribute references in a `[[id,reftext]]` anchor reftext now,
         // while the parser still holds the attributes in effect where the anchor
