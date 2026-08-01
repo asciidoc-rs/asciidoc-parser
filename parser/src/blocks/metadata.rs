@@ -96,45 +96,54 @@ impl<'src> BlockMetadata<'src> {
             }
 
             if let Some(mi) = anchor_maw.item {
-                if let Some(comma_position) = mi.item.position(|c| c == ',')
-                    && comma_position < mi.item.len() - 1
-                {
-                    let anchor_span = mi.item.slice_to(RangeTo {
-                        end: comma_position,
-                    });
-                    let reftext_span = mi.item.slice_from(RangeFrom {
-                        start: comma_position + 1,
-                    });
-
-                    // Validate anchor name.
-                    if anchor_span.is_xml_name() {
-                        anchor = Some(anchor_span);
-                        reftext = Some(reftext_span);
-                        block_start = mi.after;
-                    } else {
-                        warnings.push(Warning {
-                            source: anchor_span,
-                            warning: WarningType::InvalidBlockAnchorName,
-                            origin: None,
+                if let Some(anchor_content) = mi.item {
+                    if let Some(comma_position) = anchor_content.position(|c| c == ',')
+                        && comma_position < anchor_content.len() - 1
+                    {
+                        let anchor_span = anchor_content.slice_to(RangeTo {
+                            end: comma_position,
                         });
+
+                        let reftext_span = anchor_content.slice_from(RangeFrom {
+                            start: comma_position + 1,
+                        });
+
+                        // Validate anchor name.
+                        if anchor_span.is_xml_name() {
+                            anchor = Some(anchor_span);
+                            reftext = Some(reftext_span);
+                            block_start = mi.after;
+                        } else {
+                            warnings.push(Warning {
+                                source: anchor_span,
+                                warning: WarningType::InvalidBlockAnchorName,
+                                origin: None,
+                            });
+                        }
+                    } else {
+                        // Validate anchor name.
+                        if anchor_content.is_xml_name() {
+                            anchor = Some(anchor_content);
+
+                            // A later plain anchor (`[[foo]]`) clears any reftext
+                            // carried by an earlier `[[bar,text]]`, keeping the
+                            // last-wins semantics consistent across both fields.
+                            reftext = None;
+                            block_start = mi.after;
+                        } else {
+                            warnings.push(Warning {
+                                source: anchor_content,
+                                warning: WarningType::InvalidBlockAnchorName,
+                                origin: None,
+                            });
+                        }
                     }
                 } else {
-                    // Validate anchor name.
-                    if mi.item.is_xml_name() {
-                        anchor = Some(mi.item);
-
-                        // A later plain anchor (`[[foo]]`) clears any reftext
-                        // carried by an earlier `[[bar,text]]`, keeping the
-                        // last-wins semantics consistent across both fields.
-                        reftext = None;
-                        block_start = mi.after;
-                    } else {
-                        warnings.push(Warning {
-                            source: mi.item,
-                            warning: WarningType::InvalidBlockAnchorName,
-                            origin: None,
-                        });
-                    }
+                    // An empty `[[]]` anchor names nothing. Consume the line so
+                    // it is not emitted as a literal paragraph, but leave the
+                    // running anchor untouched (matching Asciidoctor, which
+                    // drops it). The empty-anchor warning was collected above.
+                    block_start = mi.after;
                 }
 
                 if block_start != original_block_start {
@@ -357,7 +366,7 @@ pub(crate) fn block_title_text(line: Span<'_>) -> Option<Span<'_>> {
 
 fn parse_maybe_block_anchor(
     source: Span<'_>,
-) -> MatchAndWarnings<'_, Option<MatchedItem<'_, Span<'_>>>> {
+) -> MatchAndWarnings<'_, Option<MatchedItem<'_, Option<Span<'_>>>>> {
     if !source.starts_with("[[") {
         return MatchAndWarnings {
             item: None,
@@ -380,8 +389,16 @@ fn parse_maybe_block_anchor(
     // Drop opening and closing brace pairs now that we know they are there.
     let anchor_src = line.slice(2..line.len() - 2);
     if anchor_src.is_empty() {
+        // An empty `[[]]` anchor is still a recognized (if do-nothing) anchor
+        // line: it names nothing, so the caller consumes it – setting no anchor
+        // – rather than leaving it to render as a literal paragraph (matching
+        // Asciidoctor, which drops it). The `None` payload signals the empty
+        // form, and the warning notes that the anchor name was empty.
         return MatchAndWarnings {
-            item: None,
+            item: Some(MatchedItem {
+                item: None,
+                after: block_start,
+            }),
             warnings: vec![Warning {
                 source: anchor_src,
                 warning: WarningType::EmptyBlockAnchorName,
@@ -392,7 +409,7 @@ fn parse_maybe_block_anchor(
 
     MatchAndWarnings {
         item: Some(MatchedItem {
-            item: anchor_src,
+            item: Some(anchor_src),
             after: block_start,
         }),
         warnings: vec![],
