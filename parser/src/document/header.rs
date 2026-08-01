@@ -111,11 +111,7 @@ impl<'src> Header<'src> {
                 // delimiter. This mirrors the body-level comment block path,
                 // which reports the same `UnterminatedDelimitedBlock` warning.
                 if !terminated {
-                    warnings.push(Warning {
-                        source: line,
-                        warning: WarningType::UnterminatedDelimitedBlock,
-                        origin: None,
-                    });
+                    warnings.push(Warning::new(line, WarningType::UnterminatedDelimitedBlock));
                 }
 
                 source = after;
@@ -349,11 +345,7 @@ impl<'src> Header<'src> {
                 source = line_mi.after;
             } else {
                 if title.is_some() {
-                    warnings.push(Warning {
-                        source: line,
-                        warning: WarningType::DocumentHeaderNotTerminated,
-                        origin: None,
-                    });
+                    warnings.push(Warning::new(line, WarningType::DocumentHeaderNotTerminated));
                 }
                 break;
             }

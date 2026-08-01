@@ -256,11 +256,7 @@ impl<'src> QuoteBlock<'src> {
         if closing_delimiter.is_empty() {
             warnings.insert(
                 0,
-                Warning {
-                    source: delimiter.item,
-                    warning: WarningType::UnterminatedDelimitedBlock,
-                    origin: None,
-                },
+                Warning::new(delimiter.item, WarningType::UnterminatedDelimitedBlock),
             );
         }
 
@@ -501,11 +497,7 @@ impl<'src> QuoteBlock<'src> {
 
         let warnings = nested_warning_types
             .into_iter()
-            .map(|warning| Warning {
-                source,
-                warning,
-                origin: None,
-            })
+            .map(|warning| Warning::new(source, warning))
             .collect();
 
         Some(MatchAndWarnings {

@@ -367,11 +367,10 @@ impl<'src> TableBlock<'src> {
             .trim_trailing_whitespace();
 
         if closing_delimiter.is_empty() {
-            warnings.push(Warning {
-                source: delimiter.item,
-                warning: WarningType::UnterminatedDelimitedBlock,
-                origin: None,
-            });
+            warnings.push(Warning::new(
+                delimiter.item,
+                WarningType::UnterminatedDelimitedBlock,
+            ));
         }
 
         Some(MatchAndWarnings {
@@ -1156,11 +1155,10 @@ fn build_psv_table<'src>(
 
     let (raw_cells, recovered_first_cell) = scan_cells(inside, separator);
     if let Some(source) = recovered_first_cell {
-        warnings.push(Warning {
+        warnings.push(Warning::new(
             source,
-            warning: WarningType::TableMissingLeadingSeparator,
-            origin: None,
-        });
+            WarningType::TableMissingLeadingSeparator,
+        ));
     }
 
     let raw_cells = expand_duplicates(raw_cells);
@@ -1218,11 +1216,10 @@ fn build_psv_table<'src>(
                     // Discard the whole row so the remaining cells stay aligned to
                     // the grid.
                     current_row.clear();
-                    warnings.push(Warning {
-                        source: cell_source,
-                        warning: WarningType::TableCellExceedsColumnCount,
-                        origin: None,
-                    });
+                    warnings.push(Warning::new(
+                        cell_source,
+                        WarningType::TableCellExceedsColumnCount,
+                    ));
                 }
                 column_visits = 0;
                 active_rowspans.pop_front();
@@ -1237,11 +1234,10 @@ fn build_psv_table<'src>(
         // `close_table`, that incomplete row is dropped and an error is logged
         // against its last cell.
         if let Some(last) = current_row.last() {
-            warnings.push(Warning {
-                source: last.content,
-                warning: WarningType::TableIncompleteRowAtEndOfTable,
-                origin: None,
-            });
+            warnings.push(Warning::new(
+                last.content,
+                WarningType::TableIncompleteRowAtEndOfTable,
+            ));
         }
     }
 
@@ -1458,11 +1454,10 @@ fn make_csv_field<'src>(
     let data = trimmed.data();
 
     let content = if data == "\"" {
-        warnings.push(Warning {
-            source: trimmed,
-            warning: WarningType::TableCsvDataHasUnclosedQuote,
-            origin: None,
-        });
+        warnings.push(Warning::new(
+            trimmed,
+            WarningType::TableCsvDataHasUnclosedQuote,
+        ));
         trimmed.slice(0..0)
     } else if data.len() >= 2 && data.starts_with('"') && data.ends_with('"') {
         trim_surrounding_whitespace(trimmed.slice(1..data.len() - 1))
@@ -1833,11 +1828,7 @@ fn process_content<'src>(
                     // `origin` (e.g. an unresolved include target) keep
                     // `directive_line` as their only anchor.
                     let origin = absolute_cell_directive_origin(pw.origin, cell_origin.as_ref());
-                    warnings.push(Warning {
-                        source: directive_line,
-                        warning: pw.warning,
-                        origin,
-                    });
+                    warnings.push(Warning::with_origin(directive_line, pw.warning, origin));
                 }
             } else {
                 // `directive_line` indexes an enclosing owned cell's private
@@ -1914,11 +1905,11 @@ fn process_content<'src>(
             // cells leave them queued for the document-level cell enclosing them.
             if at_document_level {
                 for rw in parser.take_owned_cell_warnings() {
-                    warnings.push(Warning {
-                        source: directive_line,
-                        warning: rw.warning,
-                        origin: Some(rw.origin),
-                    });
+                    warnings.push(Warning::with_origin(
+                        directive_line,
+                        rw.warning,
+                        Some(rw.origin),
+                    ));
                 }
             }
 

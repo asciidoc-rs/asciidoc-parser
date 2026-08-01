@@ -9,6 +9,47 @@ use thiserror::Error;
 
 use crate::{Span, parser::SourceLine};
 
+/// The severity of a [`Warning`].
+///
+/// Every diagnostic this parser records is surfaced through
+/// [`Document::warnings`](crate::Document::warnings) regardless of severity; a
+/// host filters on this value to decide which diagnostics to act on. The
+/// variants are ordered from least to most severe, so a host can select "at or
+/// above" a threshold with an ordinary comparison – for example, keeping only
+/// entries where `warning.severity >= WarningSeverity::Warning` suppresses the
+/// low-severity [`Debug`](Self::Debug) diagnostics.
+///
+/// A warning's severity is an intrinsic property of its
+/// [`WarningType`](WarningType); it is assigned when the warning is constructed
+/// and never varies from one occurrence of a given type to another.
+///
+/// This enum is `non_exhaustive`: further severities may be recognized as the
+/// parser grows, so a host matching on it needs a catch-all arm.
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum WarningSeverity {
+    /// A low-severity diagnostic that a host is expected to suppress by
+    /// default. It reports something a host may wish to observe (for example,
+    /// via tooling or a verbose mode) but which does not, on its own, suggest
+    /// the parse result is wrong. Asciidoctor logs the equivalent messages
+    /// below its default `WARN` threshold.
+    Debug,
+
+    /// A condition where the parse result might be unexpected. This is the
+    /// severity of the overwhelming majority of this parser's diagnostics and
+    /// the level a host should surface by default.
+    Warning,
+}
+
+impl std::fmt::Debug for WarningSeverity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WarningSeverity::Debug => write!(f, "WarningSeverity::Debug"),
+            WarningSeverity::Warning => write!(f, "WarningSeverity::Warning"),
+        }
+    }
+}
+
 /// Describes a possible parse error (i.e. a "warning") and its location.
 ///
 /// In `asciidoc-parser`, all documents are parseable, so this mechanism is used
@@ -21,6 +62,17 @@ pub struct Warning<'src> {
 
     /// Type of warning detected.
     pub warning: WarningType,
+
+    /// Severity of this warning.
+    ///
+    /// This is derived from [`warning`](Self::warning) – each
+    /// [`WarningType`](WarningType) has a fixed severity – so a host can filter
+    /// the [`Document::warnings`](crate::Document::warnings) stream by
+    /// importance without matching on every individual type. Most diagnostics
+    /// are [`WarningSeverity::Warning`]; a handful (such as an unknown block
+    /// style) are [`WarningSeverity::Debug`], which a host suppresses by
+    /// default.
+    pub severity: WarningSeverity,
 
     /// A pre-resolved originating `(file, line)` for this warning, independent
     /// of the document source map.
@@ -42,6 +94,44 @@ pub struct Warning<'src> {
     ///
     /// [`Document::source_map`]: crate::Document::source_map
     pub origin: Option<SourceLine>,
+}
+
+impl<'src> Warning<'src> {
+    /// Build a warning anchored at `source`, taking its severity from
+    /// `warning`'s [`WarningType::severity`] and leaving
+    /// [`origin`](Self::origin) unset. This is the constructor used for the
+    /// overwhelming majority of warnings, whose location is recovered from the
+    /// document source map.
+    pub(crate) fn new(source: Span<'src>, warning: WarningType) -> Self {
+        let severity = warning.severity();
+
+        Self {
+            source,
+            warning,
+            severity,
+            origin: None,
+        }
+    }
+
+    /// Build a warning anchored at `source` and carrying a pre-resolved
+    /// [`origin`](Self::origin), taking its severity from `warning`'s
+    /// [`WarningType::severity`]. This is used for the rare warnings that arise
+    /// from privately-expanded content with no document span of its own (see
+    /// [`origin`](Self::origin)).
+    pub(crate) fn with_origin(
+        source: Span<'src>,
+        warning: WarningType,
+        origin: Option<SourceLine>,
+    ) -> Self {
+        let severity = warning.severity();
+
+        Self {
+            source,
+            warning,
+            severity,
+            origin,
+        }
+    }
 }
 
 /// Type of possible parse error that was detected.
@@ -366,6 +456,38 @@ pub enum WarningType {
     /// counterpart in Ruby Asciidoctor.
     #[error("rejected link with potentially unsafe scheme (rendered as text): {0}")]
     UnsafeLinkSchemeRejected(String),
+
+    /// A block declared a style (the first positional attribute, e.g. `[foo]`)
+    /// that this parser does not recognize for the block's context, and which
+    /// no built-in masquerade accepts. The style is retained on the block but
+    /// otherwise ignored: the block keeps the default context implied by its
+    /// syntax (for example, `[foo]` over a `--` delimiter stays an open block).
+    ///
+    /// The first field is the block's context (for example `open` or
+    /// `paragraph`); the second is the unrecognized style as the author wrote
+    /// it. This is a [`WarningSeverity::Debug`] diagnostic – Asciidoctor logs
+    /// the equivalent message (`unknown style for <context> block: <style>`)
+    /// only below its default `WARN` threshold – so a host suppresses it by
+    /// default.
+    #[error("unknown style for {0} block: {1}")]
+    UnknownBlockStyle(String, String),
+}
+
+impl WarningType {
+    /// The intrinsic [`WarningSeverity`] of this warning type.
+    ///
+    /// Almost every type is [`WarningSeverity::Warning`]; the exceptions are
+    /// low-severity diagnostics (such as [`UnknownBlockStyle`]) that a host
+    /// suppresses by default. [`Warning::new`] uses this to stamp each
+    /// constructed [`Warning`] with its severity.
+    ///
+    /// [`UnknownBlockStyle`]: Self::UnknownBlockStyle
+    pub(crate) fn severity(&self) -> WarningSeverity {
+        match self {
+            WarningType::UnknownBlockStyle(..) => WarningSeverity::Debug,
+            _ => WarningSeverity::Warning,
+        }
+    }
 }
 
 impl std::fmt::Debug for WarningType {
@@ -607,6 +729,12 @@ impl std::fmt::Debug for WarningType {
                 .debug_tuple("WarningType::UnsafeLinkSchemeRejected")
                 .field(target)
                 .finish(),
+
+            WarningType::UnknownBlockStyle(context, style) => f
+                .debug_tuple("WarningType::UnknownBlockStyle")
+                .field(context)
+                .field(style)
+                .finish(),
         }
     }
 }
@@ -649,11 +777,7 @@ mod tests {
         #[test]
         fn impl_clone() {
             // Silly test to mark the #[derive(...)] line as covered.
-            let w1 = Warning {
-                source: crate::Span::new("abc"),
-                warning: WarningType::EmptyAttributeValue,
-                origin: None,
-            };
+            let w1 = Warning::new(crate::Span::new("abc"), WarningType::EmptyAttributeValue);
 
             let w2 = w1.clone();
             assert_eq!(w1, w2);
@@ -1187,6 +1311,51 @@ mod tests {
                     "WarningType::UnsafeLinkSchemeRejected(\"javascript:alert(1)\")"
                 );
             }
+
+            #[test]
+            fn unknown_block_style() {
+                let warning = WarningType::UnknownBlockStyle("open".to_string(), "foo".to_string());
+                let debug_output = format!("{:?}", warning);
+                assert_eq!(
+                    debug_output,
+                    "WarningType::UnknownBlockStyle(\"open\", \"foo\")"
+                );
+            }
+        }
+
+        mod severity {
+            use crate::warnings::{WarningSeverity, WarningType};
+
+            #[test]
+            fn unknown_block_style_is_debug() {
+                let warning = WarningType::UnknownBlockStyle("open".to_string(), "foo".to_string());
+                assert_eq!(warning.severity(), WarningSeverity::Debug);
+            }
+
+            #[test]
+            fn most_types_are_warning() {
+                assert_eq!(
+                    WarningType::EmptyAttributeValue.severity(),
+                    WarningSeverity::Warning
+                );
+            }
+
+            #[test]
+            fn debug_is_less_severe_than_warning() {
+                assert!(WarningSeverity::Debug < WarningSeverity::Warning);
+            }
+
+            #[test]
+            fn impl_debug() {
+                assert_eq!(
+                    format!("{:?}", WarningSeverity::Debug),
+                    "WarningSeverity::Debug"
+                );
+                assert_eq!(
+                    format!("{:?}", WarningSeverity::Warning),
+                    "WarningSeverity::Warning"
+                );
+            }
         }
     }
 
@@ -1198,11 +1367,10 @@ mod tests {
             // Silly test to mark the #[derive(...)] line as covered.
             let maw1 = MatchAndWarnings {
                 item: "xyz",
-                warnings: vec![Warning {
-                    source: crate::Span::new("abc"),
-                    warning: WarningType::EmptyAttributeValue,
-                    origin: None,
-                }],
+                warnings: vec![Warning::new(
+                    crate::Span::new("abc"),
+                    WarningType::EmptyAttributeValue,
+                )],
             };
 
             let maw2 = maw1.clone();
@@ -1225,11 +1393,10 @@ mod tests {
         fn unwrap_if_no_warnings_panic() {
             let maw = MatchAndWarnings {
                 item: "xyz",
-                warnings: vec![Warning {
-                    source: crate::Span::new("abc"),
-                    warning: WarningType::EmptyAttributeValue,
-                    origin: None,
-                }],
+                warnings: vec![Warning::new(
+                    crate::Span::new("abc"),
+                    WarningType::EmptyAttributeValue,
+                )],
             };
 
             let _ = maw.unwrap_if_no_warnings();

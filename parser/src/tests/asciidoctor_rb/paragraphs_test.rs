@@ -35,10 +35,10 @@
 //! documented in [`super`].
 //!
 //! Compatibility mode and non-HTML backends are out of scope for this crate, so
-//! the DocBook `simpara`/`indexterm` tests and the DEBUG-severity
-//! unknown-style-logging test are reproduced verbatim in `non_normative!`
-//! blocks (they account for those Ruby lines without asserting behavior this
-//! crate does not model). A handful of `inline_doctype` tests have no Ruby
+//! the DocBook `simpara`/`indexterm` tests are reproduced verbatim in
+//! `non_normative!` blocks (they account for those Ruby lines without asserting
+//! behavior this crate does not model). A handful of `inline_doctype` tests
+//! have no Ruby
 //! counterpart in v2.0.26 — they extend coverage of the boundary cases and so
 //! carry no `verifies!` block.
 
@@ -3563,19 +3563,22 @@ mod custom {
         assert_eq!(block.declared_style(), Some("foo"));
         assert_eq!(block.rendered_content(), Some("bar"));
 
-        // No warning is produced.
-        assert_eq!(doc.warnings().count(), 0);
+        // Asciidoctor asserts no messages at its *default* (WARN) severity. This
+        // crate surfaces the unknown style as a `WarningSeverity::Debug`
+        // diagnostic (see the debug-level test below), which a host suppresses
+        // by default, so the default-severity view is empty.
+        assert_eq!(
+            doc.warnings()
+                .filter(|w| w.severity >= WarningSeverity::Warning)
+                .count(),
+            0
+        );
     }
 
-    // Not ported: 'should log debug message if paragraph style is unknown and
-    // debug level is enabled'. Asciidoctor logs `unknown style for paragraph:
-    // foo` only at DEBUG severity. This crate has no debug-severity logging
-    // channel — its `Warning` mechanism conveys WARN-level possible parse
-    // errors only (see `crate::warnings`) — so there is no equivalent behavior
-    // to assert. The observable behavior at default severity (no warning) is
-    // covered by `should_not_warn_if_paragraph_style_is_unregistered` above.
-    non_normative!(
-        r#"
+    #[test]
+    fn should_log_debug_message_if_paragraph_style_is_unknown_and_debug_level_is_enabled() {
+        verifies!(
+            r#"
     test 'should log debug message if paragraph style is unknown and debug level is enabled' do
       input = <<~'EOS'
       [foo]
@@ -3587,7 +3590,31 @@ mod custom {
       end
     end
 "#
-    );
+        );
+
+        // Asciidoctor logs this only at DEBUG severity (below its default WARN
+        // threshold). This crate records it as a single `WarningSeverity::Debug`
+        // warning, observable via `Document::warnings()`. The paragraph keeps
+        // its default context; the style `foo` is retained but otherwise
+        // ignored.
+        let doc = Parser::default().parse("[foo]\nbar");
+
+        let warning = doc.warnings().next().unwrap();
+        assert_eq!(warning.severity, WarningSeverity::Debug);
+        assert_eq!(
+            warning,
+            &Warning {
+                source: Span {
+                    data: "[foo]\nbar",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                warning: WarningType::UnknownBlockStyle("paragraph".to_string(), "foo".to_string()),
+            }
+        );
+        assert_eq!(doc.warnings().count(), 1);
+    }
 }
 
 non_normative!(

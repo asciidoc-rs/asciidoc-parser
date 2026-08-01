@@ -17,7 +17,7 @@ pub(crate) use crate::{
         fixtures::{attributes::*, blocks::*, content::*, document::*, parser::*, warnings::*, *},
         sdd::*,
     },
-    warnings::WarningType,
+    warnings::{WarningSeverity, WarningType},
 };
 
 /// Collects the rendered (post-substitution) text of every simple block
