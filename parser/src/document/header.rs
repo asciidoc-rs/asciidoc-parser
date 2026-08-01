@@ -1272,6 +1272,18 @@ mod tests {
     }
 
     #[test]
+    fn leveloffset_does_not_coerce_an_over_deep_heading_to_the_doctitle() {
+        // A marker run deeper than `======` is not a valid heading at all, so
+        // even a negative `:leveloffset:` whose shift would drive its effective
+        // level to 0 must not coerce it to the document title. It stays body
+        // content (which the block parser then reports as exceeding the maximum
+        // heading level), leaving the document with no doctitle.
+        let doc = Parser::default().parse(":leveloffset: -6\n======= Not A Title");
+
+        assert_eq!(doc.doctitle(), None);
+    }
+
+    #[test]
     fn impl_clone() {
         // Silly test to mark the #[derive(...)] line as covered.
         let mut parser = Parser::default();
