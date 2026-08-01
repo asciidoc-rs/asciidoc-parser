@@ -886,6 +886,39 @@ fn err_empty_block_anchor() {
 }
 
 #[test]
+fn terminal_empty_block_anchor_does_not_spin() {
+    // A lone empty `[[]]` anchor at the end of a block scope names nothing and
+    // decorates no block, so it is consumed (dropped) and yields no block.
+    // Regression: an empty anchor consumed into empty metadata with no block
+    // following once returned `NoMatch` on a non-blank source, which the
+    // block-collection loop leaves unadvanced – spinning forever.
+    let doc = Parser::default().parse("--\nBlock content\n[[]]\n--\n");
+
+    let block = doc.child_blocks().next().unwrap();
+    assert_eq!(block.raw_context().deref(), "open");
+
+    // Only the paragraph survives inside the open block; the trailing `[[]]`
+    // produces nothing.
+    let mut inner = block.child_blocks();
+    assert_eq!(
+        inner.next().unwrap().rendered_content(),
+        Some("Block content")
+    );
+    assert!(inner.next().is_none());
+
+    assert_eq!(doc.child_blocks().count(), 1);
+}
+
+#[test]
+fn lone_empty_block_anchor_document_does_not_spin() {
+    // An empty `[[]]` anchor as the entire document body is consumed and
+    // produces no block (rather than hanging or rendering the literal `[[]]`).
+    let doc = Parser::default().parse("[[]]\n");
+
+    assert_eq!(doc.child_blocks().count(), 0);
+}
+
+#[test]
 fn err_invalid_block_anchor() {
     let mut parser = Parser::default();
 
