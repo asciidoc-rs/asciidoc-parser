@@ -233,7 +233,7 @@ impl<'src> Header<'src> {
             } else if title.is_none()
                 && line.starts_with('[')
                 && line.ends_with(']')
-                && document_title_follows_block_metadata(line_mi.after)
+                && document_title_follows_block_metadata(source)
                 && let Some((metadata, metadata_warnings)) = parse_document_metadata(line, parser)
             {
                 warnings.extend(metadata_warnings);
@@ -647,40 +647,104 @@ fn document_title_marker(line: Span<'_>) -> Option<char> {
     }
 }
 
-/// Reports whether a document title marker eventually follows the source at
-/// `after`, allowing any number of stacked block attribute lines in between.
+/// Reports whether a *promotable* document title follows the block metadata run
+/// beginning at `source` (the current bracket-delimited line, included in the
+/// scan).
 ///
-/// Starting immediately below the block attribute line under consideration,
-/// consecutive lines that are themselves document-metadata block attribute
-/// lines (see [`is_document_metadata_line`]) are skipped, and the first line
-/// that is not is tested for a document title marker. This generalizes the
-/// original single-line lookahead so that stacked metadata lines above the
-/// title are all folded, mirroring Asciidoctor's `parse_block_metadata_lines`.
+/// Consecutive document-metadata block attribute lines (see
+/// [`is_document_metadata_line`]) are consumed, and the first line that is not
+/// one is tested for a document title marker. This generalizes the original
+/// single-line lookahead so that stacked metadata lines above the title are all
+/// folded, mirroring Asciidoctor's `parse_block_metadata_lines`.
 ///
 /// A line that starts with `[` and ends with `]` but is *not* a valid
 /// document-metadata line (e.g. a `[[anchor]]` block anchor or a leading-space
 /// form) stops the scan without matching, so the run of foldable lines is only
 /// ever a contiguous prefix of well-formed metadata lines terminated by the
 /// title.
-fn document_title_follows_block_metadata(after: Span<'_>) -> bool {
-    let mut next = after;
+///
+/// The run's *effective* block style also gates promotion: if it resolves to
+/// `discrete`/`float`, the following level-0 (`=`) heading is a discrete
+/// floating title rather than the document title, so this returns `false` and
+/// neither the metadata nor the heading is folded here – both are left for the
+/// block parser, which produces a `SectionType::Discrete` heading (see #1014).
+/// The effective style is tracked with last-wins semantics that mirror
+/// `Attrlist::merge_block_attribute_line` / `merge_block_style_shorthand` – a
+/// line that specifies a block style overrides the running one, and a line with
+/// none leaves it unchanged – so the header's decision always agrees with the
+/// `BlockMetadata::is_discrete` decision the block parser would make on the
+/// same run.
+fn document_title_follows_block_metadata(source: Span<'_>) -> bool {
+    let mut next = source;
+    let mut effective_style_is_discrete = false;
 
     while !next.is_empty() {
         let line_mi = next.take_normalized_line();
         let line = line_mi.item;
 
         if document_title_marker(line).is_some() {
-            return true;
+            return !effective_style_is_discrete;
         }
 
         if !is_document_metadata_line(line) {
             return false;
         }
 
+        // Fold this line's block style into the running effective style
+        // (last-wins), leaving it unchanged when the line specifies none.
+        if let Some(is_discrete) = metadata_line_block_style_is_discrete(line) {
+            effective_style_is_discrete = is_discrete;
+        }
+
         next = line_mi.after;
     }
 
     false
+}
+
+/// Classifies the block style of a single bracket-delimited document-metadata
+/// `line`, read structurally (the attribute list is *not* parsed):
+///
+/// * `None` – the line specifies no block style (a `[[id]]` anchor, a shorthand
+///   line whose first positional leads with `.`/`#`/`%`, or a named-first
+///   attribute list such as `[reftext=…]`), so it leaves a running style
+///   unchanged.
+/// * `Some(true)` – the block style is `discrete` or `float`.
+/// * `Some(false)` – the block style is some other value (e.g. `[appendix]`).
+///
+/// Reading the style off the raw text – rather than parsing the attribute list
+/// – keeps an embedded `{counter:…}` in a *value* from being evaluated at
+/// header time (the invariant the `rejected_metadata_run_does_not_fire_counter`
+/// test guards). This is safe because a block style is always the first
+/// positional attribute's leading shorthand token – a bare name that can never
+/// itself be a counter.
+fn metadata_line_block_style_is_discrete(line: Span<'_>) -> Option<bool> {
+    // Drop the enclosing square brackets (the caller has confirmed they are
+    // present via [`is_document_metadata_line`]).
+    let inner = line.slice(1..line.len() - 1).data();
+
+    // A `[[id]]` / `[[id,reftext]]` block anchor still has its inner brackets
+    // and carries no block style.
+    if inner.starts_with('[') {
+        return None;
+    }
+
+    // The block style is the leading shorthand token of the first positional
+    // attribute: a run of name characters terminated by a shorthand delimiter
+    // (`.`, `#`, `%`), a comma, whitespace, or the end of the attribute.
+    let token_len = inner
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .unwrap_or(inner.len());
+
+    // A first positional that leads with a shorthand delimiter (`[#id]`,
+    // `[.role]`, `[%option]`), or a `=` that makes the token a named attribute
+    // name (`[reftext=…]`), carries no block style.
+    if token_len == 0 || inner[token_len..].starts_with('=') {
+        return None;
+    }
+
+    let token = &inner[..token_len];
+    Some(token == "discrete" || token == "float")
 }
 
 /// Reports whether `line` is a block attribute line that this crate folds into
@@ -2401,6 +2465,33 @@ mod tests {
 
         assert_eq!(header.title(), Some("Some Title"));
         assert_eq!(header.id(), Some("anchor"));
+    }
+
+    #[test]
+    fn stacked_block_styles_gate_doctitle_by_effective_style() {
+        // Whether a `[float]`/`[discrete]` style above a level-0 (`=`) title
+        // suppresses doctitle promotion is decided by the run's *effective*
+        // (merged, last-wins) block style – the same value the block parser
+        // computes via `Attrlist::merge_block_attribute_line` – not by any
+        // single line in isolation.
+
+        // A later non-discrete style overrides an earlier `float`, so the
+        // effective style is not discrete: the title is still promoted rather
+        // than disappearing.
+        let doc = Parser::default().parse("[float]\n[normal]\n= Some Title\n\nbody");
+        assert_eq!(doc.header().title(), Some("Some Title"));
+        assert!(all_sections(&doc).is_empty());
+
+        // A later `float` overrides an earlier non-discrete style, so the
+        // effective style is discrete: the heading becomes a level-0 discrete
+        // floating title and is not promoted to the doctitle.
+        let doc = Parser::default().parse("[normal]\n[float]\n= Some Title\n\nbody");
+        assert_eq!(doc.header().title(), None);
+
+        let sec = first_section(&doc);
+        assert_eq!(sec.section_type(), SectionType::Discrete);
+        assert_eq!(sec.level(), 0);
+        assert_eq!(sec.section_title(), "Some Title");
     }
 
     #[test]
