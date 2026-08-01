@@ -61,6 +61,17 @@ impl<'src> SectionBlock<'src> {
     ) -> Option<MatchedItem<'src, Self>> {
         let discrete = metadata.is_discrete();
 
+        // A section heading is only recognized at the document top level or
+        // within another section's body. Inside a delimited block (example,
+        // sidebar, open, or quote), a `== …` line is literal content – a
+        // paragraph – not a section, so decline here and let the line fall
+        // through to `SimpleBlock`. A discrete heading is an ordinary block, not
+        // a section, and remains valid in these contexts, so it is not
+        // suppressed.
+        if !discrete && parser.in_delimited_block {
+            return None;
+        }
+
         let source = metadata.block_start.discard_empty_lines();
 
         // The heading's effective level folds in the running `leveloffset`

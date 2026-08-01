@@ -154,6 +154,22 @@ pub struct Parser {
     /// children (the style does not propagate into subsections).
     pub(crate) parsing_bibliography_section_body: bool,
 
+    /// True while parsing the body of a delimited block (an example, sidebar,
+    /// or open block, a quote block, or a Markdown-style blockquote).
+    ///
+    /// A section heading is only recognized at the document top level or within
+    /// another section's body. Inside a delimited block a `== …` line is
+    /// literal content – a paragraph – not a section (matching Asciidoctor,
+    /// which only creates sections when the parent context is the document
+    /// or a section). A discrete heading, by contrast, is an ordinary block
+    /// and remains valid in these contexts, so it is not suppressed by this
+    /// flag. The flag is saved and restored around each delimited-block
+    /// body so nesting is handled correctly. An AsciiDoc table cell is a
+    /// nested document (see
+    /// [`nested_document_depth`](Self::nested_document_depth)) where sections
+    /// are allowed, so it deliberately does not set this flag.
+    pub(crate) in_delimited_block: bool,
+
     /// True while the principal text of a bibliography list item is being
     /// substituted.
     ///
@@ -554,6 +570,7 @@ impl Default for Parser {
             sectnumlevels: 3,
             topmost_section_type: SectionType::Normal,
             parsing_bibliography_section_body: false,
+            in_delimited_block: false,
             in_bibliography_list_item: Cell::new(false),
             mark_footnote_spans: Cell::new(false),
             pending_block_title: None,
