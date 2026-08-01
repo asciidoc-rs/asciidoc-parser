@@ -301,14 +301,20 @@ impl<'src> SectionBlock<'src> {
         // Emit an error for each subsection found directly inside a special
         // section that does not support nested sections. The error points at the
         // offending subsection's heading line, mirroring Asciidoctor's
-        // `<sectname> sections do not support nested sections` diagnostic.
+        // `<sectname> sections do not support nested sections` diagnostic. The
+        // subsection's title source is used rather than its whole span, whose
+        // first line is any block metadata (an anchor, attribute list, or block
+        // title) that precedes the heading.
         if let Some(style) = no_subsection_style {
             for block in &blocks.item {
                 if let Block::Section(subsection) = block
                     && subsection.section_type() != SectionType::Discrete
                 {
                     warnings.push(Warning {
-                        source: subsection.span().take_normalized_line().item,
+                        source: subsection
+                            .section_title_source()
+                            .take_normalized_line()
+                            .item,
                         warning: WarningType::SpecialSectionCannotHaveNestedSections(
                             style.to_string(),
                         ),

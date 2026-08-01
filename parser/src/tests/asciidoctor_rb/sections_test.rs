@@ -2314,6 +2314,34 @@ mod nesting {
         assert_eq!(special_warnings, vec!["glossary", "bibliography"]);
     }
 
+    // The "does not support nested sections" error must point at the offending
+    // subsection's heading line, even when block metadata (an anchor, attribute
+    // list, or block title) precedes it – the section span begins at that
+    // metadata, so its first line is not the heading. (No Ruby counterpart.)
+    #[test]
+    fn nested_section_error_points_at_heading_not_preceding_metadata() {
+        let doc = Parser::default().parse(
+            "= Document Title\n\n[glossary]\n== Glossary\n\n[[mysub]]\n.A title\n=== Subsection of Glossary\n\nnot allowed\n",
+        );
+
+        let warnings: Vec<_> = doc.warnings().collect();
+
+        let nested_warning = warnings
+            .iter()
+            .find(|w| {
+                matches!(
+                    &w.warning,
+                    WarningType::SpecialSectionCannotHaveNestedSections(style) if style == "glossary"
+                )
+            })
+            .expect("special-section warning");
+
+        // Line 8 is `=== Subsection of Glossary`; lines 6 and 7 are the anchor
+        // and block title above it.
+        assert_eq!(nested_warning.source.line(), 8);
+        assert_eq!(nested_warning.source.data(), "Subsection of Glossary");
+    }
+
     // NOTE: The book variant relies on the `book` doctype and its level-0 (`=`)
     // special sections (colophon, dedication, glossary, bibliography). The crate
     // does not model the book doctype – a `=` heading outside the document
