@@ -1,6 +1,7 @@
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
+    blocks::metadata::block_title_text,
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RefType, RevisionLine,
@@ -65,6 +66,7 @@ impl<'src> Header<'src> {
 
         let mut id: Option<String> = None;
         let mut roles: Vec<String> = vec![];
+        let mut pending_block_title_source: Option<Span<'src>> = None;
         let mut attributes: Vec<Attribute> = vec![];
         let mut author_line: Option<AuthorLine<'src>> = None;
         let mut author_attribute: Option<Author> = None;
@@ -279,6 +281,30 @@ impl<'src> Header<'src> {
                 }
                 source = line_mi.after;
             } else if title.is_none()
+                && let Some(block_title) = block_title_text(line)
+                && document_title_follows_block_metadata(source, parser.level_offset())
+            {
+                // A block title (`.Title`) directly above the document title is
+                // not a title *of* the document – a document has no block title.
+                // Asciidoctor demotes the following `= …` heading to a level-0
+                // section and carries the block title over to the first block of
+                // content. This crate does not represent a body-level document
+                // title as a level-0 section, so the `= …` heading remains the
+                // document title; the block title is still recognized here (so
+                // the heading is not mistaken for a paragraph) and carried over
+                // to the first body block, matching the block-title carryover
+                // above an ordinary section heading (see #782).
+                //
+                // The line is only intercepted when a document title eventually
+                // follows – possibly after further stacked block metadata lines,
+                // each folded on its own pass through this loop. A later block
+                // title overrides an earlier one (last-wins), mirroring
+                // Asciidoctor's `parse_block_metadata_lines`. Otherwise it is an
+                // ordinary block title for the body and is left for the block
+                // parser.
+                pending_block_title_source = Some(block_title);
+                source = line_mi.after;
+            } else if title.is_none()
                 && let Some((marker, count)) = document_title_marker(line, parser.level_offset())
             {
                 // Strip an optional symmetric close (a trailing ` ==` or ` ##`
@@ -455,6 +481,20 @@ impl<'src> Header<'src> {
         // author-less parse from touching the attribute map at all.
         if !authors.is_empty() {
             parser.set_attribute_by_value_from_header("authorcount", authors.len().to_string());
+        }
+
+        // A block title recognized directly above the document title is carried
+        // over to the first block of the body. Stash it on the parser as a
+        // pending block title (the same mechanism a section heading uses); the
+        // first block parsed after the header claims it. The title travels as an
+        // owned snapshot with normal (title) substitutions already applied,
+        // matching a `.Title` line on an ordinary block. It is only ever set
+        // when a document title was seen, since the recognizing branch requires
+        // one to follow.
+        if let Some(block_title) = pending_block_title_source {
+            let mut content = Content::from(block_title);
+            SubstitutionGroup::Normal.apply(&mut content, parser, None);
+            parser.pending_block_title = Some(content.to_owned_title());
         }
 
         MatchAndWarnings {
@@ -685,8 +725,9 @@ fn document_title_marker(line: Span<'_>, level_offset: i32) -> Option<(char, usi
 /// scan).
 ///
 /// Consecutive document-metadata block attribute lines (see
-/// [`is_document_metadata_line`]) are consumed, and the first line that is not
-/// one is tested for a document title marker. This generalizes the original
+/// [`is_document_metadata_line`]) and block title lines (`.Title`, see
+/// [`block_title_text`]) are consumed, and the first line that is neither is
+/// tested for a document title marker. This generalizes the original
 /// single-line lookahead so that stacked metadata lines above the title are all
 /// folded, mirroring Asciidoctor's `parse_block_metadata_lines`.
 ///
@@ -717,6 +758,14 @@ fn document_title_follows_block_metadata(source: Span<'_>, level_offset: i32) ->
 
         if document_title_marker(line, level_offset).is_some() {
             return !effective_style_is_discrete;
+        }
+
+        // A block title (`.Title`) may appear anywhere in the metadata run above
+        // the document title; it carries no block style, so it leaves the
+        // running effective style unchanged and the scan continues.
+        if block_title_text(line).is_some() {
+            next = line_mi.after;
+            continue;
         }
 
         if !is_document_metadata_line(line) {
