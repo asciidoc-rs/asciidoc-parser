@@ -253,6 +253,22 @@ impl<'src> SectionBlock<'src> {
         let previously_in_bibliography_section = parser.parsing_bibliography_section_body;
         parser.parsing_bibliography_section_body = is_bibliography_section;
 
+        // A special section that does not support nested sections (a `glossary`,
+        // `bibliography`, `colophon`, `dedication`, or `index` section) logs an
+        // error for each subsection found directly within it. Only a level-1
+        // section carries a special-section style, and a discrete heading is not
+        // part of the section hierarchy, so the check is limited accordingly.
+        // The offending subsections are detected below, once the body is parsed.
+        let no_subsection_style = if !discrete && level == 1 {
+            metadata
+                .attrlist
+                .as_ref()
+                .and_then(|attrlist| attrlist.block_style())
+                .filter(|style| special_section_forbids_subsections(style))
+        } else {
+            None
+        };
+
         // A block title above a section heading does not become the section's
         // title; it is carried over to the first block inside the section
         // (matching Asciidoctor). Stash it on the parser: the next block parsed
@@ -281,6 +297,32 @@ impl<'src> SectionBlock<'src> {
 
         let blocks = maw_blocks.item;
         let source = metadata.source.trim_remainder(blocks.after);
+
+        // Emit an error for each subsection found directly inside a special
+        // section that does not support nested sections. The error points at the
+        // offending subsection's heading line, mirroring Asciidoctor's
+        // `<sectname> sections do not support nested sections` diagnostic. The
+        // subsection's title source is used rather than its whole span, whose
+        // first line is any block metadata (an anchor, attribute list, or block
+        // title) that precedes the heading.
+        if let Some(style) = no_subsection_style {
+            for block in &blocks.item {
+                if let Block::Section(subsection) = block
+                    && subsection.section_type() != SectionType::Discrete
+                {
+                    warnings.push(Warning {
+                        source: subsection
+                            .section_title_source()
+                            .take_normalized_line()
+                            .item,
+                        warning: WarningType::SpecialSectionCannotHaveNestedSections(
+                            style.to_string(),
+                        ),
+                        origin: None,
+                    });
+                }
+            }
+        }
 
         let proposed_base_id = generate_section_id(&title_reftext, parser);
 
@@ -887,6 +929,21 @@ fn peer_or_ancestor_section<'src>(
     } else {
         false
     }
+}
+
+/// Returns `true` if a section carrying the given block style is a special
+/// section that does not support nested sections.
+///
+/// Asciidoctor treats every section style other than the numbered `sect0`–
+/// `sect5` styles as a special section, and permits subsections only within the
+/// `appendix`, `preface`, and `abstract` special sections. The remaining
+/// well-known special sections – `glossary`, `bibliography`, `colophon`,
+/// `dedication`, and `index` – forbid them.
+fn special_section_forbids_subsections(style: &str) -> bool {
+    matches!(
+        style,
+        "glossary" | "bibliography" | "colophon" | "dedication" | "index"
+    )
 }
 
 /// Records a "section title out of sequence" warning for a *top-level* section
