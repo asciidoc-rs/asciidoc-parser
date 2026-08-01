@@ -1320,11 +1320,14 @@ mod levels {
 "##
             );
 
-            // The Ruby `'-1@'` sets `leveloffset` via the API as a soft default
-            // the document may override, which maps to a modification context of
-            // [`ModificationContext::Anywhere`].
+            // The Ruby `'-1@'` value carries the trailing `@` soft-set modifier:
+            // the effective offset is `-1`, and the attribute becomes overridable
+            // by the document. `with_intrinsic_attribute` strips the `@` and
+            // relaxes the modification context to
+            // [`ModificationContext::Anywhere`] on its own, so the raw `-1@`
+            // value can be passed through verbatim.
             let doc = Parser::default()
-                .with_intrinsic_attribute("leveloffset", "-1", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("leveloffset", "-1@", ModificationContext::ApiOnly)
                 .parse("== Document Title");
             assert_eq!(doc.doctitle(), Some("Document Title"));
             assert_eq!(doc.header().id(), None);

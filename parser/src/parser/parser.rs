@@ -1440,6 +1440,14 @@ impl Parser {
     /// the value can be subsequently modified by the document header and/or in
     /// the document body.
     ///
+    /// A single trailing `@` on `value` is AsciiDoc's *soft-set* modifier: it
+    /// is stripped from the stored value and marks the attribute as
+    /// overridable by a document `:name:` entry (i.e. the effective
+    /// [`modification_context`](ModificationContext) becomes
+    /// [`Anywhere`](ModificationContext::Anywhere), regardless of the value
+    /// passed). To store a value that genuinely ends in `@`, set it from the
+    /// document body instead, where the trailing `@` is literal.
+    ///
     /// Subsequent calls to this function or [`with_intrinsic_attribute_bool()`]
     /// are always permitted. The last such call for any given attribute name
     /// takes precendence.
@@ -1455,7 +1463,11 @@ impl Parser {
         modification_context: ModificationContext,
     ) -> Self {
         let name = alias_attr_name(name.as_ref().to_lowercase());
-        let value = InterpretedValue::Value(value.as_ref().to_string());
+
+        let (value, modification_context) =
+            apply_soft_set_modifier(value.as_ref(), modification_context);
+
+        let value = InterpretedValue::Value(value);
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context,
@@ -1505,7 +1517,11 @@ impl Parser {
         modification_context: ModificationContext,
     ) -> Self {
         let name = alias_attr_name(name.as_ref().to_lowercase());
-        let value = InterpretedValue::Value(value.as_ref().to_string());
+
+        let (value, modification_context) =
+            apply_soft_set_modifier(value.as_ref(), modification_context);
+
+        let value = InterpretedValue::Value(value);
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
             modification_context,
@@ -2952,6 +2968,29 @@ fn alias_attr_name(attr_name: String) -> String {
     }
 }
 
+/// Applies AsciiDoc's *soft-set* modifier to an intrinsic (API/CLI) attribute
+/// value.
+///
+/// A single trailing `@` on an attribute value supplied via the API (or the
+/// Asciidoctor CLI) marks the attribute as *soft set*: the effective value is
+/// the string with the `@` removed, and the attribute becomes overridable by a
+/// document `:name:` entry. That maps onto
+/// [`ModificationContext::Anywhere`](crate::parser::ModificationContext::Anywhere).
+///
+/// When no trailing `@` is present the value and `modification_context` are
+/// returned unchanged. Only one `@` is stripped, mirroring Ruby's `String#chop`
+/// (so `foo@@` yields `foo@`), and a `@` that is not the final character (e.g.
+/// `foo@bar`) is not a modifier and is left in place.
+fn apply_soft_set_modifier(
+    value: &str,
+    modification_context: ModificationContext,
+) -> (String, ModificationContext) {
+    match value.strip_suffix('@') {
+        Some(stripped) => (stripped.to_string(), ModificationContext::Anywhere),
+        None => (value.to_string(), modification_context),
+    }
+}
+
 /// Returns `true` if `name` is a derived backend-family attribute whose
 /// assignment must be rejected *even while it is inactive*, because the flag it
 /// would name can become active later in the same parse and the stored override
@@ -3336,6 +3375,87 @@ mod tests {
         assert!(p.is_attribute_set("foo"));
         assert!(!p.is_attribute_set("foo2"));
         assert!(!p.is_attribute_set("xyz"));
+    }
+
+    #[test]
+    fn with_intrinsic_attribute_strips_soft_set_modifier() {
+        // A single trailing `@` on an API value is AsciiDoc's soft-set modifier:
+        // it is stripped from the stored value.
+        let mut p = Parser::default().with_intrinsic_attribute(
+            "myattr",
+            "hello@",
+            ModificationContext::ApiOnly,
+        );
+
+        assert_eq!(
+            p.attribute_value("myattr"),
+            InterpretedValue::Value("hello")
+        );
+
+        // The stored value flows through to an attribute reference: `{myattr}`
+        // resolves to `hello`, not `hello@`.
+        let doc = p.parse("{myattr}");
+        assert_eq!(rendered_paragraphs(&doc), vec!["hello"]);
+    }
+
+    #[test]
+    fn soft_set_modifier_makes_value_overridable_by_document() {
+        // The soft-set `@` also relaxes the modification context to `Anywhere`,
+        // so a document `:name:` entry overrides the API value even though the
+        // caller passed the locked `ApiOnly` context.
+        let doc = Parser::default()
+            .with_intrinsic_attribute("cash", "heroes@", ModificationContext::ApiOnly)
+            .parse(":cash: money");
+
+        assert_eq!(
+            doc.attribute_value("cash"),
+            InterpretedValue::Value("money")
+        );
+    }
+
+    #[test]
+    fn without_soft_set_modifier_api_value_is_locked() {
+        // The same value *without* the `@` keeps the caller's `ApiOnly` context,
+        // so the document assignment is rejected and the API value stands.
+        let doc = Parser::default()
+            .with_intrinsic_attribute("cash", "heroes", ModificationContext::ApiOnly)
+            .parse(":cash: money");
+
+        assert_eq!(
+            doc.attribute_value("cash"),
+            InterpretedValue::Value("heroes")
+        );
+    }
+
+    #[test]
+    fn soft_set_modifier_strips_only_one_trailing_at() {
+        // Only the final `@` is the modifier, mirroring Ruby's `String#chop`; a
+        // preceding `@` is retained as part of the value.
+        let p = Parser::default().with_intrinsic_attribute(
+            "myattr",
+            "hello@@",
+            ModificationContext::ApiOnly,
+        );
+
+        assert_eq!(
+            p.attribute_value("myattr"),
+            InterpretedValue::Value("hello@")
+        );
+    }
+
+    #[test]
+    fn non_trailing_at_is_not_a_soft_set_modifier() {
+        // A `@` that is not the final character is an ordinary value character.
+        let p = Parser::default().with_intrinsic_attribute(
+            "myattr",
+            "foo@bar",
+            ModificationContext::ApiOnly,
+        );
+
+        assert_eq!(
+            p.attribute_value("myattr"),
+            InterpretedValue::Value("foo@bar")
+        );
     }
 
     #[test]
