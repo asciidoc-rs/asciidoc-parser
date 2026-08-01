@@ -5159,11 +5159,12 @@ mod special_sections {
     );
 }
 
-// NOTE: The four setext-based tests here depend on two-line (`Section` /
-// `-------`) section titles, which this crate does not support. The
-// example-block test relies on a delimited block suppressing an interior
-// `== heading`; this crate currently parses that heading as a section instead.
-// The whole "heading patterns in blocks" context is therefore out of scope.
+// NOTE: The five setext-based tests held here depend on two-line (`Section` /
+// `-------`) section titles, which this crate does not support, so they remain
+// out of scope. The sixth test, `should not match a heading in a block`, does
+// not depend on setext titles – it verifies that a delimited block suppresses
+// an interior `== heading` – and is ported as a real test in the
+// `heading_patterns_in_blocks` module below.
 non_normative!(
     r##"
 
@@ -5258,7 +5259,16 @@ non_normative!(
       assert_xpath "//h2", output, 1
       assert_xpath "//ul", output, 1
     end
+"##
+);
 
+mod heading_patterns_in_blocks {
+    use crate::tests::prelude::*;
+
+    #[test]
+    fn should_not_match_a_heading_in_a_block() {
+        verifies!(
+            r##"
     test "should not match a heading in a block" do
       input = <<~'EOS'
       ====
@@ -5273,7 +5283,22 @@ non_normative!(
     end
   end
 "##
-);
+        );
+
+        // A section heading (`== …`) inside a delimited block is literal block
+        // content, not a section: the interior line stays a paragraph inside the
+        // example block, so no `<h2>` is emitted anywhere in the document.
+        let doc = Parser::default().parse("====\n\n== not a heading\n\n====\n");
+
+        assert_xpath(&doc, "//h2", 0);
+
+        assert_xpath(
+            &doc,
+            "//div[@class=\"exampleblock\"]//p[text()=\"== not a heading\"]",
+            1,
+        );
+    }
+}
 
 non_normative!(
     r##"

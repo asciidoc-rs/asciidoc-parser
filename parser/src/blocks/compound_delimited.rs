@@ -159,7 +159,17 @@ impl<'src> CompoundDelimitedBlock<'src> {
 
         let inside_delimiters = delimiter.after.trim_remainder(closing_delimiter);
 
+        // A `== …` line inside a delimited block is literal content, not a
+        // section heading (sections are only recognized at the document level or
+        // within a section body). Flag the nested parse so `SectionBlock::parse`
+        // declines; the flag is saved and restored so nested delimited blocks
+        // compose correctly.
+        let previously_in_delimited_block = parser.in_delimited_block;
+        parser.in_delimited_block = true;
+
         let maw_blocks = parse_blocks_until(inside_delimiters, |_, _| false, parser);
+
+        parser.in_delimited_block = previously_in_delimited_block;
 
         let blocks = maw_blocks.item;
         let source = metadata
@@ -2198,5 +2208,48 @@ mod tests {
     attrlist: None,
 }"#
         );
+    }
+
+    mod section_heading_suppressed {
+        //! A `== …` line inside a delimited block is literal content – a
+        //! paragraph – not a section heading (matching Asciidoctor, which only
+        //! creates sections at the document level or within a section body). A
+        //! discrete heading, by contrast, is an ordinary block and remains
+        //! valid inside a delimited block.
+
+        use crate::tests::prelude::*;
+
+        fn assert_literal_heading(input: &str) {
+            let doc = Parser::default().parse(input);
+
+            // No section heading was recognized, so nothing renders as an `<h2>`.
+            assert_xpath(&doc, "//h2", 0);
+
+            // The line survives as ordinary paragraph content.
+            assert!(rendered_paragraphs(&doc).contains(&"== not a heading".to_string()));
+        }
+
+        #[test]
+        fn example_block() {
+            assert_literal_heading("====\n== not a heading\n====\n");
+        }
+
+        #[test]
+        fn open_block() {
+            assert_literal_heading("--\n== not a heading\n--\n");
+        }
+
+        #[test]
+        fn sidebar_block() {
+            assert_literal_heading("****\n== not a heading\n****\n");
+        }
+
+        #[test]
+        fn discrete_heading_is_still_recognized() {
+            // A discrete heading is an ordinary block, not a section, so it is
+            // still recognized inside a delimited block and renders as a heading.
+            let doc = Parser::default().parse("====\n[discrete]\n== Sub\n====\n");
+            assert_xpath(&doc, "//h2", 1);
+        }
     }
 }

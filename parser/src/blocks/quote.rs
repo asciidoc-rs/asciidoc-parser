@@ -223,7 +223,15 @@ impl<'src> QuoteBlock<'src> {
         let (content_model, content, blocks, mut warnings) = match type_ {
             // A quote block contains other blocks.
             QuoteType::Quote => {
+                // A `== …` line inside the quote block is literal content, not a
+                // section heading; suppress section recognition for the nested
+                // parse (saved and restored to compose with outer contexts).
+                let previously_in_delimited_block = parser.in_delimited_block;
+                parser.in_delimited_block = true;
+
                 let maw_blocks = parse_blocks_until(inside_delimiters, |_, _| false, parser);
+
+                parser.in_delimited_block = previously_in_delimited_block;
                 (
                     ContentModel::Compound,
                     None,
@@ -469,7 +477,16 @@ impl<'src> QuoteBlock<'src> {
             // the document. Mark that so a footnote defined inside records no
             // (misleading) document location; see `Parser::owned_subsource_depth`.
             parser.owned_subsource_depth += 1;
+
+            // A `== …` line inside the blockquote is literal content, not a
+            // section heading; suppress section recognition for the nested parse
+            // (saved and restored to compose with outer contexts).
+            let previously_in_delimited_block = parser.in_delimited_block;
+            parser.in_delimited_block = true;
+
             let mut maw = parse_blocks_until(Span::new(source), |_, _| false, parser);
+
+            parser.in_delimited_block = previously_in_delimited_block;
             parser.owned_subsource_depth -= 1;
             nested_warning_types.extend(maw.warnings.drain(..).map(|w| w.warning));
             OwnedQuoteBlocksInner {
@@ -1288,6 +1305,35 @@ mod tests {
                  (a sign the quadratic quoted-paragraph rescan has returned)",
                 source.lines().count(),
             );
+        }
+    }
+
+    mod section_heading_suppressed {
+        //! A `== …` line inside a quote block or a Markdown-style blockquote is
+        //! literal content – a paragraph – not a section heading (matching
+        //! Asciidoctor, which only creates sections at the document level or
+        //! within a section body).
+
+        use crate::tests::prelude::*;
+
+        fn assert_literal_heading(input: &str) {
+            let doc = Parser::default().parse(input);
+
+            // No section heading was recognized, so nothing renders as an `<h2>`.
+            assert_xpath(&doc, "//h2", 0);
+
+            // The line survives as ordinary paragraph content.
+            assert!(rendered_paragraphs(&doc).contains(&"== not a heading".to_string()));
+        }
+
+        #[test]
+        fn quote_block() {
+            assert_literal_heading("____\n== not a heading\n____\n");
+        }
+
+        #[test]
+        fn markdown_blockquote() {
+            assert_literal_heading("> == not a heading\n");
         }
     }
 }

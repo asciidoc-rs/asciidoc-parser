@@ -2024,7 +2024,18 @@ fn parse_asciidoc_cell_body<'src>(
     // so a footnote defined inside records no (misleading) document location; see
     // `Parser::owned_subsource_depth`.
     parser.owned_subsource_depth += 1;
+
+    // An AsciiDoc cell is a nested document, where a section heading is again
+    // valid – it is not a delimited-block body. Clear `in_delimited_block` for
+    // the cell parse (saved and restored) so a `== …` line inside the cell is
+    // recognized as a section even when the table itself sits inside a delimited
+    // block, whose flag the parser would otherwise still be carrying.
+    let previously_in_delimited_block = parser.in_delimited_block;
+    parser.in_delimited_block = false;
+
     let mut maw = parse_blocks_until(body, |_, _| false, parser);
+
+    parser.in_delimited_block = previously_in_delimited_block;
     parser.owned_subsource_depth -= 1;
     parser.nested_document_depth -= 1;
     warnings.append(&mut maw.warnings);
@@ -3625,6 +3636,43 @@ mod tests {
 
             // The leading anchor is cataloged in the main document's catalog.
             assert!(doc.catalog().contains_id("foo"));
+        }
+    }
+
+    mod section_in_asciidoc_cell {
+        //! An AsciiDoc (`a|`) cell is a nested document, so a `== …` line
+        //! inside it is a real section heading – even when the table
+        //! itself sits inside a delimited block, whose
+        //! section-suppression context must not leak into the cell's
+        //! nested document.
+
+        use crate::{
+            blocks::{Block, BlockSelector, FindBlocks},
+            tests::prelude::*,
+        };
+
+        fn cell_section_count(input: &str) -> usize {
+            Parser::default()
+                .parse(input)
+                .find_blocks(&BlockSelector::new().traverse_documents(true))
+                .filter(|b| matches!(b, Block::Section(_)))
+                .count()
+        }
+
+        #[test]
+        fn section_recognized_in_top_level_cell() {
+            assert_eq!(
+                cell_section_count("|===\na|\n== Cell Section\n\ncell body\n|===\n"),
+                1
+            );
+        }
+
+        #[test]
+        fn section_recognized_in_cell_nested_in_delimited_block() {
+            assert_eq!(
+                cell_section_count("====\n|===\na|\n== Cell Section\n\ncell body\n|===\n====\n"),
+                1
+            );
         }
     }
 }
