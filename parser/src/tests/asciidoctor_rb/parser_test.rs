@@ -1504,13 +1504,12 @@ fn allows_authors_to_be_overridden_using_explicit_author_attributes() {
 
     // The `:author_2:` entry overrides the second author computed from the
     // implicit author line. The first author is now exposed both unsuffixed
-    // (`author`) and as `author_1`. This crate does not derive
-    // `authorcount`, and – unlike Asciidoctor – it does not re-derive the
-    // combined `authors` attribute after the explicit override, so `authors`
-    // still reflects the implicit line (`... Johnny Bravo ...`, not `... Danger
-    // Mouse ...`).
+    // (`author`) and as `author_1`. The override is reconciled back into the
+    // combined `authors` string and the resolved author list, so `{authors}`,
+    // `Document::authors()`, and `authorcount` all reflect `Danger Mouse` rather
+    // than the implicit `Johnny Bravo`.
     let mut parser = Parser::default();
-    let _ = parser.parse(
+    let doc = parser.parse(
         "= Document Title\nKismet Chameleon; Johnny Bravo; Lazarus het_Draeke\n:author_2: Danger Mouse",
     );
     assert_eq!(
@@ -1533,6 +1532,22 @@ fn allows_authors_to_be_overridden_using_explicit_author_attributes() {
         parser.attribute_value("lastname_3"),
         InterpretedValue::Value("het Draeke")
     );
+    assert_eq!(
+        parser.attribute_value("authorcount"),
+        InterpretedValue::Value("3")
+    );
+    assert_eq!(
+        parser.attribute_value("authors"),
+        InterpretedValue::Value("Kismet Chameleon, Danger Mouse, Lazarus het Draeke")
+    );
+
+    // The resolved author list reflects the override as well.
+    let authors = doc.authors();
+    assert_eq!(authors.len(), 3);
+    assert_eq!(authors[0].name(), "Kismet Chameleon");
+    assert_eq!(authors[1].name(), "Danger Mouse");
+    assert_eq!(authors[2].name(), "Lazarus het Draeke");
+    assert_eq!(authors[2].lastname(), Some("het Draeke"));
 }
 
 #[test]

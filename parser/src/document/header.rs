@@ -966,9 +966,10 @@ fn resolve_authors(
         // per-author name-part) attributes. A value that matches the computed
         // value leaves the implicit list untouched.
         //
-        // Only the multi-author `:authors:` path is reconciled here; the single
-        // `:author:` and indexed `:author_N:` entry paths keep their existing
-        // inline handling.
+        // The `:authors:` path is reconciled first (matching Asciidoctor's
+        // precedence: an explicit `:authors:` entry outranks the indexed
+        // `:author_N:` entries reconciled just below); the single `:author:`
+        // entry path keeps its existing inline handling.
         if let Some(authors_value) = attribute_string(parser, "authors") {
             let computed = implicit_authors
                 .iter()
@@ -992,6 +993,60 @@ fn resolve_authors(
                 // regression test in this module.
                 set_author_metadata(parser, &authors);
                 return authors;
+            }
+        }
+
+        // Reconcile explicit indexed `:author_N:` entries against the implicit
+        // author line, mirroring the indexed branch of Asciidoctor's
+        // `parse_header_metadata`. Each `author_N` attribute whose value still
+        // equals the implicit author's name leaves that position untouched; any
+        // position whose value differs is overridden.
+        // When at least one position was overridden, the reconciled list
+        // repopulates the derived attributes – including the combined `authors`
+        // string – so `{authors}` and `Document::authors()` reflect the
+        // override, not just the individual `author_N` attribute.
+        //
+        // The indexed `author_N` attributes are only assigned once the implicit
+        // line carries two or more authors, so a single-author line has no
+        // `author_1` and needs no reconciliation here.
+        if attribute_string(parser, "author_1").is_some() {
+            let mut reconciled: Vec<Author> = Vec::new();
+            let mut any_override = false;
+            let mut index = 1;
+
+            while let Some(current) = attribute_string(parser, &format!("author_{index}")) {
+                match implicit_authors.get(index - 1) {
+                    // The position is unchanged from the implicit line: reuse the
+                    // already-parsed author so its name partition is preserved. A
+                    // multi-word `lastname` such as `het Draeke` would otherwise
+                    // be re-split into a middle and last name by the names-only
+                    // partitioning below.
+                    Some(implicit) if current == implicit.name() => {
+                        reconciled.push(implicit.clone());
+                    }
+
+                    // The position was overridden (or added beyond the implicit
+                    // list): partition the entry value with the names-only rules,
+                    // exactly as Asciidoctor does for an attribute-supplied
+                    // author.
+                    _ => {
+                        any_override = true;
+
+                        if let Some(author) = Author::parse(&current, parser, true) {
+                            reconciled.push(author);
+                        }
+                    }
+                }
+
+                index += 1;
+            }
+
+            if any_override {
+                let reconciled = collect_indexed_authors(reconciled.into_iter(), parser);
+
+                set_author_metadata(parser, &reconciled);
+
+                return reconciled;
             }
         }
 
