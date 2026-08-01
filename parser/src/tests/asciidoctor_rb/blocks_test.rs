@@ -4758,16 +4758,24 @@ mod metadata {
         assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]", 1);
     }
 
-    // NOTE: out of scope. Both tests below depend on demoting a body-level
-    // document title (`= Title`) to a level-0 section — the "level 0 sections
-    // can only be used when doctype is book" behavior. This crate does not
-    // support level-0 sections in the document body (with or without
-    // `doctype: book`): a `=` heading in the body is declined as an unsupported
-    // level-0 heading rather than becoming a level-0 section, so the demoted
-    // `<h1>`/`.sect1` structure these tests assert is never produced. That is a
-    // deliberate divergence, not a deferral, so the tests are reproduced
-    // verbatim (`non_normative!`) rather than ported. The block-title carryover
-    // they also exercise is itself implemented (#782); see
+    // NOTE: partially out of scope. Both tests below depend on demoting a
+    // body-level document title (`= Title`) to a level-0 section – the "level 0
+    // sections can only be used when doctype is book" behavior. This crate does
+    // not support level-0 sections in the document body (with or without
+    // `doctype: book`): a `=` heading is recognized as the *document title*
+    // rather than becoming a level-0 section, so the demoted `<h1>`/`.sect1`
+    // structure and the absent header these tests assert are never produced.
+    // That is a deliberate divergence, not a deferral, so the tests are
+    // reproduced verbatim (`non_normative!`) rather than ported.
+    //
+    // The block-title recognition and carryover they exercise *is* implemented:
+    // a block title directly above the document title is recognized as document
+    // metadata (rather than titling a paragraph that captures the `= Title` line
+    // as literal text), and is carried over to the first block of the body, the
+    // same way a block title above an ordinary section heading is (#782). The
+    // crate's actual behavior on the first input is asserted by
+    // `block_title_above_document_title_is_carried_over_to_first_body_block`
+    // below; see also
     // `block_title_above_section_gets_carried_over_to_first_block_in_section`.
     non_normative!(
         r#"
@@ -4806,6 +4814,35 @@ mod metadata {
 
 "#
     );
+
+    // The crate-specific counterpart to the first `non_normative!` test above.
+    // Asciidoctor demotes the `= Section Title` heading to a level-0 body
+    // section (leaving the document header empty); this crate does not model a
+    // body-level document title as a level-0 section, so it keeps `= Section
+    // Title` as the document title. The point that both share – and that this
+    // asserts – is that the block title above the title is recognized as
+    // metadata and carried over to the first block of the body, rather than
+    // titling a paragraph whose text is the escaped `= Section Title` line.
+    #[test]
+    fn block_title_above_document_title_is_carried_over_to_first_body_block() {
+        let doc = Parser::default().parse(".Block title\n= Section Title\n\nsection paragraph\n");
+
+        // `= Section Title` is the document title, not literal paragraph text.
+        assert_eq!(doc.header().title(), Some("Section Title"));
+
+        // The block title is carried over to the (single) body paragraph.
+        assert_xpath(&doc, "//*[@class=\"paragraph\"]", 1);
+        assert_xpath(
+            &doc,
+            "//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
+            1,
+        );
+        assert_xpath(
+            &doc,
+            "//*[@class=\"paragraph\"]/p[text()=\"section paragraph\"]",
+            1,
+        );
+    }
 
     // NOTE: divergence from Asciidoctor. This crate does not render a macro
     // link inside a block title (nor were the referenced attributes supplied),
