@@ -19,9 +19,9 @@ use crate::{Span, parser::SourceLine};
 /// entries where `warning.severity >= WarningSeverity::Warning` suppresses the
 /// low-severity [`Debug`](Self::Debug) diagnostics.
 ///
-/// A warning's severity is an intrinsic property of its
-/// [`WarningType`](WarningType); it is assigned when the warning is constructed
-/// and never varies from one occurrence of a given type to another.
+/// A warning's severity is an intrinsic property of its [`WarningType`]; it is
+/// assigned when the warning is constructed and never varies from one
+/// occurrence of a given type to another.
 ///
 /// This enum is `non_exhaustive`: further severities may be recognized as the
 /// parser grows, so a host matching on it needs a catch-all arm.
@@ -65,9 +65,9 @@ pub struct Warning<'src> {
 
     /// Severity of this warning.
     ///
-    /// This is derived from [`warning`](Self::warning) – each
-    /// [`WarningType`](WarningType) has a fixed severity – so a host can filter
-    /// the [`Document::warnings`](crate::Document::warnings) stream by
+    /// This is derived from [`warning`](Self::warning) – each [`WarningType`]
+    /// has a fixed severity – so a host can filter the
+    /// [`Document::warnings`](crate::Document::warnings) stream by
     /// importance without matching on every individual type. Most diagnostics
     /// are [`WarningSeverity::Warning`]; a handful (such as an unknown block
     /// style) are [`WarningSeverity::Debug`], which a host suppresses by
