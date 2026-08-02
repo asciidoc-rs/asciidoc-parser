@@ -224,10 +224,6 @@ impl<'src> ListItemMarker<'src> {
         // during that pass. Any other term goes straight through the macros
         // step.
         if term.rendered().starts_with("[[") {
-            // NOTE: Code coverage for this branch will be missing until we
-            // complete MAJOR REFACTOR: Split parsing and inline substitution
-            // steps.
-            // (See https://github.com/asciidoc-rs/asciidoc-parser/issues/461.)
             if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term.rendered()) {
                 let id = &captures[1];
 
@@ -716,6 +712,16 @@ mod tests {
 
         // Only special characters are applied inside a double-plus span.
         assert_eq!(term_rendered("++<b>++:: desc"), "&lt;b&gt;");
+    }
+
+    #[test]
+    fn term_with_bracket_prefix_but_no_valid_anchor() {
+        // A term that starts with `[[` but is not a well-formed inline anchor
+        // (an ID may not start with a digit, and the anchor must be closed) is
+        // not registered as a reference; the bracketed text is left as-is by
+        // the macros step and no warning is emitted.
+        assert_eq!(term_rendered("[[1bad]] foo:: desc"), "[[1bad]] foo");
+        assert_eq!(term_rendered("[[ nope:: desc"), "[[ nope");
     }
 
     #[test]
