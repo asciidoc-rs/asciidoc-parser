@@ -64,18 +64,10 @@ fn err_missing_space_before_title() {
         }
     );
 
-    assert_eq!(
-        warnings,
-        [Warning {
-            source: Span {
-                data: "=blah blah",
-                line: 1,
-                col: 1,
-                offset: 0,
-            },
-            warning: WarningType::Level0SectionHeadingNotSupported,
-        },]
-    );
+    // `=blah blah` has no space after the marker, so it is not a section title
+    // at all – it is an ordinary paragraph, and no level-0 warning is raised.
+    // (Only a well-formed bare `= Title` models a level-0 section.)
+    assert!(warnings.is_empty());
 }
 
 #[test]
