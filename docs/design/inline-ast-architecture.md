@@ -273,9 +273,14 @@ impl<'src> Content<'src> {
     /// The parsed inline tree. This is the canonical representation.
     pub fn inlines(&self) -> &[InlineNode<'src>];
 
-    /// The HTML rendering, computed as a fold over `inlines()`.
-    /// Retained (approximates today's model — see §7) and cached.
+    /// The default **HTML** rendering: a fold of `inlines()` with the
+    /// built-in HTML renderer. Computed lazily and cached, so it can hand
+    /// back `&str` (approximates today's model — see §3.3.1, §7).
     pub fn rendered(&self) -> &str;
+
+    /// Render this content to a caller-supplied backend. A pure fold over
+    /// the same `inlines()`; returns an owned `String`, not cached.
+    pub fn render_with(&self, renderer: &dyn InlineRenderer) -> String;
 
     pub fn original(&self) -> Span<'src>;   // unchanged
     pub fn is_empty(&self) -> bool;         // unchanged
@@ -288,6 +293,50 @@ impl<'src> Content<'src> {
 fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> { None }
 // rendered_content()/title() retained as a fold, at least through migration.
 ```
+
+#### 3.3.1 Rendering, renderer selection, and caching
+
+Making the AST canonical **decouples rendering from parsing**, and that changes what
+`rendered()` means. Three points resolve it:
+
+1. **Parsing no longer renders.** It produces the AST with every *order-dependent* fact
+   already resolved *into node values* — footnote numbers, callout numbers, counters,
+   attribute-expanded text, resolved cross-reference destinations. Rendering is then a
+   **pure fold** `(AST, renderer, render-context) → String`, with no stateful document
+   traversal left to do. (Today this is impossible: substitution bakes output into the
+   string *during* parse, which is exactly why the #942 prototype had to *clone the parser*
+   to capture a second view. Here, one parse feeds any number of renders.)
+
+2. **`rendered()` has a fixed meaning: the built-in HTML backend.** It folds `inlines()`
+   with the crate's `HtmlInlineRenderer` and the document's own resolved render-context.
+   This is a deliberate improvement over today, where `rendered()` silently returns whatever
+   renderer was configured on the `Parser` — an ambiguous contract. So the answer to *"which
+   `InlineRenderer` does the work when I call `rendered()`?"* is unambiguous: **always the
+   built-in HTML one.**
+
+3. **A custom (non-HTML) backend is a render-time argument, not a parse-time global.** The
+   consumer never gets it invoked *through* `rendered()`; they call `render_with(&their_
+   renderer)` (or `Document::render_to(&their_renderer)`, or walk `inlines()` themselves) —
+   a pure fold they drive over the already-parsed tree. They can render the same document to
+   several backends without reparsing.
+
+**What caching means here.** The crate memoizes exactly **one** artifact — the default HTML
+fold — lazily on `Content`, which is what lets `rendered()` return `&str`. That single
+artifact has a stable identity (the built-in renderer + the document's own context) and the
+AST is frozen after resolution, so the memoization is sound with **one invalidation seam**:
+reference resolution fills in xref destinations *after* initial parse, so the HTML cache is
+populated (or invalidated) at the resolution boundary — the same place today's code rebuilds
+`rendered()` after resolving. Arbitrary custom renderers are deliberately **not** cached by
+the crate: their outputs are owned `String`s the caller may cache as it sees fit, since a
+crate-side cache would need to be keyed by renderer identity/config — an unbounded space that
+is not the crate's responsibility.
+
+> **Decision:** `rendered()` = cached default-HTML fold; all other backends go through an
+> explicit `render_with`/`render_to` fold and are the caller's to cache. Parse-time renderer
+> configuration on `Parser` is **dropped** — the renderer moves to render time. *(This is
+> the clean pre-1.0 break; the alternative — keep `rendered()`'s meaning configurable — was
+> rejected because it reintroduces the "which renderer ran?" ambiguity the AST lets us
+> finally remove.)*
 
 ### 3.4 The `text` / `charref` / `raw` trichotomy — the key idea
 
@@ -588,8 +637,10 @@ regressions the hand-written assertions don't cover.
 3. **Owned vs. borrowed strings?** → **`CowStr<'src>`**, borrowed by default.
 4. **Spans from day one?** → **Yes**, as a field on every node, populated coarsely first
    (§4.4). Avoids a breaking reshape later.
-5. **Retain `rendered()`?** → **Yes**, as a cached fold — this is the "approximate the
-   existing rendered-content model" bonus, achieved for free.
+5. **Retain `rendered()`?** → **Yes**, as a cached **default-HTML** fold, with custom
+   backends routed through an explicit `render_with`/`render_to` and the parse-time renderer
+   config dropped (§3.3.1) — this is the "approximate the existing rendered-content model"
+   bonus, achieved for free.
 6. **Which downstream tool pins the API?** → the **Ruby-to-Rust `asciidoctor` port** — the
    only consumer actually underway. It reproduces Asciidoctor's HTML exactly, so it walks
    and renders the *entire* inline vocabulary (images, footnotes, xrefs, callouts, UI
