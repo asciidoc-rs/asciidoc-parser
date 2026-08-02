@@ -1,6 +1,7 @@
 # Inline AST architecture
 
 **Status:** proposal / request for comment
+**Date:** 2026-08-02
 **Target branch:** `inline-ast` (long-running feature branch)
 **Scope:** replace the inline text-substitution content model with a first-class inline AST; make rendering a projection of that AST.
 
