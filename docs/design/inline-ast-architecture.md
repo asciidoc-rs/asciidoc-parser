@@ -484,10 +484,10 @@ branch, not separate submissions to `main`. Each is guarded by the golden-HTML o
 - Feature work is done on short-lived topic branches cut from `inline-ast` and merged back
   into it, so review stays granular within the branch.
 - **Pre-landing gate:** before the final merge to `main`, the branch is **preflighted
-  against the downstream renderer crate** (the alternate-backend consumer that implements
-  the renderer seam — see §4.6, §6.6). Because the seam changes shape (Phase 5), this
-  confirms the public API and the reshaped `InlineSubstitutionRenderer` actually serve a
-  real consumer before they are locked into `main`.
+  against the Ruby-to-Rust `asciidoctor` port** — the only consumer currently underway
+  (§6.6) and the one that implements/drives the renderer seam. Because the seam changes
+  shape (Phase 5), this confirms the public API and the reshaped `InlineRenderer` actually
+  serve a real consumer before they are locked into `main`.
 
 ### 5.2 Phased plan
 
@@ -512,7 +512,8 @@ Each phase is a reviewable unit with a clear exit gate.
 
 - **Phase 3 — expose the public inline API.** `Content::inlines()`, `IsBlock::inlines()`,
   the public node types. Resolution reports at node granularity.
-  *Exit:* public API reviewed against the first real consumer's needs (see §6); doc + README
+  *Exit:* node vocabulary reviewed against the `asciidoctor` port's needs (§6.6); the
+  purely-structural navigation sugar kept minimal pending a re-flow consumer; doc + README
   updated (the security section gets its `Raw`-node anchor).
 
 - **Phase 4 — precision spans + ASG output.** Land the single-pass builder (Strategy B) and
@@ -522,14 +523,14 @@ Each phase is a reviewable unit with a clear exit gate.
   removed.
 
 - **Phase 5 — renderer seam v2.** Reshape `InlineSubstitutionRenderer` into the AST-walking
-  form and update the README backend story.
+  form and rename it to `InlineRenderer` (§4.6); update the README backend story.
   *Exit:* seam documented; a smoke-test alternate renderer (in tests) walks the tree.
 
 - **Landing — preflight + merge to `main`.** Preflight the whole branch against the
-  downstream renderer crate (§5.1) to confirm the public API and reshaped seam serve a real
+  `asciidoctor` port (§5.1) to confirm the public API and reshaped seam serve a real
   consumer, merge current `main` in one last time, then land `inline-ast` into `main` with a
   **merge commit** (not a squash — §5.1) so the staged history survives.
-  *Exit:* renderer-crate preflight green; branch merged.
+  *Exit:* `asciidoctor`-port preflight green; branch merged.
 
 Phases 1–2 are the risk-bearing core; 3–5 are additive and can be paced against consumer
 demand (echoing the #943/#944 "pin the API with a real consumer" discipline). All of them
@@ -589,9 +590,19 @@ regressions the hand-written assertions don't cover.
    (§4.4). Avoids a breaking reshape later.
 5. **Retain `rendered()`?** → **Yes**, as a cached fold — this is the "approximate the
    existing rendered-content model" bonus, achieved for free.
-6. **Which downstream tool pins the API?** → the **Zola backend** is the most demanding (it
-   wants to re-flow inline content through its own renderer), so its needs should drive the
-   Phase 3 field sets.
+6. **Which downstream tool pins the API?** → the **Ruby-to-Rust `asciidoctor` port** — the
+   only consumer actually underway. It reproduces Asciidoctor's HTML exactly, so it walks
+   and renders the *entire* inline vocabulary (images, footnotes, xrefs, callouts, UI
+   macros, index terms, STEM, passthroughs) and exercises the renderer seam comprehensively.
+   That makes it an excellent oracle for the **node kinds and the `InlineRenderer` seam**,
+   and it doubles as a strong byte-exact parity check (§5.3).
+   - *Caveat:* because the port mostly *renders* nodes rather than *re-flowing* them, it
+     pins the seam and the node vocabulary far more than the purely-structural navigation
+     sugar on `inlines()`. The re-flow consumers that would exercise that — the Zola
+     backend, spec-coverage, and version-diff tools — have **not started**, so they inform
+     the conceptual shape only (as reflected in §1.3). Per the #943 discipline, keep the
+     structural-navigation conveniences minimal and let them be pinned by those consumers
+     when they materialize; do not finalize them by guessing now.
 
 ---
 
