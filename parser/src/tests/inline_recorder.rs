@@ -107,6 +107,26 @@ fn is_marker(c: char) -> bool {
     c == MARK_OPEN || c == MARK_CLOSE || is_pua_digit(c)
 }
 
+/// Reports whether `c` is a codepoint the recorder reserves for its own framing
+/// (a marker, a marker index digit, or the split placeholder).
+fn is_reserved_sentinel(c: char) -> bool {
+    is_marker(c) || c == SPLIT_PLACEHOLDER
+}
+
+/// Rejects a fixture whose source uses a reserved recorder codepoint. Such a
+/// character would be indistinguishable from recorder framing – `strip_markers`
+/// would delete it and `parse` would misread it – so the oracle fails fast
+/// rather than silently mis-validating the input. (The production pipeline
+/// likewise reserves its own PUA sentinels; those inputs are an accepted edge.)
+/// This is a limitation of the Strategy A oracle, not of the node model: the
+/// Phase 4 single-pass builder uses no markers and has nothing to collide with.
+fn assert_no_reserved_sentinels(source: &str) {
+    assert!(
+        !source.chars().any(is_reserved_sentinel),
+        "fixture source contains a codepoint reserved for recorder sentinels: {source:?}"
+    );
+}
+
 /// Removes every recorder sentinel from `chars`, leaving the real (HTML) bytes.
 fn strip_markers(chars: &[char]) -> String {
     chars.iter().copied().filter(|c| !is_marker(*c)).collect()
@@ -970,6 +990,8 @@ fn experimental(parser: Parser) -> Parser {
 /// built-in HTML renderer (the golden output) and once with the recording
 /// renderer (from which the tree is built). Both use a default [`Parser`].
 fn oracle<'src>(source: &'src str, group: &SubstitutionGroup) -> Oracle<'src> {
+    assert_no_reserved_sentinels(source);
+
     // Golden pass.
     let golden_parser = experimental(Parser::default());
     let mut golden_content = Content::from(Span::new(source));
@@ -1225,42 +1247,80 @@ fn normal_corpus_folds_byte_for_byte() {
 // tree reproduces its `rendered()` string. It reaches resolved xrefs, list
 // items, section bodies, and the interactions between blocks.
 
-fn simple_blocks_map<T>(
-    doc: &crate::Document<'_>,
-    mut f: impl FnMut(&crate::blocks::SimpleBlock<'_>) -> T,
-) -> Vec<T> {
-    fn walk<T>(
-        block: &crate::blocks::Block<'_>,
-        f: &mut impl FnMut(&crate::blocks::SimpleBlock<'_>) -> T,
-        out: &mut Vec<T>,
-    ) {
-        if let crate::blocks::Block::Simple(simple) = block {
-            out.push(f(simple));
+/// Collects the rendered inline content of every content-bearing location in
+/// `doc`, in a fixed document order: each block's own title, then the block's
+/// inline content (a simple block's body, a section's heading, or every simple
+/// table cell), then its children. Both parses are walked identically, so the
+/// golden and recorded vectors line up element-for-element.
+///
+/// Section headings and table cells are *not* child simple blocks, so a walk
+/// that only visited `Block::Simple` would silently skip them – leaving, for
+/// example, a table fixture green without ever folding its cells.
+fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
+    use crate::blocks::{Block, IsBlock, TableCellContent, TableRow};
+
+    fn cells(row: &TableRow<'_>, out: &mut Vec<String>) {
+        for cell in row.cells() {
+            // Only inline (`Simple`) cells carry a single `Content`; an
+            // `AsciiDoc` cell is a nested standalone document and is out of
+            // scope for this harness.
+            if let TableCellContent::Simple(content) = cell.content() {
+                out.push(content.rendered().to_string());
+            }
+        }
+    }
+
+    fn walk(block: &Block<'_>, out: &mut Vec<String>) {
+        if let Some(title) = block.title() {
+            out.push(title.to_string());
+        }
+
+        match block {
+            Block::Simple(simple) => out.push(simple.content().rendered().to_string()),
+
+            Block::Section(section) => out.push(section.section_title().to_string()),
+
+            Block::Table(table) => {
+                if let Some(header) = table.header_row() {
+                    cells(header, out);
+                }
+
+                for row in table.body_rows() {
+                    cells(row, out);
+                }
+
+                if let Some(footer) = table.footer_row() {
+                    cells(footer, out);
+                }
+            }
+
+            _ => {}
         }
 
         for child in block.child_blocks() {
-            walk(child, f, out);
+            walk(child, out);
         }
     }
 
     let mut out = vec![];
 
     for block in doc.child_blocks() {
-        walk(block, &mut f, &mut out);
+        walk(block, &mut out);
     }
 
     out
 }
 
 /// Parses `source` twice – normally and with the recorder – and asserts that
-/// folding every simple block's recorded tree reproduces its `rendered()`
-/// output byte-for-byte, including any resolved cross-references.
+/// folding every content location's recorded tree reproduces its `rendered()`
+/// output byte-for-byte, including any resolved cross-references, section
+/// headings, block titles, and table cells.
 fn check_document(source: &str) {
+    assert_no_reserved_sentinels(source);
+
     let mut golden_parser = experimental(Parser::default());
     let golden_doc = golden_parser.parse(source);
-    let golden = simple_blocks_map(&golden_doc, |simple| {
-        simple.content().rendered().to_string()
-    });
+    let golden = collect_rendered(&golden_doc);
 
     let (recorder, events) = RecordingRenderer::new();
     let mut recording_parser =
@@ -1268,10 +1328,18 @@ fn check_document(source: &str) {
     let recording_doc = recording_parser.parse(source);
     let events = events.borrow();
 
-    let folded = simple_blocks_map(&recording_doc, |simple| {
-        let marked: Vec<char> = simple.content().rendered().chars().collect();
-        fold(&parse(&marked, &events))
-    });
+    let folded: Vec<String> = collect_rendered(&recording_doc)
+        .iter()
+        .map(|marked| fold(&parse(&marked.chars().collect::<Vec<_>>(), &events)))
+        .collect();
+
+    // Guard against a fixture that exercises nothing (e.g. a table whose cells
+    // a shallower walk would have skipped): a document fixture must fold at
+    // least one content location.
+    assert!(
+        !golden.is_empty(),
+        "document fixture folded no content for {source:?}"
+    );
 
     assert_eq!(
         folded, golden,
@@ -1313,6 +1381,34 @@ fn document_corpus_folds_byte_for_byte() {
     for source in DOCUMENT_CORPUS {
         check_document(source);
     }
+}
+
+#[test]
+fn document_walk_reaches_section_headings_and_table_cells() {
+    // Regression guard: section headings and table cells are not child simple
+    // blocks, so `collect_rendered` must reach them explicitly (otherwise a
+    // table fixture folds nothing and passes vacuously).
+    let mut parser = experimental(Parser::default());
+    let doc = parser.parse("== Heading\n\n|===\n| *bold* cell | plain\n|===");
+    let rendered = collect_rendered(&doc);
+
+    assert!(
+        rendered.iter().any(|s| s == "Heading"),
+        "section heading was not collected: {rendered:?}"
+    );
+
+    assert!(
+        rendered.iter().any(|s| s == "<strong>bold</strong> cell"),
+        "table cell content was not collected: {rendered:?}"
+    );
+}
+
+#[test]
+#[should_panic(expected = "reserved for recorder sentinels")]
+fn source_using_a_reserved_sentinel_codepoint_is_rejected() {
+    // A literal marker codepoint in the source would be indistinguishable from
+    // recorder framing; the oracle rejects it rather than mis-validating.
+    check("before \u{E010} after", &SubstitutionGroup::Normal);
 }
 
 /// A known limitation of the Strategy A oracle at document scope: when a
