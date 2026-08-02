@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.6](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.5...v0.29.6)
+_02 August 2026_
+
+### Added
+
+* Expose WarningType::severity as a public accessor ([#1044](https://github.com/asciidoc-rs/asciidoc-parser/pull/1044))
+
+### Fixed
+
+* Model a demoted level-0 title as a sect0 section ([#1047](https://github.com/asciidoc-rs/asciidoc-parser/pull/1047))
+* Anchor the unknown-block-style diagnostic at the block delimiter ([#1045](https://github.com/asciidoc-rs/asciidoc-parser/pull/1045))
+
 ## [0.29.5](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.4...v0.29.5)
 _01 August 2026_
 
