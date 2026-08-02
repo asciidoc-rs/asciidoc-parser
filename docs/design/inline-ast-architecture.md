@@ -165,9 +165,11 @@ pub enum InlineNode<'src> {
     CharRef { value: CharRef<'src>, location: Span<'src> },
 
     /// Verbatim, un-escaped output: passthrough content (`+++…+++`,
-    /// `pass:[…]`, `$$…$$`) and the raw HTML that an unescaped `{attr}`
-    /// expansion injects. This node is the model's record of the language's
-    /// "emit raw HTML by design" behavior (see §3.5). ASG:
+    /// `pass:[…]`, `$$…$$`), and any literal special character of an
+    /// attribute expansion that the effective substitution order left
+    /// unescaped (§3.4.1) — *not* the whole expansion, whose replacements
+    /// and macros are still recognized. This node is the model's record of
+    /// the language's "emit raw HTML by design" behavior (see §3.4). ASG:
     /// `inlineLiteral name="raw"`.
     Raw { value: CowStr<'src>, location: Span<'src> },
 
@@ -326,14 +328,27 @@ today's `rendered()`) to signal the shift. Three points resolve it:
 
 **What caching means here.** The crate memoizes exactly **one** artifact — the default HTML
 fold — lazily on `Content`, which is what lets `rendered_html()` return `&str`. That single
-artifact has a stable identity (the built-in renderer + the document's own context) and the
-AST is frozen after resolution, so the memoization is sound with **one invalidation seam**:
-reference resolution fills in xref destinations *after* initial parse, so the HTML cache is
-populated (or invalidated) at the resolution boundary — the same place today's code rebuilds
-`rendered()` after resolving. Arbitrary custom renderers are deliberately **not** cached by
-the crate: their outputs are owned `String`s the caller may cache as it sees fit, since a
-crate-side cache would need to be keyed by renderer identity/config — an unbounded space that
-is not the crate's responsibility.
+artifact has a stable identity (the built-in renderer + the document's own context). The AST
+is *not* fully frozen at parse time, however: the resolution passes mutate reference nodes in
+place (block cross-references via `Content::resolve_references`, and — separately — section
+titles via `title_refs`, both in §4.3). The cache policy is therefore explicit:
+
+- **Lazy, invalidate-on-mutation.** The cache is empty until first read and computed on
+  demand. **Every mutation of a node the fold depends on clears it** — this covers *both*
+  block-reference resolution and title resolution, and any future in-place edit. The next
+  read recomputes.
+- **Reading before resolution is legal and defined.** It yields the unresolved-fallback
+  HTML (exactly as `rendered()` does today); once resolution runs and clears the cache, the
+  following read reflects the resolved destinations. There is no window in which a stale
+  pre-resolution string is returned as if final.
+- Concretely this is the same recompute point today's code already has — `resolve_references`
+  rebuilds the rendered string after resolving — expressed as cache invalidation rather than
+  eager rebuild.
+
+Arbitrary custom renderers are deliberately **not** cached by the crate: their outputs are
+owned `String`s the caller may cache as it sees fit, since a crate-side cache would need to
+be keyed by renderer identity/config — an unbounded space that is not the crate's
+responsibility.
 
 > **Decision:** rename `rendered()` → **`rendered_html()`** (and `rendered_content()` →
 > `rendered_html_content()`), defined as the cached default-HTML fold; all other backends go
@@ -346,16 +361,17 @@ is not the crate's responsibility.
 
 ### 3.4 The `text` / `charref` / `raw` trichotomy — the key idea
 
-The current pipeline escapes special characters *first*, then runs attribute substitution
-whose result is *not* re-escaped. That ordering is why `:x: <b>` then `{x}` emits live
-HTML. In a string model this is a subtle, security-relevant emergent behavior. In the node
-model it becomes an **explicit node kind**:
+In the normal order, special characters are escaped *first* (step 1), then attribute
+references expand *later* (step 3) and their result is *not* re-escaped — which is why
+`:x: <b>` then `{x}` emits live HTML. In a string model this is a subtle, security-relevant
+emergent behavior. In the node model each of the three literal kinds is an **explicit node**:
 
 - Ordinary source text → `Text` (logical; the fold escapes it).
 - A literal `<`, `>`, `&`, or a `(C)`/`--`/smart-quote replacement → `CharRef` (the fold
   emits the right entity).
-- Passthrough content, and the expansion of an unescaped `{attr}` → `Raw` (the fold emits
-  it verbatim).
+- Content that bypasses substitution entirely — a true passthrough (`+++…+++`, `pass:[…]`,
+  `$$…$$`) — → `Raw` (the fold emits it verbatim). *Whether a given fragment is `Raw`
+  depends on the substitution order — see below.*
 
 This maps **exactly** onto the ASG's `text` / `charref` / `raw` literals, and it means:
 
@@ -367,6 +383,30 @@ This maps **exactly** onto the ASG's `text` / `charref` / `raw` literals, and it
   security note gets a precise structural anchor.
 - **Other backends become possible** without regex-mangling HTML, because they see
   `Raw`-vs-`Text` rather than an already-escaped blob.
+
+#### 3.4.1 Node building follows the effective substitution order
+
+The kind a fragment becomes is **not** a fixed property of where it came from; it is decided
+by *which substitution steps still act on it* under the group's effective order (`normal`,
+`verbatim`, or a custom `subs=` list). Attribute expansion is the case that makes this
+concrete, and it is why an attribute value must **not** be blanket-classified as `Raw`:
+
+- In the **normal** order (`specialcharacters → quotes → attributes → replacements →
+  macros`), a value expanded at the *attributes* step has already passed `specialcharacters`
+  and `quotes`, so its literal `<`/`>`/`&` are emitted unescaped (`Raw`) and `*bold*` in it
+  stays literal — **but** `replacements` and `macros` still run afterward, so `(C)` in the
+  value becomes a `CharRef` and a `link:`/`image:` in it becomes a `Ref`/`Image`. The
+  expansion therefore yields a **mix** of node kinds, not a single `Raw` blob.
+- Under a **custom order** that runs `attributes` *before* `specialcharacters`, the same
+  value *is* subsequently escaped, so its `<` becomes a `CharRef::Special` (escaped by the
+  fold), not `Raw`.
+
+So the builder splices an expanded value into the node stream at the point the `attributes`
+step runs and lets the *remaining* steps of the effective order classify its fragments —
+mirroring exactly what the current string pipeline does to that text. Genuine passthroughs
+are the only fragments that are `Raw` regardless of order, because they are extracted before
+any step and re-inserted after all of them. This ordering-faithful policy is what keeps the
+byte-for-byte parity claim above actually achievable.
 
 ### 3.5 ASG projection and conformance
 
