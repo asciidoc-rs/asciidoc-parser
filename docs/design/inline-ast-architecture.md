@@ -442,6 +442,23 @@ break. The method *set* is largely preserved, so a downstream implementer's ment
 survives; the `*RenderParams` structs are replaced by (or become borrowed views of) the
 corresponding node types.
 
+> **Decision (Phase 5): rename the trait to `InlineRenderer`.** The word "substitution"
+> names the very mechanism this work removes — post-migration the trait is no longer invoked
+> *during substitution*; it is an AST-walking backend invoked by the fold, so the old name
+> would misdescribe it. `Inline` and `Renderer` both stay accurate, so only the middle word
+> is dropped. The cascade is small and lands in the same Phase 5 pass:
+>
+> - `InlineSubstitutionRenderer` → **`InlineRenderer`**; `HtmlSubstitutionRenderer` →
+>   **`HtmlInlineRenderer`**.
+> - The one substitution-named method, `render_quoted_substitution`, is renamed to match its
+>   node kind (e.g. `render_styled`).
+> - The `*RenderParams` structs fold into the node types (e.g. `XrefRenderParams` → the
+>   `Ref` node), so most are removed rather than renamed.
+>
+> Considered and set aside: `InlineBackend` (introduces a "backend" noun not used elsewhere),
+> `InlineNodeRenderer` ("node" is redundant with "inline"), `InlineConverter` (the crate has
+> already committed to "renderer" vocabulary).
+
 ---
 
 ## 5. Managing the transition
