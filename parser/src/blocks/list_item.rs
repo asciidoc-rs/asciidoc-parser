@@ -255,6 +255,21 @@ impl<'src> ListItem<'src> {
                     next = after_blanks;
                     next_block_must_be_indented = true;
                     continue;
+                } else if blocks.is_empty() && matches!(marker, ListItemMarker::DefinedTerm { .. })
+                {
+                    // An empty description-list term carries its content on the
+                    // following (indented) lines, so this "blank line" is the
+                    // phantom line-end after the term rather than a real
+                    // separator. Discard it and continue so a nested list (or
+                    // nested description list) attaches to the term instead of
+                    // being folded into the parent list as a sibling. This
+                    // mirrors the top-level branch above, which already lets
+                    // such content attach. If the following content is instead
+                    // a sibling or ancestor marker, the marker checks below
+                    // break correctly on the next iteration.
+                    next = next.discard_empty_lines();
+                    next_block_must_be_indented = true;
+                    continue;
                 } else if blocks.len() > 1 {
                     // Item already has content beyond principal text (e.g.,
                     // continuation-attached blocks or nested lists). Consume
