@@ -1,8 +1,6 @@
 use crate::{
     HasSpan, Span,
-    content::inlines::{
-        Anchor, Callout, CharRef, Footnote, Image, IndexTerm, Ref, Stem, Styled, Ui,
-    },
+    inlines::{Anchor, Callout, CharRef, Footnote, Image, IndexTerm, Ref, Stem, Styled, Ui},
     strings::CowStr,
 };
 
@@ -125,7 +123,7 @@ impl<'src> HasSpan<'src> for InlineNode<'src> {
 mod tests {
     use crate::{
         HasSpan, Span,
-        content::inlines::{
+        inlines::{
             Anchor, Callout, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref, RefVariant,
             SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui, UiKind,
         },

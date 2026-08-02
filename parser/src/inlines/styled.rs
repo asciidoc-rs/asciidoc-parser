@@ -1,4 +1,4 @@
-use crate::{Span, attributes::Attrlist, content::inlines::InlineNode, strings::CowStr};
+use crate::{Span, attributes::Attrlist, inlines::InlineNode, strings::CowStr};
 
 /// A formatted span, such as strong, emphasis, code, or mark. ASG:
 /// `inlineSpan`.

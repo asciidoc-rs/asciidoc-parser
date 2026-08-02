@@ -1,4 +1,4 @@
-use crate::{Span, content::inlines::InlineNode, strings::CowStr};
+use crate::{Span, inlines::InlineNode, strings::CowStr};
 
 /// A footnote (`footnote:[…]`) or a reference to an earlier one
 /// (`footnote:id[]`).

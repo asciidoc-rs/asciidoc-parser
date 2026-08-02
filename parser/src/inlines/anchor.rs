@@ -1,4 +1,4 @@
-use crate::{Span, content::inlines::InlineNode, strings::CowStr};
+use crate::{Span, inlines::InlineNode, strings::CowStr};
 
 /// An inline anchor (`[[id]]`, `[[id,reftext]]`, or `anchor:id[reftext]`).
 ///

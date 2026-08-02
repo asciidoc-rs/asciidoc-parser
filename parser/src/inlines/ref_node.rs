@@ -1,4 +1,4 @@
-use crate::{Span, content::inlines::InlineNode, parser::ResolvedReference, strings::CowStr};
+use crate::{Span, inlines::InlineNode, parser::ResolvedReference, strings::CowStr};
 
 /// A link or cross-reference. ASG: `inlineRef`.
 ///
