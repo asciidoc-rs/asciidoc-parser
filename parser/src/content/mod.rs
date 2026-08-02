@@ -10,6 +10,8 @@ pub(crate) use content::{
     rehome_xref_placeholders, render_xref_template, strip_footnote_marker_spans,
 };
 
+pub mod inlines;
+
 mod macros;
 pub(crate) use macros::apply_macros_with_leading_anchor_registered;
 
