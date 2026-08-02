@@ -2446,6 +2446,29 @@ fn ordered_list_nests_under_second_level_term() {
     }
 }
 
+#[test]
+fn blank_separated_unindented_list_still_nests_under_empty_term() {
+    // A list separated from an empty second-level term by a blank line, and not
+    // indented under it, still nests inside the term rather than folding into
+    // the parent description list. Asciidoctor 2.0.26 renders the `. Fedora` /
+    // `. Ubuntu` ordered list inside the `Linux` term's `<dd>` for this input,
+    // so the blank line and lack of indentation must not sever the nesting.
+    let doc = Parser::default().parse("OS::\n  Linux:::\n\n. Fedora\n. Ubuntu");
+
+    let outer_items: Vec<_> = top_list(&doc).child_blocks().collect();
+    assert_eq!(outer_items.len(), 1);
+
+    let inner = nested_list(outer_items[0]);
+    let inner_items: Vec<_> = inner.child_blocks().collect();
+    assert_eq!(inner_items.len(), 1);
+    assert_eq!(term_rendered(inner_items[0]), "Linux");
+
+    // The ordered list is the `Linux` term's content, not a sibling of it.
+    let ordered = nested_list(inner_items[0]);
+    assert_eq!(ordered.type_(), crate::blocks::ListType::Ordered);
+    assert_eq!(ordered.child_blocks().count(), 2);
+}
+
 /// Returns the document's first top-level block as a [`ListBlock`], panicking
 /// if it is absent or not a list.
 fn top_list<'d>(doc: &'d crate::Document<'d>) -> &'d crate::blocks::ListBlock<'d> {
