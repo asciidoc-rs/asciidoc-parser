@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.7](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.6...v0.29.7)
+_02 August 2026_
+
+### Documented
+
+* Add asciidoc.rs wordmark banner to README ([#1050](https://github.com/asciidoc-rs/asciidoc-parser/pull/1050))
+
+### Fixed
+
+* Apply the normal substitution group to description-list terms ([#1054](https://github.com/asciidoc-rs/asciidoc-parser/pull/1054))
+* Nest a list indented under a second-level description term ([#1055](https://github.com/asciidoc-rs/asciidoc-parser/pull/1055))
+* Preserve empty ({empty}) list-item principal text as a signal ([#1056](https://github.com/asciidoc-rs/asciidoc-parser/pull/1056))
+
 ## [0.29.6](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.5...v0.29.6)
 _02 August 2026_
 
