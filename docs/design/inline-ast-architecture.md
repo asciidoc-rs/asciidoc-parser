@@ -588,16 +588,32 @@ branch, not separate submissions to `main`. Each is guarded by the golden-HTML o
 
 Each phase is a reviewable unit with a clear exit gate.
 
-- **Phase 0 — this document + skeleton.** Land the `InlineNode` module (types only, no
-  wiring) and this doc on `inline-ast`. Decisions in §6 resolved or explicitly deferred.
+- **Phase 0 — this document + skeleton.** ✅ **Done** (#1058, #1060). Land the `InlineNode`
+  module (types only, no wiring) and this doc on `inline-ast`. Decisions in §6 resolved or
+  explicitly deferred.
   *Exit:* types compile, doc reviewed.
 
 - **Phase 1 — build the tree as an internal, non-public artifact; keep `rendered()`
-  authoritative.** Implement the node builder (Strategy A recorder first, as an oracle),
-  producing a tree in parallel with the existing string. Nothing public changes.
+  authoritative.** ✅ **Done**. Implement the node builder (Strategy A recorder first, as an
+  oracle), producing a tree in parallel with the existing string. Nothing public changes.
   *Exit:* for the whole test corpus, the fold of the tree equals the existing
   `rendered()` **byte-for-byte** (the oracle, §5.4), and the tree cross-checks against the
   recorder.
+
+  *Landed as:* a transparent marker-recording decorator over the built-in HTML renderer
+  ([`RecordingRenderer`]), a builder that parses the recorded sentinel structure into an
+  `InlineNode` tree, and a fold back to HTML, all behind a test-only differential harness
+  ([`parser/src/tests/inline_recorder.rs`]) that asserts byte-for-byte parity over an inline
+  fixture corpus and over whole parsed documents (including resolved cross-references).
+  Special characters and character replacements are left unmarked (their escaped output is
+  re-consumed by later steps, so bracketing it would perturb recognition) and their
+  `CharRef` nodes are recovered by splitting text runs. One Strategy A drift case is known
+  and recorded as an ignored test: an `<<auto-id>>` cross-reference whose target is a
+  section with a *formatted* title, whose rendered (marker-bearing) text feeds the reference
+  catalog. The single-pass builder (Phase 4) retires it by never re-rendering.
+
+[`RecordingRenderer`]: ../../parser/src/tests/inline_recorder.rs
+[`parser/src/tests/inline_recorder.rs`]: ../../parser/src/tests/inline_recorder.rs
 
 - **Phase 2 — make the tree canonical; `rendered()` becomes a fold.** Flip `Content` so
   the tree is the source of truth and `rendered()` is computed from it. Retire the sentinel
