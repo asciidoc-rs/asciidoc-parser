@@ -1,7 +1,11 @@
+use std::rc::Rc;
+
 use crate::{
     HasSpan, Parser,
     attributes::Attrlist,
-    content::{Content, Passthroughs, SubstitutionStep},
+    content::{
+        Content, Passthroughs, SubstitutionStep, inline_tree, inline_tree::RecordingRenderer,
+    },
     warnings::WarningType,
 };
 
@@ -226,6 +230,39 @@ impl SubstitutionGroup {
         parser: &Parser,
         attrlist: Option<&Attrlist>,
     ) {
+        // Snapshot the content and parser *before* the authoritative pass runs,
+        // when inline-tree building is enabled. The clone captures every
+        // document counter (footnote/callout numbers, `{counter:…}` values) at
+        // its pre-substitution value, so the recording pass below numbers
+        // constructs exactly as the authoritative pass does; the clone's
+        // mutations are then discarded, leaving the real parser advanced once.
+        let recording_seed = if parser.build_inline_tree {
+            Some((content.clone(), parser.clone()))
+        } else {
+            None
+        };
+
+        self.run_pipeline(content, parser, attrlist);
+
+        if let Some((mut recording_content, mut recording_parser)) = recording_seed {
+            self.build_inline_tree(
+                content,
+                &mut recording_content,
+                &mut recording_parser,
+                attrlist,
+            );
+        }
+    }
+
+    /// Runs the substitution pipeline for this group over `content`: extract
+    /// passthroughs (when the group includes them), apply each step in order,
+    /// restore the passthroughs, and finalize any deferred cross-references.
+    fn run_pipeline(
+        &self,
+        content: &mut Content<'_>,
+        parser: &Parser,
+        attrlist: Option<&Attrlist>,
+    ) {
         let steps = self.steps();
 
         let passthroughs: Option<Passthroughs> =
@@ -252,6 +289,36 @@ impl SubstitutionGroup {
         // references are resolved. This is a no-op when no cross-references were
         // found.
         content.finalize_deferred(&*parser.renderer);
+    }
+
+    /// Builds the inline AST for `content` by re-running the pipeline over the
+    /// pre-substitution snapshot with a [`RecordingRenderer`] wrapped around
+    /// the parser's own renderer, then parsing the recorded markers into a
+    /// tree and storing it on `content`.
+    ///
+    /// This is Strategy A (design §4.1): a transparent recording pass whose
+    /// fold reproduces the authoritative `rendered()` byte-for-byte. It is
+    /// a second pass for now; the Phase 4 single-pass builder retires it.
+    fn build_inline_tree(
+        &self,
+        content: &mut Content<'_>,
+        recording_content: &mut Content<'_>,
+        recording_parser: &mut Parser,
+        attrlist: Option<&Attrlist>,
+    ) {
+        let (recorder, events) = RecordingRenderer::new(recording_parser.renderer.clone());
+        recording_parser.renderer = Rc::new(recorder);
+
+        // The recording pass must not recurse into tree building itself (nested
+        // content would clone the parser again and again); it only needs to
+        // record this content's own constructs.
+        recording_parser.build_inline_tree = false;
+
+        self.run_pipeline(recording_content, recording_parser, attrlist);
+
+        let marked = recording_content.rendered_owned();
+        let tree = inline_tree::build_inline_tree(&marked, &events.borrow(), content.original());
+        content.set_inlines(tree);
     }
 
     /// Applies any block style masquerade and `subs` attribute override from

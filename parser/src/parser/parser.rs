@@ -476,6 +476,18 @@ pub struct Parser {
     /// `&Parser` attribute readers (which the substitution code paths reach
     /// with only a shared reference).
     datetime_context: RefCell<Option<DatetimeContext>>,
+
+    /// When `true`, each [`Content`](crate::content::Content) also builds its
+    /// inline AST (an additional, counter-safe recording substitution pass; see
+    /// [`content::inline_tree`](crate::content::inline_tree)) and stores it for
+    /// [`Content::inlines`](crate::content::Content::inlines).
+    ///
+    /// `false` by default, in which case the parse path is byte- and
+    /// performance-identical to before the inline AST existed. Enable it with
+    /// [`with_inline_tree`](Self::with_inline_tree). This is an opt-in switch
+    /// while the inline AST is being brought up (design Phase 2); it will
+    /// eventually become the canonical representation and the flag will retire.
+    pub(crate) build_inline_tree: bool,
 }
 
 /// A warning recorded in a form that does not borrow the source so it can live
@@ -591,6 +603,7 @@ impl Default for Parser {
             reference_time: None,
             input_mtime: None,
             datetime_context: RefCell::new(None),
+            build_inline_tree: false,
         }
     }
 }
@@ -2108,6 +2121,26 @@ impl Parser {
         renderer: ISR,
     ) -> Self {
         self.renderer = Rc::new(renderer);
+        self
+    }
+
+    /// Enables (or disables) building the **inline AST** for every
+    /// [`Content`](crate::content::Content) this parser produces.
+    ///
+    /// When enabled, each block's inline content is additionally parsed into a
+    /// tree of [`InlineNode`](crate::inlines::InlineNode)s, retrievable via
+    /// [`Content::inlines`](crate::content::Content::inlines). The tree is a
+    /// projection of the rendered output: folding it reproduces
+    /// [`Content::rendered`](crate::content::Content::rendered) byte-for-byte.
+    ///
+    /// This is **off by default**. Building the tree currently costs a second,
+    /// counter-safe substitution pass per block (design Phase 2, "promote the
+    /// tree into `Content`"), so the default parse path is unchanged in both
+    /// output and performance. The switch is expected to retire once the inline
+    /// AST becomes the canonical representation.
+    #[must_use]
+    pub fn with_inline_tree(mut self, enabled: bool) -> Self {
+        self.build_inline_tree = enabled;
         self
     }
 

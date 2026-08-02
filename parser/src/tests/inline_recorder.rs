@@ -1,125 +1,48 @@
-//! Phase 1 of the [inline AST architecture]: build the inline tree as an
-//! **internal, non-public artifact** and prove that folding it back to HTML
-//! reproduces the existing `rendered()` string **byte-for-byte**.
+//! Differential oracle for the inline AST, over the production
+//! [`inline_tree`](crate::content::inline_tree) module.
 //!
-//! This is the "Strategy A" bring-up oracle described in the design document
-//! (§4.1, §5.2, §5.4): the existing substitution pipeline is re-run with a
-//! *marker-recording* renderer ([`RecordingRenderer`]) that wraps the built-in
-//! [`HtmlSubstitutionRenderer`]. The recorder is a **transparent** decorator –
-//! it writes the exact HTML the built-in renderer would, and additionally
-//! brackets each recognized construct with inert Private-Use-Area sentinels.
-//! Because the only bytes it adds are sentinels, two facts follow directly:
+//! This began as the Phase 1 bring-up oracle (a test-only recorder). In Phase 2
+//! the recorder machinery moved into the parser proper
+//! ([`inline_tree`](crate::content::inline_tree)); this module is now the
+//! **harness** that drives it, keeping the same corpus and the two invariants
+//! it proves:
 //!
-//! 1. Stripping the sentinels from the recorded string yields the original
-//!    `rendered()` output byte-for-byte (the *no-perturbation* invariant).
-//! 2. Parsing the sentinel structure recovers a tree of [`InlineNode`]s, and
-//!    folding that tree (text verbatim, leaves by their captured HTML,
-//!    containers as open + folded children + close) reconstructs the same
-//!    bytes.
+//! 1. Stripping/folding the recorder's marked string reproduces the built-in
+//!    renderer's `rendered()` output **byte-for-byte** (the *no-perturbation*
+//!    invariant).
+//! 2. The recovered [`InlineNode`] tree is structurally faithful (node kinds,
+//!    nesting, and the `constructs <= markers <= events` cross-check).
 //!
-//! Nothing public changes: the recorder lives entirely in the test build and
-//! `Content::rendered()` remains authoritative. Later phases promote the tree
-//! to the canonical representation and make `rendered()` a fold over it.
-//!
-//! # These sentinels are temporary
-//!
-//! The `MARK_OPEN` / `MARK_CLOSE` / PUA-digit sentinels introduced below exist
-//! *only* for this Strategy A oracle. The design is explicit that Strategy A is
-//! not the end state (§4.1): the Phase 4 single-pass builder (Strategy B)
-//! constructs nodes directly as the substitution sink, so there is no recording
-//! pass and no markers at all. These sentinels are therefore retired wholesale
-//! along with the recorder, and – unlike the three production sentinel systems
-//! the node model also retires (passthrough / xref / footnote, §4.2) – they
-//! never touch shipped output even now, since this module is test-only.
-//!
-//! A missing construct degrades gracefully. If a `render_*` method is not
-//! intercepted, its output flows to the working string with no sentinels and is
-//! recovered as ordinary [`Text`](InlineNode::Text); byte parity is preserved
-//! regardless, so coverage can grow without ever risking the oracle.
+//! Because the machinery is now the production code path, this corpus doubles
+//! as the differential test for what
+//! [`Content::inlines`](crate::content::Content) stores when inline-tree
+//! building is enabled on the [`Parser`].
 //!
 //! [inline AST architecture]: ../../../docs/design/inline-ast-architecture.md
 
-// TEMPORARY: some node metadata is captured but not yet read while this is a
-// bring-up oracle; the allow goes away when the tree becomes canonical
-// (Phase 2) and every field is consumed.
-#![allow(dead_code)]
+#![allow(clippy::unwrap_used)]
 
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use crate::{
     Parser, Span,
-    attributes::Attrlist,
     blocks::FindBlocks,
-    content::{Content, SubstitutionGroup},
-    inlines::{
-        Anchor, Callout, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref, RefVariant,
-        SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui, UiKind,
+    content::{
+        Content, SubstitutionGroup,
+        inline_tree::{
+            RecordingRenderer, build_inline_tree, fold_marked, is_reserved_sentinel,
+            open_marker_count,
+        },
     },
-    parser::{
-        CalloutRenderParams, FootnoteRenderParams, HtmlSubstitutionRenderer, IconRenderParams,
-        ImageRenderParams, IndexTermRenderParams, InlineSubstitutionRenderer, LinkRenderParams,
-        MenuRenderParams, ModificationContext, QuoteScope, QuoteType, XrefRenderParams,
-    },
-    strings::CowStr,
+    inlines::{CharRef, InlineNode, RefVariant, SpanForm, StyleVariant, UiKind},
+    parser::{HtmlSubstitutionRenderer, ModificationContext},
 };
 
-// ─── Sentinels ────────────────────────────────────────────────────────────
-//
-// All in the Unicode Private Use Area, chosen to be inert to every step's
-// regexes, exactly as the existing pipeline's xref (`\u{E000}`) and passthrough
-// (`\u{96}`) sentinels already are. Digits are encoded as PUA characters too,
-// so a recorded marker injects no ASCII word characters that a later step could
-// key off of.
-
-/// Opens a recorded construct; immediately followed by the PUA-encoded index of
-/// its [`Event`].
-const MARK_OPEN: char = '\u{E010}';
-
-/// Closes a recorded construct.
-const MARK_CLOSE: char = '\u{E011}';
-
-/// Base of the ten PUA "digit" characters (`\u{E020}`..=`\u{E029}`) used to
-/// encode an [`Event`] index inside a marker.
-const PUA_DIGIT_BASE: u32 = 0xe020;
-
-/// A transient placeholder spliced in as a [quote substitution]'s body so the
-/// fixed open/close wrapper can be recovered by splitting on it. It never
-/// appears in real content.
-///
-/// [quote substitution]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
-const SPLIT_PLACEHOLDER: char = '\u{E0FF}';
-
-fn is_pua_digit(c: char) -> bool {
-    let n = c as u32;
-    (PUA_DIGIT_BASE..PUA_DIGIT_BASE + 10).contains(&n)
-}
-
-fn write_index(index: usize, dest: &mut String) {
-    for ch in index.to_string().chars() {
-        let digit = ch as u32 - '0' as u32;
-        if let Some(pua) = char::from_u32(PUA_DIGIT_BASE + digit) {
-            dest.push(pua);
-        }
-    }
-}
-
-fn is_marker(c: char) -> bool {
-    c == MARK_OPEN || c == MARK_CLOSE || is_pua_digit(c)
-}
-
-/// Reports whether `c` is a codepoint the recorder reserves for its own framing
-/// (a marker, a marker index digit, or the split placeholder).
-fn is_reserved_sentinel(c: char) -> bool {
-    is_marker(c) || c == SPLIT_PLACEHOLDER
-}
-
 /// Rejects a fixture whose source uses a reserved recorder codepoint. Such a
-/// character would be indistinguishable from recorder framing – `strip_markers`
-/// would delete it and `parse` would misread it – so the oracle fails fast
-/// rather than silently mis-validating the input. (The production pipeline
-/// likewise reserves its own PUA sentinels; those inputs are an accepted edge.)
-/// This is a limitation of the Strategy A oracle, not of the node model: the
-/// Phase 4 single-pass builder uses no markers and has nothing to collide with.
+/// character would be indistinguishable from recorder framing, so the oracle
+/// fails fast rather than silently mis-validating the input. (The production
+/// pipeline likewise reserves its own PUA sentinels; those inputs are an
+/// accepted edge.)
 fn assert_no_reserved_sentinels(source: &str) {
     assert!(
         !source.chars().any(is_reserved_sentinel),
@@ -127,857 +50,27 @@ fn assert_no_reserved_sentinels(source: &str) {
     );
 }
 
-/// Removes every recorder sentinel from `chars`, leaving the real (HTML) bytes.
-fn strip_markers(chars: &[char]) -> String {
-    chars.iter().copied().filter(|c| !is_marker(*c)).collect()
-}
-
-// ─── Recorded events ────────────────────────────────────────────────────────
-
-/// The metadata captured for one recognized construct, looked up by the index
-/// encoded in its [`MARK_OPEN`] marker.
-#[derive(Clone, Debug)]
-enum Event {
-    /// A parent construct (a [quote substitution]). `open`/`close` are the
-    /// fixed wrapper bytes the built-in renderer emits around the body.
-    ///
-    /// [quote substitution]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
-    Container {
-        open: String,
-        close: String,
-        node: ContainerNode,
-    },
-
-    /// A leaf construct. Its HTML is recovered from the marked string, so only
-    /// the structural metadata is stored here.
-    Leaf(LeafNode),
-}
-
-#[derive(Clone, Debug)]
-enum ContainerNode {
-    Styled {
-        variant: StyleVariant,
-        form: SpanForm,
-        id: Option<String>,
-        roles: Vec<String>,
-    },
-    Reference {
-        variant: RefVariant,
-        target: String,
-        roles: Vec<String>,
-        window: Option<String>,
-    },
-    Stem {
-        notation: StemNotation,
-    },
-}
-
-/// The recovered kind of a character reference. Special characters and
-/// character replacements are *not* marked by the recorder (their escaped
-/// output is re-consumed by later steps, so bracketing it would perturb
-/// recognition); instead they are recovered by splitting text runs on the
-/// entities the built-in renderer emits.
-#[derive(Clone, Debug)]
-enum CharRefKind {
-    Special(char),
-    Replacement(&'static str),
-    Entity(String),
-}
-
-#[derive(Clone, Debug)]
-enum LeafNode {
-    LineBreak,
-    Image {
-        target: String,
-        alt: Option<String>,
-        width: Option<String>,
-        height: Option<String>,
-    },
-    Reference {
-        variant: RefVariant,
-        target: String,
-        roles: Vec<String>,
-        window: Option<String>,
-    },
-    Anchor {
-        id: String,
-    },
-    Callout {
-        number: String,
-    },
-    IndexTerm {
-        terms: Vec<String>,
-        visible: bool,
-    },
-    Ui(UiMeta),
-    Footnote {
-        id: Option<String>,
-        number: Option<String>,
-        is_reference: bool,
-    },
-}
-
-#[derive(Clone, Debug)]
-enum UiMeta {
-    Button(String),
-    Keyboard(Vec<String>),
-    Menu {
-        menu: String,
-        submenus: Vec<String>,
-        item: Option<String>,
-    },
-}
-
-// ─── The recording renderer ───────────────────────────────────────────────
-
-/// A transparent decorator over [`HtmlSubstitutionRenderer`] that brackets each
-/// recognized construct with recorder sentinels and captures its structural
-/// metadata into a shared event log.
-#[derive(Debug)]
-struct RecordingRenderer {
-    html: HtmlSubstitutionRenderer,
-    events: Rc<RefCell<Vec<Event>>>,
-}
-
-impl RecordingRenderer {
-    fn new() -> (Self, Rc<RefCell<Vec<Event>>>) {
-        let events = Rc::new(RefCell::new(Vec::new()));
-
-        let renderer = Self {
-            html: HtmlSubstitutionRenderer {},
-            events: events.clone(),
-        };
-
-        (renderer, events)
-    }
-
-    fn push(&self, event: Event) -> usize {
-        let mut events = self.events.borrow_mut();
-        events.push(event);
-        events.len() - 1
-    }
-
-    /// Writes `MARK_OPEN index fragment MARK_CLOSE` into `dest`. `fragment` is
-    /// the exact HTML the built-in renderer produced, so `dest` still contains
-    /// every real byte and only inert sentinels are added.
-    fn wrap(&self, index: usize, fragment: &str, dest: &mut String) {
-        dest.push(MARK_OPEN);
-        write_index(index, dest);
-        dest.push_str(fragment);
-        dest.push(MARK_CLOSE);
-    }
-
-    fn leaf(&self, node: LeafNode, fragment: &str, dest: &mut String) {
-        let index = self.push(Event::Leaf(node));
-        self.wrap(index, fragment, dest);
-    }
-
-    /// Recovers the fixed open/close wrapper a quote substitution emits, by
-    /// rendering it once with [`SPLIT_PLACEHOLDER`] as the body and splitting.
-    fn split_quote(
-        &self,
-        type_: QuoteType,
-        scope: QuoteScope,
-        attrlist: Option<Attrlist<'_>>,
-        id: Option<String>,
-    ) -> (String, String) {
-        let mut probe = String::new();
-
-        self.html.render_quoted_substitution(
-            type_,
-            scope,
-            attrlist,
-            id,
-            &SPLIT_PLACEHOLDER.to_string(),
-            &mut probe,
-        );
-
-        match probe.split_once(SPLIT_PLACEHOLDER) {
-            Some((open, close)) => (open.to_string(), close.to_string()),
-
-            // A body that does not survive the wrapper (should not happen for
-            // any quote type) degrades to "whole fragment is the open".
-            None => (probe, String::new()),
-        }
-    }
-}
-
-fn optional(value: Option<&str>) -> Option<String> {
-    value.map(str::to_string)
-}
-
-impl InlineSubstitutionRenderer for RecordingRenderer {
-    // `render_special_character` and `render_character_replacement` are
-    // deliberately *not* overridden: their escaped output (`&lt;`, `&gt;`,
-    // `&#8594;`, …) is re-matched by later steps (callouts on `&lt;N&gt;`, the
-    // xref shorthand on `&lt;&lt;`, arrow replacements on `&lt;-`), so wrapping
-    // it in sentinels would break that recognition. They fall through to the
-    // built-in HTML renderer, and their `CharRef` nodes are recovered from the
-    // resulting text runs (see `push_text`).
-
-    fn render_quoted_substitution(
-        &self,
-        type_: QuoteType,
-        scope: QuoteScope,
-        attrlist: Option<Attrlist<'_>>,
-        id: Option<String>,
-        body: &str,
-        dest: &mut String,
-    ) {
-        let roles: Vec<String> = attrlist
-            .as_ref()
-            .map(|a| a.roles().iter().map(|r| r.to_string()).collect())
-            .unwrap_or_default();
-
-        let (open, close) = self.split_quote(type_, scope, attrlist.clone(), id.clone());
-
-        let node = match type_ {
-            QuoteType::AsciiMath => ContainerNode::Stem {
-                notation: StemNotation::AsciiMath,
-            },
-
-            QuoteType::LatexMath => ContainerNode::Stem {
-                notation: StemNotation::LatexMath,
-            },
-
-            _ => ContainerNode::Styled {
-                variant: style_variant(type_),
-                form: span_form(scope),
-                id: id.clone(),
-                roles,
-            },
-        };
-
-        let index = self.push(Event::Container {
-            open: open.clone(),
-            close: close.clone(),
-            node,
-        });
-
-        // Re-render with the real body (which already carries the sentinels of
-        // any nested constructs) so `dest` holds `open + body + close`, exactly
-        // as the built-in renderer would, wrapped in this construct's markers.
-        let mut fragment = String::new();
-        self.html
-            .render_quoted_substitution(type_, scope, attrlist, id, body, &mut fragment);
-
-        self.wrap(index, &fragment, dest);
-    }
-
-    fn render_line_break(&self, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_line_break(&mut fragment);
-        self.leaf(LeafNode::LineBreak, &fragment, dest);
-    }
-
-    fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_image(params, &mut fragment);
-
-        self.leaf(
-            LeafNode::Image {
-                target: params.target.to_string(),
-                alt: Some(params.alt.clone()),
-                width: optional(params.width),
-                height: optional(params.height),
-            },
-            &fragment,
-            dest,
-        );
-    }
-
-    fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_icon(params, &mut fragment);
-
-        // The public vocabulary has no dedicated icon node yet; an icon projects
-        // onto `Image` (its closest kin) for now.
-        self.leaf(
-            LeafNode::Image {
-                target: params.target.to_string(),
-                alt: Some(params.alt.clone()),
-                width: None,
-                height: None,
-            },
-            &fragment,
-            dest,
-        );
-    }
-
-    fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
-        let mut roles: Vec<String> = params.extra_roles.iter().map(|r| r.to_string()).collect();
-        roles.extend(params.attrlist.roles().iter().map(|r| r.to_string()));
-
-        // A link's display text is inserted verbatim between a fixed open/close,
-        // so – like a quote span – its wrapper is recovered by rendering once
-        // with a placeholder body, and the real text becomes the container's
-        // children (so `link:x[*bold*]` decomposes into a `Ref` over a `Styled`).
-        let probe_params = LinkRenderParams {
-            target: params.target.clone(),
-            link_text: SPLIT_PLACEHOLDER.to_string(),
-            extra_roles: params.extra_roles.clone(),
-            window: params.window,
-            attrlist: params.attrlist,
-            parser: params.parser,
-        };
-
-        let mut probe = String::new();
-        self.html.render_link(&probe_params, &mut probe);
-
-        let (open, close) = match probe.split_once(SPLIT_PLACEHOLDER) {
-            Some((open, close)) => (open.to_string(), close.to_string()),
-            None => (probe, String::new()),
-        };
-
-        let index = self.push(Event::Container {
-            open: open.clone(),
-            close: close.clone(),
-            node: ContainerNode::Reference {
-                variant: RefVariant::Link,
-                target: params.target.clone(),
-                roles,
-                window: optional(params.window),
-            },
-        });
-
-        let mut fragment = String::new();
-        self.html.render_link(params, &mut fragment);
-
-        self.wrap(index, &fragment, dest);
-    }
-
-    fn render_anchor(&self, id: &str, reftext: Option<String>, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_anchor(id, reftext, &mut fragment);
-        self.leaf(LeafNode::Anchor { id: id.to_string() }, &fragment, dest);
-    }
-
-    fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_xref(params, &mut fragment);
-
-        self.leaf(
-            LeafNode::Reference {
-                variant: RefVariant::Xref,
-                target: params.target.to_string(),
-                roles: params.roles.to_vec(),
-                window: optional(params.window),
-            },
-            &fragment,
-            dest,
-        );
-    }
-
-    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_callout(params, &mut fragment);
-
-        self.leaf(
-            LeafNode::Callout {
-                number: params.number.to_string(),
-            },
-            &fragment,
-            dest,
-        );
-    }
-
-    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_index_term(params, &mut fragment);
-
-        // `render_index_term` only receives the visible primary term; the
-        // concealed levels are not exposed here, so the term list is
-        // best-effort in this bring-up oracle.
-        let (terms, visible) = match params.visible_term {
-            Some(term) => (vec![term.to_string()], true),
-            None => (vec![], false),
-        };
-
-        self.leaf(LeafNode::IndexTerm { terms, visible }, &fragment, dest);
-    }
-
-    fn render_button(&self, text: &str, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_button(text, &mut fragment);
-        self.leaf(
-            LeafNode::Ui(UiMeta::Button(text.to_string())),
-            &fragment,
-            dest,
-        );
-    }
-
-    fn render_keyboard(&self, keys: &[String], dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_keyboard(keys, &mut fragment);
-        self.leaf(
-            LeafNode::Ui(UiMeta::Keyboard(keys.to_vec())),
-            &fragment,
-            dest,
-        );
-    }
-
-    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_menu(params, &mut fragment);
-
-        self.leaf(
-            LeafNode::Ui(UiMeta::Menu {
-                menu: params.menu.to_string(),
-                submenus: params.submenus.to_vec(),
-                item: optional(params.menuitem),
-            }),
-            &fragment,
-            dest,
-        );
-    }
-
-    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String) {
-        let mut fragment = String::new();
-        self.html.render_footnote(params, &mut fragment);
-
-        self.leaf(
-            LeafNode::Footnote {
-                id: optional(params.id),
-                number: optional(params.index),
-                is_reference: params.is_reference,
-            },
-            &fragment,
-            dest,
-        );
-    }
-}
-
-fn style_variant(type_: QuoteType) -> StyleVariant {
-    match type_ {
-        QuoteType::Strong => StyleVariant::Strong,
-        QuoteType::Emphasis => StyleVariant::Emphasis,
-        QuoteType::Monospaced => StyleVariant::Code,
-        QuoteType::Mark => StyleVariant::Mark,
-        QuoteType::Superscript => StyleVariant::Superscript,
-        QuoteType::Subscript => StyleVariant::Subscript,
-        QuoteType::DoubleQuote => StyleVariant::DoubleQuote,
-        QuoteType::SingleQuote => StyleVariant::SingleQuote,
-
-        // AsciiMath/LatexMath are handled as STEM before this is reached;
-        // `Unquoted` and any residue map to the unquoted span.
-        _ => StyleVariant::Unquoted,
-    }
-}
-
-fn span_form(scope: QuoteScope) -> SpanForm {
-    match scope {
-        QuoteScope::Constrained => SpanForm::Constrained,
-        QuoteScope::Unconstrained => SpanForm::Unconstrained,
-    }
-}
-
-// ─── The recorded tree ──────────────────────────────────────────────────────
-
-/// The internal Phase 1 tree. Each node carries what the fold needs to
-/// reconstruct its bytes, alongside the structural metadata that projects to a
-/// public [`InlineNode`].
-#[derive(Clone, Debug)]
-enum Rec {
-    Text(String),
-
-    /// A character reference recovered from a text run. `html` is the exact
-    /// entity the built-in renderer emitted (`&lt;`, `&#8594;`, …).
-    CharRef {
-        html: String,
-        kind: CharRefKind,
-    },
-    Leaf {
-        html: String,
-        node: LeafNode,
-    },
-    Container {
-        open: String,
-        close: String,
-        children: Vec<Rec>,
-        node: ContainerNode,
-    },
-}
-
-/// Pushes `text` onto `out`, splitting it into plain [`Rec::Text`] and
-/// [`Rec::CharRef`] runs. Every `&` in the built-in renderer's output opens an
-/// entity (a literal `&` is escaped to `&amp;`), so an ampersand-to-semicolon
-/// span is always a character reference.
-fn push_text(text: &str, out: &mut Vec<Rec>) {
-    if text.is_empty() {
-        return;
-    }
-
-    let mut plain = String::new();
-    let mut rest = text;
-
-    while let Some(amp) = rest.find('&') {
-        plain.push_str(&rest[..amp]);
-        let after = &rest[amp..];
-
-        let Some(semi) = after.find(';') else {
-            // No terminator: not an entity (should not occur). Keep the `&`.
-            plain.push('&');
-            rest = &after[1..];
-            continue;
-        };
-
-        let entity = &after[..=semi];
-
-        if !plain.is_empty() {
-            out.push(Rec::Text(std::mem::take(&mut plain)));
-        }
-
-        out.push(Rec::CharRef {
-            html: entity.to_string(),
-            kind: classify_entity(entity),
-        });
-
-        rest = &after[semi + 1..];
-    }
-
-    plain.push_str(rest);
-
-    if !plain.is_empty() {
-        out.push(Rec::Text(plain));
-    }
-}
-
-fn classify_entity(entity: &str) -> CharRefKind {
-    match entity {
-        "&lt;" => CharRefKind::Special('<'),
-        "&gt;" => CharRefKind::Special('>'),
-        "&amp;" => CharRefKind::Special('&'),
-
-        "&#169;" => CharRefKind::Replacement("\u{a9}"),
-        "&#174;" => CharRefKind::Replacement("\u{ae}"),
-        "&#8482;" => CharRefKind::Replacement("\u{2122}"),
-        "&#8201;" => CharRefKind::Replacement("\u{2009}"),
-        "&#8212;" => CharRefKind::Replacement("\u{2014}"),
-        "&#8203;" => CharRefKind::Replacement("\u{200b}"),
-        "&#8230;" => CharRefKind::Replacement("\u{2026}"),
-        "&#8592;" => CharRefKind::Replacement("\u{2190}"),
-        "&#8656;" => CharRefKind::Replacement("\u{21d0}"),
-        "&#8594;" => CharRefKind::Replacement("\u{2192}"),
-        "&#8658;" => CharRefKind::Replacement("\u{21d2}"),
-        "&#8217;" => CharRefKind::Replacement("\u{2019}"),
-        "&#8216;" => CharRefKind::Replacement("\u{2018}"),
-
-        // A numeric or named entity written by the author, carried through as
-        // written.
-        other => CharRefKind::Entity(other.to_string()),
-    }
-}
-
-/// Parses a recorder-marked string into the recorded tree, resolving each
-/// marker against `events`.
-fn parse(chars: &[char], events: &[Event]) -> Vec<Rec> {
-    let mut out = Vec::new();
-    let mut text = String::new();
-    let mut i = 0;
-
-    while let Some(&c) = chars.get(i) {
-        if c != MARK_OPEN {
-            text.push(c);
-            i += 1;
-            continue;
-        }
-
-        push_text(&std::mem::take(&mut text), &mut out);
-
-        i += 1;
-
-        // Read the PUA-encoded event index.
-        let mut index = 0usize;
-        while let Some(&d) = chars.get(i) {
-            if !is_pua_digit(d) {
-                break;
-            }
-
-            index = index * 10 + (d as u32 - PUA_DIGIT_BASE) as usize;
-            i += 1;
-        }
-
-        // Find the matching close, honoring nesting.
-        let start = i;
-        let mut depth = 1;
-
-        while let Some(&d) = chars.get(i) {
-            match d {
-                MARK_OPEN => depth += 1,
-
-                MARK_CLOSE => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-
-                _ => {}
-            }
-
-            i += 1;
-        }
-
-        let region = chars.get(start..i).unwrap_or(&[]);
-
-        // Skip the matching close.
-        i += 1;
-
-        if let Some(event) = events.get(index) {
-            out.push(build_rec(event, region, events));
-        }
-    }
-
-    push_text(&text, &mut out);
-
-    out
-}
-
-fn build_rec(event: &Event, region: &[char], events: &[Event]) -> Rec {
-    match event {
-        Event::Container { open, close, node } => {
-            // `region` is `open + body + close`; the body carries the nested
-            // markers. Slice off the known (marker-free) wrapper and recurse.
-            let open_len = open.chars().count();
-            let close_len = close.chars().count();
-            let body_end = region.len().saturating_sub(close_len);
-
-            let body = region.get(open_len..body_end).unwrap_or(&[]);
-
-            Rec::Container {
-                open: open.clone(),
-                close: close.clone(),
-                children: parse(body, events),
-                node: node.clone(),
-            }
-        }
-
-        Event::Leaf(node) => Rec::Leaf {
-            html: strip_markers(region),
-            node: node.clone(),
-        },
-    }
-}
-
-/// Folds the recorded tree back to HTML: text verbatim, a leaf as its captured
-/// HTML, a container as open + folded children + close.
-fn fold(recs: &[Rec]) -> String {
-    let mut out = String::new();
-    fold_into(recs, &mut out);
-    out
-}
-
-fn fold_into(recs: &[Rec], out: &mut String) {
-    for rec in recs {
-        match rec {
-            Rec::Text(text) => out.push_str(text),
-
-            Rec::CharRef { html, .. } => out.push_str(html),
-
-            Rec::Leaf { html, .. } => out.push_str(html),
-
-            Rec::Container {
-                open,
-                close,
-                children,
-                ..
-            } => {
-                out.push_str(open);
-                fold_into(children, out);
-                out.push_str(close);
-            }
-        }
-    }
-}
-
 /// The number of recorded constructs (non-text nodes) in the tree – i.e. the
-/// number of [`Event`]s the tree consumed. Used to cross-check the tree against
-/// the recorder.
-fn construct_count(recs: &[Rec]) -> usize {
-    recs.iter()
-        .map(|rec| match rec {
+/// number of recorder [`Event`](crate::content::inline_tree)s the tree
+/// consumed. Used to cross-check the tree against the recorder.
+fn construct_count(nodes: &[InlineNode<'_>]) -> usize {
+    nodes
+        .iter()
+        .map(|node| match node {
             // Text and recovered character references are not recorded events.
-            Rec::Text(_) | Rec::CharRef { .. } => 0,
-            Rec::Leaf { .. } => 1,
-            Rec::Container { children, .. } => 1 + construct_count(children),
+            InlineNode::Text { .. } | InlineNode::CharRef { .. } | InlineNode::Raw { .. } => 0,
+
+            InlineNode::Styled(styled) => 1 + construct_count(&styled.children),
+            InlineNode::Ref(reference) => 1 + construct_count(&reference.children),
+            InlineNode::Footnote(footnote) => 1 + construct_count(&footnote.children),
+
+            // A STEM node folds its body into `value`, so it has no child nodes;
+            // it is one recorded construct, matching the recorder.
+            InlineNode::Stem(_) => 1,
+
+            _ => 1,
         })
         .sum()
-}
-
-// ─── Projection to the public inline vocabulary ─────────────────────────────
-
-/// Projects the recorded tree onto the public [`InlineNode`] vocabulary, giving
-/// every node the same coarse `location` (Phase 1 carries no precise spans; see
-/// design §4.4).
-fn to_inline<'src>(recs: &[Rec], span: Span<'src>) -> Vec<InlineNode<'src>> {
-    recs.iter().map(|rec| node_of(rec, span)).collect()
-}
-
-fn node_of<'src>(rec: &Rec, span: Span<'src>) -> InlineNode<'src> {
-    match rec {
-        Rec::Text(text) => InlineNode::Text {
-            value: CowStr::from(text.clone()),
-            location: span,
-        },
-
-        Rec::CharRef { kind, .. } => InlineNode::CharRef {
-            value: match kind {
-                CharRefKind::Special(ch) => CharRef::Special(*ch),
-                CharRefKind::Replacement(value) => CharRef::Replacement(value),
-                CharRefKind::Entity(name) => CharRef::Entity(CowStr::from(name.clone())),
-            },
-            location: span,
-        },
-
-        Rec::Leaf { node, .. } => leaf_node_of(node, span),
-
-        Rec::Container { children, node, .. } => match node {
-            ContainerNode::Styled {
-                variant,
-                form,
-                id,
-                roles,
-            } => InlineNode::Styled(Styled {
-                variant: *variant,
-                form: *form,
-                id: id.clone().map(CowStr::from),
-                roles: roles.iter().cloned().map(CowStr::from).collect(),
-                attrs: None,
-                children: to_inline(children, span),
-                location: span,
-            }),
-
-            ContainerNode::Reference {
-                variant,
-                target,
-                roles,
-                window,
-            } => InlineNode::Ref(Ref {
-                variant: *variant,
-                target: CowStr::from(target.clone()),
-                children: to_inline(children, span),
-                roles: roles.iter().cloned().map(CowStr::from).collect(),
-                window: window.clone().map(CowStr::from),
-                resolved: None,
-                location: span,
-            }),
-
-            ContainerNode::Stem { notation } => InlineNode::Stem(Stem {
-                notation: *notation,
-                value: CowStr::from(fold(children)),
-                location: span,
-            }),
-        },
-    }
-}
-
-fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
-    match node {
-        LeafNode::LineBreak => InlineNode::LineBreak { location: span },
-
-        LeafNode::Image {
-            target,
-            alt,
-            width,
-            height,
-        } => InlineNode::Image(Image {
-            target: CowStr::from(target.clone()),
-            alt: alt.clone().map(CowStr::from),
-            width: width.clone().map(CowStr::from),
-            height: height.clone().map(CowStr::from),
-            attrs: None,
-            location: span,
-        }),
-
-        LeafNode::Reference {
-            variant,
-            target,
-            roles,
-            window,
-        } => InlineNode::Ref(Ref {
-            variant: *variant,
-            target: CowStr::from(target.clone()),
-            children: vec![],
-            roles: roles.iter().cloned().map(CowStr::from).collect(),
-            window: window.clone().map(CowStr::from),
-            resolved: None,
-            location: span,
-        }),
-
-        LeafNode::Anchor { id } => InlineNode::Anchor(Anchor {
-            id: CowStr::from(id.clone()),
-            reftext: None,
-            location: span,
-        }),
-
-        LeafNode::Callout { number } => InlineNode::Callout(Callout {
-            number: CowStr::from(number.clone()),
-            location: span,
-        }),
-
-        LeafNode::IndexTerm { terms, visible } => InlineNode::IndexTerm(IndexTerm {
-            terms: terms.iter().cloned().map(CowStr::from).collect(),
-            visible: *visible,
-            location: span,
-        }),
-
-        LeafNode::Ui(ui) => InlineNode::Ui(Ui {
-            kind: match ui {
-                UiMeta::Button(text) => UiKind::Button(CowStr::from(text.clone())),
-
-                UiMeta::Keyboard(keys) => {
-                    UiKind::Keyboard(keys.iter().cloned().map(CowStr::from).collect())
-                }
-
-                UiMeta::Menu {
-                    menu,
-                    submenus,
-                    item,
-                } => UiKind::Menu {
-                    menu: CowStr::from(menu.clone()),
-                    submenus: submenus.iter().cloned().map(CowStr::from).collect(),
-                    item: item.clone().map(CowStr::from),
-                },
-            },
-            location: span,
-        }),
-
-        LeafNode::Footnote {
-            id,
-            number,
-            is_reference,
-        } => InlineNode::Footnote(Footnote {
-            id: id.clone().map(CowStr::from),
-            number: number.clone().map(CowStr::from),
-            is_reference: *is_reference,
-            children: vec![],
-            location: span,
-        }),
-    }
-}
-
-// ─── The oracle ─────────────────────────────────────────────────────────────
-
-/// The result of running the Phase 1 oracle on one source string.
-struct Oracle<'src> {
-    /// The authoritative `rendered()` output of the unmodified pipeline.
-    golden: String,
-
-    /// The recorder-marked `rendered()` string (real HTML + inert sentinels).
-    marked: String,
-
-    /// The recorded tree, projected onto the public vocabulary.
-    tree: Vec<InlineNode<'src>>,
-
-    /// The number of constructs the recorder captured.
-    events: usize,
-
-    /// The number of open-markers that reached the final string.
-    markers: usize,
-
-    /// The number of marked construct nodes in the recorded tree (recovered
-    /// character references excluded, as they are not recorded events).
-    constructs: usize,
 }
 
 /// Enables `:experimental:` so the UI macros (`kbd:`, `btn:`, `menu:`) are
@@ -986,9 +79,33 @@ fn experimental(parser: Parser) -> Parser {
     parser.with_intrinsic_attribute_bool("experimental", true, ModificationContext::Anywhere)
 }
 
+/// The result of running the oracle on one source string.
+struct Oracle<'src> {
+    /// The authoritative `rendered()` output of the unmodified pipeline.
+    golden: String,
+
+    /// The fold of the recovered tree (the recorder's marked string folded back
+    /// to output bytes).
+    folded: String,
+
+    /// The recovered tree, projected onto the public vocabulary.
+    tree: Vec<InlineNode<'src>>,
+
+    /// The number of constructs the recorder captured.
+    events: usize,
+
+    /// The number of open-markers that reached the final string.
+    markers: usize,
+
+    /// The number of marked construct nodes in the recovered tree (recovered
+    /// character references excluded, as they are not recorded events).
+    constructs: usize,
+}
+
 /// Runs `source` through the pipeline twice under `group`: once with the
-/// built-in HTML renderer (the golden output) and once with the recording
-/// renderer (from which the tree is built). Both use a default [`Parser`].
+/// built-in HTML renderer (the golden output) and once with the production
+/// [`RecordingRenderer`] (from which the tree is built). Both use a default
+/// [`Parser`].
 fn oracle<'src>(source: &'src str, group: &SubstitutionGroup) -> Oracle<'src> {
     assert_no_reserved_sentinels(source);
 
@@ -998,60 +115,44 @@ fn oracle<'src>(source: &'src str, group: &SubstitutionGroup) -> Oracle<'src> {
     group.apply(&mut golden_content, &golden_parser, None);
     let golden = golden_content.rendered_owned();
 
-    // Recording pass.
-    let (recorder, events) = RecordingRenderer::new();
+    // Recording pass, driving the production recorder.
+    let (recorder, events) = RecordingRenderer::new(Rc::new(HtmlSubstitutionRenderer {}));
     let recording_parser =
         experimental(Parser::default()).with_inline_substitution_renderer(recorder);
     let mut recording_content = Content::from(Span::new(source));
     group.apply(&mut recording_content, &recording_parser, None);
     let marked = recording_content.rendered_owned();
 
-    let markers = marked.matches(MARK_OPEN).count();
-    let chars: Vec<char> = marked.chars().collect();
-    let events = events.borrow();
-    let recs = parse(&chars, &events);
+    let markers = open_marker_count(&marked);
+    let events_len = events.borrow().len();
+    let tree = build_inline_tree(&marked, &events.borrow(), Span::new(source));
+    let folded = fold_marked(&marked, &events.borrow());
+    let constructs = construct_count(&tree);
 
     Oracle {
         golden,
-        marked,
-        tree: to_inline(&recs, Span::new(source)),
-        events: events.len(),
+        folded,
+        tree,
+        events: events_len,
         markers,
-        constructs: construct_count(&recs),
+        constructs,
     }
 }
 
-/// Asserts the two Phase 1 invariants for `source` under `group`:
+/// Asserts the oracle's invariants for `source` under `group`:
 ///
-/// 1. stripping the sentinels reproduces the golden output byte-for-byte, and
-/// 2. folding the recorded tree reproduces the golden output byte-for-byte,
+/// 1. folding the recorder's marked string reproduces the golden output
+///    byte-for-byte, and
+/// 2. the recovered tree consumed exactly the recorded events (`constructs <=
+///    markers <= events`).
 ///
-/// and cross-checks that the tree consumed exactly the recorded events. Returns
-/// the built tree for callers that also want to assert on structure.
+/// Returns the recovered tree for callers that also want to assert on
+/// structure.
 fn check<'src>(source: &'src str, group: &SubstitutionGroup) -> Vec<InlineNode<'src>> {
     let result = oracle(source, group);
 
-    let stripped = strip_markers(&result.marked.chars().collect::<Vec<_>>());
     assert_eq!(
-        stripped, result.golden,
-        "sentinel strip diverged from rendered() for {source:?}"
-    );
-
-    // Rebuild the tree independently of `oracle` so the fold is exercised on the
-    // exact same source (the tree in `result` already reflects it, but folding
-    // needs the `Rec` form).
-    let (recorder, events) = RecordingRenderer::new();
-    let recording_parser =
-        experimental(Parser::default()).with_inline_substitution_renderer(recorder);
-    let mut content = Content::from(Span::new(source));
-    group.apply(&mut content, &recording_parser, None);
-    let marked = content.rendered_owned();
-    let chars: Vec<char> = marked.chars().collect();
-    let recs = parse(&chars, &events.borrow());
-
-    assert_eq!(
-        fold(&recs),
-        result.golden,
+        result.folded, result.golden,
         "fold of the inline tree diverged from rendered() for {source:?}"
     );
 
@@ -1064,9 +165,6 @@ fn check<'src>(source: &'src str, group: &SubstitutionGroup) -> Vec<InlineNode<'
     // * `constructs <= markers` – some markers (formatting inside a construct
     //   rendered as a single leaf, e.g. a formatted xref reftext) are absorbed into
     //   that leaf's HTML rather than surfacing as their own node.
-    //
-    // A tree with *more* constructs than the recorder saw would mean the builder
-    // invented structure, which these bounds catch.
     assert!(
         result.markers <= result.events,
         "{} markers exceeded {} recorded events for {source:?}",
@@ -1091,9 +189,7 @@ fn check_normal(source: &str) -> Vec<InlineNode<'_>> {
 // ─── Byte-parity corpus ─────────────────────────────────────────────────────
 //
 // A differential harness over a broad set of inline fixtures. Each asserts the
-// two Phase 1 invariants; together they exercise every intercepted construct.
-// This is the "corpus-wide differential harness" the design (§5.3) calls for,
-// built from inline sources because the crate keeps no `.adoc` fixture files.
+// oracle's invariants; together they exercise every intercepted construct.
 
 /// Inline fixtures covering the `normal` substitution group.
 const NORMAL_CORPUS: &[&str] = &[
@@ -1248,14 +344,7 @@ fn normal_corpus_folds_byte_for_byte() {
 // items, section bodies, and the interactions between blocks.
 
 /// Collects the rendered inline content of every content-bearing location in
-/// `doc`, in a fixed document order: each block's own title, then the block's
-/// inline content (a simple block's body, a section's heading, or every simple
-/// table cell), then its children. Both parses are walked identically, so the
-/// golden and recorded vectors line up element-for-element.
-///
-/// Section headings and table cells are *not* child simple blocks, so a walk
-/// that only visited `Block::Simple` would silently skip them – leaving, for
-/// example, a table fixture green without ever folding its cells.
+/// `doc`, in a fixed document order.
 fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
     use crate::blocks::{Block, IsBlock, TableCellContent, TableRow};
 
@@ -1322,7 +411,7 @@ fn check_document(source: &str) {
     let golden_doc = golden_parser.parse(source);
     let golden = collect_rendered(&golden_doc);
 
-    let (recorder, events) = RecordingRenderer::new();
+    let (recorder, events) = RecordingRenderer::new(Rc::new(HtmlSubstitutionRenderer {}));
     let mut recording_parser =
         experimental(Parser::default()).with_inline_substitution_renderer(recorder);
     let recording_doc = recording_parser.parse(source);
@@ -1330,7 +419,7 @@ fn check_document(source: &str) {
 
     let folded: Vec<String> = collect_rendered(&recording_doc)
         .iter()
-        .map(|marked| fold(&parse(&marked.chars().collect::<Vec<_>>(), &events)))
+        .map(|marked| fold_marked(marked, &events))
         .collect();
 
     // Guard against a fixture that exercises nothing (e.g. a table whose cells
@@ -1632,4 +721,84 @@ fn callout_in_verbatim_is_a_callout_node() {
         tree.iter().any(|n| matches!(n, InlineNode::Callout(_))),
         "expected a callout node in {tree:?}"
     );
+}
+
+// ─── Wiring: the tree as a live artifact on `Content` ────────────────────────
+//
+// These exercise the Phase 2 wiring: `Parser::with_inline_tree` builds each
+// `Content`'s tree during the parse, so `Content::inlines()` is populated for
+// real blocks (with document counters numbered correctly), and the default
+// (flag-off) path leaves it empty.
+
+/// Collects the first simple block's content from a parsed document.
+fn first_simple_inlines<'a>(doc: &'a crate::Document<'a>) -> &'a [InlineNode<'a>] {
+    use crate::blocks::Block;
+
+    for block in doc.child_blocks() {
+        if let Block::Simple(simple) = block {
+            return simple.content().inlines();
+        }
+    }
+
+    panic!("no simple block found");
+}
+
+#[test]
+fn inline_tree_is_empty_by_default() {
+    let mut parser = Parser::default();
+    let doc = parser.parse("One *word* is strong.");
+
+    assert!(
+        first_simple_inlines(&doc).is_empty(),
+        "the inline tree must be empty when tree building is disabled"
+    );
+}
+
+#[test]
+fn inline_tree_is_built_when_enabled() {
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("One *word* is strong.");
+
+    let tree = first_simple_inlines(&doc);
+
+    // "One " → Text, "*word*" → Styled(Strong), " is strong." → Text.
+    assert_eq!(tree.len(), 3);
+    assert!(matches!(&tree[0], InlineNode::Text { .. }));
+
+    let InlineNode::Styled(styled) = &tree[1] else {
+        panic!("expected a styled node, got {:?}", tree[1]);
+    };
+
+    assert_eq!(styled.variant, StyleVariant::Strong);
+    assert!(matches!(&tree[2], InlineNode::Text { .. }));
+}
+
+#[test]
+fn inline_tree_numbers_footnotes_in_document_order() {
+    // The recording pass clones the parser *before* the authoritative pass
+    // advances the footnote counter, so a footnote in the second paragraph is
+    // numbered "2" in its tree – matching `rendered()` – rather than restarting
+    // at "1" (which a fresh-parser recording pass would produce).
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc =
+        parser.parse("Body text.footnote:[the first note]\n\nMore text.footnote:[the second note]");
+
+    use crate::blocks::Block;
+
+    let numbers: Vec<String> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => Some(simple),
+            _ => None,
+        })
+        .flat_map(|simple| simple.content().inlines().to_vec())
+        .filter_map(|node| match node {
+            InlineNode::Footnote(footnote) => {
+                footnote.number.as_ref().map(|n| n.as_ref().to_string())
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(numbers, vec!["1".to_string(), "2".to_string()]);
 }
