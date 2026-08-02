@@ -350,21 +350,27 @@ changes is the **sink**: instead of each recognized construct calling
   node kinds, so `HtmlSubstitutionRenderer` largely survives — its methods now receive a
   node (or node fields) and append HTML, instead of being called mid-regex.
 
-Two viable construction strategies, and the recommended path between them:
+Two construction strategies were considered:
 
 - **Strategy A — recording second pass (the #942 prototype).** Re-run the existing pipeline
   with a marker-recording renderer, parse markers into a tree. *Pros:* smallest change,
   proven. *Cons:* double substitution, owned strings, no honest spans, two artifacts that
-  can drift. Rejected as the *end state*, but its recorder is a useful **bring-up
-  oracle** (see §5.4).
+  can drift.
 - **Strategy B — single canonical pass, nodes as the sink (#944 convergence).** One pass
   builds the tree directly; the string is a fold. *Pros:* one artifact, `'src` borrowing,
-  real spans, no drift. *Cons:* touches every step. This is the **target**.
+  real spans, no drift. *Cons:* touches every step.
 
-**Recommendation:** build toward Strategy B, but *gate every step of the way with the HTML
-oracle* (§5.4) and, during early bring-up, cross-check the node stream against Strategy A's
-recorder to catch structural regressions the HTML oracle can't see (two different node
-trees can fold to the same HTML).
+> **Decision: Strategy B.** The single canonical pass is the target architecture — it is
+> the only option that delivers `'src` borrowing, honest per-node spans, and a single
+> non-drifting artifact, all of which are stated goals (§2). Strategy A is **not** the end
+> state; its marker-recording renderer is retained only as a **bring-up oracle** (§5.4).
+>
+> Because Strategy B touches every step, the migration reaches it incrementally under the
+> phase gates of §5.2 rather than in one leap: the interior is cut over to nodes in Phase 2,
+> and the true single-pass builder (with precise spans) lands in Phase 4. Throughout, *every
+> step is gated by the HTML oracle* (§5.4), and during early bring-up the node stream is
+> cross-checked against Strategy A's recorder to catch structural regressions the HTML
+> oracle cannot see (two different node trees can fold to the same HTML).
 
 ### 4.2 Retiring the sentinel systems
 
