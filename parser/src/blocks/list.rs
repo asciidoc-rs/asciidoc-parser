@@ -743,7 +743,7 @@ mod tests {
 
         assert_eq!(
             format!("{:#?}", list.item),
-            "ListBlock {\n    type_: ListType::Unordered,\n    items: &[\n        Block::ListItem(\n            ListItem {\n                marker: ListItemMarker::Hyphen(\n                    Span {\n                        data: \"-\",\n                        line: 1,\n                        col: 1,\n                        offset: 0,\n                    },\n                ),\n                blocks: &[\n                    Block::Simple(\n                        SimpleBlock {\n                            content: Content {\n                                original: Span {\n                                    data: \"blah\",\n                                    line: 1,\n                                    col: 3,\n                                    offset: 2,\n                                },\n                                rendered: \"blah\",\n                            },\n                            source: Span {\n                                data: \"blah\",\n                                line: 1,\n                                col: 3,\n                                offset: 2,\n                            },\n                            style: SimpleBlockStyle::Paragraph,\n                            title_source: None,\n                            title: None,\n                            caption: None,\n                            number: None,\n                            anchor: None,\n                            anchor_reftext: None,\n                            attrlist: None,\n                        },\n                    ),\n                ],\n                source: Span {\n                    data: \"- blah\",\n                    line: 1,\n                    col: 1,\n                    offset: 0,\n                },\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n                checkbox: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    title_source: None,\n    title: None,\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n    is_checklist: false,\n    is_bibliography: false,\n}"
+            "ListBlock {\n    type_: ListType::Unordered,\n    items: &[\n        Block::ListItem(\n            ListItem {\n                marker: ListItemMarker::Hyphen(\n                    Span {\n                        data: \"-\",\n                        line: 1,\n                        col: 1,\n                        offset: 0,\n                    },\n                ),\n                blocks: &[\n                    Block::Simple(\n                        SimpleBlock {\n                            content: Content {\n                                original: Span {\n                                    data: \"blah\",\n                                    line: 1,\n                                    col: 3,\n                                    offset: 2,\n                                },\n                                rendered: \"blah\",\n                            },\n                            source: Span {\n                                data: \"blah\",\n                                line: 1,\n                                col: 3,\n                                offset: 2,\n                            },\n                            style: SimpleBlockStyle::Paragraph,\n                            title_source: None,\n                            title: None,\n                            caption: None,\n                            number: None,\n                            anchor: None,\n                            anchor_reftext: None,\n                            attrlist: None,\n                        },\n                    ),\n                ],\n                source: Span {\n                    data: \"- blah\",\n                    line: 1,\n                    col: 1,\n                    offset: 0,\n                },\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n                checkbox: None,\n                has_empty_principal_text: false,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    title_source: None,\n    title: None,\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n    is_checklist: false,\n    is_bibliography: false,\n}"
         );
 
         assert_eq!(
@@ -1518,6 +1518,70 @@ mod tests {
         fn non_numeric_start_attribute_falls_back_to_marker() {
             let mi = list_parse("[start=abc]\n7. one\n8. two").unwrap();
             assert_eq!(mi.item.start(), Some(7));
+        }
+    }
+
+    mod has_empty_principal_text {
+        use crate::blocks::{Block, FindBlocks};
+
+        /// Returns the child list items of the first (list) block in `doc`.
+        fn items<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::ListItem<'a>> {
+            let Some(Block::List(list)) = doc.child_blocks().next() else {
+                panic!("expected a list block");
+            };
+
+            list.child_blocks()
+                .map(|item| item.as_list_item().unwrap())
+                .collect()
+        }
+
+        #[test]
+        fn empty_principal_with_continuation_keeps_attached_block() {
+            // An empty (`{empty}`) principal followed by a continuation-attached
+            // listing: the principal-text node is dropped, so the listing is the
+            // item's only child block, but the item records the empty principal
+            // text so a renderer knows the listing is an attached block (and can
+            // emit the empty principal paragraph ahead of it).
+            let doc = crate::Parser::default().parse(". {empty}\n+\n----\nprint(\"one\")\n----\n");
+            let items = items(&doc);
+
+            assert_eq!(items.len(), 1);
+            assert!(items[0].has_empty_principal_text());
+
+            let mut children = items[0].child_blocks();
+            assert!(matches!(children.next(), Some(Block::RawDelimited(_))));
+            assert!(children.next().is_none());
+        }
+
+        #[test]
+        fn bare_empty_principal_has_no_child_blocks() {
+            // An empty principal with no attached block: the flag is still set,
+            // and the item has no child blocks at all.
+            let doc = crate::Parser::default().parse(". {empty}\n. second\n");
+            let items = items(&doc);
+
+            assert_eq!(items.len(), 2);
+            assert!(items[0].has_empty_principal_text());
+            assert_eq!(items[0].child_blocks().count(), 0);
+
+            // The second item has ordinary principal text, so the flag is clear.
+            assert!(!items[1].has_empty_principal_text());
+        }
+
+        #[test]
+        fn non_empty_principal_with_continuation_is_not_flagged() {
+            // The contrasting case from the issue: with non-empty principal text,
+            // the principal is the first child block and the flag is clear.
+            let doc = crate::Parser::default().parse(". text\n+\n----\nprint(\"one\")\n----\n");
+            let items = items(&doc);
+
+            assert_eq!(items.len(), 1);
+            assert!(!items[0].has_empty_principal_text());
+
+            let mut children = items[0].child_blocks();
+            assert!(matches!(children.next(), Some(Block::Simple(_))));
+            assert!(matches!(children.next(), Some(Block::RawDelimited(_))));
+            assert!(children.next().is_none());
         }
     }
 }

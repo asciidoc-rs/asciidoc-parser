@@ -1442,791 +1442,948 @@ You can include more xref:continuation.adoc[compound content in a list item] as 
                     offset: 0,
                 },
             },
-            blocks: &[Block::List(ListBlock {
-                type_: ListType::Description,
-                items: &[
-                    Block::ListItem(ListItem {
-                        marker: ListItemMarker::DefinedTerm {
-                            term: Content {
-                                original: Span {
-                                    data: "Operating Systems",
-                                    line: 1,
-                                    col: 1,
-                                    offset: 0,
-                                },
-                                rendered: "Operating Systems",
-                            },
-                            marker: Span {
-                                data: "::",
-                                line: 1,
-                                col: 18,
-                                offset: 17,
-                            },
-                            source: Span {
-                                data: "Operating Systems::",
-                                line: 1,
-                                col: 1,
-                                offset: 0,
-                            },
-                        },
-                        blocks: &[Block::List(ListBlock {
-                            type_: ListType::Description,
-                            items: &[
-                                Block::ListItem(ListItem {
+            blocks: &[
+                Block::List(
+                    ListBlock {
+                        type_: ListType::Description,
+                        items: &[
+                            Block::ListItem(
+                                ListItem {
                                     marker: ListItemMarker::DefinedTerm {
                                         term: Content {
                                             original: Span {
-                                                data: "Linux",
-                                                line: 2,
-                                                col: 3,
-                                                offset: 22,
+                                                data: "Operating Systems",
+                                                line: 1,
+                                                col: 1,
+                                                offset: 0,
                                             },
-                                            rendered: "Linux",
+                                            rendered: "Operating Systems",
                                         },
                                         marker: Span {
-                                            data: ":::",
-                                            line: 2,
-                                            col: 8,
-                                            offset: 27,
+                                            data: "::",
+                                            line: 1,
+                                            col: 18,
+                                            offset: 17,
                                         },
                                         source: Span {
-                                            data: "Linux:::",
-                                            line: 2,
-                                            col: 3,
-                                            offset: 22,
+                                            data: "Operating Systems::",
+                                            line: 1,
+                                            col: 1,
+                                            offset: 0,
                                         },
                                     },
-                                    blocks: &[],
-                                    source: Span {
-                                        data: "  Linux:::",
-                                        line: 2,
-                                        col: 1,
-                                        offset: 20,
-                                    },
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::Dots(Span {
-                                        data: ".",
-                                        line: 3,
-                                        col: 5,
-                                        offset: 35,
-                                    },),
                                     blocks: &[
-                                        Block::Simple(SimpleBlock {
-                                            content: Content {
-                                                original: Span {
-                                                    data: "Fedora",
-                                                    line: 3,
-                                                    col: 7,
-                                                    offset: 37,
-                                                },
-                                                rendered: "Fedora",
-                                            },
-                                            source: Span {
-                                                data: "Fedora",
-                                                line: 3,
-                                                col: 7,
-                                                offset: 37,
-                                            },
-                                            style: SimpleBlockStyle::Paragraph,
-                                            title_source: None,
-                                            title: None,
-                                            caption: None,
-                                            number: None,
-                                            anchor: None,
-                                            anchor_reftext: None,
-                                            attrlist: None,
-                                        },),
-                                        Block::List(ListBlock {
-                                            type_: ListType::Unordered,
-                                            items: &[Block::ListItem(ListItem {
-                                                marker: ListItemMarker::Asterisks(Span {
-                                                    data: "*",
-                                                    line: 4,
-                                                    col: 7,
-                                                    offset: 50,
-                                                },),
-                                                blocks: &[Block::Simple(SimpleBlock {
-                                                    content: Content {
-                                                        original: Span {
-                                                            data: "Desktop",
-                                                            line: 4,
-                                                            col: 9,
-                                                            offset: 52,
-                                                        },
-                                                        rendered: "Desktop",
-                                                    },
-                                                    source: Span {
-                                                        data: "Desktop",
-                                                        line: 4,
-                                                        col: 9,
-                                                        offset: 52,
-                                                    },
-                                                    style: SimpleBlockStyle::Paragraph,
-                                                    title_source: None,
-                                                    title: None,
-                                                    caption: None,
-                                                    number: None,
-                                                    anchor: None,
-                                                    anchor_reftext: None,
-                                                    attrlist: None,
-                                                },),],
-                                                source: Span {
-                                                    data: "      * Desktop",
-                                                    line: 4,
-                                                    col: 1,
-                                                    offset: 44,
-                                                },
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
-                                            source: Span {
-                                                data: "      * Desktop",
-                                                line: 4,
-                                                col: 1,
-                                                offset: 44,
-                                            },
-                                            title_source: None,
-                                            title: None,
-                                            anchor: None,
-                                            anchor_reftext: None,
-                                            attrlist: None,
-                                        },),
-                                    ],
-                                    source: Span {
-                                        data: "    . Fedora\n      * Desktop",
-                                        line: 3,
-                                        col: 1,
-                                        offset: 31,
-                                    },
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::Dots(Span {
-                                        data: ".",
-                                        line: 5,
-                                        col: 5,
-                                        offset: 64,
-                                    },),
-                                    blocks: &[
-                                        Block::Simple(SimpleBlock {
-                                            content: Content {
-                                                original: Span {
-                                                    data: "Ubuntu",
-                                                    line: 5,
-                                                    col: 7,
-                                                    offset: 66,
-                                                },
-                                                rendered: "Ubuntu",
-                                            },
-                                            source: Span {
-                                                data: "Ubuntu",
-                                                line: 5,
-                                                col: 7,
-                                                offset: 66,
-                                            },
-                                            style: SimpleBlockStyle::Paragraph,
-                                            title_source: None,
-                                            title: None,
-                                            caption: None,
-                                            number: None,
-                                            anchor: None,
-                                            anchor_reftext: None,
-                                            attrlist: None,
-                                        },),
-                                        Block::List(ListBlock {
-                                            type_: ListType::Unordered,
-                                            items: &[
-                                                Block::ListItem(ListItem {
-                                                    marker: ListItemMarker::Asterisks(Span {
-                                                        data: "*",
-                                                        line: 6,
-                                                        col: 7,
-                                                        offset: 79,
-                                                    },),
-                                                    blocks: &[Block::Simple(SimpleBlock {
-                                                        content: Content {
-                                                            original: Span {
-                                                                data: "Desktop",
-                                                                line: 6,
-                                                                col: 9,
-                                                                offset: 81,
-                                                            },
-                                                            rendered: "Desktop",
-                                                        },
-                                                        source: Span {
-                                                            data: "Desktop",
-                                                            line: 6,
-                                                            col: 9,
-                                                            offset: 81,
-                                                        },
-                                                        style: SimpleBlockStyle::Paragraph,
-                                                        title_source: None,
-                                                        title: None,
-                                                        caption: None,
-                                                        number: None,
-                                                        anchor: None,
-                                                        anchor_reftext: None,
-                                                        attrlist: None,
-                                                    },),],
-                                                    source: Span {
-                                                        data: "      * Desktop",
-                                                        line: 6,
-                                                        col: 1,
-                                                        offset: 73,
-                                                    },
-                                                    anchor: None,
-                                                    anchor_reftext: None,
-                                                    attrlist: None,
-                                                },),
-                                                Block::ListItem(ListItem {
-                                                    marker: ListItemMarker::Asterisks(Span {
-                                                        data: "*",
-                                                        line: 7,
-                                                        col: 7,
-                                                        offset: 95,
-                                                    },),
-                                                    blocks: &[
-                                                        Block::Simple(SimpleBlock {
-                                                            content: Content {
-                                                                original: Span {
-                                                                    data: "Server",
-                                                                    line: 7,
-                                                                    col: 9,
-                                                                    offset: 97,
+                                        Block::List(
+                                            ListBlock {
+                                                type_: ListType::Description,
+                                                items: &[
+                                                    Block::ListItem(
+                                                        ListItem {
+                                                            marker: ListItemMarker::DefinedTerm {
+                                                                term: Content {
+                                                                    original: Span {
+                                                                        data: "Linux",
+                                                                        line: 2,
+                                                                        col: 3,
+                                                                        offset: 22,
+                                                                    },
+                                                                    rendered: "Linux",
                                                                 },
-                                                                rendered: "Server",
+                                                                marker: Span {
+                                                                    data: ":::",
+                                                                    line: 2,
+                                                                    col: 8,
+                                                                    offset: 27,
+                                                                },
+                                                                source: Span {
+                                                                    data: "Linux:::",
+                                                                    line: 2,
+                                                                    col: 3,
+                                                                    offset: 22,
+                                                                },
                                                             },
+                                                            blocks: &[
+                                                                Block::List(
+                                                                    ListBlock {
+                                                                        type_: ListType::Ordered,
+                                                                        items: &[
+                                                                            Block::ListItem(
+                                                                                ListItem {
+                                                                                    marker: ListItemMarker::Dots(
+                                                                                        Span {
+                                                                                            data: ".",
+                                                                                            line: 3,
+                                                                                            col: 5,
+                                                                                            offset: 35,
+                                                                                        },
+                                                                                    ),
+                                                                                    blocks: &[
+                                                                                        Block::Simple(
+                                                                                            SimpleBlock {
+                                                                                                content: Content {
+                                                                                                    original: Span {
+                                                                                                        data: "Fedora",
+                                                                                                        line: 3,
+                                                                                                        col: 7,
+                                                                                                        offset: 37,
+                                                                                                    },
+                                                                                                    rendered: "Fedora",
+                                                                                                },
+                                                                                                source: Span {
+                                                                                                    data: "Fedora",
+                                                                                                    line: 3,
+                                                                                                    col: 7,
+                                                                                                    offset: 37,
+                                                                                                },
+                                                                                                style: SimpleBlockStyle::Paragraph,
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                caption: None,
+                                                                                                number: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                        Block::List(
+                                                                                            ListBlock {
+                                                                                                type_: ListType::Unordered,
+                                                                                                items: &[
+                                                                                                    Block::ListItem(
+                                                                                                        ListItem {
+                                                                                                            marker: ListItemMarker::Asterisks(
+                                                                                                                Span {
+                                                                                                                    data: "*",
+                                                                                                                    line: 4,
+                                                                                                                    col: 7,
+                                                                                                                    offset: 50,
+                                                                                                                },
+                                                                                                            ),
+                                                                                                            blocks: &[
+                                                                                                                Block::Simple(
+                                                                                                                    SimpleBlock {
+                                                                                                                        content: Content {
+                                                                                                                            original: Span {
+                                                                                                                                data: "Desktop",
+                                                                                                                                line: 4,
+                                                                                                                                col: 9,
+                                                                                                                                offset: 52,
+                                                                                                                            },
+                                                                                                                            rendered: "Desktop",
+                                                                                                                        },
+                                                                                                                        source: Span {
+                                                                                                                            data: "Desktop",
+                                                                                                                            line: 4,
+                                                                                                                            col: 9,
+                                                                                                                            offset: 52,
+                                                                                                                        },
+                                                                                                                        style: SimpleBlockStyle::Paragraph,
+                                                                                                                        title_source: None,
+                                                                                                                        title: None,
+                                                                                                                        caption: None,
+                                                                                                                        number: None,
+                                                                                                                        anchor: None,
+                                                                                                                        anchor_reftext: None,
+                                                                                                                        attrlist: None,
+                                                                                                                    },
+                                                                                                                ),
+                                                                                                            ],
+                                                                                                            source: Span {
+                                                                                                                data: "      * Desktop",
+                                                                                                                line: 4,
+                                                                                                                col: 1,
+                                                                                                                offset: 44,
+                                                                                                            },
+                                                                                                            anchor: None,
+                                                                                                            anchor_reftext: None,
+                                                                                                            attrlist: None,
+                                                                                                        },
+                                                                                                    ),
+                                                                                                ],
+                                                                                                source: Span {
+                                                                                                    data: "      * Desktop",
+                                                                                                    line: 4,
+                                                                                                    col: 1,
+                                                                                                    offset: 44,
+                                                                                                },
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    source: Span {
+                                                                                        data: "    . Fedora\n      * Desktop",
+                                                                                        line: 3,
+                                                                                        col: 1,
+                                                                                        offset: 31,
+                                                                                    },
+                                                                                    anchor: None,
+                                                                                    anchor_reftext: None,
+                                                                                    attrlist: None,
+                                                                                },
+                                                                            ),
+                                                                            Block::ListItem(
+                                                                                ListItem {
+                                                                                    marker: ListItemMarker::Dots(
+                                                                                        Span {
+                                                                                            data: ".",
+                                                                                            line: 5,
+                                                                                            col: 5,
+                                                                                            offset: 64,
+                                                                                        },
+                                                                                    ),
+                                                                                    blocks: &[
+                                                                                        Block::Simple(
+                                                                                            SimpleBlock {
+                                                                                                content: Content {
+                                                                                                    original: Span {
+                                                                                                        data: "Ubuntu",
+                                                                                                        line: 5,
+                                                                                                        col: 7,
+                                                                                                        offset: 66,
+                                                                                                    },
+                                                                                                    rendered: "Ubuntu",
+                                                                                                },
+                                                                                                source: Span {
+                                                                                                    data: "Ubuntu",
+                                                                                                    line: 5,
+                                                                                                    col: 7,
+                                                                                                    offset: 66,
+                                                                                                },
+                                                                                                style: SimpleBlockStyle::Paragraph,
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                caption: None,
+                                                                                                number: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                        Block::List(
+                                                                                            ListBlock {
+                                                                                                type_: ListType::Unordered,
+                                                                                                items: &[
+                                                                                                    Block::ListItem(
+                                                                                                        ListItem {
+                                                                                                            marker: ListItemMarker::Asterisks(
+                                                                                                                Span {
+                                                                                                                    data: "*",
+                                                                                                                    line: 6,
+                                                                                                                    col: 7,
+                                                                                                                    offset: 79,
+                                                                                                                },
+                                                                                                            ),
+                                                                                                            blocks: &[
+                                                                                                                Block::Simple(
+                                                                                                                    SimpleBlock {
+                                                                                                                        content: Content {
+                                                                                                                            original: Span {
+                                                                                                                                data: "Desktop",
+                                                                                                                                line: 6,
+                                                                                                                                col: 9,
+                                                                                                                                offset: 81,
+                                                                                                                            },
+                                                                                                                            rendered: "Desktop",
+                                                                                                                        },
+                                                                                                                        source: Span {
+                                                                                                                            data: "Desktop",
+                                                                                                                            line: 6,
+                                                                                                                            col: 9,
+                                                                                                                            offset: 81,
+                                                                                                                        },
+                                                                                                                        style: SimpleBlockStyle::Paragraph,
+                                                                                                                        title_source: None,
+                                                                                                                        title: None,
+                                                                                                                        caption: None,
+                                                                                                                        number: None,
+                                                                                                                        anchor: None,
+                                                                                                                        anchor_reftext: None,
+                                                                                                                        attrlist: None,
+                                                                                                                    },
+                                                                                                                ),
+                                                                                                            ],
+                                                                                                            source: Span {
+                                                                                                                data: "      * Desktop",
+                                                                                                                line: 6,
+                                                                                                                col: 1,
+                                                                                                                offset: 73,
+                                                                                                            },
+                                                                                                            anchor: None,
+                                                                                                            anchor_reftext: None,
+                                                                                                            attrlist: None,
+                                                                                                        },
+                                                                                                    ),
+                                                                                                    Block::ListItem(
+                                                                                                        ListItem {
+                                                                                                            marker: ListItemMarker::Asterisks(
+                                                                                                                Span {
+                                                                                                                    data: "*",
+                                                                                                                    line: 7,
+                                                                                                                    col: 7,
+                                                                                                                    offset: 95,
+                                                                                                                },
+                                                                                                            ),
+                                                                                                            blocks: &[
+                                                                                                                Block::Simple(
+                                                                                                                    SimpleBlock {
+                                                                                                                        content: Content {
+                                                                                                                            original: Span {
+                                                                                                                                data: "Server",
+                                                                                                                                line: 7,
+                                                                                                                                col: 9,
+                                                                                                                                offset: 97,
+                                                                                                                            },
+                                                                                                                            rendered: "Server",
+                                                                                                                        },
+                                                                                                                        source: Span {
+                                                                                                                            data: "Server",
+                                                                                                                            line: 7,
+                                                                                                                            col: 9,
+                                                                                                                            offset: 97,
+                                                                                                                        },
+                                                                                                                        style: SimpleBlockStyle::Paragraph,
+                                                                                                                        title_source: None,
+                                                                                                                        title: None,
+                                                                                                                        caption: None,
+                                                                                                                        number: None,
+                                                                                                                        anchor: None,
+                                                                                                                        anchor_reftext: None,
+                                                                                                                        attrlist: None,
+                                                                                                                    },
+                                                                                                                ),
+                                                                                                            ],
+                                                                                                            source: Span {
+                                                                                                                data: "      * Server",
+                                                                                                                line: 7,
+                                                                                                                col: 1,
+                                                                                                                offset: 89,
+                                                                                                            },
+                                                                                                            anchor: None,
+                                                                                                            anchor_reftext: None,
+                                                                                                            attrlist: None,
+                                                                                                        },
+                                                                                                    ),
+                                                                                                ],
+                                                                                                source: Span {
+                                                                                                    data: "      * Desktop\n      * Server",
+                                                                                                    line: 6,
+                                                                                                    col: 1,
+                                                                                                    offset: 73,
+                                                                                                },
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    source: Span {
+                                                                                        data: "    . Ubuntu\n      * Desktop\n      * Server",
+                                                                                        line: 5,
+                                                                                        col: 1,
+                                                                                        offset: 60,
+                                                                                    },
+                                                                                    anchor: None,
+                                                                                    anchor_reftext: None,
+                                                                                    attrlist: None,
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        source: Span {
+                                                                            data: "    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server",
+                                                                            line: 3,
+                                                                            col: 1,
+                                                                            offset: 31,
+                                                                        },
+                                                                        title_source: None,
+                                                                        title: None,
+                                                                        anchor: None,
+                                                                        anchor_reftext: None,
+                                                                        attrlist: None,
+                                                                    },
+                                                                ),
+                                                            ],
                                                             source: Span {
-                                                                data: "Server",
-                                                                line: 7,
-                                                                col: 9,
-                                                                offset: 97,
+                                                                data: "  Linux:::\n    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server",
+                                                                line: 2,
+                                                                col: 1,
+                                                                offset: 20,
                                                             },
-                                                            style: SimpleBlockStyle::Paragraph,
-                                                            title_source: None,
-                                                            title: None,
-                                                            caption: None,
-                                                            number: None,
                                                             anchor: None,
                                                             anchor_reftext: None,
                                                             attrlist: None,
-                                                        },),
-                                                        Block::List(ListBlock {
-                                                            type_: ListType::Description,
-                                                            items: &[Block::ListItem(ListItem {
-                                                                marker:
-                                                                    ListItemMarker::DefinedTerm {
-                                                                        term: Content {
-                                                                            original: Span {
-                                                                                data: "BSD",
-                                                                                line: 8,
-                                                                                col: 3,
-                                                                                offset: 106,
-                                                                            },
-                                                                            rendered: "BSD",
-                                                                        },
-                                                                        marker: Span {
-                                                                            data: ":::",
-                                                                            line: 8,
-                                                                            col: 6,
-                                                                            offset: 109,
-                                                                        },
-                                                                        source: Span {
-                                                                            data: "BSD:::",
-                                                                            line: 8,
-                                                                            col: 3,
-                                                                            offset: 106,
-                                                                        },
+                                                        },
+                                                    ),
+                                                    Block::ListItem(
+                                                        ListItem {
+                                                            marker: ListItemMarker::DefinedTerm {
+                                                                term: Content {
+                                                                    original: Span {
+                                                                        data: "BSD",
+                                                                        line: 8,
+                                                                        col: 3,
+                                                                        offset: 106,
                                                                     },
-                                                                blocks: &[],
-                                                                source: Span {
-                                                                    data: "  BSD:::",
-                                                                    line: 8,
-                                                                    col: 1,
-                                                                    offset: 104,
+                                                                    rendered: "BSD",
                                                                 },
-                                                                anchor: None,
-                                                                anchor_reftext: None,
-                                                                attrlist: None,
-                                                            },),],
+                                                                marker: Span {
+                                                                    data: ":::",
+                                                                    line: 8,
+                                                                    col: 6,
+                                                                    offset: 109,
+                                                                },
+                                                                source: Span {
+                                                                    data: "BSD:::",
+                                                                    line: 8,
+                                                                    col: 3,
+                                                                    offset: 106,
+                                                                },
+                                                            },
+                                                            blocks: &[
+                                                                Block::List(
+                                                                    ListBlock {
+                                                                        type_: ListType::Ordered,
+                                                                        items: &[
+                                                                            Block::ListItem(
+                                                                                ListItem {
+                                                                                    marker: ListItemMarker::Dots(
+                                                                                        Span {
+                                                                                            data: ".",
+                                                                                            line: 9,
+                                                                                            col: 5,
+                                                                                            offset: 117,
+                                                                                        },
+                                                                                    ),
+                                                                                    blocks: &[
+                                                                                        Block::Simple(
+                                                                                            SimpleBlock {
+                                                                                                content: Content {
+                                                                                                    original: Span {
+                                                                                                        data: "FreeBSD",
+                                                                                                        line: 9,
+                                                                                                        col: 7,
+                                                                                                        offset: 119,
+                                                                                                    },
+                                                                                                    rendered: "FreeBSD",
+                                                                                                },
+                                                                                                source: Span {
+                                                                                                    data: "FreeBSD",
+                                                                                                    line: 9,
+                                                                                                    col: 7,
+                                                                                                    offset: 119,
+                                                                                                },
+                                                                                                style: SimpleBlockStyle::Paragraph,
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                caption: None,
+                                                                                                number: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    source: Span {
+                                                                                        data: "    . FreeBSD",
+                                                                                        line: 9,
+                                                                                        col: 1,
+                                                                                        offset: 113,
+                                                                                    },
+                                                                                    anchor: None,
+                                                                                    anchor_reftext: None,
+                                                                                    attrlist: None,
+                                                                                },
+                                                                            ),
+                                                                            Block::ListItem(
+                                                                                ListItem {
+                                                                                    marker: ListItemMarker::Dots(
+                                                                                        Span {
+                                                                                            data: ".",
+                                                                                            line: 10,
+                                                                                            col: 5,
+                                                                                            offset: 131,
+                                                                                        },
+                                                                                    ),
+                                                                                    blocks: &[
+                                                                                        Block::Simple(
+                                                                                            SimpleBlock {
+                                                                                                content: Content {
+                                                                                                    original: Span {
+                                                                                                        data: "NetBSD",
+                                                                                                        line: 10,
+                                                                                                        col: 7,
+                                                                                                        offset: 133,
+                                                                                                    },
+                                                                                                    rendered: "NetBSD",
+                                                                                                },
+                                                                                                source: Span {
+                                                                                                    data: "NetBSD",
+                                                                                                    line: 10,
+                                                                                                    col: 7,
+                                                                                                    offset: 133,
+                                                                                                },
+                                                                                                style: SimpleBlockStyle::Paragraph,
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                caption: None,
+                                                                                                number: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    source: Span {
+                                                                                        data: "    . NetBSD",
+                                                                                        line: 10,
+                                                                                        col: 1,
+                                                                                        offset: 127,
+                                                                                    },
+                                                                                    anchor: None,
+                                                                                    anchor_reftext: None,
+                                                                                    attrlist: None,
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        source: Span {
+                                                                            data: "    . FreeBSD\n    . NetBSD",
+                                                                            line: 9,
+                                                                            col: 1,
+                                                                            offset: 113,
+                                                                        },
+                                                                        title_source: None,
+                                                                        title: None,
+                                                                        anchor: None,
+                                                                        anchor_reftext: None,
+                                                                        attrlist: None,
+                                                                    },
+                                                                ),
+                                                            ],
                                                             source: Span {
-                                                                data: "  BSD:::",
+                                                                data: "  BSD:::\n    . FreeBSD\n    . NetBSD",
                                                                 line: 8,
                                                                 col: 1,
                                                                 offset: 104,
                                                             },
-                                                            title_source: None,
-                                                            title: None,
                                                             anchor: None,
                                                             anchor_reftext: None,
                                                             attrlist: None,
-                                                        },),
-                                                    ],
-                                                    source: Span {
-                                                        data: "      * Server\n  BSD:::",
-                                                        line: 7,
-                                                        col: 1,
-                                                        offset: 89,
-                                                    },
-                                                    anchor: None,
-                                                    anchor_reftext: None,
-                                                    attrlist: None,
-                                                },),
-                                            ],
-                                            source: Span {
-                                                data: "      * Desktop\n      * Server\n  BSD:::",
-                                                line: 6,
-                                                col: 1,
-                                                offset: 73,
+                                                        },
+                                                    ),
+                                                ],
+                                                source: Span {
+                                                    data: "  Linux:::\n    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server\n  BSD:::\n    . FreeBSD\n    . NetBSD",
+                                                    line: 2,
+                                                    col: 1,
+                                                    offset: 20,
+                                                },
+                                                title_source: None,
+                                                title: None,
+                                                anchor: None,
+                                                anchor_reftext: None,
+                                                attrlist: None,
                                             },
-                                            title_source: None,
-                                            title: None,
-                                            anchor: None,
-                                            anchor_reftext: None,
-                                            attrlist: None,
-                                        },),
+                                        ),
                                     ],
                                     source: Span {
-                                        data: "    . Ubuntu\n      * Desktop\n      * Server\n  BSD:::",
-                                        line: 5,
+                                        data: "Operating Systems::\n  Linux:::\n    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server\n  BSD:::\n    . FreeBSD\n    . NetBSD",
+                                        line: 1,
                                         col: 1,
-                                        offset: 60,
+                                        offset: 0,
                                     },
                                     anchor: None,
                                     anchor_reftext: None,
                                     attrlist: None,
-                                },),
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::Dots(Span {
-                                        data: ".",
-                                        line: 9,
-                                        col: 5,
-                                        offset: 117,
-                                    },),
-                                    blocks: &[Block::Simple(SimpleBlock {
-                                        content: Content {
+                                },
+                            ),
+                            Block::ListItem(
+                                ListItem {
+                                    marker: ListItemMarker::DefinedTerm {
+                                        term: Content {
                                             original: Span {
-                                                data: "FreeBSD",
-                                                line: 9,
-                                                col: 7,
-                                                offset: 119,
+                                                data: "Cloud Providers",
+                                                line: 12,
+                                                col: 1,
+                                                offset: 141,
                                             },
-                                            rendered: "FreeBSD",
+                                            rendered: "Cloud Providers",
+                                        },
+                                        marker: Span {
+                                            data: "::",
+                                            line: 12,
+                                            col: 16,
+                                            offset: 156,
                                         },
                                         source: Span {
-                                            data: "FreeBSD",
-                                            line: 9,
-                                            col: 7,
-                                            offset: 119,
+                                            data: "Cloud Providers::",
+                                            line: 12,
+                                            col: 1,
+                                            offset: 141,
                                         },
-                                        style: SimpleBlockStyle::Paragraph,
-                                        title_source: None,
-                                        title: None,
-                                        caption: None,
-                                        number: None,
-                                        anchor: None,
-                                        anchor_reftext: None,
-                                        attrlist: None,
-                                    },),],
-                                    source: Span {
-                                        data: "    . FreeBSD",
-                                        line: 9,
-                                        col: 1,
-                                        offset: 113,
                                     },
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::Dots(Span {
-                                        data: ".",
-                                        line: 10,
-                                        col: 5,
-                                        offset: 131,
-                                    },),
-                                    blocks: &[Block::Simple(SimpleBlock {
-                                        content: Content {
-                                            original: Span {
-                                                data: "NetBSD",
-                                                line: 10,
-                                                col: 7,
-                                                offset: 133,
+                                    blocks: &[
+                                        Block::List(
+                                            ListBlock {
+                                                type_: ListType::Description,
+                                                items: &[
+                                                    Block::ListItem(
+                                                        ListItem {
+                                                            marker: ListItemMarker::DefinedTerm {
+                                                                term: Content {
+                                                                    original: Span {
+                                                                        data: "PaaS",
+                                                                        line: 13,
+                                                                        col: 3,
+                                                                        offset: 161,
+                                                                    },
+                                                                    rendered: "PaaS",
+                                                                },
+                                                                marker: Span {
+                                                                    data: ":::",
+                                                                    line: 13,
+                                                                    col: 7,
+                                                                    offset: 165,
+                                                                },
+                                                                source: Span {
+                                                                    data: "PaaS:::",
+                                                                    line: 13,
+                                                                    col: 3,
+                                                                    offset: 161,
+                                                                },
+                                                            },
+                                                            blocks: &[
+                                                                Block::List(
+                                                                    ListBlock {
+                                                                        type_: ListType::Ordered,
+                                                                        items: &[
+                                                                            Block::ListItem(
+                                                                                ListItem {
+                                                                                    marker: ListItemMarker::Dots(
+                                                                                        Span {
+                                                                                            data: ".",
+                                                                                            line: 14,
+                                                                                            col: 5,
+                                                                                            offset: 173,
+                                                                                        },
+                                                                                    ),
+                                                                                    blocks: &[
+                                                                                        Block::Simple(
+                                                                                            SimpleBlock {
+                                                                                                content: Content {
+                                                                                                    original: Span {
+                                                                                                        data: "OpenShift",
+                                                                                                        line: 14,
+                                                                                                        col: 7,
+                                                                                                        offset: 175,
+                                                                                                    },
+                                                                                                    rendered: "OpenShift",
+                                                                                                },
+                                                                                                source: Span {
+                                                                                                    data: "OpenShift",
+                                                                                                    line: 14,
+                                                                                                    col: 7,
+                                                                                                    offset: 175,
+                                                                                                },
+                                                                                                style: SimpleBlockStyle::Paragraph,
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                caption: None,
+                                                                                                number: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    source: Span {
+                                                                                        data: "    . OpenShift",
+                                                                                        line: 14,
+                                                                                        col: 1,
+                                                                                        offset: 169,
+                                                                                    },
+                                                                                    anchor: None,
+                                                                                    anchor_reftext: None,
+                                                                                    attrlist: None,
+                                                                                },
+                                                                            ),
+                                                                            Block::ListItem(
+                                                                                ListItem {
+                                                                                    marker: ListItemMarker::Dots(
+                                                                                        Span {
+                                                                                            data: ".",
+                                                                                            line: 15,
+                                                                                            col: 5,
+                                                                                            offset: 189,
+                                                                                        },
+                                                                                    ),
+                                                                                    blocks: &[
+                                                                                        Block::Simple(
+                                                                                            SimpleBlock {
+                                                                                                content: Content {
+                                                                                                    original: Span {
+                                                                                                        data: "CloudBees",
+                                                                                                        line: 15,
+                                                                                                        col: 7,
+                                                                                                        offset: 191,
+                                                                                                    },
+                                                                                                    rendered: "CloudBees",
+                                                                                                },
+                                                                                                source: Span {
+                                                                                                    data: "CloudBees",
+                                                                                                    line: 15,
+                                                                                                    col: 7,
+                                                                                                    offset: 191,
+                                                                                                },
+                                                                                                style: SimpleBlockStyle::Paragraph,
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                caption: None,
+                                                                                                number: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    source: Span {
+                                                                                        data: "    . CloudBees",
+                                                                                        line: 15,
+                                                                                        col: 1,
+                                                                                        offset: 185,
+                                                                                    },
+                                                                                    anchor: None,
+                                                                                    anchor_reftext: None,
+                                                                                    attrlist: None,
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        source: Span {
+                                                                            data: "    . OpenShift\n    . CloudBees",
+                                                                            line: 14,
+                                                                            col: 1,
+                                                                            offset: 169,
+                                                                        },
+                                                                        title_source: None,
+                                                                        title: None,
+                                                                        anchor: None,
+                                                                        anchor_reftext: None,
+                                                                        attrlist: None,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            source: Span {
+                                                                data: "  PaaS:::\n    . OpenShift\n    . CloudBees",
+                                                                line: 13,
+                                                                col: 1,
+                                                                offset: 159,
+                                                            },
+                                                            anchor: None,
+                                                            anchor_reftext: None,
+                                                            attrlist: None,
+                                                        },
+                                                    ),
+                                                    Block::ListItem(
+                                                        ListItem {
+                                                            marker: ListItemMarker::DefinedTerm {
+                                                                term: Content {
+                                                                    original: Span {
+                                                                        data: "IaaS",
+                                                                        line: 16,
+                                                                        col: 3,
+                                                                        offset: 203,
+                                                                    },
+                                                                    rendered: "IaaS",
+                                                                },
+                                                                marker: Span {
+                                                                    data: ":::",
+                                                                    line: 16,
+                                                                    col: 7,
+                                                                    offset: 207,
+                                                                },
+                                                                source: Span {
+                                                                    data: "IaaS:::",
+                                                                    line: 16,
+                                                                    col: 3,
+                                                                    offset: 203,
+                                                                },
+                                                            },
+                                                            blocks: &[
+                                                                Block::List(
+                                                                    ListBlock {
+                                                                        type_: ListType::Ordered,
+                                                                        items: &[
+                                                                            Block::ListItem(
+                                                                                ListItem {
+                                                                                    marker: ListItemMarker::Dots(
+                                                                                        Span {
+                                                                                            data: ".",
+                                                                                            line: 17,
+                                                                                            col: 5,
+                                                                                            offset: 215,
+                                                                                        },
+                                                                                    ),
+                                                                                    blocks: &[
+                                                                                        Block::Simple(
+                                                                                            SimpleBlock {
+                                                                                                content: Content {
+                                                                                                    original: Span {
+                                                                                                        data: "Amazon EC2",
+                                                                                                        line: 17,
+                                                                                                        col: 7,
+                                                                                                        offset: 217,
+                                                                                                    },
+                                                                                                    rendered: "Amazon EC2",
+                                                                                                },
+                                                                                                source: Span {
+                                                                                                    data: "Amazon EC2",
+                                                                                                    line: 17,
+                                                                                                    col: 7,
+                                                                                                    offset: 217,
+                                                                                                },
+                                                                                                style: SimpleBlockStyle::Paragraph,
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                caption: None,
+                                                                                                number: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    source: Span {
+                                                                                        data: "    . Amazon EC2",
+                                                                                        line: 17,
+                                                                                        col: 1,
+                                                                                        offset: 211,
+                                                                                    },
+                                                                                    anchor: None,
+                                                                                    anchor_reftext: None,
+                                                                                    attrlist: None,
+                                                                                },
+                                                                            ),
+                                                                            Block::ListItem(
+                                                                                ListItem {
+                                                                                    marker: ListItemMarker::Dots(
+                                                                                        Span {
+                                                                                            data: ".",
+                                                                                            line: 18,
+                                                                                            col: 5,
+                                                                                            offset: 232,
+                                                                                        },
+                                                                                    ),
+                                                                                    blocks: &[
+                                                                                        Block::Simple(
+                                                                                            SimpleBlock {
+                                                                                                content: Content {
+                                                                                                    original: Span {
+                                                                                                        data: "Rackspace",
+                                                                                                        line: 18,
+                                                                                                        col: 7,
+                                                                                                        offset: 234,
+                                                                                                    },
+                                                                                                    rendered: "Rackspace",
+                                                                                                },
+                                                                                                source: Span {
+                                                                                                    data: "Rackspace",
+                                                                                                    line: 18,
+                                                                                                    col: 7,
+                                                                                                    offset: 234,
+                                                                                                },
+                                                                                                style: SimpleBlockStyle::Paragraph,
+                                                                                                title_source: None,
+                                                                                                title: None,
+                                                                                                caption: None,
+                                                                                                number: None,
+                                                                                                anchor: None,
+                                                                                                anchor_reftext: None,
+                                                                                                attrlist: None,
+                                                                                            },
+                                                                                        ),
+                                                                                    ],
+                                                                                    source: Span {
+                                                                                        data: "    . Rackspace",
+                                                                                        line: 18,
+                                                                                        col: 1,
+                                                                                        offset: 228,
+                                                                                    },
+                                                                                    anchor: None,
+                                                                                    anchor_reftext: None,
+                                                                                    attrlist: None,
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        source: Span {
+                                                                            data: "    . Amazon EC2\n    . Rackspace",
+                                                                            line: 17,
+                                                                            col: 1,
+                                                                            offset: 211,
+                                                                        },
+                                                                        title_source: None,
+                                                                        title: None,
+                                                                        anchor: None,
+                                                                        anchor_reftext: None,
+                                                                        attrlist: None,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            source: Span {
+                                                                data: "  IaaS:::\n    . Amazon EC2\n    . Rackspace",
+                                                                line: 16,
+                                                                col: 1,
+                                                                offset: 201,
+                                                            },
+                                                            anchor: None,
+                                                            anchor_reftext: None,
+                                                            attrlist: None,
+                                                        },
+                                                    ),
+                                                ],
+                                                source: Span {
+                                                    data: "  PaaS:::\n    . OpenShift\n    . CloudBees\n  IaaS:::\n    . Amazon EC2\n    . Rackspace",
+                                                    line: 13,
+                                                    col: 1,
+                                                    offset: 159,
+                                                },
+                                                title_source: None,
+                                                title: None,
+                                                anchor: None,
+                                                anchor_reftext: None,
+                                                attrlist: None,
                                             },
-                                            rendered: "NetBSD",
-                                        },
-                                        source: Span {
-                                            data: "NetBSD",
-                                            line: 10,
-                                            col: 7,
-                                            offset: 133,
-                                        },
-                                        style: SimpleBlockStyle::Paragraph,
-                                        title_source: None,
-                                        title: None,
-                                        caption: None,
-                                        number: None,
-                                        anchor: None,
-                                        anchor_reftext: None,
-                                        attrlist: None,
-                                    },),],
+                                        ),
+                                    ],
                                     source: Span {
-                                        data: "    . NetBSD",
-                                        line: 10,
+                                        data: "Cloud Providers::\n  PaaS:::\n    . OpenShift\n    . CloudBees\n  IaaS:::\n    . Amazon EC2\n    . Rackspace",
+                                        line: 12,
                                         col: 1,
-                                        offset: 127,
+                                        offset: 141,
                                     },
                                     anchor: None,
                                     anchor_reftext: None,
                                     attrlist: None,
-                                },),
-                            ],
-                            source: Span {
-                                data: "  Linux:::\n    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server\n  BSD:::\n    . FreeBSD\n    . NetBSD",
-                                line: 2,
-                                col: 1,
-                                offset: 20,
-                            },
-                            title_source: None,
-                            title: None,
-                            anchor: None,
-                            anchor_reftext: None,
-                            attrlist: None,
-                        },),],
+                                },
+                            ),
+                        ],
                         source: Span {
-                            data: "Operating Systems::\n  Linux:::\n    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server\n  BSD:::\n    . FreeBSD\n    . NetBSD",
+                            data: "Operating Systems::\n  Linux:::\n    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server\n  BSD:::\n    . FreeBSD\n    . NetBSD\n\nCloud Providers::\n  PaaS:::\n    . OpenShift\n    . CloudBees\n  IaaS:::\n    . Amazon EC2\n    . Rackspace",
                             line: 1,
                             col: 1,
                             offset: 0,
                         },
+                        title_source: None,
+                        title: None,
                         anchor: None,
                         anchor_reftext: None,
                         attrlist: None,
-                    },),
-                    Block::ListItem(ListItem {
-                        marker: ListItemMarker::DefinedTerm {
-                            term: Content {
-                                original: Span {
-                                    data: "Cloud Providers",
-                                    line: 12,
-                                    col: 1,
-                                    offset: 141,
-                                },
-                                rendered: "Cloud Providers",
-                            },
-                            marker: Span {
-                                data: "::",
-                                line: 12,
-                                col: 16,
-                                offset: 156,
-                            },
-                            source: Span {
-                                data: "Cloud Providers::",
-                                line: 12,
-                                col: 1,
-                                offset: 141,
-                            },
-                        },
-                        blocks: &[Block::List(ListBlock {
-                            type_: ListType::Description,
-                            items: &[
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::DefinedTerm {
-                                        term: Content {
-                                            original: Span {
-                                                data: "PaaS",
-                                                line: 13,
-                                                col: 3,
-                                                offset: 161,
-                                            },
-                                            rendered: "PaaS",
-                                        },
-                                        marker: Span {
-                                            data: ":::",
-                                            line: 13,
-                                            col: 7,
-                                            offset: 165,
-                                        },
-                                        source: Span {
-                                            data: "PaaS:::",
-                                            line: 13,
-                                            col: 3,
-                                            offset: 161,
-                                        },
-                                    },
-                                    blocks: &[],
-                                    source: Span {
-                                        data: "  PaaS:::",
-                                        line: 13,
-                                        col: 1,
-                                        offset: 159,
-                                    },
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::Dots(Span {
-                                        data: ".",
-                                        line: 14,
-                                        col: 5,
-                                        offset: 173,
-                                    },),
-                                    blocks: &[Block::Simple(SimpleBlock {
-                                        content: Content {
-                                            original: Span {
-                                                data: "OpenShift",
-                                                line: 14,
-                                                col: 7,
-                                                offset: 175,
-                                            },
-                                            rendered: "OpenShift",
-                                        },
-                                        source: Span {
-                                            data: "OpenShift",
-                                            line: 14,
-                                            col: 7,
-                                            offset: 175,
-                                        },
-                                        style: SimpleBlockStyle::Paragraph,
-                                        title_source: None,
-                                        title: None,
-                                        caption: None,
-                                        number: None,
-                                        anchor: None,
-                                        anchor_reftext: None,
-                                        attrlist: None,
-                                    },),],
-                                    source: Span {
-                                        data: "    . OpenShift",
-                                        line: 14,
-                                        col: 1,
-                                        offset: 169,
-                                    },
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::Dots(Span {
-                                        data: ".",
-                                        line: 15,
-                                        col: 5,
-                                        offset: 189,
-                                    },),
-                                    blocks: &[
-                                        Block::Simple(SimpleBlock {
-                                            content: Content {
-                                                original: Span {
-                                                    data: "CloudBees",
-                                                    line: 15,
-                                                    col: 7,
-                                                    offset: 191,
-                                                },
-                                                rendered: "CloudBees",
-                                            },
-                                            source: Span {
-                                                data: "CloudBees",
-                                                line: 15,
-                                                col: 7,
-                                                offset: 191,
-                                            },
-                                            style: SimpleBlockStyle::Paragraph,
-                                            title_source: None,
-                                            title: None,
-                                            caption: None,
-                                            number: None,
-                                            anchor: None,
-                                            anchor_reftext: None,
-                                            attrlist: None,
-                                        },),
-                                        Block::List(ListBlock {
-                                            type_: ListType::Description,
-                                            items: &[Block::ListItem(ListItem {
-                                                marker: ListItemMarker::DefinedTerm {
-                                                    term: Content {
-                                                        original: Span {
-                                                            data: "IaaS",
-                                                            line: 16,
-                                                            col: 3,
-                                                            offset: 203,
-                                                        },
-                                                        rendered: "IaaS",
-                                                    },
-                                                    marker: Span {
-                                                        data: ":::",
-                                                        line: 16,
-                                                        col: 7,
-                                                        offset: 207,
-                                                    },
-                                                    source: Span {
-                                                        data: "IaaS:::",
-                                                        line: 16,
-                                                        col: 3,
-                                                        offset: 203,
-                                                    },
-                                                },
-                                                blocks: &[],
-                                                source: Span {
-                                                    data: "  IaaS:::",
-                                                    line: 16,
-                                                    col: 1,
-                                                    offset: 201,
-                                                },
-                                                anchor: None,
-                                                anchor_reftext: None,
-                                                attrlist: None,
-                                            },),],
-                                            source: Span {
-                                                data: "  IaaS:::",
-                                                line: 16,
-                                                col: 1,
-                                                offset: 201,
-                                            },
-                                            title_source: None,
-                                            title: None,
-                                            anchor: None,
-                                            anchor_reftext: None,
-                                            attrlist: None,
-                                        },),
-                                    ],
-                                    source: Span {
-                                        data: "    . CloudBees\n  IaaS:::",
-                                        line: 15,
-                                        col: 1,
-                                        offset: 185,
-                                    },
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::Dots(Span {
-                                        data: ".",
-                                        line: 17,
-                                        col: 5,
-                                        offset: 215,
-                                    },),
-                                    blocks: &[Block::Simple(SimpleBlock {
-                                        content: Content {
-                                            original: Span {
-                                                data: "Amazon EC2",
-                                                line: 17,
-                                                col: 7,
-                                                offset: 217,
-                                            },
-                                            rendered: "Amazon EC2",
-                                        },
-                                        source: Span {
-                                            data: "Amazon EC2",
-                                            line: 17,
-                                            col: 7,
-                                            offset: 217,
-                                        },
-                                        style: SimpleBlockStyle::Paragraph,
-                                        title_source: None,
-                                        title: None,
-                                        caption: None,
-                                        number: None,
-                                        anchor: None,
-                                        anchor_reftext: None,
-                                        attrlist: None,
-                                    },),],
-                                    source: Span {
-                                        data: "    . Amazon EC2",
-                                        line: 17,
-                                        col: 1,
-                                        offset: 211,
-                                    },
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
-                                Block::ListItem(ListItem {
-                                    marker: ListItemMarker::Dots(Span {
-                                        data: ".",
-                                        line: 18,
-                                        col: 5,
-                                        offset: 232,
-                                    },),
-                                    blocks: &[Block::Simple(SimpleBlock {
-                                        content: Content {
-                                            original: Span {
-                                                data: "Rackspace",
-                                                line: 18,
-                                                col: 7,
-                                                offset: 234,
-                                            },
-                                            rendered: "Rackspace",
-                                        },
-                                        source: Span {
-                                            data: "Rackspace",
-                                            line: 18,
-                                            col: 7,
-                                            offset: 234,
-                                        },
-                                        style: SimpleBlockStyle::Paragraph,
-                                        title_source: None,
-                                        title: None,
-                                        caption: None,
-                                        number: None,
-                                        anchor: None,
-                                        anchor_reftext: None,
-                                        attrlist: None,
-                                    },),],
-                                    source: Span {
-                                        data: "    . Rackspace",
-                                        line: 18,
-                                        col: 1,
-                                        offset: 228,
-                                    },
-                                    anchor: None,
-                                    anchor_reftext: None,
-                                    attrlist: None,
-                                },),
-                            ],
-                            source: Span {
-                                data: "  PaaS:::\n    . OpenShift\n    . CloudBees\n  IaaS:::\n    . Amazon EC2\n    . Rackspace",
-                                line: 13,
-                                col: 1,
-                                offset: 159,
-                            },
-                            title_source: None,
-                            title: None,
-                            anchor: None,
-                            anchor_reftext: None,
-                            attrlist: None,
-                        },),],
-                        source: Span {
-                            data: "Cloud Providers::\n  PaaS:::\n    . OpenShift\n    . CloudBees\n  IaaS:::\n    . Amazon EC2\n    . Rackspace",
-                            line: 12,
-                            col: 1,
-                            offset: 141,
-                        },
-                        anchor: None,
-                        anchor_reftext: None,
-                        attrlist: None,
-                    },),
-                ],
-                source: Span {
-                    data: "Operating Systems::\n  Linux:::\n    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server\n  BSD:::\n    . FreeBSD\n    . NetBSD\n\nCloud Providers::\n  PaaS:::\n    . OpenShift\n    . CloudBees\n  IaaS:::\n    . Amazon EC2\n    . Rackspace",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                title_source: None,
-                title: None,
-                anchor: None,
-                anchor_reftext: None,
-                attrlist: None,
-            },),],
+                    },
+                ),
+            ],
             source: Span {
                 data: "Operating Systems::\n  Linux:::\n    . Fedora\n      * Desktop\n    . Ubuntu\n      * Desktop\n      * Server\n  BSD:::\n    . FreeBSD\n    . NetBSD\n\nCloud Providers::\n  PaaS:::\n    . OpenShift\n    . CloudBees\n  IaaS:::\n    . Amazon EC2\n    . Rackspace",
                 line: 1,
@@ -2241,6 +2398,75 @@ You can include more xref:continuation.adoc[compound content in a list item] as 
             },
         }
     );
+}
+
+#[test]
+fn ordered_list_nests_under_second_level_term() {
+    // An ordered (or unordered) list indented under a *second-level* (`:::`)
+    // description term must nest inside that term, exactly as it does under a
+    // first-level (`::`) term. Previously the list was folded into the parent
+    // description list as sibling items instead.
+    let doc = Parser::default().parse("OS::\n  Linux:::\n    . Fedora\n    . Ubuntu");
+
+    // Outer `::` list holds the single `OS` term.
+    let outer = top_list(&doc);
+    let outer_items: Vec<_> = outer.child_blocks().collect();
+    assert_eq!(outer_items.len(), 1);
+    assert_eq!(term_delimiter(outer_items[0]), "::");
+
+    // The `OS` term nests a `:::` description list whose single term is `Linux`.
+    let inner = nested_list(outer_items[0]);
+    let inner_items: Vec<_> = inner.child_blocks().collect();
+    assert_eq!(inner_items.len(), 1);
+    assert_eq!(term_delimiter(inner_items[0]), ":::");
+    assert_eq!(term_rendered(inner_items[0]), "Linux");
+
+    // The `. Fedora` / `. Ubuntu` items form an ordered list nested inside the
+    // `Linux` term rather than becoming siblings of it.
+    let ordered = nested_list(inner_items[0]);
+    assert_eq!(ordered.type_(), crate::blocks::ListType::Ordered);
+
+    let ordered_items: Vec<_> = ordered.child_blocks().collect();
+    assert_eq!(ordered_items.len(), 2);
+
+    for (item, expected) in ordered_items.iter().zip(["Fedora", "Ubuntu"]) {
+        let crate::blocks::Block::ListItem(li) = item else {
+            panic!("expected a list item, got {item:#?}");
+        };
+
+        assert!(matches!(
+            li.list_item_marker(),
+            crate::blocks::ListItemMarker::Dots(_)
+        ));
+
+        assert_eq!(
+            li.child_blocks().next().unwrap().rendered_content(),
+            Some(expected)
+        );
+    }
+}
+
+#[test]
+fn blank_separated_unindented_list_still_nests_under_empty_term() {
+    // A list separated from an empty second-level term by a blank line, and not
+    // indented under it, still nests inside the term rather than folding into
+    // the parent description list. Asciidoctor 2.0.26 renders the `. Fedora` /
+    // `. Ubuntu` ordered list inside the `Linux` term's `<dd>` for this input,
+    // so the blank line and lack of indentation must not sever the nesting.
+    let doc = Parser::default().parse("OS::\n  Linux:::\n\n. Fedora\n. Ubuntu");
+
+    let outer_items: Vec<_> = top_list(&doc).child_blocks().collect();
+    assert_eq!(outer_items.len(), 1);
+
+    let inner = nested_list(outer_items[0]);
+    let inner_items: Vec<_> = inner.child_blocks().collect();
+    assert_eq!(inner_items.len(), 1);
+    assert_eq!(term_rendered(inner_items[0]), "Linux");
+
+    // The ordered list is the `Linux` term's content, not a sibling of it.
+    let ordered = nested_list(inner_items[0]);
+    assert_eq!(ordered.type_(), crate::blocks::ListType::Ordered);
+    assert_eq!(ordered.child_blocks().count(), 2);
 }
 
 /// Returns the document's first top-level block as a [`ListBlock`], panicking

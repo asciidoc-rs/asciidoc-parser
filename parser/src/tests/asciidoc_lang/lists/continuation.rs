@@ -2103,6 +2103,27 @@ include::example$complex.adoc[tag=complex-only]
                 },
             }
         );
+
+        // The principal-text node is dropped from each item's child blocks (the
+        // listing block is the only child, so it lines up with the marker), but
+        // each item records that it had an empty principal text. A renderer uses
+        // this to emit the empty principal paragraph ahead of the attached
+        // listing block, matching Asciidoctor.
+        let Some(crate::blocks::Block::List(list)) = doc.child_blocks().next() else {
+            panic!("expected a list block");
+        };
+
+        for item in list.child_blocks() {
+            let item = item.as_list_item().unwrap();
+            assert!(item.has_empty_principal_text());
+
+            let mut children = item.child_blocks();
+            assert!(matches!(
+                children.next(),
+                Some(crate::blocks::Block::RawDelimited(_))
+            ));
+            assert!(children.next().is_none());
+        }
     }
 }
 
