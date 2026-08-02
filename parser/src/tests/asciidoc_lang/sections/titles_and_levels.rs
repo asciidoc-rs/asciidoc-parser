@@ -380,41 +380,21 @@ include::example$section.adoc[tag=content]
                     offset: 0,
                 },
             },
-            blocks: &[
-                Block::Preamble(Preamble {
-                    blocks: &[Block::Simple(SimpleBlock {
-                        content: Content {
-                            original: Span {
-                                data: "= Illegal Level 0 Section (violates rule #1)",
-                                line: 3,
-                                col: 1,
-                                offset: 18,
-                            },
-                            rendered: "= Illegal Level 0 Section (violates rule #1)",
-                        },
-                        source: Span {
-                            data: "= Illegal Level 0 Section (violates rule #1)",
-                            line: 3,
-                            col: 1,
-                            offset: 18,
-                        },
-                        style: SimpleBlockStyle::Paragraph,
-                        title_source: None,
-                        title: None,
-                        caption: None,
-                        number: None,
-                        anchor: None,
-                        anchor_reftext: None,
-                        attrlist: None,
-                    },),],
-                    source: Span {
-                        data: "= Illegal Level 0 Section (violates rule #1)",
+            blocks: &[Block::Section(SectionBlock {
+                // A bare `=` in the body is modeled as a level-0 section
+                // (Asciidoctor's `sect0`), not declined into a preamble
+                // paragraph. It absorbs the following sections as its children.
+                level: 0,
+                section_title: Content {
+                    original: Span {
+                        data: "Illegal Level 0 Section (violates rule #1)",
                         line: 3,
-                        col: 1,
-                        offset: 18,
+                        col: 3,
+                        offset: 20,
                     },
-                },),
-                Block::Section(SectionBlock {
+                    rendered: "Illegal Level 0 Section (violates rule #1)",
+                },
+                blocks: &[Block::Section(SectionBlock {
                     level: 1,
                     section_title: Content {
                         original: Span {
@@ -468,8 +448,23 @@ include::example$section.adoc[tag=content]
                     section_id: Some("_first_section"),
                     caption: None,
                     section_number: None,
-                },),
-            ],
+                },),],
+                source: Span {
+                    data: "= Illegal Level 0 Section (violates rule #1)\n\n== First Section\n\n==== Illegal Nested Section (violates rule #2)",
+                    line: 3,
+                    col: 1,
+                    offset: 18,
+                },
+                title_source: None,
+                title: None,
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+                section_type: SectionType::Normal,
+                section_id: Some("_illegal_level_0_section_violates_rule_1"),
+                caption: None,
+                section_number: None,
+            },),],
             source: Span {
                 data: "= Document Title\n\n= Illegal Level 0 Section (violates rule #1)\n\n== First Section\n\n==== Illegal Nested Section (violates rule #2)",
                 line: 1,
@@ -508,6 +503,14 @@ include::example$section.adoc[tag=content]
                         }
                     ),
                     (
+                        "_illegal_level_0_section_violates_rule_1",
+                        RefEntry {
+                            id: "_illegal_level_0_section_violates_rule_1",
+                            reftext: Some("Illegal Level 0 Section (violates rule #1)",),
+                            ref_type: RefType::Section,
+                        }
+                    ),
+                    (
                         "_illegal_nested_section_violates_rule_2",
                         RefEntry {
                             id: "_illegal_nested_section_violates_rule_2",
@@ -518,6 +521,10 @@ include::example$section.adoc[tag=content]
                 ]),
                 reftext_to_id: HashMap::from([
                     ("First Section", "_first_section"),
+                    (
+                        "Illegal Level 0 Section (violates rule #1)",
+                        "_illegal_level_0_section_violates_rule_1"
+                    ),
                     (
                         "Illegal Nested Section (violates rule #2)",
                         "_illegal_nested_section_violates_rule_2"
