@@ -1,4 +1,4 @@
-use crate::{Span, strings::CowStr};
+use crate::{HasSpan, Span, strings::CowStr};
 
 /// A UI macro: `kbd:`, `btn:`, or `menu:`.
 ///
@@ -11,6 +11,12 @@ pub struct Ui<'src> {
 
     /// The source location of the whole UI macro.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for Ui<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }
 
 /// The kind of a [`Ui`] macro, with its parsed contents.

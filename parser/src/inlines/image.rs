@@ -1,4 +1,4 @@
-use crate::{Span, attributes::Attrlist, strings::CowStr};
+use crate::{HasSpan, Span, attributes::Attrlist, strings::CowStr};
 
 /// An inline image (`image:target[…]`).
 ///
@@ -23,4 +23,10 @@ pub struct Image<'src> {
 
     /// The source location of the whole image macro.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for Image<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }

@@ -1,4 +1,4 @@
-use crate::{Span, inlines::InlineNode, strings::CowStr};
+use crate::{HasSpan, Span, inlines::InlineNode, strings::CowStr};
 
 /// A footnote (`footnote:[…]`) or a reference to an earlier one
 /// (`footnote:id[]`).
@@ -24,4 +24,10 @@ pub struct Footnote<'src> {
 
     /// The source location of the whole footnote macro.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for Footnote<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }

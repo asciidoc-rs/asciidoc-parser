@@ -1,4 +1,4 @@
-use crate::{Span, inlines::InlineNode, parser::ResolvedReference, strings::CowStr};
+use crate::{HasSpan, Span, inlines::InlineNode, parser::ResolvedReference, strings::CowStr};
 
 /// A link or cross-reference. ASG: `inlineRef`.
 ///
@@ -32,6 +32,12 @@ pub struct Ref<'src> {
 
     /// The source location of the whole reference.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for Ref<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }
 
 /// Whether a [`Ref`] is a link or a cross-reference. ASG: `variant`.

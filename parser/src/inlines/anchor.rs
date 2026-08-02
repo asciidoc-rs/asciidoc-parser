@@ -1,4 +1,4 @@
-use crate::{Span, inlines::InlineNode, strings::CowStr};
+use crate::{HasSpan, Span, inlines::InlineNode, strings::CowStr};
 
 /// An inline anchor (`[[id]]`, `[[id,reftext]]`, or `anchor:id[reftext]`).
 ///
@@ -15,4 +15,10 @@ pub struct Anchor<'src> {
 
     /// The source location of the whole anchor.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for Anchor<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }

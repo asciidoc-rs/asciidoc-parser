@@ -1,4 +1,4 @@
-use crate::{Span, strings::CowStr};
+use crate::{HasSpan, Span, strings::CowStr};
 
 /// A callout number in verbatim content (`<1>`, `<.>`).
 ///
@@ -12,4 +12,10 @@ pub struct Callout<'src> {
 
     /// The source location of the callout.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for Callout<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }

@@ -1,4 +1,4 @@
-use crate::{Span, strings::CowStr};
+use crate::{HasSpan, Span, strings::CowStr};
 
 /// An index term (`((term))`, `(((primary, secondary, tertiary)))`,
 /// `indexterm:[…]`, or `indexterm2:[…]`).
@@ -17,4 +17,10 @@ pub struct IndexTerm<'src> {
 
     /// The source location of the whole index term.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for IndexTerm<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }

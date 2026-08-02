@@ -1,4 +1,4 @@
-use crate::{Span, attributes::Attrlist, inlines::InlineNode, strings::CowStr};
+use crate::{HasSpan, Span, attributes::Attrlist, inlines::InlineNode, strings::CowStr};
 
 /// A formatted span, such as strong, emphasis, code, or mark. ASG:
 /// `inlineSpan`.
@@ -27,6 +27,12 @@ pub struct Styled<'src> {
 
     /// The source location of the whole span.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for Styled<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }
 
 /// The kind of a formatted [`Styled`] span.

@@ -1,4 +1,4 @@
-use crate::{Span, strings::CowStr};
+use crate::{HasSpan, Span, strings::CowStr};
 
 /// Inline STEM content (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`).
 ///
@@ -14,6 +14,12 @@ pub struct Stem<'src> {
 
     /// The source location of the whole STEM macro.
     pub location: Span<'src>,
+}
+
+impl<'src> HasSpan<'src> for Stem<'src> {
+    fn span(&self) -> Span<'src> {
+        self.location
+    }
 }
 
 /// The notation of an inline [`Stem`] expression.
