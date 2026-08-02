@@ -148,25 +148,27 @@ tree**. Two things make now the right time:
 pub enum InlineNode<'src> {
     // ─── ASG literal nodes (leaves) ───────────────────────────────────
 
-    /// Logical text between constructs. The value is the *reader's* text
+    /// Logical text between constructs. `value` is the *reader's* text
     /// (attribute references expanded, but NOT HTML-escaped); the HTML fold
-    /// escapes `< > &`. Borrowed from source when the run is verbatim.
-    /// ASG: `inlineLiteral name="text"`.
-    Text(Located<'src, CowStr<'src>>),
+    /// escapes `< > &`. `location` is the source `Span` this text derives from
+    /// (see §3.2.1); in the verbatim case `value` borrows the very slice
+    /// `location.data()` covers. ASG: `inlineLiteral name="text"`.
+    Text { value: CowStr<'src>, location: Span<'src> },
 
     /// A character reference / typographic replacement: a special character
     /// (`<` `>` `&`), a character-replacement result (`(C)`, `--`, `...`,
-    /// smart quotes, arrows), or a numeric/named entity. Carries the logical
-    /// character(s); the fold decides the concrete entity. ASG:
+    /// smart quotes, arrows), or a numeric/named entity. `value` is the logical
+    /// character(s); the fold decides the concrete entity. `location` is the
+    /// source that produced it (e.g. the `(C)` span). ASG:
     /// `inlineLiteral name="charref"`.
-    CharRef(Located<'src, CharRef>),
+    CharRef { value: CharRef<'src>, location: Span<'src> },
 
     /// Verbatim, un-escaped output: passthrough content (`+++…+++`,
     /// `pass:[…]`, `$$…$$`) and the raw HTML that an unescaped `{attr}`
     /// expansion injects. This node is the model's record of the language's
     /// "emit raw HTML by design" behavior (see §3.5). ASG:
     /// `inlineLiteral name="raw"`.
-    Raw(Located<'src, CowStr<'src>>),
+    Raw { value: CowStr<'src>, location: Span<'src> },
 
     // ─── ASG parent nodes ─────────────────────────────────────────────
 
@@ -188,7 +190,7 @@ pub enum InlineNode<'src> {
     IndexTerm(IndexTerm<'src>),
     Callout(Callout<'src>),
     Stem(Stem<'src>),      // inline stem:/asciimath:/latexmath:
-    LineBreak(Located<'src, ()>),
+    LineBreak { location: Span<'src> },
 }
 ```
 
@@ -235,8 +237,31 @@ pub enum CharRef<'src> {
 }
 ```
 
-`Located<'src, T>` is a thin `{ value: T, location: Span<'src> }` wrapper so even leaf
-literals carry a location without a bespoke struct each.
+#### 3.2.1 Locations reuse `Span`
+
+Every node carries a `location: Span<'src>` — the crate's existing source-position type
+([`span/mod.rs`](../../parser/src/span/mod.rs)): a borrowed source slice plus its
+`line`/`col`/`offset`. It is `Copy` and cheap, so one per node costs nothing structural,
+and `InlineNode` implements the existing [`HasSpan<'src>`] trait, so inline nodes locate
+themselves exactly the way blocks already do. No bespoke location wrapper is introduced.
+
+The `value` field on a leaf is *separate from* its `location` precisely because a node's
+**logical payload is not always its source slice**. `Span` carries the *origin* (and, via
+`data()`, the raw source bytes); `value` carries the *meaning*:
+
+| node                            | `location.data()` (raw source) | `value` (logical)        |
+| ------------------------------- | ------------------------------ | ------------------------ |
+| `CharRef` from `(C)`            | `"(C)"`                        | `©` (U+00A9)             |
+| `Text` from a `{name}` expansion | `"{name}"`                    | the attribute's value    |
+| `Text`, a verbatim run          | `"hello"`                      | `"hello"` — *coincides*  |
+
+They coincide only for verbatim borrowed text (where `value` is `CowStr::Borrowed` over the
+same bytes `location` covers); they diverge for exactly the transformed cases the AST exists
+to capture. A synthesized value (`©`, an expanded attribute, a joined multi-line run) cannot
+live inside a `Span` at all — `Span::data()` is `&'src str` tied to real source bytes, and a
+synthesized value has none — which is why the pairing is needed rather than a `Span` alone.
+
+[`HasSpan<'src>`]: ../../parser/src/span/mod.rs
 
 ### 3.3 How blocks expose it
 
@@ -375,12 +400,15 @@ resolution operates on nodes:
 
 ### 4.4 Source locations (issue #944)
 
-Design nodes to carry `Span<'src>` from the start; populate in two stages:
+Locations reuse the existing `Span<'src>` throughout (§3.2.1) — no new location type — and
+`InlineNode` implements `HasSpan<'src>`. Each node carries its `Span` from the start;
+populate in two stages:
 
-1. **Migration stage:** nodes recognized directly from a source slice get a precise span;
+1. **Migration stage:** nodes recognized directly from a source slice get a precise `Span`;
    nodes born from transformation (attribute expansion, synthesized entities) get a
-   documented fallback (the reference's span, or the enclosing block span). Public shape is
-   already span-bearing, so no later type churn.
+   documented fallback (the reference's `Span`, or the enclosing block's). Because the field
+   is already a `Span`, this is a matter of *which* `Span` a node is given — not a type
+   change — so precision can improve later with no public churn.
 2. **Precision stage (#944):** the single-pass builder assigns each construct the source
    range it consumed and slices interstitial `Text` directly from `'src`. The hard cases
    #944 enumerates — attribute expansion, passthrough mask/restore, synthesized text,
@@ -391,6 +419,8 @@ Design nodes to carry `Span<'src>` from the start; populate in two stages:
 
 - `Text`/`Raw` hold `CowStr<'src>`: `Borrowed` for verbatim runs (the common case),
   `Boxed` only when a value is synthesized (attribute expansion, joined multi-line runs).
+  In the borrowed case the `value` and the node's `location.data()` are the *same* `'src`
+  bytes, so no extra allocation is incurred to carry both.
 - The current `from_filtered_lines` fast-path (borrow a single surviving line) generalizes:
   a paragraph with no inline constructs is a single borrowed `Text` node.
 - `OwnedTitle` (the owned snapshot a pending section title rides on) becomes an owned node
