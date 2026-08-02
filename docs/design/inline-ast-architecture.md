@@ -446,19 +446,31 @@ corresponding node types.
 
 ## 5. Managing the transition
 
-The overriding constraints: **`main` stays shippable**, unrelated work continues against
-`main`, and **HTML output never regresses**. The strategy is a long-running branch composed
-of internally-shippable phases, each guarded by the golden-HTML oracle.
+The overriding constraints: **`main` stays untouched** while this is in flight (so
+unrelated work continues against it undisturbed), and **HTML output never regresses**. The
+entire feature is developed on the long-running `inline-ast` branch and lands in `main` via
+a **single merge commit at the end** — the phases below are *internal* milestones on that
+branch, not separate submissions to `main`. Each is guarded by the golden-HTML oracle.
 
 ### 5.1 Branch strategy
 
-- `inline-ast` is the long-running integration branch. Per the project's PR policy, we
-  **merge `main` into it periodically** (never rebase/rewrite in-flight history); the final
-  landing is a squash-merge at the end.
+- `inline-ast` is the long-running integration branch and the **sole staging ground**: all
+  of the work accumulates here and reaches `main` only once, at the very end. Nothing is
+  submitted to `main` incrementally.
+- **Landing uses a real merge commit, not a squash** — a deliberate, one-off exception to
+  the project's usual squash-merge policy, so the staged phase history (and the in-branch
+  topic-branch merges) is preserved in `main` rather than flattened. This is warranted here
+  precisely because the staged history is the record of how a large architectural change was
+  made incrementally and kept green at each step.
+- Per the project's PR policy, we **merge `main` into `inline-ast` periodically** (never
+  rebase/rewrite in-flight history) to stay current.
 - Feature work is done on short-lived topic branches cut from `inline-ast` and merged back
-  into it, so review stays granular.
-- Where a phase is self-contained and non-breaking (see 5.2), it can be **cherry-picked
-  onto `main` on its own** to shrink the eventual diff and de-risk the merge.
+  into it, so review stays granular within the branch.
+- **Pre-landing gate:** before the final merge to `main`, the branch is **preflighted
+  against the downstream renderer crate** (the alternate-backend consumer that implements
+  the renderer seam — see §4.6, §6.6). Because the seam changes shape (Phase 5), this
+  confirms the public API and the reshaped `InlineSubstitutionRenderer` actually serve a
+  real consumer before they are locked into `main`.
 
 ### 5.2 Phased plan
 
@@ -496,8 +508,16 @@ Each phase is a reviewable unit with a clear exit gate.
   form and update the README backend story.
   *Exit:* seam documented; a smoke-test alternate renderer (in tests) walks the tree.
 
+- **Landing — preflight + merge to `main`.** Preflight the whole branch against the
+  downstream renderer crate (§5.1) to confirm the public API and reshaped seam serve a real
+  consumer, merge current `main` in one last time, then land `inline-ast` into `main` with a
+  **merge commit** (not a squash — §5.1) so the staged history survives.
+  *Exit:* renderer-crate preflight green; branch merged.
+
 Phases 1–2 are the risk-bearing core; 3–5 are additive and can be paced against consumer
-demand (echoing the #943/#944 "pin the API with a real consumer" discipline).
+demand (echoing the #943/#944 "pin the API with a real consumer" discipline). All of them
+land together in the single merge to `main` — the pacing is *within* the branch, not
+staggered submissions to `main`.
 
 ### 5.3 The golden-HTML oracle (the safety net)
 
@@ -530,7 +550,7 @@ regressions the hand-written assertions don't cover.
 | HTML output drifts during the interior rewrite                        | Golden oracle (5.3) gates every phase; differential harness over all fixtures.             |
 | Two node trees fold to identical HTML, masking a structural bug       | Cross-check against the recorder in Phase 1; add structural assertions in Phase 3.          |
 | Performance regression (extra allocation for nodes vs. one string)    | `'src` borrowing for `Text`/`Raw`; single-node fast path for plain paragraphs; benchmark gate in Phase 2 (existing Criterion/CodSpeed benches). |
-| Long-running branch drifts from `main`                                | Frequent `main`→branch merges; cherry-pick self-contained phases onto `main`.              |
+| Long-running branch drifts from `main`                                | Frequent `main`→branch merges (never rebase); land as one merge commit preserving staged history. |
 | Public API pinned before a consumer proves it out                     | Keep `inlines()` behind the phase gate; align field sets with the first downstream tool (§6), per #943's discipline. |
 | ASG under-models crate constructs, forcing lossy projection           | Keep native rich nodes; document projection choices; treat ASG as an output, not the internal ceiling. |
 | Attribute-expansion / passthrough span provenance is genuinely hard   | Ship Phase 3 with coarse fallback spans (shape is span-ready); defer precision to Phase 4 with #944's explicit policies. |
