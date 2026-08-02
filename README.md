@@ -1,3 +1,7 @@
+<p align="center">
+  <a href="https://asciidoc.rs"><img src="https://raw.githubusercontent.com/asciidoc-rs/asciidoc-parser/main/docs/images/asciidoc-rs-wordmark.png" alt="asciidoc.rs" width="440"></a>
+</p>
+
 # AsciiDoc parser for Rust
 
 [![CI](https://github.com/asciidoc-rs/asciidoc-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/asciidoc-rs/asciidoc-parser/actions/workflows/ci.yml) [![Latest Version](https://img.shields.io/crates/v/asciidoc-parser.svg)](https://crates.io/crates/asciidoc-parser) [![docs.rs](https://img.shields.io/docsrs/asciidoc-parser)](https://docs.rs/asciidoc-parser/) [![Codecov](https://codecov.io/gh/asciidoc-rs/asciidoc-parser/graph/badge.svg?token=ULDZN1IUR9)](https://codecov.io/gh/asciidoc-rs/asciidoc-parser) [![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/asciidoc-rs/asciidoc-parser)
