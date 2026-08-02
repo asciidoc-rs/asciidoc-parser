@@ -89,6 +89,21 @@ impl<'src> SectionBlock<'src> {
 
         let level = level_and_title.item.0;
 
+        // A level-0 section heading in the document body (a bare `=` that no
+        // positive `leveloffset` promoted to a real section) is only valid under
+        // `:doctype: book`, where it is a book part. Under any other doctype
+        // Asciidoctor logs "level 0 sections can only be used when doctype is
+        // book"; raise that warning here, where the doctype is known. The heading
+        // is still modeled as a level-0 section either way, so a renderer can emit
+        // `<h1 class="sect0">`. A discrete level-0 heading is a floating `<h1>`,
+        // not a section, and is exempt.
+        if !discrete && level == 0 && !is_book_doctype(parser) {
+            warnings.push(Warning::new(
+                source.take_normalized_line().item,
+                WarningType::Level0SectionHeadingNotSupported,
+            ));
+        }
+
         // An explicit ID supplied *above* the heading (a `[#id]`/`[id=…]` block
         // attribute or a `[[id]]` block anchor) always wins. It also suppresses
         // embedded-anchor processing below, so a `[[id]]` embedded in the title
@@ -138,8 +153,13 @@ impl<'src> SectionBlock<'src> {
         // root – the section that directly carries the `appendix` style –
         // therefore always advances the appendix counter so it (and the numbering
         // of any subsection) can derive its letter, even when `sectnums` is unset.
-        let sectnums_active =
-            parser.is_attribute_set("sectnums") && level <= parser.sectnumlevels && !discrete;
+        // A level-0 section (a book part) is not numbered through `sectnums`
+        // (parts use the separate `partnums` attribute, which this crate does not
+        // yet model), so section numbering is restricted to level 1 and deeper.
+        let sectnums_active = parser.is_attribute_set("sectnums")
+            && level >= MIN_SECTION_LEVEL as usize
+            && level <= parser.sectnumlevels
+            && !discrete;
 
         let is_appendix_root = !discrete && level == 1 && section_type == SectionType::Appendix;
 
@@ -434,8 +454,9 @@ impl<'src> SectionBlock<'src> {
     /// equal signs and must be followed by a space.
     ///
     /// This function will return an integer between 1 and 5 for an ordinary
-    /// section. A `discrete` (floating) heading may also return 0, for a
-    /// level-0 (`=`) discrete heading rendered as an `<h1>` floating title.
+    /// section. It returns 0 for a level-0 (`=`) heading modeled as a `sect0`
+    /// section – a body document title / book part – and for a level-0 (`=`)
+    /// `discrete` (floating) heading rendered as an `<h1>` floating title.
     pub fn level(&self) -> usize {
         self.level
     }
@@ -542,6 +563,15 @@ fn join_signifier(signifier: Option<&str>, number: &str) -> String {
         Some(signifier) if !signifier.is_empty() => format!("{signifier} {number}"),
         _ => number.to_string(),
     }
+}
+
+/// Returns `true` when the active `doctype` is `book`, the only doctype under
+/// which a level-0 section heading (a book part) is valid.
+fn is_book_doctype(parser: &Parser) -> bool {
+    matches!(
+        parser.attribute_value("doctype"),
+        InterpretedValue::Value(ref v) if v == "book"
+    )
 }
 
 impl<'src> IsBlock<'src> for SectionBlock<'src> {
@@ -735,16 +765,18 @@ fn match_embedded_section_anchor<'src>(
 ///
 /// The syntactic level is 0-based: a bare `=` is 0, `==` is 1, up to `======`
 /// at 5. `offset` shifts it to the effective level, which is then constrained
-/// to the [`MIN_SECTION_LEVEL`]..=[`MAX_SECTION_LEVEL`] range:
+/// to a supported range:
 ///
 /// * A bare `=` (syntactic level 0) that no positive offset lifts to level 1 or
-///   beyond has no section representation; it is rejected as an unsupported
-///   level-0 heading (recording a warning), preserving the single-document-
-///   title rule. A `discrete` heading is exempt: it may occupy level 0 (an
-///   `<h1>` floating title) and so is not rejected there.
-/// * Any other heading whose effective level falls outside the supported range
-///   is clamped to the nearest valid level and a warning is recorded. The lower
-///   bound is [`MIN_SECTION_LEVEL`], or 0 for a `discrete` heading.
+///   beyond is modeled as a level-0 section (Asciidoctor's `sect0`): a body
+///   document title / book part. The caller ([`SectionBlock::parse`]) raises
+///   [`WarningType::Level0SectionHeadingNotSupported`] for it under any doctype
+///   other than `book`. A `discrete` heading may likewise occupy level 0 (an
+///   `<h1>` floating title).
+/// * Any other heading whose effective level falls outside the
+///   [`MIN_SECTION_LEVEL`]..=[`MAX_SECTION_LEVEL`] range is clamped to the
+///   nearest valid level and a warning is recorded. The lower bound is
+///   [`MIN_SECTION_LEVEL`], or 0 for a `discrete` heading or a bare `=`.
 fn parse_title_line<'src>(
     source: Span<'src>,
     offset: i32,
@@ -790,44 +822,53 @@ fn parse_title_line<'src>(
     let syntactic_level = (count - 1) as i32;
     let effective_level = syntactic_level.saturating_add(offset);
 
-    // A bare `=` (syntactic level 0) that no positive offset lifts to level 1
-    // or beyond is a document title appearing in the body, which is not a
-    // section (the single-document-title rule). Decline it exactly as an
-    // un-offset level-0 heading is declined, rather than clamping it into a
-    // section. This is checked before the whitespace requirement below so a
-    // spaceless `=blah` is still reported, matching a bare level-0 heading.
-    //
-    // A `discrete`/`float` heading is exempt: it renders as a floating `<h1>`,
-    // not the document title, so a level-0 discrete heading is legitimate and is
-    // carried through with level 0 rather than rejected.
-    if !discrete && syntactic_level == 0 && effective_level < MIN_SECTION_LEVEL {
-        warnings.push(Warning::new(
-            source.take_normalized_line().item,
-            WarningType::Level0SectionHeadingNotSupported,
-        ));
-
-        return None;
-    }
-
     // The marker must be followed by whitespace to be a section title at all;
     // validate that before clamping the level so a non-title line such as
-    // `==x` is declined quietly, without a spurious out-of-range warning.
+    // `==x` (or a bare `=blah`) is declined quietly, falling through to a
+    // paragraph without a spurious warning.
     let title = line.take_required_whitespace()?;
 
     let title_span = strip_symmetric_title_close(title.after, marker_char, count);
 
+    // A bare `=` (syntactic level 0) that no positive offset lifts to level 1 or
+    // beyond is a document title appearing in the body. Rather than the document
+    // title (the single-document-title rule forbids a second one), it models a
+    // level-0 section – Asciidoctor's `sect0`, rendered as `<h1 class="sect0">`,
+    // a book part under `:doctype: book`. It is carried through with level 0 so
+    // the block model can represent it; `SectionBlock::parse` raises
+    // [`WarningType::Level0SectionHeadingNotSupported`] for it under any doctype
+    // other than `book`, where it knows the doctype.
+    //
+    // A `discrete`/`float` heading is likewise valid at level 0: it renders as a
+    // floating `<h1>` rather than the document title.
+    //
     // A real section heading whose offset-adjusted level lands outside the
     // supported range is clamped into range and reported, rather than producing
     // an out-of-range (or, under a hostile offset, absurd) level. The lower
-    // bound is [`MIN_SECTION_LEVEL`] normally, but 0 for a `discrete` heading,
-    // which may legitimately occupy level 0.
-    let min_level = if discrete { 0 } else { MIN_SECTION_LEVEL };
+    // bound is [`MIN_SECTION_LEVEL`] normally, but 0 for a `discrete` heading or
+    // a bare `=` (syntactic level 0), each of which may legitimately occupy
+    // level 0.
+    let min_level = if discrete || syntactic_level == 0 {
+        0
+    } else {
+        MIN_SECTION_LEVEL
+    };
+
+    // A bare `=` (syntactic level 0) whose effective level a negative offset
+    // pushes below 0 still floors at level 0 – the level-0 case – rather than
+    // being reported as an out-of-range clamp. Its diagnostic is the
+    // doctype-gated [`WarningType::Level0SectionHeadingNotSupported`] that
+    // `SectionBlock::parse` raises, so no clamp warning is added for it here.
+    let is_level_0_heading = syntactic_level == 0 && !discrete;
 
     let level = if effective_level < min_level {
-        warnings.push(Warning::new(
-            source.take_normalized_line().item,
-            WarningType::SectionHeadingLevelOutOfRange(effective_level, min_level as usize),
-        ));
+        if !is_level_0_heading {
+            warnings.push(Warning::new(
+                source.take_normalized_line().item,
+                WarningType::SectionHeadingLevelOutOfRange(effective_level, min_level as usize),
+            ));
+        }
+
         min_level as usize
     } else if effective_level > MAX_SECTION_LEVEL {
         warnings.push(Warning::new(
@@ -2099,17 +2140,22 @@ mod tests {
         }
 
         #[test]
-        fn err_level_0_section_heading() {
+        fn level_0_section_heading_models_sect0() {
             let mut parser = Parser::default();
             let mut warnings: Vec<crate::warnings::Warning<'_>> = vec![];
 
-            let result = crate::blocks::SectionBlock::parse(
+            // A bare `=` in the body is modeled as a level-0 section (Asciidoctor's
+            // `sect0`), not declined. Under the default (article) doctype it also
+            // raises the level-0 warning.
+            let mi = crate::blocks::SectionBlock::parse(
                 &BlockMetadata::new("= Document Title"),
                 &mut parser,
                 &mut warnings,
-            );
+            )
+            .unwrap();
 
-            assert!(result.is_none());
+            assert_eq!(mi.item.level(), 0);
+            assert_eq!(mi.item.section_title(), "Document Title");
 
             assert_eq!(
                 warnings,
@@ -3034,17 +3080,23 @@ mod tests {
         }
 
         #[test]
-        fn err_level_0_section_heading() {
+        fn level_0_section_heading_models_sect0() {
             let mut parser = Parser::default();
             let mut warnings: Vec<crate::warnings::Warning<'_>> = vec![];
 
-            let result = crate::blocks::SectionBlock::parse(
+            // A bare `#` (the Markdown-style level-0 marker) in the body is
+            // modeled as a level-0 section (Asciidoctor's `sect0`), not declined.
+            // Under the default (article) doctype it also raises the level-0
+            // warning.
+            let mi = crate::blocks::SectionBlock::parse(
                 &BlockMetadata::new("# Document Title"),
                 &mut parser,
                 &mut warnings,
-            );
+            )
+            .unwrap();
 
-            assert!(result.is_none());
+            assert_eq!(mi.item.level(), 0);
+            assert_eq!(mi.item.section_title(), "Document Title");
 
             assert_eq!(
                 warnings,

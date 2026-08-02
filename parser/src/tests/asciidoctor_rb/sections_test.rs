@@ -2389,10 +2389,11 @@ mod nesting {
 
     // NOTE: The book variant relies on the `book` doctype and its level-0 (`=`)
     // special sections (colophon, dedication, glossary, bibliography). The crate
-    // does not model the book doctype – a `=` heading outside the document
-    // header is declined as an unsupported level-0 heading rather than parsed as
-    // a section – so the nested-section rule can't be exercised for it. This
-    // test stays out of scope until the book doctype is supported.
+    // now models a body-level `=` heading as a level-0 section, but it does not
+    // apply the special-section styles or their no-nested-sections rule at level
+    // 0 (that rule is recognized only for level-1 special sections), so this
+    // book variant can't be exercised. It stays out of scope until the book
+    // doctype's parts and special sections are supported.
     non_normative!(
         r##"
     test 'should log error if subsections are found in special sections in book that do not support subsections' do
@@ -3110,9 +3111,14 @@ non_normative!(
 mod level_offset {
     use crate::tests::prelude::*;
 
-    // NOTE: The crate does not emit the "level 0 sections can only be used when
-    // doctype is book" error for a second level-0 heading in the body — it
-    // produces no diagnostic here. Out of scope.
+    // NOTE: The crate produces no diagnostic for *this* input, because the
+    // `= Standalone Document` line is not recognized as a section here: the
+    // `//`-comment line above it and the `:author:` line below it (no blank
+    // lines between) are absorbed with it into a single paragraph, so there is
+    // no level-0 heading to flag. (A cleanly separated body level-0 heading does
+    // now raise `Level0SectionHeadingNotSupported`; see
+    // `should_print_error_if_level_0_section_comes_after_nested_section_and_doctype_is_not_book`.)
+    // Out of scope.
     non_normative!(
         r##"
     test 'should print error if standalone document is included without level offset' do
@@ -6118,9 +6124,10 @@ non_normative!(
 mod book_doctype {
     use crate::tests::prelude::*;
 
-    // NOTE: Book *parts* (level-0 `=` headings under `:doctype: book`, their
-    // `sect0` rendering, `partintro`, and the standalone `#header` / `#content`
-    // framing) are not modeled by this crate, so this test is out of scope.
+    // NOTE: A body-level `=` heading is now modeled as a level-0 `sect0`
+    // section, but the fuller book-*part* semantics this test exercises –
+    // `partintro` promotion and the standalone `#header` / `#content` page
+    // framing – are not, so this test is out of scope.
     non_normative!(
         r##"
     test 'document title with level 0 headings' do
