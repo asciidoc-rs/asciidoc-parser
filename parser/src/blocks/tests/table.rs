@@ -598,6 +598,66 @@ fn malformed_style_operator_falls_back_to_default() {
 }
 
 #[test]
+fn header_cell_inherits_column_alignment() {
+    // A header cell with no alignment operator of its own falls back to its
+    // column's alignment, exactly like a body cell. Only the column *style* is
+    // suppressed for a header row, not the column alignment. Here column 1 is
+    // centered horizontally and bottom-aligned vertically (`^.>`); column 2 has
+    // no operators and keeps the defaults.
+    let table = parse_table(
+        "[cols=\"^.>2,1\",options=\"header\"]\n|===\n|Header A |Header B\n\n|body a |body b\n|===",
+    );
+
+    let header = table.header_row().unwrap();
+    let header_cells = header.cells();
+
+    assert_eq!(header_cells[0].h_align(), HorizontalAlignment::Center);
+    assert_eq!(header_cells[0].v_align(), VerticalAlignment::Bottom);
+    assert_eq!(header_cells[1].h_align(), HorizontalAlignment::Left);
+    assert_eq!(header_cells[1].v_align(), VerticalAlignment::Top);
+
+    // The body cells resolve to the same column alignment, confirming the header
+    // now matches the body.
+    let body_cells = table.body_rows()[0].cells();
+
+    assert_eq!(body_cells[0].h_align(), HorizontalAlignment::Center);
+    assert_eq!(body_cells[0].v_align(), VerticalAlignment::Bottom);
+    assert_eq!(body_cells[1].h_align(), HorizontalAlignment::Left);
+    assert_eq!(body_cells[1].v_align(), VerticalAlignment::Top);
+}
+
+#[test]
+fn header_cell_operator_overrides_column_alignment() {
+    // A header cell's own alignment operator still takes precedence over the
+    // column's alignment, just as for a body cell. The column is left/top by
+    // default; the first header cell's `>` operator right-aligns it.
+    let table = parse_table(
+        "[cols=\"2,1\",options=\"header\"]\n|===\n>|Header A |Header B\n\n|body a |body b\n|===",
+    );
+
+    let header_cells = table.header_row().unwrap().cells();
+
+    assert_eq!(header_cells[0].h_align(), HorizontalAlignment::Right);
+    assert_eq!(header_cells[1].h_align(), HorizontalAlignment::Left);
+}
+
+#[test]
+fn csv_header_cell_inherits_column_alignment() {
+    // A data-format (CSV) header cell carries no per-cell specifier, so its
+    // alignment comes entirely from the column – including in the header row.
+    let table = parse_table(
+        "[format=\"csv\",cols=\"^.>2,1\",options=\"header\"]\n|===\nHeader A,Header B\nbody a,body b\n|===",
+    );
+
+    let header_cells = table.header_row().unwrap().cells();
+
+    assert_eq!(header_cells[0].h_align(), HorizontalAlignment::Center);
+    assert_eq!(header_cells[0].v_align(), VerticalAlignment::Bottom);
+    assert_eq!(header_cells[1].h_align(), HorizontalAlignment::Left);
+    assert_eq!(header_cells[1].v_align(), VerticalAlignment::Top);
+}
+
+#[test]
 fn asciidoc_cell_resolves_references_in_nested_blocks() {
     // Cross-references inside an AsciiDoc cell are resolved during the document's
     // reference-resolution pass, which descends into the cell's nested blocks.
