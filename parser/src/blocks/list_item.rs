@@ -29,6 +29,7 @@ pub struct ListItem<'src> {
     anchor_reftext: Option<Span<'src>>,
     attrlist: Option<Attrlist<'src>>,
     checkbox: Option<bool>,
+    has_empty_principal_text: bool,
 }
 
 impl<'src> ListItem<'src> {
@@ -125,12 +126,23 @@ impl<'src> ListItem<'src> {
 
         parser.in_bibliography_list_item.set(false);
 
+        let mut has_empty_principal_text = false;
+
         let mut next = if let Some(simple_block_mi) = simple_block_for_list_item {
-            // If the principal text is empty (e.g. from {empty} attribute reference),
-            // drop it from the parse tree.
-            if !simple_block_mi.item.content().is_empty() {
+            // If the principal text is present but renders empty (e.g. from an
+            // `{empty}` attribute reference), the node for the principal text is
+            // dropped from the parse tree rather than emitted as an empty child
+            // block. We record that it was present, however: the item still has
+            // an (empty) principal text distinct from a list item that carries
+            // no principal text at all. A renderer uses this to emit the empty
+            // principal paragraph ahead of any continuation-attached blocks,
+            // matching Asciidoctor (whose `text?` is true with `text` empty).
+            if simple_block_mi.item.content().is_empty() {
+                has_empty_principal_text = true;
+            } else {
                 blocks.push(Block::Simple(simple_block_mi.item));
             }
+
             simple_block_mi.after
         } else if matches!(marker, ListItemMarker::DefinedTerm { .. }) {
             // Description list items can have empty content on the same line as the marker.
@@ -570,6 +582,7 @@ impl<'src> ListItem<'src> {
                 anchor_reftext: metadata.anchor_reftext,
                 attrlist: metadata.attrlist.clone(),
                 checkbox,
+                has_empty_principal_text,
             },
             after: next,
         })
@@ -589,6 +602,21 @@ impl<'src> ListItem<'src> {
     /// item.
     pub fn checkbox(&self) -> Option<bool> {
         self.checkbox
+    }
+
+    /// Reports whether this item has principal text that is present in the
+    /// source but renders empty (for example, principal text written as the
+    /// `{empty}` attribute reference).
+    ///
+    /// Such an empty principal text node is not emitted as a child block (see
+    /// [`child_blocks`](Self::child_blocks)); this flag preserves the fact that
+    /// it was there. It distinguishes an item whose principal text is empty –
+    /// so a renderer emits an empty principal paragraph ahead of any
+    /// continuation-attached blocks (as Asciidoctor does) – from an item that
+    /// simply has no principal text. When it is `true`, the item's first child
+    /// block is an attached block rather than the principal text.
+    pub fn has_empty_principal_text(&self) -> bool {
+        self.has_empty_principal_text
     }
 }
 
@@ -647,6 +675,7 @@ impl std::fmt::Debug for ListItem<'_> {
             .field("anchor_reftext", &self.anchor_reftext)
             .field("attrlist", &self.attrlist)
             .field("checkbox", &self.checkbox)
+            .field("has_empty_principal_text", &self.has_empty_principal_text)
             .finish()
     }
 }
@@ -798,7 +827,7 @@ mod tests {
 
         assert_eq!(
             format!("{:#?}", li.item),
-            "ListItem {\n    marker: ListItemMarker::Hyphen(\n        Span {\n            data: \"-\",\n            line: 1,\n            col: 1,\n            offset: 0,\n        },\n    ),\n    blocks: &[\n        Block::Simple(\n            SimpleBlock {\n                content: Content {\n                    original: Span {\n                        data: \"blah\",\n                        line: 1,\n                        col: 3,\n                        offset: 2,\n                    },\n                    rendered: \"blah\",\n                },\n                source: Span {\n                    data: \"blah\",\n                    line: 1,\n                    col: 3,\n                    offset: 2,\n                },\n                style: SimpleBlockStyle::Paragraph,\n                title_source: None,\n                title: None,\n                caption: None,\n                number: None,\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n    checkbox: None,\n}"
+            "ListItem {\n    marker: ListItemMarker::Hyphen(\n        Span {\n            data: \"-\",\n            line: 1,\n            col: 1,\n            offset: 0,\n        },\n    ),\n    blocks: &[\n        Block::Simple(\n            SimpleBlock {\n                content: Content {\n                    original: Span {\n                        data: \"blah\",\n                        line: 1,\n                        col: 3,\n                        offset: 2,\n                    },\n                    rendered: \"blah\",\n                },\n                source: Span {\n                    data: \"blah\",\n                    line: 1,\n                    col: 3,\n                    offset: 2,\n                },\n                style: SimpleBlockStyle::Paragraph,\n                title_source: None,\n                title: None,\n                caption: None,\n                number: None,\n                anchor: None,\n                anchor_reftext: None,\n                attrlist: None,\n            },\n        ),\n    ],\n    source: Span {\n        data: \"- blah\",\n        line: 1,\n        col: 1,\n        offset: 0,\n    },\n    anchor: None,\n    anchor_reftext: None,\n    attrlist: None,\n    checkbox: None,\n    has_empty_principal_text: false,\n}"
         );
     }
 
