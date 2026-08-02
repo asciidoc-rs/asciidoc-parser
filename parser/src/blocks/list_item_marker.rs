@@ -4,7 +4,9 @@ use regex::Regex;
 
 use crate::{
     HasSpan, Parser, Span,
-    content::{Content, SubstitutionStep, apply_macros_with_leading_anchor_registered},
+    content::{
+        Content, Passthroughs, SubstitutionStep, apply_macros_with_leading_anchor_registered,
+    },
     document::RefType,
     span::MatchedItem,
     warnings::{Warning, WarningType},
@@ -178,13 +180,16 @@ impl<'src> ListItemMarker<'src> {
         }
     }
 
-    /// Register any leading inline anchors found in a description list term.
+    /// Apply the term's inline substitutions and register any leading inline
+    /// anchors found in a description list term.
     ///
     /// This should be called after parsing a `DefinedTerm` marker when the list
-    /// item is being kept (not just checked for existence). It detects anchors
-    /// like `[[id]]` or `[[id,reftext]]` at the start of the term text,
-    /// registers them in the catalog, and applies macros substitution to
-    /// render the anchor.
+    /// item is being kept (not just checked for existence). A description-list
+    /// term receives the full `normal` substitution group, matching
+    /// Asciidoctor, so `&`, `<`, and `>` are escaped and inline formatting is
+    /// rendered. It also detects anchors like `[[id]]` or `[[id,reftext]]` at
+    /// the start of the term text, registers them in the catalog, and renders
+    /// the anchor.
     ///
     /// This method is a no-op for non-`DefinedTerm` markers.
     pub(crate) fn register_leading_anchors(
@@ -201,45 +206,57 @@ impl<'src> ListItemMarker<'src> {
             return;
         };
 
-        // Check if term starts with `[[` indicating a potential inline anchor.
-        let term_text = term.rendered();
-        if !term_text.starts_with("[[") {
-            // Apply macros substitution even if no leading anchor.
-            SubstitutionStep::Macros.apply(term, parser, None);
-            return;
-        }
+        // A description-list term is substituted with the `normal` group. The
+        // attribute-references step already ran during parsing (so the marker
+        // could be recognized), so the remaining steps run here. Passthrough
+        // spans are extracted first and restored last so their payloads are
+        // shielded from the intervening substitutions, mirroring the structure
+        // of `SubstitutionGroup::apply` for the normal group.
+        let passthroughs = Passthroughs::extract_from(term, parser);
 
-        // NOTE: Code coverage for the remainder of this function will be
-        // missing until we complete MAJOR REFACTOR: Split parsing and
-        // inline substitution steps.
-        // (See https://github.com/asciidoc-rs/asciidoc-parser/issues/461.)
+        SubstitutionStep::SpecialCharacters.apply(term, parser, None);
+        SubstitutionStep::Quotes.apply(term, parser, None);
+        SubstitutionStep::CharacterReplacements.apply(term, parser, None);
 
-        // Detect leading inline anchor pattern: [[id]] or [[id,reftext]]
-        if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term_text) {
-            let id = &captures[1];
+        // A leading inline anchor (`[[id]]` or `[[id,reftext]]`) at the start of
+        // the term is registered in the catalog before the macros step renders
+        // it, so that only its own duplicate-registration warning is suppressed
+        // during that pass. Any other term goes straight through the macros
+        // step.
+        if term.rendered().starts_with("[[") {
+            if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term.rendered()) {
+                let id = &captures[1];
 
-            // If reftext is provided, use it. Otherwise, use the text after the anchor
-            // as the default reftext.
-            let reftext = captures.get(2).map(|m| m.as_str().to_string()).or_else(|| {
-                // Use the text after the anchor as default reftext.
-                captures.get(3).map(|m| m.as_str().trim().to_string())
-            });
+                // If reftext is provided, use it. Otherwise, use the text after
+                // the anchor as the default reftext.
+                let reftext = captures.get(2).map(|m| m.as_str().to_string()).or_else(|| {
+                    // Use the text after the anchor as default reftext.
+                    captures.get(3).map(|m| m.as_str().trim().to_string())
+                });
 
-            // Register the anchor in the catalog.
-            if let Err(_duplicate_error) =
-                parser.register_ref(id, reftext.as_deref(), RefType::Anchor)
-            {
-                warnings.push(Warning::new(
-                    term.original(),
-                    WarningType::DuplicateId(id.to_string()),
-                ));
+                // Register the anchor in the catalog.
+                if let Err(_duplicate_error) =
+                    parser.register_ref(id, reftext.as_deref(), RefType::Anchor)
+                {
+                    warnings.push(Warning::new(
+                        term.original(),
+                        WarningType::DuplicateId(id.to_string()),
+                    ));
+                }
             }
+
+            apply_macros_with_leading_anchor_registered(term, parser);
+        } else {
+            SubstitutionStep::Macros.apply(term, parser, None);
         }
 
-        // Apply macros substitution to render the inline anchor as HTML. The
-        // leading anchor was already registered above, so suppress only that
-        // duplicate registration warning in the macro pass.
-        apply_macros_with_leading_anchor_registered(term, parser);
+        SubstitutionStep::PostReplacement.apply(term, parser, None);
+
+        // Restore the extracted passthroughs and finalize any deferred
+        // cross-references, matching the tail of `SubstitutionGroup::apply`.
+        passthroughs.restore_to(term, parser);
+        term.set_passthroughs(passthroughs.0);
+        term.finalize_deferred(&*parser.renderer);
     }
 
     /// Return a mutable reference to the term content of a description-list
@@ -646,6 +663,65 @@ mod tests {
     ) -> Option<MatchedItem<'a, crate::blocks::ListItemMarker<'a>>> {
         let parser = Parser::default();
         crate::blocks::ListItemMarker::parse(crate::Span::new(source), &parser)
+    }
+
+    /// Parses `source` as a description-list marker and returns the term text
+    /// after the term's inline substitutions have run (i.e. after
+    /// `register_leading_anchors`).
+    fn term_rendered(source: &str) -> String {
+        let mut parser = Parser::default();
+
+        let mut item = crate::blocks::ListItemMarker::parse(crate::Span::new(source), &parser)
+            .unwrap()
+            .item;
+
+        let mut warnings = vec![];
+        item.register_leading_anchors(&mut parser, &mut warnings);
+        assert!(warnings.is_empty());
+
+        match &item {
+            crate::blocks::ListItemMarker::DefinedTerm { term, .. } => term.rendered().to_string(),
+            other => panic!("expected a defined-term marker, got {other:#?}"),
+        }
+    }
+
+    #[test]
+    fn term_special_characters_are_escaped() {
+        // A description-list term receives the full `normal` substitution group,
+        // so the special characters `&`, `<`, and `>` are escaped rather than
+        // passed through verbatim. The horizontal and qanda list variants share
+        // this code path, since their terms are the same `DefinedTerm` marker.
+        assert_eq!(term_rendered("a & b:: desc"), "a &amp; b");
+        assert_eq!(term_rendered("a < b:: desc"), "a &lt; b");
+        assert_eq!(term_rendered("a > b:: desc"), "a &gt; b");
+
+        // The remaining `normal` steps also apply: inline formatting (quotes)
+        // and character replacements are rendered in the term.
+        assert_eq!(term_rendered("*bold*:: desc"), "<strong>bold</strong>");
+        assert_eq!(term_rendered("A(C):: desc"), "A&#169;");
+        assert_eq!(term_rendered("A(TM):: desc"), "A&#8482;");
+    }
+
+    #[test]
+    fn term_passthrough_payload_is_protected() {
+        // Passthrough spans in a term are extracted before the substitution
+        // steps run and restored afterward, so their payloads bypass special
+        // characters and quotes exactly as they would in ordinary content.
+        assert_eq!(term_rendered("+++<b>a & b</b>+++:: desc"), "<b>a & b</b>");
+        assert_eq!(term_rendered("pass:[<b>]:: desc"), "<b>");
+
+        // Only special characters are applied inside a double-plus span.
+        assert_eq!(term_rendered("++<b>++:: desc"), "&lt;b&gt;");
+    }
+
+    #[test]
+    fn term_with_bracket_prefix_but_no_valid_anchor() {
+        // A term that starts with `[[` but is not a well-formed inline anchor
+        // (an ID may not start with a digit, and the anchor must be closed) is
+        // not registered as a reference; the bracketed text is left as-is by
+        // the macros step and no warning is emitted.
+        assert_eq!(term_rendered("[[1bad]] foo:: desc"), "[[1bad]] foo");
+        assert_eq!(term_rendered("[[ nope:: desc"), "[[ nope");
     }
 
     #[test]
