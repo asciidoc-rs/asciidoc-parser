@@ -107,22 +107,26 @@ TIP: The header row ignores any style operators assigned via column and cell spe
         crate::blocks::TableCellContent::AsciiDoc(_)
     ));
 
-    verifies!(
+    // This sentence is classified `non_normative!` rather than `verifies!`
+    // because the crate deliberately diverges from its first clause. It is a
+    // single spec line asserting two rules – (1) the header row ignores
+    // alignment operators on column specifiers, and (2) alignment operators on
+    // a header *cell* specifier are applied. We honor rule (2) but contradict
+    // rule (1): Asciidoctor 2.0.26 (the parity oracle) does *not* ignore column
+    // alignment for the header row. In `lib/asciidoctor/table.rb`,
+    // `Table::Cell#initialize` runs `update_attributes column.attributes` for
+    // every cell (header or body), copying the column's `halign`/`valign` onto
+    // the cell; the header-specific handling only skips
+    // `cell_style = column.style`, so the header ignores the column *style*,
+    // not its alignment. Because the SDD coverage tool matches whole spec lines,
+    // the honored and contradicted rules cannot be split, so the line is marked
+    // non-normative rather than falsely reporting rule (1) as verified.
+    non_normative!(
         r#"
 It also ignores alignment operators assigned to the table's column specifiers; however, any alignment operators assigned to a cell specifier in the header row are applied.
 
 "#
     );
-
-    // NOTE: This crate deliberately diverges from the spec TIP above for the
-    // column-alignment case. Asciidoctor 2.0.26 (the parity oracle) does *not*
-    // ignore alignment operators on a column specifier for the header row: a
-    // header cell inherits its column's `halign`/`valign` exactly like a body
-    // cell. In `lib/asciidoctor/table.rb`, `Table::Cell#initialize` runs
-    // `update_attributes column.attributes` for every cell (header or body),
-    // which copies the column's alignment onto the cell; the header-specific
-    // handling only skips `cell_style = column.style`, so the header ignores the
-    // column *style*, not its alignment. We follow Asciidoctor's behavior.
 
     // The columns carry alignment operators (`^` centers, `.>` bottom-aligns),
     // and the first row is promoted to the header. The header cells inherit the
