@@ -276,8 +276,9 @@ impl<'src> Content<'src> {
 
     /// The default **HTML** rendering: a fold of `inlines()` with the
     /// built-in HTML renderer. Computed lazily and cached, so it can hand
-    /// back `&str` (approximates today's model — see §3.3.1, §7).
-    pub fn rendered(&self) -> &str;
+    /// back `&str`. Renamed from today's `rendered()` to make the
+    /// HTML-specificity explicit (§3.3.1, §7).
+    pub fn rendered_html(&self) -> &str;
 
     /// Render this content to a caller-supplied backend. A pure fold over
     /// the same `inlines()`; returns an owned `String`, not cached.
@@ -292,13 +293,15 @@ impl<'src> Content<'src> {
 
 ```rust
 fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> { None }
-// rendered_content()/title() retained as a fold, at least through migration.
+// rendered_html_content()/title() retained as a fold, at least through
+// migration (rendered_content() likewise renamed for HTML-specificity).
 ```
 
 #### 3.3.1 Rendering, renderer selection, and caching
 
-Making the AST canonical **decouples rendering from parsing**, and that changes what
-`rendered()` means. Three points resolve it:
+Making the AST canonical **decouples rendering from parsing**, and that changes what the
+rendered-string accessor means — including its name, which becomes `rendered_html()` (from
+today's `rendered()`) to signal the shift. Three points resolve it:
 
 1. **Parsing no longer renders.** It produces the AST with every *order-dependent* fact
    already resolved *into node values* — footnote numbers, callout numbers, counters,
@@ -308,21 +311,21 @@ Making the AST canonical **decouples rendering from parsing**, and that changes 
    string *during* parse, which is exactly why the #942 prototype had to *clone the parser*
    to capture a second view. Here, one parse feeds any number of renders.)
 
-2. **`rendered()` has a fixed meaning: the built-in HTML backend.** It folds `inlines()`
-   with the crate's `HtmlInlineRenderer` and the document's own resolved render-context.
-   This is a deliberate improvement over today, where `rendered()` silently returns whatever
-   renderer was configured on the `Parser` — an ambiguous contract. So the answer to *"which
-   `InlineRenderer` does the work when I call `rendered()`?"* is unambiguous: **always the
-   built-in HTML one.**
+2. **`rendered_html()` has a fixed meaning: the built-in HTML backend.** It folds `inlines()`
+   with the crate's `HtmlInlineRenderer` and the document's own resolved render-context. Its
+   very name now states the backend — a deliberate improvement over today's `rendered()`,
+   which silently returns whatever renderer was configured on the `Parser`, an ambiguous
+   contract. So the answer to *"which `InlineRenderer` does the work when I call
+   `rendered_html()`?"* is unambiguous: **always the built-in HTML one.**
 
 3. **A custom (non-HTML) backend is a render-time argument, not a parse-time global.** The
-   consumer never gets it invoked *through* `rendered()`; they call `render_with(&their_
+   consumer never gets it invoked *through* `rendered_html()`; they call `render_with(&their_
    renderer)` (or `Document::render_to(&their_renderer)`, or walk `inlines()` themselves) —
    a pure fold they drive over the already-parsed tree. They can render the same document to
    several backends without reparsing.
 
 **What caching means here.** The crate memoizes exactly **one** artifact — the default HTML
-fold — lazily on `Content`, which is what lets `rendered()` return `&str`. That single
+fold — lazily on `Content`, which is what lets `rendered_html()` return `&str`. That single
 artifact has a stable identity (the built-in renderer + the document's own context) and the
 AST is frozen after resolution, so the memoization is sound with **one invalidation seam**:
 reference resolution fills in xref destinations *after* initial parse, so the HTML cache is
@@ -332,10 +335,12 @@ the crate: their outputs are owned `String`s the caller may cache as it sees fit
 crate-side cache would need to be keyed by renderer identity/config — an unbounded space that
 is not the crate's responsibility.
 
-> **Decision:** `rendered()` = cached default-HTML fold; all other backends go through an
-> explicit `render_with`/`render_to` fold and are the caller's to cache. Parse-time renderer
-> configuration on `Parser` is **dropped** — the renderer moves to render time. *(This is
-> the clean pre-1.0 break; the alternative — keep `rendered()`'s meaning configurable — was
+> **Decision:** rename `rendered()` → **`rendered_html()`** (and `rendered_content()` →
+> `rendered_html_content()`), defined as the cached default-HTML fold; all other backends go
+> through an explicit `render_with`/`render_to` fold and are the caller's to cache.
+> Parse-time renderer configuration on `Parser` is **dropped** — the renderer moves to render
+> time. *(This is the clean pre-1.0 break; the alternative — keep one `rendered()` whose
+> meaning is configurable — was
 > rejected because it reintroduces the "which renderer ran?" ambiguity the AST lets us
 > finally remove.)*
 
@@ -561,7 +566,10 @@ Each phase is a reviewable unit with a clear exit gate.
   benchmarks within an agreed budget of `main`.
 
 - **Phase 3 — expose the public inline API.** `Content::inlines()`, `IsBlock::inlines()`,
-  the public node types. Resolution reports at node granularity.
+  the public node types, and `render_with`/`render_to`. Rename `rendered()` →
+  `rendered_html()` and `rendered_content()` → `rendered_html_content()` (§3.3.1) — a
+  mechanical sweep of the ~277 golden assertions that leaves every *asserted string*
+  untouched. Resolution reports at node granularity.
   *Exit:* node vocabulary reviewed against the `asciidoctor` port's needs (§6.6); the
   purely-structural navigation sugar kept minimal pending a re-flow consumer; doc + README
   updated (the security section gets its `Raw`-node anchor).
@@ -590,9 +598,11 @@ staggered submissions to `main`.
 ### 5.3 The golden-HTML oracle (the safety net)
 
 The ~277 existing `.rendered()` assertions comparing against literal HTML strings are the
-migration's single most valuable asset. They are kept **unchanged** as long as possible and
-treated as an executable specification of correct output. Any phase that changes internals
-must leave every one of them green. This is what lets us re-architect the interior
+migration's single most valuable asset. The invariant is the **asserted output strings**,
+not the accessor name: they are kept **unchanged** and treated as an executable
+specification of correct output (the Phase 3 rename to `.rendered_html()` rewrites only the
+call, never the expected string). Any phase that changes internals must leave every one of
+them green. This is what lets us re-architect the interior
 aggressively without fear: the observable contract is pinned.
 
 Add a **corpus-wide differential harness** early: parse every fixture, fold the tree, and
@@ -619,13 +629,17 @@ regressions the hand-written assertions don't cover.
 | Two node trees fold to identical HTML, masking a structural bug       | Cross-check against the recorder in Phase 1; add structural assertions in Phase 3.          |
 | Performance regression (extra allocation for nodes vs. one string)    | `'src` borrowing for `Text`/`Raw`; single-node fast path for plain paragraphs; benchmark gate in Phase 2 (existing Criterion/CodSpeed benches). |
 | Long-running branch drifts from `main`                                | Frequent `main`→branch merges (never rebase); land as one merge commit preserving staged history. |
-| Public API pinned before a consumer proves it out                     | Keep `inlines()` behind the phase gate; align field sets with the first downstream tool (§6), per #943's discipline. |
+| Public API pinned before a consumer proves it out                     | Keep `inlines()` behind the phase gate; align field sets with the `asciidoctor` port (§6.6), per #943's discipline. |
 | ASG under-models crate constructs, forcing lossy projection           | Keep native rich nodes; document projection choices; treat ASG as an output, not the internal ceiling. |
 | Attribute-expansion / passthrough span provenance is genuinely hard   | Ship Phase 3 with coarse fallback spans (shape is span-ready); defer precision to Phase 4 with #944's explicit policies. |
 
 ---
 
-## 6. Open decisions (recommendations)
+## 6. Decisions
+
+*Accepted by the maintainer on 2026-08-02.* These were open questions in the initial draft;
+the recommendations below were reviewed and adopted, and now stand as decisions for the
+implementation.
 
 1. **Node text: logical vs. rendered vs. source?** → **Logical** (reader's characters),
    with escaping deferred to the fold. This is what enables ASG conformance and clean
@@ -638,10 +652,10 @@ regressions the hand-written assertions don't cover.
 3. **Owned vs. borrowed strings?** → **`CowStr<'src>`**, borrowed by default.
 4. **Spans from day one?** → **Yes**, as a field on every node, populated coarsely first
    (§4.4). Avoids a breaking reshape later.
-5. **Retain `rendered()`?** → **Yes**, as a cached **default-HTML** fold, with custom
-   backends routed through an explicit `render_with`/`render_to` and the parse-time renderer
-   config dropped (§3.3.1) — this is the "approximate the existing rendered-content model"
-   bonus, achieved for free.
+5. **Retain the rendered-string accessor?** → **Yes**, renamed to `rendered_html()`, as a
+   cached **default-HTML** fold, with custom backends routed through an explicit
+   `render_with`/`render_to` and the parse-time renderer config dropped (§3.3.1) — this is
+   the "approximate the existing rendered-content model" bonus, achieved for free.
 6. **Which downstream tool pins the API?** → the **Ruby-to-Rust `asciidoctor` port** — the
    only consumer actually underway. It reproduces Asciidoctor's HTML exactly, so it walks
    and renders the *entire* inline vocabulary (images, footnotes, xrefs, callouts, UI
@@ -662,9 +676,10 @@ regressions the hand-written assertions don't cover.
 
 The prompt notes that approximating the current rendered-content model with the new
 architecture is a bonus. This design achieves it **exactly, not approximately**:
-`rendered()` survives as a fold over the AST, and the golden-HTML oracle guarantees it is
-byte-for-byte identical to today's output. Consumers that only want the string keep the
-same one-line call; consumers that want structure get `inlines()`. The rendered model is
+`rendered_html()` (today's `rendered()`, renamed — §3.3.1) survives as a fold over the AST,
+and the golden-HTML oracle guarantees it is byte-for-byte identical to today's output.
+Consumers that only want the string keep the same one-line call (under the new name);
+consumers that want structure get `inlines()`. The rendered model is
 not a parallel artifact to keep in sync — it is a *view* of the canonical tree, so the
 drift risk that plagued the #942 prototype is designed out.
 
