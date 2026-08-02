@@ -21,6 +21,17 @@
 //! `Content::rendered()` remains authoritative. Later phases promote the tree
 //! to the canonical representation and make `rendered()` a fold over it.
 //!
+//! # These sentinels are temporary
+//!
+//! The `MARK_OPEN` / `MARK_CLOSE` / PUA-digit sentinels introduced below exist
+//! *only* for this Strategy A oracle. The design is explicit that Strategy A is
+//! not the end state (§4.1): the Phase 4 single-pass builder (Strategy B)
+//! constructs nodes directly as the substitution sink, so there is no recording
+//! pass and no markers at all. These sentinels are therefore retired wholesale
+//! along with the recorder, and – unlike the three production sentinel systems
+//! the node model also retires (passthrough / xref / footnote, §4.2) – they
+//! never touch shipped output even now, since this module is test-only.
+//!
 //! A missing construct degrades gracefully. If a `render_*` method is not
 //! intercepted, its output flows to the working string with no sentinels and is
 //! recovered as ordinary [`Text`](InlineNode::Text); byte parity is preserved
@@ -28,6 +39,9 @@
 //!
 //! [inline AST architecture]: ../../../docs/design/inline-ast-architecture.md
 
+// TEMPORARY: some node metadata is captured but not yet read while this is a
+// bring-up oracle; the allow goes away when the tree becomes canonical
+// (Phase 2) and every field is consumed.
 #![allow(dead_code)]
 
 use std::{cell::RefCell, rc::Rc};
