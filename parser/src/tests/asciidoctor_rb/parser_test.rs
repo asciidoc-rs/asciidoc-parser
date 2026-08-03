@@ -1034,16 +1034,25 @@ fn parse_invalid_author_line_becomes_author() {
 
     // The author line doesn't match the author pattern (because of the embedded
     // comma), so Asciidoctor condenses the interior whitespace and stores the whole
-    // line verbatim as the author, keeping the angle brackets literal.
+    // line as the author.
+    //
+    // The Ruby assertions above check `metadata['author']`, the *raw* value that
+    // `parse_header_metadata` returns before substitution. This crate's
+    // `Author::name()` instead represents the value that populates the `author`
+    // document attribute – the one `{author}` and the converter consume – to which
+    // Asciidoctor applies the header substitution group via `apply_header_subs`
+    // (`doc.attributes['author'] = apply_header_subs val`). Applying the header
+    // subs escapes the literal angle brackets, so they appear as `&lt;`/`&gt;`
+    // here.
     let a = parse_authors("   Stuart       Rackham, founder of AsciiDoc   <founder@asciidoc.org>");
     assert_eq!(a.len(), 1);
     assert_eq!(
         a[0].name,
-        "Stuart Rackham, founder of AsciiDoc <founder@asciidoc.org>"
+        "Stuart Rackham, founder of AsciiDoc &lt;founder@asciidoc.org&gt;"
     );
     assert_eq!(
         a[0].firstname,
-        "Stuart Rackham, founder of AsciiDoc <founder@asciidoc.org>"
+        "Stuart Rackham, founder of AsciiDoc &lt;founder@asciidoc.org&gt;"
     );
     assert_eq!(a[0].middlename, None);
     assert_eq!(a[0].lastname, None);
