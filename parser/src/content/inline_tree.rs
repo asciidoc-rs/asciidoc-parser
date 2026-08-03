@@ -972,6 +972,89 @@ pub(crate) fn build_inline_tree<'src>(
     to_inline(&recs, location)
 }
 
+/// Populates the child subtree of every *defining* [`Footnote`] node in
+/// `nodes`, from the recorder-marked footnote texts the recording pass
+/// registered.
+///
+/// A footnote's text is extracted out of the flow of the block during the
+/// macros substitution step – only its marker is left behind – so it never
+/// reaches the block's marked string and cannot be recovered by
+/// [`build_inline_tree`] alone. `texts` is the marked text of each footnote the
+/// recording pass defined, in registration order (as
+/// `Parser::footnote_texts_from` reports it); each parses against the *same*
+/// `events` log, since the recorder brackets a footnote's constructs there too.
+///
+/// The defining footnote nodes of a block, visited in document order, line up
+/// one-to-one with the footnotes that block's pipeline registered, so node *i*
+/// takes text *i*. A *reference* occurrence (`footnote:id[]`) defines nothing
+/// and keeps the empty subtree its node type documents.
+///
+/// [`Footnote`]: crate::inlines::Footnote
+pub(crate) fn attach_footnote_subtrees<'src>(
+    nodes: &mut [InlineNode<'src>],
+    texts: &[String],
+    events: &[Event],
+    location: Span<'src>,
+) {
+    if texts.is_empty() {
+        return;
+    }
+
+    let mut next = 0;
+    attach_footnote_texts(nodes, texts, events, location, &mut next);
+
+    // Every footnote the pipeline defined must have found its node. A mismatch
+    // means the recording pass and the authoritative pass enumerated footnotes
+    // differently, which would misplace a subtree; catch that in debug/test
+    // builds rather than storing a wrong tree.
+    debug_assert_eq!(
+        next,
+        texts.len(),
+        "inline tree footnote count diverged from the footnotes the pipeline defined",
+    );
+}
+
+/// Walks `nodes` in document order, giving each defining [`Footnote`] node the
+/// subtree parsed from its marked text, and advancing `next` past it.
+///
+/// [`Footnote`]: crate::inlines::Footnote
+fn attach_footnote_texts<'src>(
+    nodes: &mut [InlineNode<'src>],
+    texts: &[String],
+    events: &[Event],
+    location: Span<'src>,
+    next: &mut usize,
+) {
+    for node in nodes {
+        match node {
+            InlineNode::Footnote(footnote) => {
+                // A bare reference to an earlier footnote defines nothing, so it
+                // consumes no text and keeps its empty subtree.
+                if footnote.is_reference {
+                    continue;
+                }
+
+                if let Some(text) = texts.get(*next) {
+                    let chars: Vec<char> = text.chars().collect();
+                    footnote.children = to_inline(&parse(&chars, events), location);
+                }
+
+                *next += 1;
+            }
+
+            InlineNode::Styled(styled) => {
+                attach_footnote_texts(&mut styled.children, texts, events, location, next);
+            }
+
+            InlineNode::Ref(reference) => {
+                attach_footnote_texts(&mut reference.children, texts, events, location, next);
+            }
+
+            _ => {}
+        }
+    }
+}
+
 /// Folds a recorder-marked string back to output bytes. Used by the
 /// differential tests to assert the fold reproduces the authoritative rendered
 /// string.
@@ -1088,5 +1171,98 @@ mod tests {
 
         assert_eq!(events.borrow().len(), 1);
         assert!(dest.contains("<a/>"));
+    }
+
+    mod attach_footnote_subtrees {
+        use super::super::attach_footnote_subtrees;
+        use crate::{
+            Span,
+            inlines::{Footnote, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled},
+        };
+
+        /// A defining footnote node with an as-yet-empty subtree.
+        fn footnote() -> InlineNode<'static> {
+            InlineNode::Footnote(Footnote {
+                id: None,
+                number: Some("1".into()),
+                is_reference: false,
+                children: vec![],
+                location: Span::new(""),
+            })
+        }
+
+        /// The text of the first footnote subtree found anywhere in `nodes`.
+        fn subtree_text(nodes: &[InlineNode<'_>]) -> Option<String> {
+            for node in nodes {
+                let found = match node {
+                    InlineNode::Footnote(footnote) => Some(
+                        footnote
+                            .children
+                            .iter()
+                            .filter_map(|child| match child {
+                                InlineNode::Text { value, .. } => Some(value.as_ref()),
+                                _ => None,
+                            })
+                            .collect::<String>(),
+                    ),
+
+                    InlineNode::Styled(styled) => subtree_text(&styled.children),
+                    InlineNode::Ref(reference) => subtree_text(&reference.children),
+                    _ => None,
+                };
+
+                if found.is_some() {
+                    return found;
+                }
+            }
+
+            None
+        }
+
+        #[test]
+        fn attaches_through_a_reference_child() {
+            // A footnote written inside a link's display text is a `Footnote`
+            // node under a `Ref` node, so the walk descends through reference
+            // children to reach it.
+            let mut nodes = vec![InlineNode::Ref(Ref {
+                variant: RefVariant::Link,
+                target: "https://example.org".into(),
+                children: vec![footnote()],
+                roles: vec![],
+                window: None,
+                resolved: None,
+                location: Span::new(""),
+            })];
+
+            attach_footnote_subtrees(&mut nodes, &["the note".to_string()], &[], Span::new(""));
+
+            assert_eq!(subtree_text(&nodes).as_deref(), Some("the note"));
+        }
+
+        #[test]
+        fn attaches_through_a_formatting_span() {
+            let mut nodes = vec![InlineNode::Styled(Styled {
+                variant: StyleVariant::Strong,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: vec![],
+                attrs: None,
+                children: vec![footnote()],
+                location: Span::new(""),
+            })];
+
+            attach_footnote_subtrees(&mut nodes, &["the note".to_string()], &[], Span::new(""));
+
+            assert_eq!(subtree_text(&nodes).as_deref(), Some("the note"));
+        }
+
+        #[test]
+        fn no_texts_is_a_no_op() {
+            // The overwhelmingly common case: content that defined no footnote.
+            let mut nodes = vec![footnote()];
+            attach_footnote_subtrees(&mut nodes, &[], &[], Span::new(""));
+
+            assert_eq!(subtree_text(&nodes).as_deref(), Some(""));
+        }
     }
 }

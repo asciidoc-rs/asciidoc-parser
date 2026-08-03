@@ -1709,6 +1709,37 @@ impl Parser {
         index
     }
 
+    /// The number of footnotes registered so far in the current document's
+    /// registry.
+    ///
+    /// Read by the inline-tree recording pass, which snapshots this count
+    /// before re-running the substitution pipeline so it can pick out exactly
+    /// the footnotes that pass defined; see
+    /// [`footnote_texts_from`](Self::footnote_texts_from).
+    pub(crate) fn footnote_count(&self) -> usize {
+        self.catalog.borrow().footnotes.len()
+    }
+
+    /// The already-substituted text of each footnote registered at or after
+    /// `start`, in registration (document) order.
+    ///
+    /// A footnote's text is extracted out of the flow of the block it was
+    /// written in, so it never reaches the block's rendered string; this is how
+    /// the inline-tree recording pass recovers it. During that pass the text
+    /// carries the recorder's markers, so it parses into the footnote's own
+    /// inline subtree (see
+    /// [`attach_footnote_subtrees`](crate::content::inline_tree::attach_footnote_subtrees)).
+    pub(crate) fn footnote_texts_from(&self, start: usize) -> Vec<String> {
+        self.catalog
+            .borrow()
+            .footnotes
+            .get(start..)
+            .unwrap_or_default()
+            .iter()
+            .map(|footnote| footnote.text.clone())
+            .collect()
+    }
+
     /// Removes and returns the current document's footnote list, leaving an
     /// empty list behind. Used to give a nested document (an AsciiDoc table
     /// cell) its own footnote registry; see [`restore_footnotes`].
