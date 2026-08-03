@@ -612,14 +612,40 @@ Each phase is a reviewable unit with a clear exit gate.
   section with a *formatted* title, whose rendered (marker-bearing) text feeds the reference
   catalog. The single-pass builder (Phase 4) retires it by never re-rendering.
 
-[`RecordingRenderer`]: ../../parser/src/tests/inline_recorder.rs
+[`RecordingRenderer`]: ../../parser/src/content/inline_tree.rs
 [`parser/src/tests/inline_recorder.rs`]: ../../parser/src/tests/inline_recorder.rs
 
-- **Phase 2 — make the tree canonical; `rendered()` becomes a fold.** Flip `Content` so
-  the tree is the source of truth and `rendered()` is computed from it. Retire the sentinel
-  systems (§4.2). This is the load-bearing internal cutover.
+- **Phase 2 — make the tree canonical; `rendered()` becomes a fold.** 🔶 **In progress.**
+  Flip `Content` so the tree is the source of truth and `rendered()` is computed from it.
+  Retire the sentinel systems (§4.2). This is the load-bearing internal cutover.
   *Exit:* all ~277 golden `.rendered()` assertions pass unchanged; sentinels deleted;
   benchmarks within an agreed budget of `main`.
+
+  *Step 1 landed as (promote the tree into `Content`):* the Phase 1 recorder machinery
+  moved out of the test build into a production module
+  ([`content::inline_tree`](../../parser/src/content/inline_tree.rs)) that wraps the
+  parser's *own* renderer (so the fold reproduces that renderer's bytes, not a hard-coded
+  HTML backend). `Content` now carries a live
+  [`inlines`](../../parser/src/content/content.rs) tree, populated during substitution and
+  exposed via `Content::inlines()`. Tree building is gated behind an **opt-in** flag
+  ([`Parser::with_inline_tree`](../../parser/src/parser/parser.rs)); with it off (the
+  default) the parse path is byte- and performance-identical to before, so all ~277 golden
+  assertions pass unchanged. With it on, each block's tree is built by a **counter-safe
+  second pass**: `SubstitutionGroup::apply` clones the parser *before* the authoritative
+  pass advances any document counter, runs the recording pipeline on the clone, and parses
+  the recorded markers into the tree — so footnotes, callouts, and `{counter:…}` values are
+  numbered identically to the authoritative output (regression-tested). The
+  [`inline_recorder`](../../parser/src/tests/inline_recorder.rs) differential corpus now
+  drives the production module directly, so its byte-for-byte fold parity is a test of the
+  shipped code.
+
+  *Still remaining in Phase 2 (not in this step):* making `rendered()` *authoritatively* a
+  fold of the tree (which requires the tree to carry resolution through cross-reference and
+  title passes, so `rendered()` reflects resolved destinations) and **deleting** the three
+  production sentinel systems. These are deferred because, with Strategy A, an authoritative
+  fold would inherit the known formatted-section-title drift (§4.1) and require re-folding
+  refs at resolution time; the design sequences the true single-artifact cutover with the
+  single-pass builder in Phase 4. The opt-in flag retires with it.
 
 - **Phase 3 — expose the public inline API.** `Content::inlines()`, `IsBlock::inlines()`,
   the public node types, and `render_with`/`render_to`. Rename `rendered()` →

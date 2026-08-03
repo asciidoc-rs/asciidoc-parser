@@ -6,6 +6,7 @@
 use crate::{
     Span,
     content::Passthrough,
+    inlines::InlineNode,
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
         XrefRenderParams,
@@ -36,7 +37,7 @@ use crate::{
 /// [`RawDelimitedBlock`]: crate::blocks::RawDelimitedBlock
 /// [`Document::resolve_references`]: crate::Document::resolve_references
 /// [`rendered()`]: Self::rendered
-#[derive(Clone, Eq, Hash, PartialEq)]
+#[derive(Clone)]
 pub struct Content<'src> {
     /// The original [`Span`] from which this content was derived.
     original: Span<'src>,
@@ -83,6 +84,23 @@ pub struct Content<'src> {
     /// with no passthroughs, and for content whose substitution group does not
     /// extract them.
     passthroughs: Vec<Passthrough>,
+
+    /// The inline AST for this content: the structured representation of its
+    /// inline nodes, folded from the same substitution pass that produced
+    /// [`rendered`](Self::rendered).
+    ///
+    /// This is a **derived artifact** – a projection of the rendered content,
+    /// not an independent source of truth (yet; see the [inline AST
+    /// architecture] design, Phase 2). It is populated only when inline-tree
+    /// building is enabled on the [`Parser`](crate::Parser)
+    /// ([`with_inline_tree`](crate::Parser::with_inline_tree)); otherwise it is
+    /// empty and the default parse path is byte- and performance-identical to
+    /// before. Because it is derived, it is deliberately excluded from
+    /// [`PartialEq`]/[`Eq`]/[`Hash`]: two `Content`s with equal rendered text
+    /// compare equal regardless of whether the tree was built.
+    ///
+    /// [inline AST architecture]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
+    inlines: Vec<InlineNode<'src>>,
 }
 
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
@@ -221,6 +239,7 @@ impl<'src> Content<'src> {
             source_lines: None,
             deferred: None,
             passthroughs: Vec::new(),
+            inlines: Vec::new(),
         }
     }
 
@@ -249,6 +268,7 @@ impl<'src> Content<'src> {
                 .deferred
                 .map(|(template, xrefs)| Box::new(DeferredContent { template, xrefs })),
             passthroughs: Vec::new(),
+            inlines: Vec::new(),
         }
     }
 
@@ -286,6 +306,7 @@ impl<'src> Content<'src> {
             source_lines: Some(line_spans.into_boxed_slice()),
             deferred: None,
             passthroughs: Vec::new(),
+            inlines: Vec::new(),
         }
     }
 
@@ -363,6 +384,30 @@ impl<'src> Content<'src> {
     /// them back in.
     pub(crate) fn set_passthroughs(&mut self, passthroughs: Vec<Passthrough>) {
         self.passthroughs = passthroughs;
+    }
+
+    /// Returns the inline AST for this content: the structured representation
+    /// of its inline nodes.
+    ///
+    /// This is populated only when inline-tree building is enabled on the
+    /// [`Parser`](crate::Parser) (see
+    /// [`with_inline_tree`](crate::Parser::with_inline_tree)); it is an empty
+    /// slice otherwise. The tree is a projection of the rendered content – the
+    /// fold of the tree reproduces [`rendered`](Self::rendered) byte-for-byte –
+    /// and is not yet the canonical representation (see the inline AST
+    /// architecture design, Phase 2).
+    // Consumed by the differential and structural tests (and, in Phase 3, by
+    // the public inline API); the accessor is part of the tree's internal
+    // surface even where non-test code does not yet read it.
+    #[allow(dead_code)]
+    pub(crate) fn inlines(&self) -> &[InlineNode<'src>] {
+        &self.inlines
+    }
+
+    /// Installs the inline AST built for this content by the recording pass
+    /// (see [`inline_tree`](crate::content::inline_tree)).
+    pub(crate) fn set_inlines(&mut self, inlines: Vec<InlineNode<'src>>) {
+        self.inlines = inlines;
     }
 
     /// Removes the [`FOOTNOTE_MARKER_START`]/[`FOOTNOTE_MARKER_END`] sentinels
@@ -763,7 +808,35 @@ impl<'src> From<Span<'src>> for Content<'src> {
             source_lines: None,
             deferred: None,
             passthroughs: Vec::new(),
+            inlines: Vec::new(),
         }
+    }
+}
+
+// `inlines` is a derived cache (see the field's doc comment), so it is excluded
+// from equality and hashing: a `Content` compares and hashes by its rendered
+// output and resolution state, whether or not the inline tree was built. This
+// preserves the semantics the old `#[derive(Eq, Hash, PartialEq)]` had before
+// the field was added.
+impl PartialEq for Content<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.original == other.original
+            && self.rendered == other.rendered
+            && self.source_lines == other.source_lines
+            && self.deferred == other.deferred
+            && self.passthroughs == other.passthroughs
+    }
+}
+
+impl Eq for Content<'_> {}
+
+impl std::hash::Hash for Content<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.original.hash(state);
+        self.rendered.hash(state);
+        self.source_lines.hash(state);
+        self.deferred.hash(state);
+        self.passthroughs.hash(state);
     }
 }
 

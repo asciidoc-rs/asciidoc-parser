@@ -1,7 +1,11 @@
+use std::rc::Rc;
+
 use crate::{
     HasSpan, Parser,
     attributes::Attrlist,
-    content::{Content, Passthroughs, SubstitutionStep},
+    content::{
+        Content, Passthroughs, SubstitutionStep, inline_tree, inline_tree::RecordingRenderer,
+    },
     warnings::WarningType,
 };
 
@@ -226,6 +230,39 @@ impl SubstitutionGroup {
         parser: &Parser,
         attrlist: Option<&Attrlist>,
     ) {
+        // Snapshot the content and parser *before* the authoritative pass runs,
+        // when inline-tree building is enabled. The clone captures every
+        // document counter (footnote/callout numbers, `{counter:…}` values) at
+        // its pre-substitution value, so the recording pass below numbers
+        // constructs exactly as the authoritative pass does; the clone's
+        // mutations are then discarded, leaving the real parser advanced once.
+        let recording_seed = if parser.build_inline_tree {
+            Some((content.clone(), parser.clone()))
+        } else {
+            None
+        };
+
+        self.run_pipeline(content, parser, attrlist);
+
+        if let Some((mut recording_content, mut recording_parser)) = recording_seed {
+            self.build_inline_tree(
+                content,
+                &mut recording_content,
+                &mut recording_parser,
+                attrlist,
+            );
+        }
+    }
+
+    /// Runs the substitution pipeline for this group over `content`: extract
+    /// passthroughs (when the group includes them), apply each step in order,
+    /// restore the passthroughs, and finalize any deferred cross-references.
+    fn run_pipeline(
+        &self,
+        content: &mut Content<'_>,
+        parser: &Parser,
+        attrlist: Option<&Attrlist>,
+    ) {
         let steps = self.steps();
 
         let passthroughs: Option<Passthroughs> =
@@ -252,6 +289,56 @@ impl SubstitutionGroup {
         // references are resolved. This is a no-op when no cross-references were
         // found.
         content.finalize_deferred(&*parser.renderer);
+    }
+
+    /// Builds the inline AST for `content` by re-running the pipeline over the
+    /// pre-substitution snapshot with a [`RecordingRenderer`] wrapped around
+    /// the parser's own renderer, then parsing the recorded markers into a
+    /// tree and storing it on `content`.
+    ///
+    /// This is Strategy A (design §4.1): a transparent recording pass whose
+    /// fold reproduces the authoritative `rendered()` byte-for-byte. It is
+    /// a second pass for now; the Phase 4 single-pass builder retires it.
+    fn build_inline_tree(
+        &self,
+        content: &mut Content<'_>,
+        recording_content: &mut Content<'_>,
+        recording_parser: &mut Parser,
+        attrlist: Option<&Attrlist>,
+    ) {
+        let (recorder, events) = RecordingRenderer::new(recording_parser.renderer.clone());
+        recording_parser.renderer = Rc::new(recorder);
+
+        // The recording pass must not recurse into tree building itself (nested
+        // content would clone the parser again and again); it only needs to
+        // record this content's own constructs.
+        recording_parser.build_inline_tree = false;
+
+        self.run_pipeline(recording_content, recording_parser, attrlist);
+
+        let marked = recording_content.rendered_owned();
+        let events = events.borrow();
+        let tree = inline_tree::build_inline_tree(&marked, &events, content.original());
+
+        // The recording pass re-runs the pipeline through a *clone* of the
+        // parser, but the clone shares the same `Rc`-held inline renderer and
+        // asset handlers as the authoritative pass. That is correct for the
+        // built-in (stateless) renderer and the default handlers, but a
+        // *stateful* custom renderer – or a one-shot asset handler – could
+        // observe different state the second time and make the recorded tree
+        // fold to something other than the authoritative `rendered()`. Assert
+        // parity so such a renderer fails loudly in debug/test builds rather
+        // than silently storing a divergent tree. (Retired with the second pass
+        // itself by the Phase 4 single-pass builder.)
+        debug_assert_eq!(
+            inline_tree::fold_marked(&marked, &events),
+            content.rendered_str(),
+            "inline tree fold diverged from rendered(); the configured inline \
+             renderer or an asset handler is stateful and unsafe for inline-tree \
+             building",
+        );
+
+        content.set_inlines(tree);
     }
 
     /// Applies any block style masquerade and `subs` attribute override from
