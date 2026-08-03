@@ -314,6 +314,11 @@ const NORMAL_CORPUS: &[&str] = &[
     "line one +\nline two +\nline three",
     // STEM inline (asciimath / latexmath).
     "stem:[a < b] expression",
+    "asciimath:[a < b] inline",
+    "latexmath:[x < y] inline",
+    // Inline icon macro (renders via `render_icon`).
+    "an icon:home[] icon",
+    "icon:star[2x,role=gold] rated",
     // Empty-ish and whitespace.
     "   ",
     "a\nb\nc",

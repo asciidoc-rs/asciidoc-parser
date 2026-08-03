@@ -989,3 +989,104 @@ pub(crate) fn fold_marked(marked: &str, events: &[Event]) -> String {
 pub(crate) fn open_marker_count(marked: &str) -> usize {
     marked.matches(MARK_OPEN).count()
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::{
+        Parser, Span,
+        attributes::{Attrlist, AttrlistContext},
+        parser::{LinkRenderParams, QuoteScope, QuoteType},
+    };
+
+    /// A renderer that discards the body it is handed, so the recorder's
+    /// placeholder probe never survives – exercising the defensive
+    /// "the wrapper did not contain the placeholder body" fallbacks in
+    /// [`RecordingRenderer::split_quote`] and
+    /// [`RecordingRenderer::render_link`]. A real renderer always echoes the
+    /// body, so these paths are otherwise unreachable.
+    #[derive(Debug)]
+    struct DroppingRenderer;
+
+    impl InlineSubstitutionRenderer for DroppingRenderer {
+        fn render_quoted_substitution(
+            &self,
+            _type_: QuoteType,
+            _scope: QuoteScope,
+            _attrlist: Option<Attrlist<'_>>,
+            _id: Option<String>,
+            _body: &str,
+            dest: &mut String,
+        ) {
+            dest.push_str("<q/>");
+        }
+
+        fn render_link(&self, _params: &LinkRenderParams, dest: &mut String) {
+            dest.push_str("<a/>");
+        }
+    }
+
+    #[test]
+    fn push_text_keeps_an_unterminated_ampersand() {
+        // The wrapped renderer always emits terminated entities, but the
+        // ampersand-without-`;` guard keeps a stray `&` as plain text rather
+        // than mis-reading it as an entity.
+        let mut out = Vec::new();
+        push_text("a & b", &mut out);
+
+        let mut folded = String::new();
+        fold_into(&out, &mut folded);
+        assert_eq!(folded, "a & b");
+
+        // No character reference was manufactured from the bare ampersand.
+        assert!(out.iter().all(|rec| !matches!(rec, Rec::CharRef { .. })));
+    }
+
+    #[test]
+    fn quoted_substitution_falls_back_when_the_body_is_dropped() {
+        let (recorder, events) = RecordingRenderer::new(Rc::new(DroppingRenderer));
+
+        let mut dest = String::new();
+        recorder.render_quoted_substitution(
+            QuoteType::Strong,
+            QuoteScope::Constrained,
+            None,
+            None,
+            "body",
+            &mut dest,
+        );
+
+        // A container event was still recorded, and the fallback did not panic.
+        assert_eq!(events.borrow().len(), 1);
+        assert!(dest.contains("<q/>"));
+    }
+
+    #[test]
+    fn link_falls_back_when_the_text_is_dropped() {
+        let (recorder, events) = RecordingRenderer::new(Rc::new(DroppingRenderer));
+
+        let parser = Parser::default();
+        let attrlist = Attrlist::parse(Span::new(""), &parser, AttrlistContext::Inline)
+            .item
+            .item;
+
+        let params = LinkRenderParams {
+            target: "https://example.org".to_string(),
+            link_text: "text".to_string(),
+            extra_roles: vec![],
+            window: None,
+            attrlist: &attrlist,
+            parser: &parser,
+        };
+
+        let mut dest = String::new();
+        recorder.render_link(&params, &mut dest);
+
+        assert_eq!(events.borrow().len(), 1);
+        assert!(dest.contains("<a/>"));
+    }
+}
