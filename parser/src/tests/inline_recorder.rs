@@ -248,6 +248,8 @@ const NORMAL_CORPUS: &[&str] = &[
     // Macros: footnotes.
     "A claim.footnote:[the evidence]",
     "Named.footnote:disc[a discussion] then footnote:disc[].",
+    "A claim.footnote:[the *strong* evidence and a link:https://e.org[source]]",
+    "Two notes.footnote:[first] and again.footnote:[second]",
     // Macros: UI.
     "Press kbd:[Ctrl+T] now.",
     "Press kbd:[Ctrl,Shift,N] now.",
@@ -405,16 +407,33 @@ fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
     out
 }
 
+/// Collects the rendered text of every footnote `doc` registered, in document
+/// order.
+///
+/// A footnote's text is extracted out of the block it was written in, so it
+/// never appears in any `rendered()` string [`collect_rendered`] reaches. It is
+/// nonetheless substituted inline content – and the source of a footnote node's
+/// subtree – so the differential harness folds it under the same invariant.
+fn collect_footnote_texts(doc: &crate::Document<'_>) -> Vec<String> {
+    doc.catalog()
+        .footnotes()
+        .iter()
+        .map(|footnote| footnote.text.clone())
+        .collect()
+}
+
 /// Parses `source` twice – normally and with the recorder – and asserts that
 /// folding every content location's recorded tree reproduces its `rendered()`
 /// output byte-for-byte, including any resolved cross-references, section
-/// headings, block titles, and table cells.
+/// headings, block titles, table cells, and footnote texts.
 fn check_document(source: &str) {
     assert_no_reserved_sentinels(source);
 
     let mut golden_parser = experimental(Parser::default());
     let golden_doc = golden_parser.parse(source);
-    let golden = collect_rendered(&golden_doc);
+
+    let mut golden = collect_rendered(&golden_doc);
+    golden.extend(collect_footnote_texts(&golden_doc));
 
     let (recorder, events) = RecordingRenderer::new(Rc::new(HtmlSubstitutionRenderer {}));
     let mut recording_parser =
@@ -422,7 +441,10 @@ fn check_document(source: &str) {
     let recording_doc = recording_parser.parse(source);
     let events = events.borrow();
 
-    let folded: Vec<String> = collect_rendered(&recording_doc)
+    let mut marked = collect_rendered(&recording_doc);
+    marked.extend(collect_footnote_texts(&recording_doc));
+
+    let folded: Vec<String> = marked
         .iter()
         .map(|marked| fold_marked(marked, &events))
         .collect();
@@ -453,6 +475,37 @@ const DOCUMENT_CORPUS: &[&str] = &[
     "First *para* here.\n\nSecond _para_ with `code` and (C).",
     // Footnotes across paragraphs.
     "Body text.footnote:[the first note]\n\nMore text.footnote:[the second note]",
+    // Footnote-embedded content: the text is extracted out of the block, so
+    // these fold under the footnote arm of the harness rather than the block one.
+    "A claim.footnote:[the *strong* and _soft_ evidence]",
+    "A claim.footnote:[a < b and (C) and an ellipsis...]",
+    "A claim.footnote:[see link:https://example.org[the source]]",
+    "A claim.footnote:[with an image:proof.png[Proof] inline]",
+    // Footnote-embedded cross-references, resolved and unresolved.
+    "[[tgt]]The target.\n\nA claim.footnote:[see <<tgt>> for details]",
+    "[[tgt]]The target.\n\nA claim.footnote:[see xref:tgt[the target] now]",
+    "A claim.footnote:[see <<missing>>]",
+    "[[a]]A.\n\n[[b]]B.\n\nSee <<a>>.footnote:[and also <<b>>] and <<b>>.",
+    // A named footnote defined once and referenced again.
+    "Named.footnote:disc[a *discussion* of <<tgt>>] then footnote:disc[].\n\n[[tgt]]Target.",
+    // Defining, referencing, and defining again, each carrying its own embedded
+    // reference: the re-homed segments must stay aligned with the subtrees.
+    "A.footnote:x[first <<t>>] B.footnote:x[] C.footnote:[second <<t>>]\n\n[[t]]T.",
+    // A reference to an ID that was never defined (no number, no subtree).
+    "A claim.footnote:never-defined[]",
+    // A footnote nested inside a formatting span, so the subtree walk has to
+    // descend through the `Styled` node to reach it.
+    "*bold with a footnote:[a note] inside*",
+    // Footnotes in list items, a table cell, and a block `.Title`.
+    "* item.footnote:[list note]\n* second.footnote:[another note]",
+    "|===\n| cell.footnote:[cell note] | plain\n|===",
+    ".A title.footnote:[title note]\nA paragraph.",
+    // A footnote arriving via attribute expansion.
+    ":note: footnote:[from an attribute]\n\nA claim.{note}",
+    // Multi-line footnote text (normalized onto one line).
+    "A claim.footnote:[text spread\nacross\nlines]",
+    // A footnote in a section heading (owned by the document-order title pass).
+    "[[tgt]]The target.\n\n== A Heading.footnote:[see <<tgt>>]\n\nBody.\n",
     // A list with inline formatting per item.
     "* item *one*\n* item _two_ with `code`\n* item with a < b",
     // A section whose body references an explicitly-anchored target.
@@ -474,6 +527,45 @@ const DOCUMENT_CORPUS: &[&str] = &[
 fn document_corpus_folds_byte_for_byte() {
     for source in DOCUMENT_CORPUS {
         check_document(source);
+    }
+}
+
+/// Parses `source` twice – with inline-tree building off (the default) and on –
+/// and asserts the rendered output is identical, so enabling the flag cannot
+/// perturb what the golden `.rendered()` assertions pin.
+///
+/// This also drives the whole flag-on production path over the corpus: the
+/// counter-safe recording pass, the footnote-subtree attachment, and both
+/// cross-reference mirrors. Each of those carries a debug assertion that fires
+/// here if the recording pass and the authoritative pass ever enumerate
+/// constructs differently, so the sweep is where a correlation break surfaces.
+fn check_inline_tree_flag_parity(source: &str) {
+    let mut off_parser = experimental(Parser::default());
+    let off_doc = off_parser.parse(source);
+
+    let mut off = collect_rendered(&off_doc);
+    off.extend(collect_footnote_texts(&off_doc));
+
+    let mut on_parser = experimental(Parser::default()).with_inline_tree(true);
+    let on_doc = on_parser.parse(source);
+
+    let mut on = collect_rendered(&on_doc);
+    on.extend(collect_footnote_texts(&on_doc));
+
+    assert_eq!(
+        on, off,
+        "enabling inline-tree building changed the rendered output for {source:?}"
+    );
+}
+
+#[test]
+fn inline_tree_flag_leaves_rendered_output_unchanged() {
+    for source in DOCUMENT_CORPUS
+        .iter()
+        .chain(NORMAL_CORPUS)
+        .chain(VERBATIM_CORPUS)
+    {
+        check_inline_tree_flag_parity(source);
     }
 }
 
@@ -1298,4 +1390,584 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
         None,
         "a re-resolution that fails must clear the title tree's stale destination"
     );
+}
+
+// ─── Wiring: the footnote subtree and its cross-references ──────────────────
+//
+// A footnote's text is extracted out of the flow of the block during the macros
+// substitution step – only its marker is left behind – so it never reaches the
+// block's rendered string and the tree could not recover it from that string
+// alone. The recording pass now also picks up the footnote texts it registered
+// (which carry the recorder's markers, against the same event log) and parses
+// each into the footnote node's own child subtree.
+//
+// That closes the second of the two follow-ups tracked from Phase 2 step 2: a
+// cross-reference *inside* a footnote is re-homed out of the block template
+// when the footnote text is extracted, so it lives in that subtree, and the
+// shared mirror now installs its resolved destination there – the same
+// destination the rendered footnote text reflects (design §4.3).
+
+/// The first [`Footnote`](InlineNode::Footnote) node found anywhere in the
+/// simple blocks of `doc`, in document order.
+fn first_footnote<'a>(doc: &'a crate::Document<'a>) -> crate::inlines::Footnote<'a> {
+    use crate::blocks::Block;
+
+    fn find<'a>(nodes: &[InlineNode<'a>]) -> Option<crate::inlines::Footnote<'a>> {
+        for node in nodes {
+            let found = match node {
+                InlineNode::Footnote(footnote) => Some(footnote.clone()),
+                InlineNode::Styled(styled) => find(&styled.children),
+                InlineNode::Ref(reference) => find(&reference.children),
+                _ => None,
+            };
+
+            if found.is_some() {
+                return found;
+            }
+        }
+
+        None
+    }
+
+    for block in doc.child_blocks() {
+        if let Block::Simple(simple) = block
+            && let Some(footnote) = find(simple.content().inlines())
+        {
+            return footnote;
+        }
+    }
+
+    panic!("no footnote node found");
+}
+
+/// Every cross-reference node in `nodes`, recursing through formatting spans,
+/// reference children, and footnote subtrees.
+fn refs_in<'a>(nodes: &[InlineNode<'a>]) -> Vec<crate::inlines::Ref<'a>> {
+    let mut out = vec![];
+
+    fn walk<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
+        for node in nodes {
+            match node {
+                InlineNode::Ref(reference) => {
+                    out.push(reference.clone());
+                    walk(&reference.children, out);
+                }
+
+                InlineNode::Styled(styled) => walk(&styled.children, out),
+                InlineNode::Footnote(footnote) => walk(&footnote.children, out),
+                _ => {}
+            }
+        }
+    }
+
+    walk(nodes, &mut out);
+    out
+}
+
+#[test]
+fn footnote_carries_its_text_as_child_nodes() {
+    // The footnote's text is a subtree, not an opaque string: the formatting
+    // inside it is structure the block's rendered string never carries.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("A claim.footnote:[the *strong* evidence]");
+
+    let footnote = first_footnote(&doc);
+
+    assert!(!footnote.is_reference);
+    assert_eq!(footnote.number.as_deref(), Some("1"));
+
+    // "the " → Text, "*strong*" → Styled(Strong), " evidence" → Text.
+    assert_eq!(footnote.children.len(), 3);
+    assert!(
+        matches!(&footnote.children[0], InlineNode::Text { value, .. } if value.as_ref() == "the ")
+    );
+
+    let InlineNode::Styled(styled) = &footnote.children[1] else {
+        panic!("expected a styled node, got {:?}", footnote.children[1]);
+    };
+
+    assert_eq!(styled.variant, StyleVariant::Strong);
+    assert!(
+        matches!(&styled.children[0], InlineNode::Text { value, .. } if value.as_ref() == "strong")
+    );
+
+    assert!(
+        matches!(&footnote.children[2], InlineNode::Text { value, .. } if value.as_ref() == " evidence")
+    );
+}
+
+#[test]
+fn footnote_subtree_carries_a_nested_macro() {
+    // A macro substituted before footnotes (here a link) is captured as part of
+    // the footnote's text, so it surfaces as a node of the footnote's subtree
+    // rather than being absorbed into the block.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("A claim.footnote:[see link:https://example.org[the source]]");
+
+    let footnote = first_footnote(&doc);
+
+    let reference = footnote
+        .children
+        .iter()
+        .find_map(|node| match node {
+            InlineNode::Ref(reference) => Some(reference),
+            _ => None,
+        })
+        .expect("expected a link node inside the footnote subtree");
+
+    assert_eq!(reference.variant, RefVariant::Link);
+    assert_eq!(reference.target.as_ref(), "https://example.org");
+}
+
+#[test]
+fn footnote_reference_keeps_an_empty_subtree() {
+    // `footnote:id[]` defines nothing – it re-uses an earlier footnote's number –
+    // so it consumes no footnote text and keeps the empty subtree its node type
+    // documents, while the defining occurrence carries the text.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("Named.footnote:disc[a *discussion*] then footnote:disc[].");
+
+    use crate::blocks::Block;
+
+    let footnotes: Vec<crate::inlines::Footnote<'_>> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => Some(simple),
+            _ => None,
+        })
+        .flat_map(|simple| simple.content().inlines().to_vec())
+        .filter_map(|node| match node {
+            InlineNode::Footnote(footnote) => Some(footnote),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(footnotes.len(), 2);
+
+    assert!(!footnotes[0].is_reference);
+    assert_eq!(footnotes[0].children.len(), 2);
+
+    assert!(footnotes[1].is_reference);
+    assert!(
+        footnotes[1].children.is_empty(),
+        "a bare reference defines no text: {:?}",
+        footnotes[1].children
+    );
+}
+
+#[test]
+fn footnote_subtrees_track_document_order_across_blocks() {
+    // Each block's recording pass picks up only the footnotes *that* block
+    // defined (the registry length is snapshotted first), so the second
+    // paragraph's footnote gets its own text rather than the first one's.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("One.footnote:[first note]\n\nTwo.footnote:[second note]");
+
+    use crate::blocks::Block;
+
+    let texts: Vec<String> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => Some(simple),
+            _ => None,
+        })
+        .flat_map(|simple| simple.content().inlines().to_vec())
+        .filter_map(|node| match node {
+            InlineNode::Footnote(footnote) => Some(footnote),
+            _ => None,
+        })
+        .map(|footnote| {
+            footnote
+                .children
+                .iter()
+                .filter_map(|child| match child {
+                    InlineNode::Text { value, .. } => Some(value.as_ref().to_string()),
+                    _ => None,
+                })
+                .collect::<String>()
+        })
+        .collect();
+
+    assert_eq!(
+        texts,
+        vec!["first note".to_string(), "second note".to_string()]
+    );
+}
+
+#[test]
+fn footnote_embedded_xref_is_resolved_in_the_tree() {
+    // The cross-reference lives in the footnote's subtree, and its destination
+    // is mirrored there from the same resolution sweep that resolved the block's
+    // own references – so the tree agrees with the rendered footnote text.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[[tgt]]The target.\n\nA claim.footnote:[see <<tgt>> for details]");
+
+    let footnote = first_footnote(&doc);
+
+    let reference = refs_in(&footnote.children)
+        .into_iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref node inside the footnote subtree");
+
+    assert_eq!(reference.target.as_ref(), "tgt");
+    assert_eq!(
+        reference
+            .resolved
+            .as_ref()
+            .expect("the footnote-embedded xref should be resolved after parse")
+            .href,
+        "#tgt"
+    );
+
+    // The rendered footnote text is the other projection of that same
+    // resolution, so the two must agree.
+    let text = &doc.catalog().footnotes()[0].text;
+    assert!(
+        text.contains("href=\"#tgt\""),
+        "the rendered footnote text should link to #tgt: {text:?}"
+    );
+}
+
+#[test]
+fn footnote_embedded_xref_does_not_displace_block_xrefs() {
+    // A footnote-embedded reference is re-homed out of the block template, so it
+    // must not consume a slot of the block-level list. Were the block walk to
+    // descend into the footnote subtree, the reference *after* the footnote
+    // would take the footnote's destination.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse(
+        "[[one]]First.\n\n[[two]]Second.\n\nSee <<one>>.footnote:[also <<two>>] and <<two>>.",
+    );
+
+    use crate::blocks::Block;
+
+    let tree: Vec<InlineNode<'_>> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => Some(simple),
+            _ => None,
+        })
+        .flat_map(|simple| simple.content().inlines().to_vec())
+        .collect();
+
+    // The two block-level references keep their own destinations ...
+    let block_hrefs: Vec<String> = tree
+        .iter()
+        .filter_map(|node| match node {
+            InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => reference
+                .resolved
+                .as_ref()
+                .map(|resolved| resolved.href.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(block_hrefs, vec!["#one".to_string(), "#two".to_string()]);
+
+    // ... and the footnote-embedded one gets its own.
+    let footnote = first_footnote(&doc);
+    let embedded = refs_in(&footnote.children)
+        .into_iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref inside the footnote subtree");
+
+    assert_eq!(
+        embedded
+            .resolved
+            .as_ref()
+            .expect("the footnote-embedded xref should resolve")
+            .href,
+        "#two"
+    );
+}
+
+#[test]
+fn unresolved_footnote_embedded_xref_stays_none() {
+    // A footnote-embedded reference whose target has no catalog entry is left
+    // unresolved in the subtree, mirroring the unresolved fallback the rendered
+    // footnote text shows.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("A claim.footnote:[see <<missing>>]");
+
+    let footnote = first_footnote(&doc);
+    let reference = refs_in(&footnote.children)
+        .into_iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref node inside the footnote subtree");
+
+    assert!(
+        reference.resolved.is_none(),
+        "an unresolvable footnote target must not carry a resolved destination"
+    );
+}
+
+#[test]
+fn re_resolving_clears_a_now_unresolved_footnote_tree_destination() {
+    // The footnote mirror overwrites each slot unconditionally, exactly as the
+    // block and title mirrors do, so a second resolution that no longer
+    // recognizes the target clears the subtree's destination rather than leaving
+    // the first pass's stale link behind.
+    use crate::parser::{
+        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+    };
+
+    /// Resolves every target to a fixed destination, or to nothing when `None`.
+    #[derive(Debug)]
+    struct FixedResolver(Option<&'static str>);
+
+    impl ReferenceResolver for FixedResolver {
+        fn resolve(&self, _context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
+            self.0
+                .map(|href| ResolvedReference::new(href.to_string(), None))
+        }
+    }
+
+    /// The resolved `href` of the first cross-reference in the first footnote's
+    /// subtree, scoped so the tree borrow is released before the next
+    /// resolution.
+    fn footnote_xref_href(doc: &crate::Document<'_>) -> Option<String> {
+        refs_in(&first_footnote(doc).children)
+            .into_iter()
+            .find(|r| r.variant == RefVariant::Xref)
+            .and_then(|r| r.resolved)
+            .map(|resolved| resolved.href)
+    }
+
+    let mut parser = Parser::default().with_inline_tree(true);
+    let mut doc = parser.parse_deferred("A claim.footnote:[see <<tgt>>]");
+
+    doc.resolve_references(&FixedResolver(Some("#tgt")), &HtmlSubstitutionRenderer {});
+    assert_eq!(footnote_xref_href(&doc).as_deref(), Some("#tgt"));
+
+    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {});
+    assert_eq!(
+        footnote_xref_href(&doc),
+        None,
+        "a re-resolution that fails must clear the footnote subtree's stale destination"
+    );
+}
+
+#[test]
+fn section_title_footnote_carries_its_subtree_and_resolved_xref() {
+    // A footnote in a section heading is owned by the document-order title pass,
+    // which resolves the heading's cross-references and now mirrors the
+    // footnote-embedded ones into the heading tree's footnote subtree too.
+    use crate::blocks::{Block, FindBlocks};
+
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[[tgt]]The target.\n\n== A Heading.footnote:[see <<tgt>>]\n\nBody.\n");
+
+    fn headings<'a>(
+        blocks: impl Iterator<Item = &'a Block<'a>>,
+        out: &mut Vec<Vec<InlineNode<'a>>>,
+    ) {
+        for block in blocks {
+            if let Block::Section(section) = block {
+                out.push(section.section_title_inlines().to_vec());
+            }
+
+            headings(block.child_blocks(), out);
+        }
+    }
+
+    let mut titles = vec![];
+    headings(doc.child_blocks(), &mut titles);
+
+    let footnote = titles
+        .iter()
+        .flatten()
+        .find_map(|node| match node {
+            InlineNode::Footnote(footnote) => Some(footnote),
+            _ => None,
+        })
+        .expect("expected a footnote node in the section heading tree");
+
+    assert!(
+        !footnote.children.is_empty(),
+        "the heading's footnote should carry its text as a subtree"
+    );
+
+    let reference = refs_in(&footnote.children)
+        .into_iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref inside the heading footnote's subtree");
+
+    assert_eq!(
+        reference
+            .resolved
+            .as_ref()
+            .expect("the heading footnote's xref should be resolved after parse")
+            .href,
+        "#tgt"
+    );
+}
+
+// ─── Unit: the two footnote-subtree walks ───────────────────────────────────
+//
+// A footnote can be written inside a link's display text, which puts a
+// `Footnote` node under a `Ref` node. Both new walks descend through reference
+// children (and formatting spans) to reach such a subtree. The recording pass
+// cannot currently produce that shape — a footnote nested in link text makes
+// the Strategy A fold diverge from `rendered()`, a pre-existing limitation the
+// Phase 4 single-pass builder retires — so the walks are driven directly here.
+
+/// A cross-reference node, unresolved.
+fn unresolved_xref() -> InlineNode<'static> {
+    crate::inlines::InlineNode::Ref(crate::inlines::Ref {
+        variant: RefVariant::Xref,
+        target: "tgt".into(),
+        children: vec![],
+        roles: vec![],
+        window: None,
+        resolved: None,
+        location: Span::new(""),
+    })
+}
+
+/// A defining footnote node holding `children`.
+fn defining_footnote(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
+    InlineNode::Footnote(crate::inlines::Footnote {
+        id: None,
+        number: Some("1".into()),
+        is_reference: false,
+        children,
+        location: Span::new(""),
+    })
+}
+
+/// A link node holding `children` as its display text.
+fn link_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
+    InlineNode::Ref(crate::inlines::Ref {
+        variant: RefVariant::Link,
+        target: "https://example.org".into(),
+        children,
+        roles: vec![],
+        window: None,
+        resolved: None,
+        location: Span::new(""),
+    })
+}
+
+/// A strong span holding `children`.
+fn strong_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
+    InlineNode::Styled(crate::inlines::Styled {
+        variant: StyleVariant::Strong,
+        form: SpanForm::Constrained,
+        id: None,
+        roles: vec![],
+        attrs: None,
+        children,
+        location: Span::new(""),
+    })
+}
+
+/// A `Content` carrying `inlines` as its inline tree.
+fn content_with(inlines: Vec<InlineNode<'static>>) -> Content<'static> {
+    let mut content = Content::from(Span::new("source"));
+    content.set_inlines(inlines);
+    content
+}
+
+#[test]
+fn footnote_subtree_attaches_through_a_reference_child() {
+    let mut tree = vec![link_over(vec![defining_footnote(vec![])])];
+
+    crate::content::inline_tree::attach_footnote_subtrees(
+        &mut tree,
+        &["the note".to_string()],
+        &[],
+        Span::new(""),
+    );
+
+    let footnote = first_footnote_in(&tree);
+    assert_eq!(footnote.children.len(), 1);
+    assert!(
+        matches!(&footnote.children[0], InlineNode::Text { value, .. } if value.as_ref() == "the note")
+    );
+}
+
+#[test]
+fn footnote_subtree_attaches_through_a_formatting_span() {
+    let mut tree = vec![strong_over(vec![defining_footnote(vec![])])];
+
+    crate::content::inline_tree::attach_footnote_subtrees(
+        &mut tree,
+        &["the note".to_string()],
+        &[],
+        Span::new(""),
+    );
+
+    assert_eq!(first_footnote_in(&tree).children.len(), 1);
+}
+
+#[test]
+fn footnote_subtree_attachment_is_a_no_op_without_texts() {
+    // The overwhelmingly common case: content that defined no footnote.
+    let mut tree = vec![defining_footnote(vec![])];
+
+    crate::content::inline_tree::attach_footnote_subtrees(&mut tree, &[], &[], Span::new(""));
+
+    assert!(first_footnote_in(&tree).children.is_empty());
+}
+
+#[test]
+fn footnote_xref_mirror_reaches_through_a_reference_child() {
+    let mut content = content_with(vec![link_over(vec![defining_footnote(vec![
+        unresolved_xref(),
+    ])])]);
+
+    content.mirror_tree_xref_resolution(&[], &fixed_destination());
+
+    assert_eq!(resolved_href_in(content.inlines()).as_deref(), Some("#tgt"));
+}
+
+#[test]
+fn footnote_xref_mirror_reaches_through_a_formatting_span() {
+    let mut content = content_with(vec![strong_over(vec![defining_footnote(vec![
+        unresolved_xref(),
+    ])])]);
+
+    content.mirror_tree_xref_resolution(&[], &fixed_destination());
+
+    assert_eq!(resolved_href_in(content.inlines()).as_deref(), Some("#tgt"));
+}
+
+#[test]
+fn footnote_xref_mirror_leaves_a_block_level_reference_alone() {
+    // A block-level cross-reference belongs to the *other* list; the footnote
+    // walk must not consume a footnote slot for it.
+    let mut content = content_with(vec![unresolved_xref()]);
+
+    content.mirror_tree_xref_resolution(&[None], &[]);
+
+    assert_eq!(resolved_href_in(content.inlines()), None);
+}
+
+/// One resolved destination, for the footnote-embedded list.
+fn fixed_destination() -> Vec<Option<crate::parser::ResolvedReference>> {
+    vec![Some(crate::parser::ResolvedReference::new(
+        "#tgt".to_string(),
+        None,
+    ))]
+}
+
+/// The footnote node the single wrapper node of `nodes` holds, descending
+/// through a reference child or a formatting span to reach it.
+fn first_footnote_in<'a>(nodes: &[InlineNode<'a>]) -> crate::inlines::Footnote<'a> {
+    match nodes.first().expect("expected one node") {
+        InlineNode::Footnote(footnote) => footnote.clone(),
+        InlineNode::Ref(reference) => first_footnote_in(&reference.children),
+        InlineNode::Styled(styled) => first_footnote_in(&styled.children),
+        other => panic!("expected a footnote-bearing node, got {other:?}"),
+    }
+}
+
+/// The resolved `href` of the first cross-reference in `nodes`, using the same
+/// recursion the other resolution tests use.
+fn resolved_href_in(nodes: &[InlineNode<'_>]) -> Option<String> {
+    refs_in(nodes)
+        .into_iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .and_then(|r| r.resolved)
+        .map(|resolved| resolved.href)
 }

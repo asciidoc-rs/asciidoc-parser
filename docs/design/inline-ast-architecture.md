@@ -671,13 +671,45 @@ Each phase is a reviewable unit with a clear exit gate.
   The remaining unmirrored site is footnote-embedded cross-references, which still await the
   footnote subtree the tree does not yet populate.
 
+  *Step 4 landed as (the footnote subtree, and the cross-references inside it):* the tree now
+  populates the **[`Footnote`](../../parser/src/inlines/footnote.rs) node's child subtree** and
+  resolves the cross-references that live in it, closing the second — and last — of the two
+  step-2 follow-ups, so every resolution site §4.3 names is now mirrored. A footnote's text is
+  extracted out of the flow of the block during the macros substitution step (only its marker
+  is left behind), so it never reaches the block's rendered string and the tree could not
+  recover it from that string alone. The recording pass therefore also picks up the footnote
+  texts *it* registered — snapshotting the registry length first, so it takes only this
+  content's — and parses each into its node's subtree. Those texts carry the recorder's markers
+  against the *same* event log (the recorder brackets a footnote's constructs there too), so a
+  subtree is recovered by the very parse the block string uses, and a block's defining footnote
+  nodes line up one-to-one, in document order, with the footnotes its pipeline defined. A bare
+  reference (`footnote:id[]`) defines nothing and keeps the empty subtree its node type
+  documents.
+
+  The cross-reference mirror then follows that structure. A footnote-embedded reference is
+  **re-homed out of the block template** when the footnote's text is extracted, so
+  [`ordered_tree_xrefs`](../../parser/src/content/content.rs) — which filters *to* the
+  placeholders the template still splices — already excludes it. Its exact complement,
+  [`footnote_tree_xrefs`](../../parser/src/content/content.rs), collects those same re-homed
+  segments in the order the footnote subtrees hold them, and
+  [`Content::mirror_tree_xref_resolution`](../../parser/src/content/content.rs) installs the two
+  lists into the two disjoint parts of the tree: the block walk no longer descends into a
+  footnote subtree (doing so would consume block-level slots and shift every following
+  reference onto the wrong destination), and the footnote walk installs the re-homed
+  destinations there instead. Both the block pass and the title pass feed both lists, so a
+  footnote in a section heading or a block `.Title` goes through the same seam. As in steps 2
+  and 3 this reuses the resolution the string path already performed rather than invoking the
+  resolver a second time, and it is non-destructive and re-resolvable. The differential corpus
+  gains footnote-embedded fixtures and now folds each footnote's *text* under the same
+  byte-for-byte invariant as block content, alongside a corpus-wide sweep asserting that
+  turning the flag **on** leaves every rendered string unchanged.
+
   *Still remaining in Phase 2 (not in these steps):* making `rendered()` *authoritatively* a
-  fold of the tree (which additionally requires the title pass to mirror into the tree, so
-  `rendered()` reflects *every* resolved destination) and **deleting** the three production
-  sentinel systems. These are deferred because, with Strategy A, an authoritative fold would
-  inherit the known formatted-section-title drift (§4.1) and require re-folding refs at
-  resolution time; the design sequences the true single-artifact cutover with the single-pass
-  builder in Phase 4. The opt-in flag retires with it.
+  fold of the tree and **deleting** the three production sentinel systems. These are deferred
+  because, with Strategy A, an authoritative fold would inherit the known
+  formatted-section-title drift (§4.1) and require re-folding refs at resolution time; the
+  design sequences the true single-artifact cutover with the single-pass builder in Phase 4.
+  The opt-in flag retires with it.
 
 - **Phase 3 — expose the public inline API.** `Content::inlines()`, `IsBlock::inlines()`,
   the public node types, and `render_with`/`render_to`. Rename `rendered()` →

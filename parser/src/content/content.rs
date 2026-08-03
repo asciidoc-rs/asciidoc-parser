@@ -619,13 +619,11 @@ impl<'src> Content<'src> {
     /// [`resolve_references`](Self::resolve_references): each call overwrites
     /// the tree's resolved state from the current deferred results.
     ///
-    /// Cross-references embedded in section and block titles are resolved by
-    /// the separate document-order title pass (the `title_refs` module), which
-    /// does not yet mirror into the title's tree; those title `Ref` nodes
-    /// remain unresolved for now. Likewise a cross-reference inside a footnote
-    /// is resolved with the footnote, whose subtree the tree does not yet
-    /// carry — and whose segment is re-homed out of the block template, so it
-    /// is excluded from the correlation below (keeping it one-to-one).
+    /// A cross-reference embedded in a **footnote** is carried the same way,
+    /// from the complementary list: its segment is re-homed out of the block
+    /// template when the footnote's text is extracted, so it is excluded from
+    /// the block correlation above and correlated instead with the tree's
+    /// footnote subtrees (see [`footnote_tree_xrefs`]).
     fn resolve_tree_references(&mut self) {
         if self.inlines.is_empty() {
             return;
@@ -636,7 +634,9 @@ impl<'src> Content<'src> {
         };
 
         let ordered = ordered_tree_xrefs(&deferred.template, &deferred.xrefs);
-        self.mirror_tree_xref_resolution(&ordered);
+        let footnote_ordered = footnote_tree_xrefs(&deferred.template, &deferred.xrefs);
+
+        self.mirror_tree_xref_resolution(&ordered, &footnote_ordered);
     }
 
     /// Installs a pre-computed list of resolved cross-reference destinations –
@@ -653,11 +653,21 @@ impl<'src> Content<'src> {
     /// same tree walk, so a caller that reads [`inlines`](Self::inlines)
     /// sees the resolved destinations the rendered string reflects.
     ///
+    /// `footnote_ordered` carries the same thing for the cross-references
+    /// embedded in this content's **footnotes** – the complementary list, as
+    /// produced by [`footnote_tree_xrefs`] – which are installed into the
+    /// tree's footnote subtrees. The two lists partition the deferred segments,
+    /// so each is correlated against exactly the nodes it belongs to.
+    ///
     /// It is a no-op when no inline tree was built (see
     /// [`Parser::with_inline_tree`](crate::Parser::with_inline_tree)),
     /// non-destructive, and re-resolvable: each call overwrites the tree's
-    /// resolved state from `ordered`.
-    pub(crate) fn mirror_tree_xref_resolution(&mut self, ordered: &[Option<ResolvedReference>]) {
+    /// resolved state from `ordered` and `footnote_ordered`.
+    pub(crate) fn mirror_tree_xref_resolution(
+        &mut self,
+        ordered: &[Option<ResolvedReference>],
+        footnote_ordered: &[Option<ResolvedReference>],
+    ) {
         if self.inlines.is_empty() {
             return;
         }
@@ -673,6 +683,15 @@ impl<'src> Content<'src> {
             next,
             ordered.len(),
             "inline tree cross-reference count diverged from the resolved segments",
+        );
+
+        let mut next = 0;
+        assign_footnote_tree_xrefs(&mut self.inlines, footnote_ordered, &mut next);
+
+        debug_assert_eq!(
+            next,
+            footnote_ordered.len(),
+            "inline tree footnote cross-reference count diverged from the re-homed segments",
         );
     }
 
@@ -692,12 +711,12 @@ impl<'src> Content<'src> {
 ///
 /// The list holds one entry per deferred segment whose placeholder **still
 /// appears in `template`**, in placeholder (document) order. A
-/// footnote-embedded cross-reference is re-homed out of the template (and lives
-/// in a footnote subtree the tree does not yet populate), so filtering on the
-/// template keeps this list aligned one-to-one with the tree's cross-reference
-/// nodes. A segment that resolved to nothing contributes a `None`, so an
-/// unresolved node is left unresolved, exactly as the rendered string leaves
-/// it.
+/// footnote-embedded cross-reference is re-homed out of the template, so
+/// filtering on the template keeps this list aligned one-to-one with the tree's
+/// *block-level* cross-reference nodes; the re-homed ones are carried by
+/// [`footnote_tree_xrefs`] instead. A segment that resolved to nothing
+/// contributes a `None`, so an unresolved node is left unresolved, exactly as
+/// the rendered string leaves it.
 pub(crate) fn ordered_tree_xrefs(
     template: &str,
     xrefs: &[XrefSegment],
@@ -706,6 +725,37 @@ pub(crate) fn ordered_tree_xrefs(
         .iter()
         .enumerate()
         .filter(|(index, _)| template.contains(&Content::xref_placeholder(*index)))
+        .map(|(_, xref)| xref.resolved.clone())
+        .collect()
+}
+
+/// Builds the list of resolved destinations for the cross-references embedded
+/// in this content's **footnotes**, which
+/// [`Content::mirror_tree_xref_resolution`] installs into the tree's footnote
+/// subtrees.
+///
+/// This is the exact complement of [`ordered_tree_xrefs`]: it holds one entry
+/// per deferred segment whose placeholder **no longer appears in `template`**,
+/// in segment order. A placeholder leaves the template only by being re-homed
+/// onto a footnote (see [`rehome_xref_placeholders`]), which happens when the
+/// footnote's text is extracted out of the block – and the footnotes are
+/// extracted left to right, each scanning its own text left to right, so this
+/// order is the document order in which the tree's footnote subtrees hold their
+/// cross-reference nodes.
+///
+/// The segments themselves are the block's own copies, resolved in the very
+/// same sweep that resolved the block-level ones. The footnote holds a clone of
+/// each (same target, provided text, and derived destination), so the resolver
+/// sees an identical [`ResolutionContext`] on both sides and the tree carries
+/// the destination the rendered footnote text reflects.
+pub(crate) fn footnote_tree_xrefs(
+    template: &str,
+    xrefs: &[XrefSegment],
+) -> Vec<Option<ResolvedReference>> {
+    xrefs
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !template.contains(&Content::xref_placeholder(*index)))
         .map(|(_, xref)| xref.resolved.clone())
         .collect()
 }
@@ -722,6 +772,12 @@ pub(crate) fn ordered_tree_xrefs(
 /// *i*'s destination – overwritten unconditionally (to `Some` or `None`) so a
 /// repeated resolution reflects the latest result. A node with no matching slot
 /// (a count mismatch, guarded against by the caller) is left untouched.
+///
+/// A [`Footnote`](InlineNode::Footnote) node's subtree is deliberately **not**
+/// descended into: its cross-references were re-homed onto the footnote and so
+/// are absent from `ordered`. Consuming a slot for one would shift every
+/// following block-level reference onto the wrong destination. They are
+/// installed by [`assign_footnote_tree_xrefs`] from the complementary list.
 fn assign_tree_xrefs(
     nodes: &mut [InlineNode<'_>],
     ordered: &[Option<ResolvedReference>],
@@ -745,8 +801,38 @@ fn assign_tree_xrefs(
                 assign_tree_xrefs(&mut styled.children, ordered, next);
             }
 
+            _ => {}
+        }
+    }
+}
+
+/// Walks an inline node slice in document order and installs each
+/// **footnote-embedded** cross-reference's resolved destination from `ordered`
+/// – the resolved state of the re-homed deferred segments, in segment order (as
+/// produced by [`footnote_tree_xrefs`]) – advancing `next` past each one.
+///
+/// The block walk skips footnote subtrees, so this is the pass that reaches
+/// them: for each [`Footnote`](InlineNode::Footnote) node it hands the
+/// footnote's own children to [`assign_tree_xrefs`], which assigns them exactly
+/// as it assigns block-level references. A footnote cannot nest another
+/// footnote, so that reuse cannot skip anything.
+fn assign_footnote_tree_xrefs(
+    nodes: &mut [InlineNode<'_>],
+    ordered: &[Option<ResolvedReference>],
+    next: &mut usize,
+) {
+    for node in nodes {
+        match node {
             InlineNode::Footnote(footnote) => {
                 assign_tree_xrefs(&mut footnote.children, ordered, next);
+            }
+
+            InlineNode::Ref(reference) => {
+                assign_footnote_tree_xrefs(&mut reference.children, ordered, next);
+            }
+
+            InlineNode::Styled(styled) => {
+                assign_footnote_tree_xrefs(&mut styled.children, ordered, next);
             }
 
             _ => {}

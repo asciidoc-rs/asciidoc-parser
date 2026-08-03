@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{XrefSegment, ordered_tree_xrefs, render_xref_template},
+    content::{XrefSegment, footnote_tree_xrefs, ordered_tree_xrefs, render_xref_template},
     document::Catalog,
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
@@ -49,6 +49,12 @@ struct Resolution {
     /// The resolved destination of each title-level cross-reference, in
     /// placeholder order, ready for [`ordered_tree_xrefs`]-aligned mirroring.
     ordered: Vec<Option<ResolvedReference>>,
+
+    /// The resolved destination of each cross-reference embedded in a footnote
+    /// the title carries, in segment order, ready for
+    /// [`footnote_tree_xrefs`]-aligned mirroring into the title tree's footnote
+    /// subtrees.
+    footnote_ordered: Vec<Option<ResolvedReference>>,
 }
 
 /// One title carrying cross-references, captured for the resolution pass.
@@ -182,7 +188,10 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], ind
             if section.section_title_deferred_parts().is_some() {
                 if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
                     section.set_section_title_rendered(resolution.rendered.clone());
-                    section.mirror_section_title_tree_xrefs(&resolution.ordered);
+                    section.mirror_section_title_tree_xrefs(
+                        &resolution.ordered,
+                        &resolution.footnote_ordered,
+                    );
                 }
                 *index += 1;
             }
@@ -191,7 +200,8 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], ind
         {
             if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
                 title.set_rendered(resolution.rendered.clone());
-                title.mirror_tree_xref_resolution(&resolution.ordered);
+                title
+                    .mirror_tree_xref_resolution(&resolution.ordered, &resolution.footnote_ordered);
             }
             *index += 1;
         }
@@ -310,6 +320,12 @@ fn compute<'src>(
     // the string.
     let ordered = ordered_tree_xrefs(&node.template, &xrefs);
 
+    // The complementary set: a cross-reference the title's footnotes carry was
+    // re-homed out of the template when the footnote text was extracted, so it
+    // is absent from `ordered` and belongs to a footnote subtree of the title
+    // tree instead.
+    let footnote_ordered = footnote_tree_xrefs(&node.template, &xrefs);
+
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = false;
     }
@@ -317,6 +333,7 @@ fn compute<'src>(
         *slot = Some(Resolution {
             rendered: rendered.clone(),
             ordered,
+            footnote_ordered,
         });
     }
     rendered

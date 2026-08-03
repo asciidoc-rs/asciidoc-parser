@@ -294,7 +294,8 @@ impl SubstitutionGroup {
     /// Builds the inline AST for `content` by re-running the pipeline over the
     /// pre-substitution snapshot with a [`RecordingRenderer`] wrapped around
     /// the parser's own renderer, then parsing the recorded markers into a
-    /// tree and storing it on `content`.
+    /// tree and storing it on `content`, then populating each footnote node's
+    /// subtree from the footnote texts that pass registered.
     ///
     /// This is Strategy A (design §4.1): a transparent recording pass whose
     /// fold reproduces the authoritative `rendered()` byte-for-byte. It is
@@ -314,11 +315,27 @@ impl SubstitutionGroup {
         // record this content's own constructs.
         recording_parser.build_inline_tree = false;
 
+        // A footnote's text is extracted out of the block, so it never reaches
+        // the marked string below; it is recovered from the footnotes this pass
+        // registers. Snapshot the registry length first so only *this* content's
+        // footnotes are picked up (the clone carries the ones defined earlier in
+        // the document).
+        let footnote_start = recording_parser.footnote_count();
+
         self.run_pipeline(recording_content, recording_parser, attrlist);
+
+        let footnote_texts = recording_parser.footnote_texts_from(footnote_start);
 
         let marked = recording_content.rendered_owned();
         let events = events.borrow();
-        let tree = inline_tree::build_inline_tree(&marked, &events, content.original());
+        let mut tree = inline_tree::build_inline_tree(&marked, &events, content.original());
+
+        inline_tree::attach_footnote_subtrees(
+            &mut tree,
+            &footnote_texts,
+            &events,
+            content.original(),
+        );
 
         // The recording pass re-runs the pipeline through a *clone* of the
         // parser, but the clone shares the same `Rc`-held inline renderer and
