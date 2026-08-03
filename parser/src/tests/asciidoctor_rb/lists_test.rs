@@ -7561,6 +7561,7 @@ mod description_lists_dlist {
     );
     mod special_lists {
         use super::*;
+        use crate::blocks::BlockSelector;
 
         #[test]
         fn should_convert_glossary_list_with_proper_semantics() {
@@ -8014,7 +8015,26 @@ mod description_lists_dlist {
 
             // Both top-level unordered lists in the bibliography section inherit
             // the `bibliography` style, even though neither carries an explicit
-            // `[bibliography]` attribute.
+            // `[bibliography]` attribute. This mirrors the Ruby assertions
+            // `ulists[0].style == 'bibliography'` and `ulists[1].style ==
+            // 'bibliography'`: the crate surfaces the resolved style through
+            // `resolved_style()`.
+            let ulists: Vec<_> = doc
+                .find_blocks(&BlockSelector::new().context("list"))
+                .collect();
+            assert_eq!(ulists.len(), 2);
+            assert_eq!(ulists[0].resolved_style(), Some("bibliography"));
+            assert_eq!(ulists[1].resolved_style(), Some("bibliography"));
+
+            // The resolved style is also what the `style` selector matches on,
+            // so both lists are found by `find_by(context: :ulist, style:
+            // 'bibliography')`.
+            assert_eq!(
+                doc.find_blocks(&BlockSelector::new().context("list").style("bibliography"))
+                    .count(),
+                2
+            );
+
             assert_css(&doc, ".ulist.bibliography", 2);
             assert_css(&doc, "a#taoup", 1);
             assert_css(&doc, "a#walsh-muellner", 1);

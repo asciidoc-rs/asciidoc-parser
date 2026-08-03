@@ -79,13 +79,20 @@ impl<'src> ListBlock<'src> {
         //   lists (only) a bibliography. A nested list never inherits the section
         //   style, so this is gated on `parent_list_markers` being empty; the list-type
         //   restriction is applied below, once the type is known.
-        let own_style_bibliography = metadata
+        //
+        // The section only propagates its style to a list that declares no style
+        // of its own – Asciidoctor applies it with `!style && …`, so a list with
+        // an explicit style (e.g. `[square]`) keeps that style and is not treated
+        // as a bibliography.
+        let declared_style = metadata
             .attrlist
             .as_ref()
-            .and_then(|attrlist| attrlist.block_style())
-            == Some("bibliography");
-        let section_propagated_bibliography =
-            parent_list_markers.is_empty() && parser.parsing_bibliography_section_body;
+            .and_then(|attrlist| attrlist.block_style());
+
+        let own_style_bibliography = declared_style == Some("bibliography");
+        let section_propagated_bibliography = parent_list_markers.is_empty()
+            && declared_style.is_none()
+            && parser.parsing_bibliography_section_body;
 
         let mut items: Vec<Block<'src>> = vec![];
         let mut next_item_source = source;
@@ -458,6 +465,18 @@ impl<'src> IsBlock<'src> for ListBlock<'src> {
 
     fn attrlist(&'src self) -> Option<&'src Attrlist<'src>> {
         self.attrlist.as_ref()
+    }
+
+    fn resolved_style(&'src self) -> Option<&'src str> {
+        // A list's resolved style is its declared style, except that a top-level
+        // unordered list in a `bibliography` section resolves to `bibliography`
+        // even though the author declared no style on the list itself (see
+        // [`is_bibliography()`]). The explicit `[bibliography]` case is already
+        // covered by the declared style.
+        //
+        // [`is_bibliography()`]: Self::is_bibliography
+        self.declared_style()
+            .or_else(|| self.is_bibliography.then_some("bibliography"))
     }
 }
 
@@ -1323,6 +1342,81 @@ mod tests {
     fn marker_style_asterisk_returns_none() {
         let list = list_parse("* Item one\n* Item two\n").unwrap();
         assert_eq!(list.item.marker_style(), None);
+    }
+
+    mod resolved_style {
+        use super::list_parse;
+        use crate::{
+            Parser,
+            blocks::{Block, FindBlocks, IsBlock},
+        };
+
+        /// Parses `src`, then calls `check` with the first top-level list of
+        /// its first section. Keeps the borrowed list within the
+        /// document's scope.
+        fn with_first_section_list(src: &str, check: impl FnOnce(&crate::blocks::ListBlock<'_>)) {
+            let doc = Parser::default().parse(src);
+
+            let Some(Block::Section(section)) = doc.child_blocks().next() else {
+                panic!("expected a section");
+            };
+
+            let Some(Block::List(list)) = section.child_blocks().next() else {
+                panic!("expected a list");
+            };
+
+            check(list);
+        }
+
+        #[test]
+        fn none_for_a_plain_list() {
+            let list = list_parse("* one\n* two").unwrap();
+            assert_eq!(list.item.resolved_style(), None);
+        }
+
+        #[test]
+        fn reflects_an_explicit_declared_style() {
+            let list = list_parse("[loweralpha]\n. one\n. two").unwrap();
+            assert_eq!(list.item.declared_style(), Some("loweralpha"));
+            assert_eq!(list.item.resolved_style(), Some("loweralpha"));
+        }
+
+        #[test]
+        fn explicit_bibliography_style() {
+            let list = list_parse("[bibliography]\n* [[[a]]] An entry.").unwrap();
+            assert!(list.item.is_bibliography());
+            assert_eq!(list.item.declared_style(), Some("bibliography"));
+            assert_eq!(list.item.resolved_style(), Some("bibliography"));
+        }
+
+        #[test]
+        fn inherited_from_a_bibliography_section() {
+            // A top-level unordered list with no declared style inherits the
+            // section's `bibliography` style.
+            with_first_section_list(
+                "[bibliography]\n== References\n\n* [[[a]]] An entry.\n",
+                |list| {
+                    assert!(list.is_bibliography());
+                    assert_eq!(list.declared_style(), None);
+                    assert_eq!(list.resolved_style(), Some("bibliography"));
+                },
+            );
+        }
+
+        #[test]
+        fn a_declared_style_suppresses_the_inherited_bibliography() {
+            // A list that declares its own style keeps it and is not treated as a
+            // bibliography, mirroring Asciidoctor's `!style` guard: the section
+            // style is applied only when the list has no style of its own.
+            with_first_section_list(
+                "[bibliography]\n== References\n\n[square]\n* An entry.\n",
+                |list| {
+                    assert!(!list.is_bibliography());
+                    assert_eq!(list.declared_style(), Some("square"));
+                    assert_eq!(list.resolved_style(), Some("square"));
+                },
+            );
+        }
     }
 
     #[test]
