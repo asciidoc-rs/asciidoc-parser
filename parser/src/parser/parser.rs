@@ -2160,10 +2160,10 @@ impl Parser {
     ///
     /// When enabled, each block's inline content is additionally parsed into a
     /// tree of [`InlineNode`](crate::inlines::InlineNode)s, retrievable from
-    /// its [`Content`](crate::content::Content) (a crate-internal accessor
-    /// while the inline AST is being brought up; the public accessor lands
-    /// in Phase 3). The tree is a projection of the rendered output:
-    /// folding it reproduces
+    /// its [`Content`](crate::content::Content) via
+    /// [`Content::inlines`](crate::content::Content::inlines) (or, at the block
+    /// level, [`IsBlock::inlines`](crate::blocks::IsBlock::inlines)). The tree
+    /// is a projection of the rendered output: folding it reproduces
     /// [`Content::rendered`](crate::content::Content::rendered) byte-for-byte.
     ///
     /// This is **off by default**. Building the tree currently costs a second,

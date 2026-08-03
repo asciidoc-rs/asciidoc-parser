@@ -870,6 +870,61 @@ fn inline_tree_is_built_when_enabled() {
     assert!(matches!(&tree[2], InlineNode::Text { .. }));
 }
 
+// ─── Public API: `IsBlock::inlines()` ───────────────────────────────────────
+//
+// The public inline accessor (design Phase 3) is the structured counterpart of
+// `IsBlock::rendered_content()`: the same content-bearing blocks carry each. A
+// content-bearing block returns `Some(tree)` (an empty tree when the flag is
+// off); a block with no directly-contained inline content returns `None`.
+
+#[test]
+fn is_block_inlines_exposes_the_content_tree() {
+    use crate::blocks::{Block, IsBlock};
+
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("One *word* is strong.");
+
+    let block = doc.child_blocks().next().expect("a block");
+
+    // The trait accessor returns the same tree the block's `Content` carries.
+    let via_trait = block.inlines().expect("a content-bearing block");
+    let Block::Simple(simple) = block else {
+        panic!("expected a simple block, got {block:?}");
+    };
+
+    assert_eq!(via_trait, simple.content().inlines());
+    assert_eq!(via_trait.len(), 3);
+    assert!(matches!(&via_trait[1], InlineNode::Styled(_)));
+}
+
+#[test]
+fn is_block_inlines_is_some_but_empty_when_flag_off() {
+    use crate::blocks::IsBlock;
+
+    // A content-bearing block parsed without tree building returns an *empty*
+    // tree, not `None` – the block still has content, the tree is just not built.
+    let mut parser = Parser::default();
+    let doc = parser.parse("One *word* is strong.");
+
+    let block = doc.child_blocks().next().expect("a block");
+
+    assert_eq!(block.inlines(), Some(&[][..]));
+}
+
+#[test]
+fn is_block_inlines_is_none_for_a_block_without_direct_content() {
+    use crate::blocks::IsBlock;
+
+    // A section is a compound block: its inline content lives in its child
+    // blocks, so the section itself has no direct tree.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("== Title\n\nBody.");
+
+    let section = doc.child_blocks().next().expect("a section block");
+
+    assert_eq!(section.inlines(), None);
+}
+
 #[test]
 fn inline_tree_numbers_footnotes_in_document_order() {
     // The recording pass clones the parser *before* the authoritative pass

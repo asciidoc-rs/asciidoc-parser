@@ -8,6 +8,7 @@ use crate::{
         metadata::{BlockMetadata, block_title_text},
     },
     content::{Content, SubstitutionGroup},
+    inlines::InlineNode,
     span::MatchedItem,
     strings::CowStr,
 };
@@ -584,6 +585,10 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
 
     fn rendered_content(&self) -> Option<&str> {
         Some(self.content.rendered())
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        Some(self.content.inlines())
     }
 
     fn raw_context(&self) -> CowStr<'src> {

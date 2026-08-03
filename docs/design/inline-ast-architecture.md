@@ -711,14 +711,27 @@ Each phase is a reviewable unit with a clear exit gate.
   design sequences the true single-artifact cutover with the single-pass builder in Phase 4.
   The opt-in flag retires with it.
 
-- **Phase 3 — expose the public inline API.** `Content::inlines()`, `IsBlock::inlines()`,
-  the public node types, and `render_with`/`render_to`. Rename `rendered()` →
-  `rendered_html()` and `rendered_content()` → `rendered_html_content()` (§3.3.1) — a
-  mechanical sweep of the ~277 golden assertions that leaves every *asserted string*
-  untouched. Resolution reports at node granularity.
+- **Phase 3 — expose the public inline API.** 🔶 **In progress.** `Content::inlines()`,
+  `IsBlock::inlines()`, the public node types, and `render_with`/`render_to`. Rename
+  `rendered()` → `rendered_html()` and `rendered_content()` → `rendered_html_content()`
+  (§3.3.1) — a mechanical sweep of the ~277 golden assertions that leaves every *asserted
+  string* untouched. Resolution reports at node granularity.
   *Exit:* node vocabulary reviewed against the `asciidoctor` port's needs (§6.6); the
   purely-structural navigation sugar kept minimal pending a re-flow consumer; doc + README
   updated (the security section gets its `Raw`-node anchor).
+
+  *Step 1 landed as (expose the read-only tree accessor):* the tree accessor
+  [`Content::inlines`](../../parser/src/content/content.rs) — populated during Phase 2 but
+  crate-internal until now — is **public**, and a parallel
+  [`IsBlock::inlines`](../../parser/src/blocks/is_block.rs) is the block-level counterpart of
+  [`IsBlock::rendered_content`](../../parser/src/blocks/is_block.rs): the same content-bearing
+  blocks carry each. A content-bearing block returns `Some(tree)` — an *empty* tree when
+  [`with_inline_tree`](../../parser/src/parser/parser.rs) is off, since the block still has
+  content the tree simply was not built for — and a block with no directly-contained inline
+  content (a compound/section block) returns `None`. The node types were already public
+  (Phase 0); this step opens the accessor that reaches them, the core of #943. The larger
+  pieces of the phase — the `rendered()` → `rendered_html()` rename and the
+  `render_with`/`render_to` fold — remain as later steps.
 
 - **Phase 4 — precision spans + ASG output.** Land the single-pass builder (Strategy B) and
   `Document::to_asg()`; validate against the ASG schema; retire the `attribute-missing`
