@@ -1268,7 +1268,15 @@ fn apply_post_replacements(
         content.rendered = new_result.into();
     } else {
         let rendered = content.rendered.as_ref();
-        if !(rendered.contains('+') && rendered.contains('\n')) {
+
+        // A hard line break is a ` +` at the end of a line. Because the
+        // `HARD_LINE_BREAK` regex anchors on `$` in multiline mode – which
+        // matches at the end of the haystack as well as before each `\n` – the
+        // final line of the content is eligible too, even when it is not
+        // followed by a newline (e.g. a one-line paragraph, a block title, or a
+        // section title ending in ` +`). So the cheap pre-check requires only a
+        // `+`, not also a `\n`.
+        if !rendered.contains('+') {
             return;
         }
 
