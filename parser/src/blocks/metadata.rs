@@ -581,6 +581,11 @@ mod tests {
 
     #[test]
     fn title_does_not_extend_via_plus_syntax() {
+        // A trailing ` +` on a block title does not join the following line
+        // (`def`) into the title: the title is a single line and `def` remains a
+        // separate paragraph. The ` +` is, however, still a hard line break, so
+        // the post_replacements step renders it as `<br>` within the title
+        // itself (the raw `title_source` keeps the literal ` +`).
         let doc: crate::Document<'_> =
             Parser::default().parse(".Title abc +\ndef\n****\nStuff > nonsense\n****");
 
@@ -625,7 +630,7 @@ mod tests {
                             col: 2,
                             offset: 1,
                         },),
-                        title: Some("Title abc +",),
+                        title: Some("Title abc<br>",),
                         caption: None,
                         number: None,
                         anchor: None,

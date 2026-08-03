@@ -282,6 +282,20 @@ mod default_post_replacements_substitution {
         };
 
         assert_eq!(block1.content().rendered(), "abc<br>\ndef");
+
+        // A trailing ` +` on the *final* line of a paragraph – with no newline
+        // following it – is also converted to a line break, matching
+        // Asciidoctor 2.0.26. Here the paragraph is a single line, so the ` +`
+        // ends the block's content.
+        let doc = Parser::default().parse("only +");
+
+        let block1 = doc.child_blocks().next().unwrap();
+
+        let Block::Simple(block1) = block1 else {
+            panic!("Unexpected block type: {block1:?}");
+        };
+
+        assert_eq!(block1.content().rendered(), "only<br>");
     }
 
     #[test]
@@ -388,15 +402,47 @@ mod default_post_replacements_substitution {
         assert_eq!(literal_cell.rendered(), "abc +\nghi");
     }
 
-    // A block title cannot span multiple lines via a trailing `+`: a title is a
-    // single line, and a trailing ` +` is retained literally rather than joined to
-    // the following line. Because a title never spans lines, the post_replacements
-    // line-break substitution has nothing to act on here, so the `|Titles |{y}`
-    // row has no observable effect to assert and is out of scope for verification.
-    // Treated as non-normative.
+    #[test]
+    fn titles() {
+        verifies!(
+            r#"
+|Titles |{y}
+"#
+        );
+
+        // A title is a single line, so it never spans lines the way a paragraph
+        // does. It can, however, *end* in a trailing ` +`, and the
+        // post_replacements step converts that to a line break just as it does
+        // for the final line of a paragraph (verified against Asciidoctor
+        // 2.0.26). This applies identically to block titles and section titles,
+        // both of which use `SubstitutionGroup::Title` (which includes the
+        // post_replacements step).
+
+        // A block title ending in ` +`.
+        let doc = Parser::default().parse(".first +\ncontent");
+
+        let block1 = doc.child_blocks().next().unwrap();
+
+        let Block::Simple(block1) = block1 else {
+            panic!("Unexpected block type: {block1:?}");
+        };
+
+        assert_eq!(block1.title().unwrap(), "first<br>");
+
+        // A section title ending in ` +`.
+        let doc = Parser::default().parse("== sect +\n\ncontent");
+
+        let block1 = doc.child_blocks().next().unwrap();
+
+        let Block::Section(section) = block1 else {
+            panic!("Unexpected block type: {block1:?}");
+        };
+
+        assert_eq!(section.section_title(), "sect<br>");
+    }
+
     non_normative!(
         r#"
-|Titles |{y}
 |===
 
 "#
