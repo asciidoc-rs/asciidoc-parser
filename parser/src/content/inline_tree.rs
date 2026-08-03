@@ -19,9 +19,8 @@
 //!
 //! 1. Stripping the sentinels reproduces the wrapped renderer's output
 //!    byte-for-byte (the *no-perturbation* invariant).
-//! 2. Parsing the sentinel structure recovers a tree of
-//!    [`InlineNode`](crate::inlines::InlineNode)s, and folding that tree
-//!    reconstructs the same bytes.
+//! 2. Parsing the sentinel structure recovers a tree of [`InlineNode`]s, and
+//!    folding that tree reconstructs the same bytes.
 //!
 //! Because the decorator wraps whatever renderer the [`Parser`] carries, the
 //! fold reproduces *that* renderer's bytes, not a hard-coded HTML backend.
@@ -48,6 +47,7 @@
 //!
 //! [`inline_recorder`]: ../../tests/inline_recorder.rs
 //! [`Content`]: crate::content::Content
+//! [`Parser`]: crate::Parser
 //! [`Parser::with_inline_tree`]: crate::Parser::with_inline_tree
 
 // Some node metadata is captured but not yet read by every consumer while the

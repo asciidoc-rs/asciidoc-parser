@@ -92,7 +92,7 @@ pub struct Content<'src> {
     /// This is a **derived artifact** – a projection of the rendered content,
     /// not an independent source of truth (yet; see the [inline AST
     /// architecture] design, Phase 2). It is populated only when inline-tree
-    /// building is enabled on the [`Parser`]
+    /// building is enabled on the [`Parser`](crate::Parser)
     /// ([`with_inline_tree`](crate::Parser::with_inline_tree)); otherwise it is
     /// empty and the default parse path is byte- and performance-identical to
     /// before. Because it is derived, it is deliberately excluded from
