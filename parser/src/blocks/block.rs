@@ -1027,6 +1027,25 @@ impl<'src> IsBlock<'src> for Block<'src> {
         }
     }
 
+    fn resolved_style(&'src self) -> Option<&'src str> {
+        match self {
+            Self::Simple(b) => b.resolved_style(),
+            Self::Media(b) => b.resolved_style(),
+            Self::Section(b) => b.resolved_style(),
+            Self::List(b) => b.resolved_style(),
+            Self::ListItem(b) => b.resolved_style(),
+            Self::RawDelimited(b) => b.resolved_style(),
+            Self::CompoundDelimited(b) => b.resolved_style(),
+            Self::Admonition(b) => b.resolved_style(),
+            Self::Quote(b) => b.resolved_style(),
+            Self::Table(b) => b.resolved_style(),
+            Self::Preamble(b) => b.resolved_style(),
+            Self::Break(b) => b.resolved_style(),
+            Self::Toc(b) => b.resolved_style(),
+            Self::DocumentAttribute(b) => b.resolved_style(),
+        }
+    }
+
     fn rendered_content(&'src self) -> Option<&'src str> {
         match self {
             Self::Simple(b) => b.rendered_content(),

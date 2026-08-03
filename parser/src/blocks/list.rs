@@ -459,6 +459,18 @@ impl<'src> IsBlock<'src> for ListBlock<'src> {
     fn attrlist(&'src self) -> Option<&'src Attrlist<'src>> {
         self.attrlist.as_ref()
     }
+
+    fn resolved_style(&'src self) -> Option<&'src str> {
+        // A list's resolved style is its declared style, except that a top-level
+        // unordered list in a `bibliography` section resolves to `bibliography`
+        // even though the author declared no style on the list itself (see
+        // [`is_bibliography()`]). The explicit `[bibliography]` case is already
+        // covered by the declared style.
+        //
+        // [`is_bibliography()`]: Self::is_bibliography
+        self.declared_style()
+            .or_else(|| self.is_bibliography.then_some("bibliography"))
+    }
 }
 
 impl<'src> HasSpan<'src> for ListBlock<'src> {
@@ -1323,6 +1335,32 @@ mod tests {
     fn marker_style_asterisk_returns_none() {
         let list = list_parse("* Item one\n* Item two\n").unwrap();
         assert_eq!(list.item.marker_style(), None);
+    }
+
+    mod resolved_style {
+        use super::list_parse;
+        use crate::blocks::IsBlock;
+
+        #[test]
+        fn none_for_a_plain_list() {
+            let list = list_parse("* one\n* two").unwrap();
+            assert_eq!(list.item.resolved_style(), None);
+        }
+
+        #[test]
+        fn reflects_an_explicit_declared_style() {
+            let list = list_parse("[loweralpha]\n. one\n. two").unwrap();
+            assert_eq!(list.item.declared_style(), Some("loweralpha"));
+            assert_eq!(list.item.resolved_style(), Some("loweralpha"));
+        }
+
+        #[test]
+        fn explicit_bibliography_style() {
+            let list = list_parse("[bibliography]\n* [[[a]]] An entry.").unwrap();
+            assert!(list.item.is_bibliography());
+            assert_eq!(list.item.declared_style(), Some("bibliography"));
+            assert_eq!(list.item.resolved_style(), Some("bibliography"));
+        }
     }
 
     #[test]

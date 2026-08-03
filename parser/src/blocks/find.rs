@@ -256,8 +256,11 @@ impl<'a> BlockSelector<'a> {
     }
 
     /// Restricts the match to blocks whose
-    /// [declared style](IsBlock::declared_style) equals `style` (e.g.
-    /// `"source"`, `"verse"`, `"NOTE"`).
+    /// [resolved style](IsBlock::resolved_style) equals `style` (e.g.
+    /// `"source"`, `"verse"`, `"NOTE"`, `"bibliography"`). Matching the
+    /// resolved style (rather than the declared one) mirrors Asciidoctor's
+    /// `find_by(style: …)`, so a list that acquired the `bibliography` style
+    /// implicitly from its section is matched by `style("bibliography")`.
     pub fn style(mut self, style: impl Into<Cow<'a, str>>) -> Self {
         self.style = Some(style.into());
         self
@@ -295,7 +298,7 @@ impl<'a> BlockSelector<'a> {
         }
 
         if let Some(style) = &self.style
-            && block.declared_style() != Some(style.as_ref())
+            && block.resolved_style() != Some(style.as_ref())
         {
             return false;
         }

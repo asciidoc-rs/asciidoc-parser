@@ -1,4 +1,4 @@
-use crate::tests::prelude::*;
+use crate::{blocks::BlockSelector, tests::prelude::*};
 
 track_file!("ref/asciidoc-lang/docs/modules/sections/pages/bibliography.adoc");
 
@@ -27,8 +27,18 @@ By adding the `bibliography` style to the section, you implicitly add it to each
     );
 
     // A section assigned the `bibliography` style implicitly adds that style to
-    // each of its (top-level) unordered lists.
+    // each of its (top-level) unordered lists. The list surfaces the inherited
+    // style through `resolved_style()`, even though the author declared none on
+    // the list itself.
     let doc = Parser::default().parse("[bibliography]\n== Bibliography\n\n* [[[ref]]] An entry.\n");
+
+    let list = doc
+        .find_blocks(&BlockSelector::new().context("list"))
+        .next()
+        .unwrap();
+    assert_eq!(list.declared_style(), None);
+    assert_eq!(list.resolved_style(), Some("bibliography"));
+
     assert_css(&doc, ".ulist.bibliography", 1);
 
     non_normative!(
