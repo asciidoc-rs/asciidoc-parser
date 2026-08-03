@@ -1247,3 +1247,55 @@ fn block_title_xref_is_resolved_in_the_tree() {
         "#tgt"
     );
 }
+
+#[test]
+fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
+    // Resolving a document twice, the second time with a resolver that no longer
+    // recognizes the title's target, must leave the title tree's `Ref` node
+    // *unresolved* – not stale at the first pass's destination. The title pass
+    // rebuilds the ordered destinations each run (the template, and so the list
+    // length, is stable), and the mirror overwrites each slot unconditionally
+    // (to `Some` or `None`), so the tree tracks the rendered title rather than
+    // retaining a superseded link.
+    use crate::parser::{
+        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+    };
+
+    /// Resolves every target to a fixed destination, or to nothing when `None`.
+    #[derive(Debug)]
+    struct FixedResolver(Option<&'static str>);
+
+    impl ReferenceResolver for FixedResolver {
+        fn resolve(&self, _context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
+            self.0
+                .map(|href| ResolvedReference::new(href.to_string(), None))
+        }
+    }
+
+    /// The resolved `href` of the first cross-reference in any section heading,
+    /// scoped so the tree borrow is released before the next resolution.
+    fn title_xref_href(doc: &crate::Document<'_>) -> Option<String> {
+        collect_section_title_refs(doc)
+            .iter()
+            .find(|r| r.variant == RefVariant::Xref)
+            .and_then(|r| r.resolved.as_ref())
+            .map(|resolved| resolved.href.clone())
+    }
+
+    let mut parser = Parser::default().with_inline_tree(true);
+    let mut doc = parser.parse_deferred("== See <<tgt>>\n\n[#tgt]\n== Target\n");
+
+    // First pass: the resolver recognizes the target, so the heading's tree xref
+    // carries its destination.
+    doc.resolve_references(&FixedResolver(Some("#tgt")), &HtmlSubstitutionRenderer {});
+    assert_eq!(title_xref_href(&doc).as_deref(), Some("#tgt"));
+
+    // Second pass: the resolver no longer recognizes the target, so the tree xref
+    // must fall back to unresolved rather than keep the stale destination.
+    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {});
+    assert_eq!(
+        title_xref_href(&doc),
+        None,
+        "a re-resolution that fails must clear the title tree's stale destination"
+    );
+}
