@@ -147,17 +147,19 @@ impl Author {
                 let (name, firstname, middlename, lastname, email) =
                     matched_parts(&captures, str::to_string);
 
-                // Derive the raw components from the raw expansion when it
-                // matches the same pattern. Escaping only ever adds characters,
-                // so a rendered match almost always implies a raw match with the
-                // same structure; if it does not, fall back to the rendered
-                // components (they carry no literal special characters to unescape
-                // in that case).
+                // Derive the raw components from the raw expansion, but only when
+                // it matches the same pattern *and* agrees on whether a trailing
+                // `<email>` is present, so the two representations keep the same
+                // structure and differ only in escaping. They can disagree only
+                // if a literal author-line bracket was escaped in the rendered
+                // value; in that case fall back to the rendered components.
                 let (raw_name, raw_firstname, raw_middlename, raw_lastname, raw_email) =
                     match AUTHOR.captures(&raw_expanded) {
-                        Some(raw_captures) => matched_parts(&raw_captures, str::to_string),
+                        Some(raw_captures) if raw_captures.get(4).is_some() == email.is_some() => {
+                            matched_parts(&raw_captures, str::to_string)
+                        }
 
-                        None => (
+                        _ => (
                             name.clone(),
                             firstname.clone(),
                             middlename.clone(),
@@ -553,8 +555,22 @@ fn join_name_parts(firstname: &str, middlename: Option<&str>, lastname: Option<&
 /// attribute entry that carries no literal special characters the two arguments
 /// are identical.
 fn partition_names_only(escaped_source: &str, raw_source: &str) -> Author {
-    let escaped = partition_parts(escaped_source);
-    let raw = partition_parts(raw_source);
+    // Partition the rendered value first, then partition the raw value using the
+    // *rendered* value's trailing-email decision so the two representations keep
+    // the same structure and differ only in escaping. A literal author-line
+    // bracket is escaped in the rendered value and so is not recognized as an
+    // email delimiter; the raw value, whose bracket is still literal, must follow
+    // that same decision rather than splitting an email off on its own.
+    let escaped = partition_parts(escaped_source, EmailSplit::Detect);
+
+    let raw = partition_parts(
+        raw_source,
+        if escaped.email.is_some() {
+            EmailSplit::Detect
+        } else {
+            EmailSplit::Suppress
+        },
+    );
 
     Author {
         name: escaped.name,
@@ -579,17 +595,33 @@ struct NameParts {
     email: Option<String>,
 }
 
+/// Whether [`partition_parts`] may split a trailing `<email>` off its input.
+enum EmailSplit {
+    /// Split a trailing `<email>` off when one is present (the rendered value's
+    /// own decision).
+    Detect,
+
+    /// Never split an email off; the whole value is treated as the name. Used
+    /// for the raw value when the rendered value kept its bracket escaped, so
+    /// the two stay structurally aligned.
+    Suppress,
+}
+
 /// Partition a single names-only author value into its parts, following the
 /// rules described on [`partition_names_only`].
-fn partition_parts(source: &str) -> NameParts {
+fn partition_parts(source: &str, email_split: EmailSplit) -> NameParts {
     let source = source.trim();
 
-    let (name_source, email) = match NAMES_ONLY_EMAIL.captures(source) {
-        Some(captures) => (
-            captures.get(1).map_or(source, |m| m.as_str()),
-            Some(captures[2].to_string()),
-        ),
-        None => (source, None),
+    let (name_source, email) = match email_split {
+        EmailSplit::Detect => match NAMES_ONLY_EMAIL.captures(source) {
+            Some(captures) => (
+                captures.get(1).map_or(source, |m| m.as_str()),
+                Some(captures[2].to_string()),
+            ),
+            None => (source, None),
+        },
+
+        EmailSplit::Suppress => (source, None),
     };
 
     let mut segments = split_whitespace_max3(name_source);
@@ -823,13 +855,22 @@ fn apply_author_subs(source: &str, parser: &Parser) -> String {
 /// the [`Author`] `raw_*` fields. It is the attribute-references half of
 /// [`apply_author_subs`], mirroring the value Asciidoctor keeps in its
 /// internal, pre-substitution `metadata` hash.
+///
+/// The rendered value is always resolved from the same source first (via
+/// [`apply_author_subs`]), which records any `attribute-missing` warning, so
+/// this second, raw-value pass discards the warnings it would otherwise
+/// duplicate.
 fn resolve_attribute_references(source: &str, parser: &Parser) -> String {
     use crate::content::SubstitutionStep;
+
+    let warnings_before = parser.substitution_warnings_len();
 
     let span = Span::new(source);
     let mut content = Content::from(span);
 
     SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+
+    parser.truncate_substitution_warnings(warnings_before);
 
     content.rendered().to_string()
 }
@@ -989,6 +1030,55 @@ mod tests {
             assert_eq!(a.raw_middlename(), None);
             assert_eq!(a.lastname(), None);
             assert_eq!(a.raw_lastname(), None);
+        }
+
+        #[test]
+        fn unresolved_attribute_reference_warns_only_once() {
+            // The raw pass resolves the same references as the rendered pass, so
+            // an author line with an unresolved reference must not record the
+            // `attribute-missing` warning twice.
+            let mut parser = Parser::default();
+            let doc =
+                parser.parse(":attribute-missing: warn\n= Doc\nJane {undefined} Smith\n\nbody\n");
+
+            assert_eq!(doc.warnings().count(), 1);
+        }
+
+        #[test]
+        fn names_only_email_split_stays_aligned_between_raw_and_rendered() {
+            // A four-part `:author:` entry that wraps an attribute reference in
+            // literal brackets fails the author pattern, so it is partitioned. The
+            // rendered value escapes the brackets and keeps no email; the raw
+            // value must follow that decision rather than splitting the still-
+            // literal `<…>` off as an email, so the two stay structurally aligned.
+            let a = only_author(":mail: someone@example.com\n:author: A B C D <{mail}>\n\nbody\n");
+
+            assert_eq!(a.name(), "A B C D &lt;someone@example.com&gt;");
+            assert_eq!(a.raw_name(), "A B C D <someone@example.com>");
+            assert_eq!(a.email(), None);
+            assert_eq!(a.raw_email(), None);
+            assert_eq!(a.lastname(), Some("C D &lt;someone@example.com&gt;"));
+            assert_eq!(a.raw_lastname(), Some("C D <someone@example.com>"));
+        }
+
+        #[test]
+        fn names_only_email_from_an_attribute_still_splits_in_both() {
+            // When the trailing `<email>` survives into the rendered expansion
+            // unescaped (here from an intrinsic attribute value, so the bracket is
+            // literal in *both* the rendered and raw expansions), the email is
+            // split off in both – the alignment fix only suppresses a raw split
+            // the rendered value did not also make.
+            let mut parser = Parser::default().with_intrinsic_attribute(
+                "tail",
+                "Jr. <boss@example.com>",
+                crate::parser::ModificationContext::Anywhere,
+            );
+
+            let doc = parser.parse("= Doc\n:author: A B C {tail}\n\nbody\n");
+            let a = doc.authors().first().cloned().unwrap();
+
+            assert_eq!(a.email(), Some("boss@example.com"));
+            assert_eq!(a.raw_email(), Some("boss@example.com"));
         }
     }
 
