@@ -912,6 +912,55 @@ fn inline_tree_unresolved_xref_stays_none() {
 }
 
 #[test]
+fn inline_tree_resolution_walks_past_a_footnote_and_a_link() {
+    // A block carrying a resolvable cross-reference alongside a footnote and a
+    // link exercises the other arms of the resolution walk: the xref resolves,
+    // the walk recurses into the footnote node's (currently empty) subtree
+    // without disturbing it, and a link (a `Ref` of variant `Link`) passes
+    // through untouched because only an `Xref` has a catalog destination.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser
+        .parse("[[tgt]]The target.\n\nSee <<tgt>> and https://example.org[x].footnote:[a note]");
+
+    use crate::blocks::Block;
+
+    let tree: Vec<InlineNode<'_>> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => Some(simple),
+            _ => None,
+        })
+        .flat_map(|simple| simple.content().inlines().to_vec())
+        .collect();
+
+    // The cross-reference in the same block still resolves ...
+    let refs = collect_refs(&doc);
+    assert_eq!(
+        refs.iter()
+            .find(|r| r.variant == RefVariant::Xref)
+            .and_then(|r| r.resolved.as_ref())
+            .map(|resolved| resolved.href.as_str()),
+        Some("#tgt")
+    );
+
+    // ... the link (a `Ref` of variant `Link`) is left untouched by resolution ...
+    let link = refs
+        .iter()
+        .find(|r| r.variant == RefVariant::Link)
+        .expect("expected a link node");
+    assert!(
+        link.resolved.is_none(),
+        "a link has no catalog destination and must stay unresolved"
+    );
+
+    // ... and the footnote node survives the walk.
+    assert!(
+        tree.iter().any(|n| matches!(n, InlineNode::Footnote(_))),
+        "expected a footnote node alongside the resolved xref in {tree:?}"
+    );
+}
+
+#[test]
 fn inline_tree_xref_resolution_matches_the_rendered_string() {
     // The tree's resolved destination and the rendered HTML are two projections
     // of the same resolution: the `#tgt` fragment in the resolved node is the
