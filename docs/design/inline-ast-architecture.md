@@ -639,13 +639,28 @@ Each phase is a reviewable unit with a clear exit gate.
   drives the production module directly, so its byte-for-byte fold parity is a test of the
   shipped code.
 
-  *Still remaining in Phase 2 (not in this step):* making `rendered()` *authoritatively* a
-  fold of the tree (which requires the tree to carry resolution through cross-reference and
-  title passes, so `rendered()` reflects resolved destinations) and **deleting** the three
-  production sentinel systems. These are deferred because, with Strategy A, an authoritative
-  fold would inherit the known formatted-section-title drift (§4.1) and require re-folding
-  refs at resolution time; the design sequences the true single-artifact cutover with the
-  single-pass builder in Phase 4. The opt-in flag retires with it.
+  *Step 2 landed as (cross-reference resolution reaches the tree):* the tree now **carries
+  resolution** for block-content cross-references (§4.3), the first of the two prerequisites
+  the authoritative fold needs. When resolution runs
+  ([`Content::resolve_references`](../../parser/src/content/content.rs)), each resolved
+  destination is mirrored into the corresponding [`Ref`](../../parser/src/inlines/ref_node.rs)
+  node of the tree — reusing the same `target`→destination decisions the rendered string
+  reflects (not a second, independently-invoked resolution), and recursing into formatting
+  spans and reference children. So a consumer that walks `inlines()` after a parse sees
+  resolved `#id` destinations rather than the parse-time `resolved: None` state the tree is
+  first built with. This is non-destructive and re-resolvable, exactly like the string path.
+  Two resolution sites remain unmirrored for now and are tracked as follow-ups: section- and
+  block-title cross-references (owned by the separate document-order title pass,
+  [`title_refs`](../../parser/src/document/title_refs.rs)) and footnote-embedded
+  cross-references (which live in a footnote subtree the tree does not yet populate).
+
+  *Still remaining in Phase 2 (not in these steps):* making `rendered()` *authoritatively* a
+  fold of the tree (which additionally requires the title pass to mirror into the tree, so
+  `rendered()` reflects *every* resolved destination) and **deleting** the three production
+  sentinel systems. These are deferred because, with Strategy A, an authoritative fold would
+  inherit the known formatted-section-title drift (§4.1) and require re-folding refs at
+  resolution time; the design sequences the true single-artifact cutover with the single-pass
+  builder in Phase 4. The opt-in flag retires with it.
 
 - **Phase 3 — expose the public inline API.** `Content::inlines()`, `IsBlock::inlines()`,
   the public node types, and `render_with`/`render_to`. Rename `rendered()` →

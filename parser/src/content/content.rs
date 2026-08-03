@@ -3,13 +3,15 @@
 //!
 //! [substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/
 
+use std::collections::HashMap;
+
 use crate::{
     Span,
     content::Passthrough,
-    inlines::InlineNode,
+    inlines::{InlineNode, RefVariant},
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
-        XrefRenderParams,
+        ResolvedReference, XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -396,6 +398,13 @@ impl<'src> Content<'src> {
     /// fold of the tree reproduces [`rendered`](Self::rendered) byte-for-byte –
     /// and is not yet the canonical representation (see the inline AST
     /// architecture design, Phase 2).
+    ///
+    /// Cross-references in the tree carry their resolved destination once
+    /// resolution runs: [`resolve_references`](Self::resolve_references)
+    /// mirrors each resolved destination into the corresponding
+    /// [`Ref`](crate::inlines::Ref) node, so a caller that walks
+    /// [`inlines`](Self::inlines) after resolution sees the same destinations
+    /// the rendered string reflects (§4.3 of the design).
     // Consumed by the differential and structural tests (and, in Phase 3, by
     // the public inline API); the accessor is part of the tree's internal
     // surface even where non-test code does not yet read it.
@@ -588,6 +597,55 @@ impl<'src> Content<'src> {
         }
 
         self.rebuild_rendered(renderer);
+        self.resolve_tree_references();
+    }
+
+    /// Mirrors the destinations just resolved for this content's deferred
+    /// cross-references into its inline tree, so a [`Ref`](InlineNode::Ref)
+    /// node of variant [`Xref`](RefVariant::Xref) carries the same
+    /// [`resolved`](crate::inlines::Ref::resolved) destination the rendered
+    /// string reflects.
+    ///
+    /// This runs only when an inline tree was built (see
+    /// [`Parser::with_inline_tree`](crate::Parser::with_inline_tree)); it is a
+    /// no-op otherwise. It reuses the results of the deferred-reference
+    /// resolution above rather than re-invoking the resolver: within one
+    /// `Content` the path attributes are constant, so a target resolves
+    /// identically wherever it appears, and a `target`→`resolved` map
+    /// faithfully reproduces the string path's decisions (including a
+    /// target that resolved to nothing). It is non-destructive and
+    /// re-resolvable, mirroring
+    /// [`resolve_references`](Self::resolve_references): each call overwrites
+    /// the tree's resolved state from the current deferred results.
+    ///
+    /// Cross-references embedded in section and block titles are resolved by
+    /// the separate document-order title pass
+    /// ([`title_refs`](crate::document::title_refs)), which does not yet mirror
+    /// into the title's tree; those title `Ref` nodes remain unresolved for
+    /// now. Likewise a cross-reference inside a footnote is resolved with
+    /// the footnote, whose subtree the tree does not yet carry.
+    fn resolve_tree_references(&mut self) {
+        if self.inlines.is_empty() {
+            return;
+        }
+
+        let Some(deferred) = self.deferred.as_ref() else {
+            return;
+        };
+
+        // A target that names a document carries its own derived destination and
+        // is intentionally left unresolved by the resolver (mirroring the string
+        // path); it therefore contributes no map entry and its tree node stays
+        // unresolved, exactly as the rendered string leaves it.
+        let mut resolved_by_target: HashMap<&str, Option<ResolvedReference>> = HashMap::new();
+
+        for xref in &deferred.xrefs {
+            resolved_by_target
+                .entry(xref.target.as_str())
+                .or_insert_with(|| xref.resolved.clone());
+        }
+
+        resolve_tree_xrefs(&mut self.inlines, &resolved_by_target);
     }
 
     /// Rebuilds [`Content::rendered`] from the deferred template and the
@@ -598,6 +656,44 @@ impl<'src> Content<'src> {
         };
 
         self.rendered = render_template(&deferred.template, &deferred.xrefs, renderer).into();
+    }
+}
+
+/// Walks an inline node slice and installs each cross-reference's resolved
+/// destination from `resolved_by_target`, recursing into every node that can
+/// contain children.
+///
+/// Only [`Ref`](InlineNode::Ref) nodes of variant [`Xref`](RefVariant::Xref)
+/// are touched; a [`Link`](RefVariant::Link) has no catalog destination to
+/// resolve. A node whose target appears in the map is overwritten
+/// unconditionally (to `Some` or `None`) so a repeated resolution reflects the
+/// latest result; a target absent from the map is left untouched.
+fn resolve_tree_xrefs(
+    nodes: &mut [InlineNode<'_>],
+    resolved_by_target: &HashMap<&str, Option<ResolvedReference>>,
+) {
+    for node in nodes {
+        match node {
+            InlineNode::Ref(reference) => {
+                if reference.variant == RefVariant::Xref
+                    && let Some(resolved) = resolved_by_target.get(reference.target.as_ref())
+                {
+                    reference.resolved = resolved.clone();
+                }
+
+                resolve_tree_xrefs(&mut reference.children, resolved_by_target);
+            }
+
+            InlineNode::Styled(styled) => {
+                resolve_tree_xrefs(&mut styled.children, resolved_by_target);
+            }
+
+            InlineNode::Footnote(footnote) => {
+                resolve_tree_xrefs(&mut footnote.children, resolved_by_target);
+            }
+
+            _ => {}
+        }
     }
 }
 
