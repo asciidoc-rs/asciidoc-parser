@@ -1801,3 +1801,173 @@ fn section_title_footnote_carries_its_subtree_and_resolved_xref() {
         "#tgt"
     );
 }
+
+// ─── Unit: the two footnote-subtree walks ───────────────────────────────────
+//
+// A footnote can be written inside a link's display text, which puts a
+// `Footnote` node under a `Ref` node. Both new walks descend through reference
+// children (and formatting spans) to reach such a subtree. The recording pass
+// cannot currently produce that shape — a footnote nested in link text makes
+// the Strategy A fold diverge from `rendered()`, a pre-existing limitation the
+// Phase 4 single-pass builder retires — so the walks are driven directly here.
+
+/// A cross-reference node, unresolved.
+fn unresolved_xref() -> InlineNode<'static> {
+    crate::inlines::InlineNode::Ref(crate::inlines::Ref {
+        variant: RefVariant::Xref,
+        target: "tgt".into(),
+        children: vec![],
+        roles: vec![],
+        window: None,
+        resolved: None,
+        location: Span::new(""),
+    })
+}
+
+/// A defining footnote node holding `children`.
+fn defining_footnote(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
+    InlineNode::Footnote(crate::inlines::Footnote {
+        id: None,
+        number: Some("1".into()),
+        is_reference: false,
+        children,
+        location: Span::new(""),
+    })
+}
+
+/// A link node holding `children` as its display text.
+fn link_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
+    InlineNode::Ref(crate::inlines::Ref {
+        variant: RefVariant::Link,
+        target: "https://example.org".into(),
+        children,
+        roles: vec![],
+        window: None,
+        resolved: None,
+        location: Span::new(""),
+    })
+}
+
+/// A strong span holding `children`.
+fn strong_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
+    InlineNode::Styled(crate::inlines::Styled {
+        variant: StyleVariant::Strong,
+        form: SpanForm::Constrained,
+        id: None,
+        roles: vec![],
+        attrs: None,
+        children,
+        location: Span::new(""),
+    })
+}
+
+/// A `Content` carrying `inlines` as its inline tree.
+fn content_with(inlines: Vec<InlineNode<'static>>) -> Content<'static> {
+    let mut content = Content::from(Span::new("source"));
+    content.set_inlines(inlines);
+    content
+}
+
+#[test]
+fn footnote_subtree_attaches_through_a_reference_child() {
+    let mut tree = vec![link_over(vec![defining_footnote(vec![])])];
+
+    crate::content::inline_tree::attach_footnote_subtrees(
+        &mut tree,
+        &["the note".to_string()],
+        &[],
+        Span::new(""),
+    );
+
+    let footnote = first_footnote_in(&tree);
+    assert_eq!(footnote.children.len(), 1);
+    assert!(
+        matches!(&footnote.children[0], InlineNode::Text { value, .. } if value.as_ref() == "the note")
+    );
+}
+
+#[test]
+fn footnote_subtree_attaches_through_a_formatting_span() {
+    let mut tree = vec![strong_over(vec![defining_footnote(vec![])])];
+
+    crate::content::inline_tree::attach_footnote_subtrees(
+        &mut tree,
+        &["the note".to_string()],
+        &[],
+        Span::new(""),
+    );
+
+    assert_eq!(first_footnote_in(&tree).children.len(), 1);
+}
+
+#[test]
+fn footnote_subtree_attachment_is_a_no_op_without_texts() {
+    // The overwhelmingly common case: content that defined no footnote.
+    let mut tree = vec![defining_footnote(vec![])];
+
+    crate::content::inline_tree::attach_footnote_subtrees(&mut tree, &[], &[], Span::new(""));
+
+    assert!(first_footnote_in(&tree).children.is_empty());
+}
+
+#[test]
+fn footnote_xref_mirror_reaches_through_a_reference_child() {
+    let mut content = content_with(vec![link_over(vec![defining_footnote(vec![
+        unresolved_xref(),
+    ])])]);
+
+    content.mirror_tree_xref_resolution(&[], &fixed_destination());
+
+    assert_eq!(resolved_href_in(content.inlines()).as_deref(), Some("#tgt"));
+}
+
+#[test]
+fn footnote_xref_mirror_reaches_through_a_formatting_span() {
+    let mut content = content_with(vec![strong_over(vec![defining_footnote(vec![
+        unresolved_xref(),
+    ])])]);
+
+    content.mirror_tree_xref_resolution(&[], &fixed_destination());
+
+    assert_eq!(resolved_href_in(content.inlines()).as_deref(), Some("#tgt"));
+}
+
+#[test]
+fn footnote_xref_mirror_leaves_a_block_level_reference_alone() {
+    // A block-level cross-reference belongs to the *other* list; the footnote
+    // walk must not consume a footnote slot for it.
+    let mut content = content_with(vec![unresolved_xref()]);
+
+    content.mirror_tree_xref_resolution(&[None], &[]);
+
+    assert_eq!(resolved_href_in(content.inlines()), None);
+}
+
+/// One resolved destination, for the footnote-embedded list.
+fn fixed_destination() -> Vec<Option<crate::parser::ResolvedReference>> {
+    vec![Some(crate::parser::ResolvedReference::new(
+        "#tgt".to_string(),
+        None,
+    ))]
+}
+
+/// The footnote node the single wrapper node of `nodes` holds, descending
+/// through a reference child or a formatting span to reach it.
+fn first_footnote_in<'a>(nodes: &[InlineNode<'a>]) -> crate::inlines::Footnote<'a> {
+    match nodes.first().expect("expected one node") {
+        InlineNode::Footnote(footnote) => footnote.clone(),
+        InlineNode::Ref(reference) => first_footnote_in(&reference.children),
+        InlineNode::Styled(styled) => first_footnote_in(&styled.children),
+        other => panic!("expected a footnote-bearing node, got {other:?}"),
+    }
+}
+
+/// The resolved `href` of the first cross-reference in `nodes`, using the same
+/// recursion the other resolution tests use.
+fn resolved_href_in(nodes: &[InlineNode<'_>]) -> Option<String> {
+    refs_in(nodes)
+        .into_iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .and_then(|r| r.resolved)
+        .map(|resolved| resolved.href)
+}
