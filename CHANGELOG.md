@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.9](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.8...v0.29.9)
+_03 August 2026_
+
+### Fixed
+
+* Surface the bibliography style propagated to child unordered lists ([#1071](https://github.com/asciidoc-rs/asciidoc-parser/pull/1071))
+* Apply the header substitution group to implicit author-line names consistently ([#1072](https://github.com/asciidoc-rs/asciidoc-parser/pull/1072))
+* Apply post-replacement line break to a trailing ` +` at end of content ([#1069](https://github.com/asciidoc-rs/asciidoc-parser/pull/1069))
+
 ## [0.29.8](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.7...v0.29.8)
 _02 August 2026_
 
