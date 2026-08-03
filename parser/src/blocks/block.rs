@@ -1569,4 +1569,38 @@ mod tests {
             assert!(!is_plausible_style_name("has space"));
         }
     }
+
+    mod resolved_style {
+        use crate::{
+            Parser,
+            blocks::{FindBlocks, IsBlock},
+        };
+
+        #[test]
+        fn forwards_to_every_block_variant() {
+            // `Block::resolved_style` forwards to each variant. Exercise every
+            // arm with a document that contains one of each block kind, and
+            // confirm the forwarded value: none of these blocks acquires an
+            // implicit style, so the resolved style equals the declared style
+            // for every one. (The one case where the two differ – a bibliography
+            // list that inherits its style from its section – is covered by the
+            // list block's own tests.)
+            let doc = Parser::default().parse(
+                "= Doc Title\n\nPreamble para.\n\nimage::pic.png[]\n\n'''\n\ntoc::[]\n\n== Section One\n\n:body-attr: x\n\nA paragraph.\n\n* list item\n\n[quote]\n____\nA quote.\n____\n\n[NOTE]\n====\nAn admonition.\n====\n\n----\nlisting\n----\n\n|===\n| cell\n|===\n\n--\nopen block\n--\n",
+            );
+
+            let mut count = 0;
+            for block in doc.descendant_blocks() {
+                assert_eq!(block.resolved_style(), block.declared_style());
+                count += 1;
+            }
+
+            // Guard against the document silently parsing into fewer blocks than
+            // the variants it is meant to cover.
+            assert!(
+                count >= 14,
+                "expected the sample document to yield every block variant, saw {count} blocks"
+            );
+        }
+    }
 }
