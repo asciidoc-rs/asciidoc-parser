@@ -775,6 +775,59 @@ impl Parser {
         )
     }
 
+    /// Applies a substitution group to a bare string, returning the substituted
+    /// result.
+    ///
+    /// This runs the same inline substitution pipeline the parser uses for
+    /// block and inline content, but over a caller-supplied fragment rather
+    /// than a parsed block. It lets a downstream converter mirror
+    /// Asciidoctor's per-string substitution helpers – `sub_replacements`,
+    /// `sub_macros`, `apply_header_subs`, and friends – without
+    /// reimplementing (or taking a dependency on) this crate's
+    /// `regex`-based substitution logic.
+    ///
+    /// Pass any [`SubstitutionGroup`](crate::content::SubstitutionGroup),
+    /// including a [`Custom`](crate::content::SubstitutionGroup::Custom) group
+    /// built from an explicit list of
+    /// [`SubstitutionStep`](crate::content::SubstitutionStep)s, to select
+    /// exactly which substitutions run. A single-step group is the way to apply
+    /// one step (e.g. just character replacements) on its own.
+    ///
+    /// The parser's document attributes are visible to the attribute-references
+    /// step, so `{name}` references in `text` resolve against this parser's
+    /// current attribute state.
+    ///
+    /// # Example
+    ///
+    /// Mirror Asciidoctor's `sub_replacements` on a byline author name so
+    /// `O'Brien` renders with a typographic apostrophe and `(C)` becomes the
+    /// copyright sign:
+    ///
+    /// ```
+    /// use asciidoc_parser::{
+    ///     Parser,
+    ///     content::{SubstitutionGroup, SubstitutionStep},
+    /// };
+    ///
+    /// let parser = Parser::default();
+    /// let replacements = SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]);
+    ///
+    /// assert_eq!(
+    ///     parser.apply_substitutions("O'Brien (C)", &replacements),
+    ///     "O&#8217;Brien &#169;"
+    /// );
+    /// ```
+    #[must_use]
+    pub fn apply_substitutions(
+        &self,
+        text: &str,
+        group: &crate::content::SubstitutionGroup,
+    ) -> String {
+        let mut content = crate::content::Content::from(crate::Span::new(text));
+        group.apply(&mut content, self, None);
+        content.rendered_owned()
+    }
+
     /// Drops leading YAML-style front matter from `source`, mirroring
     /// Asciidoctor's `Reader#skip_front_matter!`.
     ///
@@ -3039,6 +3092,97 @@ mod tests {
         let p = Parser::new();
         assert_eq!(p.attribute_value("foo"), InterpretedValue::Unset);
         assert_eq!(p.safe_mode(), Parser::default().safe_mode());
+    }
+
+    mod apply_substitutions {
+        use crate::{
+            content::{SubstitutionGroup, SubstitutionStep},
+            parser::ModificationContext,
+            tests::prelude::*,
+        };
+
+        #[test]
+        fn character_replacements_only() {
+            // The byline use case: a converter runs just the
+            // character-replacements step over an author name, so `O'Brien`
+            // gets a typographic apostrophe and `(C)` becomes the copyright
+            // sign, without any other substitution altering the string.
+            let parser = Parser::default();
+            let group = SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]);
+
+            assert_eq!(
+                parser.apply_substitutions("O'Brien (C)", &group),
+                "O&#8217;Brien &#169;"
+            );
+        }
+
+        #[test]
+        fn character_replacements_leave_markup_untouched() {
+            // Only the replacements step runs, so `*bold*` and `<` are passed
+            // through verbatim – neither the quotes nor the special-characters
+            // step fires.
+            let parser = Parser::default();
+            let group = SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]);
+
+            assert_eq!(
+                parser.apply_substitutions("*bold* < (TM)", &group),
+                "*bold* < &#8482;"
+            );
+        }
+
+        #[test]
+        fn header_group_matches_byline_subs() {
+            // The `Header` group applies special characters and attribute
+            // references but not quotes, matching Asciidoctor's header subs.
+            let parser = Parser::default();
+
+            assert_eq!(
+                parser.apply_substitutions("*Ed* <a & b>", &SubstitutionGroup::Header),
+                "*Ed* &lt;a &amp; b&gt;"
+            );
+        }
+
+        #[test]
+        fn attribute_references_resolve_against_parser_state() {
+            // A `{name}` reference resolves against the parser's current
+            // attribute state, so the caller can seed values via the builder.
+            let parser = Parser::default().with_intrinsic_attribute(
+                "author",
+                "Kismet",
+                ModificationContext::Anywhere,
+            );
+
+            let group = SubstitutionGroup::Custom(vec![SubstitutionStep::AttributeReferences]);
+
+            assert_eq!(
+                parser.apply_substitutions("by {author}", &group),
+                "by Kismet"
+            );
+        }
+
+        #[test]
+        fn normal_group_runs_full_pipeline() {
+            // A named group runs its whole step sequence: `Normal` turns
+            // `*word*` into a `<strong>` span and escapes `<`.
+            let parser = Parser::default();
+
+            assert_eq!(
+                parser.apply_substitutions("*word* <x>", &SubstitutionGroup::Normal),
+                "<strong>word</strong> &lt;x&gt;"
+            );
+        }
+
+        #[test]
+        fn none_group_is_a_no_op() {
+            // The `None` group applies no substitutions, returning the input
+            // unchanged.
+            let parser = Parser::default();
+
+            assert_eq!(
+                parser.apply_substitutions("*word* <x> (C)", &SubstitutionGroup::None),
+                "*word* <x> (C)"
+            );
+        }
     }
 
     mod attribute_state_between_parses {
