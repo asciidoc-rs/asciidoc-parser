@@ -612,7 +612,7 @@ Each phase is a reviewable unit with a clear exit gate.
   section with a *formatted* title, whose rendered (marker-bearing) text feeds the reference
   catalog. The single-pass builder (Phase 4) retires it by never re-rendering.
 
-[`RecordingRenderer`]: ../../parser/src/tests/inline_recorder.rs
+[`RecordingRenderer`]: ../../parser/src/content/inline_tree.rs
 [`parser/src/tests/inline_recorder.rs`]: ../../parser/src/tests/inline_recorder.rs
 
 - **Phase 2 — make the tree canonical; `rendered()` becomes a fold.** 🔶 **In progress.**
