@@ -649,10 +649,27 @@ Each phase is a reviewable unit with a clear exit gate.
   spans and reference children. So a consumer that walks `inlines()` after a parse sees
   resolved `#id` destinations rather than the parse-time `resolved: None` state the tree is
   first built with. This is non-destructive and re-resolvable, exactly like the string path.
-  Two resolution sites remain unmirrored for now and are tracked as follow-ups: section- and
-  block-title cross-references (owned by the separate document-order title pass,
+  Two resolution sites remained unmirrored after this step and were tracked as follow-ups:
+  section- and block-title cross-references (owned by the separate document-order title pass,
   [`title_refs`](../../parser/src/document/title_refs.rs)) and footnote-embedded
-  cross-references (which live in a footnote subtree the tree does not yet populate).
+  cross-references (which live in a footnote subtree the tree does not yet populate). The first
+  is closed by step 3 below.
+
+  *Step 3 landed as (title cross-reference resolution reaches the tree):* the document-order
+  title pass ([`title_refs`](../../parser/src/document/title_refs.rs)) now **mirrors** the
+  destinations it resolves for each section heading and block `.Title` into that title's own
+  inline tree, closing the first of the two step-2 follow-ups. The title pass exists precisely
+  because a title's cross-references need cross-title coordination (forward and circular
+  references between headings) that the per-content pass cannot do; it computes each title's
+  resolved references once, in document order, and — reusing the *same* resolved segments that
+  produce the rendered title (not a second resolution) — installs them into the title tree via
+  the same walk the block path uses. The tree-facing mirror is factored into one shared entry
+  point ([`Content::mirror_tree_xref_resolution`](../../parser/src/content/content.rs), fed by
+  the placeholder-ordered [`ordered_tree_xrefs`](../../parser/src/content/content.rs)) that
+  both the block pass and the title pass call, so the two paths cannot drift. Block titles —
+  which the per-content pass never resolved at all — now carry resolved tree destinations too.
+  The remaining unmirrored site is footnote-embedded cross-references, which still await the
+  footnote subtree the tree does not yet populate.
 
   *Still remaining in Phase 2 (not in these steps):* making `rendered()` *authoritatively* a
   fold of the tree (which additionally requires the title pass to mirror into the tree, so

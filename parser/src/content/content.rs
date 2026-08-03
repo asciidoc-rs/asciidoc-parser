@@ -635,30 +635,37 @@ impl<'src> Content<'src> {
             return;
         };
 
-        // The block-level segments, in placeholder (document) order: those whose
-        // placeholder still appears in the template. A footnote-embedded
-        // cross-reference is re-homed out of the template (and lives in a
-        // footnote subtree the tree does not yet populate), so filtering on the
-        // template keeps this list aligned one-to-one with the tree's
-        // cross-reference nodes. A segment that resolved to nothing contributes a
-        // `None`, so an unresolved node is left unresolved, exactly as the
-        // rendered string leaves it.
-        let ordered: Vec<Option<ResolvedReference>> = deferred
-            .xrefs
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                deferred
-                    .template
-                    .contains(&Content::xref_placeholder(*index))
-            })
-            .map(|(_, xref)| xref.resolved.clone())
-            .collect();
+        let ordered = ordered_tree_xrefs(&deferred.template, &deferred.xrefs);
+        self.mirror_tree_xref_resolution(&ordered);
+    }
+
+    /// Installs a pre-computed list of resolved cross-reference destinations –
+    /// in placeholder (document) order, as produced by
+    /// [`ordered_tree_xrefs`] – into this content's inline tree.
+    ///
+    /// This is the tree-facing half of
+    /// [`resolve_references`](Self::resolve_references): where that method
+    /// resolves this content's *own* deferred segments and then calls here,
+    /// the **document-order title resolution pass** (the `title_refs`
+    /// module) resolves a title's cross-references with cross-title
+    /// coordination the per-content pass cannot do, and calls here directly
+    /// with the destinations it computed. Either way the mirroring is the
+    /// same tree walk, so a caller that reads [`inlines`](Self::inlines)
+    /// sees the resolved destinations the rendered string reflects.
+    ///
+    /// It is a no-op when no inline tree was built (see
+    /// [`Parser::with_inline_tree`](crate::Parser::with_inline_tree)),
+    /// non-destructive, and re-resolvable: each call overwrites the tree's
+    /// resolved state from `ordered`.
+    pub(crate) fn mirror_tree_xref_resolution(&mut self, ordered: &[Option<ResolvedReference>]) {
+        if self.inlines.is_empty() {
+            return;
+        }
 
         let mut next = 0;
-        assign_tree_xrefs(&mut self.inlines, &ordered, &mut next);
+        assign_tree_xrefs(&mut self.inlines, ordered, &mut next);
 
-        // Each block-level segment must line up with exactly one tree node. A
+        // Each ordered segment must line up with exactly one tree node. A
         // mismatch means the recording pass and the authoritative pass
         // enumerated cross-references differently, which would silently misplace
         // a resolved destination; catch that in debug/test builds.
@@ -678,6 +685,29 @@ impl<'src> Content<'src> {
 
         self.rendered = render_template(&deferred.template, &deferred.xrefs, renderer).into();
     }
+}
+
+/// Builds the placeholder-ordered list of resolved destinations that
+/// [`Content::mirror_tree_xref_resolution`] installs into an inline tree.
+///
+/// The list holds one entry per deferred segment whose placeholder **still
+/// appears in `template`**, in placeholder (document) order. A
+/// footnote-embedded cross-reference is re-homed out of the template (and lives
+/// in a footnote subtree the tree does not yet populate), so filtering on the
+/// template keeps this list aligned one-to-one with the tree's cross-reference
+/// nodes. A segment that resolved to nothing contributes a `None`, so an
+/// unresolved node is left unresolved, exactly as the rendered string leaves
+/// it.
+pub(crate) fn ordered_tree_xrefs(
+    template: &str,
+    xrefs: &[XrefSegment],
+) -> Vec<Option<ResolvedReference>> {
+    xrefs
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| template.contains(&Content::xref_placeholder(*index)))
+        .map(|(_, xref)| xref.resolved.clone())
+        .collect()
 }
 
 /// Walks an inline node slice in document order and installs each
