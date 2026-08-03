@@ -516,11 +516,11 @@ impl<'src> SectionBlock<'src> {
     /// installed in the rendered string. A no-op when no inline tree was built.
     pub(crate) fn mirror_section_title_tree_xrefs(
         &mut self,
-        ordered: &[Option<ResolvedReference>],
+        block_ordered: &[Option<ResolvedReference>],
         footnote_ordered: &[Option<ResolvedReference>],
     ) {
         self.section_title
-            .mirror_tree_xref_resolution(ordered, footnote_ordered);
+            .mirror_tree_xref_resolution(block_ordered, footnote_ordered);
     }
 
     /// Returns the section title's inline tree. Used by the inline-tree tests

@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{XrefSegment, footnote_tree_xrefs, ordered_tree_xrefs, render_xref_template},
+    content::{XrefSegment, block_tree_xrefs, footnote_tree_xrefs, render_xref_template},
     document::Catalog,
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
@@ -36,9 +36,10 @@ use crate::{
 /// The resolved outcome of one title: its final rendering, plus the resolved
 /// destinations of its cross-references in placeholder order.
 ///
-/// The rendering is installed into the title's rendered string; the ordered
-/// destinations are mirrored into the title's inline tree (see
-/// [`Content::mirror_tree_xref_resolution`]), so both views of the title agree.
+/// The rendering is installed into the title's rendered string; the
+/// `block_ordered` / `footnote_ordered` destinations are mirrored into the
+/// title's inline tree (see [`Content::mirror_tree_xref_resolution`]), so both
+/// views of the title agree.
 ///
 /// [`Content::mirror_tree_xref_resolution`]: crate::content::Content::mirror_tree_xref_resolution
 struct Resolution {
@@ -47,8 +48,8 @@ struct Resolution {
     rendered: String,
 
     /// The resolved destination of each title-level cross-reference, in
-    /// placeholder order, ready for [`ordered_tree_xrefs`]-aligned mirroring.
-    ordered: Vec<Option<ResolvedReference>>,
+    /// placeholder order, ready for [`block_tree_xrefs`]-aligned mirroring.
+    block_ordered: Vec<Option<ResolvedReference>>,
 
     /// The resolved destination of each cross-reference embedded in a footnote
     /// the title carries, in segment order, ready for
@@ -189,7 +190,7 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], ind
                 if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
                     section.set_section_title_rendered(resolution.rendered.clone());
                     section.mirror_section_title_tree_xrefs(
-                        &resolution.ordered,
+                        &resolution.block_ordered,
                         &resolution.footnote_ordered,
                     );
                 }
@@ -200,8 +201,10 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], ind
         {
             if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
                 title.set_rendered(resolution.rendered.clone());
-                title
-                    .mirror_tree_xref_resolution(&resolution.ordered, &resolution.footnote_ordered);
+                title.mirror_tree_xref_resolution(
+                    &resolution.block_ordered,
+                    &resolution.footnote_ordered,
+                );
             }
             *index += 1;
         }
@@ -318,12 +321,12 @@ fn compute<'src>(
     // cross-reference nodes when mirrored (see `write_back`). This reuses the
     // very `xrefs` that produced `rendered`, so the tree cannot disagree with
     // the string.
-    let ordered = ordered_tree_xrefs(&node.template, &xrefs);
+    let block_ordered = block_tree_xrefs(&node.template, &xrefs);
 
     // The complementary set: a cross-reference the title's footnotes carry was
     // re-homed out of the template when the footnote text was extracted, so it
-    // is absent from `ordered` and belongs to a footnote subtree of the title
-    // tree instead.
+    // is absent from `block_ordered` and belongs to a footnote subtree of the
+    // title tree instead.
     let footnote_ordered = footnote_tree_xrefs(&node.template, &xrefs);
 
     if let Some(flag) = in_progress.get_mut(index) {
@@ -332,7 +335,7 @@ fn compute<'src>(
     if let Some(slot) = memo.get_mut(index) {
         *slot = Some(Resolution {
             rendered: rendered.clone(),
-            ordered,
+            block_ordered,
             footnote_ordered,
         });
     }

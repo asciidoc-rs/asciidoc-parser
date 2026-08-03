@@ -633,15 +633,15 @@ impl<'src> Content<'src> {
             return;
         };
 
-        let ordered = ordered_tree_xrefs(&deferred.template, &deferred.xrefs);
+        let block_ordered = block_tree_xrefs(&deferred.template, &deferred.xrefs);
         let footnote_ordered = footnote_tree_xrefs(&deferred.template, &deferred.xrefs);
 
-        self.mirror_tree_xref_resolution(&ordered, &footnote_ordered);
+        self.mirror_tree_xref_resolution(&block_ordered, &footnote_ordered);
     }
 
     /// Installs a pre-computed list of resolved cross-reference destinations –
     /// in placeholder (document) order, as produced by
-    /// [`ordered_tree_xrefs`] – into this content's inline tree.
+    /// [`block_tree_xrefs`] – into this content's inline tree.
     ///
     /// This is the tree-facing half of
     /// [`resolve_references`](Self::resolve_references): where that method
@@ -662,10 +662,10 @@ impl<'src> Content<'src> {
     /// It is a no-op when no inline tree was built (see
     /// [`Parser::with_inline_tree`](crate::Parser::with_inline_tree)),
     /// non-destructive, and re-resolvable: each call overwrites the tree's
-    /// resolved state from `ordered` and `footnote_ordered`.
+    /// resolved state from `block_ordered` and `footnote_ordered`.
     pub(crate) fn mirror_tree_xref_resolution(
         &mut self,
-        ordered: &[Option<ResolvedReference>],
+        block_ordered: &[Option<ResolvedReference>],
         footnote_ordered: &[Option<ResolvedReference>],
     ) {
         if self.inlines.is_empty() {
@@ -673,15 +673,15 @@ impl<'src> Content<'src> {
         }
 
         let mut next = 0;
-        assign_tree_xrefs(&mut self.inlines, ordered, &mut next);
+        assign_tree_xrefs(&mut self.inlines, block_ordered, &mut next);
 
-        // Each ordered segment must line up with exactly one tree node. A
+        // Each block-level segment must line up with exactly one tree node. A
         // mismatch means the recording pass and the authoritative pass
         // enumerated cross-references differently, which would silently misplace
         // a resolved destination; catch that in debug/test builds.
         debug_assert_eq!(
             next,
-            ordered.len(),
+            block_ordered.len(),
             "inline tree cross-reference count diverged from the resolved segments",
         );
 
@@ -717,7 +717,7 @@ impl<'src> Content<'src> {
 /// [`footnote_tree_xrefs`] instead. A segment that resolved to nothing
 /// contributes a `None`, so an unresolved node is left unresolved, exactly as
 /// the rendered string leaves it.
-pub(crate) fn ordered_tree_xrefs(
+pub(crate) fn block_tree_xrefs(
     template: &str,
     xrefs: &[XrefSegment],
 ) -> Vec<Option<ResolvedReference>> {
@@ -734,7 +734,7 @@ pub(crate) fn ordered_tree_xrefs(
 /// [`Content::mirror_tree_xref_resolution`] installs into the tree's footnote
 /// subtrees.
 ///
-/// This is the exact complement of [`ordered_tree_xrefs`]: it holds one entry
+/// This is the exact complement of [`block_tree_xrefs`]: it holds one entry
 /// per deferred segment whose placeholder **no longer appears in `template`**,
 /// in segment order. A placeholder leaves the template only by being re-homed
 /// onto a footnote (see [`rehome_xref_placeholders`]), which happens when the

@@ -665,7 +665,7 @@ Each phase is a reviewable unit with a clear exit gate.
   produce the rendered title (not a second resolution) — installs them into the title tree via
   the same walk the block path uses. The tree-facing mirror is factored into one shared entry
   point ([`Content::mirror_tree_xref_resolution`](../../parser/src/content/content.rs), fed by
-  the placeholder-ordered [`ordered_tree_xrefs`](../../parser/src/content/content.rs)) that
+  the placeholder-ordered [`block_tree_xrefs`](../../parser/src/content/content.rs)) that
   both the block pass and the title pass call, so the two paths cannot drift. Block titles —
   which the per-content pass never resolved at all — now carry resolved tree destinations too.
   The remaining unmirrored site is footnote-embedded cross-references, which still await the
@@ -688,7 +688,7 @@ Each phase is a reviewable unit with a clear exit gate.
 
   The cross-reference mirror then follows that structure. A footnote-embedded reference is
   **re-homed out of the block template** when the footnote's text is extracted, so
-  [`ordered_tree_xrefs`](../../parser/src/content/content.rs) — which filters *to* the
+  [`block_tree_xrefs`](../../parser/src/content/content.rs) — which filters *to* the
   placeholders the template still splices — already excludes it. Its exact complement,
   [`footnote_tree_xrefs`](../../parser/src/content/content.rs), collects those same re-homed
   segments in the order the footnote subtrees hold them, and
