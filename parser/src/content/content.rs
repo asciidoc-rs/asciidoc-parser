@@ -6,10 +6,10 @@
 use crate::{
     Span,
     content::Passthrough,
-    inlines::InlineNode,
+    inlines::{InlineNode, RefVariant},
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
-        XrefRenderParams,
+        ResolvedReference, XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -396,6 +396,13 @@ impl<'src> Content<'src> {
     /// fold of the tree reproduces [`rendered`](Self::rendered) byte-for-byte –
     /// and is not yet the canonical representation (see the inline AST
     /// architecture design, Phase 2).
+    ///
+    /// Cross-references in the tree carry their resolved destination once
+    /// resolution runs: [`resolve_references`](Self::resolve_references)
+    /// mirrors each resolved destination into the corresponding
+    /// [`Ref`](crate::inlines::Ref) node, so a caller that walks
+    /// [`inlines`](Self::inlines) after resolution sees the same destinations
+    /// the rendered string reflects (§4.3 of the design).
     // Consumed by the differential and structural tests (and, in Phase 3, by
     // the public inline API); the accessor is part of the tree's internal
     // surface even where non-test code does not yet read it.
@@ -588,6 +595,78 @@ impl<'src> Content<'src> {
         }
 
         self.rebuild_rendered(renderer);
+        self.resolve_tree_references();
+    }
+
+    /// Mirrors the destinations just resolved for this content's deferred
+    /// cross-references into its inline tree, so a [`Ref`](InlineNode::Ref)
+    /// node of variant [`Xref`](RefVariant::Xref) carries the same
+    /// [`resolved`](crate::inlines::Ref::resolved) destination the rendered
+    /// string reflects.
+    ///
+    /// This runs only when an inline tree was built (see
+    /// [`Parser::with_inline_tree`](crate::Parser::with_inline_tree)); it is a
+    /// no-op otherwise. It reuses the results of the deferred-reference
+    /// resolution above rather than re-invoking the resolver, correlating each
+    /// tree node with its *own* segment **positionally**: the tree's
+    /// cross-reference nodes, visited in document order, line up one-to-one
+    /// with the block-level deferred segments (those whose placeholder
+    /// still appears in the template) in the same order. So node *i* takes
+    /// segment *i*'s destination — two references sharing a target but
+    /// resolving differently (a custom resolver keying on the per-reference
+    /// context) keep their distinct destinations rather than collapsing
+    /// onto one. It is non-destructive and re-resolvable, mirroring
+    /// [`resolve_references`](Self::resolve_references): each call overwrites
+    /// the tree's resolved state from the current deferred results.
+    ///
+    /// Cross-references embedded in section and block titles are resolved by
+    /// the separate document-order title pass (the `title_refs` module), which
+    /// does not yet mirror into the title's tree; those title `Ref` nodes
+    /// remain unresolved for now. Likewise a cross-reference inside a footnote
+    /// is resolved with the footnote, whose subtree the tree does not yet
+    /// carry — and whose segment is re-homed out of the block template, so it
+    /// is excluded from the correlation below (keeping it one-to-one).
+    fn resolve_tree_references(&mut self) {
+        if self.inlines.is_empty() {
+            return;
+        }
+
+        let Some(deferred) = self.deferred.as_ref() else {
+            return;
+        };
+
+        // The block-level segments, in placeholder (document) order: those whose
+        // placeholder still appears in the template. A footnote-embedded
+        // cross-reference is re-homed out of the template (and lives in a
+        // footnote subtree the tree does not yet populate), so filtering on the
+        // template keeps this list aligned one-to-one with the tree's
+        // cross-reference nodes. A segment that resolved to nothing contributes a
+        // `None`, so an unresolved node is left unresolved, exactly as the
+        // rendered string leaves it.
+        let ordered: Vec<Option<ResolvedReference>> = deferred
+            .xrefs
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                deferred
+                    .template
+                    .contains(&Content::xref_placeholder(*index))
+            })
+            .map(|(_, xref)| xref.resolved.clone())
+            .collect();
+
+        let mut next = 0;
+        assign_tree_xrefs(&mut self.inlines, &ordered, &mut next);
+
+        // Each block-level segment must line up with exactly one tree node. A
+        // mismatch means the recording pass and the authoritative pass
+        // enumerated cross-references differently, which would silently misplace
+        // a resolved destination; catch that in debug/test builds.
+        debug_assert_eq!(
+            next,
+            ordered.len(),
+            "inline tree cross-reference count diverged from the resolved segments",
+        );
     }
 
     /// Rebuilds [`Content::rendered`] from the deferred template and the
@@ -598,6 +677,50 @@ impl<'src> Content<'src> {
         };
 
         self.rendered = render_template(&deferred.template, &deferred.xrefs, renderer).into();
+    }
+}
+
+/// Walks an inline node slice in document order and installs each
+/// cross-reference's resolved destination from `ordered` – the resolved state
+/// of the block-level deferred segments, in placeholder order – advancing
+/// `next` past each [`Xref`](RefVariant::Xref) node it visits.
+///
+/// Only [`Ref`](InlineNode::Ref) nodes of variant [`Xref`](RefVariant::Xref)
+/// consume a slot; a [`Link`](RefVariant::Link) has no catalog destination. The
+/// pre-order traversal visits cross-references in the same left-to-right order
+/// the substitution assigned their placeholders, so node *i* receives segment
+/// *i*'s destination – overwritten unconditionally (to `Some` or `None`) so a
+/// repeated resolution reflects the latest result. A node with no matching slot
+/// (a count mismatch, guarded against by the caller) is left untouched.
+fn assign_tree_xrefs(
+    nodes: &mut [InlineNode<'_>],
+    ordered: &[Option<ResolvedReference>],
+    next: &mut usize,
+) {
+    for node in nodes {
+        match node {
+            InlineNode::Ref(reference) => {
+                if reference.variant == RefVariant::Xref {
+                    if let Some(resolved) = ordered.get(*next) {
+                        reference.resolved = resolved.clone();
+                    }
+
+                    *next += 1;
+                }
+
+                assign_tree_xrefs(&mut reference.children, ordered, next);
+            }
+
+            InlineNode::Styled(styled) => {
+                assign_tree_xrefs(&mut styled.children, ordered, next);
+            }
+
+            InlineNode::Footnote(footnote) => {
+                assign_tree_xrefs(&mut footnote.children, ordered, next);
+            }
+
+            _ => {}
+        }
     }
 }
 

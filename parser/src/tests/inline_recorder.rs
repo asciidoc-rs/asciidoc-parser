@@ -808,6 +808,244 @@ fn inline_tree_numbers_footnotes_in_document_order() {
     assert_eq!(numbers, vec!["1".to_string(), "2".to_string()]);
 }
 
+// ─── Wiring: cross-reference resolution reaches the tree ─────────────────────
+//
+// After a full parse (which resolves references against the document's own
+// catalog), a cross-reference in the inline tree carries the same resolved
+// destination the rendered string reflects – so a consumer that walks
+// `inlines()` sees resolved xrefs, not just the parse-time `resolved: None`
+// state the tree is first built with (design §4.3).
+
+/// Collects every [`Ref`](InlineNode::Ref) node from the simple blocks of
+/// `doc`, recursing into formatting spans and reference children.
+fn collect_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+    use crate::blocks::Block;
+
+    fn walk<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
+        for node in nodes {
+            match node {
+                InlineNode::Ref(reference) => {
+                    out.push(reference.clone());
+                    walk(&reference.children, out);
+                }
+
+                InlineNode::Styled(styled) => walk(&styled.children, out),
+                InlineNode::Footnote(footnote) => walk(&footnote.children, out),
+                _ => {}
+            }
+        }
+    }
+
+    let mut out = vec![];
+
+    for block in doc.child_blocks() {
+        if let Block::Simple(simple) = block {
+            walk(simple.content().inlines(), &mut out);
+        }
+    }
+
+    out
+}
+
+#[test]
+fn inline_tree_xref_is_resolved_after_parse() {
+    // The target is anchored in the first paragraph and referenced in the
+    // second; after the parse's own-catalog resolution, the tree's xref node
+    // carries the resolved `#tgt` destination.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[[tgt]]The target paragraph.\n\nSee <<tgt>> for details.");
+
+    let refs = collect_refs(&doc);
+    let reference = refs
+        .iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref node");
+
+    let resolved = reference
+        .resolved
+        .as_ref()
+        .expect("the xref should be resolved after parse");
+
+    assert_eq!(resolved.href, "#tgt");
+}
+
+#[test]
+fn inline_tree_xref_inside_formatting_is_resolved() {
+    // The recursion reaches an xref nested inside a formatting span, so a
+    // `Ref` node that lives under a `Styled` node is resolved too.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[[tgt]]The target.\n\nSee *the <<tgt>> link* here.");
+
+    let refs = collect_refs(&doc);
+    let reference = refs
+        .iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref node nested in formatting");
+
+    assert_eq!(
+        reference
+            .resolved
+            .as_ref()
+            .expect("nested xref should be resolved")
+            .href,
+        "#tgt"
+    );
+}
+
+#[test]
+fn inline_tree_unresolved_xref_stays_none() {
+    // A reference whose target has no catalog entry is left unresolved in the
+    // tree, mirroring the unresolved-fallback the rendered string shows.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("See <<missing>> here.");
+
+    let refs = collect_refs(&doc);
+    let reference = refs
+        .iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref node");
+
+    assert!(
+        reference.resolved.is_none(),
+        "an unresolvable target must not carry a resolved destination"
+    );
+}
+
+#[test]
+fn inline_tree_resolution_walks_past_a_footnote_and_a_link() {
+    // A block carrying a resolvable cross-reference alongside a footnote and a
+    // link exercises the other arms of the resolution walk: the xref resolves,
+    // the walk recurses into the footnote node's (currently empty) subtree
+    // without disturbing it, and a link (a `Ref` of variant `Link`) passes
+    // through untouched because only an `Xref` has a catalog destination.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser
+        .parse("[[tgt]]The target.\n\nSee <<tgt>> and https://example.org[x].footnote:[a note]");
+
+    use crate::blocks::Block;
+
+    let tree: Vec<InlineNode<'_>> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => Some(simple),
+            _ => None,
+        })
+        .flat_map(|simple| simple.content().inlines().to_vec())
+        .collect();
+
+    // The cross-reference in the same block still resolves ...
+    let refs = collect_refs(&doc);
+    assert_eq!(
+        refs.iter()
+            .find(|r| r.variant == RefVariant::Xref)
+            .and_then(|r| r.resolved.as_ref())
+            .map(|resolved| resolved.href.as_str()),
+        Some("#tgt")
+    );
+
+    // ... the link (a `Ref` of variant `Link`) is left untouched by resolution ...
+    let link = refs
+        .iter()
+        .find(|r| r.variant == RefVariant::Link)
+        .expect("expected a link node");
+    assert!(
+        link.resolved.is_none(),
+        "a link has no catalog destination and must stay unresolved"
+    );
+
+    // ... and the footnote node survives the walk.
+    assert!(
+        tree.iter().any(|n| matches!(n, InlineNode::Footnote(_))),
+        "expected a footnote node alongside the resolved xref in {tree:?}"
+    );
+}
+
+#[test]
+fn inline_tree_same_target_refs_keep_per_reference_resolution() {
+    // Two references to the same target, resolved by a custom resolver that
+    // varies its destination by the reference's provided text. Correlating each
+    // tree node with its own segment positionally (rather than keying by target)
+    // gives each node its own destination instead of collapsing both onto the
+    // first.
+    use crate::parser::{
+        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+    };
+
+    #[derive(Debug)]
+    struct PerTextResolver;
+
+    impl ReferenceResolver for PerTextResolver {
+        fn resolve(&self, context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
+            // Same target, distinct destination per provided text.
+            let href = match context.provided_text {
+                Some("first") => "#one",
+                Some("second") => "#two",
+                _ => "#default",
+            };
+
+            Some(ResolvedReference::new(href.to_string(), None))
+        }
+    }
+
+    let mut parser = Parser::default().with_inline_tree(true);
+    let mut doc = parser.parse_deferred("See <<tgt,first>> and <<tgt,second>>.");
+    doc.resolve_references(&PerTextResolver, &HtmlSubstitutionRenderer {});
+
+    let hrefs: Vec<String> = collect_refs(&doc)
+        .iter()
+        .filter(|r| r.variant == RefVariant::Xref)
+        .map(|r| {
+            r.resolved
+                .as_ref()
+                .expect("each xref should resolve")
+                .href
+                .clone()
+        })
+        .collect();
+
+    assert_eq!(hrefs, vec!["#one".to_string(), "#two".to_string()]);
+}
+
+#[test]
+fn inline_tree_xref_resolution_matches_the_rendered_string() {
+    // The tree's resolved destination and the rendered HTML are two projections
+    // of the same resolution: the `#tgt` fragment in the resolved node is the
+    // same href the rendered `<a>` carries.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[[tgt]]The target.\n\nSee <<tgt,the target>> now.");
+
+    use crate::blocks::Block;
+
+    let rendered = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => Some(simple.content().rendered().to_string()),
+            _ => None,
+        })
+        .find(|r| r.contains("<a href"))
+        .expect("expected a rendered link");
+
+    assert!(
+        rendered.contains("href=\"#tgt\""),
+        "rendered string should link to #tgt: {rendered:?}"
+    );
+
+    let refs = collect_refs(&doc);
+    let reference = refs
+        .iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref node");
+
+    assert_eq!(
+        reference
+            .resolved
+            .as_ref()
+            .expect("xref should be resolved")
+            .href,
+        "#tgt"
+    );
+}
+
 // The guard lives in `SubstitutionGroup::build_inline_tree` as a
 // `debug_assert!`, so both the test and the stateful renderer it needs are
 // gated on `debug_assertions` – otherwise the renderer is unused in release
