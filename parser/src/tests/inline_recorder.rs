@@ -1087,3 +1087,215 @@ fn inline_tree_build_rejects_a_stateful_renderer() {
 
     let _doc = parser.parse("a < b");
 }
+
+// ─── Wiring: title cross-reference resolution reaches the tree ───────────────
+//
+// A cross-reference embedded in a section heading or a block `.Title` is owned
+// by the separate document-order title pass (`title_refs`), which coordinates
+// cross-title references – including forward and circular ones – that the
+// per-content pass cannot. That pass now mirrors each resolved destination into
+// the title's own inline tree, so a consumer that walks a title's `inlines()`
+// sees the same destinations the rendered title reflects – closing the
+// section-/block-title follow-up of Phase 2 step 2 (design §4.3).
+
+/// Collects every cross-reference/link node from the inline tree of every
+/// section heading in `doc`, recursing into nested sections and into formatting
+/// spans and reference children within each title.
+fn collect_section_title_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+    use crate::blocks::{Block, FindBlocks};
+
+    fn refs_in<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
+        for node in nodes {
+            match node {
+                InlineNode::Ref(reference) => {
+                    out.push(reference.clone());
+                    refs_in(&reference.children, out);
+                }
+
+                InlineNode::Styled(styled) => refs_in(&styled.children, out),
+                InlineNode::Footnote(footnote) => refs_in(&footnote.children, out),
+                _ => {}
+            }
+        }
+    }
+
+    fn walk<'a>(
+        blocks: impl Iterator<Item = &'a Block<'a>>,
+        out: &mut Vec<crate::inlines::Ref<'a>>,
+    ) {
+        for block in blocks {
+            if let Block::Section(section) = block {
+                refs_in(section.section_title_inlines(), out);
+            }
+
+            walk(block.child_blocks(), out);
+        }
+    }
+
+    let mut out = vec![];
+    walk(doc.child_blocks(), &mut out);
+    out
+}
+
+#[test]
+fn section_title_forward_xref_is_resolved_in_the_tree() {
+    // The first heading forward-references a section defined later. The title
+    // pass resolves it in document order and mirrors the destination into the
+    // heading's tree, so the title's `Ref` node carries `#the-end`.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("== See <<the-end>>\n\n[#the-end]\n== The End\n");
+
+    let refs = collect_section_title_refs(&doc);
+    let reference = refs
+        .iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref node in a section heading");
+
+    assert_eq!(
+        reference
+            .resolved
+            .as_ref()
+            .expect("the title xref should be resolved after parse")
+            .href,
+        "#the-end"
+    );
+}
+
+#[test]
+fn circular_section_title_xrefs_are_both_resolved_in_the_tree() {
+    // Two headings reference each other. The title pass breaks the cycle for the
+    // rendered link *text*, but each reference still resolves to its target's
+    // destination – and both destinations are now mirrored into the two
+    // headings' trees.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[#a]\n== See <<b>>\n\n[#b]\n== See <<a>>\n");
+
+    let hrefs: Vec<String> = collect_section_title_refs(&doc)
+        .iter()
+        .filter(|r| r.variant == RefVariant::Xref)
+        .map(|r| {
+            r.resolved
+                .as_ref()
+                .expect("each circular title xref should resolve")
+                .href
+                .clone()
+        })
+        .collect();
+
+    assert_eq!(hrefs, vec!["#b".to_string(), "#a".to_string()]);
+}
+
+#[test]
+fn unresolved_section_title_xref_stays_none_in_the_tree() {
+    // A heading whose cross-reference names no catalog entry is left unresolved
+    // in the tree, mirroring the unresolved fallback the rendered title shows.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("== See <<missing>>\n");
+
+    let refs = collect_section_title_refs(&doc);
+    let reference = refs
+        .iter()
+        .find(|r| r.variant == RefVariant::Xref)
+        .expect("expected an xref node in the heading");
+
+    assert!(
+        reference.resolved.is_none(),
+        "an unresolvable title target must not carry a resolved destination"
+    );
+}
+
+#[test]
+fn block_title_xref_is_resolved_in_the_tree() {
+    // A block `.Title` carrying a cross-reference is resolved by the same title
+    // pass, which mirrors the destination into the block title's tree – a site
+    // the per-content pass never resolved at all.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc =
+        parser.parse("[[tgt]]The target paragraph.\n\n.See <<tgt>>\nA captioned paragraph.\n");
+
+    use crate::blocks::Block;
+
+    let title = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => simple.title_content(),
+            _ => None,
+        })
+        .find(|content| {
+            content
+                .inlines()
+                .iter()
+                .any(|node| matches!(node, InlineNode::Ref(_)))
+        })
+        .expect("expected a block title carrying a cross-reference");
+
+    let reference = title
+        .inlines()
+        .iter()
+        .find_map(|node| match node {
+            InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => Some(reference),
+            _ => None,
+        })
+        .expect("expected an xref node in the block title");
+
+    assert_eq!(
+        reference
+            .resolved
+            .as_ref()
+            .expect("the block title xref should be resolved after parse")
+            .href,
+        "#tgt"
+    );
+}
+
+#[test]
+fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
+    // Resolving a document twice, the second time with a resolver that no longer
+    // recognizes the title's target, must leave the title tree's `Ref` node
+    // *unresolved* – not stale at the first pass's destination. The title pass
+    // rebuilds the ordered destinations each run (the template, and so the list
+    // length, is stable), and the mirror overwrites each slot unconditionally
+    // (to `Some` or `None`), so the tree tracks the rendered title rather than
+    // retaining a superseded link.
+    use crate::parser::{
+        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+    };
+
+    /// Resolves every target to a fixed destination, or to nothing when `None`.
+    #[derive(Debug)]
+    struct FixedResolver(Option<&'static str>);
+
+    impl ReferenceResolver for FixedResolver {
+        fn resolve(&self, _context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
+            self.0
+                .map(|href| ResolvedReference::new(href.to_string(), None))
+        }
+    }
+
+    /// The resolved `href` of the first cross-reference in any section heading,
+    /// scoped so the tree borrow is released before the next resolution.
+    fn title_xref_href(doc: &crate::Document<'_>) -> Option<String> {
+        collect_section_title_refs(doc)
+            .iter()
+            .find(|r| r.variant == RefVariant::Xref)
+            .and_then(|r| r.resolved.as_ref())
+            .map(|resolved| resolved.href.clone())
+    }
+
+    let mut parser = Parser::default().with_inline_tree(true);
+    let mut doc = parser.parse_deferred("== See <<tgt>>\n\n[#tgt]\n== Target\n");
+
+    // First pass: the resolver recognizes the target, so the heading's tree xref
+    // carries its destination.
+    doc.resolve_references(&FixedResolver(Some("#tgt")), &HtmlSubstitutionRenderer {});
+    assert_eq!(title_xref_href(&doc).as_deref(), Some("#tgt"));
+
+    // Second pass: the resolver no longer recognizes the target, so the tree xref
+    // must fall back to unresolved rather than keep the stale destination.
+    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {});
+    assert_eq!(
+        title_xref_href(&doc),
+        None,
+        "a re-resolution that fails must clear the title tree's stale destination"
+    );
+}

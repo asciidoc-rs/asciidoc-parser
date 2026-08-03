@@ -25,10 +25,31 @@ use std::collections::HashMap;
 use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{XrefSegment, render_xref_template},
+    content::{XrefSegment, ordered_tree_xrefs, render_xref_template},
     document::Catalog,
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext},
+    parser::{
+        InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+        ResolvedReference,
+    },
 };
+
+/// The resolved outcome of one title: its final rendering, plus the resolved
+/// destinations of its cross-references in placeholder order.
+///
+/// The rendering is installed into the title's rendered string; the ordered
+/// destinations are mirrored into the title's inline tree (see
+/// [`Content::mirror_tree_xref_resolution`]), so both views of the title agree.
+///
+/// [`Content::mirror_tree_xref_resolution`]: crate::content::Content::mirror_tree_xref_resolution
+struct Resolution {
+    /// The title's final rendered form, with cross-title references
+    /// coordinated.
+    rendered: String,
+
+    /// The resolved destination of each title-level cross-reference, in
+    /// placeholder order, ready for [`ordered_tree_xrefs`]-aligned mirroring.
+    ordered: Vec<Option<ResolvedReference>>,
+}
 
 /// One title carrying cross-references, captured for the resolution pass.
 struct TitleNode<'src> {
@@ -82,7 +103,7 @@ pub(crate) fn resolve_title_references<'src>(
         }
     }
 
-    let mut memo: Vec<Option<String>> = vec![None; nodes.len()];
+    let mut memo: Vec<Option<Resolution>> = (0..nodes.len()).map(|_| None).collect();
     let mut in_progress: Vec<bool> = vec![false; nodes.len()];
 
     for (index, node) in nodes.iter().enumerate() {
@@ -150,22 +171,27 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
     }
 }
 
-/// Installs the computed rendering for each collected title, walking `blocks`
-/// in the same document order as [`collect`] so `index` stays aligned.
-fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<String>], index: &mut usize) {
+/// Installs each collected title's computed resolution, walking `blocks` in the
+/// same document order as [`collect`] so `index` stays aligned. For every title
+/// this installs both views the resolution carries: the coordinated rendered
+/// string, and – mirrored into the title's inline tree – the resolved
+/// destinations of its cross-references.
+fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], index: &mut usize) {
     for block in blocks.iter_mut() {
         if let Block::Section(section) = block {
             if section.section_title_deferred_parts().is_some() {
-                if let Some(rendered) = memo.get(*index).and_then(Option::as_ref) {
-                    section.set_section_title_rendered(rendered.clone());
+                if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
+                    section.set_section_title_rendered(resolution.rendered.clone());
+                    section.mirror_section_title_tree_xrefs(&resolution.ordered);
                 }
                 *index += 1;
             }
         } else if let Some(title) = block.block_title_content_mut()
             && title.deferred_parts().is_some()
         {
-            if let Some(rendered) = memo.get(*index).and_then(Option::as_ref) {
-                title.set_rendered(rendered.clone());
+            if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
+                title.set_rendered(resolution.rendered.clone());
+                title.mirror_tree_xref_resolution(&resolution.ordered);
             }
             *index += 1;
         }
@@ -190,12 +216,12 @@ fn compute<'src>(
     catalog: &Catalog,
     resolver: &dyn ReferenceResolver,
     renderer: &dyn InlineSubstitutionRenderer,
-    memo: &mut [Option<String>],
+    memo: &mut [Option<Resolution>],
     in_progress: &mut [bool],
     warnings: &mut ReferenceWarnings<'src>,
 ) -> String {
-    if let Some(Some(rendered)) = memo.get(index) {
-        return rendered.clone();
+    if let Some(Some(resolution)) = memo.get(index) {
+        return resolution.rendered.clone();
     }
 
     if let Some(flag) = in_progress.get_mut(index) {
@@ -277,11 +303,21 @@ fn compute<'src>(
 
     let rendered = render_xref_template(&node.template, &xrefs, renderer);
 
+    // The resolved destinations, in placeholder order and filtered to those the
+    // template still splices, so they line up one-to-one with the title tree's
+    // cross-reference nodes when mirrored (see `write_back`). This reuses the
+    // very `xrefs` that produced `rendered`, so the tree cannot disagree with
+    // the string.
+    let ordered = ordered_tree_xrefs(&node.template, &xrefs);
+
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = false;
     }
     if let Some(slot) = memo.get_mut(index) {
-        *slot = Some(rendered.clone());
+        *slot = Some(Resolution {
+            rendered: rendered.clone(),
+            ordered,
+        });
     }
     rendered
 }

@@ -15,7 +15,7 @@ use crate::{
     },
     document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
-    parser::XrefSignifier,
+    parser::{ResolvedReference, XrefSignifier},
     span::MatchedItem,
     strings::CowStr,
     warnings::{Warning, WarningType},
@@ -506,6 +506,27 @@ impl<'src> SectionBlock<'src> {
     /// with cross-title coordination.
     pub(crate) fn set_section_title_rendered(&mut self, rendered: String) {
         self.section_title.set_rendered(rendered);
+    }
+
+    /// Mirrors the section title's resolved cross-reference destinations –
+    /// computed by the document-order title resolution pass – into the title's
+    /// inline tree, so a caller that walks the title's
+    /// [`inlines`](Content::inlines) sees the same destinations
+    /// [`set_section_title_rendered`](Self::set_section_title_rendered)
+    /// installed in the rendered string. A no-op when no inline tree was built.
+    pub(crate) fn mirror_section_title_tree_xrefs(
+        &mut self,
+        ordered: &[Option<ResolvedReference>],
+    ) {
+        self.section_title.mirror_tree_xref_resolution(ordered);
+    }
+
+    /// Returns the section title's inline tree. Used by the inline-tree tests
+    /// to inspect the title's mirrored cross-reference resolution; empty
+    /// unless tree building is enabled on the [`Parser`](crate::Parser).
+    #[cfg(test)]
+    pub(crate) fn section_title_inlines(&self) -> &[crate::inlines::InlineNode<'src>] {
+        self.section_title.inlines()
     }
 
     /// Returns the ID under which this section is registered in the catalog, if
