@@ -3,8 +3,6 @@
 //!
 //! [substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/
 
-use std::collections::HashMap;
-
 use crate::{
     Span,
     content::Passthrough,
@@ -609,12 +607,15 @@ impl<'src> Content<'src> {
     /// This runs only when an inline tree was built (see
     /// [`Parser::with_inline_tree`](crate::Parser::with_inline_tree)); it is a
     /// no-op otherwise. It reuses the results of the deferred-reference
-    /// resolution above rather than re-invoking the resolver: within one
-    /// `Content` the path attributes are constant, so a target resolves
-    /// identically wherever it appears, and a `target`→`resolved` map
-    /// faithfully reproduces the string path's decisions (including a
-    /// target that resolved to nothing). It is non-destructive and
-    /// re-resolvable, mirroring
+    /// resolution above rather than re-invoking the resolver, correlating each
+    /// tree node with its *own* segment **positionally**: the tree's
+    /// cross-reference nodes, visited in document order, line up one-to-one
+    /// with the block-level deferred segments (those whose placeholder
+    /// still appears in the template) in the same order. So node *i* takes
+    /// segment *i*'s destination — two references sharing a target but
+    /// resolving differently (a custom resolver keying on the per-reference
+    /// context) keep their distinct destinations rather than collapsing
+    /// onto one. It is non-destructive and re-resolvable, mirroring
     /// [`resolve_references`](Self::resolve_references): each call overwrites
     /// the tree's resolved state from the current deferred results.
     ///
@@ -623,7 +624,8 @@ impl<'src> Content<'src> {
     /// does not yet mirror into the title's tree; those title `Ref` nodes
     /// remain unresolved for now. Likewise a cross-reference inside a footnote
     /// is resolved with the footnote, whose subtree the tree does not yet
-    /// carry.
+    /// carry — and whose segment is re-homed out of the block template, so it
+    /// is excluded from the correlation below (keeping it one-to-one).
     fn resolve_tree_references(&mut self) {
         if self.inlines.is_empty() {
             return;
@@ -633,19 +635,38 @@ impl<'src> Content<'src> {
             return;
         };
 
-        // A target that names a document carries its own derived destination and
-        // is intentionally left unresolved by the resolver (mirroring the string
-        // path); it therefore contributes no map entry and its tree node stays
-        // unresolved, exactly as the rendered string leaves it.
-        let mut resolved_by_target: HashMap<&str, Option<ResolvedReference>> = HashMap::new();
+        // The block-level segments, in placeholder (document) order: those whose
+        // placeholder still appears in the template. A footnote-embedded
+        // cross-reference is re-homed out of the template (and lives in a
+        // footnote subtree the tree does not yet populate), so filtering on the
+        // template keeps this list aligned one-to-one with the tree's
+        // cross-reference nodes. A segment that resolved to nothing contributes a
+        // `None`, so an unresolved node is left unresolved, exactly as the
+        // rendered string leaves it.
+        let ordered: Vec<Option<ResolvedReference>> = deferred
+            .xrefs
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                deferred
+                    .template
+                    .contains(&Content::xref_placeholder(*index))
+            })
+            .map(|(_, xref)| xref.resolved.clone())
+            .collect();
 
-        for xref in &deferred.xrefs {
-            resolved_by_target
-                .entry(xref.target.as_str())
-                .or_insert_with(|| xref.resolved.clone());
-        }
+        let mut next = 0;
+        assign_tree_xrefs(&mut self.inlines, &ordered, &mut next);
 
-        resolve_tree_xrefs(&mut self.inlines, &resolved_by_target);
+        // Each block-level segment must line up with exactly one tree node. A
+        // mismatch means the recording pass and the authoritative pass
+        // enumerated cross-references differently, which would silently misplace
+        // a resolved destination; catch that in debug/test builds.
+        debug_assert_eq!(
+            next,
+            ordered.len(),
+            "inline tree cross-reference count diverged from the resolved segments",
+        );
     }
 
     /// Rebuilds [`Content::rendered`] from the deferred template and the
@@ -659,37 +680,43 @@ impl<'src> Content<'src> {
     }
 }
 
-/// Walks an inline node slice and installs each cross-reference's resolved
-/// destination from `resolved_by_target`, recursing into every node that can
-/// contain children.
+/// Walks an inline node slice in document order and installs each
+/// cross-reference's resolved destination from `ordered` – the resolved state
+/// of the block-level deferred segments, in placeholder order – advancing
+/// `next` past each [`Xref`](RefVariant::Xref) node it visits.
 ///
 /// Only [`Ref`](InlineNode::Ref) nodes of variant [`Xref`](RefVariant::Xref)
-/// are touched; a [`Link`](RefVariant::Link) has no catalog destination to
-/// resolve. A node whose target appears in the map is overwritten
-/// unconditionally (to `Some` or `None`) so a repeated resolution reflects the
-/// latest result; a target absent from the map is left untouched.
-fn resolve_tree_xrefs(
+/// consume a slot; a [`Link`](RefVariant::Link) has no catalog destination. The
+/// pre-order traversal visits cross-references in the same left-to-right order
+/// the substitution assigned their placeholders, so node *i* receives segment
+/// *i*'s destination – overwritten unconditionally (to `Some` or `None`) so a
+/// repeated resolution reflects the latest result. A node with no matching slot
+/// (a count mismatch, guarded against by the caller) is left untouched.
+fn assign_tree_xrefs(
     nodes: &mut [InlineNode<'_>],
-    resolved_by_target: &HashMap<&str, Option<ResolvedReference>>,
+    ordered: &[Option<ResolvedReference>],
+    next: &mut usize,
 ) {
     for node in nodes {
         match node {
             InlineNode::Ref(reference) => {
-                if reference.variant == RefVariant::Xref
-                    && let Some(resolved) = resolved_by_target.get(reference.target.as_ref())
-                {
-                    reference.resolved = resolved.clone();
+                if reference.variant == RefVariant::Xref {
+                    if let Some(resolved) = ordered.get(*next) {
+                        reference.resolved = resolved.clone();
+                    }
+
+                    *next += 1;
                 }
 
-                resolve_tree_xrefs(&mut reference.children, resolved_by_target);
+                assign_tree_xrefs(&mut reference.children, ordered, next);
             }
 
             InlineNode::Styled(styled) => {
-                resolve_tree_xrefs(&mut styled.children, resolved_by_target);
+                assign_tree_xrefs(&mut styled.children, ordered, next);
             }
 
             InlineNode::Footnote(footnote) => {
-                resolve_tree_xrefs(&mut footnote.children, resolved_by_target);
+                assign_tree_xrefs(&mut footnote.children, ordered, next);
             }
 
             _ => {}

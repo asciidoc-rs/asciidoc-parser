@@ -961,6 +961,52 @@ fn inline_tree_resolution_walks_past_a_footnote_and_a_link() {
 }
 
 #[test]
+fn inline_tree_same_target_refs_keep_per_reference_resolution() {
+    // Two references to the same target, resolved by a custom resolver that
+    // varies its destination by the reference's provided text. Correlating each
+    // tree node with its own segment positionally (rather than keying by target)
+    // gives each node its own destination instead of collapsing both onto the
+    // first.
+    use crate::parser::{
+        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+    };
+
+    #[derive(Debug)]
+    struct PerTextResolver;
+
+    impl ReferenceResolver for PerTextResolver {
+        fn resolve(&self, context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
+            // Same target, distinct destination per provided text.
+            let href = match context.provided_text {
+                Some("first") => "#one",
+                Some("second") => "#two",
+                _ => "#default",
+            };
+
+            Some(ResolvedReference::new(href.to_string(), None))
+        }
+    }
+
+    let mut parser = Parser::default().with_inline_tree(true);
+    let mut doc = parser.parse_deferred("See <<tgt,first>> and <<tgt,second>>.");
+    doc.resolve_references(&PerTextResolver, &HtmlSubstitutionRenderer {});
+
+    let hrefs: Vec<String> = collect_refs(&doc)
+        .iter()
+        .filter(|r| r.variant == RefVariant::Xref)
+        .map(|r| {
+            r.resolved
+                .as_ref()
+                .expect("each xref should resolve")
+                .href
+                .clone()
+        })
+        .collect();
+
+    assert_eq!(hrefs, vec!["#one".to_string(), "#two".to_string()]);
+}
+
+#[test]
 fn inline_tree_xref_resolution_matches_the_rendered_string() {
     // The tree's resolved destination and the rendered HTML are two projections
     // of the same resolution: the `#tgt` fragment in the resolved node is the
