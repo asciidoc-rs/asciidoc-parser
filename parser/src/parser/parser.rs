@@ -2144,9 +2144,9 @@ impl Parser {
     /// # Requires a side-effect-free renderer
     ///
     /// That second pass re-invokes the configured
-    /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
+    /// [`InlineSubstitutionRenderer`]
     /// and the registered asset handlers (for example the
-    /// [`ImageFileHandler`](crate::parser::ImageFileHandler)), so it assumes
+    /// [`ImageFileHandler`]), so it assumes
     /// they are **idempotent**: rendering the same content twice must produce
     /// the same bytes. The built-in HTML renderer and the default handlers
     /// satisfy this. A *stateful* custom renderer (one whose output depends on
