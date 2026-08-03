@@ -619,11 +619,11 @@ impl<'src> Content<'src> {
     /// the tree's resolved state from the current deferred results.
     ///
     /// Cross-references embedded in section and block titles are resolved by
-    /// the separate document-order title pass
-    /// ([`title_refs`](crate::document::title_refs)), which does not yet mirror
-    /// into the title's tree; those title `Ref` nodes remain unresolved for
-    /// now. Likewise a cross-reference inside a footnote is resolved with
-    /// the footnote, whose subtree the tree does not yet carry.
+    /// the separate document-order title pass (the `title_refs` module), which
+    /// does not yet mirror into the title's tree; those title `Ref` nodes
+    /// remain unresolved for now. Likewise a cross-reference inside a footnote
+    /// is resolved with the footnote, whose subtree the tree does not yet
+    /// carry.
     fn resolve_tree_references(&mut self) {
         if self.inlines.is_empty() {
             return;
