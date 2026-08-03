@@ -786,9 +786,10 @@ impl Parser {
     /// reimplementing (or taking a dependency on) this crate's
     /// `regex`-based substitution logic.
     ///
-    /// Pass any [`SubstitutionGroup`], including a
-    /// [`Custom`](SubstitutionGroup::Custom) group built from an explicit list
-    /// of [`SubstitutionStep`](crate::content::SubstitutionStep)s, to select
+    /// Pass any [`SubstitutionGroup`](crate::content::SubstitutionGroup),
+    /// including a [`Custom`](crate::content::SubstitutionGroup::Custom) group
+    /// built from an explicit list of
+    /// [`SubstitutionStep`](crate::content::SubstitutionStep)s, to select
     /// exactly which substitutions run. A single-step group is the way to apply
     /// one step (e.g. just character replacements) on its own.
     ///
