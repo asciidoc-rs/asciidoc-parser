@@ -2140,6 +2140,23 @@ impl Parser {
     /// tree into `Content`"), so the default parse path is unchanged in both
     /// output and performance. The switch is expected to retire once the inline
     /// AST becomes the canonical representation.
+    ///
+    /// # Requires a side-effect-free renderer
+    ///
+    /// That second pass re-invokes the configured
+    /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
+    /// and the registered asset handlers (for example the
+    /// [`ImageFileHandler`](crate::parser::ImageFileHandler)), so it assumes
+    /// they are **idempotent**: rendering the same content twice must produce
+    /// the same bytes. The built-in HTML renderer and the default handlers
+    /// satisfy this. A *stateful* custom renderer (one whose output depends on
+    /// mutable internal state) or a *one-shot* asset handler may therefore be
+    /// invoked twice while this is enabled, and could make the tree diverge
+    /// from [`rendered`](crate::content::Content::rendered) – a divergence
+    /// caught by a debug assertion. Externally-visible reads (such as
+    /// loading an image for a `data-uri`) likewise occur an extra time. The
+    /// Phase 4 single-pass builder removes the second pass and this caveat
+    /// with it.
     #[must_use]
     pub fn with_inline_tree(mut self, enabled: bool) -> Self {
         self.build_inline_tree = enabled;

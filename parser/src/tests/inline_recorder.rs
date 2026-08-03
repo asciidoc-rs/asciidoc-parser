@@ -807,3 +807,37 @@ fn inline_tree_numbers_footnotes_in_document_order() {
 
     assert_eq!(numbers, vec!["1".to_string(), "2".to_string()]);
 }
+
+/// A renderer whose output depends on mutable internal state: it emits
+/// different bytes on its second invocation. Because the recording pass shares
+/// the same renderer instance as the authoritative pass, such a renderer makes
+/// the recorded tree fold to something other than `rendered()`.
+#[derive(Debug, Default)]
+struct FlipRenderer {
+    flipped: std::cell::Cell<bool>,
+}
+
+impl crate::parser::InlineSubstitutionRenderer for FlipRenderer {
+    fn render_special_character(&self, _type_: crate::parser::SpecialCharacter, dest: &mut String) {
+        if self.flipped.replace(true) {
+            dest.push_str("[second]");
+        } else {
+            dest.push_str("[first]");
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "diverged from rendered()")]
+fn inline_tree_build_rejects_a_stateful_renderer() {
+    // Guard from `SubstitutionGroup::build_inline_tree`: a stateful renderer is
+    // invoked a second time by the recording pass and diverges, which the debug
+    // assertion catches rather than silently storing a wrong tree. (Only active
+    // where `debug_assertions` are, matching the assertion itself.)
+    let mut parser = Parser::default()
+        .with_inline_substitution_renderer(FlipRenderer::default())
+        .with_inline_tree(true);
+
+    let _doc = parser.parse("a < b");
+}

@@ -317,7 +317,27 @@ impl SubstitutionGroup {
         self.run_pipeline(recording_content, recording_parser, attrlist);
 
         let marked = recording_content.rendered_owned();
-        let tree = inline_tree::build_inline_tree(&marked, &events.borrow(), content.original());
+        let events = events.borrow();
+        let tree = inline_tree::build_inline_tree(&marked, &events, content.original());
+
+        // The recording pass re-runs the pipeline through a *clone* of the
+        // parser, but the clone shares the same `Rc`-held inline renderer and
+        // asset handlers as the authoritative pass. That is correct for the
+        // built-in (stateless) renderer and the default handlers, but a
+        // *stateful* custom renderer – or a one-shot asset handler – could
+        // observe different state the second time and make the recorded tree
+        // fold to something other than the authoritative `rendered()`. Assert
+        // parity so such a renderer fails loudly in debug/test builds rather
+        // than silently storing a divergent tree. (Retired with the second pass
+        // itself by the Phase 4 single-pass builder.)
+        debug_assert_eq!(
+            inline_tree::fold_marked(&marked, &events),
+            content.rendered_str(),
+            "inline tree fold diverged from rendered(); the configured inline \
+             renderer or an asset handler is stateful and unsafe for inline-tree \
+             building",
+        );
+
         content.set_inlines(tree);
     }
 
