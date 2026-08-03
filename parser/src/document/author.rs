@@ -145,21 +145,13 @@ impl Author {
                 // encoding so a trailing `<email>` can still be split off.
                 Some(partition_names_only(&expanded_source))
             } else {
-                // Even after expansion, doesn't match: Treat as single name with HTML encoding.
-                let mut expanded_name = expanded_source;
-
-                if expanded_name.contains('<') && expanded_name.contains('>') {
-                    let span = crate::Span::new(&expanded_name);
-                    let mut content = crate::content::Content::from(span);
-                    crate::content::SubstitutionStep::SpecialCharacters.apply(
-                        &mut content,
-                        parser,
-                        None,
-                    );
-                    expanded_name = content.rendered().to_string();
-                }
-
-                let name_with_spaces = replace_underscores_with_spaces(expanded_name);
+                // Even after expansion the value does not match the author
+                // pattern, so it becomes a single name. `apply_author_subs`
+                // already applied the header substitution group – special
+                // characters (escaping any literal `<`, `>`, or `&`) followed by
+                // attribute references – so the expanded value is stored as is,
+                // mirroring Asciidoctor's `apply_header_subs`.
+                let name_with_spaces = replace_underscores_with_spaces(expanded_source);
                 Some(Self {
                     name: name_with_spaces.clone(),
                     firstname: name_with_spaces,
@@ -176,12 +168,18 @@ impl Author {
             // assigning any trailing parts to `lastname`.
             Some(partition_names_only(source))
         } else {
-            // Input doesn't contain attributes and doesn't match the author pattern.
-            // Asciidoctor stores the whole line as the author, condensing interior
-            // whitespace and keeping any angle brackets literal. Underscores are left
-            // literal here: Asciidoctor only converts underscore-joined names while
+            // Input doesn't contain attributes and doesn't match the author
+            // pattern. Asciidoctor stores the whole line as the author,
+            // condensing interior whitespace. Underscores are left literal here:
+            // Asciidoctor only converts underscore-joined names while
             // partitioning a *matching* line, not in this fallback.
-            let name = condense_whitespace(source);
+            //
+            // The header substitution group still applies, so any literal `<`,
+            // `>`, or `&` is escaped consistently – matching Asciidoctor's
+            // `apply_header_subs` and the attribute-reference path above, rather
+            // than returning the name raw only because it lacks an attribute
+            // reference.
+            let name = apply_author_special_characters(&condense_whitespace(source), parser);
             Some(Self {
                 name: name.clone(),
                 firstname: name,
@@ -611,40 +609,75 @@ pub(crate) fn matches_author_pattern(source: &str) -> bool {
     AUTHOR.is_match(source.trim())
 }
 
+/// Apply the header substitution group to an author-line fragment: special
+/// characters first, then attribute references – matching Asciidoctor's
+/// `apply_header_subs` (`HEADER_SUBS = [:specialcharacters, :attributes]`).
+///
+/// Running special characters *before* attribute references escapes any literal
+/// `<`, `>`, or `&` in the fragment while leaving the expanded value of an
+/// attribute reference untouched, so an attribute whose value already contains
+/// markup (or a character reference) is inserted verbatim rather than escaped a
+/// second time – exactly as Asciidoctor's header subs behave. Numeric character
+/// references in the literal text are preserved (see
+/// [`apply_author_special_characters`]).
 fn apply_author_subs(source: &str, parser: &Parser) -> String {
-    let span = Span::new(source);
-    let mut content = Content::from(span);
-
     use crate::content::SubstitutionStep;
 
-    // Apply attribute references first.
+    let with_special_characters = apply_author_special_characters(source, parser);
+
+    let span = Span::new(&with_special_characters);
+    let mut content = Content::from(span);
+
     SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
-
-    // Apply HTML encoding:
-    // - Single attribute reference (like {full-author}): No HTML encoding.
-    // - Single attribute in email position (like <{email}>): No HTML encoding.
-    // - Multiple attributes or complex patterns: HTML encoding.
-    // - Don't HTML encode if the content only has pre-existing HTML entities.
-    let is_simple_single_attribute = source.trim().starts_with('{')
-        && source.trim().ends_with('}')
-        && source.matches('{').count() == 1;
-
-    let has_multiple_attributes = source.matches('{').count() > 1;
-
-    // Check if we should apply HTML encoding.
-    let rendered = content.rendered();
-    let has_angle_brackets = rendered.contains('<') && rendered.contains('>');
-    let has_unencoded_ampersand = rendered.contains('&') && !rendered.contains("&amp;");
-
-    if !is_simple_single_attribute
-        && has_multiple_attributes
-        && (has_angle_brackets || has_unencoded_ampersand)
-    {
-        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-    }
 
     content.rendered().to_string()
 }
+
+/// Apply the special-characters substitution to `source`, escaping every
+/// literal `<`, `>`, and `&` – except the leading `&` of a numeric HTML
+/// character reference, which is left intact so a name such as `AsciiDoc&#174;`
+/// keeps its ® entity rather than degrading to `AsciiDoc&amp;#174;` (issue
+/// #757).
+fn apply_author_special_characters(source: &str, parser: &Parser) -> String {
+    let mut result = String::with_capacity(source.len());
+    let mut last = 0;
+
+    // Escape the text between the character references, emitting each reference
+    // verbatim so its `&` is never doubled.
+    for m in NUMERIC_CHARACTER_REFERENCE.find_iter(source) {
+        result.push_str(&escape_special_characters(&source[last..m.start()], parser));
+        result.push_str(m.as_str());
+        last = m.end();
+    }
+
+    result.push_str(&escape_special_characters(&source[last..], parser));
+    result
+}
+
+/// Run the special-characters substitution step over `source`, escaping `<`,
+/// `>`, and `&`.
+fn escape_special_characters(source: &str, parser: &Parser) -> String {
+    if source.is_empty() {
+        return String::new();
+    }
+
+    let span = Span::new(source);
+    let mut content = Content::from(span);
+
+    crate::content::SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
+
+    content.rendered().to_string()
+}
+
+/// Matches a numeric HTML character reference – decimal (`&#174;`) or
+/// hexadecimal (`&#xAE;`). Mirrors the guard the author line uses when deciding
+/// whether a semicolon separates two authors (see
+/// [`AuthorLine`](crate::document::AuthorLine)); the leading `&` of such a
+/// reference is preserved rather than escaped when header subs are applied.
+static NUMERIC_CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"&#(?:[0-9]+|[xX][0-9a-fA-F]+);").unwrap()
+});
 
 #[cfg(test)]
 mod tests {
