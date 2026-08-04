@@ -750,13 +750,53 @@ Each phase is a reviewable unit with a clear exit gate.
   the new name ultimately implies (making `rendered_html()` a *fold* of the tree, and
   dropping the parse-time renderer so it is *always* the built-in HTML backend) are the
   deferred remainder of Phase 2 and Phase 4, unchanged by this step. The `render_with` /
-  `render_to` fold is still the remaining Phase 3 piece.
+  `render_to` fold is the last Phase 3 piece – but attempting it revealed that a *faithful*
+  fold needs the per-construct attrlist/parser back at fold time, which the `'static`
+  Strategy-A recorder cannot carry into a node (every `Styled`/`Image` node is therefore
+  built with `attrs: None`). The self-describing nodes such a fold needs come from the
+  Phase 4 single-pass builder, so `render_with` / `render_to` is **resequenced to land after**
+  that builder covers the inline vocabulary (see Phase 4's step list).
 
-- **Phase 4 — precision spans + ASG output.** Land the single-pass builder (Strategy B) and
-  `Document::to_asg()`; validate against the ASG schema; retire the `attribute-missing`
-  per-line hack (#564).
+- **Phase 4 — precision spans + single-pass builder + ASG output.** 🔶 **In progress.** Land
+  the single-pass builder (Strategy B) so the tree is built **directly from `'src`** – nodes
+  carrying honest per-node spans (#944) and their own `Attrlist<'src>` (self-describing) –
+  then make `rendered_html()` a fold of the tree, add `Document::to_asg()`, validate against
+  the ASG schema, and retire the `attribute-missing` per-line hack (#564).
   *Exit:* ASG output validates; #944 hard-case policies documented and tested; #564 hack
   removed.
+
+  *Step 1 landed as (the single-pass builder foundation + `SpecialCharacters`):* a new
+  [`inline_builder`](../../parser/src/content/inline_builder.rs) module recasts a
+  substitution step as a **transducer** over a node list (`Vec<InlineNode> → Vec<InlineNode>`) –
+  the shape §4.1 describes. [`build`](../../parser/src/content/inline_builder.rs) seeds one
+  borrowed whole-source `Text` node and threads it through the steps;
+  [`apply_special_characters`](../../parser/src/content/inline_builder.rs) splits each `Text`
+  run on `<`/`>`/`&` into precise-span `Text` and `CharRef::Special` nodes, sliced with the
+  crate's own [`Span`](../../parser/src/span/slice.rs) primitives so each node's
+  `line`/`col`/`offset` is honest (the precise spans #944 targets) and verbatim runs borrow
+  from `'src`. [`fold_html`](../../parser/src/content/inline_builder.rs) is the **first fold
+  over the public `InlineNode` tree** – the recorder's `fold_into` folds an intermediate
+  representation, not the public tree – and is the seed of both `rendered_html()`-as-a-fold
+  and `render_with`. This step is **additive**: nothing is wired into the parse path, so the
+  string pipeline and the Strategy-A [`inlines()`](../../parser/src/content/content.rs) tree
+  are untouched, and a differential test asserts the fold reproduces the string pipeline's
+  special-characters output byte-for-byte, alongside precise-span assertions the Strategy-A
+  tree cannot make.
+
+  *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
+  1. ✅ Foundation + `SpecialCharacters` (this step).
+  2. `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
+  3. `CharacterReplacements` → `CharRef::Replacement`, and `PostReplacement` → `LineBreak`.
+  4. `Macros` → `Ref` / `Image` / `Footnote` / `Ui` / `IndexTerm` / `Stem` / `Anchor`,
+     capturing the owned `Attrlist<'src>` each construct carries – the step that makes nodes
+     **self-describing** (and the one that finally unblocks `render_with`).
+  5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
+     `Callouts` – completing the vocabulary the recorder covers.
+  6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
+     `rendered_html()` a fold, delete the three production sentinel systems (§4.2), and retire
+     the `with_inline_tree` opt-in flag (the deferred remainder of Phase 2).
+  7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
+     nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
 - **Phase 5 — renderer seam v2.** Reshape `InlineSubstitutionRenderer` into the AST-walking
   form and rename it to `InlineRenderer` (§4.6); update the README backend story.
