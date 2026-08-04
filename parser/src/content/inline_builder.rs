@@ -192,9 +192,16 @@ fn fold_into_html(
             }
 
             other => {
-                unreachable!(
-                    "inline_builder::fold_html reached a node the SpecialCharacters step \
-                     cannot yet produce: {other:?}"
+                // The `SpecialCharacters` step produces only `Text` and
+                // `CharRef::Special` leaves, and this fold additionally emits the
+                // design-legal `Raw` leaf; no other node kind reaches the fold in
+                // this increment. A later increment fills in the arms above as
+                // the transducer grows new kinds. Guard against a premature
+                // caller in debug builds and emit nothing in release, mirroring
+                // the safe defensive fallback in [`content`](super::content).
+                debug_assert!(
+                    false,
+                    "inline_builder::fold_html reached an unsupported node kind: {other:?}"
                 );
             }
         }
@@ -225,11 +232,11 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::{build, fold_html};
+    use super::{apply_special_characters, build, fold_html};
     use crate::{
         Span,
         content::{Content, SubstitutionStep},
-        inlines::{CharRef, InlineNode},
+        inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
@@ -344,6 +351,103 @@ mod tests {
 
             other => panic!("expected CharRef::Special('>'), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn special_characters_recurses_into_styled_children() {
+        // A custom `subs` order can run quotes before special characters, so the
+        // step must descend into a `Styled` span's children.
+        let loc = Span::new("a<b");
+
+        let styled = InlineNode::Styled(Styled {
+            variant: StyleVariant::Strong,
+            form: SpanForm::Constrained,
+            id: None,
+            roles: vec![],
+            attrs: None,
+            children: vec![InlineNode::Text {
+                value: CowStr::from(loc.data()),
+                location: loc,
+            }],
+            location: loc,
+        });
+
+        let out = apply_special_characters(vec![styled]);
+
+        assert_eq!(out.len(), 1);
+
+        match &out[0] {
+            InlineNode::Styled(styled) => {
+                assert_eq!(styled.children.len(), 3);
+                assert_text(&styled.children[0], "a", 1, 1);
+                assert_special(&styled.children[1], '<', 2, 1);
+                assert_text(&styled.children[2], "b", 1, 3);
+            }
+
+            other => panic!("expected Styled, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn special_characters_recurses_into_ref_children() {
+        // A reference's display text is likewise refined in place.
+        let loc = Span::new("x&y");
+
+        let reference = InlineNode::Ref(Ref {
+            variant: RefVariant::Link,
+            target: CowStr::from("https://example.com"),
+            children: vec![InlineNode::Text {
+                value: CowStr::from(loc.data()),
+                location: loc,
+            }],
+            roles: vec![],
+            window: None,
+            resolved: None,
+            location: loc,
+        });
+
+        let out = apply_special_characters(vec![reference]);
+
+        assert_eq!(out.len(), 1);
+
+        match &out[0] {
+            InlineNode::Ref(reference) => {
+                assert_eq!(reference.children.len(), 3);
+                assert_text(&reference.children[0], "x", 1, 1);
+                assert_special(&reference.children[1], '&', 2, 1);
+                assert_text(&reference.children[2], "y", 1, 3);
+            }
+
+            other => panic!("expected Ref, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn special_characters_passes_other_nodes_through() {
+        // A node kind the step does not split (here a line break) is forwarded
+        // unchanged.
+        let location = Span::new("");
+        let out = apply_special_characters(vec![InlineNode::LineBreak { location }]);
+
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], InlineNode::LineBreak { .. }));
+    }
+
+    #[test]
+    fn fold_emits_raw_verbatim() {
+        // A `Raw` leaf is emitted without HTML-escaping, unlike `Text`; its `<`,
+        // `>`, and `&` pass straight through.
+        let location = Span::new("<b>raw &amp;</b>");
+
+        let raw = InlineNode::Raw {
+            value: CowStr::from(location.data()),
+            location,
+        };
+
+        assert_eq!(
+            fold_html(&[raw], &HtmlSubstitutionRenderer {}),
+            "<b>raw &amp;</b>"
+        );
     }
 
     /// The string pipeline's special-characters output for `source`, used as
