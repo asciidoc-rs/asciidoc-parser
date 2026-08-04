@@ -74,19 +74,23 @@ fn is_special(c: char) -> bool {
 }
 
 /// The special-characters substitution, as a node transducer: every
-/// [`Text`](InlineNode::Text) run is split on `<`/`>`/`&` into precise-span
+/// [`Text`](InlineNode::Text) run is split on `<`/`>`/`&` into
 /// [`Text`](InlineNode::Text) and [`CharRef`](InlineNode::CharRef) nodes, and
 /// every other node passes through (recursing into parent nodes' children).
 ///
-/// A `Text` node's `value` borrows its `location` at this stage, so splitting
-/// by the `location` span is faithful to the logical text.
+/// The split is driven by the node's **logical `value`**, not by its source
+/// span, so a *synthesized* value – an attribute expansion or a joined
+/// multi-line run that a later step may feed in under a custom `subs` order –
+/// is preserved rather than replaced by its source spelling. Precise spans are
+/// kept for the common verbatim run, where the value coincides with the source
+/// its `location` covers; see [`split_text`].
 fn apply_special_characters<'src>(nodes: Vec<InlineNode<'src>>) -> Vec<InlineNode<'src>> {
     let mut out = Vec::with_capacity(nodes.len());
 
     for node in nodes {
         match node {
-            InlineNode::Text { location, .. } => {
-                split_special_characters(location, &mut out);
+            InlineNode::Text { value, location } => {
+                split_text(value, location, &mut out);
             }
 
             InlineNode::Styled(mut styled) => {
@@ -106,13 +110,28 @@ fn apply_special_characters<'src>(nodes: Vec<InlineNode<'src>>) -> Vec<InlineNod
     out
 }
 
-/// Splits the text covered by `location` into alternating
-/// [`Text`](InlineNode::Text) runs and [`CharRef`](InlineNode::CharRef)
-/// specials, pushing each onto `out`.
+/// Splits a [`Text`](InlineNode::Text) node's logical `value` into alternating
+/// text runs and `<`/`>`/`&` [`CharRef`](InlineNode::CharRef) specials.
 ///
-/// Every sub-span is sliced from `location` with the crate's span primitives,
-/// so its `line`/`col`/`offset` stay honest; a run is never emitted empty.
-fn split_special_characters<'src>(location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
+/// When `value` is exactly the source its `location` covers – the common
+/// verbatim run – each sub-node is sliced from `location`, so its
+/// `line`/`col`/`offset` stay honest (issue #944) and its run text borrows from
+/// `'src`. When `value` is *synthesized* – it has no source of its own – the
+/// runs are owned slices of the value and every sub-node falls back to the
+/// whole `location` span, the documented coarse fallback (design §4.4).
+fn split_text<'src>(value: CowStr<'src>, location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
+    if value.as_ref() == location.data() {
+        split_verbatim(location, out);
+    } else {
+        split_synthesized(value.as_ref(), location, out);
+    }
+}
+
+/// Splits a verbatim run – text that coincides with the source `location`
+/// covers – slicing each sub-span from `location` with the crate's span
+/// primitives so `line`/`col`/`offset` stay honest; a run is never emitted
+/// empty.
+fn split_verbatim<'src>(location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
     let mut rest = location;
 
     while let Some(pos) = rest.position(is_special) {
@@ -143,6 +162,41 @@ fn split_special_characters<'src>(location: Span<'src>, out: &mut Vec<InlineNode
         out.push(InlineNode::Text {
             value: CowStr::from(rest.data()),
             location: rest,
+        });
+    }
+}
+
+/// Splits a synthesized `value` – text with no source span of its own – into
+/// owned [`Text`](InlineNode::Text) runs and [`CharRef`](InlineNode::CharRef)
+/// specials, each carrying the whole `location` as its coarse fallback span; a
+/// run is never emitted empty.
+fn split_synthesized<'src>(value: &str, location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
+    let mut rest = value;
+
+    while let Some(pos) = rest.find(is_special) {
+        // Emit the owned text run preceding the special, when non-empty.
+        if pos > 0 {
+            out.push(InlineNode::Text {
+                value: CowStr::from(rest[..pos].to_string()),
+                location,
+            });
+        }
+
+        // The three specials are ASCII, so the match is exactly one byte wide.
+        let ch = rest[pos..].chars().next().unwrap_or('\u{FFFD}');
+
+        out.push(InlineNode::CharRef {
+            value: CharRef::Special(ch),
+            location,
+        });
+
+        rest = &rest[pos + 1..];
+    }
+
+    if !rest.is_empty() {
+        out.push(InlineNode::Text {
+            value: CowStr::from(rest.to_string()),
+            location,
         });
     }
 }
@@ -431,6 +485,57 @@ mod tests {
 
         assert_eq!(out.len(), 1);
         assert!(matches!(out[0], InlineNode::LineBreak { .. }));
+    }
+
+    #[test]
+    fn special_characters_preserves_a_synthesized_text_value() {
+        // A synthesized `value` (standing in for an attribute expansion) does
+        // not coincide with the source its `location` covers. The step must
+        // split the *logical value* – not re-derive text from the span – so the
+        // expansion survives, with the whole `location` kept as each sub-node's
+        // coarse fallback span.
+        let location = Span::new("{x}");
+
+        let text = InlineNode::Text {
+            value: CowStr::from("a<b".to_string()),
+            location,
+        };
+
+        let out = apply_special_characters(vec![text]);
+
+        assert_eq!(out.len(), 3);
+
+        // Leading run: the value's text, not the span's, and the coarse span.
+        match &out[0] {
+            InlineNode::Text { value, location } => {
+                assert_eq!(value.as_ref(), "a");
+                assert_eq!(location.data(), "{x}");
+            }
+
+            other => panic!("expected Text, got {other:?}"),
+        }
+
+        match &out[1] {
+            InlineNode::CharRef {
+                value: CharRef::Special(ch),
+                location,
+            } => {
+                assert_eq!(*ch, '<');
+                assert_eq!(location.data(), "{x}");
+            }
+
+            other => panic!("expected CharRef::Special, got {other:?}"),
+        }
+
+        // Trailing run, exercising the loop's post-special tail.
+        match &out[2] {
+            InlineNode::Text { value, location } => {
+                assert_eq!(value.as_ref(), "b");
+                assert_eq!(location.data(), "{x}");
+            }
+
+            other => panic!("expected Text, got {other:?}"),
+        }
     }
 
     #[test]
