@@ -89,7 +89,7 @@ fn check_block_contains<'src, B: IsBlock<'src> + FindBlocks<'src>>(
     block: &'src B,
     text: &str,
 ) -> bool {
-    if let Some(content) = block.rendered_content()
+    if let Some(content) = block.rendered_html_content()
         && content.contains(text)
     {
         return true;
@@ -117,7 +117,7 @@ pub(crate) fn refute_output_contains<'src>(doc: &'src Document<'src>, text: &str
 }
 
 fn refute_block_contains<'src, B: IsBlock<'src> + FindBlocks<'src>>(block: &'src B, text: &str) {
-    if let Some(content) = block.rendered_content() {
+    if let Some(content) = block.rendered_html_content() {
         dbg!(&content);
         if content.contains(text) {
             panic!("Block should not have contained {text}, but did:\n\n{block:#?}");

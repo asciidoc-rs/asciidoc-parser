@@ -2727,7 +2727,7 @@ mod intrinsic_attributes {
             if let crate::blocks::Block::RawDelimited(raw) = b {
                 return raw
                     .content()
-                    .rendered()
+                    .rendered_html()
                     .lines()
                     .map(str::to_string)
                     .collect();

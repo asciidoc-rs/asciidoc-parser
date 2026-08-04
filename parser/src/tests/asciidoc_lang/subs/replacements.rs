@@ -46,7 +46,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#169;");
+        assert_eq!(sb1.content().rendered_html(), "&#169;");
     }
 
     #[test]
@@ -59,7 +59,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#174;");
+        assert_eq!(sb1.content().rendered_html(), "&#174;");
     }
 
     #[test]
@@ -72,7 +72,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#8482;");
+        assert_eq!(sb1.content().rendered_html(), "&#8482;");
     }
 
     #[test]
@@ -85,7 +85,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "abc&#8212;&#8203;def");
+        assert_eq!(sb1.content().rendered_html(), "abc&#8212;&#8203;def");
     }
 
     #[test]
@@ -98,7 +98,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "abc&#8201;&#8212;&#8201;def");
+        assert_eq!(sb1.content().rendered_html(), "abc&#8201;&#8212;&#8201;def");
     }
 
     #[test]
@@ -111,7 +111,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#8230;&#8203;");
+        assert_eq!(sb1.content().rendered_html(), "&#8230;&#8203;");
     }
 
     #[test]
@@ -124,7 +124,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#8594;");
+        assert_eq!(sb1.content().rendered_html(), "&#8594;");
     }
 
     #[test]
@@ -137,7 +137,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#8658;");
+        assert_eq!(sb1.content().rendered_html(), "&#8658;");
     }
 
     #[test]
@@ -150,7 +150,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#8592;");
+        assert_eq!(sb1.content().rendered_html(), "&#8592;");
     }
 
     #[test]
@@ -163,7 +163,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#8656;");
+        assert_eq!(sb1.content().rendered_html(), "&#8656;");
     }
 
     #[test]
@@ -176,7 +176,7 @@ include::partial$subs-symbol-repl.adoc[]
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "Sam&#8217;s");
+        assert_eq!(sb1.content().rendered_html(), "Sam&#8217;s");
     }
 
     #[test]
@@ -197,7 +197,7 @@ When the document is processed, `replacements` will preserve the section symbol 
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "In &sect; 8.1.5, we say &#8230;&#8203;"
         );
     }
@@ -220,7 +220,7 @@ In turn, `\&#167;` in the AsciiDoc source will display as &#167; in the rendered
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "In &#167; 8.1.5, we say &#8230;&#8203;"
         );
     }
@@ -300,7 +300,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "ab (C) def");
+        assert_eq!(sb1.content().rendered_html(), "ab (C) def");
     }
 
     #[test]
@@ -320,7 +320,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "ab (C) def");
+        assert_eq!(block1.content().rendered_html(), "ab (C) def");
     }
 
     #[test]
@@ -347,7 +347,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Hello &#169; goodbye.");
+        assert_eq!(block1.content().rendered_html(), "Hello &#169; goodbye.");
     }
 
     #[test]
@@ -382,7 +382,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo (C) bar");
+        assert_eq!(block1.content().rendered_html(), "foo (C) bar");
     }
 
     #[test]
@@ -403,7 +403,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Click <span class="image"><img src="pause.png" alt="pause" title="Pause &#169; Resume"></span> when you need a break."#
         );
     }
@@ -426,7 +426,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Click Pause (C) Resume when you need a break."#
         );
     }
@@ -455,7 +455,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Opened &#169; closed!");
+        assert_eq!(block1.content().rendered_html(), "Opened &#169; closed!");
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"This is a &#169; paragraph."#
         );
     }
@@ -498,7 +498,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo (C) bar");
+        assert_eq!(block1.content().rendered_html(), "foo (C) bar");
     }
 
     #[test]
@@ -525,7 +525,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "This &#169; that");
+        assert_eq!(block1.content().rendered_html(), "This &#169; that");
     }
 
     #[test]
@@ -552,7 +552,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Stuff &#169; nonsense");
+        assert_eq!(block1.content().rendered_html(), "Stuff &#169; nonsense");
     }
 
     #[test]
@@ -577,12 +577,12 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
         let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(default_cell.rendered(), "&#169;");
+        assert_eq!(default_cell.rendered_html(), "&#169;");
 
         let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(literal_cell.rendered(), "(C)");
+        assert_eq!(literal_cell.rendered_html(), "(C)");
     }
 
     #[test]
@@ -634,7 +634,7 @@ For blocks, the step's name, `replacements`, can be assigned to the xref:apply-s
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc<lt &#169; *bold*");
+        assert_eq!(block1.content().rendered_html(), "abc<lt &#169; *bold*");
     }
 
     #[test]
@@ -655,7 +655,7 @@ For inline elements, the built-in values `r` or `replacements` can be applied to
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "abc<lt &#169; *bold* and then &#8230;&#8203;"
         );
     }
@@ -678,7 +678,7 @@ This is important to keep in mind when applying the `replacements` value to bloc
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "left-arrow <- not here but &#8592; there &#8230;&#8203;"
         );
     }

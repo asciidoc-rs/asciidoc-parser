@@ -20,7 +20,7 @@ fn render_first_block(source: &str) -> String {
     let doc = Parser::default().parse(source);
     doc.child_blocks()
         .next()
-        .and_then(|b| b.rendered_content())
+        .and_then(|b| b.rendered_html_content())
         .unwrap_or_default()
         .to_string()
 }
@@ -182,7 +182,7 @@ fn attribute_missing_can_be_changed_mid_document() {
 
     let rendered: Vec<&str> = doc
         .child_blocks()
-        .filter_map(|b| b.rendered_content())
+        .filter_map(|b| b.rendered_html_content())
         .collect();
 
     assert_eq!(rendered, vec!["one {x}", "two "]);

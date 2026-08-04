@@ -223,8 +223,8 @@ impl<'src> ListItemMarker<'src> {
         // it, so that only its own duplicate-registration warning is suppressed
         // during that pass. Any other term goes straight through the macros
         // step.
-        if term.rendered().starts_with("[[") {
-            if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term.rendered()) {
+        if term.rendered_html().starts_with("[[") {
+            if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term.rendered_html()) {
                 let id = &captures[1];
 
                 // If reftext is provided, use it. Otherwise, use the text after
@@ -680,7 +680,9 @@ mod tests {
         assert!(warnings.is_empty());
 
         match &item {
-            crate::blocks::ListItemMarker::DefinedTerm { term, .. } => term.rendered().to_string(),
+            crate::blocks::ListItemMarker::DefinedTerm { term, .. } => {
+                term.rendered_html().to_string()
+            }
             other => panic!("expected a defined-term marker, got {other:#?}"),
         }
     }

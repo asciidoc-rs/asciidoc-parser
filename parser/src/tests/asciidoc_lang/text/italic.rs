@@ -57,7 +57,7 @@ Italic c__hara__cter__s__ within a word.
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         r#"An italic <em>word</em>, and an italic <em>phrase of text</em>."#
     );
 
@@ -67,7 +67,7 @@ Italic c__hara__cter__s__ within a word.
     };
 
     assert_eq!(
-        sb2.content().rendered(),
+        sb2.content().rendered_html(),
         r#"Italic c<em>hara</em>cter<em>s</em> within a word."#
     );
 
@@ -111,7 +111,7 @@ The result of <<ex-mix>> is rendered below.
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         r#"<code><strong><em>monospace bold italic phrase</em></strong></code> &amp; <code><strong><em>char</em></strong></code>acter<code><strong><em>s</em></strong></code>"#
     );
 

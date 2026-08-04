@@ -285,7 +285,7 @@ impl SubstitutionGroup {
         }
 
         // Capture any deferred cross-references as a placeholder template and
-        // render the unresolved fallback, so `rendered()` is clean even before
+        // render the unresolved fallback, so `rendered_html()` is clean even before
         // references are resolved. This is a no-op when no cross-references were
         // found.
         content.finalize_deferred(&*parser.renderer);
@@ -298,7 +298,7 @@ impl SubstitutionGroup {
     /// subtree from the footnote texts that pass registered.
     ///
     /// This is Strategy A (design §4.1): a transparent recording pass whose
-    /// fold reproduces the authoritative `rendered()` byte-for-byte. It is
+    /// fold reproduces the authoritative `rendered_html()` byte-for-byte. It is
     /// a second pass for now; the Phase 4 single-pass builder retires it.
     fn build_inline_tree(
         &self,
@@ -343,14 +343,14 @@ impl SubstitutionGroup {
         // built-in (stateless) renderer and the default handlers, but a
         // *stateful* custom renderer – or a one-shot asset handler – could
         // observe different state the second time and make the recorded tree
-        // fold to something other than the authoritative `rendered()`. Assert
+        // fold to something other than the authoritative `rendered_html()`. Assert
         // parity so such a renderer fails loudly in debug/test builds rather
         // than silently storing a divergent tree. (Retired with the second pass
         // itself by the Phase 4 single-pass builder.)
         debug_assert_eq!(
             inline_tree::fold_marked(&marked, &events),
             content.rendered_str(),
-            "inline tree fold diverged from rendered(); the configured inline \
+            "inline tree fold diverged from rendered_html(); the configured inline \
              renderer or an asset handler is stateful and unsafe for inline-tree \
              building",
         );
@@ -1167,7 +1167,7 @@ mod tests {
 
             let block = doc.child_blocks().next().unwrap();
             assert_eq!(
-                block.rendered_content(),
+                block.rendered_html_content(),
                 Some("abc <strong>bold</strong> &\ndef")
             );
 
@@ -1187,7 +1187,7 @@ mod tests {
             let doc = p.parse("[subs=\",\"]\n....\ncontent <here>\n....");
 
             let block = doc.child_blocks().next().unwrap();
-            assert_eq!(block.rendered_content(), Some("content <here>"));
+            assert_eq!(block.rendered_html_content(), Some("content <here>"));
 
             assert_eq!(doc.warnings().count(), 0);
         }

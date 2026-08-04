@@ -56,7 +56,7 @@ Happy werewolves are <strong>really</strong> slobbery.
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "Happy werewolves are <strong>really</strong> slobbery."
         );
     }
@@ -92,7 +92,7 @@ Happy werewolves are <strong>really</strong> slobbery.
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "<em>word</em>");
+        assert_eq!(sb1.content().rendered_html(), "<em>word</em>");
     }
 
     #[test]
@@ -114,7 +114,7 @@ Happy werewolves are <strong>really</strong> slobbery.
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "<strong>word</strong>");
+        assert_eq!(sb1.content().rendered_html(), "<strong>word</strong>");
     }
 
     #[test]
@@ -136,7 +136,7 @@ Happy werewolves are <strong>really</strong> slobbery.
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "<code>word</code>");
+        assert_eq!(sb1.content().rendered_html(), "<code>word</code>");
     }
 
     #[test]
@@ -158,7 +158,7 @@ Happy werewolves are <strong>really</strong> slobbery.
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "<sup>word</sup>");
+        assert_eq!(sb1.content().rendered_html(), "<sup>word</sup>");
     }
 
     #[test]
@@ -180,7 +180,7 @@ Happy werewolves are <strong>really</strong> slobbery.
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "<sub>word</sub>");
+        assert_eq!(sb1.content().rendered_html(), "<sub>word</sub>");
     }
 
     #[test]
@@ -202,7 +202,7 @@ Happy werewolves are <strong>really</strong> slobbery.
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#8220;word&#8221;");
+        assert_eq!(sb1.content().rendered_html(), "&#8220;word&#8221;");
     }
 
     #[test]
@@ -225,7 +225,7 @@ Happy werewolves are <strong>really</strong> slobbery.
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "&#8216;word&#8217;");
+        assert_eq!(sb1.content().rendered_html(), "&#8216;word&#8217;");
     }
 }
 
@@ -263,7 +263,7 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "Foo *bar*");
+        assert_eq!(sb1.content().rendered_html(), "Foo *bar*");
     }
 
     #[test]
@@ -283,7 +283,7 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc *def*");
+        assert_eq!(block1.content().rendered_html(), "abc *def*");
     }
 
     #[test]
@@ -311,7 +311,7 @@ mod default_quotes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "Hello <strong>goodbye.</strong>"
         );
     }
@@ -333,7 +333,7 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo *bar*");
+        assert_eq!(block1.content().rendered_html(), "foo *bar*");
     }
 
     #[test]
@@ -354,7 +354,7 @@ mod default_quotes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Click <span class="image"><img src="pause.png" alt="pause" title="<strong>Pause</strong> and Resume"></span> when you need a break."#
         );
     }
@@ -377,7 +377,7 @@ mod default_quotes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Click *Pause* and Resume when you need a break."#
         );
     }
@@ -407,7 +407,7 @@ mod default_quotes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "Opened and <strong>closed!</strong>"
         );
     }
@@ -430,7 +430,7 @@ mod default_quotes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"This is a <strong>paragraph.</strong>"#
         );
     }
@@ -452,7 +452,7 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo *bar*");
+        assert_eq!(block1.content().rendered_html(), "foo *bar*");
     }
 
     #[test]
@@ -480,7 +480,7 @@ mod default_quotes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This and <strong>that</strong>"
         );
     }
@@ -509,7 +509,10 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Stuff over <em>nonsense</em>");
+        assert_eq!(
+            block1.content().rendered_html(),
+            "Stuff over <em>nonsense</em>"
+        );
     }
 
     #[test]
@@ -534,12 +537,12 @@ mod default_quotes_substitution {
         let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(default_cell.rendered(), "<strong>bold</strong>");
+        assert_eq!(default_cell.rendered_html(), "<strong>bold</strong>");
 
         let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(literal_cell.rendered(), "*lit*");
+        assert_eq!(literal_cell.rendered_html(), "*lit*");
     }
 
     #[test]
@@ -592,7 +595,10 @@ For blocks, the step's name, `quotes`, can be assigned to the xref:apply-subs-to
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc<lt <strong>bold</strong>");
+        assert_eq!(
+            block1.content().rendered_html(),
+            "abc<lt <strong>bold</strong>"
+        );
     }
 
     #[test]
@@ -612,7 +618,7 @@ For inline elements, the built-in values `q` or `quotes` can be applied to xref:
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "abc<lt <strong>bold</strong> and then &#8230;&#8203;"
         );
     }

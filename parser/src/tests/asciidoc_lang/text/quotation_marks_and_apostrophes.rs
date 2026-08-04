@@ -50,7 +50,7 @@ include::example$text.adoc[tag=straight-quotes]
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "In Ruby, '\\n' represents a backslash followed by the letter n.\nSingle quotes prevent escape sequences from being interpreted.\nIn contrast, \"\\n\" represents a newline."
         );
 
@@ -92,7 +92,7 @@ include::example$text.adoc[tag=c-quote]
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "&#8220;What kind of charm?&#8221; Lazarus asked.\n&#8220;An odoriferous one or a mineral one?&#8221;"
         );
 
@@ -102,7 +102,7 @@ include::example$text.adoc[tag=c-quote]
         };
 
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             "Kizmet shrugged.\n&#8220;The note from Olaf&#8217;s desk says &#8216;wormwood and licorice,&#8217;\nbut these could be normal groceries for werewolves.&#8221;"
         );
 
@@ -159,7 +159,10 @@ Olaf's desk was a mess.
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "Olaf&#8217;s desk was a mess.");
+        assert_eq!(
+            sb1.content().rendered_html(),
+            "Olaf&#8217;s desk was a mess."
+        );
 
         assert!(blocks.next().is_none());
     }
@@ -194,7 +197,7 @@ Olaf\'s desk ...
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "Olaf's desk &#8230;&#8203;");
+        assert_eq!(sb1.content().rendered_html(), "Olaf's desk &#8230;&#8203;");
 
         assert!(blocks.next().is_none());
     }
@@ -240,7 +243,7 @@ include::example$text.adoc[tag=apos]
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "Olaf had been with the company since the &#8217;00s.\nHis desk overflowed with heaps of paper, apple cores and squeaky toys.\nWe couldn&#8217;t find Olaf&#8217;s keyboard.\nThe state of his desk was replicated, in triplicate, across all of\nthe werewolves&#8217; desks."
         );
 
@@ -284,7 +287,7 @@ A ``std::vector```'s size is the number of items it contains.
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "<code>npm</code>&#8217;s job is to manage the dependencies for your application."
         );
 
@@ -294,7 +297,7 @@ A ``std::vector```'s size is the number of items it contains.
         };
 
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             "A <code>std::vector</code>&#8217;s size is the number of items it contains."
         );
 
@@ -342,7 +345,7 @@ The `class`’ static methods make it easy to operate on files and directories.
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "This <code>class</code>&#8217; static methods make it easy to operate on files and directories."
         );
 

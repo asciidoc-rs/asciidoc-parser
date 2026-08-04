@@ -45,7 +45,7 @@ fn render_paragraph(src: &str) -> String {
     walk(doc.child_blocks())
         .expect("expected at least one simple block")
         .content()
-        .rendered()
+        .rendered_html()
         .to_string()
 }
 
@@ -61,7 +61,7 @@ fn render_icon(src: &str, icons: &str) -> String {
     SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
     SubstitutionStep::Macros.apply(&mut content, &parser, None);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 /// Renders `src` through the special-characters and macros substitution steps
@@ -75,7 +75,7 @@ fn render_macros(src: &str) -> String {
     SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
     SubstitutionStep::Macros.apply(&mut content, &parser, None);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 // ---- Link target escaping --------------------------------------------------

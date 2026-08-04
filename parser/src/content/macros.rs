@@ -39,7 +39,7 @@ fn apply_macros_internal(
     parser: &Parser,
     leading_anchor_registered: bool,
 ) {
-    let /* mut */ text = content.rendered().to_string();
+    let /* mut */ text = content.rendered_html().to_string();
     let found_square_bracket = text.contains('[');
     let found_colon = text.contains(':');
     let found_macroish = found_square_bracket && found_colon;
@@ -59,7 +59,7 @@ fn apply_macros_internal(
         };
 
         if let Cow::Owned(new_result) =
-            INLINE_BIBLIO_ANCHOR.replace_all(content.rendered(), replacer)
+            INLINE_BIBLIO_ANCHOR.replace_all(content.rendered_html(), replacer)
         {
             content.rendered = new_result.into();
         }
@@ -81,7 +81,7 @@ fn apply_macros_internal(
             let replacer = InlineKbdBtnMacroReplacer(parser);
 
             if let Cow::Owned(new_result) =
-                INLINE_KBD_BTN_MACRO.replace_all(content.rendered(), replacer)
+                INLINE_KBD_BTN_MACRO.replace_all(content.rendered_html(), replacer)
             {
                 content.rendered = new_result.into();
             }
@@ -91,7 +91,7 @@ fn apply_macros_internal(
             let replacer = InlineMenuMacroReplacer(parser);
 
             if let Cow::Owned(new_result) =
-                INLINE_MENU_MACRO.replace_all(content.rendered(), replacer)
+                INLINE_MENU_MACRO.replace_all(content.rendered_html(), replacer)
             {
                 content.rendered = new_result.into();
             }
@@ -104,7 +104,8 @@ fn apply_macros_internal(
             source: content.original(),
         };
 
-        if let Cow::Owned(new_result) = INLINE_IMAGE_MACRO.replace_all(content.rendered(), replacer)
+        if let Cow::Owned(new_result) =
+            INLINE_IMAGE_MACRO.replace_all(content.rendered_html(), replacer)
         {
             content.rendered = new_result.into();
         }
@@ -116,7 +117,7 @@ fn apply_macros_internal(
         let replacer = InlineIndextermReplacer(parser);
 
         if let Cow::Owned(new_result) =
-            replace_with_lookahead(&INLINE_INDEXTERM, content.rendered(), replacer)
+            replace_with_lookahead(&INLINE_INDEXTERM, content.rendered_html(), replacer)
         {
             content.rendered = new_result.into();
         }
@@ -125,7 +126,7 @@ fn apply_macros_internal(
     if found_colon && text.contains("://") {
         let replacer = InlineLinkReplacer(parser);
 
-        if let Cow::Owned(new_result) = INLINE_LINK.replace_all(content.rendered(), replacer) {
+        if let Cow::Owned(new_result) = INLINE_LINK.replace_all(content.rendered_html(), replacer) {
             content.rendered = new_result.into();
         }
     }
@@ -136,7 +137,8 @@ fn apply_macros_internal(
             source: content.original(),
         };
 
-        if let Cow::Owned(new_result) = INLINE_LINK_MACRO.replace_all(content.rendered(), replacer)
+        if let Cow::Owned(new_result) =
+            INLINE_LINK_MACRO.replace_all(content.rendered_html(), replacer)
         {
             content.rendered = new_result.into();
         }
@@ -145,7 +147,8 @@ fn apply_macros_internal(
     if text.contains('@') {
         let replacer = InlineEmailReplacer(parser);
 
-        if let Cow::Owned(new_result) = INLINE_EMAIL.replace_all(content.rendered(), replacer) {
+        if let Cow::Owned(new_result) = INLINE_EMAIL.replace_all(content.rendered_html(), replacer)
+        {
             content.rendered = new_result.into();
         }
     }
@@ -155,7 +158,7 @@ fn apply_macros_internal(
         // immediately preceding each match (see `InlineAnchorReplacer`); prior
         // passes above may have mutated the rendered text, so the initial `text`
         // snapshot cannot be reused here.
-        let haystack = content.rendered().to_string();
+        let haystack = content.rendered_html().to_string();
 
         let replacer = InlineAnchorReplacer {
             parser,
@@ -189,7 +192,7 @@ fn apply_macros_internal(
 
     if (text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:")))
         && let Cow::Owned(new_result) = INLINE_XREF.replace_all(
-            content.rendered(),
+            content.rendered_html(),
             InlineXrefReplacer {
                 parser,
                 xrefs: &mut xrefs,
@@ -216,7 +219,7 @@ fn apply_macros_internal(
         };
 
         if let Cow::Owned(new_result) =
-            replace_with_lookahead(&INLINE_FOOTNOTE_MACRO, content.rendered(), replacer)
+            replace_with_lookahead(&INLINE_FOOTNOTE_MACRO, content.rendered_html(), replacer)
         {
             content.rendered = new_result.into();
         }
@@ -2563,7 +2566,7 @@ mod tests {
                 .child_blocks()
                 .next()
                 .unwrap()
-                .rendered_content()
+                .rendered_html_content()
                 .unwrap();
 
             assert_eq!(
@@ -2584,7 +2587,7 @@ mod tests {
                 .child_blocks()
                 .next()
                 .unwrap()
-                .rendered_content()
+                .rendered_html_content()
                 .unwrap();
 
             assert_eq!(

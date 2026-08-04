@@ -755,7 +755,7 @@ mod tests {
             );
 
             assert_eq!(mi.item.content_model(), ContentModel::Compound);
-            assert!(mi.item.rendered_content().is_none());
+            assert!(mi.item.rendered_html_content().is_none());
             assert_eq!(mi.item.raw_context().as_ref(), "example");
             assert_eq!(mi.item.resolved_context().as_ref(), "example");
             assert!(mi.item.declared_style().is_none());

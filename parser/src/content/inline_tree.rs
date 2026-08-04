@@ -42,8 +42,8 @@
 //! a real, live artifact, but it is built behind an **opt-in** flag
 //! ([`Parser::with_inline_tree`]) so the default parse path is byte- and
 //! performance-identical to before. Making the tree *canonical* (with
-//! `rendered()` folding it, and the three production sentinel systems retired)
-//! is the remainder of Phase 2 and Phase 4.
+//! `rendered_html()` folding it, and the three production sentinel systems
+//! retired) is the remainder of Phase 2 and Phase 4.
 //!
 //! [`inline_recorder`]: ../../tests/inline_recorder.rs
 //! [`Content`]: crate::content::Content

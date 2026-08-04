@@ -200,7 +200,7 @@ Additionally, no AsciiDoc syntax within the delimited lines is interpreted, not 
     let doc = Parser::default().parse("////\n*bold* {attr}\n// inner\n////");
     let block = doc.child_blocks().next().expect("expected a block");
     assert_eq!(
-        block.rendered_content(),
+        block.rendered_html_content(),
         Some("*bold* {attr}\n// inner"),
         "comment block content must be raw"
     );
@@ -209,7 +209,7 @@ Additionally, no AsciiDoc syntax within the delimited lines is interpreted, not 
     // interpreted.
     let doc = Parser::default().parse("[subs=quotes]\n////\n*bold*\n////");
     let block = doc.child_blocks().next().expect("expected a block");
-    assert_eq!(block.rendered_content(), Some("*bold*"));
+    assert_eq!(block.rendered_html_content(), Some("*bold*"));
 
     non_normative!(
         r#"
@@ -239,11 +239,14 @@ A comment block can also be written as an open block with the comment style:
     let doc = Parser::default().parse("[comment]\n--\n*bold* {attr}\n// inner\n--");
     let block = doc.child_blocks().next().expect("expected a block");
     assert_eq!(block.resolved_context().as_ref(), "comment");
-    assert_eq!(block.rendered_content(), Some("*bold* {attr}\n// inner"));
+    assert_eq!(
+        block.rendered_html_content(),
+        Some("*bold* {attr}\n// inner")
+    );
 
     let doc = Parser::default().parse("[comment,subs=quotes]\n--\n*bold*\n--");
     let block = doc.child_blocks().next().expect("expected a block");
-    assert_eq!(block.rendered_content(), Some("*bold*"));
+    assert_eq!(block.rendered_html_content(), Some("*bold*"));
 
     non_normative!(
         r#"
@@ -277,7 +280,7 @@ A comment block that can consists of a single paragraph can be written as a para
     assert_eq!(first.substitution_group(), SubstitutionGroup::None);
     let second = doc.child_blocks().nth(1).expect("expected a second block");
     assert_eq!(second.declared_style(), None);
-    assert_eq!(second.rendered_content(), Some("Not a comment."));
+    assert_eq!(second.rendered_html_content(), Some("Not a comment."));
 
     // Like the `////` and open-block forms, a `[comment]` paragraph retains its
     // content verbatim: an inner `//` line is preserved (not stripped as a line
@@ -286,13 +289,13 @@ A comment block that can consists of a single paragraph can be written as a para
     let doc = Parser::default().parse("[comment]\nfirst line\n// inner\n*bold*");
     let first = doc.child_blocks().next().expect("expected a block");
     assert_eq!(
-        first.rendered_content(),
+        first.rendered_html_content(),
         Some("first line\n// inner\n*bold*")
     );
 
     let doc = Parser::default().parse("[comment,subs=quotes]\n*bold*");
     let first = doc.child_blocks().next().expect("expected a block");
-    assert_eq!(first.rendered_content(), Some("*bold*"));
+    assert_eq!(first.rendered_html_content(), Some("*bold*"));
 
     non_normative!(
         r#"

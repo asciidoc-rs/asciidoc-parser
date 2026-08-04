@@ -238,7 +238,7 @@ impl InterpretedValue {
                     let (group, _invalid) = SubstitutionGroup::from_custom_string(None, subs);
                     let mut inner_content = Content::from(Span::new(inner));
                     group.apply(&mut inner_content, parser, None);
-                    inner_content.rendered().to_string()
+                    inner_content.rendered_html().to_string()
                 }
             };
 
@@ -1149,7 +1149,7 @@ mod tests {
         );
 
         assert_eq!(block.content_model(), ContentModel::Empty);
-        assert!(block.rendered_content().is_none());
+        assert!(block.rendered_html_content().is_none());
         assert_eq!(block.raw_context().deref(), "attribute");
         assert!(block.child_blocks().next().is_none());
         assert!(block.title_source().is_none());

@@ -7164,7 +7164,7 @@ mod macros {
             let parser = Parser::default();
             crate::content::SubstitutionStep::Macros.apply(&mut content, &parser, None);
 
-            assert_eq!(content.rendered(), "x footnote:[note]</a>");
+            assert_eq!(content.rendered_html(), "x footnote:[note]</a>");
         }
     }
 
@@ -9018,7 +9018,7 @@ mod passthroughs {
                 panic!("expected a simple block");
             };
 
-            block.content().rendered().to_string()
+            block.content().rendered_html().to_string()
         };
 
         // Unquoted role via the normal block-style path.
@@ -9628,7 +9628,7 @@ mod passthroughs {
         );
         let doc = p.parse("pass:bogus[++]");
         assert_eq!(
-            doc.child_blocks().next().unwrap().rendered_content(),
+            doc.child_blocks().next().unwrap().rendered_html_content(),
             Some("++")
         );
 
@@ -10645,7 +10645,7 @@ mod passthroughs {
             let mut parser = parser;
             let doc = parser.parse(input);
             assert_eq!(
-                doc.child_blocks().next().unwrap().rendered_content(),
+                doc.child_blocks().next().unwrap().rendered_html_content(),
                 Some(expected),
                 "input = {input:?}"
             );
@@ -11153,7 +11153,7 @@ mod passthroughs {
             );
             let doc = p.parse("stem:bogus[x^2]");
             assert_eq!(
-                doc.child_blocks().next().unwrap().rendered_content(),
+                doc.child_blocks().next().unwrap().rendered_html_content(),
                 Some(r"\$x^2\$")
             );
 

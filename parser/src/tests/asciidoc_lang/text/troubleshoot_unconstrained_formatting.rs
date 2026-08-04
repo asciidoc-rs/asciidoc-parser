@@ -52,7 +52,7 @@ To help you determine whether a particular syntax pattern requires an unconstrai
 
         let doc = Parser::default().parse(r#"Sara__h__"#);
         let sb = super::first_simple_block(&doc);
-        assert_eq!(sb.content().rendered(), "Sara<em>h</em>");
+        assert_eq!(sb.content().rendered_html(), "Sara<em>h</em>");
     }
 
     #[test]
@@ -69,7 +69,7 @@ To help you determine whether a particular syntax pattern requires an unconstrai
 
         let doc = Parser::default().parse(r#"**B**old"#);
         let sb = super::first_simple_block(&doc);
-        assert_eq!(sb.content().rendered(), "<strong>B</strong>old");
+        assert_eq!(sb.content().rendered_html(), "<strong>B</strong>old");
     }
 
     #[test]
@@ -86,7 +86,7 @@ To help you determine whether a particular syntax pattern requires an unconstrai
 
         let doc = Parser::default().parse(r#"&ndash;**2016**"#);
         let sb = super::first_simple_block(&doc);
-        assert_eq!(sb.content().rendered(), "&ndash;<strong>2016</strong>");
+        assert_eq!(sb.content().rendered_html(), "&ndash;<strong>2016</strong>");
     }
 
     #[test]
@@ -104,7 +104,7 @@ To help you determine whether a particular syntax pattern requires an unconstrai
         // NOTE: Inserted `xyz` prefix to prevent this being parsed as a list.
         let doc = Parser::default().parse(r#"xyz ** bold **"#);
         let sb = super::first_simple_block(&doc);
-        assert_eq!(sb.content().rendered(), "xyz <strong> bold </strong>");
+        assert_eq!(sb.content().rendered_html(), "xyz <strong> bold </strong>");
     }
 
     #[test]
@@ -121,7 +121,7 @@ To help you determine whether a particular syntax pattern requires an unconstrai
 
         let doc = Parser::default().parse(r#"我喜欢**大**狗"#);
         let sb = super::first_simple_block(&doc);
-        assert_eq!(sb.content().rendered(), "我喜欢<strong>大</strong>狗");
+        assert_eq!(sb.content().rendered_html(), "我喜欢<strong>大</strong>狗");
     }
 
     #[test]
@@ -138,7 +138,7 @@ To help you determine whether a particular syntax pattern requires an unconstrai
 
         let doc = Parser::default().parse(r#"*2016*&ndash;"#);
         let sb = super::first_simple_block(&doc);
-        assert_eq!(sb.content().rendered(), "<strong>2016</strong>&ndash;");
+        assert_eq!(sb.content().rendered_html(), "<strong>2016</strong>&ndash;");
     }
 
     #[test]
@@ -155,7 +155,7 @@ To help you determine whether a particular syntax pattern requires an unconstrai
         let doc = Parser::default().parse(r#"*9*-to-*5*"#);
         let sb = super::first_simple_block(&doc);
         assert_eq!(
-            sb.content().rendered(),
+            sb.content().rendered_html(),
             "<strong>9</strong>-to-<strong>5</strong>"
         );
     }
@@ -209,7 +209,7 @@ The backticks contribute to making the curved quotation marks, but the word isn'
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), r#"&#8220;end points&#8221;"#);
+        assert_eq!(sb1.content().rendered_html(), r#"&#8220;end points&#8221;"#);
 
         assert!(blocks.next().is_none());
     }
@@ -238,7 +238,10 @@ The parser ignores the inner pair of backticks and interprets them as literal ch
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), r#"&#8220;`end points`&#8221;"#);
+        assert_eq!(
+            sb1.content().rendered_html(),
+            r#"&#8220;`end points`&#8221;"#
+        );
 
         assert!(blocks.next().is_none());
     }
@@ -268,7 +271,7 @@ That's three pairs of backticks in total.
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"&#8220;<code>end points</code>&#8221;"#
         );
 
@@ -300,7 +303,7 @@ For example:
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#""<code class="code">end points</code>" or "<code>end points</code>""#
         );
 
@@ -339,7 +342,7 @@ The ``class```' static methods make it easy to operate on files and directories.
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"The <code>class</code>&#8217; static methods make it easy to operate on files and directories."#
         );
 
@@ -371,7 +374,7 @@ The `class`’ static methods make it easy to operate on files and directories.
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"The <code>class</code>’ static methods make it easy to operate on files and directories."#
         );
 
@@ -433,7 +436,7 @@ The mix of constrained and unconstrained formatting marks in the line is ambiguo
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"The <em>kernel qualifier can be used with the </em>attribute__ keyword&#8230;&#8203;"#
         );
 
@@ -443,7 +446,7 @@ The mix of constrained and unconstrained formatting marks in the line is ambiguo
         };
 
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             r#"<mark><code>CB<mark>#2</code></mark> and <mark><code>CB</mark>#3</code></mark>"#
         );
 
@@ -490,7 +493,7 @@ This works because xref:subs:attributes.adoc[attribute expansion] is performed a
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"The __kernel qualifier can be used with the __attribute__ keyword&#8230;&#8203;"#
         );
 
@@ -500,7 +503,7 @@ This works because xref:subs:attributes.adoc[attribute expansion] is performed a
         };
 
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             r#"<mark><code>CB###2</code></mark> and <mark><code>CB###3</code></mark>"#
         );
 
@@ -536,7 +539,7 @@ However, the text still receives proper output escaping for xref:subs:special-ch
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"The __kernel qualifier can be used with the __attribute__ keyword&#8230;&#8203;"#
         );
 
@@ -546,7 +549,7 @@ However, the text still receives proper output escaping for xref:subs:special-ch
         };
 
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             r#"<mark><code>CB###2</code></mark> and <mark><code>CB###3</code></mark>"#
         );
 

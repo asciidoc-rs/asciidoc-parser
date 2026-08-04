@@ -211,7 +211,7 @@ This title label can be xref:customize-title-label.adoc[customized] or xref:turn
         panic!("expected a paragraph");
     };
     assert_eq!(
-        para.content().rendered(),
+        para.content().rendered_html(),
         "This title label can be <a href=\"customize-title-label.html\">customized</a> or <a href=\"turn-off-title-label.html\">deactivated</a>."
     );
 }

@@ -733,6 +733,25 @@ Each phase is a reviewable unit with a clear exit gate.
   pieces of the phase — the `rendered()` → `rendered_html()` rename and the
   `render_with`/`render_to` fold — remain as later steps.
 
+  *Step 2 landed as (rename the rendered-string accessors for HTML-specificity):* the
+  public string accessors are renamed to state their backend —
+  [`Content::rendered`](../../parser/src/content/content.rs)`()` →
+  [`Content::rendered_html`](../../parser/src/content/content.rs)`()` and
+  [`IsBlock::rendered_content`](../../parser/src/blocks/is_block.rs)`()` →
+  [`IsBlock::rendered_html_content`](../../parser/src/blocks/is_block.rs)`()` (§3.3.1). This
+  is the mechanical sweep §5.3 describes: every one of the ~277 golden `.rendered()`
+  assertions (and the corpus-wide differential harness) is rewritten to call the new name
+  while the *asserted output strings* are left untouched, so the oracle still pins the same
+  bytes. The rename is **name-only**: the accessor still returns exactly what it returned
+  before, including the output of a custom
+  [`InlineSubstitutionRenderer`](../../parser/src/parser/inline_substitution_renderer.rs)
+  installed via
+  [`with_inline_substitution_renderer`](../../parser/src/parser/parser.rs) — the two changes
+  the new name ultimately implies (making `rendered_html()` a *fold* of the tree, and
+  dropping the parse-time renderer so it is *always* the built-in HTML backend) are the
+  deferred remainder of Phase 2 and Phase 4, unchanged by this step. The `render_with` /
+  `render_to` fold is still the remaining Phase 3 piece.
+
 - **Phase 4 — precision spans + ASG output.** Land the single-pass builder (Strategy B) and
   `Document::to_asg()`; validate against the ASG schema; retire the `attribute-missing`
   per-line hack (#564).

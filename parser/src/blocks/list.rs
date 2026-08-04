@@ -784,11 +784,19 @@ mod tests {
         assert_eq!(items.len(), 2);
 
         assert_eq!(
-            items[0].child_blocks().next().unwrap().rendered_content(),
+            items[0]
+                .child_blocks()
+                .next()
+                .unwrap()
+                .rendered_html_content(),
             Some("First")
         );
         assert_eq!(
-            items[1].child_blocks().next().unwrap().rendered_content(),
+            items[1]
+                .child_blocks()
+                .next()
+                .unwrap()
+                .rendered_html_content(),
             Some("Second")
         );
 
@@ -1427,7 +1435,7 @@ mod tests {
         assert!(matches!(mi.item, crate::blocks::Block::List(_)));
 
         assert_eq!(mi.item.content_model(), ContentModel::Compound);
-        assert!(mi.item.rendered_content().is_none());
+        assert!(mi.item.rendered_html_content().is_none());
         assert_eq!(mi.item.raw_context().as_ref(), "list");
         assert_eq!(mi.item.child_blocks().count(), 1);
         assert!(mi.item.title_source().is_none());

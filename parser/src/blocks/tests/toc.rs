@@ -52,7 +52,7 @@ fn simplest_toc_macro() {
     assert_eq!(mi.item.resolved_context().deref(), "toc");
 
     // Exercise the remaining `Block::Toc` accessor delegations.
-    assert!(mi.item.rendered_content().is_none());
+    assert!(mi.item.rendered_html_content().is_none());
     assert!(mi.item.declared_style().is_none());
     assert!(mi.item.title_source().is_none());
     assert!(mi.item.title().is_none());

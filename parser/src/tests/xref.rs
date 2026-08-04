@@ -36,7 +36,7 @@ fn first_simple<'a>(doc: &'a Document<'a>) -> &'a SimpleBlock<'a> {
 
 /// Returns the rendered text of the first paragraph in `doc`.
 fn first_paragraph<'a>(doc: &'a Document<'a>) -> &'a str {
-    first_simple(doc).content().rendered()
+    first_simple(doc).content().rendered_html()
 }
 
 /// Returns the first `SectionBlock` found in document order (recursing into
@@ -73,7 +73,7 @@ fn backward_reference_resolves() {
     fn collect<'a>(blocks: impl Iterator<Item = &'a Block<'a>>, out: &mut Vec<String>) {
         for block in blocks {
             if let Block::Simple(simple) = block {
-                out.push(simple.content().rendered().to_string());
+                out.push(simple.content().rendered_html().to_string());
             }
             collect(block.child_blocks(), out);
         }
@@ -299,7 +299,7 @@ fn footnote_in_heading_does_not_advance_a_counter_twice() {
     fn collect<'a>(blocks: impl Iterator<Item = &'a Block<'a>>, out: &mut Vec<String>) {
         for block in blocks {
             if let Block::Simple(simple) = block {
-                out.push(simple.content().rendered().to_string());
+                out.push(simple.content().rendered_html().to_string());
             }
             collect(block.child_blocks(), out);
         }

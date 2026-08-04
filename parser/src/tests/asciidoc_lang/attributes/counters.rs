@@ -9,7 +9,7 @@ track_file!("ref/asciidoc-lang/docs/modules/attributes/pages/counters.adoc");
 fn rendered_blocks(input: &str) -> Vec<String> {
     let doc = Parser::default().parse(input);
     doc.child_blocks()
-        .filter_map(|b| b.rendered_content().map(str::to_string))
+        .filter_map(|b| b.rendered_html_content().map(str::to_string))
         .collect()
 }
 

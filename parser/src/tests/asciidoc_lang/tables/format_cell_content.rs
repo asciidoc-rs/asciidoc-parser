@@ -30,7 +30,7 @@ fn body_styles(table: &crate::blocks::TableBlock<'_>) -> Vec<Vec<ColumnStyle>> {
 /// cell, panicking if the cell holds AsciiDoc block content instead.
 fn simple_text(cell: &crate::blocks::TableCell<'_>) -> String {
     match cell.content() {
-        crate::blocks::TableCellContent::Simple(content) => content.rendered().to_string(),
+        crate::blocks::TableCellContent::Simple(content) => content.rendered_html().to_string(),
         crate::blocks::TableCellContent::AsciiDoc(_) => panic!("expected simple cell content"),
     }
 }
@@ -50,7 +50,7 @@ fn asciidoc_cell_text(doc: &crate::Document<'_>) -> String {
         crate::blocks::TableCellContent::AsciiDoc(cell) => cell
             .blocks()
             .iter()
-            .filter_map(|block| block.rendered_content())
+            .filter_map(|block| block.rendered_html_content())
             .collect::<Vec<_>>()
             .join("\n"),
         other => panic!("expected nested AsciiDoc blocks, got {other:?}"),
@@ -431,7 +431,7 @@ As such, it inherits attributes from the parent document.
             assert_eq!(blocks.len(), 1);
             match &blocks[0] {
                 crate::blocks::Block::Simple(simple) => {
-                    assert_eq!(simple.content().rendered(), "Hello Tester");
+                    assert_eq!(simple.content().rendered_html(), "Hello Tester");
                 }
                 other => panic!("expected a simple block, got {other:?}"),
             }

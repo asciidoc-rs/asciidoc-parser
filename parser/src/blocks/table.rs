@@ -2047,7 +2047,7 @@ fn parse_asciidoc_cell_body<'src>(
         title_source.map(|span| {
             let mut content = Content::from(span);
             SubstitutionGroup::Header.apply(&mut content, parser, None);
-            content.rendered().to_string()
+            content.rendered_html().to_string()
         })
     } else {
         None

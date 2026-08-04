@@ -50,7 +50,7 @@ include::example$text.adoc[tag=highlight]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "Mark my words, <mark>automation is essential</mark>."
     );
 

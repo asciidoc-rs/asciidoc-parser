@@ -85,7 +85,7 @@ fn single_line() {
     );
 
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
-    assert_eq!(mi.item.rendered_content(), Some("abc"));
+    assert_eq!(mi.item.rendered_html_content(), Some("abc"));
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
     assert_eq!(mi.item.resolved_context().deref(), "paragraph");
     assert!(mi.item.declared_style().is_none());
@@ -520,7 +520,7 @@ fn with_block_anchor_only() {
 
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
     assert_eq!(
-        mi.item.rendered_content(),
+        mi.item.rendered_html_content(),
         Some("This paragraph gets a lot of attention.")
     );
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
@@ -623,7 +623,7 @@ fn with_block_anchor_trailing_comma() {
 
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
     assert_eq!(
-        mi.item.rendered_content(),
+        mi.item.rendered_html_content(),
         Some("[[notice,]]\nThis paragraph gets a lot of attention.")
     );
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
@@ -745,7 +745,7 @@ fn with_block_anchor_and_reftext() {
 
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
     assert_eq!(
-        mi.item.rendered_content(),
+        mi.item.rendered_html_content(),
         Some("This paragraph gets a lot of attention.")
     );
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
@@ -857,7 +857,7 @@ fn err_empty_block_anchor() {
 
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
     assert_eq!(
-        mi.item.rendered_content(),
+        mi.item.rendered_html_content(),
         Some("This paragraph gets a lot of attention.")
     );
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
@@ -901,7 +901,7 @@ fn terminal_empty_block_anchor_does_not_spin() {
     // produces nothing.
     let mut inner = block.child_blocks();
     assert_eq!(
-        inner.next().unwrap().rendered_content(),
+        inner.next().unwrap().rendered_html_content(),
         Some("Block content")
     );
     assert!(inner.next().is_none());
@@ -983,7 +983,7 @@ fn err_invalid_block_anchor() {
 
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
     assert_eq!(
-        mi.item.rendered_content(),
+        mi.item.rendered_html_content(),
         Some("[[3 blind mice]]\nThis paragraph gets a lot of attention.")
     );
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
@@ -1076,7 +1076,7 @@ fn unterminated_block_anchor() {
 
     assert_eq!(mi.item.content_model(), ContentModel::Simple);
     assert_eq!(
-        mi.item.rendered_content(),
+        mi.item.rendered_html_content(),
         Some("This paragraph gets a lot of attention.")
     );
     assert_eq!(mi.item.raw_context().deref(), "paragraph");
@@ -1478,7 +1478,7 @@ mod comment_directly_above_metadata {
         // blocks[0] is `first`; blocks[1] is the retained comment.
         assert_eq!(blocks[2].raw_context().as_ref(), "paragraph");
         assert_eq!(blocks[2].title(), Some("Title"));
-        assert_eq!(blocks[2].rendered_content(), Some("text"));
+        assert_eq!(blocks[2].rendered_html_content(), Some("text"));
     }
 
     #[test]
@@ -1497,7 +1497,7 @@ mod comment_directly_above_metadata {
         assert_eq!(blocks[1].span().data(), "// note");
 
         assert_eq!(blocks[2].raw_context().as_ref(), "paragraph");
-        assert_eq!(blocks[2].rendered_content(), Some("[ foo]"));
+        assert_eq!(blocks[2].rendered_html_content(), Some("[ foo]"));
     }
 
     #[test]
@@ -1523,6 +1523,6 @@ mod comment_directly_above_metadata {
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].raw_context().as_ref(), "paragraph");
-        assert_eq!(blocks[0].rendered_content(), Some("Hello world"));
+        assert_eq!(blocks[0].rendered_html_content(), Some("Hello world"));
     }
 }

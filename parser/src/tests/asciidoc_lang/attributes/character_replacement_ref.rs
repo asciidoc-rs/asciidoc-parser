@@ -219,7 +219,7 @@ fn reference_a_character_replacement_attribute() {
     };
 
     assert_eq!(
-        block.content().rendered(),
+        block.content().rendered_html(),
         "Wolpertingers don&#8217;t like temperatures above 100&#176;C."
     );
 }

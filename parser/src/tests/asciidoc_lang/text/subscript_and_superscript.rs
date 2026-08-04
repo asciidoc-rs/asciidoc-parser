@@ -64,7 +64,7 @@ E=mc^2^,`" Lazarus replied."#,
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "&#8220;Well the H<sub>2</sub>O formula written on their whiteboard could be part\nof a shopping list, but I don&#8217;t think the local bodega sells\nE=mc<sup>2</sup>,&#8221; Lazarus replied."
         );
 
@@ -97,7 +97,7 @@ include::example$text.adoc[tag=sup-with-spaces]
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "The deepest body of water is Deep Creek Lake.<sup>[citation needed]</sup>"
         );
 

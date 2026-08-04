@@ -1726,7 +1726,7 @@ include::example$id.adoc[tag=anchor-wrong]
 
         let block = doc.child_blocks().next().unwrap();
         assert_eq!(
-            block.rendered_content().unwrap(),
+            block.rendered_html_content().unwrap(),
             "<a id=\"anchor-point\"></a>* list item with invalid anchor"
         );
 
@@ -1861,7 +1861,7 @@ include::example$id.adoc[tag=inline-anchor-brackets]
 
         let block = doc.child_blocks().next().unwrap();
         assert_eq!(
-            block.rendered_content().unwrap(),
+            block.rendered_html_content().unwrap(),
             "<a id=\"tiger-image\"></a><span class=\"image\"><img src=\"tiger.png\" alt=\"Image of a tiger\"></span>"
         );
 
@@ -1889,7 +1889,7 @@ include::example$id.adoc[tag=inline-anchor-macro]
 
         let block = doc.child_blocks().next().unwrap();
         assert_eq!(
-            block.rendered_content().unwrap(),
+            block.rendered_html_content().unwrap(),
             "<a id=\"tiger-image\"></a><span class=\"image\"><img src=\"tiger.png\" alt=\"Image of a tiger\"></span>"
         );
 
@@ -1985,7 +1985,7 @@ include::example$id.adoc[tag=anchor-xreflabel]
 
         let xref_paragraph = doc
             .child_blocks()
-            .filter_map(|block| block.rendered_content())
+            .filter_map(|block| block.rendered_html_content())
             .find(|rendered| rendered.contains("href"))
             .unwrap();
 
