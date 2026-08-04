@@ -386,28 +386,28 @@ impl<'src> Content<'src> {
         self.passthroughs = passthroughs;
     }
 
-    /// Returns the inline AST for this content: the structured representation
-    /// of its inline nodes.
+    /// Returns the inline AST for this content: the structured, read-only
+    /// representation of its inline nodes.
     ///
     /// This is populated only when inline-tree building is enabled on the
     /// [`Parser`](crate::Parser) (see
     /// [`with_inline_tree`](crate::Parser::with_inline_tree)); it is an empty
     /// slice otherwise. The tree is a projection of the rendered content – the
     /// fold of the tree reproduces [`rendered`](Self::rendered) byte-for-byte –
-    /// and is not yet the canonical representation (see the inline AST
-    /// architecture design, Phase 2).
+    /// and is not yet the canonical representation (see the [inline AST
+    /// architecture design], Phase 2).
     ///
-    /// Cross-references in the tree carry their resolved destination once
-    /// resolution runs: [`resolve_references`](Self::resolve_references)
-    /// mirrors each resolved destination into the corresponding
+    /// Cross-references in the tree carry their resolved destination once a
+    /// full [`Parser::parse`](crate::Parser::parse) has resolved the document's
+    /// references: each resolved destination is mirrored into the corresponding
     /// [`Ref`](crate::inlines::Ref) node, so a caller that walks
-    /// [`inlines`](Self::inlines) after resolution sees the same destinations
-    /// the rendered string reflects (§4.3 of the design).
-    // Consumed by the differential and structural tests (and, in Phase 3, by
-    // the public inline API); the accessor is part of the tree's internal
-    // surface even where non-test code does not yet read it.
-    #[allow(dead_code)]
-    pub(crate) fn inlines(&self) -> &[InlineNode<'src>] {
+    /// [`inlines`](Self::inlines) after the parse sees the same destinations
+    /// the rendered string reflects (§4.3 of the design). Before resolution
+    /// – or for a standalone parse with no document catalog – a `Ref`
+    /// node's destination is `None`.
+    ///
+    /// [inline AST architecture design]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
+    pub fn inlines(&self) -> &[InlineNode<'src>] {
         &self.inlines
     }
 

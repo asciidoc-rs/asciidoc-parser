@@ -11,6 +11,7 @@ use crate::{
         parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
+    inlines::InlineNode,
     internal::debug::DebugSliceReference,
     parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings},
     span::MatchedItem,
@@ -777,6 +778,10 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
 
     fn rendered_content(&'src self) -> Option<&'src str> {
         self.content.as_ref().map(|content| content.rendered())
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        self.content.as_ref().map(|content| content.inlines())
     }
 
     /// Returns a mutable slice of the nested blocks of a `____`-delimited

@@ -7,6 +7,7 @@ use crate::{
     },
     content::Content,
     document::InterpretedValue,
+    inlines::InlineNode,
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     strings::CowStr,
@@ -374,6 +375,10 @@ impl<'src> IsBlock<'src> for AdmonitionBlock<'src> {
 
     fn rendered_content(&'src self) -> Option<&'src str> {
         self.content.as_ref().map(|content| content.rendered())
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        self.content.as_ref().map(|content| content.inlines())
     }
 
     fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {

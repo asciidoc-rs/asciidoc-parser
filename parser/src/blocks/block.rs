@@ -9,6 +9,7 @@ use crate::{
     },
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{Attribute, InterpretedValue, RefType},
+    inlines::InlineNode,
     parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, XrefSignifier},
     span::MatchedItem,
     strings::CowStr,
@@ -1043,6 +1044,25 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Break(b) => b.rendered_content(),
             Self::Toc(b) => b.rendered_content(),
             Self::DocumentAttribute(b) => b.rendered_content(),
+        }
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        match self {
+            Self::Simple(b) => b.inlines(),
+            Self::Media(b) => b.inlines(),
+            Self::Section(b) => b.inlines(),
+            Self::List(b) => b.inlines(),
+            Self::ListItem(b) => b.inlines(),
+            Self::RawDelimited(b) => b.inlines(),
+            Self::CompoundDelimited(b) => b.inlines(),
+            Self::Admonition(b) => b.inlines(),
+            Self::Quote(b) => b.inlines(),
+            Self::Table(b) => b.inlines(),
+            Self::Preamble(b) => b.inlines(),
+            Self::Break(b) => b.inlines(),
+            Self::Toc(b) => b.inlines(),
+            Self::DocumentAttribute(b) => b.inlines(),
         }
     }
 

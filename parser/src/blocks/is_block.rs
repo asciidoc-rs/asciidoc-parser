@@ -5,6 +5,7 @@ use crate::{
     attributes::Attrlist,
     blocks::{Block, is_built_in_context},
     content::{Content, SubstitutionGroup},
+    inlines::InlineNode,
     strings::CowStr,
 };
 
@@ -33,6 +34,25 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     /// This content will contain the text _after_ substitutions have been
     /// applied.
     fn rendered_content(&'src self) -> Option<&'src str> {
+        None
+    }
+
+    /// Returns the inline AST for this block's content, if any: the structured,
+    /// read-only representation of its inline nodes.
+    ///
+    /// This is the structured counterpart of
+    /// [`rendered_content`](Self::rendered_content) – the same blocks carry
+    /// each – so a block with no directly-contained content returns `None`
+    /// here too.
+    ///
+    /// The tree is populated only when inline-tree building is enabled on the
+    /// [`Parser`](crate::Parser) (see
+    /// [`with_inline_tree`](crate::Parser::with_inline_tree)); a
+    /// content-bearing block parsed without it returns `Some(&[])` (an
+    /// empty tree), not `None`.
+    /// See [`Content::inlines`](crate::content::Content::inlines) for the
+    /// tree's guarantees.
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
         None
     }
 

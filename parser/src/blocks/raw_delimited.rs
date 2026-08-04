@@ -5,6 +5,7 @@ use crate::{
         ChildBlocks, ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata,
     },
     content::{Content, SubstitutionGroup},
+    inlines::InlineNode,
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -398,6 +399,10 @@ impl<'src> IsBlock<'src> for RawDelimitedBlock<'src> {
 
     fn rendered_content(&self) -> Option<&str> {
         Some(self.content.rendered())
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        Some(self.content.inlines())
     }
 
     fn raw_context(&self) -> CowStr<'src> {
