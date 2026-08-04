@@ -331,8 +331,7 @@ impl<'src> Content<'src> {
     /// after all substitutions have been applied.
     ///
     /// This is the built-in HTML output. (A custom
-    /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
-    /// installed via
+    /// [`InlineSubstitutionRenderer`] installed via
     /// [`Parser::with_inline_substitution_renderer`](crate::Parser::with_inline_substitution_renderer)
     /// still drives this output during migration; moving renderer selection to
     /// render time is a later step of the [inline AST architecture].)
