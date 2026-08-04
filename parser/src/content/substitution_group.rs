@@ -356,6 +356,12 @@ impl SubstitutionGroup {
         );
 
         content.set_inlines(tree);
+
+        // Retain the marked string and event log so `Content::render_with` can
+        // re-fold the tree through a caller-supplied renderer. This is a
+        // Strategy A carry-over, retired with the recording pass by the Phase 4
+        // single-pass builder.
+        content.set_inline_fold(marked, events.to_vec());
     }
 
     /// Applies any block style masquerade and `subs` attribute override from

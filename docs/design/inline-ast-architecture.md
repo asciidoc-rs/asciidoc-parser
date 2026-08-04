@@ -752,6 +752,39 @@ Each phase is a reviewable unit with a clear exit gate.
   deferred remainder of Phase 2 and Phase 4, unchanged by this step. The `render_with` /
   `render_to` fold is still the remaining Phase 3 piece.
 
+  *Step 3 landed as (the `render_with` fold):* the render-time counterpart of
+  `rendered_html()` — [`Content::render_with`](../../parser/src/content/content.rs) — folds a
+  block's inline tree through a **caller-supplied**
+  [`InlineSubstitutionRenderer`](../../parser/src/parser/inline_substitution_renderer.rs) and
+  returns an owned `String`, so a consumer can drive an alternate backend over an
+  already-parsed document without reparsing (§3.3). Passing the built-in HTML renderer
+  reproduces `rendered_html()` **byte-for-byte**, including resolved cross-references — a new
+  corpus-wide differential (`render_with_reproduces_rendered_html_byte_for_byte`) folds every
+  fixture through it and pins the same bytes the golden oracle pins. A cross-reference is the
+  one construct whose captured bytes are resolution-*dependent* (the recording pass runs
+  before resolution), so the fold re-renders it from its *resolved*
+  [`XrefSegment`](../../parser/src/content/content.rs) — pairing the tree's cross-reference
+  leaves, in document order, with the block-level segments the placeholder-ordered
+  [`block_tree_xref_segments`](../../parser/src/content/content.rs) yields, the same
+  positional correlation [`mirror_tree_xref_resolution`](../../parser/src/content/content.rs)
+  relies on. To re-fold after the parse, `Content` retains the recorder's marked string and
+  event log (a private, `inlines`-like derived artifact, behind
+  [`with_inline_tree`](../../parser/src/parser/parser.rs)); with the flag off there is nothing
+  to fold, so `render_with` returns the cached built-in rendering.
+
+  Because the Strategy A tree carries each construct's *built-in bytes* rather than the full
+  parameters some renderer methods need, `render_with` invokes the supplied renderer only for
+  the **self-contained** constructs it can drive faithfully — special characters, line breaks,
+  anchors, index terms, buttons, keyboards, and cross-references — so a custom backend
+  overrides those (a smoke test drives a renderer that re-skins the line break). A formatted
+  span, link, or STEM wrapper, and an image, menu, callout, or footnote marker, emit their
+  captured bytes; a span's or link's *children* are still folded, so a renderer-driven
+  construct nested inside one still reaches the renderer. Widening renderer control over the
+  captured constructs — and a document-level `render_to` — awaits the single-pass builder and
+  the reshaped renderer seam (Phases 4–5), the point at which nodes carry logical parameters
+  instead of pre-rendered bytes. With this step the substantive Phase 3 API surface
+  (`inlines()`, the HTML-specific accessor names, and the `render_with` fold) is in place.
+
 - **Phase 4 — precision spans + ASG output.** Land the single-pass builder (Strategy B) and
   `Document::to_asg()`; validate against the ASG schema; retire the `attribute-missing`
   per-line hack (#564).

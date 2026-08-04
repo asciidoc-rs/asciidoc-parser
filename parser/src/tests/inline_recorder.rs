@@ -35,7 +35,7 @@ use crate::{
         },
     },
     inlines::{CharRef, InlineNode, RefVariant, SpanForm, StyleVariant, UiKind},
-    parser::{HtmlSubstitutionRenderer, ModificationContext},
+    parser::{HtmlSubstitutionRenderer, InlineSubstitutionRenderer, ModificationContext},
 };
 
 /// Rejects a fixture whose source uses a reserved recorder codepoint. Such a
@@ -569,6 +569,174 @@ fn inline_tree_flag_leaves_rendered_output_unchanged() {
     {
         check_inline_tree_flag_parity(source);
     }
+}
+
+// ─── Public API: `Content::render_with` ─────────────────────────────────────
+//
+// `render_with` folds the inline tree through a caller-supplied renderer
+// (design Phase 3). Passing the built-in HTML renderer must reproduce
+// `rendered_html()` byte-for-byte – including resolved cross-references, which
+// the fold re-renders from their resolved state rather than the tree's
+// parse-time capture – so the same golden oracle that pins `rendered_html()`
+// pins `render_with` too. A custom renderer overrides the self-contained
+// constructs.
+
+/// Parses `source` with tree building on, then asserts that folding every
+/// simple block's (and inline table cell's) tree with the built-in HTML
+/// renderer via [`Content::render_with`] reproduces its `rendered_html()`
+/// exactly.
+fn check_document_render_with(source: &str) {
+    use crate::{
+        blocks::{Block, TableCellContent, TableRow},
+        parser::HtmlSubstitutionRenderer,
+    };
+
+    assert_no_reserved_sentinels(source);
+
+    let mut parser = experimental(Parser::default()).with_inline_tree(true);
+    let doc = parser.parse(source);
+    let html = HtmlSubstitutionRenderer {};
+
+    fn check_content(content: &Content<'_>, html: &HtmlSubstitutionRenderer, checked: &mut usize) {
+        let rendered = content.rendered_html();
+
+        assert_eq!(
+            content.render_with(html),
+            rendered,
+            "render_with(&Html) diverged from rendered_html() for {content:?}"
+        );
+
+        *checked += 1;
+    }
+
+    fn cells(row: &TableRow<'_>, html: &HtmlSubstitutionRenderer, checked: &mut usize) {
+        for cell in row.cells() {
+            // Only inline (`Simple`) cells carry a single `Content`; an
+            // `AsciiDoc` cell is a nested standalone document, out of scope here.
+            if let TableCellContent::Simple(content) = cell.content() {
+                check_content(content, html, checked);
+            }
+        }
+    }
+
+    fn walk(block: &Block<'_>, html: &HtmlSubstitutionRenderer, checked: &mut usize) {
+        match block {
+            Block::Simple(simple) => check_content(simple.content(), html, checked),
+
+            Block::Table(table) => {
+                if let Some(header) = table.header_row() {
+                    cells(header, html, checked);
+                }
+
+                for row in table.body_rows() {
+                    cells(row, html, checked);
+                }
+
+                if let Some(footer) = table.footer_row() {
+                    cells(footer, html, checked);
+                }
+            }
+
+            _ => {}
+        }
+
+        for child in block.child_blocks() {
+            walk(child, html, checked);
+        }
+    }
+
+    let mut checked = 0;
+
+    for block in doc.child_blocks() {
+        walk(block, &html, &mut checked);
+    }
+
+    // A fixture that exercised no content location would pass vacuously; every
+    // corpus entry has at least one simple block or inline cell.
+    assert!(
+        checked > 0,
+        "render_with fixture exercised no content for {source:?}"
+    );
+}
+
+#[test]
+fn render_with_reproduces_rendered_html_byte_for_byte() {
+    // The document corpus reaches resolved cross-references; the normal corpus
+    // (each parsed as a one-paragraph document) reaches every inline construct.
+    // A blank fixture parses to no block, so it has no content to fold.
+    for source in DOCUMENT_CORPUS.iter().chain(NORMAL_CORPUS) {
+        if source.trim().is_empty() {
+            continue;
+        }
+
+        check_document_render_with(source);
+    }
+}
+
+#[test]
+fn render_with_reproduces_rendered_html_for_callouts() {
+    // A callout leaf renders from captured bytes (it needs the parser's `icons`
+    // attribute), so it must still reproduce `rendered_html()` under the fold.
+    check_document_render_with("[source]\n----\ncode line <1>\n----\n<1> a note");
+}
+
+#[test]
+fn render_with_falls_back_to_rendered_html_when_tree_is_off() {
+    // With tree building disabled there is nothing to fold, so `render_with`
+    // returns the built-in rendering and ignores the (here custom) renderer.
+    use crate::blocks::Block;
+
+    let mut parser = Parser::default();
+    let doc = parser.parse("a *bold* line +\nand <b>raw</b>? no.");
+
+    let Block::Simple(simple) = doc.child_blocks().next().expect("a block") else {
+        panic!("expected a simple block");
+    };
+
+    let content = simple.content();
+
+    assert_eq!(
+        content.render_with(&LineBreakMarkerRenderer),
+        content.rendered_html()
+    );
+}
+
+/// A custom renderer that emits a distinctive line break, so a test can observe
+/// that `render_with` genuinely drives the supplied renderer (rather than
+/// replaying the built-in bytes).
+#[derive(Debug)]
+struct LineBreakMarkerRenderer;
+
+impl InlineSubstitutionRenderer for LineBreakMarkerRenderer {
+    fn render_line_break(&self, dest: &mut String) {
+        dest.push_str("[BR]");
+    }
+}
+
+#[test]
+fn render_with_drives_a_custom_renderer() {
+    use crate::blocks::Block;
+
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("first line +\nsecond line");
+
+    let Block::Simple(simple) = doc.child_blocks().next().expect("a block") else {
+        panic!("expected a simple block");
+    };
+
+    let content = simple.content();
+
+    // The built-in rendering uses `<br>`; the custom renderer overrides the
+    // line break, and only `render_with` reflects it.
+    assert!(content.rendered_html().contains("<br>"));
+
+    let custom = content.render_with(&LineBreakMarkerRenderer);
+    assert!(custom.contains("[BR]"), "custom render was {custom:?}");
+    assert!(!custom.contains("<br>"), "custom render was {custom:?}");
+
+    // The surrounding text is untouched.
+    assert!(custom.starts_with("first line"));
+    assert!(custom.ends_with("second line"));
 }
 
 #[test]

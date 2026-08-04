@@ -5,7 +5,7 @@
 
 use crate::{
     Span,
-    content::Passthrough,
+    content::{Passthrough, inline_tree, inline_tree::Event},
     inlines::{InlineNode, RefVariant},
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
@@ -101,6 +101,35 @@ pub struct Content<'src> {
     ///
     /// [inline AST architecture]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
     inlines: Vec<InlineNode<'src>>,
+
+    /// The recorder artifacts the inline tree was folded from, retained so
+    /// [`render_with`](Self::render_with) can re-fold the tree through a
+    /// caller-supplied renderer.
+    ///
+    /// Populated alongside [`inlines`](Self::inlines) only when inline-tree
+    /// building is enabled on the [`Parser`](crate::Parser)
+    /// ([`with_inline_tree`](crate::Parser::with_inline_tree)); `None`
+    /// otherwise, in which case [`render_with`](Self::render_with) falls back
+    /// to the cached built-in rendering. Like `inlines`, it is a **derived
+    /// artifact** and is deliberately excluded from
+    /// [`PartialEq`]/[`Eq`]/[`Hash`].
+    fold: Option<Box<InlineFold>>,
+}
+
+/// The recorder artifacts retained for [`Content::render_with`]: the marked
+/// string a [`RecordingRenderer`](inline_tree) produced and the event log it
+/// filled in, from which the inline tree was folded. This is a Strategy A
+/// carry-over that the Phase 4 single-pass builder retires along with the
+/// recording pass itself.
+#[derive(Clone)]
+struct InlineFold {
+    /// The recorder-marked string (the built-in rendering bracketed with inert
+    /// sentinels).
+    marked: String,
+
+    /// The recorded construct metadata, indexed by the marker each construct
+    /// carries.
+    events: Vec<Event>,
 }
 
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
@@ -240,6 +269,7 @@ impl<'src> Content<'src> {
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
+            fold: None,
         }
     }
 
@@ -269,6 +299,7 @@ impl<'src> Content<'src> {
                 .map(|(template, xrefs)| Box::new(DeferredContent { template, xrefs })),
             passthroughs: Vec::new(),
             inlines: Vec::new(),
+            fold: None,
         }
     }
 
@@ -307,6 +338,7 @@ impl<'src> Content<'src> {
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
+            fold: None,
         }
     }
 
@@ -424,6 +456,95 @@ impl<'src> Content<'src> {
     /// (see [`inline_tree`](crate::content::inline_tree)).
     pub(crate) fn set_inlines(&mut self, inlines: Vec<InlineNode<'src>>) {
         self.inlines = inlines;
+    }
+
+    /// Retains the recorder artifacts (`marked` string and `events` log) the
+    /// inline tree was folded from, so [`render_with`](Self::render_with) can
+    /// re-fold it through a caller-supplied renderer.
+    pub(crate) fn set_inline_fold(&mut self, marked: String, events: Vec<Event>) {
+        self.fold = Some(Box::new(InlineFold { marked, events }));
+    }
+
+    /// Renders this content to a caller-supplied backend, as a fold over the
+    /// inline tree ([`inlines`](Self::inlines)), and returns the result.
+    ///
+    /// This is the render-time counterpart of
+    /// [`rendered_html`](Self::rendered_html): where that returns the cached
+    /// built-in HTML, this folds the same tree through `renderer`, so a caller
+    /// can drive an alternate backend over an already-parsed document without
+    /// reparsing. The result is owned and **not** cached.
+    ///
+    /// Passing the built-in
+    /// [`HtmlSubstitutionRenderer`](crate::parser::HtmlSubstitutionRenderer)
+    /// reproduces [`rendered_html`](Self::rendered_html) **byte-for-byte**,
+    /// including resolved cross-references (which are re-rendered from their
+    /// resolved state, not the tree's parse-time capture).
+    ///
+    /// # Which constructs `renderer` drives
+    ///
+    /// While the tree is built by the Strategy A recording pass (design §4.1),
+    /// it retains the built-in bytes of each construct rather than the full
+    /// parameters some renderer methods need. `renderer` is therefore invoked
+    /// for the **self-contained** kinds it can drive faithfully – special
+    /// characters, line breaks, anchors, index terms, buttons, keyboards, and
+    /// cross-references – so a custom backend overrides those. A formatted
+    /// span, link, or STEM wrapper, and an image, menu, callout, or
+    /// footnote marker, emit their captured built-in bytes (nested
+    /// renderer-driven constructs inside a span or link are still folded
+    /// through `renderer`). Full `renderer` control over every construct
+    /// arrives with the single-pass builder and the reshaped renderer seam
+    /// (design Phases 4–5).
+    ///
+    /// # Fallback
+    ///
+    /// When no inline tree was built – tree building was not enabled on the
+    /// [`Parser`](crate::Parser) (see
+    /// [`with_inline_tree`](crate::Parser::with_inline_tree)), or this content
+    /// carries none – there is nothing to fold through `renderer`, so this
+    /// returns the cached built-in rendering (the same bytes as
+    /// [`rendered_html`](Self::rendered_html)).
+    pub fn render_with(&self, renderer: &dyn InlineSubstitutionRenderer) -> String {
+        let Some(fold) = self.fold.as_deref() else {
+            return self.rendered.as_ref().to_string();
+        };
+
+        // The block-level cross-references, in the document order the tree's
+        // cross-reference leaves appear – each carrying the destination
+        // resolution filled in (the same segments the rendered string reflects).
+        // A footnote-embedded reference is re-homed out of the block template,
+        // so it is excluded here exactly as it is absent from the block tree.
+        let segments: Vec<&XrefSegment> = match self.deferred.as_deref() {
+            Some(deferred) => block_tree_xref_segments(&deferred.template, &deferred.xrefs),
+            None => Vec::new(),
+        };
+
+        let mut segments = segments.into_iter();
+
+        let mut render_xref = |out: &mut String| match segments.next() {
+            Some(xref) => renderer.render_xref(
+                &XrefRenderParams {
+                    target: &xref.target,
+                    provided_text: xref.provided_text.as_deref(),
+                    window: xref.window.as_deref(),
+                    roles: &xref.roles,
+                    xrefstyle: xref.xrefstyle,
+                    derived: xref.derived.as_ref(),
+                    resolved: xref.resolved.as_ref(),
+                },
+                out,
+            ),
+
+            // Each cross-reference leaf in the tree lines up with one block-level
+            // segment (the invariant `mirror_tree_xref_resolution` also relies
+            // on); running out means the recording pass and the authoritative
+            // pass enumerated references differently.
+            None => debug_assert!(
+                false,
+                "inline fold requested more cross-references than the content holds"
+            ),
+        };
+
+        inline_tree::fold_with(&fold.marked, &fold.events, renderer, &mut render_xref)
     }
 
     /// Removes the [`FOOTNOTE_MARKER_START`]/[`FOOTNOTE_MARKER_END`] sentinels
@@ -735,6 +856,29 @@ pub(crate) fn block_tree_xrefs(
         .enumerate()
         .filter(|(index, _)| template.contains(&Content::xref_placeholder(*index)))
         .map(|(_, xref)| xref.resolved.clone())
+        .collect()
+}
+
+/// The block-level deferred cross-reference segments, in placeholder (document)
+/// order, that [`Content::render_with`] re-renders in place of the tree's
+/// cross-reference leaves.
+///
+/// This is the whole-segment counterpart of [`block_tree_xrefs`] (which
+/// projects each to just its resolved destination): it applies the same
+/// still-in-`template` filter – so a footnote-re-homed reference is excluded
+/// and the result lines up one-to-one with the block tree's cross-reference
+/// leaves – but keeps each [`XrefSegment`] so the fold can rebuild a full
+/// [`XrefRenderParams`] (target, provided text, window, roles, style, and
+/// resolution) and reproduce the rendered string's link exactly.
+pub(crate) fn block_tree_xref_segments<'a>(
+    template: &str,
+    xrefs: &'a [XrefSegment],
+) -> Vec<&'a XrefSegment> {
+    xrefs
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| template.contains(&Content::xref_placeholder(*index)))
+        .map(|(_, xref)| xref)
         .collect()
 }
 
@@ -1057,6 +1201,7 @@ impl<'src> From<Span<'src>> for Content<'src> {
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
+            fold: None,
         }
     }
 }

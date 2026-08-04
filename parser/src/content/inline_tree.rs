@@ -67,7 +67,7 @@ use crate::{
     parser::{
         CalloutRenderParams, FootnoteRenderParams, IconRenderParams, ImageRenderParams,
         IndexTermRenderParams, InlineSubstitutionRenderer, LinkRenderParams, MenuRenderParams,
-        QuoteScope, QuoteType, XrefRenderParams,
+        QuoteScope, QuoteType, SpecialCharacter, XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -1071,6 +1071,144 @@ pub(crate) fn fold_marked(marked: &str, events: &[Event]) -> String {
 /// to cross-check the recovered tree against the recorder.
 pub(crate) fn open_marker_count(marked: &str) -> usize {
     marked.matches(MARK_OPEN).count()
+}
+
+/// Folds a recorder-marked string to output, driving a **caller-supplied**
+/// renderer where the tree carries a construct's parameters in full, and
+/// emitting the captured (built-in) bytes for the constructs whose faithful
+/// rendering needs live parser/attrlist context. This is the engine behind
+/// [`Content::render_with`](crate::content::Content::render_with).
+///
+/// The kinds that reach `renderer` are the self-contained ones – special
+/// characters, line breaks, anchors, index terms, buttons, keyboards, and
+/// cross-references – so a custom backend can override them. A cross-reference
+/// is re-rendered from its *resolved* state (not the recording pass's
+/// unresolved capture) through `render_xref`, which the caller supplies: the
+/// tree's cross-reference leaves, in document order, correspond one-to-one with
+/// the caller's resolved segments, so each call renders the next one.
+///
+/// A formatted span, link, or STEM wrapper (a container), and an image, menu,
+/// callout, or footnote marker (a leaf), reconstruct only from context the tree
+/// does not retain under Strategy A, so their captured bytes are emitted;
+/// container children are still folded, so a renderer-driven construct nested
+/// inside one still reaches `renderer`. Widening `renderer` control over the
+/// captured kinds lands with the Phase 5 node-taking seam.
+pub(crate) fn fold_with(
+    marked: &str,
+    events: &[Event],
+    renderer: &dyn InlineSubstitutionRenderer,
+    render_xref: &mut dyn FnMut(&mut String),
+) -> String {
+    let chars: Vec<char> = marked.chars().collect();
+    let recs = parse(&chars, events);
+    let mut out = String::new();
+    fold_with_into(&recs, renderer, render_xref, &mut out);
+    out
+}
+
+/// Recursive worker for [`fold_with`].
+fn fold_with_into(
+    recs: &[Rec],
+    renderer: &dyn InlineSubstitutionRenderer,
+    render_xref: &mut dyn FnMut(&mut String),
+    out: &mut String,
+) {
+    for rec in recs {
+        match rec {
+            Rec::Text(text) => out.push_str(text),
+
+            Rec::CharRef { html, kind } => fold_char_ref_with(kind, html, renderer, out),
+
+            Rec::Leaf { html, node } => fold_leaf_with(node, html, renderer, render_xref, out),
+
+            Rec::Container {
+                open,
+                close,
+                children,
+                ..
+            } => {
+                // A formatted span, link, or STEM wrapper is reconstructed only
+                // from live attrlist/parser context the tree does not retain, so
+                // its fixed open/close bytes are emitted as captured; its
+                // children are folded so a nested renderer-driven construct still
+                // reaches `renderer`.
+                out.push_str(open);
+                fold_with_into(children, renderer, render_xref, out);
+                out.push_str(close);
+            }
+        }
+    }
+}
+
+/// Folds one recovered character reference, routing a special character through
+/// `renderer` (so a custom backend can change how `<`, `>`, and `&` are
+/// escaped) and emitting the captured entity for a replacement or author entity
+/// – whose concrete
+/// [`CharacterReplacementType`](crate::parser::CharacterReplacementType)
+/// the tree does not retain.
+fn fold_char_ref_with(
+    kind: &CharRefKind,
+    html: &str,
+    renderer: &dyn InlineSubstitutionRenderer,
+    out: &mut String,
+) {
+    match kind {
+        CharRefKind::Special('<') => renderer.render_special_character(SpecialCharacter::Lt, out),
+        CharRefKind::Special('>') => renderer.render_special_character(SpecialCharacter::Gt, out),
+
+        CharRefKind::Special('&') => {
+            renderer.render_special_character(SpecialCharacter::Ampersand, out)
+        }
+
+        // `Special` only ever holds `<`, `>`, or `&`; a replacement or author
+        // entity carries only its logical value, not the concrete type the
+        // trait method needs, so its captured entity is emitted verbatim.
+        _ => out.push_str(html),
+    }
+}
+
+/// Folds one recovered leaf, routing the self-contained kinds through
+/// `renderer` and emitting the captured bytes for the kinds that need context
+/// the tree does not retain.
+fn fold_leaf_with(
+    node: &LeafNode,
+    html: &str,
+    renderer: &dyn InlineSubstitutionRenderer,
+    render_xref: &mut dyn FnMut(&mut String),
+    out: &mut String,
+) {
+    match node {
+        LeafNode::LineBreak => renderer.render_line_break(out),
+
+        LeafNode::Anchor { id } => renderer.render_anchor(id, None, out),
+
+        LeafNode::IndexTerm { terms, visible } => {
+            let params = IndexTermRenderParams {
+                visible_term: if *visible {
+                    terms.first().map(String::as_str)
+                } else {
+                    None
+                },
+            };
+
+            renderer.render_index_term(&params, out);
+        }
+
+        LeafNode::Ui(UiMeta::Button(text)) => renderer.render_button(text, out),
+
+        LeafNode::Ui(UiMeta::Keyboard(keys)) => renderer.render_keyboard(keys, out),
+
+        LeafNode::Reference {
+            variant: RefVariant::Xref,
+            ..
+        } => render_xref(out),
+
+        // Image/icon, menu, and callout need live parser/attrlist context; a
+        // footnote marker needs a param the tree does not retain; a link leaf
+        // (links are recorded as containers, so this does not arise in practice)
+        // likewise falls back. Each emits its captured (built-in) bytes.
+        _ => out.push_str(html),
+    }
 }
 
 #[cfg(test)]
