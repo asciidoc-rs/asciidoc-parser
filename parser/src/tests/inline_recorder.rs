@@ -925,6 +925,162 @@ fn is_block_inlines_is_none_for_a_block_without_direct_content() {
     assert_eq!(section.inlines(), None);
 }
 
+/// Names the [`Block`](crate::blocks::Block) variant, so a test can assert its
+/// fixture reaches every one.
+fn block_variant_name(block: &crate::blocks::Block<'_>) -> &'static str {
+    use crate::blocks::Block;
+
+    match block {
+        Block::Simple(_) => "Simple",
+        Block::Media(_) => "Media",
+        Block::Section(_) => "Section",
+        Block::List(_) => "List",
+        Block::ListItem(_) => "ListItem",
+        Block::RawDelimited(_) => "RawDelimited",
+        Block::CompoundDelimited(_) => "CompoundDelimited",
+        Block::Admonition(_) => "Admonition",
+        Block::Quote(_) => "Quote",
+        Block::Table(_) => "Table",
+        Block::Preamble(_) => "Preamble",
+        Block::Break(_) => "Break",
+        Block::Toc(_) => "Toc",
+        Block::DocumentAttribute(_) => "DocumentAttribute",
+    }
+}
+
+#[test]
+fn is_block_inlines_matches_rendered_content_across_every_block_kind() {
+    use std::collections::BTreeSet;
+
+    use crate::blocks::{FindBlocks, IsBlock};
+
+    // A document exercising all fourteen `Block` variants: a title + section
+    // give a `Preamble` (wrapping everything before the section) and a
+    // `Section`; the leaf/container blocks cover the rest. Each is walked with
+    // the inline-tree flag on so `inlines()` is populated for the
+    // content-bearing kinds.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse(concat!(
+        "= Doc Title\n\n",
+        "Preamble *para*.\n\n",
+        "NOTE: A _note_.\n\n",
+        "[verse]\n____\nA `verse`.\n____\n\n",
+        "----\nlisting\n----\n\n",
+        "====\nexample\n====\n\n",
+        "* item one\n* item two\n\n",
+        "|===\n|cell\n|===\n\n",
+        "'''\n\n",
+        "image::pic.png[Alt]\n\n",
+        "toc::[]\n\n",
+        ":bodyattr: v2\n\n",
+        "== A Section\n\nSection body.\n",
+    ));
+
+    let mut seen = BTreeSet::new();
+
+    for block in doc.descendant_blocks() {
+        seen.insert(block_variant_name(block));
+
+        // `inlines()` is the structured counterpart of `rendered_content()`:
+        // the same content-bearing blocks carry each, so their presence agrees
+        // for every kind (this also drives every `Block::inlines()` dispatch
+        // arm and each block type's override).
+        assert_eq!(
+            block.inlines().is_some(),
+            block.rendered_content().is_some(),
+            "`inlines()`/`rendered_content()` presence disagree for a {} block",
+            block_variant_name(block),
+        );
+    }
+
+    // The fixture must actually reach every variant, or the walk above proves
+    // nothing about the arms it never visited.
+    let expected: BTreeSet<&str> = [
+        "Simple",
+        "Media",
+        "Section",
+        "List",
+        "ListItem",
+        "RawDelimited",
+        "CompoundDelimited",
+        "Admonition",
+        "Quote",
+        "Table",
+        "Preamble",
+        "Break",
+        "Toc",
+        "DocumentAttribute",
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(
+        seen, expected,
+        "the fixture did not reach every block variant"
+    );
+}
+
+#[test]
+fn is_block_inlines_carries_a_real_tree_for_each_content_bearing_kind() {
+    use crate::blocks::{Block, FindBlocks, IsBlock};
+
+    // Beyond `Some` vs `None`, the override bodies for the content-bearing block
+    // kinds must return the *actual* parsed tree – so a formatting construct in
+    // each shows up as a `Styled` node, not an empty slice.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse(concat!(
+        "NOTE: A _note_.\n\n",
+        "[verse]\n____\nA `verse`.\n____\n\n",
+        "----\nlisting\n----\n",
+    ));
+
+    let mut admonition_styled = None;
+    let mut quote_styled = None;
+    let mut listing_tree_len = None;
+
+    for block in doc.descendant_blocks() {
+        let Some(tree) = block.inlines() else {
+            continue;
+        };
+
+        match block {
+            Block::Admonition(_) => {
+                admonition_styled = Some(has_styled(tree, StyleVariant::Emphasis))
+            }
+            Block::Quote(_) => quote_styled = Some(has_styled(tree, StyleVariant::Code)),
+            Block::RawDelimited(_) => listing_tree_len = Some(tree.len()),
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        admonition_styled,
+        Some(true),
+        "the admonition tree lost its `_note_` emphasis"
+    );
+    assert_eq!(
+        quote_styled,
+        Some(true),
+        "the verse tree lost its `verse` code span"
+    );
+
+    // A listing applies verbatim subs, so its tree is a single text run – but a
+    // populated one, proving the `RawDelimited` override returns the parse.
+    assert_eq!(
+        listing_tree_len,
+        Some(1),
+        "the listing tree should be one text run"
+    );
+}
+
+/// Whether `nodes` contains a top-level [`Styled`](InlineNode::Styled) node of
+/// the given variant.
+fn has_styled(nodes: &[InlineNode<'_>], variant: StyleVariant) -> bool {
+    nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(styled) if styled.variant == variant))
+}
+
 #[test]
 fn inline_tree_numbers_footnotes_in_document_order() {
     // The recording pass clones the parser *before* the authoritative pass
