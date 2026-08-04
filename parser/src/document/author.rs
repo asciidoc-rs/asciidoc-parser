@@ -156,7 +156,7 @@ impl Author {
                         parser,
                         None,
                     );
-                    expanded_name = content.rendered().to_string();
+                    expanded_name = content.rendered_html().to_string();
                 }
 
                 let name_with_spaces = replace_underscores_with_spaces(expanded_name);
@@ -632,7 +632,7 @@ fn apply_author_subs(source: &str, parser: &Parser) -> String {
     let has_multiple_attributes = source.matches('{').count() > 1;
 
     // Check if we should apply HTML encoding.
-    let rendered = content.rendered();
+    let rendered = content.rendered_html();
     let has_angle_brackets = rendered.contains('<') && rendered.contains('>');
     let has_unencoded_ampersand = rendered.contains('&') && !rendered.contains("&amp;");
 
@@ -643,7 +643,7 @@ fn apply_author_subs(source: &str, parser: &Parser) -> String {
         SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
     }
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 #[cfg(test)]

@@ -397,8 +397,8 @@ impl<'src> IsBlock<'src> for RawDelimitedBlock<'src> {
         Some(&mut self.content)
     }
 
-    fn rendered_content(&self) -> Option<&str> {
-        Some(self.content.rendered())
+    fn rendered_html_content(&self) -> Option<&str> {
+        Some(self.content.rendered_html())
     }
 
     fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
@@ -777,7 +777,7 @@ mod tests {
             );
 
             assert_eq!(mi.item.content_model(), ContentModel::Raw);
-            assert_eq!(mi.item.rendered_content().unwrap(), "");
+            assert_eq!(mi.item.rendered_html_content().unwrap(), "");
             assert_eq!(mi.item.raw_context().as_ref(), "comment");
             assert_eq!(mi.item.resolved_context().as_ref(), "comment");
             assert!(mi.item.declared_style().is_none());
@@ -837,7 +837,7 @@ mod tests {
             );
 
             assert_eq!(mi.item.content_model(), ContentModel::Raw);
-            assert_eq!(mi.item.rendered_content().unwrap(), "line1  \nline2");
+            assert_eq!(mi.item.rendered_html_content().unwrap(), "line1  \nline2");
             assert_eq!(mi.item.raw_context().as_ref(), "comment");
             assert_eq!(mi.item.resolved_context().as_ref(), "comment");
             assert!(mi.item.declared_style().is_none());
@@ -1634,7 +1634,7 @@ mod tests {
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.resolved_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("stem"));
-            assert_eq!(block.rendered_content(), Some("a &lt; b"));
+            assert_eq!(block.rendered_html_content(), Some("a &lt; b"));
             assert_eq!(block.substitution_group(), SubstitutionGroup::Stem);
             assert!(doc.warnings().next().is_none());
         }
@@ -1646,7 +1646,7 @@ mod tests {
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("asciimath"));
-            assert_eq!(block.rendered_content(), Some("x^2"));
+            assert_eq!(block.rendered_html_content(), Some("x^2"));
         }
 
         #[test]
@@ -1656,7 +1656,7 @@ mod tests {
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("latexmath"));
-            assert_eq!(block.rendered_content(), Some(r"C = \alpha"));
+            assert_eq!(block.rendered_html_content(), Some(r"C = \alpha"));
         }
 
         /// Without a STEM style, a `++++` block remains a `pass` block with no
@@ -1667,7 +1667,7 @@ mod tests {
             let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "pass");
-            assert_eq!(block.rendered_content(), Some("a < b"));
+            assert_eq!(block.rendered_html_content(), Some("a < b"));
             assert_eq!(block.substitution_group(), SubstitutionGroup::Pass);
         }
 
@@ -1679,7 +1679,7 @@ mod tests {
             let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "stem");
-            assert_eq!(block.rendered_content(), Some("a < b"));
+            assert_eq!(block.rendered_html_content(), Some("a < b"));
             assert_eq!(block.substitution_group(), SubstitutionGroup::None);
         }
     }

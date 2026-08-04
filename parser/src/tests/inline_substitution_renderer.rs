@@ -181,7 +181,7 @@ fn assert_inherits_html(
     let render = |parser: &Parser| {
         let mut content = Content::from(Span::new(source));
         step.apply(&mut content, parser, None);
-        content.rendered().to_string()
+        content.rendered_html().to_string()
     };
 
     let expected = render(&configure(Parser::default()));

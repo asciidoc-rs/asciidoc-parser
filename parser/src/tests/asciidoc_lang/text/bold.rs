@@ -57,7 +57,7 @@ Bold c**hara**cter**s** within a word.
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         r#"A bold <strong>word</strong>, and a bold <strong>phrase of text</strong>."#
     );
 
@@ -67,7 +67,7 @@ Bold c**hara**cter**s** within a word.
     };
 
     assert_eq!(
-        sb2.content().rendered(),
+        sb2.content().rendered_html(),
         r#"Bold c<strong>hara</strong>cter<strong>s</strong> within a word."#
     );
 
@@ -110,7 +110,7 @@ The results of <<ex-mix>> are displayed below.
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         r#"<code><strong><em>monospace bold italic phrase</em></strong></code> &amp; <code><strong><em>char</em></strong></code>acter<code><strong><em>s</em></strong></code>"#
     );
 

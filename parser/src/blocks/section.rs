@@ -262,7 +262,7 @@ impl<'src> SectionBlock<'src> {
 
         // The footnote-free rendering of the title, for the reference text and
         // auto-generated ID; a no-op string copy when the title had no footnote.
-        let title_reftext = strip_footnote_marker_spans(section_title.rendered());
+        let title_reftext = strip_footnote_marker_spans(section_title.rendered_html());
 
         // Strip the now-consumed sentinels from the title itself, keeping the
         // footnote marker so the heading still renders it.
@@ -469,7 +469,7 @@ impl<'src> SectionBlock<'src> {
     /// Return the processed section title after substitutions have been
     /// applied.
     pub fn section_title(&'src self) -> &'src str {
-        self.section_title.rendered()
+        self.section_title.rendered_html()
     }
 
     /// Return the type of this section (normal or appendix).
@@ -4016,7 +4016,7 @@ mod tests {
             let Some(Block::Simple(paragraph)) = section.child_blocks().next() else {
                 panic!("expected a simple block");
             };
-            assert_eq!(paragraph.content().rendered(), "Letter A.");
+            assert_eq!(paragraph.content().rendered_html(), "Letter A.");
         }
     }
 

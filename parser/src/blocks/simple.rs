@@ -583,8 +583,8 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
         Some(&mut self.content)
     }
 
-    fn rendered_content(&self) -> Option<&str> {
-        Some(self.content.rendered())
+    fn rendered_html_content(&self) -> Option<&str> {
+        Some(self.content.rendered_html())
     }
 
     fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
@@ -777,7 +777,7 @@ mod tests {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Simple);
-        assert_eq!(mi.item.rendered_content().unwrap(), "abc");
+        assert_eq!(mi.item.rendered_html_content().unwrap(), "abc");
         assert_eq!(mi.item.raw_context().deref(), "paragraph");
         assert_eq!(mi.item.resolved_context().deref(), "paragraph");
         assert!(mi.item.declared_style().is_none());
@@ -847,7 +847,7 @@ mod tests {
             }
         );
 
-        assert_eq!(mi.item.rendered_content().unwrap(), "abc\ndef");
+        assert_eq!(mi.item.rendered_html_content().unwrap(), "abc\ndef");
     }
 
     #[test]
@@ -958,7 +958,7 @@ mod tests {
         );
 
         assert_eq!(
-            mi.item.rendered_content().unwrap(),
+            mi.item.rendered_html_content().unwrap(),
             "a<b>c <strong>bold</strong>"
         );
     }

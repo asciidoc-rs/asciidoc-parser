@@ -123,7 +123,7 @@ fn apply_header_subs(source: &str, parser: &Parser) -> String {
     let mut content = Content::from(span);
     SubstitutionGroup::Header.apply(&mut content, parser, None);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 fn is_valid_standalone_revision(s: &str) -> bool {

@@ -123,7 +123,7 @@ impl Passthroughs {
         }
 
         if let Cow::Owned(new_result) = PASS_WITH_INDEX.replace_all(
-            content.rendered().as_ref(),
+            content.rendered_html().as_ref(),
             PassthroughRestoreReplacer(self, parser),
         ) {
             content.rendered = new_result.into();
@@ -697,22 +697,23 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
                 QuoteScope::Unconstrained,
                 attrlist,
                 id,
-                subbed_text.rendered(),
+                subbed_text.rendered_html(),
                 &mut new_text,
             );
 
             subbed_text.rendered = new_text.into();
         }
 
-        if subbed_text.rendered().contains('\u{96}') {
+        if subbed_text.rendered_html().contains('\u{96}') {
             // Recursively apply passthrough replacement and write the result.
             let replacer = PassthroughRestoreReplacer(self.0, self.1);
 
-            let new_result = PASS_WITH_INDEX.replace_all(subbed_text.rendered().as_ref(), replacer);
+            let new_result =
+                PASS_WITH_INDEX.replace_all(subbed_text.rendered_html().as_ref(), replacer);
 
             dest.push_str(new_result.as_ref());
         } else {
-            dest.push_str(subbed_text.rendered());
+            dest.push_str(subbed_text.rendered_html());
         }
     }
 }

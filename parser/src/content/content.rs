@@ -28,15 +28,15 @@ use crate::{
 /// macros substitution therefore records each cross-reference in a deferred
 /// form and leaves an opaque placeholder in the rendered text. The
 /// references are resolved in a later pass – see
-/// [`Document::resolve_references`] – at which point [`rendered()`] reflects
-/// the resolved links. Until then, [`rendered()`] shows an unresolved fallback,
-/// so it always returns clean text.
+/// [`Document::resolve_references`] – at which point [`rendered_html()`]
+/// reflects the resolved links. Until then, [`rendered_html()`] shows an
+/// unresolved fallback, so it always returns clean text.
 ///
 /// [substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/
 /// [`SimpleBlock`]: crate::blocks::SimpleBlock
 /// [`RawDelimitedBlock`]: crate::blocks::RawDelimitedBlock
 /// [`Document::resolve_references`]: crate::Document::resolve_references
-/// [`rendered()`]: Self::rendered
+/// [`rendered_html()`]: Self::rendered_html
 #[derive(Clone)]
 pub struct Content<'src> {
     /// The original [`Span`] from which this content was derived.
@@ -327,18 +327,28 @@ impl<'src> Content<'src> {
         self.source_lines.as_deref()
     }
 
-    /// Returns the final text after all substitutions have been applied.
-    pub fn rendered(&'src self) -> &'src str {
+    /// Returns the default **HTML** rendering of this content: the final text
+    /// after all substitutions have been applied.
+    ///
+    /// This is the built-in HTML output. (A custom
+    /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
+    /// installed via
+    /// [`Parser::with_inline_substitution_renderer`](crate::Parser::with_inline_substitution_renderer)
+    /// still drives this output during migration; moving renderer selection to
+    /// render time is a later step of the [inline AST architecture].)
+    ///
+    /// [inline AST architecture]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
+    pub fn rendered_html(&'src self) -> &'src str {
         self.rendered.as_ref()
     }
 
     /// Returns the final rendered text, borrowed for the duration of `&self`
     /// rather than for `'src`.
     ///
-    /// [`rendered`](Self::rendered) ties its result to `'src`, which a block's
-    /// `title(&self)` accessor cannot provide. This shorter-lived borrow lets a
-    /// block expose its title `Content`'s rendered text through the `&self`
-    /// accessor.
+    /// [`rendered_html`](Self::rendered_html) ties its result to `'src`, which
+    /// a block's `title(&self)` accessor cannot provide. This shorter-lived
+    /// borrow lets a block expose its title `Content`'s rendered text
+    /// through the `&self` accessor.
     pub(crate) fn rendered_str(&self) -> &str {
         self.rendered.as_ref()
     }
@@ -346,10 +356,10 @@ impl<'src> Content<'src> {
     /// Returns an owned copy of the final text after all substitutions have
     /// been applied.
     ///
-    /// Unlike [`rendered()`](Self::rendered), this does not tie the returned
-    /// value to the `'src` lifetime, so it can be called on a short-lived
-    /// `Content` built solely to render a fragment (e.g. a block's attribution
-    /// or citation text).
+    /// Unlike [`rendered_html()`](Self::rendered_html), this does not tie the
+    /// returned value to the `'src` lifetime, so it can be called on a
+    /// short-lived `Content` built solely to render a fragment (e.g. a
+    /// block's attribution or citation text).
     pub(crate) fn rendered_owned(&self) -> String {
         self.rendered.as_ref().to_string()
     }
@@ -393,9 +403,9 @@ impl<'src> Content<'src> {
     /// [`Parser`](crate::Parser) (see
     /// [`with_inline_tree`](crate::Parser::with_inline_tree)); it is an empty
     /// slice otherwise. The tree is a projection of the rendered content – the
-    /// fold of the tree reproduces [`rendered`](Self::rendered) byte-for-byte –
-    /// and is not yet the canonical representation (see the [inline AST
-    /// architecture design], Phase 2).
+    /// fold of the tree reproduces [`rendered_html`](Self::rendered_html)
+    /// byte-for-byte – and is not yet the canonical representation (see the
+    /// [inline AST architecture design], Phase 2).
     ///
     /// Cross-references in the tree carry their resolved destination once a
     /// full [`Parser::parse`](crate::Parser::parse) has resolved the document's

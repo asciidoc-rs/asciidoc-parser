@@ -1028,22 +1028,22 @@ impl<'src> IsBlock<'src> for Block<'src> {
         }
     }
 
-    fn rendered_content(&'src self) -> Option<&'src str> {
+    fn rendered_html_content(&'src self) -> Option<&'src str> {
         match self {
-            Self::Simple(b) => b.rendered_content(),
-            Self::Media(b) => b.rendered_content(),
-            Self::Section(b) => b.rendered_content(),
-            Self::List(b) => b.rendered_content(),
-            Self::ListItem(b) => b.rendered_content(),
-            Self::RawDelimited(b) => b.rendered_content(),
-            Self::CompoundDelimited(b) => b.rendered_content(),
-            Self::Admonition(b) => b.rendered_content(),
-            Self::Quote(b) => b.rendered_content(),
-            Self::Table(b) => b.rendered_content(),
-            Self::Preamble(b) => b.rendered_content(),
-            Self::Break(b) => b.rendered_content(),
-            Self::Toc(b) => b.rendered_content(),
-            Self::DocumentAttribute(b) => b.rendered_content(),
+            Self::Simple(b) => b.rendered_html_content(),
+            Self::Media(b) => b.rendered_html_content(),
+            Self::Section(b) => b.rendered_html_content(),
+            Self::List(b) => b.rendered_html_content(),
+            Self::ListItem(b) => b.rendered_html_content(),
+            Self::RawDelimited(b) => b.rendered_html_content(),
+            Self::CompoundDelimited(b) => b.rendered_html_content(),
+            Self::Admonition(b) => b.rendered_html_content(),
+            Self::Quote(b) => b.rendered_html_content(),
+            Self::Table(b) => b.rendered_html_content(),
+            Self::Preamble(b) => b.rendered_html_content(),
+            Self::Break(b) => b.rendered_html_content(),
+            Self::Toc(b) => b.rendered_html_content(),
+            Self::DocumentAttribute(b) => b.rendered_html_content(),
         }
     }
 

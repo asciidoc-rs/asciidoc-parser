@@ -52,7 +52,7 @@ TIP: When you need to prevent or control the substitutions on one or more blocks
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "content like #{variable} passed directly to the output followed by normal content."
     );
 }
@@ -88,7 +88,7 @@ The main difference, however, is that they are applied first to suppress formatt
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "A word, a sequence of words, or characters that are escaped from formatting."
     );
 }
@@ -124,7 +124,7 @@ You can also escape formatting marks, like +``+.
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "A word or phrase between single pluses, such as /document/{id}, is not substituted.\nHowever, the special characters &lt; and &gt; are still escaped in the output."
     );
 
@@ -135,7 +135,7 @@ You can also escape formatting marks, like +``+.
     };
 
     assert_eq!(
-        sb2.content().rendered(),
+        sb2.content().rendered_html(),
         "You can also escape formatting marks, like ``."
     );
 }
@@ -175,7 +175,7 @@ If you want to do both, you must enclose the pair in a monospace formatting pair
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "Text formatting is not applied to a link target if it is surrounded by double pluses.\nFor example, <a href=\"https://example.org/now_this__link_works.html\" class=\"bare\">https://example.org/now_this__link_works.html</a>."
     );
 
@@ -186,7 +186,7 @@ If you want to do both, you must enclose the pair in a monospace formatting pair
     };
 
     assert_eq!(
-        sb2.content().rendered(),
+        sb2.content().rendered_html(),
         "You can also escape formatting marks, like all-natural*."
     );
 
@@ -197,7 +197,7 @@ If you want to do both, you must enclose the pair in a monospace formatting pair
     };
 
     assert_eq!(
-        sb3.content().rendered(),
+        sb3.content().rendered_html(),
         "An attribute reference within a word, such as dev{conf}, is not replaced."
     );
 }
@@ -237,7 +237,7 @@ include::example$pass.adoc[tag=3p]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "The text <del>strike this</del> is marked as deleted."
     );
 }
@@ -289,7 +289,7 @@ Let's look at how to use the inline pass macro to hand select substitutions.
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "The text <del>strike this</del> is marked as deleted."
     );
 }
@@ -365,7 +365,7 @@ include::example$pass.adoc[tag=in-macro-sub]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "The text <del>strike <strong>this</strong></del> is marked as deleted."
     );
 }
@@ -399,7 +399,7 @@ include::example$pass.adoc[tag=in-macro-subs]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "The text <del>strike <em>untitled document 1</em></del> is marked as deleted."
     );
 }
@@ -454,7 +454,7 @@ protected void configure(HttpSecurity http) throws Exception {
     };
 
     assert_eq!(
-        rdb1.content().rendered(),
+        rdb1.content().rendered_html(),
         "protected void configure(HttpSecurity http) throws Exception {\n    http\n        .authorizeRequests()\n            <strong>.antMatchers(\"/resources/**\").permitAll()</strong>\n            .anyRequest().authenticated()\n            .and()\n        .formLogin()\n            .loginPage(\"/login\")\n            .permitAll();"
     );
 }

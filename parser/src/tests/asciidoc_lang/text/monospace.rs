@@ -49,7 +49,7 @@ include::example$text.adoc[tag=mono]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "&#8220;Wait!&#8221; Indigo plucked a small vial from her desk&#8217;s top drawer and held it toward us.\nThe vial&#8217;s label read: <code>E=mc<sup>2</sup></code>; the <code>E</code> represents <em>energy</em>,\nbut also pure <em>genius!</em>"
     );
 
@@ -83,7 +83,7 @@ The command will re``link`` all packages.
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "The command will re<code>link</code> all packages."
     );
 
@@ -124,7 +124,7 @@ The result of <<ex-mix>> is rendered below.
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "<code><strong><em>monospaced bold italic</em></strong></code>"
     );
 

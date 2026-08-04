@@ -1627,7 +1627,7 @@ mod tests {
                 doc.child_blocks()
                     .next()
                     .unwrap()
-                    .rendered_content()
+                    .rendered_html_content()
                     .unwrap(),
                 r#"<span id="the_id">marked text</span>"#
             );
@@ -2258,7 +2258,7 @@ mod tests {
                 SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 // Sanity check that the earlier step really did shift offsets.
-                assert!(content.rendered().contains("&lt;"));
+                assert!(content.rendered_html().contains("&lt;"));
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
@@ -2275,7 +2275,7 @@ mod tests {
                 let mut content = content_with_source_lines(text);
                 SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
-                assert!(content.rendered().contains("<strong>"));
+                assert!(content.rendered_html().contains("<strong>"));
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);

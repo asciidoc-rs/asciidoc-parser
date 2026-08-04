@@ -776,8 +776,8 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
             .and_then(|attrlist| attrlist.block_style())
     }
 
-    fn rendered_content(&'src self) -> Option<&'src str> {
-        self.content.as_ref().map(|content| content.rendered())
+    fn rendered_html_content(&'src self) -> Option<&'src str> {
+        self.content.as_ref().map(|content| content.rendered_html())
     }
 
     fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
@@ -936,11 +936,11 @@ mod tests {
         assert_eq!(quote.type_(), QuoteType::Quote);
         assert_eq!(quote.content_model(), ContentModel::Simple);
         assert_eq!(
-            quote.content().unwrap().rendered(),
+            quote.content().unwrap().rendered_html(),
             "A person who never made a mistake."
         );
         assert_eq!(
-            quote.rendered_content(),
+            quote.rendered_html_content(),
             Some("A person who never made a mistake.")
         );
         assert_eq!(quote.attribution(), Some("Albert Einstein"));
@@ -956,7 +956,7 @@ mod tests {
         assert_eq!(quote.content_model(), ContentModel::Simple);
         assert_eq!(quote.raw_context().deref(), "verse");
         assert_eq!(
-            quote.content().unwrap().rendered(),
+            quote.content().unwrap().rendered_html(),
             "The fog comes\non little cat feet."
         );
         assert_eq!(quote.attribution(), Some("Carl Sandburg"));
@@ -971,7 +971,7 @@ mod tests {
         assert_eq!(quote.type_(), QuoteType::Verse);
         assert_eq!(quote.content_model(), ContentModel::Simple);
         assert_eq!(
-            quote.content().unwrap().rendered(),
+            quote.content().unwrap().rendered_html(),
             "A verse\ndelimited block"
         );
         assert!(quote.child_blocks().next().is_none());
@@ -1003,7 +1003,7 @@ mod tests {
         assert_eq!(quote.type_(), QuoteType::Quote);
         assert_eq!(quote.content_model(), ContentModel::Simple);
         assert_eq!(
-            quote.content().unwrap().rendered(),
+            quote.content().unwrap().rendered_html(),
             "A little rebellion is good."
         );
         assert_eq!(quote.attribution(), Some("Thomas Jefferson"));
@@ -1073,7 +1073,7 @@ mod tests {
             parse_one("\"line one\n-- not really an attribution\nline two\"\n-- Real Attribution");
         let quote = as_quote(&block);
         assert_eq!(quote.attribution(), Some("Real Attribution"));
-        let rendered = quote.content().unwrap().rendered();
+        let rendered = quote.content().unwrap().rendered_html();
         assert!(
             rendered.contains("line one") && rendered.contains("line two"),
             "content was: {rendered}"
@@ -1170,7 +1170,7 @@ mod tests {
 
         assert_eq!(quote.blocks().len(), 1);
         let inner = quote.blocks().first().unwrap();
-        assert_eq!(inner.rendered_content(), Some("line one\nline two"));
+        assert_eq!(inner.rendered_html_content(), Some("line one\nline two"));
     }
 
     #[test]
@@ -1233,7 +1233,7 @@ mod tests {
         assert!(format!("{compound:?}").starts_with("Block::Quote"));
 
         let simple = parse_one("[verse]\nverse text");
-        assert_eq!(simple.rendered_content(), Some("verse text"));
+        assert_eq!(simple.rendered_html_content(), Some("verse text"));
         assert_eq!(simple.content_model(), ContentModel::Simple);
     }
 

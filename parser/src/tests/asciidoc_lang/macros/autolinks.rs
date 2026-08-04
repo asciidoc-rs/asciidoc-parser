@@ -878,7 +878,7 @@ mod pr498 {
             .child_blocks()
             .next()
             .unwrap()
-            .rendered_content()
+            .rendered_html_content()
             .unwrap();
 
         assert_eq!(
@@ -897,7 +897,7 @@ mod pr498 {
             .child_blocks()
             .next()
             .unwrap()
-            .rendered_content()
+            .rendered_html_content()
             .unwrap();
 
         assert_eq!(

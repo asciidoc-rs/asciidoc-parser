@@ -53,7 +53,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "Not icon: icon:heart[]\nOnly: <strong>bold</strong>"
         );
     }
@@ -75,7 +75,7 @@ mod default_macros_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "icon:heart[]");
+        assert_eq!(block1.content().rendered_html(), "icon:heart[]");
     }
 
     #[test]
@@ -103,7 +103,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Hello <span class="icon"><img src="./images/icons/heart.png" alt="heart"></span> Asciidoc."#
         );
     }
@@ -140,7 +140,7 @@ mod default_macros_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo icon:heart[] bar");
+        assert_eq!(block1.content().rendered_html(), "foo icon:heart[] bar");
     }
 
     #[test]
@@ -166,7 +166,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"<a href="https://example.org"><span class="image"><img src="logo.png" alt="Logo"></span></a>"#
         );
 
@@ -182,7 +182,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"See <a href="https://example.org">the <span class="image"><img src="logo.png" alt="Logo"></span> here</a>."#
         );
 
@@ -198,7 +198,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            block2.content().rendered(),
+            block2.content().rendered_html(),
             r##"See <a href="#sec"><span class="image"><img src="logo.png" alt="Logo"></span></a> now."##
         );
     }
@@ -228,7 +228,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Opened <span class="icon"><img src="./images/icons/heart.png" alt="heart"></span> closed!"#
         );
     }
@@ -251,7 +251,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"This is a <span class="icon"><img src="./images/icons/heart.png" alt="heart"></span> paragraph."#
         );
     }
@@ -273,7 +273,7 @@ mod default_macros_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo icon:heart[] bar");
+        assert_eq!(block1.content().rendered_html(), "foo icon:heart[] bar");
     }
 
     #[test]
@@ -301,7 +301,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"This <span class="icon"><img src="./images/icons/heart.png" alt="heart"></span> that"#
         );
     }
@@ -331,7 +331,7 @@ mod default_macros_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Stuff <span class="icon"><img src="./images/icons/heart.png" alt="heart"></span> nonsense"#
         );
     }
@@ -360,14 +360,14 @@ mod default_macros_substitution {
             panic!("expected simple cell content");
         };
         assert_eq!(
-            default_cell.rendered(),
+            default_cell.rendered_html(),
             r#"<a href="https://example.org">Example</a>"#
         );
 
         let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(literal_cell.rendered(), "https://example.org[Example]");
+        assert_eq!(literal_cell.rendered_html(), "https://example.org[Example]");
     }
 
     #[test]
@@ -425,7 +425,7 @@ For blocks, the step's name, `macros`, can be assigned to the xref:apply-subs-to
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Hello <span class="icon"><img src="./images/icons/heart.png" alt="heart"></span> *Asciidoc*."#
         );
     }
@@ -448,7 +448,7 @@ For inline elements, the built-in values `m` or `macros` can be applied to xref:
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Hello <span class="icon"><img src="./images/icons/heart.png" alt="heart"></span> *Asciidoc* and then &#8230;&#8203;"#
         );
     }

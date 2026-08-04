@@ -51,7 +51,7 @@ mod default_attributes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "Goodbye abc def hello");
+        assert_eq!(sb1.content().rendered_html(), "Goodbye abc def hello");
     }
 
     #[test]
@@ -71,7 +71,7 @@ mod default_attributes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc {sp} def");
+        assert_eq!(block1.content().rendered_html(), "abc {sp} def");
     }
 
     #[test]
@@ -98,7 +98,7 @@ mod default_attributes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Hello goodbye.");
+        assert_eq!(block1.content().rendered_html(), "Hello goodbye.");
     }
 
     #[test]
@@ -133,7 +133,7 @@ mod default_attributes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo{sp}bar");
+        assert_eq!(block1.content().rendered_html(), "foo{sp}bar");
     }
 
     #[test]
@@ -154,7 +154,7 @@ mod default_attributes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Click <span class="image"><img src="pause.png" alt="pause" title="Pause Resume"></span> when you need a break."#
         );
     }
@@ -177,7 +177,7 @@ mod default_attributes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Click Pause{sp}Resume when you need a break."#
         );
     }
@@ -206,7 +206,7 @@ mod default_attributes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Opened closed!");
+        assert_eq!(block1.content().rendered_html(), "Opened closed!");
     }
 
     #[test]
@@ -227,7 +227,7 @@ mod default_attributes_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"This is a &lt;paragraph&gt;."#
         );
     }
@@ -249,7 +249,7 @@ mod default_attributes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo{sp}bar");
+        assert_eq!(block1.content().rendered_html(), "foo{sp}bar");
     }
 
     #[test]
@@ -276,7 +276,7 @@ mod default_attributes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "This that");
+        assert_eq!(block1.content().rendered_html(), "This that");
     }
 
     #[test]
@@ -303,7 +303,7 @@ mod default_attributes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Stuff nonsense");
+        assert_eq!(block1.content().rendered_html(), "Stuff nonsense");
     }
 
     #[test]
@@ -328,12 +328,12 @@ mod default_attributes_substitution {
         let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(default_cell.rendered(), "subd");
+        assert_eq!(default_cell.rendered_html(), "subd");
 
         let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(literal_cell.rendered(), "{val}");
+        assert_eq!(literal_cell.rendered_html(), "{val}");
     }
 
     #[test]
@@ -385,7 +385,7 @@ For blocks, the step's name, `attributes`, can be assigned to the xref:apply-sub
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc<lt space");
+        assert_eq!(block1.content().rendered_html(), "abc<lt space");
     }
 
     #[test]
@@ -405,7 +405,7 @@ For an inline passthrough, the built-in values `a` or `attributes` can be applie
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "abc<lt space and then &#8230;&#8203;"
         );
     }
@@ -426,6 +426,6 @@ Single occurrences of an attribute reference can be escaped by prefixing the exp
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "This is not a{sp}space.");
+        assert_eq!(block1.content().rendered_html(), "This is not a{sp}space.");
     }
 }

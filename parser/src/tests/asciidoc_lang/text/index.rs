@@ -88,7 +88,7 @@ You can think of a constrained pair as being a weaker markup hint than an uncons
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"That is <strong>strong</strong> stuff!"#
         );
 
@@ -106,7 +106,7 @@ You can think of a constrained pair as being a weaker markup hint than an uncons
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"That is <strong>really strong</strong> stuff!"#
         );
 
@@ -124,7 +124,7 @@ You can think of a constrained pair as being a weaker markup hint than an uncons
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"This stuff is <strong>strong</strong>!"#
         );
 
@@ -166,7 +166,7 @@ See xref:troubleshoot-unconstrained-formatting.adoc#use-unconstrained[When shoul
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"The man page, short for <strong>man</strong>ual page, is a form of software documentation."#
         );
 

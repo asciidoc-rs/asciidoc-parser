@@ -2164,7 +2164,8 @@ impl Parser {
     /// [`Content::inlines`](crate::content::Content::inlines) (or, at the block
     /// level, [`IsBlock::inlines`](crate::blocks::IsBlock::inlines)). The tree
     /// is a projection of the rendered output: folding it reproduces
-    /// [`Content::rendered`](crate::content::Content::rendered) byte-for-byte.
+    /// [`Content::rendered_html`](crate::content::Content::rendered_html)
+    /// byte-for-byte.
     ///
     /// This is **off by default**. Building the tree currently costs a second,
     /// counter-safe substitution pass per block (design Phase 2, "promote the
@@ -2183,11 +2184,11 @@ impl Parser {
     /// satisfy this. A *stateful* custom renderer (one whose output depends on
     /// mutable internal state) or a *one-shot* asset handler may therefore be
     /// invoked twice while this is enabled, and could make the tree diverge
-    /// from [`rendered`](crate::content::Content::rendered) – a divergence
-    /// caught by a debug assertion. Externally-visible reads (such as
-    /// loading an image for a `data-uri`) likewise occur an extra time. The
-    /// Phase 4 single-pass builder removes the second pass and this caveat
-    /// with it.
+    /// from [`rendered_html`](crate::content::Content::rendered_html) – a
+    /// divergence caught by a debug assertion. Externally-visible reads
+    /// (such as loading an image for a `data-uri`) likewise occur an extra
+    /// time. The Phase 4 single-pass builder removes the second pass and
+    /// this caveat with it.
     #[must_use]
     pub fn with_inline_tree(mut self, enabled: bool) -> Self {
         self.build_inline_tree = enabled;
@@ -4174,7 +4175,7 @@ mod tests {
         // Our custom renderer should show [AMP], [LT], and [GT] instead of HTML
         // entities, and a resolved footnote as [FOOTNOTE:<index>].
         assert_eq!(
-            simple_block.content().rendered(),
+            simple_block.content().rendered_html(),
             "Hello [AMP] goodbye [LT] world [GT] test [FOOTNOTE:1]"
         );
     }
@@ -4193,7 +4194,10 @@ mod tests {
             panic!("Expected simple block, got: {block:?}");
         };
 
-        assert_eq!(simple_block.content().rendered(), "test.[FOOTNOTE:missing]");
+        assert_eq!(
+            simple_block.content().rendered_html(),
+            "test.[FOOTNOTE:missing]"
+        );
     }
 
     /// A custom [`PathResolver`](crate::parser::PathResolver) that rewrites
@@ -4223,7 +4227,7 @@ mod tests {
         };
 
         assert_eq!(
-            simple_block.content().rendered(),
+            simple_block.content().rendered_html(),
             r#"<span class="image"><img src="https://cdn.example.com/tiger.png" alt="tiger"></span>"#
         );
     }
@@ -4374,7 +4378,7 @@ mod tests {
             let Block::Simple(simple_block) = block else {
                 panic!("expected a simple block");
             };
-            assert_eq!(simple_block.content().rendered(), "{showtitle}");
+            assert_eq!(simple_block.content().rendered_html(), "{showtitle}");
         }
 
         #[test]

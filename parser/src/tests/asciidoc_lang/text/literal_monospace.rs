@@ -53,7 +53,7 @@ include::example$text.adoc[tag=literal-mono]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "You can reference the value of a document attribute using\nthe syntax <code>{name}</code>, where <code>name</code> is the attribute name."
     );
 
@@ -89,7 +89,7 @@ include::example$text.adoc[tag=literal-mono-with-plus]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "<code>++</code> is the increment operator in C."
     );
 

@@ -55,7 +55,7 @@ In this case, since `underline` is a built-in role, the style is provided for yo
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         r#"The text <span class="underline">underline me</span> is underlined."#
     );
 

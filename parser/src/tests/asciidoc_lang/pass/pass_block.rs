@@ -35,7 +35,7 @@ include::example$pass.adoc[tag=pass-style]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "<del>strike this</del> is marked as deleted."
     );
 }
@@ -69,7 +69,7 @@ However, a passthrough could come in handy if you need to output more sophistica
     };
 
     assert_eq!(
-        rdb1.content().rendered(),
+        rdb1.content().rendered_html(),
         "<video poster=\"images/movie-reel.png\">\n  <source src=\"videos/writing-zen.webm\" type=\"video/webm\">\n</video>"
     );
 }
@@ -102,7 +102,7 @@ include::example$pass.adoc[tag=subs-bl]
     };
 
     assert_eq!(
-        sb1.content().rendered(),
+        sb1.content().rendered_html(),
         "This Is My Name\nimage:tiger.png[]"
     );
 }
@@ -134,7 +134,7 @@ In these cases, you should use conditional preprocessor directives to route pass
     };
 
     assert_eq!(
-        rdb1.content().rendered(),
+        rdb1.content().rendered_html(),
         "Normal content which is not enclosed in a paragraph."
     );
 }

@@ -115,14 +115,14 @@ All such syntax is passed through to the STEM processor as is.
         let Block::Simple(sb1) = block1 else {
             panic!("Unexpected block type: {block1:?}");
         };
-        assert_eq!(sb1.content().rendered(), r"\$sqrt(4) = 2\$");
+        assert_eq!(sb1.content().rendered_html(), r"\$sqrt(4) = 2\$");
 
         let block2 = blocks.next().unwrap();
         let Block::Simple(sb2) = block2 else {
             panic!("Unexpected block type: {block2:?}");
         };
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             r"Water (\$H_2O\$) is a critical component."
         );
         assert!(blocks.next().is_none());
@@ -137,7 +137,7 @@ All such syntax is passed through to the STEM processor as is.
             panic!("Unexpected block type: {block:?}");
         };
         assert_eq!(
-            sb.content().rendered(),
+            sb.content().rendered_html(),
             r"A matrix can be written as \$[[a,b],[c,d]]((n),(k))\$."
         );
     }
@@ -186,7 +186,7 @@ The AsciiDoc processor handles that for you automatically!
         assert_eq!(block.content_model(), ContentModel::Raw);
         assert_eq!(block.raw_context().as_ref(), "stem");
         assert_eq!(block.declared_style(), Some("stem"));
-        assert_eq!(block.rendered_content(), Some("sqrt(4) = 2"));
+        assert_eq!(block.rendered_html_content(), Some("sqrt(4) = 2"));
         assert_eq!(block.substitution_group(), SubstitutionGroup::Stem);
     }
 }
@@ -376,7 +376,7 @@ include::example$stem.adoc[tag=multi-a-render]
             panic!("Unexpected block type: {block:?}");
         };
         assert_eq!(
-            sb.content().rendered(),
+            sb.content().rendered_html(),
             r"\(C = \alpha + \beta Y^{\gamma} + \epsilon\)"
         );
 

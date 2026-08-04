@@ -8,8 +8,8 @@
 //! it proves:
 //!
 //! 1. Stripping/folding the recorder's marked string reproduces the built-in
-//!    renderer's `rendered()` output **byte-for-byte** (the *no-perturbation*
-//!    invariant).
+//!    renderer's `rendered_html()` output **byte-for-byte** (the
+//!    *no-perturbation* invariant).
 //! 2. The recovered [`InlineNode`] tree is structurally faithful (node kinds,
 //!    nesting, and the `constructs <= markers <= events` cross-check).
 //!
@@ -81,7 +81,7 @@ fn experimental(parser: Parser) -> Parser {
 
 /// The result of running the oracle on one source string.
 struct Oracle<'src> {
-    /// The authoritative `rendered()` output of the unmodified pipeline.
+    /// The authoritative `rendered_html()` output of the unmodified pipeline.
     golden: String,
 
     /// The fold of the recovered tree (the recorder's marked string folded back
@@ -153,7 +153,7 @@ fn check<'src>(source: &'src str, group: &SubstitutionGroup) -> Vec<InlineNode<'
 
     assert_eq!(
         result.folded, result.golden,
-        "fold of the inline tree diverged from rendered() for {source:?}"
+        "fold of the inline tree diverged from rendered_html() for {source:?}"
     );
 
     // Cross-check the tree against the recorder along the honest chain
@@ -347,7 +347,7 @@ fn normal_corpus_folds_byte_for_byte() {
 // `Content`, which cannot resolve cross-references (that needs a document
 // catalog). This harness parses whole documents – once normally, once with the
 // recorder installed – and asserts that folding each simple block's recorded
-// tree reproduces its `rendered()` string. It reaches resolved xrefs, list
+// tree reproduces its `rendered_html()` string. It reaches resolved xrefs, list
 // items, section bodies, and the interactions between blocks.
 
 /// Collects the rendered inline content of every content-bearing location in
@@ -361,7 +361,7 @@ fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
             // `AsciiDoc` cell is a nested standalone document and is out of
             // scope for this harness.
             if let TableCellContent::Simple(content) = cell.content() {
-                out.push(content.rendered().to_string());
+                out.push(content.rendered_html().to_string());
             }
         }
     }
@@ -372,7 +372,7 @@ fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
         }
 
         match block {
-            Block::Simple(simple) => out.push(simple.content().rendered().to_string()),
+            Block::Simple(simple) => out.push(simple.content().rendered_html().to_string()),
 
             Block::Section(section) => out.push(section.section_title().to_string()),
 
@@ -411,9 +411,10 @@ fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
 /// order.
 ///
 /// A footnote's text is extracted out of the block it was written in, so it
-/// never appears in any `rendered()` string [`collect_rendered`] reaches. It is
-/// nonetheless substituted inline content – and the source of a footnote node's
-/// subtree – so the differential harness folds it under the same invariant.
+/// never appears in any `rendered_html()` string [`collect_rendered`] reaches.
+/// It is nonetheless substituted inline content – and the source of a footnote
+/// node's subtree – so the differential harness folds it under the same
+/// invariant.
 fn collect_footnote_texts(doc: &crate::Document<'_>) -> Vec<String> {
     doc.catalog()
         .footnotes()
@@ -423,9 +424,10 @@ fn collect_footnote_texts(doc: &crate::Document<'_>) -> Vec<String> {
 }
 
 /// Parses `source` twice – normally and with the recorder – and asserts that
-/// folding every content location's recorded tree reproduces its `rendered()`
-/// output byte-for-byte, including any resolved cross-references, section
-/// headings, block titles, table cells, and footnote texts.
+/// folding every content location's recorded tree reproduces its
+/// `rendered_html()` output byte-for-byte, including any resolved
+/// cross-references, section headings, block titles, table cells, and footnote
+/// texts.
 fn check_document(source: &str) {
     assert_no_reserved_sentinels(source);
 
@@ -459,7 +461,7 @@ fn check_document(source: &str) {
 
     assert_eq!(
         folded, golden,
-        "document fold diverged from rendered() for {source:?}"
+        "document fold diverged from rendered_html() for {source:?}"
     );
 }
 
@@ -532,7 +534,7 @@ fn document_corpus_folds_byte_for_byte() {
 
 /// Parses `source` twice – with inline-tree building off (the default) and on –
 /// and asserts the rendered output is identical, so enabling the flag cannot
-/// perturb what the golden `.rendered()` assertions pin.
+/// perturb what the golden `.rendered_html()` assertions pin.
 ///
 /// This also drives the whole flag-on production path over the corpus: the
 /// counter-safe recording pass, the footnote-subtree attachment, and both
@@ -873,9 +875,10 @@ fn inline_tree_is_built_when_enabled() {
 // ─── Public API: `IsBlock::inlines()` ───────────────────────────────────────
 //
 // The public inline accessor (design Phase 3) is the structured counterpart of
-// `IsBlock::rendered_content()`: the same content-bearing blocks carry each. A
-// content-bearing block returns `Some(tree)` (an empty tree when the flag is
-// off); a block with no directly-contained inline content returns `None`.
+// `IsBlock::rendered_html_content()`: the same content-bearing blocks carry
+// each. A content-bearing block returns `Some(tree)` (an empty tree when the
+// flag is off); a block with no directly-contained inline content returns
+// `None`.
 
 #[test]
 fn is_block_inlines_exposes_the_content_tree() {
@@ -949,7 +952,7 @@ fn block_variant_name(block: &crate::blocks::Block<'_>) -> &'static str {
 }
 
 #[test]
-fn is_block_inlines_matches_rendered_content_across_every_block_kind() {
+fn is_block_inlines_matches_rendered_html_content_across_every_block_kind() {
     use std::collections::BTreeSet;
 
     use crate::blocks::{FindBlocks, IsBlock};
@@ -981,14 +984,14 @@ fn is_block_inlines_matches_rendered_content_across_every_block_kind() {
     for block in doc.descendant_blocks() {
         seen.insert(block_variant_name(block));
 
-        // `inlines()` is the structured counterpart of `rendered_content()`:
+        // `inlines()` is the structured counterpart of `rendered_html_content()`:
         // the same content-bearing blocks carry each, so their presence agrees
         // for every kind (this also drives every `Block::inlines()` dispatch
         // arm and each block type's override).
         assert_eq!(
             block.inlines().is_some(),
-            block.rendered_content().is_some(),
-            "`inlines()`/`rendered_content()` presence disagree for a {} block",
+            block.rendered_html_content().is_some(),
+            "`inlines()`/`rendered_html_content()` presence disagree for a {} block",
             block_variant_name(block),
         );
     }
@@ -1085,8 +1088,8 @@ fn has_styled(nodes: &[InlineNode<'_>], variant: StyleVariant) -> bool {
 fn inline_tree_numbers_footnotes_in_document_order() {
     // The recording pass clones the parser *before* the authoritative pass
     // advances the footnote counter, so a footnote in the second paragraph is
-    // numbered "2" in its tree – matching `rendered()` – rather than restarting
-    // at "1" (which a fresh-parser recording pass would produce).
+    // numbered "2" in its tree – matching `rendered_html()` – rather than
+    // restarting at "1" (which a fresh-parser recording pass would produce).
     let mut parser = Parser::default().with_inline_tree(true);
     let doc =
         parser.parse("Body text.footnote:[the first note]\n\nMore text.footnote:[the second note]");
@@ -1322,7 +1325,7 @@ fn inline_tree_xref_resolution_matches_the_rendered_string() {
     let rendered = doc
         .child_blocks()
         .filter_map(|block| match block {
-            Block::Simple(simple) => Some(simple.content().rendered().to_string()),
+            Block::Simple(simple) => Some(simple.content().rendered_html().to_string()),
             _ => None,
         })
         .find(|r| r.contains("<a href"))
@@ -1355,13 +1358,13 @@ fn inline_tree_xref_resolution_matches_the_rendered_string() {
 // (and `#![deny(warnings)]` rejects the dead code).
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "diverged from rendered()")]
+#[should_panic(expected = "diverged from rendered_html()")]
 fn inline_tree_build_rejects_a_stateful_renderer() {
     /// A renderer whose output depends on mutable internal state: it emits
     /// different bytes on its second invocation. Because the recording pass
     /// shares the same renderer instance as the authoritative pass, such a
     /// renderer makes the recorded tree fold to something other than
-    /// `rendered()`.
+    /// `rendered_html()`.
     #[derive(Debug, Default)]
     struct FlipRenderer {
         flipped: std::cell::Cell<bool>,
@@ -2019,8 +2022,9 @@ fn section_title_footnote_carries_its_subtree_and_resolved_xref() {
 // `Footnote` node under a `Ref` node. Both new walks descend through reference
 // children (and formatting spans) to reach such a subtree. The recording pass
 // cannot currently produce that shape — a footnote nested in link text makes
-// the Strategy A fold diverge from `rendered()`, a pre-existing limitation the
-// Phase 4 single-pass builder retires — so the walks are driven directly here.
+// the Strategy A fold diverge from `rendered_html()`, a pre-existing limitation
+// the Phase 4 single-pass builder retires — so the walks are driven directly
+// here.
 
 /// A cross-reference node, unresolved.
 fn unresolved_xref() -> InlineNode<'static> {

@@ -579,7 +579,7 @@ include::example$image.adoc[tag=inline]
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"Click <span class="image"><img src="play.png" alt="play"></span> to get the party started."#
         );
 
@@ -589,7 +589,7 @@ include::example$image.adoc[tag=inline]
         };
 
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             r#"Click <span class="image"><img src="pause.png" alt="pause" title="Pause"></span> when you need a break."#
         );
 
@@ -617,7 +617,7 @@ The alt text for an inline image has the same requirements as for a block image,
         };
 
         assert_eq!(
-            sb.content().rendered(),
+            sb.content().rendered_html(),
             r#"Click <span class="image"><img src="play.png" alt="Look ] here"></span> to continue."#
         );
     }
