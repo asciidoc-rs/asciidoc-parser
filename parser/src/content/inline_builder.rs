@@ -1303,9 +1303,16 @@ mod tests {
             // Specials adjacent to quotes exercise the escaped-boundary classes.
             "*a<b>c*",
             "before < *bold* > after",
-            // Escapes.
+            // Escapes: constrained, unconstrained, and escaped-with-attributes.
             "\\*not bold*",
             "\\_not italic_",
+            "\\**not bold**",
+            "\\[role]*bold*",
+            // Monospace-constrained followed by a quote character triggers the
+            // look-ahead retry.
+            "a `b`\" c",
+            "x `y`' z",
+            "\\`m`\" n",
             // Roles / ids on a span.
             "[.lead]#tagline#",
             "[#anchor]*bold*",
@@ -1343,6 +1350,82 @@ mod tests {
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
+    }
+
+    #[test]
+    fn s_to_src_guards_are_defensive() {
+        use super::{Piece, s_to_src};
+
+        // In practice every boundary `s_to_src` maps falls on a literal
+        // delimiter (a text position), so the atomic-snap, before-first, and
+        // past-last branches are defensive. Exercise them directly to document
+        // the intended fallback.
+        let atomic = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 4,
+            src_offset: 10,
+            src_len: 1,
+            atomic: true,
+        };
+
+        // A boundary inside an atomic piece snaps to the nearer edge.
+        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 1), 10);
+        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 3), 11);
+
+        // A boundary past the last piece falls back to the source end.
+        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 9), 11);
+
+        // A boundary before the first piece begins breaks out to the same
+        // fallback.
+        let offset = Piece {
+            s_start: 2,
+            ..atomic
+        };
+
+        assert_eq!(s_to_src(std::slice::from_ref(&offset), 0), 11);
+
+        // No pieces (an empty level) anchors at the source start.
+        assert_eq!(s_to_src(&[], 0), 0);
+    }
+
+    #[test]
+    fn emit_range_skips_a_stale_piece_index() {
+        use super::{Piece, emit_range};
+
+        // A piece whose `node_index` no longer resolves is skipped rather than
+        // panicking (defensive against an internal invariant slip).
+        let piece = Piece {
+            node_index: 9,
+            s_start: 0,
+            s_len: 1,
+            src_offset: 0,
+            src_len: 1,
+            atomic: true,
+        };
+
+        let mut out = Vec::new();
+        emit_range(&[], std::slice::from_ref(&piece), 0..1, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn style_variant_maps_non_quote_types_to_unquoted() {
+        use super::style_variant;
+
+        // `quote_subs` never yields these, so the residue arm is defensive.
+        assert_eq!(
+            style_variant(crate::parser::QuoteType::AsciiMath, false),
+            StyleVariant::Unquoted
+        );
+        assert_eq!(
+            style_variant(crate::parser::QuoteType::LatexMath, true),
+            StyleVariant::Unquoted
+        );
+        assert_eq!(
+            style_variant(crate::parser::QuoteType::Unquoted, false),
+            StyleVariant::Unquoted
+        );
     }
 
     #[test]
