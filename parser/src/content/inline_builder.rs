@@ -37,6 +37,13 @@
 //!   reuses the shared [`character_replacements`] rules and, like the string
 //!   step, matches over the *escaped* text so an arrow (`-&gt;`) or entity
 //!   (`&amp;copy;`) can straddle a `Text`/`CharRef` boundary.
+//! - [`apply_macros`] recognizes **image and icon macros** (`image:target[…]`,
+//!   `icon:target[…]`), replacing each with an [`Image`](InlineNode::Image)
+//!   node that captures its own owned [`Attrlist`] – the step that makes a
+//!   macro node *self-describing*. It reuses the shared [`INLINE_IMAGE_MACRO`]
+//!   pattern and builds `'src`-borrowing nodes for verbatim macros only (see
+//!   [`apply_macros`] for the boundary the escaped-content case defers). The
+//!   other macro families are later increments.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
@@ -51,9 +58,9 @@
 //! It is **additive and non-regressing**: nothing here is wired into the parse
 //! path yet, so the authoritative string pipeline and the Strategy-A
 //! [`Content::inlines`](crate::content::Content::inlines) tree are untouched.
-//! Later increments extend the transducer to macros, attribute expansion, and
-//! passthroughs, at which point it can replace the recorder,
-//! make `rendered_html()` a fold, and retire the sentinel systems.
+//! Later increments extend the transducer to the remaining macro families,
+//! attribute expansion, and passthroughs, at which point it can replace the
+//! recorder, make `rendered_html()` a fold, and retire the sentinel systems.
 //!
 //! # A note on quote nesting
 //!
@@ -82,13 +89,14 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{
-        CharacterReplacement, QuoteSub, character_replacements, hard_line_break_pattern,
-        maybe_has_quotes, maybe_has_replacements, quote_subs,
+        CharacterReplacement, INLINE_IMAGE_MACRO, QuoteSub, basename, character_replacements,
+        hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements,
+        normalize_text_lf_escaped_bracket, quote_subs,
     },
-    inlines::{CharRef, InlineNode, SpanForm, StyleVariant, Styled},
+    inlines::{CharRef, Image, InlineNode, SpanForm, StyleVariant, Styled},
     parser::{
-        CharacterReplacementType, InlineSubstitutionRenderer, QuoteScope, QuoteType,
-        SpecialCharacter,
+        CharacterReplacementType, IconRenderParams, ImageRenderParams, InlineSubstitutionRenderer,
+        QuoteScope, QuoteType, SpecialCharacter,
     },
     strings::CowStr,
 };
@@ -112,6 +120,7 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
     let nodes = apply_special_characters(seed);
     let nodes = apply_quotes(nodes, source, parser);
     let nodes = apply_character_replacements(nodes, source);
+    let nodes = apply_macros(nodes, source, parser);
 
     apply_post_replacements(nodes, source)
 }
@@ -1124,6 +1133,289 @@ fn rebuild_replacements<'src>(
     out
 }
 
+// ─── Macros ───────────────────────────────────────────────────────────────
+
+/// The macros substitution, as a node transducer.
+///
+/// This increment recognizes **image and icon macros** only
+/// (`image:target[…]`, `icon:target[…]`), replacing each with an
+/// [`Image`](InlineNode::Image) node that carries its own owned
+/// [`Attrlist`] – the step that makes a macro node *self-describing*,
+/// so the fold reconstructs the render parameters and calls the same
+/// `render_image`/`render_icon` the string step calls. The remaining macro
+/// families (links, cross-references, footnotes, UI macros, index terms,
+/// anchors, STEM) are later increments.
+///
+/// Like the other steps it descends into the
+/// [`Styled`]/[`Ref`](InlineNode::Ref) children earlier steps created – a macro
+/// can appear inside a rendered span (`*image:x[]*`), just as the string
+/// pipeline matches one inside a rendered `<strong>` tag – then matches at each
+/// level.
+///
+/// # Scope: verbatim macros only
+///
+/// A recognized macro is built into an `'src`-borrowing node only when its
+/// whole match is **verbatim source** – no special character (`< > &`, an
+/// atomic [`CharRef`](InlineNode::CharRef)) and no rendered [`Styled`] span
+/// falls inside it. The string pipeline matches macros over *escaped,
+/// already-rendered* text, so a macro containing (say) a `&` sees `&amp;` in
+/// its target/attrlist, and a self-describing node cannot carry that escaped
+/// text as an `'src` slice. Such a macro is therefore **left unrecognized**
+/// here for a later increment (the attribute-references step and the cutover),
+/// mirroring how the quotes step documents its own cross-span boundary (crossed
+/// delimiters). The differential corpus pins the verbatim cases this increment
+/// claims.
+fn apply_macros<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<InlineNode<'src>> {
+    // Recurse into spans/refs first, matching the string pipeline's
+    // whole-string pass.
+    let nodes: Vec<InlineNode<'src>> = nodes
+        .into_iter()
+        .map(|node| match node {
+            InlineNode::Styled(mut styled) => {
+                styled.children = apply_macros(styled.children, root, parser);
+                InlineNode::Styled(styled)
+            }
+
+            InlineNode::Ref(mut reference) => {
+                reference.children = apply_macros(reference.children, root, parser);
+                InlineNode::Ref(reference)
+            }
+
+            other => other,
+        })
+        .collect();
+
+    image_macros_level(nodes, root, parser)
+}
+
+/// One image/icon match at a level, in absolute match-string byte offsets.
+struct ImageMatch<'src> {
+    /// The whole match, `[start, end)`.
+    full: std::ops::Range<usize>,
+
+    /// What to emit in place of `full`.
+    kind: ImageMatchKind<'src>,
+}
+
+enum ImageMatchKind<'src> {
+    /// An escaped macro (`\image:…`): drop the leading backslash and keep the
+    /// rest as literal nodes, replacing nothing – mirroring the string
+    /// replacer's `caps[0][1..]`.
+    Unescape,
+
+    /// A recognized macro, built into an [`Image`](InlineNode::Image) node.
+    /// Boxed to keep this enum small – the [`Image`](InlineNode::Image) node is
+    /// far larger than the empty [`Unescape`](Self::Unescape) variant.
+    Node(Box<InlineNode<'src>>),
+}
+
+/// Matches `INLINE_IMAGE_MACRO` at this level's escaped text, replacing each
+/// verbatim match with the [`Image`](InlineNode::Image) node it produces and
+/// leaving everything else in place.
+fn image_macros_level<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<InlineNode<'src>> {
+    let (s, pieces) = build_match_string(&nodes);
+
+    // Cheap pre-filter mirroring the string step's `found_macroish`: an image
+    // or icon macro needs its name prefix and an opening bracket.
+    if !((s.contains("image:") || s.contains("icon:")) && s.contains('[')) {
+        return nodes;
+    }
+
+    let matches = find_image_matches(&s, &pieces, root, parser);
+
+    if matches.is_empty() {
+        return nodes;
+    }
+
+    rebuild_image_level(&nodes, &pieces, &s, matches)
+}
+
+/// Finds every image/icon macro at this level, skipping any whose match is not
+/// wholly verbatim source (see [`apply_macros`]).
+fn find_image_matches<'src>(
+    s: &str,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<ImageMatch<'src>> {
+    let mut matches = Vec::new();
+
+    for caps in INLINE_IMAGE_MACRO.captures_iter(s) {
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let whole = caps.get(0).unwrap();
+
+        let full = whole.start()..whole.end();
+
+        // Only a wholly-verbatim match can slice its target/attrlist from
+        // `'src`; a match crossing an escaped special or a rendered span is left
+        // for a later increment.
+        if !range_is_verbatim(pieces, &full) {
+            continue;
+        }
+
+        if whole.as_str().starts_with('\\') {
+            matches.push(ImageMatch {
+                full,
+                kind: ImageMatchKind::Unescape,
+            });
+
+            continue;
+        }
+
+        let node = build_image_node(&caps, &full, pieces, root, parser);
+
+        matches.push(ImageMatch {
+            full,
+            kind: ImageMatchKind::Node(Box::new(node)),
+        });
+    }
+
+    matches
+}
+
+/// Reports whether every piece overlapping the match-string range `range` is a
+/// verbatim [`Text`](InlineNode::Text) run (non-atomic). Only then does the
+/// range map one-to-one onto contiguous source, so its captures can slice
+/// `'src` directly.
+fn range_is_verbatim(pieces: &[Piece], range: &std::ops::Range<usize>) -> bool {
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the range.
+        if p_end <= range.start || p_start >= range.end {
+            continue;
+        }
+
+        if piece.atomic {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Builds one [`Image`](InlineNode::Image) node from a verbatim image/icon
+/// match: it slices the target and attribute list straight from `'src` and
+/// pre-extracts the alt/width/height the way the string replacer does, so the
+/// fold reproduces the same bytes.
+fn build_image_node<'src>(
+    caps: &regex::Captures<'_>,
+    full: &std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> InlineNode<'src> {
+    let location = source_slice(pieces, full.clone(), root);
+
+    // The macro name (past any – here absent – escape) is `image:` or `icon:`.
+    let is_icon = !location.data().starts_with("image:");
+
+    // Group 1 is the (optional) target; group 2 is the bracket text, which
+    // always participates (it may be empty).
+    let target = caps
+        .get(1)
+        .map(|m| source_slice(pieces, m.start()..m.end(), root))
+        .map_or_else(|| CowStr::from(""), |sp| CowStr::from(sp.data()));
+
+    let bracket = caps.get(2).map_or_else(
+        || location.slice(0..0),
+        |m| source_slice(pieces, m.start()..m.end(), root),
+    );
+
+    let attrlist = Attrlist::parse(bracket, parser, AttrlistContext::Inline)
+        .item
+        .item;
+
+    // The default alt text derives from the target's basename, with `_`/`-`
+    // read as spaces – exactly the string replacer's `default_alt`.
+    let default_alt = basename(&target.replace(['_', '-'], " "));
+
+    // Pre-extract the resolved alt/width/height into owned values, ending the
+    // `&'src self`-tied borrows before the attribute list is moved into the node
+    // (the same read-then-move shape [`attributes_of`] uses). An icon carries a
+    // `size` rather than width/height, recomputed at fold time from `attrs`.
+    let (alt, width, height) = if is_icon {
+        let alt = attrlist.named_attribute("alt").map_or(default_alt, |a| {
+            normalize_text_lf_escaped_bracket(a.value())
+        });
+
+        (Some(CowStr::from(alt)), None, None)
+    } else {
+        let alt = attrlist
+            .named_or_positional_attribute("alt", 1)
+            .map_or(default_alt, |a| {
+                normalize_text_lf_escaped_bracket(a.value())
+            });
+
+        let width = attrlist
+            .named_or_positional_attribute("width", 2)
+            .map(|a| CowStr::from(a.value().to_string()));
+
+        let height = attrlist
+            .named_or_positional_attribute("height", 3)
+            .map(|a| CowStr::from(a.value().to_string()));
+
+        (Some(CowStr::from(alt)), width, height)
+    };
+
+    InlineNode::Image(Image {
+        is_icon,
+        target,
+        alt,
+        width,
+        height,
+        attrs: Some(attrlist),
+        location,
+    })
+}
+
+/// Rebuilds a level's node list from its image/icon matches: each gap keeps its
+/// original nodes; each match becomes either its literal text (an escape, with
+/// the leading backslash dropped) or the built [`Image`](InlineNode::Image)
+/// node.
+fn rebuild_image_level<'src>(
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    s: &str,
+    matches: Vec<ImageMatch<'src>>,
+) -> Vec<InlineNode<'src>> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+
+    for m in matches {
+        match m.kind {
+            ImageMatchKind::Unescape => {
+                // Keep the whole match with the single leading backslash dropped.
+                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
+                emit_range(nodes, pieces, (m.full.start + 1)..m.full.end, &mut out);
+            }
+
+            ImageMatchKind::Node(node) => {
+                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
+                out.push(*node);
+            }
+        }
+
+        cursor = m.full.end;
+    }
+
+    if cursor < s.len() {
+        emit_range(nodes, pieces, cursor..s.len(), &mut out);
+    }
+
+    out
+}
+
 // ─── Post replacements (hard line breaks) ─────────────────────────────────
 
 /// The post-replacement substitution, as a node transducer: a line ending in
@@ -1233,23 +1525,33 @@ fn replacement_type_of(value: &str) -> Option<CharacterReplacementType> {
 
 /// Folds an inline node tree to output bytes through `renderer`.
 ///
-/// This is the first fold over the *public* [`InlineNode`] tree. It currently
-/// handles only the leaves the [`apply_special_characters`] step produces; a
-/// later increment extends it as the transducer grows new node kinds.
+/// This is the fold over the *public* [`InlineNode`] tree. It handles the node
+/// kinds the transducer steps produce so far – [`Text`](InlineNode::Text),
+/// [`CharRef`](InlineNode::CharRef), [`Styled`], [`Image`](InlineNode::Image),
+/// and [`LineBreak`](InlineNode::LineBreak), plus the design-legal
+/// [`Raw`](InlineNode::Raw) leaf; a later increment extends it as the
+/// transducer grows new kinds.
 pub(crate) fn fold_html(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
 ) -> String {
     let mut out = String::new();
-    fold_into_html(nodes, renderer, &mut out);
+    fold_into_html(nodes, renderer, parser, &mut out);
     out
 }
 
 /// Appends the fold of `nodes` to `out` (the recursive worker for
 /// [`fold_html`]).
+///
+/// `parser` is threaded through because rendering some nodes – an
+/// [`Image`](InlineNode::Image), whose `render_image`/`render_icon` reads the
+/// document's safe mode, `data-uri`, and `icons`/`icontype` attributes – is a
+/// function of document context, not of the node alone.
 fn fold_into_html(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
     out: &mut String,
 ) {
     for node in nodes {
@@ -1307,12 +1609,16 @@ fn fold_into_html(
                 renderer.render_line_break(out);
             }
 
+            InlineNode::Image(image) => {
+                fold_image(image, renderer, parser, out);
+            }
+
             InlineNode::Styled(styled) => {
                 // Fold the children to the body, then wrap it exactly as the
                 // string pipeline's quotes step did: the same `QuoteType`,
                 // attribute list, and id it recognized, so the bytes match.
                 let mut body = String::new();
-                fold_into_html(&styled.children, renderer, &mut body);
+                fold_into_html(&styled.children, renderer, parser, &mut body);
 
                 let scope = match styled.form {
                     SpanForm::Constrained => QuoteScope::Constrained,
@@ -1331,10 +1637,11 @@ fn fold_into_html(
 
             other => {
                 // The steps wired up so far produce only `Text`,
-                // `CharRef::Special`, and `Styled` nodes, and this fold
-                // additionally emits the design-legal `Raw` leaf; no other node
-                // kind reaches the fold in this increment. A later increment
-                // fills in the arms above as the transducer grows new kinds.
+                // `CharRef::Special`, `Styled`, `Image`, and `LineBreak` nodes,
+                // and this fold additionally emits the design-legal `Raw` leaf;
+                // no other node kind reaches the fold in this increment. A later
+                // increment fills in the arms above as the transducer grows new
+                // kinds.
                 // Guard against a premature caller in debug builds and emit
                 // nothing in release, mirroring the safe defensive fallback in
                 // [`content`](super::content).
@@ -1365,6 +1672,68 @@ fn render_char(ch: char, renderer: &dyn InlineSubstitutionRenderer, out: &mut St
     renderer.render_special_character(type_, out);
 }
 
+/// Folds an [`Image`](InlineNode::Image) node, reconstructing the
+/// [`ImageRenderParams`]/[`IconRenderParams`] the string pipeline built and
+/// calling the same `render_image`/`render_icon`, so the output is
+/// byte-for-byte identical. The pre-extracted `alt` (and, for an image,
+/// `width`/`height`) come straight off the node; an icon's `size` and every
+/// other rendered attribute (`title`, `link`, `format`, roles, …) are read back
+/// from the node's own [`Attrlist`] – which is why the macro step
+/// captured it.
+fn fold_image(
+    image: &Image<'_>,
+    renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
+    out: &mut String,
+) {
+    // A macro-built image always carries its attribute list; a node hand-built
+    // without one folds through an empty list, sliced (empty) from the node's
+    // own `'src` location so its lifetime matches.
+    let empty;
+    let attrlist = match &image.attrs {
+        Some(attrlist) => attrlist,
+
+        None => {
+            empty = Attrlist::parse(image.location.slice(0..0), parser, AttrlistContext::Inline)
+                .item
+                .item;
+
+            &empty
+        }
+    };
+
+    let alt = image
+        .alt
+        .as_ref()
+        .map(|a| a.to_string())
+        .unwrap_or_default();
+
+    if image.is_icon {
+        let params = IconRenderParams {
+            target: image.target.as_ref(),
+            alt,
+            size: attrlist
+                .named_or_positional_attribute("size", 1)
+                .map(|a| a.value()),
+            attrlist,
+            parser,
+        };
+
+        renderer.render_icon(&params, out);
+    } else {
+        let params = ImageRenderParams {
+            target: image.target.as_ref(),
+            alt,
+            width: image.width.as_deref(),
+            height: image.height.as_deref(),
+            attrlist,
+            parser,
+        };
+
+        renderer.render_image(&params, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing)]
@@ -1372,16 +1741,25 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::{
-        apply_character_replacements, apply_post_replacements, apply_quotes,
-        apply_special_characters, build, fold_html,
+        apply_character_replacements, apply_macros, apply_post_replacements, apply_quotes,
+        apply_special_characters, build,
     };
     use crate::{
         HasSpan, Parser, Span,
         content::{Content, SubstitutionStep},
-        inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled},
+        inlines::{CharRef, Image, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
+
+    /// Folds the tree with the built-in HTML renderer and a default parser. The
+    /// parser is consulted only when the tree contains an
+    /// [`Image`](InlineNode::Image) node (for the document's safe mode,
+    /// `data-uri`, and `icons` attributes); tests that need a non-default
+    /// document call [`super::fold_html`] directly with their own parser.
+    fn fold_html(nodes: &[InlineNode<'_>], renderer: &HtmlSubstitutionRenderer) -> String {
+        super::fold_html(nodes, renderer, &Parser::default())
+    }
 
     /// Builds the single-pass tree for `source` with a default parser (the
     /// parser is consulted only for attributed-quote attribute lists).
@@ -2458,5 +2836,252 @@ mod tests {
         }
 
         assert!(replacement_type_of("not a replacement").is_none());
+    }
+
+    // ─── Macros (image / icon) ────────────────────────────────────────────
+
+    /// The string pipeline's output through the **macros** step for `source`,
+    /// used as the golden oracle: the five steps [`build`] runs, in order
+    /// (special characters, quotes, character replacements, macros, post
+    /// replacement), with `parser` as the document context. Attribute
+    /// references are skipped – exactly as the additive builder skips them – so
+    /// the fixtures deliberately contain none.
+    fn golden_macros_with(source: &str, parser: &Parser) -> String {
+        let mut content = Content::from(Span::new(source));
+        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
+        SubstitutionStep::Quotes.apply(&mut content, parser, None);
+        SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
+        SubstitutionStep::Macros.apply(&mut content, parser, None);
+        SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
+        content.rendered_str().to_string()
+    }
+
+    /// [`golden_macros_with`] with a default parser.
+    fn golden_macros(source: &str) -> String {
+        golden_macros_with(source, &Parser::default())
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_through_macros() {
+        // For each fixture, folding the single-pass tree (all five steps)
+        // reproduces the string pipeline's output byte-for-byte. This is the
+        // differential corpus (design §5.3) that pins the image/icon increment.
+        let fixtures = [
+            // No macro despite macro-ish characters.
+            "plain text",
+            "a colon : and a bracket [ apart",
+            "image without a bracket image:foo.png stays literal",
+            // Images: empty, alt, defaulted alt, dimensions, named attrs.
+            "image:sunset.jpg[]",
+            "image:sunset.jpg[Sunset]",
+            "image:sunset.jpg[Sunset Mountain]",
+            "image:photo.png[Alt Text,200,100]",
+            "image:photo.png[alt=Alt Text,width=200,height=100]",
+            "image:a_b-c.png[]",
+            "image:d/e/f.png[]",
+            "image:logo.png[Logo,role=thumb]",
+            "image:logo.png[title=Hover text]",
+            "image:logo.png[link=https://example.org]",
+            "image:logo.png[float=left]",
+            // Icons.
+            "icon:tags[]",
+            "icon:home[Home]",
+            "icon:home[size=2x]",
+            // A macro embedded in surrounding flow, and next to other constructs.
+            "See image:sunset.jpg[Sunset] here.",
+            "*bold* then image:x.png[X] and _em_",
+            "before image:a.png[A] middle image:b.png[B] after",
+            "a copyright (C) then image:x.png[X]",
+            // Escapes: the macro stays literal, minus the backslash.
+            "\\image:sunset.jpg[]",
+            "\\image:sunset.jpg[Sunset]",
+            "\\icon:home[]",
+            // A macro inside a rendered span (recognized inside the span body).
+            "*see image:x.png[X]*",
+            "_image:y.png[Y] in em_",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_with_document_context() {
+        // The image/icon fold reads document attributes (an icon's `icons`
+        // mode, an image's `imagesdir`), so the parity must hold under a
+        // non-default document too. Build and fold with the *same* parser the
+        // golden uses.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default()
+            .with_intrinsic_attribute("imagesdir", "assets/img", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("icons", "font", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("icontype", "svg", ModificationContext::Anywhere);
+
+        let fixtures = [
+            "image:sunset.jpg[Sunset]",
+            "image:sub/dir/pic.png[Pic,320]",
+            "icon:heart[]",
+            "icon:heart[2x]",
+            "icon:heart[size=lg,role=fav]",
+            "text with icon:star[] inline",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = super::fold_html(&build(Span::new(fixture), &parser), &renderer, &parser);
+
+            assert_eq!(
+                folded,
+                golden_macros_with(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    /// Asserts that `node` is an [`Image`](InlineNode::Image), returning it for
+    /// further inspection.
+    fn assert_image<'a, 'src>(node: &'a InlineNode<'src>) -> &'a Image<'src> {
+        match node {
+            InlineNode::Image(image) => image,
+
+            other => panic!("expected Image, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_image_macro_becomes_a_self_describing_node() {
+        let nodes = build_src(Span::new("image:sunset.jpg[Sunset]"));
+
+        assert_eq!(nodes.len(), 1);
+        let image = assert_image(&nodes[0]);
+
+        assert!(!image.is_icon);
+
+        // The target borrows from source (no allocation), and the alt is the
+        // supplied positional value.
+        assert!(matches!(image.target, CowStr::Borrowed(_)));
+        assert_eq!(image.target.as_ref(), "sunset.jpg");
+        assert_eq!(image.alt.as_deref(), Some("Sunset"));
+        assert_eq!(image.width, None);
+        assert_eq!(image.height, None);
+
+        // The node captures its own attribute list – the property that makes it
+        // self-describing (and unblocks a faithful fold).
+        assert!(image.attrs.is_some(), "the attribute list is retained");
+
+        // Its location covers the whole macro, delimiters included.
+        assert_eq!(image.location.data(), "image:sunset.jpg[Sunset]");
+        assert_eq!(image.location.line(), 1);
+        assert_eq!(image.location.col(), 1);
+    }
+
+    #[test]
+    fn image_dimensions_are_captured_positionally() {
+        let nodes = build_src(Span::new("image:p.png[Alt,200,100]"));
+
+        let image = assert_image(&nodes[0]);
+        assert_eq!(image.alt.as_deref(), Some("Alt"));
+        assert_eq!(image.width.as_deref(), Some("200"));
+        assert_eq!(image.height.as_deref(), Some("100"));
+    }
+
+    #[test]
+    fn image_default_alt_derives_from_the_basename() {
+        // With no alt, the default is the target's basename with `_`/`-` read as
+        // spaces and the extension dropped.
+        let nodes = build_src(Span::new("image:a_b-c.png[]"));
+
+        let image = assert_image(&nodes[0]);
+        assert_eq!(image.alt.as_deref(), Some("a b c"));
+    }
+
+    #[test]
+    fn an_icon_macro_becomes_an_icon_node() {
+        let nodes = build_src(Span::new("icon:home[size=2x]"));
+
+        let image = assert_image(&nodes[0]);
+        assert!(image.is_icon);
+        assert_eq!(image.target.as_ref(), "home");
+
+        // An icon has no positional width/height; its `size` lives in the
+        // attribute list (read back at fold time), and its default alt is the
+        // target itself.
+        assert_eq!(image.width, None);
+        assert_eq!(image.height, None);
+        assert_eq!(image.alt.as_deref(), Some("home"));
+    }
+
+    #[test]
+    fn an_image_macro_is_recognized_inside_a_span() {
+        // A macro can appear inside a rendered span; the transducer descends
+        // into the span body and builds the node there.
+        let nodes = build_src(Span::new("*see image:x.png[X]*"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+        assert_eq!(children.len(), 2);
+        assert_text(&children[0], "see ", 1, 2);
+
+        let image = assert_image(&children[1]);
+        assert_eq!(image.target.as_ref(), "x.png");
+        assert_eq!(image.alt.as_deref(), Some("X"));
+    }
+
+    #[test]
+    fn an_escaped_image_macro_stays_literal() {
+        // `\image:…` drops the backslash and keeps the macro as literal text –
+        // no image node.
+        let nodes = build_src(Span::new("\\image:sunset.jpg[Sunset]"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+            "an escaped macro must not produce an image node: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros("\\image:sunset.jpg[Sunset]")
+        );
+    }
+
+    #[test]
+    fn a_macro_over_a_special_character_is_a_documented_divergence() {
+        // The string pipeline matches macros over *escaped* text, so a target
+        // containing `&` is matched as `a&amp;b.png`. A self-describing node
+        // cannot carry that escaped text as an `'src` slice, so the single-pass
+        // builder leaves such a macro *unrecognized* for a later increment (the
+        // attribute-references step and the cutover). This is the documented
+        // boundary of the additive image increment; the differential corpus
+        // above deliberately excludes it.
+        let nodes = apply_macros(
+            build_through_special_and_replacements(Span::new("image:a&b.png[]")),
+            Span::new("image:a&b.png[]"),
+            &Parser::default(),
+        );
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+            "a macro crossing an escaped special must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build an image here.
+        assert!(golden_macros("image:a&b.png[]").contains("<img"));
+    }
+
+    /// Builds the tree **through character replacements** (special characters,
+    /// quotes, character replacements) – the state the macros step consumes –
+    /// so a test can drive [`apply_macros`] directly.
+    fn build_through_special_and_replacements(source: Span<'_>) -> Vec<InlineNode<'_>> {
+        apply_character_replacements(build_through_quotes(source), source)
     }
 }

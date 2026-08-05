@@ -16,7 +16,10 @@ pub(crate) mod inline_builder;
 pub(crate) mod inline_tree;
 
 mod macros;
-pub(crate) use macros::apply_macros_with_leading_anchor_registered;
+pub(crate) use macros::{
+    INLINE_IMAGE_MACRO, apply_macros_with_leading_anchor_registered, basename,
+    normalize_text_lf_escaped_bracket,
+};
 
 mod xref_target;
 

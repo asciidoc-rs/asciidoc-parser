@@ -1,11 +1,19 @@
 use crate::{HasSpan, Span, attributes::Attrlist, strings::CowStr};
 
-/// An inline image (`image:target[…]`).
+/// An inline image (`image:target[…]`) or icon (`icon:target[…]`).
+///
+/// The two share one macro syntax and one node; [`is_icon`](Self::is_icon)
+/// distinguishes them, because they render through different renderer methods
+/// (an icon consults the `icons`/`icontype` document attributes and carries a
+/// `size` rather than a `width`/`height`).
 ///
 /// Field set is provisional (Phase 0) and will be refined against the first
 /// consumer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Image<'src> {
+    /// `true` for an `icon:` macro, `false` for an `image:` macro.
+    pub is_icon: bool,
+
     /// The image target (the reference to the image), as written.
     pub target: CowStr<'src>,
 

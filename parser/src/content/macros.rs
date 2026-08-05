@@ -228,7 +228,14 @@ fn apply_macros_internal(
     content.set_deferred_xrefs(xrefs);
 }
 
-static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+/// Matches an inline image (`image:target[…]`) or icon (`icon:target[…]`)
+/// macro.
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes image and icon
+/// macros with the *exact* same pattern this string step matches with, changing
+/// only the recognition *sink* (a node instead of rendered markup).
+pub(crate) static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                    
@@ -381,7 +388,7 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
     }
 }
 
-fn basename(path: &str) -> String {
+pub(crate) fn basename(path: &str) -> String {
     Path::new(path)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -574,7 +581,7 @@ impl Replacer for InlineMenuMacroReplacer<'_> {
     }
 }
 
-fn normalize_text_lf_escaped_bracket(text: &str) -> String {
+pub(crate) fn normalize_text_lf_escaped_bracket(text: &str) -> String {
     text.replace("\n", " ").replace("\\]", "]")
 }
 

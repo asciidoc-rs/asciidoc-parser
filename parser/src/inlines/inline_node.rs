@@ -166,6 +166,7 @@ mod tests {
                 location,
             }),
             InlineNode::Image(Image {
+                is_icon: false,
                 target: CowStr::from("photo.png"),
                 alt: None,
                 width: None,

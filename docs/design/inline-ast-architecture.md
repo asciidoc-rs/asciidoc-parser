@@ -838,13 +838,45 @@ Each phase is a reviewable unit with a clear exit gate.
   The block-wide `hardbreaks` option (which needs the block's attribute list, not yet threaded
   into the builder) is deferred to the cutover (step 6).
 
+  *Step 4a landed as (`Macros` → `Image`, the first macro family):* the macros step is by far
+  the largest – seven construct families plus deferred-xref recording and footnote text
+  extraction – so it lands as its own sequence of sub-steps rather than one leap. The first,
+  [`apply_macros`](../../parser/src/content/inline_builder.rs), recognizes **image and icon
+  macros** (`image:target[…]`, `icon:target[…]`), replacing each with an
+  [`Image`](../../parser/src/inlines/image.rs) node that captures its own owned
+  `Attrlist<'src>` – the step that makes a macro node **self-describing**, the property a
+  faithful fold needs (§3.3.1, Phase 3 step 2). It reuses the string pipeline's *exact*
+  recognition, now shared `pub(crate)`
+  ([`INLINE_IMAGE_MACRO`](../../parser/src/content/macros.rs)), so only the *sink* differs
+  (§4.1); it descends into `Styled`/`Ref` children (a macro can sit inside a rendered span),
+  pre-extracts the alt/width/height (`icon:` carries a `size`, read back from `attrs` at fold
+  time) the way the string replacer does, and honors the `\image:` escape. An `is_icon` flag is
+  added to the `Image` node so the two forms fold through the right renderer method. The
+  [`fold_html`](../../parser/src/content/inline_builder.rs) fold gains a `&Parser` argument –
+  rendering an image reads the document's safe mode, `data-uri`, and `icons`/`icontype`
+  attributes – and reconstructs `ImageRenderParams`/`IconRenderParams` to call the same
+  `render_image`/`render_icon`, so its output is byte-identical (differential corpora pin this
+  under both the default document and one with `imagesdir`/`icons` set). Because the string
+  pipeline matches macros over *escaped, already-rendered* text, a macro whose target or
+  attribute list contains a special character (`< > &`) or a rendered span cannot be carried as
+  an `'src` slice; such a macro is left **unrecognized** for a later increment (the
+  attribute-references step and the cutover), a documented boundary pinned by a test, exactly as
+  the quotes step documents crossed delimiters. The additive builder deliberately performs *no*
+  recognition side effect (no `register_image` in the asset catalog, no dangerous-`link=` scheme
+  warning); the cutover (step 6) must re-attach those. This step is **additive**: nothing is
+  wired into the parse path. The remaining macro families (`Ref`, `Footnote`, `Ui`,
+  `IndexTerm`, `Stem`, `Anchor`) are later sub-steps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
   3. ✅ `CharacterReplacements` → `CharRef::Replacement`, and `PostReplacement` → `LineBreak`.
-  4. `Macros` → `Ref` / `Image` / `Footnote` / `Ui` / `IndexTerm` / `Stem` / `Anchor`,
-     capturing the owned `Attrlist<'src>` each construct carries – the step that makes nodes
-     **self-describing** (and the one that finally unblocks `render_with`).
+  4. `Macros`, sliced by construct family, each capturing the owned `Attrlist<'src>` it carries –
+     the step that makes nodes **self-describing** (and the one that finally unblocks
+     `render_with`):
+     - ✅ **4a.** `Image` / icon (`image:` / `icon:`).
+     - **4b.** the remaining families – `Ref` (links / cross-references), `Footnote`, `Ui`
+       (`kbd:` / `btn:` / `menu:`), `IndexTerm`, `Stem`, `Anchor`.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
      `Callouts` – completing the vocabulary the recorder covers.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
