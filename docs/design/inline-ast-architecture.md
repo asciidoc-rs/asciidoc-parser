@@ -819,7 +819,10 @@ Each phase is a reviewable unit with a clear exit gate.
      `Callouts` – completing the vocabulary the recorder covers.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
      `rendered_html()` a fold, delete the three production sentinel systems (§4.2), and retire
-     the `with_inline_tree` opt-in flag (the deferred remainder of Phase 2).
+     the `with_inline_tree` opt-in flag (the deferred remainder of Phase 2). Re-attach the
+     recognition **side effects** the string pipeline performs that the additive builder skips –
+     notably registering an inline id (an attributed span's anchor) in the reference catalog so
+     cross-references resolve (#1087).
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

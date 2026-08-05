@@ -691,6 +691,13 @@ fn attributes_of<'src>(
 
     // Extract owned id/roles before the attrlist is moved into the node, exactly
     // as the string pipeline's quote replacer does.
+    //
+    // Unlike that replacer, this deliberately performs *no* side effect: it does
+    // not `register_ref` an assigned id in the catalog, because the builder is
+    // additive and not yet the recognition sink – the authoritative string
+    // pipeline still registers it. The cutover (design §5.2 Phase 4, step 6)
+    // must add that registration so cross-references to an inline id resolve
+    // (tracked by #1087).
     let id = attrlist.id().map(|id| CowStr::from(id.to_string()));
 
     let roles = attrlist
@@ -1308,6 +1315,13 @@ mod tests {
             "\\_not italic_",
             "\\**not bold**",
             "\\[role]*bold*",
+            // Escaped constrained quotes *after* a boundary character: the
+            // backslash is the match's leading boundary group, so it is still
+            // recognized as an escape (not wrapped).
+            "a \\*x*",
+            "foo \\_bar_",
+            "x \\`code`",
+            "word \\#m#",
             // Monospace-constrained followed by a quote character triggers the
             // look-ahead retry.
             "a `b`\" c",
@@ -1582,6 +1596,26 @@ mod tests {
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
             golden_quotes("\\*x*")
+        );
+    }
+
+    #[test]
+    fn an_escaped_quote_after_a_boundary_wraps_nothing() {
+        // Regression guard for the escape-after-a-boundary case (`a \*x*`): the
+        // backslash immediately before the delimiter is the constrained match's
+        // *leading boundary group*, hence the first character of the whole
+        // match, so it is still recognized as an escape. The construct must stay
+        // literal rather than becoming a span.
+        let nodes = build_src(Span::new("a \\*x*"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Styled(_))),
+            "an escaped quote after a boundary must not produce a span: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_quotes("a \\*x*")
         );
     }
 
