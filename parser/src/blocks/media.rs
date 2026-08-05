@@ -135,6 +135,22 @@ impl<'src> MediaBlock<'src> {
             };
         }
 
+        // Asciidoctor's block-macro regex requires the target to begin and end
+        // with a non-space character. A target with leading or trailing
+        // whitespace is not recognized as a block macro at all; the line falls
+        // through to be parsed as a description list or paragraph instead. Reject
+        // it here (with no warning) so it is not mistaken for a media block.
+        let target_data = target.item.data();
+
+        if target_data.starts_with(char::is_whitespace)
+            || target_data.ends_with(char::is_whitespace)
+        {
+            return MatchAndWarnings {
+                item: None,
+                warnings: vec![],
+            };
+        }
+
         let Some(open_brace) = target.after.take_prefix("[") else {
             return MatchAndWarnings {
                 item: None,
