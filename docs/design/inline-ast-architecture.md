@@ -783,9 +783,34 @@ Each phase is a reviewable unit with a clear exit gate.
   special-characters output byte-for-byte, alongside precise-span assertions the Strategy-A
   tree cannot make.
 
+  *Step 2 landed as (`Quotes` → `Styled`, introducing nesting):*
+  [`apply_quotes`](../../parser/src/content/inline_builder.rs) recasts the quoted-text step as
+  a transducer: it reuses the *exact* recognition rules the string pipeline matches with –
+  [`quote_subs`](../../parser/src/content/substitution_step.rs), now shared `pub(crate)` – so
+  the recognition is unchanged and only the *sink* differs (§4.1). Each rule is applied to the
+  node tree in order; before matching at a level the transducer descends into the
+  [`Styled`](../../parser/src/inlines/styled.rs) spans earlier rules created, so a later rule
+  can match *inside* an earlier span – which is what makes `*a _b_ c*` and `*a `b` c*` nest
+  into a tree. Matching runs over an **escaped working string** rebuilt from the level's leaves
+  (a `CharRef` contributes its canonical entity, so the boundary classes the patterns key off
+  – `&`, `;` – see exactly what the string pipeline's escaped text presents; an earlier span is
+  one opaque placeholder), and each match maps back to precise `'src` spans: delimiters are
+  consumed, the boundary prefix is kept, and an attributed span (`[.role]#…#`) parses and
+  **retains its own `Attrlist<'src>`** (self-describing – better than the recorder's
+  `attrs: None`), so [`fold_html`](../../parser/src/content/inline_builder.rs) renders it
+  through the same `render_quoted_substitution` the string step calls. A broad differential
+  corpus asserts the fold reproduces the string pipeline's output through the quotes step
+  byte-for-byte (nesting, unconstrained forms, smart quotes, super/subscript, roles/ids,
+  escapes, specials adjacent to delimiters, multi-line runs), alongside structural precise-span
+  assertions the Strategy-A tree cannot make. The one intended divergence – *crossed* delimiters
+  (`` `a *b` c* ``) whose overlapping ranges the string pipeline renders as malformed,
+  improperly-nested tags that no tree can represent – is documented and pinned by a test: the
+  builder seals the inner delimiter inside its opaque span and stays well-formed. This step is
+  **additive**: nothing is wired into the parse path.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
-  1. ✅ Foundation + `SpecialCharacters` (this step).
-  2. `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
+  1. ✅ Foundation + `SpecialCharacters`.
+  2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
   3. `CharacterReplacements` → `CharRef::Replacement`, and `PostReplacement` → `LineBreak`.
   4. `Macros` → `Ref` / `Image` / `Footnote` / `Ui` / `IndexTerm` / `Stem` / `Anchor`,
      capturing the owned `Attrlist<'src>` each construct carries – the step that makes nodes
