@@ -1635,12 +1635,13 @@ fn build_menu_node<'src>(
 ) -> InlineNode<'src> {
     let location = source_slice(pieces, full.clone(), root);
 
-    // Group 1 (the menu name) always participates; on a verbatim match it slices
-    // straight from `'src`, so it borrows.
-    let menu = caps.get(1).map_or_else(
-        || CowStr::from(""),
-        |m| CowStr::from(source_slice(pieces, m.start()..m.end(), root).data()),
-    );
+    // Group 1 (the menu name) is mandatory in the pattern, and on a verbatim
+    // match it slices straight from `'src`, so the name borrows.
+    // `unwrap` is safe: the pattern cannot match without group 1.
+    #[allow(clippy::unwrap_used)]
+    let name = caps.get(1).unwrap();
+
+    let menu = CowStr::from(source_slice(pieces, name.start()..name.end(), root).data());
 
     // Group 2 (the items) is optional.
     let (submenus, item) = split_menu_items(caps.get(2).map(|m| m.as_str()));
@@ -3439,6 +3440,9 @@ mod tests {
             // No UI macro despite macro-ish characters.
             "kbd is a word, not a macro",
             "a menu without a bracket menu:File stays literal",
+            // Passes the `kbd:`/`:[` prefilter but never forms a `kbd:[…]`, so
+            // the pattern sweep finds nothing and the level returns unchanged.
+            "note kbd: and a :[ bracket here",
             // Keyboard: single key and sequences (both delimiters).
             "kbd:[Enter]",
             "press kbd:[F11] to go full screen",
@@ -3668,5 +3672,70 @@ mod tests {
         // The string pipeline, by contrast, *does* build a menuseq with a
         // submenu here – the divergence this test documents.
         assert!(golden_macros_with(source, &experimental_parser()).contains(r#"class="submenu""#));
+    }
+
+    #[test]
+    fn a_kbd_macro_over_a_special_character_is_a_documented_divergence() {
+        // A `kbd:` whose bracket content contains a special character (`<`) is
+        // matched by the string pipeline over the *escaped* text (`kbd:[a&lt;b]`),
+        // but a self-describing node cannot carry that escaped text as an `'src`
+        // slice, so the single-pass builder leaves the macro *unrecognized* here
+        // (deferred to a later increment), exactly as it defers the `&gt;`-submenu
+        // menu form and the image increment defers a macro over a special.
+        let nodes = build_ui(Span::new("kbd:[a<b]"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ui(_))),
+            "a kbd macro crossing an escaped special must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a keyboard macro here.
+        assert!(golden_macros_with("kbd:[a<b]", &experimental_parser()).contains("<kbd>"));
+    }
+
+    #[test]
+    fn split_menu_items_reproduces_the_delimiter_handling() {
+        use super::split_menu_items;
+
+        // Helper to compare against owned expectations.
+        let go = |items: Option<&str>| {
+            let (submenus, item) = split_menu_items(items);
+
+            (
+                submenus.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                item.map(|i| i.to_string()),
+            )
+        };
+
+        // An absent list (an empty `[]`) is a bare menu reference.
+        assert_eq!(go(None), (vec![], None));
+
+        // No delimiter: the whole (right-trimmed) list is a single item.
+        assert_eq!(go(Some("Save As ")), (vec![], Some("Save As".to_string())));
+
+        // Comma: the last part is the item, earlier parts are submenus.
+        assert_eq!(
+            go(Some("Project, Build")),
+            (vec!["Project".to_string()], Some("Build".to_string()))
+        );
+
+        // An escaped `]` inside the list is unescaped before splitting.
+        assert_eq!(
+            go(Some("a\\]b, c")),
+            (vec!["a]b".to_string()], Some("c".to_string()))
+        );
+
+        // The `&gt;` submenu delimiter takes precedence over a comma. This form
+        // never reaches [`build_menu_node`] through the verbatim boundary (its
+        // source `>` is an escaped `CharRef` by macro time), so it is exercised
+        // directly here to keep [`split_menu_items`] a faithful reproduction of
+        // the string replacer's splitting.
+        assert_eq!(
+            go(Some("View &gt; Zoom &gt; Reset")),
+            (
+                vec!["View".to_string(), "Zoom".to_string()],
+                Some("Reset".to_string())
+            )
+        );
     }
 }
