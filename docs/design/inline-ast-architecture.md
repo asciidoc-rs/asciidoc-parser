@@ -867,6 +867,32 @@ Each phase is a reviewable unit with a clear exit gate.
   wired into the parse path. The remaining macro families (`Ref`, `Footnote`, `Ui`,
   `IndexTerm`, `Stem`, `Anchor`) are later sub-steps.
 
+  *Step 4b(i) landed as (`Macros` → `Ui`, the UI-macro family):*
+  [`apply_macros`](../../parser/src/content/inline_builder.rs) now also recognizes the **UI
+  macros** – keyboard (`kbd:[…]`), button (`btn:[…]`), and menu (`menu:…[…]`) – replacing each
+  with a [`Ui`](../../parser/src/inlines/ui.rs) node that carries the split keys / normalized
+  label / menu path the string replacer computes. It reuses the string pipeline's *exact*
+  recognition and splitting, now shared `pub(crate)`
+  ([`INLINE_KBD_BTN_MACRO`](../../parser/src/content/macros.rs),
+  [`INLINE_MENU_MACRO`](../../parser/src/content/macros.rs), `split_kbd_keys`,
+  `normalize_index_text`), so only the *sink* differs (§4.1). Like the string step it runs the
+  families **in order** – keyboard/button, then menu, then image/icon – and recognizes the UI
+  macros only under the `experimental` document attribute, mirroring the gate exactly (with it
+  off a `kbd:[…]` stays literal, in the tree as in the string). The
+  [`fold_html`](../../parser/src/content/inline_builder.rs) fold reconstructs the render
+  parameters from the node and calls the same `render_keyboard`/`render_button`/`render_menu`
+  the string step calls (a menu reads the document's `icons` attribute for its caret), so its
+  output is byte-identical (a differential corpus pins it under `experimental`, and a companion
+  test pins that the macros stay literal *without* it). The image increment's match/rebuild
+  plumbing is generalized into a shared `MacroMatch`/`rebuild_macro_level` seam the families
+  now share. The one intended divergence is the `&gt;`-submenu form
+  (`menu:View[Zoom > Reset]`): its `>` is always an escaped `CharRef` by the time macros run, so
+  it fails the verbatim boundary and is left **unrecognized** for a later increment – documented
+  and pinned by a test, exactly as step 4a defers a macro over a special character (the
+  comma-delimited and bare/single-item menu forms *are* verbatim and covered). This step is
+  **additive**: nothing is wired into the parse path. The remaining macro families (`Ref`,
+  `Footnote`, `IndexTerm`, `Stem`, `Anchor`) are later sub-steps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -875,8 +901,9 @@ Each phase is a reviewable unit with a clear exit gate.
      the step that makes nodes **self-describing** (and the one that finally unblocks
      `render_with`):
      - ✅ **4a.** `Image` / icon (`image:` / `icon:`).
-     - **4b.** the remaining families – `Ref` (links / cross-references), `Footnote`, `Ui`
-       (`kbd:` / `btn:` / `menu:`), `IndexTerm`, `Stem`, `Anchor`.
+     - **4b.** the remaining families, each its own sub-step:
+       - ✅ **4b(i).** `Ui` (`kbd:` / `btn:` / `menu:`).
+       - **4b(ii).** `Ref` (links / cross-references), `Footnote`, `IndexTerm`, `Stem`, `Anchor`.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
      `Callouts` – completing the vocabulary the recorder covers.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make

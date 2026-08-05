@@ -398,13 +398,18 @@ pub(crate) fn basename(path: &str) -> String {
 
 /// Matches a keyboard (`kbd:[…]`) or button (`btn:[…]`) UI macro.
 ///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes keyboard and
+/// button macros with the *exact* same pattern this string step matches with,
+/// changing only the recognition *sink* (a node instead of rendered markup).
+///
 /// ## Examples
 ///
 /// * `kbd:[F3]`
 /// * `kbd:[Ctrl+Shift+T]`
 /// * `kbd:[Ctrl+\]]`
 /// * `btn:[Save]`
-static INLINE_KBD_BTN_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_KBD_BTN_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                    # extended mode; dot matches newline
@@ -451,7 +456,11 @@ impl Replacer for InlineKbdBtnMacroReplacer<'_> {
 /// (e.g. `kbd:[,te]` is the single key `,te`). If the argument ends with the
 /// delimiter, that trailing delimiter is preserved as the value of the final
 /// key (e.g. `kbd:[Ctrl + +]` yields `Ctrl` and `+`).
-fn split_kbd_keys(raw: &str) -> Vec<String> {
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) splits a keyboard macro's
+/// keys exactly as this string step does.
+pub(crate) fn split_kbd_keys(raw: &str) -> Vec<String> {
     let mut keys = raw.trim().to_string();
     if keys.contains(']') {
         keys = keys.replace("\\]", "]");
@@ -497,13 +506,18 @@ fn split_kbd_keys(raw: &str) -> Vec<String> {
 /// The shorthand form (`"File > Save"`) is intentionally not matched here; per
 /// the spec it is not on a standards track.
 ///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes menu macros
+/// with the *exact* same pattern this string step matches with, changing only
+/// the recognition *sink* (a node instead of rendered markup).
+///
 /// ## Examples
 ///
 /// * `menu:File[]`
 /// * `menu:File[Save]`
 /// * `menu:View[Zoom > Reset]`
 /// * `menu:Tools[Project, Build]`
-static INLINE_MENU_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_MENU_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                        # extended mode; dot matches newline
@@ -745,7 +759,11 @@ impl LookaheadReplacer for InlineIndextermReplacer<'_> {
 /// collapses embedded newlines to spaces (Asciidoctor compacts a multi-line
 /// term onto a single line). When `unescape_brackets` is set (the macro forms),
 /// an escaped closing square bracket (`\]`) is also unescaped.
-fn normalize_index_text(text: &str, unescape_brackets: bool) -> String {
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) normalizes a button
+/// macro's label exactly as this string step does.
+pub(crate) fn normalize_index_text(text: &str, unescape_brackets: bool) -> String {
     let normalized = text.trim().replace('\n', " ");
     if unescape_brackets {
         normalized.replace("\\]", "]")
