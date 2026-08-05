@@ -888,9 +888,10 @@ fn apply_character_replacements<'src>(
 }
 
 /// Applies one [`CharacterReplacement`] rule to `nodes`, first descending into
-/// the [`Styled`]/[`Ref`] children earlier steps created (a replacement inside
-/// a span is recognized just as the string pipeline recognizes one inside a
-/// rendered tag), then matching and replacing at this level.
+/// the [`Styled`]/[`Ref`](InlineNode::Ref) children earlier steps created (a
+/// replacement inside a span is recognized just as the string pipeline
+/// recognizes one inside a rendered tag), then matching and replacing at this
+/// level.
 fn apply_one_replacement<'src>(
     repl: &CharacterReplacement,
     nodes: Vec<InlineNode<'src>>,
@@ -978,9 +979,9 @@ fn find_replacement_matches(repl: &CharacterReplacement, s: &str) -> Vec<Replace
     let mut matches = Vec::new();
 
     for caps in repl.pattern.captures_iter(s) {
-        let Some(whole) = caps.get(0) else {
-            continue;
-        };
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let whole = caps.get(0).unwrap();
 
         let full = whole.start()..whole.end();
 
@@ -1165,13 +1166,18 @@ fn apply_post_replacements<'src>(
     }
 
     // Each match's `[content.end, whole.end)` is the trailing ` +` the break
-    // replaces; the line content before it is kept.
+    // replaces; the line content before it is kept. Group 0 (the whole match)
+    // and group 1 (the `(.*)` line content) always participate in this pattern.
     let breaks: Vec<std::ops::Range<usize>> = hard_line_break_pattern()
         .captures_iter(&s)
-        .filter_map(|caps| {
-            let whole = caps.get(0)?;
-            let content = caps.get(1)?;
-            Some(content.end()..whole.end())
+        .map(|caps| {
+            #[allow(clippy::unwrap_used)]
+            let whole = caps.get(0).unwrap();
+
+            #[allow(clippy::unwrap_used)]
+            let content = caps.get(1).unwrap();
+
+            content.end()..whole.end()
         })
         .collect();
 
@@ -1273,18 +1279,15 @@ fn fold_into_html(
                 value: CharRef::Replacement(value),
                 ..
             } => match replacement_type_of(value) {
+                // A replacement the builder produced routes through the renderer,
+                // so a custom backend can override the entity it emits.
                 Some(type_) => renderer.render_character_replacement(type_, out),
 
+                // A value the builder never produces (only a hand-built node can
+                // reach here) still folds losslessly: the general rule every
+                // known replacement follows is one decimal numeric entity per
+                // logical character.
                 None => {
-                    // Every replacement the builder produces has a known type,
-                    // so this is defensive. The general rule the known
-                    // replacements all follow is one decimal numeric entity per
-                    // logical character; fall back to it in release builds.
-                    debug_assert!(
-                        false,
-                        "inline_builder::fold_html reached an unknown replacement value: {value:?}"
-                    );
-
                     for ch in value.chars() {
                         out.push_str(&format!("&#{};", ch as u32));
                     }
@@ -1368,7 +1371,10 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::{apply_quotes, apply_special_characters, build, fold_html};
+    use super::{
+        apply_character_replacements, apply_post_replacements, apply_quotes,
+        apply_special_characters, build, fold_html,
+    };
     use crate::{
         HasSpan, Parser, Span,
         content::{Content, SubstitutionStep},
@@ -2164,6 +2170,12 @@ mod tests {
             "no break here\nsecond line",
             "line one +\nline two\nline three +\nline four",
             "trailing space but no plus \nnext",
+            // A `+` and a newline are both present, but no line ends in ` +`, so
+            // no break is recognized.
+            "a + b\nc",
+            // The content ends exactly in a break, so nothing trails the last
+            // one.
+            "a\nfoo +",
             // Line breaks interacting with replacements and spans.
             "Acme (C) +\nnext line",
             "*bold* +\nplain",
@@ -2332,6 +2344,91 @@ mod tests {
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
             "foo<br>\nbar"
         );
+    }
+
+    #[test]
+    fn character_replacements_recurse_into_ref_children() {
+        // A reference's display text is subject to replacements, just as the
+        // string pipeline processes it inside the rendered anchor. (No macros
+        // step yet builds `Ref` nodes, so this drives the recursion directly.)
+        let loc = Span::new("(C)");
+
+        let reference = InlineNode::Ref(Ref {
+            variant: RefVariant::Link,
+            target: CowStr::from("https://example.com"),
+            children: vec![InlineNode::Text {
+                value: CowStr::from(loc.data()),
+                location: loc,
+            }],
+            roles: vec![],
+            window: None,
+            resolved: None,
+            location: loc,
+        });
+
+        let out = apply_character_replacements(vec![reference], loc);
+
+        assert_eq!(out.len(), 1);
+
+        match &out[0] {
+            InlineNode::Ref(reference) => {
+                assert_eq!(reference.children.len(), 1);
+                assert_replacement(&reference.children[0], "\u{a9}", "(C)");
+            }
+
+            other => panic!("expected Ref, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn post_replacements_recurse_into_ref_children() {
+        // A hard line break inside a reference's display text is likewise
+        // recognized (driven directly, as above).
+        let loc = Span::new("x +\ny");
+
+        let reference = InlineNode::Ref(Ref {
+            variant: RefVariant::Link,
+            target: CowStr::from("https://example.com"),
+            children: vec![InlineNode::Text {
+                value: CowStr::from(loc.data()),
+                location: loc,
+            }],
+            roles: vec![],
+            window: None,
+            resolved: None,
+            location: loc,
+        });
+
+        let out = apply_post_replacements(vec![reference], loc);
+
+        match &out[0] {
+            InlineNode::Ref(reference) => {
+                assert_eq!(reference.children.len(), 3);
+                assert_text(&reference.children[0], "x", 1, 1);
+                assert!(matches!(
+                    reference.children[1],
+                    InlineNode::LineBreak { .. }
+                ));
+                assert_text(&reference.children[2], "\ny", 1, 4);
+            }
+
+            other => panic!("expected Ref, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fold_encodes_an_unknown_replacement_value_per_character() {
+        // A `CharRef::Replacement` value the builder never produces (only a
+        // hand-built node can carry one) still folds losslessly: one decimal
+        // numeric entity per logical character. Here `z` is U+007A.
+        let location = Span::new("z");
+
+        let node = InlineNode::CharRef {
+            value: CharRef::Replacement("z"),
+            location,
+        };
+
+        assert_eq!(fold_html(&[node], &HtmlSubstitutionRenderer {}), "&#122;");
     }
 
     #[test]
