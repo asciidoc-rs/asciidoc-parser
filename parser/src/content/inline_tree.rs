@@ -881,6 +881,10 @@ fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
             width,
             height,
         } => InlineNode::Image(Image {
+            // The Strategy-A recorder does not distinguish `icon:` from
+            // `image:` (both fold through its own recorded markers), so it
+            // leaves this `false`; the single-pass builder sets it honestly.
+            is_icon: false,
             target: CowStr::from(target.clone()),
             alt: alt.clone().map(CowStr::from),
             width: width.clone().map(CowStr::from),
