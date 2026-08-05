@@ -139,10 +139,32 @@ static QUOTED_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("[*_`#^~]").unwrap()
 });
 
-struct QuoteSub {
-    type_: QuoteType,
-    scope: QuoteScope,
-    pattern: Regex,
+/// One quoted-text recognition rule: a [`QuoteType`]/[`QuoteScope`] pairing and
+/// the [`Regex`] that recognizes it.
+///
+/// The rules are `pub(crate)` (via [`quote_subs`]) so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) reuses the *exact* same
+/// patterns the string pipeline matches with – the design's core principle of
+/// changing the recognition *sink*, not the recognition itself (§4.1).
+pub(crate) struct QuoteSub {
+    pub(crate) type_: QuoteType,
+    pub(crate) scope: QuoteScope,
+    pub(crate) pattern: Regex,
+}
+
+/// The ordered quoted-text recognition rules, shared with the single-pass
+/// [`inline_builder`](crate::content::inline_builder). The order is
+/// significant: it encodes Asciidoctor's precedence (see [`QUOTE_SUBS`]).
+pub(crate) fn quote_subs() -> &'static [QuoteSub] {
+    &QUOTE_SUBS
+}
+
+/// Reports whether `text` contains any character that could open a quoted-text
+/// construct. A cheap pre-filter (shared with the single-pass builder) that
+/// lets a caller skip the full pattern sweep when nothing quote-like is
+/// present.
+pub(crate) fn maybe_has_quotes(text: &str) -> bool {
+    QUOTED_TEXT_SNIFF.is_match(text)
 }
 
 // Adapted from QUOTE_SUBS in Ruby Asciidoctor implementation,
