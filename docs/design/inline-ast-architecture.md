@@ -808,10 +808,40 @@ Each phase is a reviewable unit with a clear exit gate.
   builder seals the inner delimiter inside its opaque span and stays well-formed. This step is
   **additive**: nothing is wired into the parse path.
 
+  *Step 3 landed as (`CharacterReplacements` → `CharRef`, `PostReplacement` → `LineBreak`):*
+  two more transducer steps.
+  [`apply_character_replacements`](../../parser/src/content/inline_builder.rs) recognizes the
+  typographic replacements – `(C)`/`(R)`/`(TM)`, em dashes, ellipsis, apostrophes, arrows, and
+  restored entities – replacing each with a
+  [`CharRef::Replacement`](../../parser/src/inlines/char_ref.rs) (logical character(s)) or
+  [`CharRef::Entity`](../../parser/src/inlines/char_ref.rs) (a named/numeric entity as written)
+  leaf, and [`apply_post_replacements`](../../parser/src/content/inline_builder.rs) turns a
+  trailing ` +` at the end of a line into a
+  [`LineBreak`](../../parser/src/inlines/inline_node.rs) leaf. Both reuse the string pipeline's
+  *exact* recognition, now shared `pub(crate)`
+  ([`character_replacements`](../../parser/src/content/substitution_step.rs) and
+  [`hard_line_break_pattern`](../../parser/src/content/substitution_step.rs)), so only the
+  *sink* differs (§4.1). Like the string step, they match over the level's **escaped** working
+  string (reusing the quotes step's leaf-to-string machinery), which is precisely why an arrow
+  (`-&gt;`, `&lt;-`) or a restored entity (`&amp;copy;`) can straddle a `Text`/`CharRef`
+  boundary and still be recognized as one construct; a word character the pattern anchors on
+  (the `w` in `w--`, the letters around a `w'w` apostrophe) stays outside the consumed range and
+  is kept by the surrounding gaps, and an escape (`\(C)`) drops its backslash and wraps nothing.
+  Each leaf is sliced back to a precise `'src` span. The fold reconstructs the replacement's
+  [`CharacterReplacementType`](../../parser/src/parser/inline_substitution_renderer.rs) from its
+  logical value (a bijection) and renders through the same `render_character_replacement` /
+  `render_line_break` the string step calls, so its output is byte-identical. A broad
+  differential corpus pins symbols, dashes, ellipsis, apostrophes, boundary-straddling arrows
+  and entities, escapes, replacements inside spans, and hard line breaks (including their
+  interaction with spans and replacements), alongside structural precise-span assertions the
+  Strategy-A tree cannot make. This step is **additive**: nothing is wired into the parse path.
+  The block-wide `hardbreaks` option (which needs the block's attribute list, not yet threaded
+  into the builder) is deferred to the cutover (step 6).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
-  3. `CharacterReplacements` → `CharRef::Replacement`, and `PostReplacement` → `LineBreak`.
+  3. ✅ `CharacterReplacements` → `CharRef::Replacement`, and `PostReplacement` → `LineBreak`.
   4. `Macros` → `Ref` / `Image` / `Footnote` / `Ui` / `IndexTerm` / `Stem` / `Anchor`,
      capturing the owned `Attrlist<'src>` each construct carries – the step that makes nodes
      **self-describing** (and the one that finally unblocks `render_with`).
