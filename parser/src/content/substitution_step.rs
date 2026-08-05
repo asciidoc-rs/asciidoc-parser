@@ -1093,9 +1093,38 @@ fn apply_character_replacements(
     }
 }
 
-struct CharacterReplacement {
-    type_: CharacterReplacementType,
-    pattern: Regex,
+/// One character-replacement recognition rule: a
+/// [`CharacterReplacementType`] and the [`Regex`] that recognizes it.
+///
+/// The rules are `pub(crate)` (via [`character_replacements`]) so the
+/// single-pass [`inline_builder`](crate::content::inline_builder) reuses the
+/// *exact* same patterns the string pipeline matches with – the design's core
+/// principle of changing the recognition *sink*, not the recognition itself
+/// (§4.1). This mirrors how [`quote_subs`] is shared.
+pub(crate) struct CharacterReplacement {
+    pub(crate) type_: CharacterReplacementType,
+    pub(crate) pattern: Regex,
+}
+
+/// The ordered character-replacement recognition rules, shared with the
+/// single-pass [`inline_builder`](crate::content::inline_builder). The order is
+/// significant: it encodes Asciidoctor's precedence (see [`REPLACEMENTS`]).
+pub(crate) fn character_replacements() -> &'static [CharacterReplacement] {
+    &REPLACEMENTS
+}
+
+/// Reports whether `text` contains any character that could open a
+/// character-replacement construct. A cheap pre-filter (shared with the
+/// single-pass builder) that lets a caller skip the full pattern sweep when
+/// nothing replaceable is present.
+pub(crate) fn maybe_has_replacements(text: &str) -> bool {
+    REPLACEABLE_TEXT_SNIFF.is_match(text)
+}
+
+/// The hard-line-break recognition pattern (a line ending in ` +`), shared with
+/// the single-pass [`inline_builder`](crate::content::inline_builder).
+pub(crate) fn hard_line_break_pattern() -> &'static Regex {
+    &HARD_LINE_BREAK
 }
 
 static REPLACEABLE_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {

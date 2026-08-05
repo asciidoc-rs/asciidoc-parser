@@ -30,7 +30,8 @@ pub use substitution_group::SubstitutionGroup;
 mod substitution_step;
 pub use substitution_step::SubstitutionStep;
 pub(crate) use substitution_step::{
-    AttributeMissing, QuoteSub, maybe_has_quotes, quote_subs,
+    AttributeMissing, CharacterReplacement, QuoteSub, character_replacements,
+    hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements, quote_subs,
     substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
     substitute_attributes_in_text,
 };
