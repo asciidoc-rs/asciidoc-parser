@@ -53,15 +53,29 @@ fn absolute_cell_directive_origin(
     }
 }
 
-/// Attributes that an AsciiDoc table cell may modify even when they are set in
-/// the parent document.
+/// Attributes that an AsciiDoc table cell may modify even when they hold a
+/// value inherited from the parent document.
 ///
 /// An AsciiDoc cell inherits the parent's attributes and cannot modify them,
 /// but the AsciiDoc specification carves out a handful of exceptions:
 /// `doctype`, `toc`, `notitle` (and its complement, `showtitle`), and
 /// `compat-mode`.
-const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
-    &["doctype", "toc", "notitle", "showtitle", "compat-mode"];
+///
+/// `sectnumlevels` is also listed here. It is header-settable (its built-in
+/// default carries a value of `3`) and an AsciiDoc cell is a nested, standalone
+/// document whose leading attribute lines form its own header, so the cell may
+/// set its own `sectnumlevels` – matching Asciidoctor, where a cell that
+/// assigns `:sectnumlevels:` is honored rather than pinned to the inherited
+/// default. Without this exception the built-in default value would lock the
+/// attribute for the cell, silently ignoring the cell-body assignment.
+const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] = &[
+    "doctype",
+    "toc",
+    "notitle",
+    "showtitle",
+    "compat-mode",
+    "sectnumlevels",
+];
 
 /// A table is a delimited block that arranges content into a grid of rows and
 /// columns.

@@ -987,6 +987,49 @@ fn asciidoc_cell_may_set_an_attribute_unset_in_the_parent() {
 }
 
 #[test]
+fn asciidoc_cell_may_set_sectnumlevels() {
+    // `sectnumlevels` has a built-in default value (`3`), but the parent did not
+    // set it, so the built-in default must not lock it inside the cell. An
+    // AsciiDoc cell is a nested, standalone document whose leading attribute lines
+    // are its own header, and `sectnumlevels` is header-settable, so a cell-body
+    // assignment is honored: the cell's resolved `sectnumlevels` reflects the
+    // value the cell set (`1`), not the inherited default (`3`), matching
+    // Asciidoctor.
+    let doc = Parser::default()
+        .parse("|===\na|\n:toc:\n:sectnums:\n:sectnumlevels: 1\n\n== Alpha\n\n=== Beta\n\nx\n|===");
+
+    let table = doc
+        .child_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let TableCellContent::AsciiDoc(cell) = table.body_rows()[0].cells()[0].content() else {
+        panic!("expected AsciiDoc cell content");
+    };
+
+    assert_eq!(
+        cell.attribute_value("sectnumlevels"),
+        crate::document::InterpretedValue::Value("1".to_string())
+    );
+
+    // The other attributes the cell set are likewise honored (a bare `:sectnums:`
+    // resolves to its `all` default).
+    assert_eq!(
+        cell.attribute_value("sectnums"),
+        crate::document::InterpretedValue::Value("all".to_string())
+    );
+
+    // The parent document is unaffected: its `sectnumlevels` stays at the default.
+    assert_eq!(
+        doc.attribute_value("sectnumlevels"),
+        crate::document::InterpretedValue::Value("3".to_string())
+    );
+}
+
+#[test]
 fn asciidoc_cell_may_modify_an_exempt_attribute() {
     // A handful of attributes are exempt from the cell lock; `compat-mode` is one
     // of them, so a cell may modify it even though the parent set it, while a
