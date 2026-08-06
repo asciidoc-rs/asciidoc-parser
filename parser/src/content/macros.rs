@@ -1161,7 +1161,14 @@ impl Replacer for InlineLinkReplacer<'_> {
     }
 }
 
-static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+/// Matches an inline link (`link:target[…]`) or `mailto:` macro.
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes the link and
+/// `mailto:` macros with the *exact* same pattern this string step matches
+/// with, changing only the recognition *sink* (a node instead of rendered
+/// markup).
+pub(crate) static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                # (?x) extended mode, (?s) dot matches newline
@@ -2071,7 +2078,13 @@ fn normalize_footnote_text(content: &str) -> String {
     content.trim().replace('\n', " ").replace("\\]", "]")
 }
 
-static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
+/// Sniffs a leading URI scheme (e.g. `https://`), used to strip it from a link's
+/// display text under the `hide-uri-scheme` document attribute.
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) reproduces the same
+/// `hide-uri-scheme` display text the string step's link macro computes.
+pub(crate) static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(r#"^\p{alpha}[\p{alpha}\p{digit}.+-]+:/{0,2}"#).unwrap()
 });
