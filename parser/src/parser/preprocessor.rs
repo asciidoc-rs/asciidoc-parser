@@ -3651,6 +3651,28 @@ mod tests {
     }
 
     #[test]
+    fn ifdef_single_line_escaped_include_in_brackets_keeps_backslash() {
+        // An *escaped* include in a single-line conditional body is emitted
+        // literally with its backslash intact, matching Asciidoctor. Its reader
+        // decrements the look-ahead – forcing the body to be re-read as an
+        // include – only when the body starts with the unescaped `include::`, so
+        // `\include::…` is left as written rather than being unescaped the way a
+        // normal reader line is. A normal line `\include::…` does drop the
+        // backslash; the two paths legitimately differ.
+        let handler = InlineFileHandler::from_pairs([("snippet.adoc", "snippet content\n")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let source = ":foo:\n\nifdef::foo[\\include::snippet.adoc[]]";
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(output, ":foo:\n\n\\include::snippet.adoc[]\n");
+    }
+
+    #[test]
     fn ifdef_single_line_include_in_brackets_becomes_link_when_secure() {
         // At `SafeMode::Secure` (the default) the include directive is disabled,
         // so the single-line body is rewritten to a link to its target – the
