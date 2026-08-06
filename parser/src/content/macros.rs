@@ -816,7 +816,12 @@ fn strip_see_and_seealso(term: &str) -> String {
 //
 // `InlineLinkReplacer` normalizes the three capture-group sets into a single
 // view (see `NormalizedCaps`), so the numbering below is only referenced there.
-static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
+//
+// Shared `pub(crate)` so the single-pass
+// [`inline_builder`](crate::content::inline_builder) recognizes auto-links and
+// formal-URL links with the *exact* same pattern this string step matches with,
+// changing only the recognition *sink* (a node instead of rendered markup).
+pub(crate) static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?msx)
@@ -862,7 +867,12 @@ static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
 /// one branch participates in any given match; this resolves the relevant
 /// groups so the replacer doesn't have to special-case the branch numbering
 /// everywhere.
-struct NormalizedCaps<'c, 't> {
+///
+/// Shared `pub(crate)` (with the string replacer) so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) resolves an `INLINE_LINK`
+/// match's branch through the *same* group-numbering logic, rather than
+/// duplicating that knowledge at its own recognition sink.
+pub(crate) struct NormalizedCaps<'c, 't> {
     caps: &'c Captures<'t>,
 
     /// True when the ANGLE branch matched (prefix was `&lt;`). Corresponds to
@@ -884,7 +894,7 @@ struct NormalizedCaps<'c, 't> {
 }
 
 impl<'c, 't> NormalizedCaps<'c, 't> {
-    fn new(caps: &'c Captures<'t>) -> Self {
+    pub(crate) fn new(caps: &'c Captures<'t>) -> Self {
         if caps.get(1).is_some() {
             // ANGLE branch.
             NormalizedCaps {
@@ -925,19 +935,43 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
         }
     }
 
+    /// Whether the ANGLE branch matched (its prefix was a leading `&lt;`).
+    pub(crate) fn is_angle(&self) -> bool {
+        self.is_angle
+    }
+
+    /// Whether the LINK-MACRO branch matched (a literal `link:` prefix paired
+    /// with a trailing `[…]`). The single-pass builder leaves this branch to
+    /// its `link:`/`mailto:` pass, which produces the identical node.
+    pub(crate) fn is_link_macro(&self) -> bool {
+        self.prefix == 8
+    }
+
     fn prefix(&self) -> &'t str {
         self.caps.get(self.prefix).map_or("", |m| m.as_str())
+    }
+
+    /// The boundary-prefix capture (a leading `&lt;`, a `link:`, or the single
+    /// boundary character before a non-angle URL), if it participated.
+    pub(crate) fn prefix_str(&self) -> &'t str {
+        self.prefix()
     }
 
     fn scheme(&self) -> &'t str {
         self.caps.get(self.scheme).map_or("", |m| m.as_str())
     }
 
-    fn target(&self) -> Option<Match<'t>> {
+    /// The scheme capture (`https://`, `\https://`, …) as a [`Match`], so a
+    /// caller can recover its source offset.
+    pub(crate) fn scheme_match(&self) -> Option<Match<'t>> {
+        self.caps.get(self.scheme)
+    }
+
+    pub(crate) fn target(&self) -> Option<Match<'t>> {
         self.caps.get(self.target)
     }
 
-    fn attrlist(&self) -> Option<Match<'t>> {
+    pub(crate) fn attrlist(&self) -> Option<Match<'t>> {
         self.caps.get(self.attrlist)
     }
 
@@ -945,7 +979,7 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
         self.angle_url.and_then(|g| self.caps.get(g))
     }
 
-    fn bare(&self) -> Option<Match<'t>> {
+    pub(crate) fn bare(&self) -> Option<Match<'t>> {
         self.bare.and_then(|g| self.caps.get(g))
     }
 }
