@@ -4050,6 +4050,9 @@ mod tests {
             // mailto: labeled and bare (bare shows the address).
             "mailto:hello@example.org[Email us]",
             "mailto:hello@example.org[]",
+            // Degenerate empty targets: a bare link/mailto with no display text.
+            "link:[]",
+            "mailto:[]",
             // A macro embedded in surrounding flow, and next to other constructs.
             "See link:about.html[about] for details.",
             "*bold* then link:x.html[X] and _em_",
@@ -4073,6 +4076,47 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_with_hide_uri_scheme() {
+        // Under `hide-uri-scheme`, a bare link's display text drops the URI
+        // scheme; the builder reproduces the string step's `URI_SNIFF` stripping,
+        // including the fall-back to the whole target when the strip leaves
+        // nothing. Every fixture is a non-`://` `link:` target, so the string
+        // pipeline routes it through the same `INLINE_LINK_MACRO` the builder
+        // uses (a `://` target is `INLINE_LINK`'s territory, a later increment).
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute_bool(
+            "hide-uri-scheme",
+            true,
+            ModificationContext::Anywhere,
+        );
+
+        let fixtures = [
+            // A scheme prefix is stripped, leaving the remainder as the text.
+            "link:foo:bar[]",
+            // The whole target is a scheme: the strip leaves nothing, so the
+            // text falls back to the target itself.
+            "link:foo:[]",
+            // No scheme to strip: the target shows unchanged.
+            "link:index.html[]",
+            // A bare mailto shows the address regardless of `hide-uri-scheme`.
+            "mailto:hello@example.org[]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = super::fold_html(&build(Span::new(fixture), &parser), &renderer, &parser);
+
+            assert_eq!(
+                folded,
+                golden_macros_with(fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
