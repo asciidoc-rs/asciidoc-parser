@@ -39,22 +39,25 @@
 //!   (`&amp;copy;`) can straddle a `Text`/`CharRef` boundary.
 //! - [`apply_macros`] recognizes **image and icon macros** (`image:target[…]`,
 //!   `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
-//!   the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`), and
+//!   the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
 //!   **auto-links and formal-URL links** (`https://example.org`,
-//!   `https://example.org[text]`), replacing each with an
-//!   [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui), or
-//!   [`Ref`](InlineNode::Ref) node. An image node captures its own owned
-//!   [`Attrlist`] – the step that makes a macro node *self-describing*; a link
-//!   node bakes its computed display text into [`Text`](InlineNode::Text)
-//!   children so its fold needs no build-time state. Each family reuses the
-//!   shared pattern the string step matches with ([`INLINE_IMAGE_MACRO`],
-//!   [`INLINE_KBD_BTN_MACRO`], [`INLINE_MENU_MACRO`], [`INLINE_LINK_MACRO`],
-//!   [`INLINE_LINK`]), builds `'src`-borrowing nodes for verbatim macros only
+//!   `https://example.org[text]`), and the **`xref:` cross-reference macro**
+//!   (`xref:id[text]`), replacing each with an [`Image`](InlineNode::Image),
+//!   [`Ui`](InlineNode::Ui), or [`Ref`](InlineNode::Ref) node. An image node
+//!   captures its own owned [`Attrlist`] – the step that makes a macro node
+//!   *self-describing*; a link or cross-reference node bakes its computed display
+//!   text into [`Text`](InlineNode::Text) children so its fold needs no
+//!   build-time state. Each family reuses the shared pattern the string step
+//!   matches with ([`INLINE_IMAGE_MACRO`], [`INLINE_KBD_BTN_MACRO`],
+//!   [`INLINE_MENU_MACRO`], [`INLINE_LINK_MACRO`], [`INLINE_LINK`],
+//!   [`INLINE_XREF`]), builds `'src`-borrowing nodes for verbatim macros only
 //!   (see [`apply_macros`] for the boundary the escaped-content case defers),
 //!   and – for the UI macros – is recognized only under the `experimental`
-//!   document attribute, exactly as the string step gates them. The remaining
-//!   macro families (cross-references, footnotes, index terms, anchors, STEM)
-//!   are later increments.
+//!   document attribute, exactly as the string step gates them. The
+//!   cross-reference pass claims only the same-document `xref:` macro form; the
+//!   shorthand (`<<id>>`), inter-document targets, and an attribute-list text are
+//!   deferred. The remaining macro families (footnotes, index terms, anchors,
+//!   STEM) are later increments.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
@@ -101,9 +104,11 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{
         CharacterReplacement, INLINE_IMAGE_MACRO, INLINE_KBD_BTN_MACRO, INLINE_LINK,
-        INLINE_LINK_MACRO, INLINE_MENU_MACRO, NormalizedCaps, QuoteSub, URI_SNIFF, basename,
-        character_replacements, hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements,
-        normalize_index_text, normalize_text_lf_escaped_bracket, quote_subs, split_kbd_keys,
+        INLINE_LINK_MACRO, INLINE_MENU_MACRO, INLINE_XREF, NormalizedCaps, QuoteSub, URI_SNIFF,
+        basename, character_replacements, hard_line_break_pattern, maybe_has_quotes,
+        maybe_has_replacements, normalize_index_text, normalize_text_lf_escaped_bracket,
+        quote_subs, split_kbd_keys,
+        xref_target::{XrefTarget, interpret_xref_target},
     },
     inlines::{
         CharRef, Image, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled, Ui, UiKind,
@@ -111,7 +116,7 @@ use crate::{
     parser::{
         CharacterReplacementType, IconRenderParams, ImageRenderParams, InlineSubstitutionRenderer,
         LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, SpecialCharacter,
-        has_dangerous_scheme,
+        XrefRenderParams, has_dangerous_scheme,
     },
     strings::CowStr,
 };
@@ -1255,7 +1260,14 @@ fn apply_macros<'src>(
 
     // The `link:`/`mailto:` macro runs after the auto-link pass, mirroring the
     // string step's order.
-    link_macro_level(nodes, root, parser)
+    let nodes = link_macro_level(nodes, root, parser);
+
+    // Cross-references (`xref:id[…]`) run last, after the link families. The
+    // string step runs the e-mail, then the anchor pass between links and
+    // cross-references; both are later increments, so with them absent this
+    // preserves the string step's relative order for the constructs the builder
+    // recognizes so far.
+    xref_macros_level(nodes, root)
 }
 
 /// One recognized macro match at a level, in absolute match-string byte
@@ -2288,6 +2300,180 @@ fn build_link_node<'src>(
     }))
 }
 
+/// Matches `INLINE_XREF` at this level's escaped text, replacing each
+/// recognized `xref:` macro with the [`Ref`](InlineNode::Ref)`{Xref}` node it
+/// produces and leaving everything else in place.
+fn xref_macros_level<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let (s, pieces) = build_match_string(&nodes);
+
+    // Cheap pre-filter: only the `xref:` macro form is recognized here. The
+    // shorthand form (`<<id>>`, seen as `&lt;&lt;id&gt;&gt;`) is deferred – its
+    // delimiters are `&lt;`/`&gt;` `CharRef`s, so the match can never be wholly
+    // verbatim – so its `&lt;&lt;` trigger is deliberately not pre-filtered on.
+    if !s.contains("xref:") {
+        return nodes;
+    }
+
+    let matches = find_xref_matches(&s, &pieces, root);
+
+    if matches.is_empty() {
+        return nodes;
+    }
+
+    rebuild_macro_level(&nodes, &pieces, &s, matches)
+}
+
+/// Finds every recognized `xref:` macro at this level, skipping any match that
+/// is not wholly verbatim source or that this increment defers (see
+/// [`build_xref_node`]).
+fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<MacroMatch<'src>> {
+    let mut matches = Vec::new();
+
+    for caps in INLINE_XREF.captures_iter(s) {
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let whole = caps.get(0).unwrap();
+
+        let full = whole.start()..whole.end();
+
+        // Only a wholly-verbatim match can slice its target/text from `'src`; a
+        // match crossing an escaped special or a rendered span is left for a
+        // later increment. (The shorthand form always fails this, since its
+        // `&lt;&lt;` / `&gt;&gt;` delimiters are `CharRef`s.)
+        if !range_is_verbatim(pieces, &full) {
+            continue;
+        }
+
+        if whole.as_str().starts_with('\\') {
+            matches.push(MacroMatch {
+                kind: MacroMatchKind::Unescape {
+                    backslash: full.start,
+                },
+                full,
+            });
+
+            continue;
+        }
+
+        match build_xref_node(&caps, &full, pieces, root) {
+            Some(node) => matches.push(MacroMatch {
+                kind: MacroMatchKind::Node {
+                    consumed: full.clone(),
+                    node: Box::new(node),
+                },
+                full,
+            }),
+
+            // A form this increment defers (the shorthand, an inter-document
+            // target, or an attribute-list-in-text macro) is left as literal
+            // source for a later increment.
+            None => continue,
+        }
+    }
+
+    matches
+}
+
+/// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a verbatim `xref:`
+/// macro match, computing the target and display text exactly as the string
+/// replacer does so the fold reproduces the same bytes. Returns `None` for a
+/// form this increment defers.
+///
+/// The scope this increment claims is the **same-document** `xref:` macro form
+/// (`xref:id[]`, `xref:id[Reference Text]`). Three forms are deferred, each to
+/// a later increment:
+///
+/// - the **shorthand** form (`<<id>>`): group 3 is absent, and the match is
+///   never verbatim anyway (its `&lt;`/`&gt;` delimiters are `CharRef`s);
+/// - an **inter-document** target (`xref:other.adoc#frag[]`): its rendering
+///   needs a *derived* destination the [`Ref`] node does not carry;
+/// - a **text carrying an attribute list** (an `=`, for `window`/`role`/
+///   `xrefstyle`): it is parsed as an [`Attrlist`] the node cannot hold yet,
+///   exactly as [`build_link_node`] defers the analogous link form.
+///
+/// The display text becomes the node's children as a single
+/// [`Text`](InlineNode::Text), so the fold recovers the provided text by
+/// folding the children and needs no build-time state; an empty text yields no
+/// children, which the fold reads as "no text provided" (the bracketed `[id]`
+/// fallback).
+///
+/// As in the additive builder generally, this performs *no* recognition side
+/// effect – notably it does **not** register the reference for resolution,
+/// which the string replacer does by recording a deferred `XrefSegment`; the
+/// cutover (design §5.2 Phase 4, step 6) wires resolution to the tree.
+fn build_xref_node<'src>(
+    caps: &regex::Captures<'_>,
+    full: &std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+) -> Option<InlineNode<'src>> {
+    // Group 3 is the `xref:` macro target; when it is absent the match is the
+    // shorthand form, which this increment defers.
+    let raw_target = caps.get(3)?.as_str();
+
+    // This increment recognizes only same-document references. An empty target
+    // (`xref:#[]`) points at the document as a whole – which carries a derived
+    // destination – and an inter-document target needs one too; both are
+    // deferred.
+    let target = match interpret_xref_target(raw_target, true) {
+        XrefTarget::SameDocument(id) if !id.is_empty() => id,
+        _ => return None,
+    };
+
+    let raw_text = caps.get(4).map_or("", |m| m.as_str());
+
+    // A text carrying an attribute list (an `=`) is parsed from a
+    // newline-normalized copy of the text into named attributes (`window`,
+    // `role`, `xrefstyle`); it cannot be carried on the node yet, so defer the
+    // whole macro, mirroring the string replacer's `raw_text.contains('=')`
+    // branch and [`build_link_node`].
+    if raw_text.contains('=') {
+        return None;
+    }
+
+    let location = source_slice(pieces, full.clone(), root);
+
+    let children = if raw_text.is_empty() {
+        vec![]
+    } else {
+        // The provided text becomes the node's children, located at the
+        // bracketed text.
+        #[allow(clippy::unwrap_used)]
+        let text_span = caps.get(4).unwrap();
+
+        let text_location = source_slice(pieces, text_span.start()..text_span.end(), root);
+
+        // An escaped bracket (`\]`) makes the logical text a computed (owned)
+        // value – a *synthesized* `Text` whose value need not coincide with its
+        // source, mirroring the string replacer's `raw_text.replace`. Without
+        // one the text is verbatim, so it borrows the very bytes its location
+        // covers (the builder's `'src`-borrowing goal).
+        let value = if raw_text.contains("\\]") {
+            CowStr::from(raw_text.replace("\\]", "]"))
+        } else {
+            CowStr::from(text_location.data())
+        };
+
+        vec![InlineNode::Text {
+            value,
+            location: text_location,
+        }]
+    };
+
+    Some(InlineNode::Ref(Ref {
+        variant: RefVariant::Xref,
+        target: CowStr::from(target),
+        children,
+        roles: vec![],
+        window: None,
+        resolved: None,
+        location,
+    }))
+}
+
 // ─── Post replacements (hard line breaks) ─────────────────────────────────
 
 /// The post-replacement substitution, as a node transducer: a line ending in
@@ -2400,9 +2586,10 @@ fn replacement_type_of(value: &str) -> Option<CharacterReplacementType> {
 /// This is the fold over the *public* [`InlineNode`] tree. It handles the node
 /// kinds the transducer steps produce so far – [`Text`](InlineNode::Text),
 /// [`CharRef`](InlineNode::CharRef), [`Styled`], [`Image`](InlineNode::Image),
-/// and [`LineBreak`](InlineNode::LineBreak), plus the design-legal
-/// [`Raw`](InlineNode::Raw) leaf; a later increment extends it as the
-/// transducer grows new kinds.
+/// [`Ui`](InlineNode::Ui), [`Ref`](InlineNode::Ref) (both link and
+/// cross-reference), and [`LineBreak`](InlineNode::LineBreak), plus the
+/// design-legal [`Raw`](InlineNode::Raw) leaf; a later increment extends it as
+/// the transducer grows new kinds.
 pub(crate) fn fold_html(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineSubstitutionRenderer,
@@ -2493,6 +2680,10 @@ fn fold_into_html(
                 fold_link(reference, renderer, parser, out);
             }
 
+            InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => {
+                fold_xref(reference, renderer, parser, out);
+            }
+
             InlineNode::Styled(styled) => {
                 // Fold the children to the body, then wrap it exactly as the
                 // string pipeline's quotes step did: the same `QuoteType`,
@@ -2517,11 +2708,11 @@ fn fold_into_html(
 
             other => {
                 // The steps wired up so far produce only `Text`,
-                // `CharRef::Special`, `Styled`, `Image`, `Ui`, and `LineBreak`
-                // nodes, and this fold additionally emits the design-legal `Raw`
-                // leaf; no other node kind reaches the fold in this increment. A
-                // later increment fills in the arms above as the transducer
-                // grows new kinds.
+                // `CharRef::Special`, `Styled`, `Image`, `Ui`, `Ref` (link and
+                // cross-reference), and `LineBreak` nodes, and this fold
+                // additionally emits the design-legal `Raw` leaf; no other node
+                // kind reaches the fold in this increment. A later increment
+                // fills in the arms above as the transducer grows new kinds.
                 // Guard against a premature caller in debug builds and emit
                 // nothing in release, mirroring the safe defensive fallback in
                 // [`content`](super::content).
@@ -2694,6 +2885,51 @@ fn fold_link(
     };
 
     renderer.render_link(&params, out);
+}
+
+/// Folds a cross-reference [`Ref`](InlineNode::Ref) node through the same
+/// `render_xref` the string pipeline's macros step feeds at resolution time,
+/// reconstructing the [`XrefRenderParams`] from the node: the provided text is
+/// the fold of the children (empty children ⇒ no text, so the renderer emits
+/// the bracketed `[id]` fallback), and the target/window/roles come straight
+/// off the node.
+///
+/// This increment recognizes only same-document references, which the additive
+/// builder leaves **unresolved** (no catalog-resolution pass runs) and which
+/// carry no *derived* destination – so the fold always takes `render_xref`'s
+/// unresolved branch, where `xrefstyle` and `derived` play no part. The cutover
+/// (design §5.2 Phase 4, step 6) wires resolution to the tree, at which point a
+/// resolved reference renders through its resolved destination.
+fn fold_xref(
+    reference: &Ref<'_>,
+    renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
+    out: &mut String,
+) {
+    let mut provided = String::new();
+    fold_into_html(&reference.children, renderer, parser, &mut provided);
+
+    let provided_text = if provided.is_empty() {
+        None
+    } else {
+        Some(provided.as_str())
+    };
+
+    // `XrefRenderParams::roles` is `&[String]`; the node's `CowStr` roles are
+    // materialized into a `String` vector for the borrow.
+    let roles: Vec<String> = reference.roles.iter().map(|r| r.to_string()).collect();
+
+    let params = XrefRenderParams {
+        target: reference.target.as_ref(),
+        provided_text,
+        window: reference.window.as_deref(),
+        roles: &roles,
+        xrefstyle: None,
+        derived: None,
+        resolved: reference.resolved.as_ref(),
+    };
+
+    renderer.render_xref(&params, out);
 }
 
 #[cfg(test)]
@@ -4990,5 +5226,221 @@ mod tests {
 
         // The string pipeline, by contrast, applies the role.
         assert!(golden_macros(source).contains(r#"class="hl""#));
+    }
+
+    // ─── Macros (cross-references) ────────────────────────────────────────
+
+    /// The string pipeline's output through the **macros** step for `source`,
+    /// with any deferred cross-references finalized to their unresolved
+    /// fallback. Unlike [`golden_macros`], the macros step defers a
+    /// cross-reference to a placeholder rather than rendering it, so the
+    /// placeholder must be finalized – no catalog resolution runs, so the
+    /// result is the unresolved-fallback rendering the additive builder's
+    /// fold (always unresolved) must reproduce.
+    fn golden_xref_with(source: &str, parser: &Parser) -> String {
+        let mut content = Content::from(Span::new(source));
+        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
+        SubstitutionStep::Quotes.apply(&mut content, parser, None);
+        SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
+        SubstitutionStep::Macros.apply(&mut content, parser, None);
+        SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
+
+        // Finalize as the real pipeline does after the last step, capturing the
+        // placeholder template and rebuilding the unresolved fallback.
+        content.finalize_deferred(&HtmlSubstitutionRenderer {});
+        content.rendered_str().to_string()
+    }
+
+    /// [`golden_xref_with`] with a default parser.
+    fn golden_xref(source: &str) -> String {
+        golden_xref_with(source, &Parser::default())
+    }
+
+    /// Asserts that `node` is a cross-reference [`Ref`](InlineNode::Ref), and
+    /// returns it.
+    fn assert_xref<'a, 'src>(node: &'a InlineNode<'src>) -> &'a Ref<'src> {
+        match node {
+            InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => reference,
+
+            other => panic!("expected an xref Ref, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_through_xrefs() {
+        // For each fixture, folding the single-pass tree (all five steps)
+        // reproduces the string pipeline's output byte-for-byte. This is the
+        // differential corpus (design §5.3) that pins the `xref:` macro
+        // increment. Every fixture is a *verbatim*, same-document `xref:` macro
+        // with attribute-list-free text – the boundary this increment claims
+        // (the shorthand form, an inter-document target, or an attribute-list
+        // text is deferred and lives in a divergence test below).
+        let fixtures = [
+            // No cross-reference despite macro-ish characters.
+            "plain text without a reference",
+            "an xref without a bracket xref:foo stays literal",
+            // Macro form: bracketed reference text, and empty (bracketed
+            // fallback).
+            "xref:install[Installation]",
+            "xref:install[]",
+            "xref:sect-one[Section One]",
+            // An explicit same-document reference (`#id`).
+            "xref:#install[Install]",
+            // An escaped `]` inside the text is unescaped.
+            "xref:foo[a\\]b]",
+            // A macro embedded in surrounding flow, and next to other constructs.
+            "See xref:install[the guide] for details.",
+            "*bold* then xref:x[X] and _em_",
+            "a copyright (C) then xref:x[X]",
+            // Escapes: the macro stays literal, minus the backslash.
+            "\\xref:install[Installation]",
+            "\\xref:install[]",
+            // A macro inside a rendered span (recognized inside the span body).
+            "*see xref:x[X]*",
+            "_xref:y[Y] in em_",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_xref(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_xref_macro_becomes_a_ref_node() {
+        let nodes = build_src(Span::new("xref:install[Installation]"));
+
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_xref(&nodes[0]);
+
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(link_text_of(reference), "Installation");
+        assert!(reference.roles.is_empty());
+        assert_eq!(reference.window, None);
+        assert_eq!(reference.resolved, None);
+
+        // Its location covers the whole macro, the `[…]` included.
+        assert_eq!(reference.location.data(), "xref:install[Installation]");
+        assert_eq!(reference.location.line(), 1);
+        assert_eq!(reference.location.col(), 1);
+    }
+
+    #[test]
+    fn an_empty_xref_macro_has_no_children() {
+        // An empty text yields no children; the fold reads that as "no text
+        // provided" and renders the bracketed `[id]` fallback.
+        let nodes = build_src(Span::new("xref:install[]"));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert!(reference.children.is_empty());
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref("xref:install[]")
+        );
+    }
+
+    #[test]
+    fn an_xref_display_text_is_located_at_its_source() {
+        // The display text's `Text` child locates at the bracketed text, not the
+        // whole macro.
+        let nodes = build_src(Span::new("xref:install[Installation]"));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.children.len(), 1);
+        assert_text(&reference.children[0], "Installation", 1, 14);
+    }
+
+    #[test]
+    fn an_xref_is_recognized_inside_a_span() {
+        // A cross-reference can appear inside a rendered span; the transducer
+        // descends into the span body and builds the node there.
+        let nodes = build_src(Span::new("*see xref:x[X]*"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+        assert_eq!(children.len(), 2);
+        assert_text(&children[0], "see ", 1, 2);
+
+        let reference = assert_xref(&children[1]);
+        assert_eq!(reference.target.as_ref(), "x");
+        assert_eq!(link_text_of(reference), "X");
+    }
+
+    #[test]
+    fn an_escaped_xref_stays_literal() {
+        // `\xref:…` drops the backslash and keeps the macro as literal text – no
+        // reference node – exactly as the string replacer's escape branch does.
+        let source = "\\xref:install[Installation]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an escaped xref must not produce a reference node: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
+    }
+
+    #[test]
+    fn an_xref_shorthand_is_a_documented_divergence() {
+        // The shorthand `<<id>>` is seen as `&lt;&lt;id&gt;&gt;` by macro time,
+        // so its delimiters are escaped `CharRef`s and the match is never
+        // verbatim; the single-pass builder leaves it unrecognized for a later
+        // increment.
+        let nodes = build_src(Span::new("<<install>>"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "the xref shorthand must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a reference here.
+        assert!(golden_xref("<<install>>").contains("<a href"));
+    }
+
+    #[test]
+    fn an_inter_document_xref_is_a_documented_divergence() {
+        // An inter-document target (`other.adoc#frag`) renders through a
+        // *derived* destination the `Ref` node does not carry, so the single-pass
+        // builder defers it to a later increment (left literal).
+        let source = "xref:other.adoc#frag[Elsewhere]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an inter-document xref must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a reference here.
+        assert!(golden_xref(source).contains("<a href"));
+    }
+
+    #[test]
+    fn an_xref_attribute_list_is_a_documented_divergence() {
+        // An `xref:` text carrying an `=` splits into an attribute list (here a
+        // role), which the string replacer parses from a newline-normalized copy
+        // of the text – not from `'src`. The builder cannot carry that as an
+        // `Attrlist<'src>` yet, so it defers the whole macro (left literal).
+        let source = "xref:install[Installation,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an attribute-list-in-text xref must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, applies the role.
+        assert!(golden_xref(source).contains(r#"class="hl""#));
     }
 }
