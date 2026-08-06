@@ -1368,8 +1368,9 @@ impl Parser {
     /// `showtitle` takes precedence: if present, the title shows precisely when
     /// it is set. Otherwise `notitle`, if present, hides the title when set.
     /// When neither attribute is present, `default_shown` decides – a
-    /// standalone document (such as a nested AsciiDoc table cell) shows its
-    /// title, while an embedded document does not.
+    /// standalone document shows its title, while embedded output does not.
+    /// A nested AsciiDoc table cell is embedded output, so it passes
+    /// `default_shown = false`.
     pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
         if self.has_attribute("showtitle") {
             self.is_attribute_set("showtitle")
