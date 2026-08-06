@@ -4687,10 +4687,17 @@ mod tests {
             // A bracketed / parenthesized URL keeps the surrounding punctuation.
             "(see https://example.org)",
             "[https://example.org]",
+            // A ')' adjacent to a stripped ';'/':' is stripped out with it,
+            // keeping both as literal text after the link.
+            "See (https://example.org); done.",
+            "read (https://example.org): really",
             // Formal URL links: labeled, bare, and the `^` new-window suffix.
             "https://example.org[Example]",
             "https://example.org[]",
             "https://example.org[Open^]",
+            // A formal text that is only the `^` suffix becomes an empty, bare,
+            // new-window link (the display text falls back to the target).
+            "https://example.org[^]",
             // An escaped `]` inside the text is unescaped.
             "https://example.org[a\\]b]",
             // A bare scheme with nothing left after trimming is left literal by
@@ -4810,6 +4817,37 @@ mod tests {
         // The stripped ';' is kept as its own literal run, then the rest.
         assert_text(&nodes[1], ";", 1, 20);
         assert_text(&nodes[2], " done", 1, 21);
+    }
+
+    #[test]
+    fn a_bare_auto_link_strips_a_trailing_paren_before_punctuation() {
+        // A ')' adjacent to a stripped ';' is stripped out with it: the link
+        // covers only the URL, and both trailing characters are kept as literal
+        // text after it (a single run).
+        let nodes = build_src(Span::new("(https://example.org);"));
+
+        // Text "(", the link, then Text ");".
+        assert_eq!(nodes.len(), 3);
+        assert_text(&nodes[0], "(", 1, 1);
+
+        let reference = assert_link(&nodes[1]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(reference.location.data(), "https://example.org");
+
+        assert_text(&nodes[2], ");", 1, 21);
+    }
+
+    #[test]
+    fn a_formal_url_link_that_is_only_a_window_suffix_is_bare() {
+        // A `[^]` text is empty once the `^` is stripped, so the link is bare
+        // (its display text falls back to the target) *and* opens a new window.
+        let nodes = build_src(Span::new("https://example.org[^]"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(link_text_of(reference), "https://example.org");
+        assert_eq!(reference.roles, [CowStr::from("bare")]);
+        assert_eq!(reference.window.as_deref(), Some("_blank"));
     }
 
     #[test]
