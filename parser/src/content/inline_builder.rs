@@ -5427,6 +5427,26 @@ mod tests {
     }
 
     #[test]
+    fn an_xref_over_a_special_character_is_a_documented_divergence() {
+        // A cross-reference whose text contains `<` is matched by the string
+        // pipeline over the *escaped* text (`xref:foo[a&lt;b]`). A self-describing
+        // node cannot carry that escaped text as an `'src` slice, so the
+        // single-pass builder leaves such a macro *unrecognized* for a later
+        // increment, exactly as the image and auto-link increments defer a macro
+        // crossing a special character.
+        let source = "xref:foo[a<b]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an xref crossing an escaped special must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a reference here.
+        assert!(golden_xref(source).contains("<a href"));
+    }
+
+    #[test]
     fn an_xref_attribute_list_is_a_documented_divergence() {
         // An `xref:` text carrying an `=` splits into an attribute list (here a
         // role), which the string replacer parses from a newline-normalized copy

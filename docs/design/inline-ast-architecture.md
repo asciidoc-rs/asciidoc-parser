@@ -938,13 +938,17 @@ Each phase is a reviewable unit with a clear exit gate.
   string pipeline's deferred cross-references to the same **unresolved** fallback the additive
   builder (no resolution pass) produces. Because the additive builder never resolves, the fold
   always takes `render_xref`'s unresolved branch, where `xrefstyle` and a *derived* destination play
-  no part; wiring resolution to the tree is the cutover's job (step 6). Three forms are deferred,
+  no part; wiring resolution to the tree is the cutover's job (step 6). Four forms are deferred,
   each documented and pinned by a divergence test: the **shorthand** (`<<id>>`, always non-verbatim
   because its `&lt;`/`&gt;` delimiters are `CharRef`s by macro time, exactly as the angle-bracketed
   `<url>` link defers), an **inter-document** target (`xref:other.adoc#frag[]`, whose derived
-  destination the node cannot carry yet), and a **text carrying an attribute list** (`=`, parsed
-  into `window`/`role`/`xrefstyle`, deferred until the node can hold an `Attrlist<'src>` – as the
-  formal-URL link defers the same). This step is **additive**: nothing is wired into the parse path.
+  destination the node cannot carry yet), a **text carrying an attribute list** (`=`, parsed into
+  `window`/`role`/`xrefstyle`, deferred until the node can hold an `Attrlist<'src>` – as the
+  formal-URL link defers the same), and a macro whose **target or text crosses a special character
+  or a rendered span** (`xref:foo[a<b]`, matched by the string pipeline over the *escaped* text,
+  which a self-describing node cannot carry as an `'src` slice – the same verbatim boundary the
+  image and auto-link increments document). This step is **additive**: nothing is wired into the
+  parse path.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
