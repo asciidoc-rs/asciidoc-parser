@@ -1882,6 +1882,16 @@ fn find_inline_link_matches<'src>(
 /// trailing-punctuation strip – so the fold reproduces the same bytes through
 /// the same `render_link` [`link_macro_level`]'s nodes fold through.
 ///
+/// Like every macro family in this additive builder, it deliberately performs
+/// *no* recognition side effect: it does **not** `register_link` the target in
+/// the document's asset catalog, because the builder is not yet the
+/// authoritative recognition sink – the string pipeline still registers it, and
+/// registering it here too would double-count it. The cutover (design §5.2
+/// Phase 4, step 6) re-attaches this registration, so
+/// `Document::catalog().links()` stays populated by the string pipeline until
+/// then. (The same applies to the `link:`/`mailto:` macro node built by
+/// [`build_link_node`].)
+///
 /// [`InlineLinkReplacer`]: crate::content::macros
 fn build_inline_link_node<'src>(
     n: &NormalizedCaps<'_, '_>,
@@ -2168,6 +2178,11 @@ fn find_link_macro_matches<'src>(
 /// build-time state (bare-vs-labeled, `hide-uri-scheme`, `mailto:`) at fold
 /// time; the `bare` role, when the string step would add one, rides on the
 /// node's `roles`.
+///
+/// As in the additive builder generally, this performs *no* recognition side
+/// effect – notably it does **not** `register_link` the target in the asset
+/// catalog, which the string replacer does; the cutover (design §5.2 Phase 4,
+/// step 6) re-attaches that (see [`build_inline_link_node`]).
 fn build_link_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,

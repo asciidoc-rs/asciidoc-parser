@@ -945,8 +945,12 @@ Each phase is a reviewable unit with a clear exit gate.
      `rendered_html()` a fold, delete the three production sentinel systems (§4.2), and retire
      the `with_inline_tree` opt-in flag (the deferred remainder of Phase 2). Re-attach the
      recognition **side effects** the string pipeline performs that the additive builder skips –
-     notably registering an inline id (an attributed span's anchor) in the reference catalog so
-     cross-references resolve (#1087).
+     registering an inline id (an attributed span's anchor) in the reference catalog so
+     cross-references resolve (#1087), registering a link target (`register_link`) and an image
+     target (`register_image`) in the asset catalog so `Document::catalog()` stays complete, and
+     the dangerous-scheme substitution warning. Doing this at the cutover (rather than in the
+     additive passes, which run *alongside* the authoritative string pipeline) is what avoids
+     double-counting each registration.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
