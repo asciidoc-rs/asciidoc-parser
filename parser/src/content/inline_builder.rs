@@ -38,18 +38,22 @@
 //!   step, matches over the *escaped* text so an arrow (`-&gt;`) or entity
 //!   (`&amp;copy;`) can straddle a `Text`/`CharRef` boundary.
 //! - [`apply_macros`] recognizes **image and icon macros** (`image:target[…]`,
-//!   `icon:target[…]`) and the **UI macros** (`kbd:[…]`, `btn:[…]`,
-//!   `menu:…[…]`), replacing each with an [`Image`](InlineNode::Image) or
-//!   [`Ui`](InlineNode::Ui) node. An image node captures its own owned
-//!   [`Attrlist`] – the step that makes a macro node *self-describing*. Each
-//!   family reuses the shared pattern the string step matches with
-//!   ([`INLINE_IMAGE_MACRO`], [`INLINE_KBD_BTN_MACRO`], [`INLINE_MENU_MACRO`]),
-//!   builds `'src`-borrowing nodes for verbatim macros only (see
-//!   [`apply_macros`] for the boundary the escaped-content case defers), and –
-//!   for the UI macros – is recognized only under the `experimental` document
-//!   attribute, exactly as the string step gates them. The remaining macro
-//!   families (links, cross-references, footnotes, index terms, anchors, STEM)
-//!   are later increments.
+//!   `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
+//!   and the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
+//!   replacing each with an [`Image`](InlineNode::Image),
+//!   [`Ui`](InlineNode::Ui), or [`Ref`](InlineNode::Ref) node. An image node
+//!   captures its own owned [`Attrlist`] – the step that makes a macro node
+//!   *self-describing*; a link node bakes its computed display text into
+//!   [`Text`](InlineNode::Text) children so its fold needs no build-time state.
+//!   Each family reuses the shared pattern the string step matches with
+//!   ([`INLINE_IMAGE_MACRO`], [`INLINE_KBD_BTN_MACRO`], [`INLINE_MENU_MACRO`],
+//!   [`INLINE_LINK_MACRO`]), builds `'src`-borrowing nodes for verbatim macros
+//!   only (see [`apply_macros`] for the boundary the escaped-content case
+//!   defers), and – for the UI macros – is recognized only under the
+//!   `experimental` document attribute, exactly as the string step gates them.
+//!   The remaining macro families (auto-links and formal-URL links,
+//!   cross-references, footnotes, index terms, anchors, STEM) are later
+//!   increments.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
@@ -95,15 +99,18 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{
-        CharacterReplacement, INLINE_IMAGE_MACRO, INLINE_KBD_BTN_MACRO, INLINE_MENU_MACRO,
-        QuoteSub, basename, character_replacements, hard_line_break_pattern, maybe_has_quotes,
-        maybe_has_replacements, normalize_index_text, normalize_text_lf_escaped_bracket,
-        quote_subs, split_kbd_keys,
+        CharacterReplacement, INLINE_IMAGE_MACRO, INLINE_KBD_BTN_MACRO, INLINE_LINK_MACRO,
+        INLINE_MENU_MACRO, QuoteSub, URI_SNIFF, basename, character_replacements,
+        hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements, normalize_index_text,
+        normalize_text_lf_escaped_bracket, quote_subs, split_kbd_keys,
     },
-    inlines::{CharRef, Image, InlineNode, SpanForm, StyleVariant, Styled, Ui, UiKind},
+    inlines::{
+        CharRef, Image, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled, Ui, UiKind,
+    },
     parser::{
         CharacterReplacementType, IconRenderParams, ImageRenderParams, InlineSubstitutionRenderer,
-        MenuRenderParams, QuoteScope, QuoteType, SpecialCharacter,
+        LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, SpecialCharacter,
+        has_dangerous_scheme,
     },
     strings::CowStr,
 };
@@ -1145,20 +1152,25 @@ fn rebuild_replacements<'src>(
 /// The macros substitution, as a node transducer.
 ///
 /// This increment recognizes **image and icon macros** (`image:target[…]`,
-/// `icon:target[…]`) and the **UI macros** (`kbd:[…]`, `btn:[…]`,
-/// `menu:…[…]`), replacing each with an [`Image`](InlineNode::Image) or
-/// [`Ui`](InlineNode::Ui) node. An image node carries its own owned
+/// `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
+/// and the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
+/// replacing each with an [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui),
+/// or [`Ref`](InlineNode::Ref) node. An image node carries its own owned
 /// [`Attrlist`] – the step that makes a macro node *self-describing*, so the
 /// fold reconstructs the render parameters and calls the same
 /// `render_image`/`render_icon` the string step calls; a UI node carries the
 /// keys / label / menu path the string replacer computed, so its fold calls the
-/// same `render_keyboard`/`render_button`/`render_menu`. The remaining macro
-/// families (links, cross-references, footnotes, index terms, anchors, STEM)
-/// are later increments.
+/// same `render_keyboard`/`render_button`/`render_menu`; a link node carries
+/// the computed target, display text (as [`Text`](InlineNode::Text) children),
+/// and roles/window, so its fold calls the same `render_link`. The remaining
+/// macro families (auto-links and formal-URL links, cross-references,
+/// footnotes, index terms, anchors, STEM) are later increments (see
+/// [`link_macro_level`] for the link forms this increment defers).
 ///
 /// Each family is applied at each level in the **same order the string step
-/// applies them** – keyboard/button, then menu, then image/icon – so a level's
-/// overlapping constructs resolve identically. Like the other steps it descends
+/// applies them** – keyboard/button, then menu, then image/icon, then
+/// `link:`/`mailto:` – so a level's overlapping constructs resolve identically.
+/// Like the other steps it descends
 /// into the [`Styled`]/[`Ref`](InlineNode::Ref) children earlier steps created
 /// – a macro can appear inside a rendered span (`*image:x[]*`), just as the
 /// string pipeline matches one inside a rendered `<strong>` tag – then matches
@@ -1221,7 +1233,11 @@ fn apply_macros<'src>(
         nodes
     };
 
-    image_macros_level(nodes, root, parser)
+    let nodes = image_macros_level(nodes, root, parser);
+
+    // The `link:`/`mailto:` macro runs after image/icon, mirroring the string
+    // step's order (`INLINE_LINK_MACRO` follows the image and index-term passes).
+    link_macro_level(nodes, root, parser)
 }
 
 /// One recognized macro match at a level, in absolute match-string byte
@@ -1693,6 +1709,229 @@ fn split_menu_items<'src>(items: Option<&str>) -> (Vec<CowStr<'src>>, Option<Cow
     }
 }
 
+// ─── Link and mailto macros (link: / mailto:) ─────────────────────────────
+
+/// The `link:`/`mailto:` macro pass at a level: matches [`INLINE_LINK_MACRO`]
+/// over the level's escaped text and replaces each verbatim, recognized match
+/// with the [`Ref`](InlineNode::Ref) link node it produces.
+///
+/// # Scope
+///
+/// This increment covers the **explicit `link:`/`mailto:` macro** in its
+/// verbatim, attribute-list-free forms: `link:target[text]`, `link:target[]`
+/// (a bare link), `mailto:addr[text]`, and `mailto:addr[]`, plus the `^`
+/// new-window suffix and the `\` escape. It deliberately leaves several forms
+/// **unrecognized** for a later increment, each left as literal source here (so
+/// the differential corpus only pins the forms this increment claims):
+///
+/// - **Auto-links and formal-URL links** (`https://example.org`, `https://example.org[text]`)
+///   are matched by a *different* pattern (`INLINE_LINK`, with its bare-URL
+///   trailing-punctuation handling) and are a separate later increment.
+/// - **A link text that carries an attribute list** – a `,` in a `mailto:` text
+///   (its `subject`/`body`) or an `=` in a `link:` text (roles / id / title /
+///   window) – is deferred, because that attribute list is parsed from a
+///   newline-normalized *copy* of the text (not from `'src`) and so cannot be
+///   carried as an [`Attrlist`]`<'src>` on the node yet.
+/// - **A non-verbatim match** – a macro whose target or text crosses an escaped
+///   special ([`CharRef`](InlineNode::CharRef)) or a rendered [`Styled`] span
+///   (`link:a&b[]`, `link:x[*bold*]`) – is deferred exactly as the image
+///   increment defers `image:a&b.png[]`.
+///
+/// A `link:` (not `mailto:`) target whose scheme could execute script
+/// (`javascript:`, `data:`, `vbscript:`) is likewise left literal – matching
+/// the string step, which neutralizes it, so it renders identically; the
+/// additive builder simply skips the `record_substitution_warning` side effect
+/// the string step performs there.
+fn link_macro_level<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<InlineNode<'src>> {
+    let (s, pieces) = build_match_string(&nodes);
+
+    // Cheap pre-filter mirroring the string step's guard: a link/mailto macro
+    // needs its prefix and an opening bracket.
+    if !((s.contains("link:") || s.contains("mailto:")) && s.contains('[')) {
+        return nodes;
+    }
+
+    let matches = find_link_macro_matches(&s, &pieces, root, parser);
+
+    if matches.is_empty() {
+        return nodes;
+    }
+
+    rebuild_macro_level(&nodes, &pieces, &s, matches)
+}
+
+/// Finds every recognized `link:`/`mailto:` macro at this level, skipping any
+/// match that is not wholly verbatim source or that this increment defers (see
+/// [`link_macro_level`]).
+fn find_link_macro_matches<'src>(
+    s: &str,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<MacroMatch<'src>> {
+    let mut matches = Vec::new();
+
+    for caps in INLINE_LINK_MACRO.captures_iter(s) {
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let whole = caps.get(0).unwrap();
+
+        let full = whole.start()..whole.end();
+
+        // Only a wholly-verbatim match can slice its target/text from `'src`; a
+        // match crossing an escaped special or a rendered span is left for a
+        // later increment.
+        if !range_is_verbatim(pieces, &full) {
+            continue;
+        }
+
+        if whole.as_str().starts_with('\\') {
+            matches.push(MacroMatch {
+                full,
+                kind: MacroMatchKind::Unescape,
+            });
+
+            continue;
+        }
+
+        match build_link_node(&caps, &full, pieces, root, parser) {
+            Some(node) => matches.push(MacroMatch {
+                full,
+                kind: MacroMatchKind::Node(Box::new(node)),
+            }),
+
+            // A deferred form (an attribute-list-in-text macro, or a rejected
+            // dangerous `link:` scheme) is left as literal source: parity with
+            // the string step for the dangerous case, a documented divergence
+            // for the attribute-list case.
+            None => continue,
+        }
+    }
+
+    matches
+}
+
+/// Builds one [`Ref`](InlineNode::Ref) link node from a verbatim
+/// `link:`/`mailto:` match, computing the target, display text, window, and
+/// roles exactly as the string replacer does so the fold reproduces the same
+/// bytes. Returns `None` for a form this increment defers (see
+/// [`link_macro_level`]): a rejected dangerous `link:` scheme, or a link text
+/// that carries an attribute list.
+///
+/// The display text is baked into a single [`Text`](InlineNode::Text) child, so
+/// the fold recovers `link_text` by folding the children and needs no
+/// build-time state (bare-vs-labeled, `hide-uri-scheme`, `mailto:`) at fold
+/// time; the `bare` role, when the string step would add one, rides on the
+/// node's `roles`.
+fn build_link_node<'src>(
+    caps: &regex::Captures<'_>,
+    full: &std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Option<InlineNode<'src>> {
+    let location = source_slice(pieces, full.clone(), root);
+
+    // Group 1 present ⟺ a `mailto:` macro; group 3 is the (optional) target;
+    // group 5 is the (optional) bracketed text.
+    let is_mailto = caps.get(1).is_some();
+    let target_str = caps.get(3).map_or("", |m| m.as_str());
+
+    let target = if is_mailto {
+        format!("mailto:{target_str}")
+    } else {
+        target_str.to_string()
+    };
+
+    // A `link:` target whose scheme could execute script is neutralized by the
+    // string step (left literal); mirror that by deferring – the node would
+    // otherwise render a live, dangerous link. `mailto:` carries its own safe
+    // scheme and is exempt.
+    if !is_mailto && has_dangerous_scheme(&target) {
+        return None;
+    }
+
+    let mut window: Option<CowStr<'src>> = None;
+
+    let mut link_text = caps
+        .get(5)
+        .map_or_else(String::new, |m| m.as_str().to_string());
+
+    if !link_text.is_empty() {
+        // An attribute list embedded in the text (`mailto:` subject/body via a
+        // comma, or `link:` roles/id/title via an `=`) is parsed from a
+        // newline-normalized copy of the text, so it cannot be carried as an
+        // `Attrlist<'src>` on the node yet; defer the whole macro.
+        if (is_mailto && link_text.contains(',')) || (!is_mailto && link_text.contains('=')) {
+            return None;
+        }
+
+        link_text = link_text.replace("\\]", "]");
+
+        if link_text.ends_with('^') {
+            link_text.truncate(link_text.len() - 1);
+            window = Some(CowStr::from("_blank"));
+        }
+    }
+
+    let mut roles: Vec<CowStr<'src>> = vec![];
+
+    if link_text.is_empty() {
+        if is_mailto {
+            // A bare `mailto:` shows the address (group 3) and takes no `bare`
+            // role.
+            link_text = target_str.to_string();
+        } else {
+            // A bare `link:` shows the target (with the scheme optionally hidden)
+            // and takes the `bare` role.
+            link_text = if parser.is_attribute_set("hide-uri-scheme") {
+                let stripped = URI_SNIFF.replace_all(&target, "").into_owned();
+
+                if stripped.is_empty() {
+                    target.clone()
+                } else {
+                    stripped
+                }
+            } else {
+                target.clone()
+            };
+
+            roles.push(CowStr::from("bare"));
+        }
+    }
+
+    // The display text becomes the node's children, located at the bracketed
+    // text (or the whole macro when there is none). `link_text` is a computed
+    // (owned) value, so this is a *synthesized* `Text` whose value need not
+    // coincide with its source.
+    let text_location = caps
+        .get(5)
+        .map_or(location, |m| source_slice(pieces, m.start()..m.end(), root));
+
+    let children = if link_text.is_empty() {
+        vec![]
+    } else {
+        vec![InlineNode::Text {
+            value: CowStr::from(link_text),
+            location: text_location,
+        }]
+    };
+
+    Some(InlineNode::Ref(Ref {
+        variant: RefVariant::Link,
+        target: CowStr::from(target),
+        children,
+        roles,
+        window,
+        resolved: None,
+        location,
+    }))
+}
+
 // ─── Post replacements (hard line breaks) ─────────────────────────────────
 
 /// The post-replacement substitution, as a node transducer: a line ending in
@@ -1894,6 +2133,10 @@ fn fold_into_html(
                 fold_ui(ui, renderer, parser, out);
             }
 
+            InlineNode::Ref(reference) if reference.variant == RefVariant::Link => {
+                fold_link(reference, renderer, parser, out);
+            }
+
             InlineNode::Styled(styled) => {
                 // Fold the children to the body, then wrap it exactly as the
                 // string pipeline's quotes step did: the same `QuoteType`,
@@ -2054,6 +2297,47 @@ fn fold_ui(
             renderer.render_menu(&params, out);
         }
     }
+}
+
+/// Folds a link [`Ref`](InlineNode::Ref) node through the same `render_link`
+/// the string pipeline's macros step calls, reconstructing the
+/// [`LinkRenderParams`] from the node: the display text is the fold of the
+/// children, the extra roles (`bare`) ride on the node's `roles`, and the
+/// target/window come straight off the node. The attribute list is empty
+/// because this increment recognizes only the attribute-list-free link forms
+/// (see [`link_macro_level`]).
+fn fold_link(
+    reference: &Ref<'_>,
+    renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
+    out: &mut String,
+) {
+    let mut link_text = String::new();
+    fold_into_html(&reference.children, renderer, parser, &mut link_text);
+
+    // A link built by this increment carries no attribute list; fold through an
+    // empty one, sliced (empty) from the node's own location so its lifetime
+    // matches.
+    let attrlist = Attrlist::parse(
+        reference.location.slice(0..0),
+        parser,
+        AttrlistContext::Inline,
+    )
+    .item
+    .item;
+
+    let extra_roles: Vec<&str> = reference.roles.iter().map(|r| r.as_ref()).collect();
+
+    let params = LinkRenderParams {
+        target: reference.target.to_string(),
+        link_text,
+        extra_roles,
+        window: reference.window.as_deref(),
+        attrlist: &attrlist,
+        parser,
+    };
+
+    renderer.render_link(&params, out);
 }
 
 #[cfg(test)]
@@ -3737,5 +4021,296 @@ mod tests {
                 Some("Reset".to_string())
             )
         );
+    }
+
+    // ─── Macros (link / mailto) ───────────────────────────────────────────
+
+    #[test]
+    fn fold_matches_the_string_pipeline_through_link_macros() {
+        // For each fixture, folding the single-pass tree (all five steps)
+        // reproduces the string pipeline's output byte-for-byte. This is the
+        // differential corpus (design §5.3) that pins the `link:`/`mailto:`
+        // macro increment. Every fixture is a *verbatim*, attribute-list-free
+        // `link:`/`mailto:` macro – the boundary this increment claims (a URL
+        // target, an attribute list in the text, or a special character inside
+        // the macro is deferred and lives in a divergence test below).
+        let fixtures = [
+            // No link macro despite macro-ish characters.
+            "plain text with a colon: but no bracket",
+            "a link without a bracket link:index.html stays literal",
+            // Link macro: labeled, bare, relative and pathed targets.
+            "link:index.html[Docs]",
+            "link:downloads/report.pdf[Report]",
+            "link:index.html[]",
+            "link:index.html[Read the docs]",
+            // The `^` suffix opens the link in a new window.
+            "link:index.html[Open^]",
+            // An escaped `]` inside the text is unescaped.
+            "link:index.html[a\\]b]",
+            // mailto: labeled and bare (bare shows the address).
+            "mailto:hello@example.org[Email us]",
+            "mailto:hello@example.org[]",
+            // Degenerate empty targets: a bare link/mailto with no display text.
+            "link:[]",
+            "mailto:[]",
+            // A macro embedded in surrounding flow, and next to other constructs.
+            "See link:about.html[about] for details.",
+            "*bold* then link:x.html[X] and _em_",
+            "a copyright (C) then link:x.html[X]",
+            // Escapes: the macro stays literal, minus the backslash.
+            "\\link:index.html[Docs]",
+            "\\mailto:hello@example.org[Email]",
+            // A `link:` target whose scheme could execute script is left literal
+            // by the string step *and* the builder, so it renders identically.
+            "link:javascript:alert(1)[Click]",
+            // A macro inside a rendered span (recognized inside the span body).
+            "*see link:x.html[X]*",
+            "_link:y.html[Y] in em_",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_with_hide_uri_scheme() {
+        // Under `hide-uri-scheme`, a bare link's display text drops the URI
+        // scheme; the builder reproduces the string step's `URI_SNIFF` stripping,
+        // including the fall-back to the whole target when the strip leaves
+        // nothing. Every fixture is a non-`://` `link:` target, so the string
+        // pipeline routes it through the same `INLINE_LINK_MACRO` the builder
+        // uses (a `://` target is `INLINE_LINK`'s territory, a later increment).
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute_bool(
+            "hide-uri-scheme",
+            true,
+            ModificationContext::Anywhere,
+        );
+
+        let fixtures = [
+            // A scheme prefix is stripped, leaving the remainder as the text.
+            "link:foo:bar[]",
+            // The whole target is a scheme: the strip leaves nothing, so the
+            // text falls back to the target itself.
+            "link:foo:[]",
+            // No scheme to strip: the target shows unchanged.
+            "link:index.html[]",
+            // A bare mailto shows the address regardless of `hide-uri-scheme`.
+            "mailto:hello@example.org[]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = super::fold_html(&build(Span::new(fixture), &parser), &renderer, &parser);
+
+            assert_eq!(
+                folded,
+                golden_macros_with(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    /// Asserts that `node` is a link [`Ref`], returning it for further
+    /// inspection.
+    fn assert_link<'a, 'src>(node: &'a InlineNode<'src>) -> &'a Ref<'src> {
+        match node {
+            InlineNode::Ref(reference) if reference.variant == RefVariant::Link => reference,
+
+            other => panic!("expected a link Ref, got {other:?}"),
+        }
+    }
+
+    /// The concatenated value of a link node's [`Text`](InlineNode::Text)
+    /// display children (the reconstructed `link_text`).
+    fn link_text_of(reference: &Ref<'_>) -> String {
+        let mut s = String::new();
+
+        for child in &reference.children {
+            if let InlineNode::Text { value, .. } = child {
+                s.push_str(value);
+            }
+        }
+
+        s
+    }
+
+    #[test]
+    fn a_link_macro_becomes_a_ref_node() {
+        let nodes = build_src(Span::new("link:index.html[Docs]"));
+
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
+
+        assert_eq!(reference.target.as_ref(), "index.html");
+        assert_eq!(link_text_of(reference), "Docs");
+        assert!(reference.roles.is_empty());
+        assert_eq!(reference.window, None);
+        assert_eq!(reference.resolved, None);
+
+        // Its location covers the whole macro, delimiters included.
+        assert_eq!(reference.location.data(), "link:index.html[Docs]");
+        assert_eq!(reference.location.line(), 1);
+        assert_eq!(reference.location.col(), 1);
+    }
+
+    #[test]
+    fn a_bare_link_takes_the_bare_role() {
+        // An empty text is a bare link: the display text is the target, and the
+        // `bare` role rides on the node so the fold reproduces `class="bare"`.
+        let nodes = build_src(Span::new("link:index.html[]"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "index.html");
+        assert_eq!(link_text_of(reference), "index.html");
+        assert_eq!(reference.roles, [CowStr::from("bare")]);
+    }
+
+    #[test]
+    fn a_mailto_macro_targets_the_address() {
+        // A labeled mailto prefixes the address with `mailto:` and shows the
+        // label; a bare mailto shows the address itself and takes no `bare` role.
+        let labeled = build_src(Span::new("mailto:hello@example.org[Email us]"));
+        let reference = assert_link(&labeled[0]);
+        assert_eq!(reference.target.as_ref(), "mailto:hello@example.org");
+        assert_eq!(link_text_of(reference), "Email us");
+        assert!(reference.roles.is_empty());
+
+        let bare = build_src(Span::new("mailto:hello@example.org[]"));
+        let reference = assert_link(&bare[0]);
+        assert_eq!(reference.target.as_ref(), "mailto:hello@example.org");
+        assert_eq!(link_text_of(reference), "hello@example.org");
+        assert!(
+            reference.roles.is_empty(),
+            "a bare mailto takes no `bare` role"
+        );
+    }
+
+    #[test]
+    fn a_link_window_suffix_opens_blank() {
+        // A trailing `^` in the text is stripped and selects the `_blank`
+        // window, exactly as the string replacer does.
+        let nodes = build_src(Span::new("link:index.html[Open^]"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(link_text_of(reference), "Open");
+        assert_eq!(reference.window.as_deref(), Some("_blank"));
+    }
+
+    #[test]
+    fn an_escaped_link_macro_stays_literal() {
+        // `\link:…` drops the backslash and keeps the macro as literal text – no
+        // link node.
+        let nodes = build_src(Span::new("\\link:index.html[Docs]"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an escaped macro must not produce a link node: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros("\\link:index.html[Docs]")
+        );
+    }
+
+    #[test]
+    fn a_dangerous_link_scheme_is_left_literal() {
+        // A `link:` target whose scheme could execute script is neutralized by
+        // the string step (left literal); the builder mirrors that by leaving
+        // the macro unrecognized, so the two render identically. (The builder
+        // additionally skips the warning side effect the string step records.)
+        let source = "link:javascript:alert(1)[Click]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a dangerous link scheme must not produce a link node: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_link_over_a_special_character_is_a_documented_divergence() {
+        // The string pipeline matches macros over *escaped* text, so a target
+        // containing `&` is matched as `a&amp;b.html`. A self-describing node
+        // cannot carry that escaped text as an `'src` slice, so the single-pass
+        // builder leaves such a macro *unrecognized* for a later increment,
+        // exactly as the image increment defers `image:a&b.png[]`.
+        let nodes = build_src(Span::new("link:a&b.html[x]"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a macro crossing an escaped special must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a link here.
+        assert!(golden_macros("link:a&b.html[x]").contains("<a href"));
+    }
+
+    #[test]
+    fn a_link_text_attribute_list_is_a_documented_divergence() {
+        // A `link:` text carrying an `=` splits into an attribute list (here a
+        // role), which the string replacer parses from a newline-normalized copy
+        // of the text – not from `'src`. The builder cannot carry that as an
+        // `Attrlist<'src>` yet, so it defers the whole macro (left literal),
+        // pending the increment that adds an attribute list to the link node.
+        let source = "link:index.html[Docs,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an attribute-list-in-text link must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, applies the role.
+        assert!(golden_macros(source).contains(r#"class="hl""#));
+    }
+
+    #[test]
+    fn a_mailto_subject_is_a_documented_divergence() {
+        // A `mailto:` text carrying a `,` encodes a `subject` (and optional
+        // `body`) into the target – the same attribute-list-from-a-copy handling
+        // the builder defers.
+        let source = "mailto:team@example.org[Team,Hello there]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a mailto with a subject must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, encodes the subject into the href.
+        assert!(golden_macros(source).contains("subject="));
+    }
+
+    #[test]
+    fn a_link_is_recognized_inside_a_span() {
+        // A macro can appear inside a rendered span; the transducer descends into
+        // the span body and builds the node there.
+        let nodes = build_src(Span::new("*see link:x.html[X]*"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+        assert_eq!(children.len(), 2);
+        assert_text(&children[0], "see ", 1, 2);
+
+        let reference = assert_link(&children[1]);
+        assert_eq!(reference.target.as_ref(), "x.html");
+        assert_eq!(link_text_of(reference), "X");
     }
 }
