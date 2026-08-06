@@ -489,417 +489,14 @@ impl<'p> PreprocessorState<'p> {
             } else if line.starts_with("include::")
                 && let Some(caps) = INCLUDE_DIRECTIVE.captures(line.data())
             {
-                // Asciidoctor substitutes attributes into an include target
-                // using the `attribute-missing` policy in effect, except that
-                // `warn` is mapped to `drop-line`: a warning here names the
-                // whole directive, not the individual reference. Under either
-                // of those policies a reference to a missing attribute empties
-                // the entire target, and the directive is dropped before the
-                // include file handler is ever consulted. See issue #776.
-                let attribute_missing = AttributeMissing::from_parser(self.parser);
-
-                let missing_policy = match attribute_missing {
-                    AttributeMissing::Skip => MissingAttribute::KeepLiteral,
-                    AttributeMissing::Drop => MissingAttribute::Drop,
-                    AttributeMissing::DropLine | AttributeMissing::Warn => {
-                        MissingAttribute::DropLine
-                    }
-                };
-
-                let (target, missing_reference) =
-                    self.substitute_attributes_tracking(&caps[1], missing_policy);
-
-                if missing_reference
-                    && matches!(
-                        attribute_missing,
-                        AttributeMissing::DropLine | AttributeMissing::Warn
-                    )
-                {
-                    // Under `drop-line` (and for an include marked
-                    // `opts=optional`) the directive line is removed with no
-                    // replacement text. Asciidoctor logs this at INFO level;
-                    // this crate has no INFO channel, so – as everywhere else
-                    // `drop-line` applies – the line is dropped silently.
-                    // Re-anchor the source map so the lines that follow map
-                    // back to their correct original line numbers.
-                    if attribute_missing == AttributeMissing::DropLine
-                        || parse_attrlist(&caps, self.parser).has_option("optional")
-                    {
-                        has_reported_file = false;
-                        continue;
-                    }
-
-                    // Under `warn` the directive is replaced by an "Unresolved
-                    // directive" message, as it is for a target that could not
-                    // be resolved, and a warning naming the whole directive is
-                    // recorded.
-                    self.emit_unresolved_directive(
-                        line.data(),
-                        WarningType::IncludeDroppedDueToMissingAttribute(line.data().to_owned()),
-                        file_name,
-                        source_line_number,
-                        &mut has_reported_file,
-                    );
-
-                    continue;
-                }
-
-                if self.parser.safe >= SafeMode::Secure {
-                    // The include directive is disabled at `SafeMode::Secure`
-                    // and above (the default): rather than embed the contents of
-                    // an arbitrary file, the directive is converted to a link to
-                    // its target, matching Asciidoctor. The include file handler
-                    // is never consulted in this case.
-                    self.record_origin(
-                        file_name,
-                        source_line_number,
-                        Fidelity::Synthetic(Transform::SecureLinkRewrite),
-                        &mut has_reported_file,
-                    );
-
-                    // A target containing a space would break the link macro,
-                    // so it is wrapped in a `pass:c[…]` macro (matching
-                    // Asciidoctor).
-                    let replacement = if target.contains(' ') {
-                        format!("link:pass:c[{target}][role=include]")
-                    } else {
-                        format!("link:{target}[role=include]")
-                    };
-                    self.output_line_number += 1;
-                    self.output.push_str(&replacement);
-                    self.output.push('\n');
-
-                    continue;
-                }
-
-                // `max-include-depth=0` disables the include directive
-                // entirely: the directive line is left in the output verbatim,
-                // with no diagnostic, and the include file handler is never
-                // consulted (matching Asciidoctor).
-                let Some(max_depth) = self.max_include_depth else {
-                    self.emit_line(
-                        line.data(),
-                        file_name,
-                        source_line_number,
-                        content_fidelity,
-                        &mut has_reported_file,
-                    );
-                    continue;
-                };
-
-                // When the file containing the directive already sits at the
-                // maximum include depth, the directive is likewise left
-                // verbatim, and a "maximum include depth exceeded" error is
-                // recorded at the directive's own file and line (matching
-                // Asciidoctor). `include_depth` counts the current file as 1,
-                // so the containing file's depth – which the limit is compared
-                // against – is `include_depth - 1`, making the depth-exceeded
-                // condition `include_depth - 1 >= curr`, i.e.:
-                if self.include_depth > max_depth.curr {
-                    self.warnings.push(DeferredWarning {
-                        offset: self.output.len(),
-                        len: line.data().len(),
-                        warning: WarningType::MaxIncludeDepthExceeded(max_depth.rel),
-                        origin: None,
-                    });
-
-                    self.emit_line(
-                        line.data(),
-                        file_name,
-                        source_line_number,
-                        content_fidelity,
-                        &mut has_reported_file,
-                    );
-                    continue;
-                }
-
-                let attrlist = parse_attrlist(&caps, self.parser);
-
-                // A URI target is only fetched when the URI read permission has
-                // been granted (`allow-uri-read`). This is disabled by default,
-                // so a URI include that is not permitted is not fetched; instead
-                // the directive is converted to a `link:` macro to its target –
-                // the same rewrite applied at `SafeMode::Secure` above – and no
-                // warning is recorded (matching Asciidoctor). See
-                // `include-uri.adoc`.
-                if is_uri(&target) && !self.parser.is_attribute_set("allow-uri-read") {
-                    self.record_origin(
-                        file_name,
-                        source_line_number,
-                        Fidelity::Synthetic(Transform::SecureLinkRewrite),
-                        &mut has_reported_file,
-                    );
-
-                    // A target containing a space would break the link macro,
-                    // so it is wrapped in a `pass:c[…]` macro (matching
-                    // Asciidoctor).
-                    let replacement = if target.contains(' ') {
-                        format!("link:pass:c[{target}][role=include]")
-                    } else {
-                        format!("link:{target}[role=include]")
-                    };
-                    self.output_line_number += 1;
-                    self.output.push_str(&replacement);
-                    self.output.push('\n');
-
-                    continue;
-                }
-
-                // Ask the handler to resolve the target. With no handler
-                // configured, the target is treated as not found. The failure
-                // reason (`NotFound`, `NotReadable`, or `NotDecodable`) selects
-                // the warning recorded below, mirroring Asciidoctor's distinct
-                // `include file not found`, `include file not readable`, and
-                // `invalid byte sequence in UTF-8` messages.
-                let resolution = self
-                    .parser
-                    .include_file_handler
-                    .as_ref()
-                    .map_or(IncludeResolution::NotFound, |ifh| {
-                        ifh.resolve_target(file_name, &target, &attrlist, self.parser)
-                    });
-
-                // Matched exhaustively (no catch-all) on purpose: although
-                // `IncludeResolution` is `non_exhaustive` for downstream crates,
-                // within this crate a new reason must be handled here
-                // deliberately – with its own warning – rather than silently
-                // collapsing into "not found". Each failure reason carries the
-                // `WarningType` constructor (a `fn(String) -> WarningType`) used
-                // to build its warning below, once the target is available to
-                // move in. The constructor paired with `Found` is never used.
-                let (include_content, failure_warning): (_, fn(String) -> WarningType) =
-                    match resolution {
-                        IncludeResolution::Found(content) => {
-                            (Some(content), WarningType::IncludeFileNotFound)
-                        }
-
-                        IncludeResolution::NotReadable => {
-                            (None, WarningType::IncludeFileNotReadable)
-                        }
-
-                        IncludeResolution::NotDecodable => {
-                            (None, WarningType::IncludeFileNotDecodable)
-                        }
-
-                        IncludeResolution::NotFound => (None, WarningType::IncludeFileNotFound),
-                    };
-
-                if let Some(include_content) = include_content {
-                    // Apply `lines`/`tag(s)` selection and `indent` normalization
-                    // to the raw included content before it is merged, matching
-                    // Asciidoctor. Any nested include/conditional directives in an
-                    // AsciiDoc include are therefore interpreted only on the
-                    // selected, re-indented lines.
-                    let (selected, tag_diagnostics) =
-                        select_included_lines(include_content.content(), &attrlist);
-                    let (selected, nested_reindent) =
-                        reindent_included_lines(selected, &attrlist, self.parser);
-
-                    // A malformed or unmatched tag directive (or a requested tag
-                    // that was never found) is reported against the include
-                    // directive's own cursor.
-                    self.emit_tag_filter_warnings(&tag_diagnostics, file_name, source_line_number);
-
-                    // The parser only handles UTF-8 content, so an `encoding`
-                    // attribute requesting any other encoding cannot be honored
-                    // by the parser itself; record a warning (emitted below, once
-                    // the offset of the included content is known). See
-                    // `include.adoc`. A handler that transcodes the content to
-                    // UTF-8 itself signals this via `IncludeContent::transcoded`,
-                    // in which case the encoding has been honored and no warning
-                    // is recorded. See
-                    // https://github.com/asciidoc-rs/asciidoc-parser/issues/611.
-                    let non_utf8_encoding = (!include_content.encoding_handled())
-                        .then(|| {
-                            attrlist
-                                .named_attribute("encoding")
-                                .map(|a| a.value())
-                                .filter(|v| !is_utf8_encoding(v))
-                        })
-                        .flatten();
-
-                    // `leveloffset` wraps the included content in `:leveloffset:`
-                    // attribute entries: the offset is applied to the included
-                    // content and reset afterward (see
-                    // `include-with-leveloffset.adoc`). The running `leveloffset`
-                    // document attribute is applied to section levels during
-                    // parsing (see `SectionBlock::parse` and
-                    // `Parser::level_offset`), so this wrapping shifts the
-                    // effective heading levels of the included content.
-                    let leveloffset = attrlist
-                        .named_attribute("leveloffset")
-                        .map(|a| a.value())
-                        .filter(|v| !v.is_empty());
-
-                    // Capture the restore value *before* processing the include:
-                    // an included AsciiDoc file may itself set `:leveloffset:`,
-                    // which would mutate the running attribute state, so reading it
-                    // afterward would restore the included file's value rather than
-                    // the one in effect before the include.
-                    let restore_leveloffset = leveloffset.map(|offset| {
-                        let restore = match self.parser.attribute_value("leveloffset") {
-                            InterpretedValue::Value(v) if !v.is_empty() => {
-                                format!(":leveloffset: {v}")
-                            }
-                            _ => ":leveloffset!:".to_string(),
-                        };
-                        let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
-                        self.emit_line(
-                            &format!(":leveloffset: {offset}"),
-                            file_name,
-                            source_line_number,
-                            wrapper,
-                            &mut has_reported_file,
-                        );
-                        self.emit_line(
-                            "",
-                            file_name,
-                            source_line_number,
-                            wrapper,
-                            &mut has_reported_file,
-                        );
-                        restore
-                    });
-
-                    let content_start = self.output.len();
-
-                    if is_asciidoc_file(&target) {
-                        // Register the included AsciiDoc file so an
-                        // inter-document cross reference whose target names it
-                        // can later collapse to a same-document reference (its
-                        // anchors are now part of this document). A `lines` or
-                        // partial `tag(s)` selection records a *partial* include,
-                        // which does not collapse the reference. A file
-                        // included both fully and partially resolves to full;
-                        // that merge is applied by
-                        // [`Catalog::register_include`] when these entries are
-                        // replayed into the catalog.
-                        //
-                        // Only a directive written in the *outermost* document
-                        // (depth 1) is recorded: its target is already in the
-                        // coordinate system an inter-document xref target uses.
-                        // A nested include's target is relative to the file
-                        // containing it, so registering it as written could
-                        // collide with – and falsely collapse – a root-relative
-                        // xref that names a different file. A nested include is
-                        // therefore not recorded at all: an xref to it keeps
-                        // its ordinary inter-document destination.
-                        //
-                        // [`Catalog::register_include`]: crate::document::Catalog::register_include
-                        if self.include_depth == 1 {
-                            let full = is_full_include(&attrlist);
-                            self.includes
-                                .push((include_catalog_key(&target).to_string(), full));
-                        }
-
-                        // The directive's `depth` attribute lowers the maximum
-                        // include depth while the included file (and anything
-                        // it includes) is processed; the previous limit is
-                        // restored once the include has been merged. A positive
-                        // value permits that many more levels below the
-                        // included file, clamped to the absolute
-                        // `max-include-depth` limit; zero (or a value that
-                        // coerces to zero) permits none. `include_depth` here
-                        // is the containing file's depth plus one – i.e. the
-                        // depth of the included file itself.
-                        let saved_max_depth = self.max_include_depth;
-
-                        if let Some(depth_attr) = attrlist.named_attribute("depth")
-                            && let Some(max_depth) = self.max_include_depth.as_mut()
-                        {
-                            let rel = ruby_to_i(depth_attr.value());
-                            if rel > 0 {
-                                // A request too large for `usize` (possible on
-                                // 32-bit targets) saturates rather than
-                                // wrapping into a restrictive value; the clamp
-                                // below then reduces it to the absolute limit.
-                                let mut rel = usize::try_from(rel).unwrap_or(usize::MAX);
-                                let mut curr = self.include_depth.saturating_add(rel);
-                                if curr > max_depth.abs {
-                                    curr = max_depth.abs;
-                                    rel = max_depth.abs;
-                                }
-                                max_depth.curr = curr;
-                                max_depth.rel = rel;
-                            } else {
-                                max_depth.curr = self.include_depth;
-                                max_depth.rel = 0;
-                            }
-                        }
-
-                        // AsciiDoc files are run through the preprocessor, so the
-                        // include (and other) directives they contain are
-                        // interpreted.
-                        self.process_adoc_include(&selected, Some(&target), &nested_reindent);
-
-                        self.max_include_depth = saved_max_depth;
-                    } else {
-                        // Non-AsciiDoc files are merged verbatim; the preprocessor
-                        // does not interpret any AsciiDoc directives within them
-                        // (matching Asciidoctor).
-                        self.process_nonadoc_include(&selected, Some(&target), &nested_reindent);
-                    }
-
-                    if let Some(encoding) = non_utf8_encoding {
-                        // Point the warning at the first line of the included
-                        // content (the directive line itself is not present in the
-                        // output once it has been expanded).
-                        let len = self.output[content_start..]
-                            .find('\n')
-                            .unwrap_or(self.output.len() - content_start);
-                        self.warnings.push(DeferredWarning {
-                            offset: content_start,
-                            len,
-                            warning: WarningType::NonUtf8IncludeEncoding(encoding.to_string()),
-                            origin: None,
-                        });
-                    }
-
-                    if let Some(restore) = restore_leveloffset {
-                        // Reset the level offset to whatever was in effect before
-                        // the include (unset unless a `:leveloffset:` was active).
-                        let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
-                        self.emit_line(
-                            "",
-                            file_name,
-                            source_line_number,
-                            wrapper,
-                            &mut has_reported_file,
-                        );
-                        self.emit_line(
-                            &restore,
-                            file_name,
-                            source_line_number,
-                            wrapper,
-                            &mut has_reported_file,
-                        );
-                    }
-
-                    // Re-report the including file if there's more content.
-                    has_reported_file = false;
-                } else if attrlist.has_option("optional") {
-                    // `opts=optional`: a target that can't be resolved is dropped
-                    // silently – neither the "Unresolved directive" text nor a
-                    // warning is produced (matching Asciidoctor). Nothing is
-                    // emitted for this line; re-anchor the source map so the lines
-                    // that follow map back to their correct original line numbers.
-                    has_reported_file = false;
-                } else {
-                    // The target could not be resolved. Replace the directive with
-                    // an "Unresolved directive" message and record a warning. A
-                    // file that exists but can't be read (or can't be decoded as
-                    // UTF-8) is reported distinctly from a missing one, matching
-                    // Asciidoctor.
-                    let warning = failure_warning(target);
-
-                    self.emit_unresolved_directive(
-                        line.data(),
-                        warning,
-                        file_name,
-                        source_line_number,
-                        &mut has_reported_file,
-                    );
-                }
+                self.process_include_directive(
+                    &caps,
+                    line.data(),
+                    file_name,
+                    source_line_number,
+                    content_fidelity,
+                    &mut has_reported_file,
+                );
             } else {
                 // If none of the above apply, add the line to output.
                 //
@@ -936,6 +533,432 @@ impl<'p> PreprocessorState<'p> {
         }
 
         self.include_depth -= 1;
+    }
+
+    /// Process an `include::` directive line: resolve its target through the
+    /// configured include file handler (honoring the safe mode, the URI-read
+    /// permission, and the include-depth limits) and merge the resulting
+    /// content, or record the appropriate diagnostic. Extracted from the main
+    /// preprocessing loop so it can be shared with a single-line conditional
+    /// whose bracketed body is itself an include directive (see
+    /// [`process_single_line_content`]).
+    ///
+    /// `line_data` is the directive line as written (the raw source line for a
+    /// top-level include, or the bracketed body for a single-line conditional);
+    /// `caps` are its [`INCLUDE_DIRECTIVE`] captures.
+    ///
+    /// [`process_single_line_content`]: Self::process_single_line_content
+    fn process_include_directive(
+        &mut self,
+        caps: &Captures<'_>,
+        line_data: &str,
+        file_name: Option<&str>,
+        source_line_number: usize,
+        content_fidelity: Fidelity,
+        has_reported_file: &mut bool,
+    ) {
+        // Asciidoctor substitutes attributes into an include target
+        // using the `attribute-missing` policy in effect, except that
+        // `warn` is mapped to `drop-line`: a warning here names the
+        // whole directive, not the individual reference. Under either
+        // of those policies a reference to a missing attribute empties
+        // the entire target, and the directive is dropped before the
+        // include file handler is ever consulted. See issue #776.
+        let attribute_missing = AttributeMissing::from_parser(self.parser);
+
+        let missing_policy = match attribute_missing {
+            AttributeMissing::Skip => MissingAttribute::KeepLiteral,
+            AttributeMissing::Drop => MissingAttribute::Drop,
+            AttributeMissing::DropLine | AttributeMissing::Warn => MissingAttribute::DropLine,
+        };
+
+        let (target, missing_reference) =
+            self.substitute_attributes_tracking(&caps[1], missing_policy);
+
+        if missing_reference
+            && matches!(
+                attribute_missing,
+                AttributeMissing::DropLine | AttributeMissing::Warn
+            )
+        {
+            // Under `drop-line` (and for an include marked
+            // `opts=optional`) the directive line is removed with no
+            // replacement text. Asciidoctor logs this at INFO level;
+            // this crate has no INFO channel, so – as everywhere else
+            // `drop-line` applies – the line is dropped silently.
+            // Re-anchor the source map so the lines that follow map
+            // back to their correct original line numbers.
+            if attribute_missing == AttributeMissing::DropLine
+                || parse_attrlist(caps, self.parser).has_option("optional")
+            {
+                *has_reported_file = false;
+                return;
+            }
+
+            // Under `warn` the directive is replaced by an "Unresolved
+            // directive" message, as it is for a target that could not
+            // be resolved, and a warning naming the whole directive is
+            // recorded.
+            self.emit_unresolved_directive(
+                line_data,
+                WarningType::IncludeDroppedDueToMissingAttribute(line_data.to_owned()),
+                file_name,
+                source_line_number,
+                has_reported_file,
+            );
+
+            return;
+        }
+
+        if self.parser.safe >= SafeMode::Secure {
+            // The include directive is disabled at `SafeMode::Secure`
+            // and above (the default): rather than embed the contents of
+            // an arbitrary file, the directive is converted to a link to
+            // its target, matching Asciidoctor. The include file handler
+            // is never consulted in this case.
+            self.record_origin(
+                file_name,
+                source_line_number,
+                Fidelity::Synthetic(Transform::SecureLinkRewrite),
+                has_reported_file,
+            );
+
+            // A target containing a space would break the link macro,
+            // so it is wrapped in a `pass:c[…]` macro (matching
+            // Asciidoctor).
+            let replacement = if target.contains(' ') {
+                format!("link:pass:c[{target}][role=include]")
+            } else {
+                format!("link:{target}[role=include]")
+            };
+            self.output_line_number += 1;
+            self.output.push_str(&replacement);
+            self.output.push('\n');
+
+            return;
+        }
+
+        // `max-include-depth=0` disables the include directive
+        // entirely: the directive line is left in the output verbatim,
+        // with no diagnostic, and the include file handler is never
+        // consulted (matching Asciidoctor).
+        let Some(max_depth) = self.max_include_depth else {
+            self.emit_line(
+                line_data,
+                file_name,
+                source_line_number,
+                content_fidelity,
+                has_reported_file,
+            );
+            return;
+        };
+
+        // When the file containing the directive already sits at the
+        // maximum include depth, the directive is likewise left
+        // verbatim, and a "maximum include depth exceeded" error is
+        // recorded at the directive's own file and line (matching
+        // Asciidoctor). `include_depth` counts the current file as 1,
+        // so the containing file's depth – which the limit is compared
+        // against – is `include_depth - 1`, making the depth-exceeded
+        // condition `include_depth - 1 >= curr`, i.e.:
+        if self.include_depth > max_depth.curr {
+            self.warnings.push(DeferredWarning {
+                offset: self.output.len(),
+                len: line_data.len(),
+                warning: WarningType::MaxIncludeDepthExceeded(max_depth.rel),
+                origin: None,
+            });
+
+            self.emit_line(
+                line_data,
+                file_name,
+                source_line_number,
+                content_fidelity,
+                has_reported_file,
+            );
+            return;
+        }
+
+        let attrlist = parse_attrlist(caps, self.parser);
+
+        // A URI target is only fetched when the URI read permission has
+        // been granted (`allow-uri-read`). This is disabled by default,
+        // so a URI include that is not permitted is not fetched; instead
+        // the directive is converted to a `link:` macro to its target –
+        // the same rewrite applied at `SafeMode::Secure` above – and no
+        // warning is recorded (matching Asciidoctor). See
+        // `include-uri.adoc`.
+        if is_uri(&target) && !self.parser.is_attribute_set("allow-uri-read") {
+            self.record_origin(
+                file_name,
+                source_line_number,
+                Fidelity::Synthetic(Transform::SecureLinkRewrite),
+                has_reported_file,
+            );
+
+            // A target containing a space would break the link macro,
+            // so it is wrapped in a `pass:c[…]` macro (matching
+            // Asciidoctor).
+            let replacement = if target.contains(' ') {
+                format!("link:pass:c[{target}][role=include]")
+            } else {
+                format!("link:{target}[role=include]")
+            };
+            self.output_line_number += 1;
+            self.output.push_str(&replacement);
+            self.output.push('\n');
+
+            return;
+        }
+
+        // Ask the handler to resolve the target. With no handler
+        // configured, the target is treated as not found. The failure
+        // reason (`NotFound`, `NotReadable`, or `NotDecodable`) selects
+        // the warning recorded below, mirroring Asciidoctor's distinct
+        // `include file not found`, `include file not readable`, and
+        // `invalid byte sequence in UTF-8` messages.
+        let resolution = self
+            .parser
+            .include_file_handler
+            .as_ref()
+            .map_or(IncludeResolution::NotFound, |ifh| {
+                ifh.resolve_target(file_name, &target, &attrlist, self.parser)
+            });
+
+        // Matched exhaustively (no catch-all) on purpose: although
+        // `IncludeResolution` is `non_exhaustive` for downstream crates,
+        // within this crate a new reason must be handled here
+        // deliberately – with its own warning – rather than silently
+        // collapsing into "not found". Each failure reason carries the
+        // `WarningType` constructor (a `fn(String) -> WarningType`) used
+        // to build its warning below, once the target is available to
+        // move in. The constructor paired with `Found` is never used.
+        let (include_content, failure_warning): (_, fn(String) -> WarningType) = match resolution {
+            IncludeResolution::Found(content) => (Some(content), WarningType::IncludeFileNotFound),
+
+            IncludeResolution::NotReadable => (None, WarningType::IncludeFileNotReadable),
+
+            IncludeResolution::NotDecodable => (None, WarningType::IncludeFileNotDecodable),
+
+            IncludeResolution::NotFound => (None, WarningType::IncludeFileNotFound),
+        };
+
+        if let Some(include_content) = include_content {
+            // Apply `lines`/`tag(s)` selection and `indent` normalization
+            // to the raw included content before it is merged, matching
+            // Asciidoctor. Any nested include/conditional directives in an
+            // AsciiDoc include are therefore interpreted only on the
+            // selected, re-indented lines.
+            let (selected, tag_diagnostics) =
+                select_included_lines(include_content.content(), &attrlist);
+            let (selected, nested_reindent) =
+                reindent_included_lines(selected, &attrlist, self.parser);
+
+            // A malformed or unmatched tag directive (or a requested tag
+            // that was never found) is reported against the include
+            // directive's own cursor.
+            self.emit_tag_filter_warnings(&tag_diagnostics, file_name, source_line_number);
+
+            // The parser only handles UTF-8 content, so an `encoding`
+            // attribute requesting any other encoding cannot be honored
+            // by the parser itself; record a warning (emitted below, once
+            // the offset of the included content is known). See
+            // `include.adoc`. A handler that transcodes the content to
+            // UTF-8 itself signals this via `IncludeContent::transcoded`,
+            // in which case the encoding has been honored and no warning
+            // is recorded. See
+            // https://github.com/asciidoc-rs/asciidoc-parser/issues/611.
+            let non_utf8_encoding = (!include_content.encoding_handled())
+                .then(|| {
+                    attrlist
+                        .named_attribute("encoding")
+                        .map(|a| a.value())
+                        .filter(|v| !is_utf8_encoding(v))
+                })
+                .flatten();
+
+            // `leveloffset` wraps the included content in `:leveloffset:`
+            // attribute entries: the offset is applied to the included
+            // content and reset afterward (see
+            // `include-with-leveloffset.adoc`). The running `leveloffset`
+            // document attribute is applied to section levels during
+            // parsing (see `SectionBlock::parse` and
+            // `Parser::level_offset`), so this wrapping shifts the
+            // effective heading levels of the included content.
+            let leveloffset = attrlist
+                .named_attribute("leveloffset")
+                .map(|a| a.value())
+                .filter(|v| !v.is_empty());
+
+            // Capture the restore value *before* processing the include:
+            // an included AsciiDoc file may itself set `:leveloffset:`,
+            // which would mutate the running attribute state, so reading it
+            // afterward would restore the included file's value rather than
+            // the one in effect before the include.
+            let restore_leveloffset = leveloffset.map(|offset| {
+                let restore = match self.parser.attribute_value("leveloffset") {
+                    InterpretedValue::Value(v) if !v.is_empty() => {
+                        format!(":leveloffset: {v}")
+                    }
+                    _ => ":leveloffset!:".to_string(),
+                };
+                let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
+                self.emit_line(
+                    &format!(":leveloffset: {offset}"),
+                    file_name,
+                    source_line_number,
+                    wrapper,
+                    has_reported_file,
+                );
+                self.emit_line(
+                    "",
+                    file_name,
+                    source_line_number,
+                    wrapper,
+                    has_reported_file,
+                );
+                restore
+            });
+
+            let content_start = self.output.len();
+
+            if is_asciidoc_file(&target) {
+                // Register the included AsciiDoc file so an
+                // inter-document cross reference whose target names it
+                // can later collapse to a same-document reference (its
+                // anchors are now part of this document). A `lines` or
+                // partial `tag(s)` selection records a *partial* include,
+                // which does not collapse the reference. A file
+                // included both fully and partially resolves to full;
+                // that merge is applied by
+                // [`Catalog::register_include`] when these entries are
+                // replayed into the catalog.
+                //
+                // Only a directive written in the *outermost* document
+                // (depth 1) is recorded: its target is already in the
+                // coordinate system an inter-document xref target uses.
+                // A nested include's target is relative to the file
+                // containing it, so registering it as written could
+                // collide with – and falsely collapse – a root-relative
+                // xref that names a different file. A nested include is
+                // therefore not recorded at all: an xref to it keeps
+                // its ordinary inter-document destination.
+                //
+                // [`Catalog::register_include`]: crate::document::Catalog::register_include
+                if self.include_depth == 1 {
+                    let full = is_full_include(&attrlist);
+                    self.includes
+                        .push((include_catalog_key(&target).to_string(), full));
+                }
+
+                // The directive's `depth` attribute lowers the maximum
+                // include depth while the included file (and anything
+                // it includes) is processed; the previous limit is
+                // restored once the include has been merged. A positive
+                // value permits that many more levels below the
+                // included file, clamped to the absolute
+                // `max-include-depth` limit; zero (or a value that
+                // coerces to zero) permits none. `include_depth` here
+                // is the containing file's depth plus one – i.e. the
+                // depth of the included file itself.
+                let saved_max_depth = self.max_include_depth;
+
+                if let Some(depth_attr) = attrlist.named_attribute("depth")
+                    && let Some(max_depth) = self.max_include_depth.as_mut()
+                {
+                    let rel = ruby_to_i(depth_attr.value());
+                    if rel > 0 {
+                        // A request too large for `usize` (possible on
+                        // 32-bit targets) saturates rather than
+                        // wrapping into a restrictive value; the clamp
+                        // below then reduces it to the absolute limit.
+                        let mut rel = usize::try_from(rel).unwrap_or(usize::MAX);
+                        let mut curr = self.include_depth.saturating_add(rel);
+                        if curr > max_depth.abs {
+                            curr = max_depth.abs;
+                            rel = max_depth.abs;
+                        }
+                        max_depth.curr = curr;
+                        max_depth.rel = rel;
+                    } else {
+                        max_depth.curr = self.include_depth;
+                        max_depth.rel = 0;
+                    }
+                }
+
+                // AsciiDoc files are run through the preprocessor, so the
+                // include (and other) directives they contain are
+                // interpreted.
+                self.process_adoc_include(&selected, Some(&target), &nested_reindent);
+
+                self.max_include_depth = saved_max_depth;
+            } else {
+                // Non-AsciiDoc files are merged verbatim; the preprocessor
+                // does not interpret any AsciiDoc directives within them
+                // (matching Asciidoctor).
+                self.process_nonadoc_include(&selected, Some(&target), &nested_reindent);
+            }
+
+            if let Some(encoding) = non_utf8_encoding {
+                // Point the warning at the first line of the included
+                // content (the directive line itself is not present in the
+                // output once it has been expanded).
+                let len = self.output[content_start..]
+                    .find('\n')
+                    .unwrap_or(self.output.len() - content_start);
+                self.warnings.push(DeferredWarning {
+                    offset: content_start,
+                    len,
+                    warning: WarningType::NonUtf8IncludeEncoding(encoding.to_string()),
+                    origin: None,
+                });
+            }
+
+            if let Some(restore) = restore_leveloffset {
+                // Reset the level offset to whatever was in effect before
+                // the include (unset unless a `:leveloffset:` was active).
+                let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
+                self.emit_line(
+                    "",
+                    file_name,
+                    source_line_number,
+                    wrapper,
+                    has_reported_file,
+                );
+                self.emit_line(
+                    &restore,
+                    file_name,
+                    source_line_number,
+                    wrapper,
+                    has_reported_file,
+                );
+            }
+
+            // Re-report the including file if there's more content.
+            *has_reported_file = false;
+        } else if attrlist.has_option("optional") {
+            // `opts=optional`: a target that can't be resolved is dropped
+            // silently – neither the "Unresolved directive" text nor a
+            // warning is produced (matching Asciidoctor). Nothing is
+            // emitted for this line; re-anchor the source map so the lines
+            // that follow map back to their correct original line numbers.
+            *has_reported_file = false;
+        } else {
+            // The target could not be resolved. Replace the directive with
+            // an "Unresolved directive" message and record a warning. A
+            // file that exists but can't be read (or can't be decoded as
+            // UTF-8) is reported distinctly from a missing one, matching
+            // Asciidoctor.
+            let warning = failure_warning(target);
+
+            self.emit_unresolved_directive(
+                line_data,
+                warning,
+                file_name,
+                source_line_number,
+                has_reported_file,
+            );
+        }
     }
 
     /// Merge the content of a non-AsciiDoc include verbatim.
@@ -1446,6 +1469,28 @@ impl<'p> PreprocessorState<'p> {
         source_line_number: usize,
         has_reported_file: &mut bool,
     ) {
+        // A single-line conditional whose body is itself an include directive is
+        // re-fed through include processing rather than emitted literally,
+        // matching Asciidoctor: its reader restores the body as the next line and
+        // decrements the look-ahead so a line beginning `include::` is processed
+        // again (`replace_next_line`/`@look_ahead -= 1`). The body is right-
+        // trimmed first (Asciidoctor's `replace_next_line text.rstrip`) so the
+        // anchored include-directive pattern still matches.
+        let include_body = content.trim_end();
+        if include_body.starts_with("include::")
+            && let Some(caps) = INCLUDE_DIRECTIVE.captures(include_body)
+        {
+            self.process_include_directive(
+                &caps,
+                include_body,
+                file_name,
+                source_line_number,
+                Fidelity::Transformed(Transform::Rewritten),
+                has_reported_file,
+            );
+            return;
+        }
+
         let can_have_attribute = self.can_have_attribute;
         let mut applied_attribute = false;
 
@@ -3559,6 +3604,60 @@ mod tests {
         assert_eq!(
             conditional_output("head\n\nifdef::foo[dropped]\n\ntail"),
             "head\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_single_line_processes_include_directive_in_brackets() {
+        // A single-line conditional whose bracketed body is itself an include
+        // directive processes the include (rather than emitting the directive
+        // text literally), matching Asciidoctor.
+        let handler = InlineFileHandler::from_pairs([("snippet.adoc", "snippet content\n")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let source = ":foo:\n\nifdef::foo[include::snippet.adoc[]]";
+        let (output, source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(output, ":foo:\n\nsnippet content\n");
+
+        // The merged include content is attributed to the included file, so a
+        // diagnostic in it points at the right source.
+        assert_eq!(
+            source_map.original_file_and_line(3),
+            Some(SourceLine(Some("snippet.adoc".to_owned()), 1))
+        );
+    }
+
+    #[test]
+    fn ifdef_single_line_include_in_brackets_honors_rstrip() {
+        // Asciidoctor right-trims the single-line body before re-reading it, so a
+        // trailing space inside the brackets still leaves an include directive
+        // the anchored pattern matches.
+        let handler = InlineFileHandler::from_pairs([("snippet.adoc", "snippet content\n")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let source = ":foo:\n\nifdef::foo[include::snippet.adoc[]   ]";
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(output, ":foo:\n\nsnippet content\n");
+    }
+
+    #[test]
+    fn ifdef_single_line_include_in_brackets_becomes_link_when_secure() {
+        // At `SafeMode::Secure` (the default) the include directive is disabled,
+        // so the single-line body is rewritten to a link to its target – the
+        // same rewrite a top-level include gets – rather than being resolved.
+        assert_eq!(
+            conditional_output(":foo:\n\nifdef::foo[include::snippet.adoc[]]"),
+            ":foo:\n\nlink:snippet.adoc[role=include]\n"
         );
     }
 
