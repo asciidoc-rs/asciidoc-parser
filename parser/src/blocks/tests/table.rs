@@ -1022,6 +1022,28 @@ fn asciidoc_cell_may_set_sectnumlevels() {
         crate::document::InterpretedValue::Value("all".to_string())
     );
 
+    // Section numbering within the cell honors the cell-local depth, not just the
+    // resolved attribute: `Alpha` (level 1) is numbered, while `Beta` (level 2)
+    // falls beyond the cell's `sectnumlevels` of 1 and is left unnumbered.
+    let alpha = cell
+        .blocks()
+        .iter()
+        .find_map(|b| match b {
+            Block::Section(section) => Some(section),
+            _ => None,
+        })
+        .unwrap();
+    assert!(alpha.section_number().is_some());
+
+    let beta = alpha
+        .child_blocks()
+        .find_map(|b| match b {
+            Block::Section(section) => Some(section),
+            _ => None,
+        })
+        .unwrap();
+    assert!(beta.section_number().is_none());
+
     // The parent document is unaffected: its `sectnumlevels` stays at the default.
     assert_eq!(
         doc.attribute_value("sectnumlevels"),

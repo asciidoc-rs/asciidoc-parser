@@ -2669,6 +2669,18 @@ impl Parser {
             value,
         };
 
+        // Inside an AsciiDoc table cell (a nested document) the leading attribute
+        // lines act as the cell's own header, so a `sectnumlevels` assignment
+        // there must refresh the cached depth that section numbering reads. The
+        // top-level document freezes that value at the end of its header (see
+        // [`Document::parse`](crate::Document)) and a cell has no separate header
+        // pass, so without this a cell that lowered `sectnumlevels` would still
+        // number its deeper sections at the inherited depth. The enclosing cell
+        // parse saves and restores the field, keeping the change scoped to the
+        // cell.
+        let refresh_cell_sectnumlevels =
+            attr_name == "sectnumlevels" && self.nested_document_depth > 0;
+
         // An explicit assignment supersedes (and resets) any counter of the same
         // name. This is what lets `:!name:` reset a counter.
         self.counter_values.borrow_mut().remove(&attr_name);
@@ -2676,6 +2688,14 @@ impl Parser {
         // The derived `backend-html5-doctype-*` attribute tracks `doctype`
         // automatically (it is synthesized on lookup), so no refresh is needed.
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
+
+        if refresh_cell_sectnumlevels {
+            self.sectnumlevels = self
+                .attribute_value("sectnumlevels")
+                .as_maybe_str()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(3);
+        }
     }
 
     /// Unlocks each *flexible* document attribute ([`FLEXIBLE_ATTRIBUTES`],

@@ -1702,6 +1702,13 @@ fn process_content<'src>(
         // which a static lock could not do anyway once the cell changes its own
         // doctype.
         let saved_locks = parser.locked_attribute_names.clone();
+
+        // The cached section-numbering depth is frozen at the end of the
+        // enclosing document's header, so it holds the parent's value throughout
+        // the cell. A cell that assigns its own `sectnumlevels` refreshes it (see
+        // `Parser::set_attribute_from_body`); snapshot and restore it here so that
+        // refresh cannot leak back into the parent's numbering.
+        let saved_sectnumlevels = parser.sectnumlevels;
         {
             // Whether `name` (holding `value` in the inherited set) must be
             // locked for the cell. Kept separate from the insert so each source
@@ -1943,6 +1950,7 @@ fn process_content<'src>(
 
         parser.locked_attribute_names = saved_locks;
         parser.attribute_values = saved_attributes;
+        parser.sectnumlevels = saved_sectnumlevels;
         TableCellContent::AsciiDoc(cell)
     } else {
         let mut content = match replacement {
