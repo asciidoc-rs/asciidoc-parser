@@ -893,6 +893,36 @@ Each phase is a reviewable unit with a clear exit gate.
   **additive**: nothing is wired into the parse path. The remaining macro families (`Ref`,
   `Footnote`, `IndexTerm`, `Stem`, `Anchor`) are later sub-steps.
 
+  *Step 4b(ii) landed as (`Macros` → `Ref{Link}`, the link half of the `Ref` family), in two
+  parts:* the builder now recognizes every **link** form the recorder covers, each as a
+  [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}` node whose fold routes through the same
+  `render_link` the string step calls, so its output is byte-for-byte identical. **Part 1** added
+  the explicit `link:`/`mailto:` macro (`INLINE_LINK_MACRO`), introducing the `Ref` node into the
+  builder. **Part 2** added **auto-links** (a bare `https://example.org`) and **formal-URL links**
+  (`https://example.org[text]`), matched by the shared `INLINE_LINK` pattern (now `pub(crate)`,
+  its branch-resolving `NormalizedCaps` view shared with the string replacer so the two cannot
+  drift on group numbering). Both reuse the string pipeline's *exact* recognition, changing only
+  the *sink*, and neither adds a field to `Ref`: the computed display text is baked into a single
+  [`Text`](../../parser/src/inlines/inline_node.rs) child (so the fold recovers `link_text` with no
+  build-time state), the `bare` role rides on the node's `roles`, and a `^` suffix sets `window`.
+  The auto-link part reproduces the replacer's boundary-prefix preservation and bare-URL
+  trailing-punctuation stripping by generalizing the shared `MacroMatch` seam so a macro node can
+  replace only a *sub-range* of its match – keeping a kept prefix before it and stripped
+  punctuation after it – which the image/UI/`link:` families use degenerately (the node consumes
+  the whole match). Because macros are matched over *escaped, already-rendered* text, a link whose
+  URL crosses a special (`&`) or a rendered span is left **unrecognized** for a later increment,
+  exactly the verbatim boundary step 4a documents; the angle-bracketed URL form (`<url>`) needs a
+  leading `&lt;` and so is always non-verbatim, and a text carrying an attribute list (`=`, or a
+  `mailto:` `,` subject) is deferred until the node can hold an `Attrlist<'src>`. The `link:` URL
+  macro form (`link:https://…[…]`) is left to the `INLINE_LINK_MACRO` pass, which folds the
+  identical node – the two passes run in the string step's order (`INLINE_LINK` before
+  `INLINE_LINK_MACRO`). Differential corpora pin the verbatim link forms (labeled / bare / pathed,
+  `mailto:`, other schemes, the `^` suffix, escapes, `hide-uri-scheme`, links next to and inside
+  spans) byte-for-byte, alongside structural precise-span assertions the Strategy-A tree cannot
+  make and divergence tests for each deferred form. These steps are **additive**: nothing is wired
+  into the parse path. Cross-references (`Ref{Xref}`), footnotes, index terms, STEM, and anchors
+  remain later sub-steps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -903,7 +933,12 @@ Each phase is a reviewable unit with a clear exit gate.
      - ✅ **4a.** `Image` / icon (`image:` / `icon:`).
      - **4b.** the remaining families, each its own sub-step:
        - ✅ **4b(i).** `Ui` (`kbd:` / `btn:` / `menu:`).
-       - **4b(ii).** `Ref` (links / cross-references), `Footnote`, `IndexTerm`, `Stem`, `Anchor`.
+       - **4b(ii).** `Ref` (links / cross-references), `Footnote`, `IndexTerm`, `Stem`, `Anchor`,
+         itself sliced into parts:
+         - ✅ **part 1.** the `link:`/`mailto:` macro (`INLINE_LINK_MACRO`) → `Ref{Link}`.
+         - ✅ **part 2.** auto-links and formal-URL links (`INLINE_LINK`) → `Ref{Link}`.
+         - **part 3.** cross-references (`INLINE_XREF`) → `Ref{Xref}`, then `Footnote`,
+           `IndexTerm`, `Stem`, `Anchor`.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
      `Callouts` – completing the vocabulary the recorder covers.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make

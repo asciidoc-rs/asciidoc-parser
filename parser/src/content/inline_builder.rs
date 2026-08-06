@@ -39,21 +39,22 @@
 //!   (`&amp;copy;`) can straddle a `Text`/`CharRef` boundary.
 //! - [`apply_macros`] recognizes **image and icon macros** (`image:target[…]`,
 //!   `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
-//!   and the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
-//!   replacing each with an [`Image`](InlineNode::Image),
-//!   [`Ui`](InlineNode::Ui), or [`Ref`](InlineNode::Ref) node. An image node
-//!   captures its own owned [`Attrlist`] – the step that makes a macro node
-//!   *self-describing*; a link node bakes its computed display text into
-//!   [`Text`](InlineNode::Text) children so its fold needs no build-time state.
-//!   Each family reuses the shared pattern the string step matches with
-//!   ([`INLINE_IMAGE_MACRO`], [`INLINE_KBD_BTN_MACRO`], [`INLINE_MENU_MACRO`],
-//!   [`INLINE_LINK_MACRO`]), builds `'src`-borrowing nodes for verbatim macros
-//!   only (see [`apply_macros`] for the boundary the escaped-content case
-//!   defers), and – for the UI macros – is recognized only under the
-//!   `experimental` document attribute, exactly as the string step gates them.
-//!   The remaining macro families (auto-links and formal-URL links,
-//!   cross-references, footnotes, index terms, anchors, STEM) are later
-//!   increments.
+//!   the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`), and
+//!   **auto-links and formal-URL links** (`https://example.org`,
+//!   `https://example.org[text]`), replacing each with an
+//!   [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui), or
+//!   [`Ref`](InlineNode::Ref) node. An image node captures its own owned
+//!   [`Attrlist`] – the step that makes a macro node *self-describing*; a link
+//!   node bakes its computed display text into [`Text`](InlineNode::Text)
+//!   children so its fold needs no build-time state. Each family reuses the
+//!   shared pattern the string step matches with ([`INLINE_IMAGE_MACRO`],
+//!   [`INLINE_KBD_BTN_MACRO`], [`INLINE_MENU_MACRO`], [`INLINE_LINK_MACRO`],
+//!   [`INLINE_LINK`]), builds `'src`-borrowing nodes for verbatim macros only
+//!   (see [`apply_macros`] for the boundary the escaped-content case defers),
+//!   and – for the UI macros – is recognized only under the `experimental`
+//!   document attribute, exactly as the string step gates them. The remaining
+//!   macro families (cross-references, footnotes, index terms, anchors, STEM)
+//!   are later increments.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
@@ -99,10 +100,10 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{
-        CharacterReplacement, INLINE_IMAGE_MACRO, INLINE_KBD_BTN_MACRO, INLINE_LINK_MACRO,
-        INLINE_MENU_MACRO, QuoteSub, URI_SNIFF, basename, character_replacements,
-        hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements, normalize_index_text,
-        normalize_text_lf_escaped_bracket, quote_subs, split_kbd_keys,
+        CharacterReplacement, INLINE_IMAGE_MACRO, INLINE_KBD_BTN_MACRO, INLINE_LINK,
+        INLINE_LINK_MACRO, INLINE_MENU_MACRO, NormalizedCaps, QuoteSub, URI_SNIFF, basename,
+        character_replacements, hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements,
+        normalize_index_text, normalize_text_lf_escaped_bracket, quote_subs, split_kbd_keys,
     },
     inlines::{
         CharRef, Image, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled, Ui, UiKind,
@@ -759,6 +760,13 @@ fn emit_range<'src>(
     range: std::ops::Range<usize>,
     out: &mut Vec<InlineNode<'src>>,
 ) {
+    // An empty range (e.g. a macro whose node consumes its whole match, so the
+    // kept-suffix range is zero-width) emits nothing – never a spurious empty
+    // `Text` node sliced from a piece the range merely touches.
+    if range.start >= range.end {
+        return;
+    }
+
     for piece in pieces {
         let p_start = piece.s_start;
         let p_end = piece.s_start + piece.s_len;
@@ -1153,24 +1161,28 @@ fn rebuild_replacements<'src>(
 ///
 /// This increment recognizes **image and icon macros** (`image:target[…]`,
 /// `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
-/// and the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
-/// replacing each with an [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui),
-/// or [`Ref`](InlineNode::Ref) node. An image node carries its own owned
+/// the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`), and
+/// **auto-links and formal-URL links** (`https://example.org`,
+/// `https://example.org[text]`), replacing each with an
+/// [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui), or
+/// [`Ref`](InlineNode::Ref) node. An image node carries its own owned
 /// [`Attrlist`] – the step that makes a macro node *self-describing*, so the
 /// fold reconstructs the render parameters and calls the same
 /// `render_image`/`render_icon` the string step calls; a UI node carries the
 /// keys / label / menu path the string replacer computed, so its fold calls the
-/// same `render_keyboard`/`render_button`/`render_menu`; a link node carries
-/// the computed target, display text (as [`Text`](InlineNode::Text) children),
-/// and roles/window, so its fold calls the same `render_link`. The remaining
-/// macro families (auto-links and formal-URL links, cross-references,
-/// footnotes, index terms, anchors, STEM) are later increments (see
-/// [`link_macro_level`] for the link forms this increment defers).
+/// same `render_keyboard`/`render_button`/`render_menu`; a link node (whether a
+/// `link:`/`mailto:` macro or an auto-link) carries the computed target,
+/// display text (as [`Text`](InlineNode::Text) children), and roles/window, so
+/// its fold calls the same `render_link`. The remaining macro families
+/// (cross-references, footnotes, index terms, anchors, STEM) are later
+/// increments (see [`link_macro_level`] and [`inline_link_level`] for the link
+/// forms this increment defers).
 ///
 /// Each family is applied at each level in the **same order the string step
 /// applies them** – keyboard/button, then menu, then image/icon, then
-/// `link:`/`mailto:` – so a level's overlapping constructs resolve identically.
-/// Like the other steps it descends
+/// auto-links (`INLINE_LINK`), then the `link:`/`mailto:` macro
+/// (`INLINE_LINK_MACRO`) – so a level's overlapping constructs resolve
+/// identically. Like the other steps it descends
 /// into the [`Styled`]/[`Ref`](InlineNode::Ref) children earlier steps created
 /// – a macro can appear inside a rendered span (`*image:x[]*`), just as the
 /// string pipeline matches one inside a rendered `<strong>` tag – then matches
@@ -1235,8 +1247,14 @@ fn apply_macros<'src>(
 
     let nodes = image_macros_level(nodes, root, parser);
 
-    // The `link:`/`mailto:` macro runs after image/icon, mirroring the string
-    // step's order (`INLINE_LINK_MACRO` follows the image and index-term passes).
+    // Auto-links and formal-URL links (`INLINE_LINK`) run after image/icon and
+    // before the `link:`/`mailto:` macro, mirroring the string step's order
+    // (`INLINE_LINK` precedes `INLINE_LINK_MACRO`); the index-term pass the
+    // string step runs between them is a later increment.
+    let nodes = inline_link_level(nodes, root, parser);
+
+    // The `link:`/`mailto:` macro runs after the auto-link pass, mirroring the
+    // string step's order.
     link_macro_level(nodes, root, parser)
 }
 
@@ -1252,15 +1270,30 @@ struct MacroMatch<'src> {
 }
 
 enum MacroMatchKind<'src> {
-    /// An escaped macro (`\image:…`, `\kbd:[…]`): drop the leading backslash
-    /// and keep the rest as literal nodes, replacing nothing – mirroring
-    /// the string replacer's `caps[0][1..]`.
-    Unescape,
+    /// An escaped macro (`\image:…`, `\kbd:[…]`, `\https://…`): drop the single
+    /// backslash at `backslash` and keep the rest of the match as literal
+    /// nodes, replacing nothing – mirroring the string replacer's
+    /// `caps[0][1..]`. The backslash is at the match start for the
+    /// prefix-less macros, and at the scheme for an escaped auto-link whose
+    /// match carries a boundary prefix.
+    Unescape { backslash: usize },
 
     /// A recognized macro, built into its node ([`Image`](InlineNode::Image),
-    /// [`Ui`](InlineNode::Ui), …). Boxed to keep this enum small – a macro node
-    /// is far larger than the empty [`Unescape`](Self::Unescape) variant.
-    Node(Box<InlineNode<'src>>),
+    /// [`Ui`](InlineNode::Ui), [`Ref`](InlineNode::Ref), …). Boxed to keep this
+    /// enum small – a macro node is far larger than the
+    /// [`Unescape`](Self::Unescape) variant.
+    ///
+    /// The node replaces only the `consumed` sub-range of the match; the match
+    /// text before it (`[full.start, consumed.start)`, a boundary prefix a
+    /// non-angle auto-link keeps) and after it (`[consumed.end, full.end)`, the
+    /// trailing punctuation a bare URL strips) is kept as literal. For the
+    /// macro families that consume their whole match (image, UI,
+    /// `link:`/`mailto:`), `consumed` equals the full match, so no prefix
+    /// or suffix is kept.
+    Node {
+        consumed: std::ops::Range<usize>,
+        node: Box<InlineNode<'src>>,
+    },
 }
 
 /// Matches `INLINE_IMAGE_MACRO` at this level's escaped text, replacing each
@@ -1314,8 +1347,10 @@ fn find_image_matches<'src>(
 
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
+                kind: MacroMatchKind::Unescape {
+                    backslash: full.start,
+                },
                 full,
-                kind: MacroMatchKind::Unescape,
             });
 
             continue;
@@ -1324,8 +1359,11 @@ fn find_image_matches<'src>(
         let node = build_image_node(&caps, &full, pieces, root, parser);
 
         matches.push(MacroMatch {
+            kind: MacroMatchKind::Node {
+                consumed: full.clone(),
+                node: Box::new(node),
+            },
             full,
-            kind: MacroMatchKind::Node(Box::new(node)),
         });
     }
 
@@ -1444,20 +1482,26 @@ fn rebuild_macro_level<'src>(
     let mut cursor = 0usize;
 
     for m in matches {
-        match m.kind {
-            MacroMatchKind::Unescape => {
-                // Keep the whole match with the single leading backslash dropped.
-                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
-                emit_range(nodes, pieces, (m.full.start + 1)..m.full.end, &mut out);
+        let MacroMatch { full, kind } = m;
+
+        match kind {
+            MacroMatchKind::Unescape { backslash } => {
+                // Keep the whole match with the single backslash dropped.
+                emit_range(nodes, pieces, cursor..backslash, &mut out);
+                emit_range(nodes, pieces, (backslash + 1)..full.end, &mut out);
             }
 
-            MacroMatchKind::Node(node) => {
-                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
+            MacroMatchKind::Node { consumed, node } => {
+                // The gap runs to the node, absorbing any kept boundary prefix;
+                // the node replaces `consumed`; any stripped trailing
+                // punctuation after it is kept as literal.
+                emit_range(nodes, pieces, cursor..consumed.start, &mut out);
                 out.push(*node);
+                emit_range(nodes, pieces, consumed.end..full.end, &mut out);
             }
         }
 
-        cursor = m.full.end;
+        cursor = full.end;
     }
 
     if cursor < s.len() {
@@ -1522,8 +1566,10 @@ fn find_kbd_btn_matches<'src>(
         // Group 1 is the (optional) escape backslash.
         if caps.get(1).is_some() {
             matches.push(MacroMatch {
+                kind: MacroMatchKind::Unescape {
+                    backslash: full.start,
+                },
                 full,
-                kind: MacroMatchKind::Unescape,
             });
 
             continue;
@@ -1532,8 +1578,11 @@ fn find_kbd_btn_matches<'src>(
         let node = build_kbd_btn_node(&caps, &full, pieces, root);
 
         matches.push(MacroMatch {
+            kind: MacroMatchKind::Node {
+                consumed: full.clone(),
+                node: Box::new(node),
+            },
             full,
-            kind: MacroMatchKind::Node(Box::new(node)),
         });
     }
 
@@ -1621,8 +1670,10 @@ fn find_menu_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
         // The menu pattern's escape is an uncaptured leading `\?`.
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
+                kind: MacroMatchKind::Unescape {
+                    backslash: full.start,
+                },
                 full,
-                kind: MacroMatchKind::Unescape,
             });
 
             continue;
@@ -1631,8 +1682,11 @@ fn find_menu_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
         let node = build_menu_node(&caps, &full, pieces, root);
 
         matches.push(MacroMatch {
+            kind: MacroMatchKind::Node {
+                consumed: full.clone(),
+                node: Box::new(node),
+            },
             full,
-            kind: MacroMatchKind::Node(Box::new(node)),
         });
     }
 
@@ -1706,6 +1760,288 @@ fn split_menu_items<'src>(items: Option<&str>) -> (Vec<CowStr<'src>>, Option<Cow
         (parts.into_iter().map(CowStr::from).collect(), item)
     } else {
         (vec![], Some(CowStr::from(items.trim_end().to_string())))
+    }
+}
+
+// ─── Auto-links and formal-URL links (INLINE_LINK) ────────────────────────
+
+/// The auto-link / formal-URL-link pass at a level: matches [`INLINE_LINK`]
+/// over the level's escaped text and replaces each verbatim, recognized match
+/// with the [`Ref`](InlineNode::Ref) link node it produces.
+///
+/// # Scope
+///
+/// This increment covers [`INLINE_LINK`]'s **non-angle branch** – a bare
+/// auto-linked URL (`https://example.org`) and a formal URL link
+/// (`https://example.org[text]`, `https://example.org[]`) – in its verbatim,
+/// attribute-list-free forms, reproducing the string replacer's boundary-prefix
+/// preservation, bare-URL trailing-punctuation stripping, `^` new-window
+/// suffix, `hide-uri-scheme` display text, and `\` scheme escape. It
+/// deliberately leaves several forms **unrecognized** for a later increment,
+/// each left as literal source here (so the differential corpus only pins the
+/// forms this increment claims):
+///
+/// - The **angle-bracketed URL** form (`<https://example.org>`) requires a
+///   leading `&lt;`, which is always an escaped
+///   [`CharRef`](InlineNode::CharRef) by the time macros run – so its match is
+///   never verbatim, exactly the boundary the image increment documents.
+/// - The **`link:` URL macro** form (`link:https://example.org[text]`, the
+///   pattern's LINK-MACRO branch) is left to [`link_macro_level`], which folds
+///   the identical node; running that pass second mirrors the string step's
+///   order.
+/// - A **formal text carrying an attribute list** (an `=` selecting roles / id
+///   / title / window) is deferred, exactly as [`link_macro_level`] defers it:
+///   the attribute list is parsed from a newline-normalized *copy* of the text,
+///   so it cannot ride on the node as an [`Attrlist`]`<'src>` yet.
+/// - A **non-verbatim match** – a URL crossing an escaped special
+///   ([`CharRef`](InlineNode::CharRef)) or a rendered [`Styled`] span – is
+///   deferred exactly as the image increment defers `image:a&b.png[]`.
+///
+/// An invalid quoted bare URL (`"https://example.org`) and a bare scheme with no
+/// body (`http://;`) are left literal by the string step *and* the builder, so
+/// they render identically and are covered by the differential corpus rather
+/// than a divergence test.
+fn inline_link_level<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<InlineNode<'src>> {
+    let (s, pieces) = build_match_string(&nodes);
+
+    // Cheap pre-filter mirroring the string step's guard: an auto-link needs a
+    // `://` scheme separator somewhere in the level.
+    if !s.contains("://") {
+        return nodes;
+    }
+
+    let matches = find_inline_link_matches(&s, &pieces, root, parser);
+
+    if matches.is_empty() {
+        return nodes;
+    }
+
+    rebuild_macro_level(&nodes, &pieces, &s, matches)
+}
+
+/// Finds every recognized auto-link / formal-URL link at this level, skipping
+/// an angle-bracketed or `link:` macro match, a non-verbatim match, and any
+/// form [`build_inline_link_node`] defers (see [`inline_link_level`]).
+fn find_inline_link_matches<'src>(
+    s: &str,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<MacroMatch<'src>> {
+    let mut matches = Vec::new();
+
+    for caps in INLINE_LINK.captures_iter(s) {
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let whole = caps.get(0).unwrap();
+
+        let full = whole.start()..whole.end();
+
+        let n = NormalizedCaps::new(&caps);
+
+        // The angle-bracketed form always crosses a `&lt;` `CharRef` (so it is
+        // never verbatim), and the `link:` URL macro form is left to
+        // `link_macro_level`, which folds the identical node.
+        if n.is_angle() || n.is_link_macro() {
+            continue;
+        }
+
+        // Only a wholly-verbatim match can slice its target/text from `'src`; a
+        // match crossing an escaped special or a rendered span is left for a
+        // later increment.
+        if !range_is_verbatim(pieces, &full) {
+            continue;
+        }
+
+        match build_inline_link_node(&n, &full, pieces, root, parser) {
+            Some(m) => matches.push(m),
+
+            // A deferred or invalid form (an escaped scheme is handled inside as
+            // an `Unescape`; a quoted bare URL, a bare scheme, or an
+            // attribute-list text is left as literal source).
+            None => continue,
+        }
+    }
+
+    matches
+}
+
+/// Builds one [`MacroMatch`] for a verbatim non-angle [`INLINE_LINK`] match: a
+/// [`Ref`](InlineNode::Ref) link node (with the boundary prefix kept before it
+/// and any stripped trailing punctuation kept after it), or an
+/// [`Unescape`](MacroMatchKind::Unescape) for an escaped scheme. Returns `None`
+/// for a form this increment defers or that the string step leaves literal (see
+/// [`inline_link_level`]).
+///
+/// The value computation mirrors [`InlineLinkReplacer`] exactly – target, bare
+/// vs. labeled display text, `hide-uri-scheme`, the `^` window suffix, and the
+/// trailing-punctuation strip – so the fold reproduces the same bytes through
+/// the same `render_link` [`link_macro_level`]'s nodes fold through.
+///
+/// [`InlineLinkReplacer`]: crate::content::macros
+fn build_inline_link_node<'src>(
+    n: &NormalizedCaps<'_, '_>,
+    full: &std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Option<MacroMatch<'src>> {
+    // `scheme_match` is always present in a non-angle match (the branch cannot
+    // match without it); fall through defensively if it is somehow absent.
+    let scheme_m = n.scheme_match()?;
+    let scheme = scheme_m.as_str();
+
+    // An escaped scheme (`\https://…`) keeps the boundary prefix and drops the
+    // single backslash, leaving the rest of the match literal – no link node.
+    if scheme.starts_with('\\') {
+        return Some(MacroMatch {
+            kind: MacroMatchKind::Unescape {
+                backslash: scheme_m.start(),
+            },
+            full: full.clone(),
+        });
+    }
+
+    let prefix = n.prefix_str();
+
+    // The URL body is the formal-macro target group or, for a bare link, the
+    // bare group; the two are mutually exclusive.
+    let url_part = n.target().or_else(|| n.bare()).map_or("", |m| m.as_str());
+    let mut target = format!("{scheme}{url_part}");
+
+    // The node consumes the URL (and, for a formal macro, its `[…]` attrlist)
+    // but not the boundary prefix; a bare URL additionally stops short of any
+    // trailing punctuation the string step strips out.
+    let mut consumed_end = full.end;
+
+    let mut link_text: Option<String> = None;
+
+    if let Some(attrlist_m) = n.attrlist() {
+        // A formal URL link: the bracketed text is the display text (empty means
+        // a bare link, handled by the shared post-processing below).
+        if !attrlist_m.is_empty() {
+            link_text = Some(attrlist_m.as_str().to_string());
+        }
+    } else {
+        // A bare auto-link.
+
+        // A URL wrapped in quotes with no brackets is invalid macro syntax; the
+        // string step leaves the whole match literal.
+        if prefix == "\"" || prefix == "'" {
+            return None;
+        }
+
+        // Strip a trailing ';' or ':' (and an adjacent ')') off a bare URL,
+        // keeping it as literal text after the link – mirroring the string
+        // replacer, which keys off the target's final character.
+        let mut stripped = 0usize;
+
+        if target.ends_with([';', ':']) {
+            target.truncate(target.len() - 1);
+            stripped += 1;
+
+            if target.ends_with(')') {
+                target.truncate(target.len() - 1);
+                stripped += 1;
+            }
+        }
+
+        // A bare scheme with nothing left after trimming is not a link; leave it
+        // literal, exactly as the string step does.
+        if target.ends_with("://") {
+            return None;
+        }
+
+        // The bare group is the last group in the match, so the URL ends at
+        // `full.end`; the node stops short of the stripped punctuation, which the
+        // stripped bytes (ASCII) place `stripped` bytes back.
+        consumed_end = full.end - stripped;
+    }
+
+    // The display text becomes the node's children, located at the bracketed
+    // text (a formal link) or the node itself (a bare link). Its value is a
+    // computed (owned) string, so this is a *synthesized* `Text`.
+    let text_location_range = n.attrlist().map(|m| m.start()..m.end());
+
+    let mut window: Option<CowStr<'src>> = None;
+    let mut bare = false;
+
+    let link_text = if let Some(mut link_text) = link_text {
+        link_text = link_text.replace("\\]", "]");
+
+        // A text carrying an `=` splits into an attribute list, parsed from a
+        // newline-normalized copy of the text (not from `'src`); defer the whole
+        // macro until the node can carry an `Attrlist<'src>`.
+        if link_text.contains('=') {
+            return None;
+        }
+
+        if link_text.ends_with('^') {
+            link_text.truncate(link_text.len() - 1);
+            window = Some(CowStr::from("_blank"));
+        }
+
+        if link_text.is_empty() {
+            bare = true;
+            hide_uri_scheme_text(&target, parser)
+        } else {
+            link_text
+        }
+    } else {
+        bare = true;
+        hide_uri_scheme_text(&target, parser)
+    };
+
+    let mut roles: Vec<CowStr<'src>> = vec![];
+    if bare {
+        roles.push(CowStr::from("bare"));
+    }
+
+    let consumed = scheme_m.start()..consumed_end;
+    let location = source_slice(pieces, consumed.clone(), root);
+
+    let text_location =
+        text_location_range.map_or(location, |range| source_slice(pieces, range, root));
+
+    let children = vec![InlineNode::Text {
+        value: CowStr::from(link_text),
+        location: text_location,
+    }];
+
+    let node = InlineNode::Ref(Ref {
+        variant: RefVariant::Link,
+        target: CowStr::from(target),
+        children,
+        roles,
+        window,
+        resolved: None,
+        location,
+    });
+
+    Some(MacroMatch {
+        kind: MacroMatchKind::Node {
+            consumed,
+            node: Box::new(node),
+        },
+        full: full.clone(),
+    })
+}
+
+/// The display text for a bare link, dropping the URI scheme under
+/// `hide-uri-scheme` exactly as the string replacer's `URI_SNIFF` strip does.
+/// Unlike a bare `link:`/`mailto:` macro, [`INLINE_LINK`]'s bare branch does
+/// *not* fall back to the whole target when the strip leaves nothing – it
+/// cannot leave nothing, because a bare scheme with no body is rejected
+/// upstream.
+fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
+    if parser.is_attribute_set("hide-uri-scheme") {
+        URI_SNIFF.replace_all(target, "").into_owned()
+    } else {
+        target.to_string()
     }
 }
 
@@ -1791,8 +2127,10 @@ fn find_link_macro_matches<'src>(
 
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
+                kind: MacroMatchKind::Unescape {
+                    backslash: full.start,
+                },
                 full,
-                kind: MacroMatchKind::Unescape,
             });
 
             continue;
@@ -1800,8 +2138,11 @@ fn find_link_macro_matches<'src>(
 
         match build_link_node(&caps, &full, pieces, root, parser) {
             Some(node) => matches.push(MacroMatch {
+                kind: MacroMatchKind::Node {
+                    consumed: full.clone(),
+                    node: Box::new(node),
+                },
                 full,
-                kind: MacroMatchKind::Node(Box::new(node)),
             }),
 
             // A deferred form (an attribute-list-in-text macro, or a rejected
@@ -4312,5 +4653,289 @@ mod tests {
         let reference = assert_link(&children[1]);
         assert_eq!(reference.target.as_ref(), "x.html");
         assert_eq!(link_text_of(reference), "X");
+    }
+
+    // ─── Auto-links and formal-URL links (INLINE_LINK) ────────────────────
+
+    #[test]
+    fn fold_matches_the_string_pipeline_through_inline_links() {
+        // For each fixture, folding the single-pass tree (all five steps)
+        // reproduces the string pipeline's output byte-for-byte. This is the
+        // differential corpus (design §5.3) that pins the auto-link / formal-URL
+        // link increment. Every fixture is a *verbatim*, attribute-list-free
+        // link – the boundary this increment claims (an angle form, a URL
+        // crossing a special, or an attribute-list text is deferred and lives in
+        // a divergence test below).
+        let fixtures = [
+            // No auto-link despite a colon or a `//`.
+            "plain text with a colon: but no scheme",
+            "a bare host example.org stays literal",
+            // Bare auto-links: at the start, mid-flow, and with a path/query.
+            "https://example.org",
+            "Visit https://example.org for details.",
+            "https://example.org/path/to/page.html",
+            "https://example.org/search?q=rust",
+            // Other schemes the pattern recognizes.
+            "ftp://ftp.example.org/pub",
+            "irc://irc.example.org/channel",
+            "file:///etc/hosts here",
+            // A trailing sentence period is left outside the link (the pattern
+            // stops before it); a trailing ';'/':' is stripped back out.
+            "See https://example.org. Next sentence.",
+            "https://example.org; and more",
+            "read https://example.org: really",
+            // A bracketed / parenthesized URL keeps the surrounding punctuation.
+            "(see https://example.org)",
+            "[https://example.org]",
+            // Formal URL links: labeled, bare, and the `^` new-window suffix.
+            "https://example.org[Example]",
+            "https://example.org[]",
+            "https://example.org[Open^]",
+            // An escaped `]` inside the text is unescaped.
+            "https://example.org[a\\]b]",
+            // A bare scheme with nothing left after trimming is left literal by
+            // both (a `://`-only rejection).
+            "http://; is not a link",
+            // A URL wrapped in quotes with no brackets is invalid macro syntax:
+            // left literal by both.
+            "\"https://example.org\" in quotes",
+            // Escapes: the scheme's backslash is dropped and the URL stays
+            // literal (no link), the boundary prefix preserved.
+            "\\https://example.org",
+            "see \\https://example.org here",
+            "\\https://example.org[text]",
+            // Next to other constructs, and inside a rendered span.
+            "*bold* then https://example.org and _em_",
+            "a copyright (C) then https://example.org",
+            "*see https://example.org*",
+            "_https://example.org in em_",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_auto_links_with_hide_uri_scheme() {
+        // Under `hide-uri-scheme`, a bare auto-link's display text drops the URI
+        // scheme; the builder reproduces the string step's `URI_SNIFF` stripping.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute_bool(
+            "hide-uri-scheme",
+            true,
+            ModificationContext::Anywhere,
+        );
+
+        let fixtures = [
+            // A bare auto-link shows the scheme-stripped URL.
+            "https://example.org",
+            "Visit https://example.org for details.",
+            // A formal bare link (`[]`) likewise drops the scheme.
+            "https://example.org[]",
+            // A labeled link keeps its explicit text unchanged.
+            "https://example.org[Example]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = super::fold_html(&build(Span::new(fixture), &parser), &renderer, &parser);
+
+            assert_eq!(
+                folded,
+                golden_macros_with(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_auto_link_becomes_a_ref_node() {
+        // A bare URL is a link whose display text is the target and which takes
+        // the `bare` role, so the fold reproduces `class="bare"`.
+        let nodes = build_src(Span::new("https://example.org"));
+
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
+
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(link_text_of(reference), "https://example.org");
+        assert_eq!(reference.roles, [CowStr::from("bare")]);
+        assert_eq!(reference.window, None);
+        assert_eq!(reference.resolved, None);
+
+        // Its location covers the whole URL.
+        assert_eq!(reference.location.data(), "https://example.org");
+        assert_eq!(reference.location.line(), 1);
+        assert_eq!(reference.location.col(), 1);
+    }
+
+    #[test]
+    fn a_bare_auto_link_keeps_its_boundary_prefix() {
+        // The boundary character before the URL (here a space) is not part of
+        // the link – it stays as literal text before the node.
+        let nodes = build_src(Span::new("Visit https://example.org now"));
+
+        // Text "Visit ", the link, then Text " now".
+        assert_eq!(nodes.len(), 3);
+        assert_text(&nodes[0], "Visit ", 1, 1);
+
+        let reference = assert_link(&nodes[1]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(reference.location.col(), 7);
+
+        assert_text(&nodes[2], " now", 1, 26);
+    }
+
+    #[test]
+    fn a_bare_auto_link_strips_trailing_punctuation() {
+        // A trailing ';' is stripped off the target and kept as literal text
+        // after the link, exactly as the string replacer does.
+        let nodes = build_src(Span::new("https://example.org; done"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(reference.location.data(), "https://example.org");
+
+        // The stripped ';' is kept as its own literal run, then the rest.
+        assert_text(&nodes[1], ";", 1, 20);
+        assert_text(&nodes[2], " done", 1, 21);
+    }
+
+    #[test]
+    fn a_formal_url_link_becomes_a_ref_node() {
+        // A URL with a `[…]` text is a labeled link: no `bare` role.
+        let nodes = build_src(Span::new("https://example.org[Example]"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(link_text_of(reference), "Example");
+        assert!(reference.roles.is_empty());
+
+        // Its location covers the whole macro, the `[…]` included.
+        assert_eq!(reference.location.data(), "https://example.org[Example]");
+    }
+
+    #[test]
+    fn a_formal_url_window_suffix_opens_blank() {
+        // A trailing `^` in the text is stripped and selects the `_blank`
+        // window.
+        let nodes = build_src(Span::new("https://example.org[Open^]"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(link_text_of(reference), "Open");
+        assert_eq!(reference.window.as_deref(), Some("_blank"));
+    }
+
+    #[test]
+    fn an_escaped_auto_link_stays_literal() {
+        // `\https://…` drops the backslash and keeps the URL as literal text – no
+        // link node – with the boundary prefix preserved.
+        let nodes = build_src(Span::new("see \\https://example.org here"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an escaped auto-link must not produce a link node: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros("see \\https://example.org here")
+        );
+    }
+
+    #[test]
+    fn a_link_macro_url_target_is_left_for_the_link_macro_pass() {
+        // `link:https://…[…]` is the pattern's LINK-MACRO branch; the auto-link
+        // pass leaves it, and `link_macro_level` builds the identical node, so
+        // the fold still matches the string pipeline byte-for-byte.
+        let source = "link:https://example.org[Example]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(link_text_of(reference), "Example");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn an_auto_link_is_recognized_inside_a_span() {
+        // A URL can appear inside a rendered span; the transducer descends into
+        // the span body and builds the node there.
+        let nodes = build_src(Span::new("*see https://example.org*"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+        assert_eq!(children.len(), 2);
+        assert_text(&children[0], "see ", 1, 2);
+
+        let reference = assert_link(&children[1]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(link_text_of(reference), "https://example.org");
+    }
+
+    #[test]
+    fn an_angle_bracketed_url_is_a_documented_divergence() {
+        // `<https://example.org>` requires a leading `&lt;`, which is an escaped
+        // `CharRef` by the time macros run, so the match is never verbatim and
+        // the single-pass builder leaves it unrecognized for a later increment.
+        let nodes = build_src(Span::new("<https://example.org>"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an angle-bracketed URL must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a link here.
+        assert!(golden_macros("<https://example.org>").contains("<a href"));
+    }
+
+    #[test]
+    fn an_auto_link_over_a_special_character_is_a_documented_divergence() {
+        // A URL whose body contains `&` is matched by the string pipeline over
+        // the *escaped* text (`…?a=1&amp;b=2`). A self-describing node cannot
+        // carry that escaped text as an `'src` slice, so the single-pass builder
+        // leaves such a link *unrecognized* for a later increment, exactly as the
+        // image increment defers `image:a&b.png[]`.
+        let nodes = build_src(Span::new("https://example.org/?a=1&b=2"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a URL crossing an escaped special must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a link here.
+        assert!(golden_macros("https://example.org/?a=1&b=2").contains("<a href"));
+    }
+
+    #[test]
+    fn a_formal_url_link_attribute_list_is_a_documented_divergence() {
+        // A formal URL text carrying an `=` splits into an attribute list (here a
+        // role), which the string replacer parses from a newline-normalized copy
+        // of the text – not from `'src`. The builder cannot carry that as an
+        // `Attrlist<'src>` yet, so it defers the whole macro (left literal).
+        let source = "https://example.org[Example,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an attribute-list-in-text link must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, applies the role.
+        assert!(golden_macros(source).contains(r#"class="hl""#));
     }
 }
