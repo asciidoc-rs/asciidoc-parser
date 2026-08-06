@@ -2057,7 +2057,12 @@ fn parse_asciidoc_cell_body<'src>(
         InterpretedValue::Value(ref v) if v == "inline"
     );
 
-    let title = if parser.resolve_show_title(true) {
+    // An AsciiDoc table cell's inner document is embedded output (like
+    // `convert_string_to_embedded`), so its doctitle defaults to hidden when
+    // neither `showtitle` nor `notitle` is set – matching Asciidoctor, which
+    // renders a nested cell document without an `<h1>` unless `showtitle` is
+    // enabled.
+    let title = if parser.resolve_show_title(false) {
         title_source.map(|span| {
             let mut content = Content::from(span);
             SubstitutionGroup::Header.apply(&mut content, parser, None);
