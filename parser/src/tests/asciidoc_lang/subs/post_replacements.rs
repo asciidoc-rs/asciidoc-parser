@@ -163,10 +163,25 @@ mod default_post_replacements_substitution {
 "#
         );
 
+        // This table row describes the *metadata* lines in a document header
+        // (author and revision information, and attribute-entry values),
+        // which stay on the restricted `Header` substitution group and so
+        // never see post_replacements: a trailing ` +` on the revision line
+        // is left as literal text.
+        let doc = Parser::default().parse("= Title\nJane Doe\nv1, 2025-09-28: remark +");
+
+        let revremark = doc.header().revision_line().unwrap().revremark().unwrap();
+        assert_eq!(revremark, "remark +");
+
+        // The document *title* line itself is not part of this "Headers" row
+        // – like a block or section title (see the `titles` test below), it
+        // uses `SubstitutionGroup::Title`, so the same trailing ` +` there
+        // does convert to a line break (verified against Asciidoctor 2.0.26;
+        // see #1121).
         let doc = Parser::default().parse("= abc +\ndef");
 
         let title = doc.header().title().unwrap();
-        assert_eq!(title, "abc +");
+        assert_eq!(title, "abc<br>");
     }
 
     #[test]

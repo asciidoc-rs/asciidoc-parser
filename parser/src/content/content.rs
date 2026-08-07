@@ -179,6 +179,59 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     out
 }
 
+/// Strips markup down to plain text, mirroring Asciidoctor's
+/// `Document::Title` sanitize option (`XmlSanitizeRx = /<[^>]+>/`): every tag
+/// – opening, closing, or self-contained (e.g. an `<img>` rendered from an
+/// inline `image:` macro) – is removed, any run of interior spaces left
+/// behind by a removed tag is squeezed to one, and the result is trimmed.
+///
+/// A value with no `<` is returned unchanged, matching Asciidoctor, which
+/// skips the squeeze-and-trim pass entirely when there is nothing to
+/// sanitize. Used both by the sanitized doctitle accessor
+/// (`Document::doctitle_sanitized`) and by this document's own
+/// cross-reference fallback text (`this_document_reference`), which embeds
+/// the doctitle inside its own `<a>` and so cannot carry nested markup.
+pub(crate) fn sanitize_title(source: &str) -> String {
+    if !source.contains('<') {
+        return source.to_string();
+    }
+
+    let mut stripped = String::with_capacity(source.len());
+    let mut rest = source;
+
+    while let Some(lt) = rest.find('<') {
+        stripped.push_str(&rest[..lt]);
+
+        let after_lt = &rest[lt + 1..];
+        match after_lt.find('>') {
+            // `[^>]+` requires at least one character between `<` and `>`;
+            // an empty `<>` does not match and is copied through verbatim.
+            Some(gt) if gt > 0 => rest = &after_lt[gt + 1..],
+            _ => {
+                stripped.push('<');
+                rest = after_lt;
+            }
+        }
+    }
+    stripped.push_str(rest);
+
+    let mut squeezed = String::with_capacity(stripped.len());
+    let mut prev_was_space = false;
+    for c in stripped.chars() {
+        if c == ' ' {
+            if prev_was_space {
+                continue;
+            }
+            prev_was_space = true;
+        } else {
+            prev_was_space = false;
+        }
+        squeezed.push(c);
+    }
+
+    squeezed.trim().to_string()
+}
+
 /// A fully-owned snapshot of a rendered title, including any deferred
 /// cross-references it carries.
 ///
