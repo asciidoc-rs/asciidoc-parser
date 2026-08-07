@@ -2360,6 +2360,13 @@ fn indexterm_macros_level<'src>(
     // but concealed shorthand terms (`(((coffee)))`, `(((a)))(((b)))`) is left
     // *literal*, where the same terms with any surrounding output render to
     // nothing. Detect that no-op and mirror it: leave the level untouched.
+    //
+    // This mirrors a **known string-pipeline bug**
+    // (asciidoc-rs/asciidoc-parser#1123): a whole-content concealed term should
+    // render empty, not literal. The additive builder reproduces it here to
+    // keep byte-for-byte parity (design §5.3); the fix for both is to drop this
+    // call at the cutover (design §5.2, Phase 4, step 6),
+    // where `rendered_html()` becomes the fold and the golden output is updated.
     if indexterm_substitution_is_a_noop(&matches) {
         return nodes;
     }
