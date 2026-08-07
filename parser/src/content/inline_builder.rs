@@ -7074,6 +7074,25 @@ mod tests {
     }
 
     #[test]
+    fn a_visible_macro_term_over_a_span_is_a_documented_divergence() {
+        // The same span boundary for the *macro* spelling: an `indexterm2:[…]`
+        // whose shown text crosses a rendered span is left unrecognized (the
+        // `indexterm2:[` stays literal), where the string pipeline folds the span
+        // markup into the shown term and consumes the macro.
+        let source = "indexterm2:[*bold* term]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::IndexTerm(_))),
+            "a visible macro term crossing a span must be left unrecognized: {nodes:?}"
+        );
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        assert!(folded.contains("indexterm2:["));
+        assert_eq!(golden_macros(source), "<strong>bold</strong> term");
+    }
+
+    #[test]
     fn an_indexterm2_attribute_list_is_a_documented_divergence() {
         // An `indexterm2:[…]` argument carrying an `=` splits into an attribute
         // list whose first positional attribute is the shown term. The builder
