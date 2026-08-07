@@ -300,6 +300,18 @@ mod tests {
     }
 
     #[test]
+    fn drop_line_removes_docinfo_lines_with_an_unset_attribute() {
+        // A reference to an attribute explicitly unset via a document
+        // `:name!:` entry is dropped just like one that was never assigned at
+        // all (issue #1117).
+        let head = head_for(
+            "= Doc\n:attribute-missing: drop-line\n:license-url!:\n:docinfo: shared-head\n\nBody.",
+            &[("docinfo.html", "keep one\n{license-url}\nkeep two")],
+        );
+        assert_eq!(head, "keep one\nkeep two");
+    }
+
+    #[test]
     fn outfilesuffix_falls_back_to_html() {
         // A bare `:outfilesuffix:` (set, no value) is not a usable suffix, so
         // docinfo file names fall back to the `.html` default.
