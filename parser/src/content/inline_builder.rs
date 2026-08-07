@@ -4087,6 +4087,10 @@ mod tests {
             "icon:tags[]",
             "icon:home[Home]",
             "icon:home[size=2x]",
+            // An icon's named `alt` attribute (its value normalized, escaped
+            // brackets unescaped).
+            "icon:home[alt=Home Page]",
+            "icon:home[alt=a\\]b]",
             // A macro embedded in surrounding flow, and next to other constructs.
             "See image:sunset.jpg[Sunset] here.",
             "*bold* then image:x.png[X] and _em_",
@@ -5462,5 +5466,100 @@ mod tests {
 
         // The string pipeline, by contrast, applies the role.
         assert!(golden_xref(source).contains(r#"class="hl""#));
+    }
+
+    #[test]
+    fn an_empty_same_document_xref_is_a_documented_divergence() {
+        // `xref:#[]` names the document as a whole: an empty same-document id
+        // that resolves through a *derived* destination (`this_document_
+        // reference`) the `Ref` node does not carry, so the builder defers it to
+        // a later increment (left literal) exactly as it defers an inter-document
+        // target.
+        let source = "xref:#[]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an empty same-document xref must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a reference here.
+        assert!(golden_xref(source).contains("<a href"));
+    }
+
+    // ─── Fold robustness on hand-built nodes ──────────────────────────────
+
+    #[test]
+    fn fold_folds_a_hand_built_image_without_an_attribute_list() {
+        // The node types are public, so a consumer may hand-build an
+        // [`Image`](InlineNode::Image) directly rather than through the macro
+        // step – with no [`Attrlist`]. The fold handles that by folding through
+        // an empty attribute list sliced from the node's own location, so a
+        // hand-built image renders like the same macro would. (The macro step
+        // always attaches an attribute list, so only a hand-built node reaches
+        // this branch, exactly as [`fold_encodes_an_unknown_replacement_value_
+        // per_character`] exercises a hand-built replacement.)
+        let location = Span::new("image:sunset.jpg[Sunset]");
+
+        let hand_built = InlineNode::Image(Image {
+            is_icon: false,
+            target: CowStr::from("sunset.jpg"),
+            alt: Some(CowStr::from("Sunset")),
+            width: None,
+            height: None,
+            attrs: None,
+            location,
+        });
+
+        // The macro-built equivalent (which carries an attribute list) is the
+        // oracle: the two must fold identically.
+        let renderer = HtmlSubstitutionRenderer {};
+        let macro_built = fold_html(&build_src(location), &renderer);
+
+        assert_eq!(fold_html(&[hand_built], &renderer), macro_built);
+    }
+
+    #[test]
+    fn apply_macros_recognizes_a_macro_inside_reference_children() {
+        // The macros step descends into a [`Ref`](InlineNode::Ref)'s display
+        // children before matching at its own level (mirroring the string
+        // pipeline's whole-string pass). The builder never leaves an
+        // unrecognized macro inside freshly-built reference children, so this
+        // descent is exercised directly: a hand-built `Ref` whose child text is
+        // an `image:` macro has that macro recognized inside it.
+        let root = Span::new("image:x.png[X]");
+
+        let reference = InlineNode::Ref(Ref {
+            variant: RefVariant::Link,
+            target: CowStr::from("https://example.org"),
+            children: vec![InlineNode::Text {
+                value: CowStr::from(root.data()),
+                location: root,
+            }],
+            roles: vec![],
+            window: None,
+            resolved: None,
+            location: root,
+        });
+
+        let out = apply_macros(vec![reference], root, &Parser::default());
+
+        // The reference survives, and its single child is now the recognized
+        // image node.
+        assert_eq!(out.len(), 1);
+
+        match &out[0] {
+            InlineNode::Ref(reference) => {
+                assert_eq!(reference.children.len(), 1);
+
+                assert!(
+                    matches!(reference.children[0], InlineNode::Image(_)),
+                    "expected the child macro to be recognized, got {:?}",
+                    reference.children[0]
+                );
+            }
+
+            other => panic!("expected the Ref to survive, got {other:?}"),
+        }
     }
 }
