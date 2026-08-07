@@ -1920,6 +1920,18 @@ impl Parser {
         std::mem::take(&mut *self.catalog.borrow_mut())
     }
 
+    /// Returns a read-only borrow of the parser's current reference catalog,
+    /// without taking it.
+    ///
+    /// Used to resolve cross-references discovered outside the document's own
+    /// block tree (e.g. docinfo content) against the catalog while it is still
+    /// held by the parser – after the document body has been parsed (so the
+    /// catalog is complete) but before [`take_catalog`](Self::take_catalog)
+    /// transfers it to the `Document`.
+    pub(crate) fn catalog(&self) -> std::cell::Ref<'_, Catalog> {
+        self.catalog.borrow()
+    }
+
     /* Comment out until we're prepared to use and test this.
         /// Sets the default value for an [intrinsic attribute].
         ///

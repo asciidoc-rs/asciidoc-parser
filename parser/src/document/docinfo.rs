@@ -8,6 +8,7 @@ use crate::{
     Parser, SafeMode, Span,
     content::{Content, SubstitutionGroup, SubstitutionStep},
     document::InterpretedValue,
+    parser::{CatalogResolver, ReferenceWarnings},
 };
 
 /// Where a [docinfo] file's content is injected into the converted output.
@@ -197,6 +198,25 @@ impl Docinfo {
             let saved = parser.substitution_warnings_len();
             let mut content = Content::from(Span::new(&joined));
             docinfo_subs.apply(&mut content, parser, None);
+
+            // A `docinfosubs` list that includes `macros` may have discovered
+            // cross-references (`<<id>>`, `xref:id[…]`), left deferred with an
+            // unresolved-fallback rendering. Docinfo content isn't part of the
+            // document's own block tree, so the later document-wide
+            // `resolve_against_own_catalog` pass never visits it; resolve it
+            // here instead, directly against the parser's catalog. This is
+            // safe because `Docinfo::resolve` runs only after the entire
+            // document body has been parsed, so the catalog is already
+            // complete. Any unresolved-reference warning is discarded for the
+            // same reason the substitution warnings above are: its span
+            // refers to the docinfo text, not the document source.
+            if content.has_unresolved_refs() {
+                let catalog = parser.catalog();
+                let resolver = CatalogResolver::new(&catalog);
+                let mut ref_warnings = ReferenceWarnings::default();
+                content.resolve_references(&resolver, &*parser.renderer, &mut ref_warnings);
+            }
+
             let substituted = content.rendered_owned();
             parser.truncate_substitution_warnings(saved);
             substituted
@@ -390,6 +410,20 @@ mod tests {
             &[("docinfo.html", "{license-url} (C)")],
         );
         assert_eq!(head, "https://example.org &#169;");
+    }
+
+    #[test]
+    fn docinfosubs_macros_resolves_cross_references_against_the_document_catalog() {
+        // `docinfosubs=macros` runs the macros substitution on docinfo
+        // content, which can discover a cross-reference. Docinfo content
+        // isn't part of the document's own block tree, so the reference must
+        // still resolve against the document's catalog rather than being left
+        // as unresolved-fallback text.
+        let head = head_for(
+            "= Doc\n:docinfo: shared-head\n:docinfosubs: macros\n\n[#section-a]\n== Section A\n\ncontent",
+            &[("docinfo.html", "xref:section-a[]")],
+        );
+        assert_eq!(head, r##"<a href="#section-a">Section A</a>"##);
     }
 
     #[test]
