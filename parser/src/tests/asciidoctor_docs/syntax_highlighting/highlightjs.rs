@@ -2,13 +2,13 @@ use crate::{document::InterpretedValue, tests::prelude::*};
 
 track_file!("ref/asciidoctor/docs/modules/syntax-highlighting/pages/highlightjs.adoc");
 
-// Highlight.js is a client-side syntax highlighter. This crate performs no
-// rendering, so the activation, CDN-loading, language-bundle, and
-// custom-library mechanics on this page are the responsibility of a downstream
-// renderer crate and are non-normative here. The one exception is the
-// documented default value of the `highlightjs-theme` document attribute, which
-// the parser knows as a built-in default value (see `built_in_attrs.rs`); that
-// is verified below.
+// Highlight.js is a client-side syntax highlighter, and one this crate models:
+// when `source-highlighter` is `highlight.js`, a source block renders with the
+// highlight.js markup its browser-side loader expects (verified below). The
+// remaining CDN-loading, language-bundle, and custom-library mechanics concern
+// the standalone HTML document (its `<head>` and footer scripts), which this
+// block-level virtual DOM does not model, so those parts stay non-normative
+// here.
 non_normative!(
     r##"
 = Highlight.js
@@ -18,6 +18,13 @@ non_normative!(
 
 {url-highlightjs}[Highlight.js^] is a popular client-side syntax highlighter that supports a broad range of {url-highlightjs-lang}[languages^].
 
+"##
+);
+
+#[test]
+fn activate_highlightjs() {
+    verifies!(
+        r##"
 == Activate highlight.js
 
 To activate highlight.js, add the following attribute entry to the header of your AsciiDoc file:
@@ -26,6 +33,27 @@ To activate highlight.js, add the following attribute entry to the header of you
 ----
 :source-highlighter: highlight.js
 ----
+"##
+    );
+
+    // Setting `source-highlighter: highlight.js` renders a source block with the
+    // highlight.js markup: a `pre.highlightjs.highlight` wrapping a
+    // `code.language-<lang>.hljs` that carries `data-lang`.
+    let doc = Parser::default().parse(
+        ":source-highlighter: highlight.js\n\n[source,ruby]\n----\nputs 'Hello, World!'\n----\n",
+    );
+
+    assert_css(&doc, "pre.highlightjs.highlight", 1);
+
+    assert_css(
+        &doc,
+        "pre.highlightjs.highlight > code.language-ruby.hljs[data-lang=\"ruby\"]",
+        1,
+    );
+}
+
+non_normative!(
+    r##"
 
 By default, Asciidoctor will link to the highlight.js library and stylesheet hosted on {url-highlightjs-cdn}[cdnjs^].
 The version of the highlight.js library Asciidoctor loads from the CDN only includes support for languages in the common language bundle (apache, bash, coffeescript, cpp, cs, css, diff, http, ini, java, javascript, json, makefile, markdown, nginx, objectivec, perl, php, properties, python, ruby, shell, sql, xml, and yaml).
@@ -46,8 +74,7 @@ By default, highlight.js is configured to use the github theme.
 
     // `github` is the parser's built-in default value for `highlightjs-theme`:
     // setting the attribute with an empty value (a bare `:highlightjs-theme:`)
-    // resolves to `github`. The parser does no rendering, so this is the extent
-    // to which it models the documented default theme.
+    // resolves to `github`.
     let doc = Parser::default().parse(":highlightjs-theme:\n");
 
     assert_eq!(

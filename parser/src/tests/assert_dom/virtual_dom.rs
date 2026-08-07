@@ -47,6 +47,27 @@ thread_local! {
     static ICONS_MODE: Cell<IconsMode> = const { Cell::new(IconsMode::None) };
 }
 
+/// The document-wide `source-highlighter`, captured so a source block (rendered
+/// without any document context) can emit the markup its highlighter requires.
+/// Only `highlight.js` – the built-in client-side highlighter – changes the
+/// block markup here; a build-time (server-side) highlighter runs during
+/// conversion and is out of scope, so every other value leaves the source block
+/// unchanged.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum SourceHighlighter {
+    /// No `source-highlighter`, or one whose output this virtual DOM does not
+    /// model.
+    Other,
+
+    /// `source-highlighter: highlight.js`.
+    HighlightJs,
+}
+
+thread_local! {
+    static SOURCE_HIGHLIGHTER: Cell<SourceHighlighter> =
+        const { Cell::new(SourceHighlighter::Other) };
+}
+
 /// A fully resolved table of contents, ready to render: the prebuilt section
 /// list (already pruned to the configured `toclevels`), the title text (from
 /// `toc-title`), and the container CSS class (from `toc-class`).
@@ -214,6 +235,16 @@ fn icons_mode_from_document(doc: &Document) -> IconsMode {
         }
     }
     IconsMode::None
+}
+
+/// Reads the document-wide `source-highlighter` mode for the virtual DOM. Only
+/// `highlight.js` is modeled; every other value (including unset) is treated as
+/// [`SourceHighlighter::Other`].
+fn source_highlighter_from_document(doc: &Document) -> SourceHighlighter {
+    match doc.attribute_value("source-highlighter") {
+        InterpretedValue::Value(v) if v == "highlight.js" => SourceHighlighter::HighlightJs,
+        _ => SourceHighlighter::Other,
+    }
 }
 
 /// Decodes common HTML entities to their character equivalents.
@@ -542,6 +573,11 @@ impl ToVirtualDom for Document<'_> {
         // Capture the document-wide icons mode so callout lists (built without
         // any document context) can render an icon table when appropriate.
         ICONS_MODE.with(|m| m.set(icons_mode_from_document(self)));
+
+        // Capture the document-wide `source-highlighter` so a source block can
+        // emit highlight.js markup when it is active (see
+        // [`raw_delimited_to_node`]).
+        SOURCE_HIGHLIGHTER.with(|m| m.set(source_highlighter_from_document(self)));
 
         let mut node = VirtualNode::new("div").with_class("document");
 
@@ -1592,23 +1628,47 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
             .unwrap_or(false);
 
         if is_source_block {
+            let highlighter = SOURCE_HIGHLIGHTER.with(|m| m.get());
+
+            // The source language is the second positional attribute (the first
+            // is `style="source"`).
+            let language = raw.attrlist().and_then(|attrlist| {
+                let mut attrs = attrlist.attributes();
+                attrs.next();
+                attrs.next().map(|lang_attr| lang_attr.value().to_string())
+            });
+
             // For source blocks, create pre > code structure.
             let mut code = VirtualNode::new("code");
 
-            // Add data-lang attribute if language is specified (second positional
-            // attribute).
-            if let Some(attrlist) = raw.attrlist() {
-                let mut attrs = attrlist.attributes();
+            match highlighter {
+                SourceHighlighter::HighlightJs => {
+                    // Highlight.js is a client-side highlighter: Asciidoctor
+                    // passes the source through unchanged and tags the element
+                    // for the browser-side library. The `<code>` carries a
+                    // `language-<lang>` class (falling back to `language-none`
+                    // when no language is set) plus the `hljs` marker class, and
+                    // `data-lang` is emitted only when a language is present.
+                    let lang_class = match language.as_deref() {
+                        Some(lang) => format!("language-{lang}"),
+                        None => "language-none".to_string(),
+                    };
 
-                // Skip first attribute (style="source").
-                attrs.next();
+                    code = code.with_class(lang_class).with_class("hljs");
 
-                // Second attribute is the language, which yields both a
-                // `language-<lang>` class and a `data-lang` attribute.
-                if let Some(lang_attr) = attrs.next() {
-                    code = code
-                        .with_class(format!("language-{}", lang_attr.value()))
-                        .with_attribute("data-lang", lang_attr.value());
+                    if let Some(lang) = language.as_deref() {
+                        code = code.with_attribute("data-lang", lang);
+                    }
+                }
+
+                SourceHighlighter::Other => {
+                    // A language yields both a `language-<lang>` class and a
+                    // `data-lang` attribute.
+                    if let Some(lang) = language.as_deref() {
+                        code = code
+                            .with_class(format!("language-{lang}"))
+                            .with_attribute("data-lang", lang);
+                    }
                 }
             }
 
@@ -1618,7 +1678,15 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
                 code = code.with_html_content(content);
             }
 
-            let pre = VirtualNode::new("pre").with_child(code);
+            let mut pre = VirtualNode::new("pre");
+
+            // Highlight.js marks the enclosing `<pre>` with `highlightjs
+            // highlight` so its loader can find the block.
+            if highlighter == SourceHighlighter::HighlightJs {
+                pre = pre.with_class("highlightjs").with_class("highlight");
+            }
+
+            pre = pre.with_child(code);
             node.children.push(pre);
         } else {
             let mut pre = VirtualNode::new("pre");
