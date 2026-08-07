@@ -6985,11 +6985,25 @@ mod tests {
 
     #[test]
     fn an_all_concealed_shorthand_level_stays_literal() {
-        // A level that is *only* concealed shorthand terms accumulates no output
-        // and ends in a look-ahead retry, so the string replacer returns
-        // `Cow::Borrowed` and leaves it literal. The builder mirrors that: the
-        // terms are left unrecognized (no `IndexTerm` node), byte-for-byte.
-        for source in ["(((coffee)))", "(((a)))(((b)))", "indexterm:[x](((y)))"] {
+        // A level whose only *output* would be from concealed shorthand terms
+        // accumulates no output and ends in a look-ahead retry, so the string
+        // replacer returns `Cow::Borrowed` and leaves it literal (the #1123
+        // bug). The builder mirrors that byte-for-byte: the terms are left
+        // unrecognized (no `IndexTerm` node).
+        //
+        // Note the `(((coffee))) trailing` case: **trailing** text does *not*
+        // rescue recognition, because it is appended only on the replacer's
+        // normal completion — the `Cow::Borrowed` early-return on the empty-`new`
+        // retry happens first and discards it. Only output emitted *before* the
+        // retry (a leading/between gap, or a shown term) makes `new` non-empty;
+        // see `a_concealed_term_after_leading_output_is_consumed` for that
+        // contrast. (Both mirror the string pipeline exactly — verified below.)
+        for source in [
+            "(((coffee)))",
+            "(((a)))(((b)))",
+            "indexterm:[x](((y)))",
+            "(((coffee))) trailing",
+        ] {
             let nodes = build_src(Span::new(source));
 
             assert!(
@@ -7004,6 +7018,25 @@ mod tests {
                 source,
                 "golden literal for {source:?}"
             );
+        }
+    }
+
+    #[test]
+    fn a_concealed_term_after_leading_output_is_consumed() {
+        // The contrast to the all-concealed no-op: **leading** text makes the
+        // replacer's accumulator non-empty *before* the look-ahead retry, so the
+        // substitution is `Cow::Owned` and the concealed term is recognized and
+        // consumed (renders nothing) — leaving only the leading text. The builder
+        // reproduces this byte-for-byte, so `leading (((coffee)))` folds to
+        // `leading `, not the literal source.
+        for source in ["leading (((coffee)))", "((a)) (((b)))"] {
+            let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+            assert_eq!(
+                folded,
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+            assert_ne!(folded, source, "the term should be consumed for {source:?}");
         }
     }
 
