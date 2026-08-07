@@ -982,6 +982,39 @@ Each phase is a reviewable unit with a clear exit gate.
   text – remain for a later increment (part 3c), which needs new `Ref` fields pinned against a
   consumer.
 
+  *Step 4b(ii) part 4a landed as (`Macros` → `Anchor`, inline anchors):* the builder now recognizes
+  **inline anchors** in both spellings – the `[[id]]` / `[[id,reftext]]` shorthand and the
+  `anchor:id[reftext]` macro – as an [`Anchor`](../../parser/src/inlines/anchor.rs) node, folding
+  through the same `render_anchor` the string step calls so the output is byte-for-byte identical
+  (pinned by a new differential corpus). It reuses the string pipeline's *exact* recognition –
+  [`INLINE_ANCHOR`](../../parser/src/content/macros.rs) is now shared `pub(crate)` – so only the
+  recognition *sink* changes (a node instead of rendered markup). Taken out of pipeline order (it is
+  listed last under part 4) precisely because it is the cleanest of the remaining families: an
+  anchor's rendering (`<a id="…"></a>`) is a function of its **id alone**, and the pattern admits no
+  special character in an id, so an id is always verbatim and an anchor is **always recognized** –
+  there is no deferred-output boundary the way the link and cross-reference families have one. The id
+  borrows from `'src` and the whole `[[…]]` / `anchor:…[…]` is the node's `location`. An escaped
+  `\[[…` / `\anchor:…` drops its backslash and stays literal, and – because the id is always verbatim
+  while a reference text may not be – the unescape needs no verbatim gate at all.
+
+  The optional reference text becomes the node's `reftext` – a single
+  [`Text`](../../parser/src/inlines/inline_node.rs) child – **when it is verbatim** (borrowing
+  `'src`; a shorthand's trailing whitespace is trimmed and a macro's escaped `\]` is unescaped into an
+  owned value, mirroring the string replacer). A reference text carrying a rendered span or an escaped
+  special is *non-verbatim*; because it never reaches the flow (the anchor renders from its id alone),
+  such an anchor is still recognized and rendered – the whole match, the rendered-span reference text
+  included, is **consumed** by the node – but its `reftext` is left `None` rather than sliced wrongly
+  from `'src`. This is the same verbatim boundary the other macro families document, expressed here as
+  a node field the fold ignores rather than as a deferred construct; the field stays provisional
+  pending a re-flow consumer (design §6.6). As the additive builder does throughout, the anchor pass
+  performs *no* recognition side effect – it does **not** `register_ref` the id in the reference
+  catalog (so a cross-reference can resolve against it), nor raise the duplicate-id warning the string
+  replacer does; those, and the bibliography-anchor form (`[[[id]]]`, which the string step recognizes
+  only inside a bibliography list item – a context the additive builder is not wired into), are the
+  cutover's job (step 6). This step is **additive**: nothing is wired into the parse path. The
+  remaining macro families (`Footnote`, `IndexTerm`, `Stem`) and the node-blocked cross-reference
+  forms (part 3c) are later sub-steps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1002,7 +1035,9 @@ Each phase is a reviewable unit with a clear exit gate.
            - **part 3c.** the node-blocked forms both spellings share – inter-document targets (a
              *derived* destination) and an attribute-list text (an `Attrlist<'src>`) – which need
              new `Ref` fields, pinned against a consumer.
-         - **part 4.** `Footnote`, `IndexTerm`, `Stem`, `Anchor`.
+         - **part 4.** `Anchor`, `Footnote`, `IndexTerm`, `Stem`, each its own sub-step:
+           - ✅ **part 4a.** inline anchors (`[[id]]` / `anchor:id[…]`, `INLINE_ANCHOR`) → `Anchor`.
+           - **part 4b.** `Footnote`, `IndexTerm`, `Stem`.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
      `Callouts` – completing the vocabulary the recorder covers.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
