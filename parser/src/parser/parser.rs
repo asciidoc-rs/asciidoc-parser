@@ -2390,11 +2390,28 @@ impl Parser {
     /// Returns the document name (`docname`): the base name of the primary
     /// file, stripped of its directory and final extension.
     ///
+    /// An explicitly-set `docname` attribute (e.g. via
+    /// [`with_intrinsic_attribute`]) takes precedence and is returned verbatim,
+    /// mirroring Asciidoctor's model where `doc.attributes['docname']` is the
+    /// single source of truth (seeded from the primary file name at load time,
+    /// but overridable through the API). Only when no `docname` attribute is
+    /// set does this fall back to deriving the stem from the primary file
+    /// name.
+    ///
     /// This is the `<docname>` used to build private docinfo file names (e.g.
-    /// `mydoc-docinfo.html` for `mydoc.adoc`). Returns `None` when no primary
-    /// file name has been set, in which case private docinfo files cannot be
-    /// resolved.
+    /// `mydoc-docinfo.html` for `mydoc.adoc`). Returns `None` when neither a
+    /// `docname` attribute nor a primary file name has been set, in which case
+    /// private docinfo files cannot be resolved.
+    ///
+    /// [`with_intrinsic_attribute`]: Self::with_intrinsic_attribute
     pub(crate) fn docname(&self) -> Option<String> {
+        // An explicitly-set `docname` attribute is the source of truth.
+        if let Some(docname) = self.attribute_value("docname").as_maybe_str()
+            && !docname.is_empty()
+        {
+            return Some(docname.to_string());
+        }
+
         let primary = self.primary_file_name.as_deref()?;
 
         // Strip the directory portion (handling both separators, since the
@@ -4694,11 +4711,39 @@ mod tests {
     }
 
     mod docname {
-        use crate::Parser;
+        use crate::{Parser, parser::ModificationContext};
 
         #[test]
         fn none_without_primary_file_name() {
             assert_eq!(Parser::default().docname(), None);
+        }
+
+        #[test]
+        fn explicit_attribute_takes_precedence() {
+            // An explicitly-set `docname` attribute is the source of truth, even
+            // when no primary file name has been supplied.
+            assert_eq!(
+                Parser::default()
+                    .with_intrinsic_attribute("docname", "test", ModificationContext::ApiOnly)
+                    .docname()
+                    .as_deref(),
+                Some("test")
+            );
+        }
+
+        #[test]
+        fn explicit_attribute_overrides_primary_file_name() {
+            // When both are present, the attribute wins and is returned verbatim
+            // (no directory/extension stripping), mirroring Asciidoctor's
+            // `doc.attributes['docname']` being the single source of truth.
+            assert_eq!(
+                Parser::default()
+                    .with_primary_file_name("mydoc.adoc")
+                    .with_intrinsic_attribute("docname", "other", ModificationContext::ApiOnly)
+                    .docname()
+                    .as_deref(),
+                Some("other")
+            );
         }
 
         #[test]
