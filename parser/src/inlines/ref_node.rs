@@ -13,7 +13,18 @@ pub struct Ref<'src> {
     /// Whether this is a link or a cross-reference.
     pub variant: RefVariant,
 
-    /// The raw target as written in the source.
+    /// The reference target.
+    ///
+    /// For a [`Link`](RefVariant::Link) this is the raw target as written in
+    /// the source (for example `https://example.org` or `index.html`).
+    ///
+    /// For an [`Xref`](RefVariant::Xref) this is the *interpreted* target that
+    /// drives the rendered `href` and the catalog resolution, not the verbatim
+    /// source spelling: a same-document reference's leading `#` is removed
+    /// (`xref:#install[]` is stored as `install`), while an inter-document
+    /// target is kept as written (`other.adoc#frag`). This mirrors the
+    /// value the renderer and the resolution pass use, so the two
+    /// representations cannot disagree.
     pub target: CowStr<'src>,
 
     /// The display text, as child inline nodes. Empty when none was supplied.

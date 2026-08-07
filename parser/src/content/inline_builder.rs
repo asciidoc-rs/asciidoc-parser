@@ -2418,6 +2418,14 @@ fn build_xref_node<'src>(
     // (`xref:#[]`) points at the document as a whole – which carries a derived
     // destination – and an inter-document target needs one too; both are
     // deferred.
+    //
+    // The node's `target` is the *interpreted* id (a leading `#` stripped:
+    // `#install` → `install`), not the raw source spelling. This is deliberate:
+    // it is the value the renderer builds the `href` from and the value
+    // resolution keys on, so it matches both the string pipeline's rendering and
+    // the recorder tree's `target` (which stores the same interpreted value) –
+    // storing the raw `#install` would fold to `href="##install"` and break
+    // parity. See the `Ref::target` field docs.
     let target = match interpret_xref_target(raw_target, true) {
         XrefTarget::SameDocument(id) if !id.is_empty() => id,
         _ => return None,
@@ -5361,6 +5369,26 @@ mod tests {
         let reference = assert_xref(&nodes[0]);
         assert_eq!(reference.children.len(), 1);
         assert_text(&reference.children[0], "Installation", 1, 14);
+    }
+
+    #[test]
+    fn an_explicit_same_document_xref_stores_the_interpreted_id() {
+        // `xref:#install[]` uses the explicit-`#` same-document form. The node's
+        // `target` is the *interpreted* id (`install`), not the raw `#install`:
+        // it is the value the renderer builds the `href` from and resolution
+        // keys on, matching the string pipeline and the recorder tree (see the
+        // `Ref::target` field docs). Storing `#install` would fold to
+        // `href="##install"` and break parity.
+        let nodes = build_src(Span::new("xref:#install[Install]"));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(link_text_of(reference), "Install");
+
+        // The fold reproduces the string pipeline's `href="#install"` exactly.
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        assert!(folded.contains(r##"href="#install""##), "folded: {folded}");
+        assert_eq!(folded, golden_xref("xref:#install[Install]"));
     }
 
     #[test]
