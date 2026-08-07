@@ -1600,7 +1600,15 @@ impl Replacer for InlineBiblioAnchorReplacer<'_, '_> {
 /// * `[[idname,Reference Text]]`
 /// * `anchor:idname[]`
 /// * `anchor:idname[Reference Text]`
-static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes inline anchors
+/// with the *exact* same pattern this string step matches with, changing only
+/// the recognition *sink* (an [`Anchor`](crate::inlines::Anchor) node instead
+/// of rendered markup). Group 1 is the optional escape backslash, groups 2/3
+/// the shorthand id and its optional reference text, and groups 4/5 the
+/// `anchor:id[…]` macro id and its optional reference text.
+pub(crate) static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?x)
