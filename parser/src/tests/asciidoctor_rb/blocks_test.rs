@@ -8301,12 +8301,6 @@ mod references {
         );
     }
 
-    // NOTE: divergence from Asciidoctor. This crate does not trim the leading
-    // space after the id when a block reference's reftext contains a comma, so
-    // the reftext is " Debian, Ubuntu" rather than "Debian, Ubuntu". Kept
-    // `#[ignore]`d with the Ruby-intended reftext.
-    // TODO: trim the leading space of a comma-containing block reftext.
-    #[ignore]
     #[test]
     fn should_allow_comma_in_block_reference_text() {
         verifies!(
@@ -8338,6 +8332,10 @@ mod references {
             .get_ref("debian")
             .expect("ref should be registered");
         assert_eq!(entry.reftext.as_deref(), Some("Debian, Ubuntu"));
+        assert_eq!(
+            doc.catalog().resolve_id("Debian, Ubuntu").as_deref(),
+            Some("debian")
+        );
     }
 
     // NOTE: divergence from Asciidoctor. This test exercises resolving an
