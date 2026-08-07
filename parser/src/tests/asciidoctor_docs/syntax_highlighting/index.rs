@@ -2,10 +2,11 @@ use crate::tests::prelude::*;
 
 track_file!("ref/asciidoctor/docs/modules/syntax-highlighting/pages/index.adoc");
 
-// This page documents how an AsciiDoc processor applies syntax highlighting
-// when rendering source blocks. Because asciidoc-parser performs no rendering –
-// neither client-side nor build-time (server-side) highlighting is a goal of
-// this crate – the whole page is non-normative here.
+// This page is an overview of Asciidoctor's syntax highlighting: how a
+// processor applies a highlighter (client-side or build-time) to a source block
+// while rendering. Applying the highlighter is the responsibility of a
+// downstream renderer crate, not this parser, so the whole page is
+// non-normative here.
 non_normative!(
     r##"
 = Syntax Highlighting

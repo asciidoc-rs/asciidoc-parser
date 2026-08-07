@@ -2,10 +2,10 @@ use crate::tests::prelude::*;
 
 track_file!("ref/asciidoctor/docs/modules/syntax-highlighting/pages/coderay.adoc");
 
-// This page documents how an AsciiDoc processor applies syntax highlighting
-// when rendering source blocks. Because asciidoc-parser performs no rendering –
-// neither client-side nor build-time (server-side) highlighting is a goal of
-// this crate – the whole page is non-normative here.
+// This page documents a build-time (server-side) syntax highlighter, which an
+// AsciiDoc processor invokes while rendering a source block. Build-time
+// highlighting is a non-goal of this project, and this crate performs no
+// rendering in any case, so the whole page is non-normative here.
 non_normative!(
     r##"
 = CodeRay

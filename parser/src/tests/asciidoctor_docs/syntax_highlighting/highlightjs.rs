@@ -2,12 +2,13 @@ use crate::{document::InterpretedValue, tests::prelude::*};
 
 track_file!("ref/asciidoctor/docs/modules/syntax-highlighting/pages/highlightjs.adoc");
 
-// Highlight.js is a client-side syntax highlighter. asciidoc-parser performs no
+// Highlight.js is a client-side syntax highlighter. This crate performs no
 // rendering, so the activation, CDN-loading, language-bundle, and
-// custom-library mechanics on this page are non-normative here. The one
-// exception is the documented default value of the `highlightjs-theme` document
-// attribute, which the parser knows as a built-in default value (see
-// `built_in_attrs.rs`); that is verified below.
+// custom-library mechanics on this page are the responsibility of a downstream
+// renderer crate and are non-normative here. The one exception is the
+// documented default value of the `highlightjs-theme` document attribute, which
+// the parser knows as a built-in default value (see `built_in_attrs.rs`); that
+// is verified below.
 non_normative!(
     r##"
 = Highlight.js

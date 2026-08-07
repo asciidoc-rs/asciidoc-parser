@@ -2,10 +2,10 @@ use crate::tests::prelude::*;
 
 track_file!("ref/asciidoctor/docs/modules/syntax-highlighting/pages/custom.adoc");
 
-// This page documents how an AsciiDoc processor applies syntax highlighting
-// when rendering source blocks. Because asciidoc-parser performs no rendering –
-// neither client-side nor build-time (server-side) highlighting is a goal of
-// this crate – the whole page is non-normative here.
+// This page documents how to implement and register a syntax highlighter
+// adapter in Asciidoctor (in Ruby). This crate neither resolves nor registers
+// syntax highlighters and performs no rendering, so the whole page is
+// non-normative here.
 non_normative!(
     r##"
 = Custom Syntax Highlighter Adapter
