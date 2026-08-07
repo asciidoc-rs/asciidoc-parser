@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.12](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.11...v0.29.12)
+_07 August 2026_
+
+### Fixed
+
+* Honor a cell-body sectnumlevels assignment in an AsciiDoc table cell ([#1102](https://github.com/asciidoc-rs/asciidoc-parser/pull/1102))
+* Hide AsciiDoc table cell doctitle by default (embedded semantics) ([#1101](https://github.com/asciidoc-rs/asciidoc-parser/pull/1101))
+* Process an include:: directive in a single-line conditional's brackets ([#1098](https://github.com/asciidoc-rs/asciidoc-parser/pull/1098))
+
 ## [0.29.11](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.10...v0.29.11)
 _05 August 2026_
 
