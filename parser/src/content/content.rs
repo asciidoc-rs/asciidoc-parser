@@ -916,6 +916,63 @@ mod tests {
         }
     }
 
+    mod sanitize_title {
+        use super::super::sanitize_title;
+
+        #[test]
+        fn leaves_plain_text_unchanged() {
+            assert_eq!(sanitize_title("Plain title"), "Plain title");
+        }
+
+        #[test]
+        fn strips_a_tag_pair_keeping_its_inner_text() {
+            assert_eq!(sanitize_title("<strong>bold</strong>"), "bold");
+        }
+
+        #[test]
+        fn strips_a_self_contained_tag() {
+            assert_eq!(
+                sanitize_title(r#"Before <img src="a.png" alt="a"> after"#),
+                "Before after",
+            );
+        }
+
+        #[test]
+        fn squeezes_spaces_left_behind_by_a_removed_tag() {
+            // A run of spaces left behind after tags are stripped (e.g. two
+            // images rendered back-to-back, or a tag flanked by spaces on
+            // both sides) collapses to one, and the ends are trimmed,
+            // mirroring Ruby's `tr_s(' ', ' ').strip`.
+            assert_eq!(
+                sanitize_title(r#"<img src="a.png">  <img src="b.png">"#),
+                "",
+            );
+            assert_eq!(
+                sanitize_title("Before <b>bold</b>   after"),
+                "Before bold after",
+            );
+        }
+
+        #[test]
+        fn an_empty_tag_does_not_match_and_is_kept_verbatim() {
+            // `[^>]+` in Ruby's `XmlSanitizeRx` requires at least one
+            // character between `<` and `>`; an empty `<>` does not match
+            // and is copied through as literal text.
+            assert_eq!(sanitize_title("a<>b"), "a<>b");
+        }
+
+        #[test]
+        fn an_unclosed_angle_bracket_is_kept_verbatim() {
+            // A `<` with no `>` anywhere after it in the rest of the string
+            // is not a tag and is left as literal text, along with
+            // everything after it.
+            assert_eq!(
+                sanitize_title("Title <dangling and more"),
+                "Title <dangling and more",
+            );
+        }
+    }
+
     mod footnote_deferred {
         use super::super::{
             FootnoteDeferred, XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment,

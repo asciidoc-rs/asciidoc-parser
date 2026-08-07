@@ -1426,22 +1426,6 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_title_squeezes_spaces_left_by_a_removed_tag() {
-        // A run of spaces left behind after tags are stripped (e.g. two
-        // images rendered back-to-back, or a tag flanked by spaces on both
-        // sides) collapses to one, and the ends are trimmed, mirroring
-        // Ruby's `tr_s(' ', ' ').strip`.
-        assert_eq!(
-            super::sanitize_title("<img src=\"a.png\">  <img src=\"b.png\">"),
-            "",
-        );
-        assert_eq!(
-            super::sanitize_title("Before <b>bold</b>   after"),
-            "Before bold after",
-        );
-    }
-
-    #[test]
     fn impl_clone() {
         // Silly test to mark the #[derive(...)] line as covered.
         let mut parser = Parser::default();
