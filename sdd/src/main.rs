@@ -11,8 +11,9 @@ use walkdir::{DirEntry, WalkDir};
 
 // Spec sources whose lines we measure coverage against, as `(root, extension,
 // within)` triples: the normative documentation prose (`.adoc`) of the AsciiDoc
-// language description, plus the Asciidoctor reference test suite (`.rb`) that
-// this crate is validated against.
+// language description, the Asciidoctor processor documentation (`.adoc`), and
+// the Asciidoctor reference test suite (`.rb`) that this crate is validated
+// against.
 //
 // `within`, when `Some`, restricts a source to files whose path contains that
 // segment.
@@ -21,8 +22,14 @@ use walkdir::{DirEntry, WalkDir};
 // `ref/asciidoctor/README.md`); every `.rb` file vendored under
 // `ref/asciidoctor/test` is picked up here automatically. Coverage grows as
 // more files are ported – at present `attribute_list_test.rb` is the first.
+//
+// The Asciidoctor processor documentation (`ref/asciidoctor/docs/modules`) is
+// likewise vendored and ported one module at a time; the `syntax-highlighting`
+// module is the first. Because these pages describe rendering behavior that
+// asciidoc-parser does not implement, they are largely non-normative here.
 const SPEC_SOURCES: &[(&str, &str, Option<&str>)] = &[
     ("../ref/asciidoc-lang/docs/modules", ".adoc", None),
+    ("../ref/asciidoctor/docs/modules", ".adoc", None),
     ("../ref/asciidoctor/test", ".rb", None),
 ];
 

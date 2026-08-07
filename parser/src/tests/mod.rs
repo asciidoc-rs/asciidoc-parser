@@ -4,6 +4,7 @@
 #![allow(clippy::unwrap_used)]
 
 mod asciidoc_lang;
+mod asciidoctor_docs;
 mod asciidoctor_rb;
 pub(crate) mod assert_dom;
 mod block_nesting_depth;
