@@ -3285,9 +3285,18 @@ fn fold_xref(
 
 /// Folds an [`Anchor`](InlineNode::Anchor) through the same `render_anchor` the
 /// string step calls. The built-in HTML backend emits only `<a id="…"></a>`, so
-/// the reference text does not reach the flow; it is still folded and passed
-/// through so a custom backend that consults it (e.g. one using it as an
-/// `xreflabel`) sees the same value the string path passed.
+/// the reference text never reaches the flow; a custom backend that consults it
+/// (e.g. one using it as an `xreflabel`) receives the folded reference text
+/// **when the node captured it**.
+///
+/// That capture is verbatim-only: a *non-verbatim* reference text (a rendered
+/// span or an escaped special) is `None` on the node (see
+/// [`build_anchor_reftext`]), so `render_anchor` receives `None` here where the
+/// string replacer would have passed the substituted text. This changes no HTML
+/// output – the built-in backend ignores the reference text entirely – and is
+/// the same verbatim boundary the node documents; a custom backend that needs
+/// the full reference text unconditionally will get it once a re-flow consumer
+/// pins richer `reftext` population.
 fn fold_anchor(
     anchor: &Anchor<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
