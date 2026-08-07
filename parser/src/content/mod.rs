@@ -18,7 +18,7 @@ pub(crate) mod inline_tree;
 mod macros;
 pub(crate) use macros::{
     INLINE_IMAGE_MACRO, INLINE_KBD_BTN_MACRO, INLINE_LINK, INLINE_LINK_MACRO, INLINE_MENU_MACRO,
-    NormalizedCaps, URI_SNIFF, apply_macros_with_leading_anchor_registered, basename,
+    INLINE_XREF, NormalizedCaps, URI_SNIFF, apply_macros_with_leading_anchor_registered, basename,
     normalize_index_text, normalize_text_lf_escaped_bracket, split_kbd_keys,
 };
 

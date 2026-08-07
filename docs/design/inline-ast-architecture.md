@@ -923,6 +923,33 @@ Each phase is a reviewable unit with a clear exit gate.
   into the parse path. Cross-references (`Ref{Xref}`), footnotes, index terms, STEM, and anchors
   remain later sub-steps.
 
+  *Step 4b(ii) part 3a landed as (`Macros` → `Ref{Xref}`, the same-document `xref:` macro form):*
+  the builder now recognizes the **`xref:` cross-reference macro** (`xref:id[]`,
+  `xref:id[Reference Text]`), each as a [`Ref`](../../parser/src/inlines/ref_node.rs)`{Xref}` node.
+  It reuses the string pipeline's *exact* recognition – `INLINE_XREF` is now shared `pub(crate)` –
+  so only the recognition *sink* changes (a node instead of the string step's deferred
+  `XrefSegment` placeholder). As with links, no field is added to `Ref`: the provided text is baked
+  into a single [`Text`](../../parser/src/inlines/inline_node.rs) child (verbatim text borrows from
+  `'src`; an escaped `\]` synthesizes an owned value), and an empty text yields no children, which
+  the fold reads as "no text provided" (the bracketed `[id]` fallback). The
+  [`fold_html`](../../parser/src/content/inline_builder.rs) fold reconstructs `XrefRenderParams`
+  from the node and routes through the same `render_xref` the string path feeds at resolution time,
+  so its output is byte-for-byte identical – pinned by a new differential corpus that finalizes the
+  string pipeline's deferred cross-references to the same **unresolved** fallback the additive
+  builder (no resolution pass) produces. Because the additive builder never resolves, the fold
+  always takes `render_xref`'s unresolved branch, where `xrefstyle` and a *derived* destination play
+  no part; wiring resolution to the tree is the cutover's job (step 6). Four forms are deferred,
+  each documented and pinned by a divergence test: the **shorthand** (`<<id>>`, always non-verbatim
+  because its `&lt;`/`&gt;` delimiters are `CharRef`s by macro time, exactly as the angle-bracketed
+  `<url>` link defers), an **inter-document** target (`xref:other.adoc#frag[]`, whose derived
+  destination the node cannot carry yet), a **text carrying an attribute list** (`=`, parsed into
+  `window`/`role`/`xrefstyle`, deferred until the node can hold an `Attrlist<'src>` – as the
+  formal-URL link defers the same), and a macro whose **target or text crosses a special character
+  or a rendered span** (`xref:foo[a<b]`, matched by the string pipeline over the *escaped* text,
+  which a self-describing node cannot carry as an `'src` slice – the same verbatim boundary the
+  image and auto-link increments document). This step is **additive**: nothing is wired into the
+  parse path.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -937,8 +964,11 @@ Each phase is a reviewable unit with a clear exit gate.
          itself sliced into parts:
          - ✅ **part 1.** the `link:`/`mailto:` macro (`INLINE_LINK_MACRO`) → `Ref{Link}`.
          - ✅ **part 2.** auto-links and formal-URL links (`INLINE_LINK`) → `Ref{Link}`.
-         - **part 3.** cross-references (`INLINE_XREF`) → `Ref{Xref}`, then `Footnote`,
-           `IndexTerm`, `Stem`, `Anchor`.
+         - **part 3.** cross-references (`INLINE_XREF`) → `Ref{Xref}`, itself sliced:
+           - ✅ **part 3a.** the same-document `xref:` macro form (`xref:id[text]`).
+           - **part 3b.** the shorthand (`<<id>>`), inter-document targets, and attribute-list
+             text – the forms part 3a defers.
+         - **part 4.** `Footnote`, `IndexTerm`, `Stem`, `Anchor`.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
      `Callouts` – completing the vocabulary the recorder covers.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make

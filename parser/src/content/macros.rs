@@ -1713,13 +1713,21 @@ impl Replacer for InlineAnchorReplacer<'_, '_, '_> {
 /// Note that the special-characters substitution runs before macros, so by this
 /// point `<<` and `>>` have already become `&lt;&lt;` and `&gt;&gt;`.
 ///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes
+/// cross-references with the *exact* same pattern this string step matches
+/// with, changing only the recognition *sink* (a node instead of a deferred
+/// placeholder). Group 1 is the optional escape backslash, group 2 the
+/// shorthand's inner text, group 3 the `xref:` macro target, and group 4 the
+/// macro's bracketed text.
+///
 /// ## Examples
 ///
 /// * `<<idname>>` (seen here as `&lt;&lt;idname&gt;&gt;`)
 /// * `<<idname,Reference Text>>`
 /// * `xref:idname[]`
 /// * `xref:idname[Reference Text]`
-static INLINE_XREF: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_XREF: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
