@@ -41,8 +41,9 @@
 //!   `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
 //!   the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
 //!   **auto-links and formal-URL links** (`https://example.org`,
-//!   `https://example.org[text]`), and the **`xref:` cross-reference macro**
-//!   (`xref:id[text]`), replacing each with an [`Image`](InlineNode::Image),
+//!   `https://example.org[text]`), and **cross-references** in both the
+//!   `xref:` macro form (`xref:id[text]`) and the `<<id>>` shorthand,
+//!   replacing each with an [`Image`](InlineNode::Image),
 //!   [`Ui`](InlineNode::Ui), or [`Ref`](InlineNode::Ref) node. An image node
 //!   captures its own owned [`Attrlist`] – the step that makes a macro node
 //!   *self-describing*; a link or cross-reference node bakes its computed display
@@ -54,10 +55,11 @@
 //!   (see [`apply_macros`] for the boundary the escaped-content case defers),
 //!   and – for the UI macros – is recognized only under the `experimental`
 //!   document attribute, exactly as the string step gates them. The
-//!   cross-reference pass claims only the same-document `xref:` macro form; the
-//!   shorthand (`<<id>>`), inter-document targets, and an attribute-list text are
-//!   deferred. The remaining macro families (footnotes, index terms, anchors,
-//!   STEM) are later increments.
+//!   cross-reference pass claims the same-document form in both spellings
+//!   (`xref:id[text]` and `<<id>>` / `<<id,text>>`); inter-document targets, a
+//!   document-as-a-whole reference, and an attribute-list text are deferred. The
+//!   remaining macro families (footnotes, index terms, anchors, STEM) are later
+//!   increments.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
@@ -2309,11 +2311,13 @@ fn xref_macros_level<'src>(
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
-    // Cheap pre-filter: only the `xref:` macro form is recognized here. The
-    // shorthand form (`<<id>>`, seen as `&lt;&lt;id&gt;&gt;`) is deferred – its
-    // delimiters are `&lt;`/`&gt;` `CharRef`s, so the match can never be wholly
-    // verbatim – so its `&lt;&lt;` trigger is deliberately not pre-filtered on.
-    if !s.contains("xref:") {
+    // Cheap pre-filter: both the `xref:` macro form and the `<<id>>` shorthand
+    // (seen here as `&lt;&lt;id&gt;&gt;`, since specials run before macros) are
+    // recognized. The prefilter triggers on either the macro prefix or the
+    // shorthand's `&lt;&lt;` opener, mirroring the string step's
+    // `text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:"))`
+    // guard.
+    if !s.contains("xref:") && !s.contains("&lt;&lt;") {
         return nodes;
     }
 
@@ -2326,9 +2330,10 @@ fn xref_macros_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every recognized `xref:` macro at this level, skipping any match that
-/// is not wholly verbatim source or that this increment defers (see
-/// [`build_xref_node`]).
+/// Finds every recognized cross-reference at this level – the `xref:` macro
+/// form and the `<<id>>` shorthand – skipping any match that is not verbatim
+/// enough to slice from `'src` or that this increment defers (see
+/// [`build_xref_node`] and [`build_xref_shorthand_node`]).
 fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
@@ -2339,26 +2344,48 @@ fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
 
         let full = whole.start()..whole.end();
 
-        // Only a wholly-verbatim match can slice its target/text from `'src`; a
-        // match crossing an escaped special or a rendered span is left for a
-        // later increment. (The shorthand form always fails this, since its
-        // `&lt;&lt;` / `&gt;&gt;` delimiters are `CharRef`s.)
-        if !range_is_verbatim(pieces, &full) {
-            continue;
-        }
+        // The `xref:` macro (group 3) and the `<<…>>` shorthand (group 2) differ
+        // in what must be verbatim to build a node. The macro's whole match is
+        // sliced from `'src`, so all of it must be verbatim. The shorthand's
+        // `&lt;&lt;` / `&gt;&gt;` delimiters are always `CharRef`s that the node
+        // *consumes* rather than slices, so only its inner text (group 2) – the
+        // id and any reference text – need be verbatim.
+        let shorthand_inner = caps.get(2).map(|inner| inner.start()..inner.end());
 
+        let verbatim = match &shorthand_inner {
+            Some(inner) => range_is_verbatim(pieces, inner),
+            None => range_is_verbatim(pieces, &full),
+        };
+
+        // An escape (`\xref:` / `\<<`) is honored by dropping the backslash and
+        // keeping the rest literal, mirroring the string replacer's leading
+        // `caps.get(1)` check. For the shorthand the unescape runs even when the
+        // inner is not verbatim, because [`rebuild_macro_level`] emits the
+        // `CharRef` delimiters (and any rendered span between them) whole; the
+        // macro form keeps its established verbatim-first order.
         if whole.as_str().starts_with('\\') {
-            matches.push(MacroMatch {
-                kind: MacroMatchKind::Unescape {
-                    backslash: full.start,
-                },
-                full,
-            });
+            if shorthand_inner.is_some() || verbatim {
+                matches.push(MacroMatch {
+                    kind: MacroMatchKind::Unescape {
+                        backslash: full.start,
+                    },
+                    full,
+                });
+            }
 
             continue;
         }
 
-        match build_xref_node(&caps, &full, pieces, root) {
+        if !verbatim {
+            continue;
+        }
+
+        let node = match &shorthand_inner {
+            Some(inner) => build_xref_shorthand_node(inner.clone(), &full, pieces, root),
+            None => build_xref_node(&caps, &full, pieces, root),
+        };
+
+        match node {
             Some(node) => matches.push(MacroMatch {
                 kind: MacroMatchKind::Node {
                     consumed: full.clone(),
@@ -2367,9 +2394,9 @@ fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
                 full,
             }),
 
-            // A form this increment defers (the shorthand, an inter-document
-            // target, or an attribute-list-in-text macro) is left as literal
-            // source for a later increment.
+            // A form this increment defers (an inter-document target, an
+            // attribute-list-in-text macro, or a degenerate shorthand – see the
+            // two builders) is left as literal source for a later increment.
             None => continue,
         }
     }
@@ -2382,12 +2409,11 @@ fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
 /// replacer does so the fold reproduces the same bytes. Returns `None` for a
 /// form this increment defers.
 ///
-/// The scope this increment claims is the **same-document** `xref:` macro form
-/// (`xref:id[]`, `xref:id[Reference Text]`). Three forms are deferred, each to
+/// The scope this builder claims is the **same-document** `xref:` macro form
+/// (`xref:id[]`, `xref:id[Reference Text]`); the `<<id>>` shorthand is built by
+/// [`build_xref_shorthand_node`]. Two macro-form targets are deferred, each to
 /// a later increment:
 ///
-/// - the **shorthand** form (`<<id>>`): group 3 is absent, and the match is
-///   never verbatim anyway (its `&lt;`/`&gt;` delimiters are `CharRef`s);
 /// - an **inter-document** target (`xref:other.adoc#frag[]`): its rendering
 ///   needs a *derived* destination the [`Ref`] node does not carry;
 /// - a **text carrying an attribute list** (an `=`, for `window`/`role`/
@@ -2469,6 +2495,112 @@ fn build_xref_node<'src>(
             value,
             location: text_location,
         }]
+    };
+
+    Some(InlineNode::Ref(Ref {
+        variant: RefVariant::Xref,
+        target: CowStr::from(target),
+        children,
+        roles: vec![],
+        window: None,
+        resolved: None,
+        location,
+    }))
+}
+
+/// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a `<<id>>` shorthand
+/// cross-reference, computing the target and display text exactly as the string
+/// replacer's shorthand branch does so the fold reproduces the same bytes.
+/// Returns `None` for a form this increment defers.
+///
+/// `inner` is the shorthand's inner text (`INLINE_XREF` group 2) in
+/// match-string coordinates; the caller guarantees it is verbatim, so its
+/// match-string bytes coincide with source. It is split on the first `,` into
+/// an id and an optional reference text, each trimmed – mirroring the string
+/// replacer's `inner.split_once(',')` with `id.trim()` / `text.trim()`. The
+/// reference text becomes the node's single [`Text`](InlineNode::Text) child
+/// (an empty text yields no children, which the fold reads as "no text
+/// provided" – the bracketed `[id]` fallback), and the whole `<<…>>` – its
+/// `CharRef` delimiters included – is the node's `location`.
+///
+/// The scope this builder claims is the **same-document** shorthand
+/// (`<<id>>`, `<<id,Reference Text>>`). Three forms are deferred, each left as
+/// literal source for a later increment and pinned by a divergence test:
+///
+/// - an **inter-document** shorthand (`<<other#frag>>`): like the macro form,
+///   it needs a *derived* destination the [`Ref`] node does not carry;
+/// - a **document-as-a-whole** shorthand (`<<>>`, an empty id): it too resolves
+///   through a derived destination;
+/// - a **`<<id,>>` with an empty reference text**: the string replacer records
+///   this as a *present-but-empty* text (rendering an empty `<a>…</a>`), which
+///   an empty child vector cannot distinguish from "no text provided" – so the
+///   whole shorthand is deferred rather than rendered with the wrong fallback.
+///
+/// A shorthand whose id already carries a rendered `<` (an earlier-substituted
+/// macro, e.g. `<<link:https://example.com[], Example>>`) – which the string
+/// replacer leaves untouched – cannot reach here at all: the `<` is a
+/// `CharRef`, so the inner is not verbatim and the caller never calls this
+/// builder.
+///
+/// As in the additive builder generally, this performs *no* recognition side
+/// effect – notably it does **not** register the reference for resolution; the
+/// cutover (design §5.2 Phase 4, step 6) wires resolution to the tree.
+fn build_xref_shorthand_node<'src>(
+    inner: std::ops::Range<usize>,
+    full: &std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+) -> Option<InlineNode<'src>> {
+    // The inner is verbatim (the caller checked), so its source slice's bytes
+    // coincide with the match string's – a byte offset within `inner_data` maps
+    // to a match-string offset by adding `inner.start`.
+    let inner_span = source_slice(pieces, inner.clone(), root);
+    let inner_data = inner_span.data();
+
+    // Split an optional ", reference text" off the id at the first comma.
+    let comma = inner_data.find(',');
+
+    let raw_id = match comma {
+        Some(index) => &inner_data[..index],
+        None => inner_data,
+    };
+
+    // Only same-document shorthands are claimed. An inter-document target
+    // (`<<other#frag>>`) carries a derived destination, and an empty id
+    // (`<<>>`) names the document as a whole (also derived); both are deferred.
+    let target = match interpret_xref_target(raw_id.trim(), false) {
+        XrefTarget::SameDocument(id) if !id.is_empty() => id,
+        _ => return None,
+    };
+
+    let location = source_slice(pieces, full.clone(), root);
+
+    let children = match comma {
+        None => vec![],
+
+        Some(index) => {
+            let raw_text = &inner_data[index + 1..];
+            let trimmed = raw_text.trim();
+
+            // A `<<id,>>` with an empty (or whitespace-only) reference text is a
+            // present-but-empty text the node cannot represent (see the doc
+            // comment); defer the whole shorthand.
+            if trimmed.is_empty() {
+                return None;
+            }
+
+            // Locate the trimmed reference text at its source. It is verbatim, so
+            // the `Text` child borrows the very bytes its location covers.
+            let lead = raw_text.len() - raw_text.trim_start().len();
+
+            let text_start = inner.start + index + 1 + lead;
+            let text_location = source_slice(pieces, text_start..text_start + trimmed.len(), root);
+
+            vec![InlineNode::Text {
+                value: CowStr::from(text_location.data()),
+                location: text_location,
+            }]
+        }
     };
 
     Some(InlineNode::Ref(Ref {
@@ -5282,11 +5414,12 @@ mod tests {
     fn fold_matches_the_string_pipeline_through_xrefs() {
         // For each fixture, folding the single-pass tree (all five steps)
         // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the `xref:` macro
-        // increment. Every fixture is a *verbatim*, same-document `xref:` macro
-        // with attribute-list-free text – the boundary this increment claims
-        // (the shorthand form, an inter-document target, or an attribute-list
-        // text is deferred and lives in a divergence test below).
+        // differential corpus (design §5.3) that pins the cross-reference
+        // increment. Every fixture is a *verbatim*, same-document cross-reference
+        // in either spelling – the boundary this increment claims (an
+        // inter-document target, a document-as-a-whole reference, an
+        // attribute-list text, and a shorthand crossing a special/span are
+        // deferred and live in divergence tests below).
         let fixtures = [
             // No cross-reference despite macro-ish characters.
             "plain text without a reference",
@@ -5310,6 +5443,26 @@ mod tests {
             // A macro inside a rendered span (recognized inside the span body).
             "*see xref:x[X]*",
             "_xref:y[Y] in em_",
+            // Shorthand form: bare id (bracketed fallback) and with reference
+            // text, seen post-special-chars as `&lt;&lt;id&gt;&gt;`.
+            "<<install>>",
+            "<<install,Install Now>>",
+            "<<sect-one,Section One>>",
+            // The shorthand reads a dotted target as an id (unlike the macro).
+            "<<a.b.c>>",
+            // The id and reference text are each trimmed around the comma.
+            "<< spaced , Trimmed Text >>",
+            // A shorthand embedded in surrounding flow, and next to other
+            // constructs; and both spellings together.
+            "See <<install>> now.",
+            "*bold* then <<x,X>> and _em_",
+            "<<install>> and xref:install[Installation]",
+            // Escapes: the shorthand stays literal, minus the backslash.
+            "\\<<install>>",
+            "\\<<install,Install Now>>",
+            // A shorthand inside a rendered span (recognized inside the body).
+            "*see <<x>>*",
+            "_<<y,Y>> in em_",
         ];
 
         let renderer = HtmlSubstitutionRenderer {};
@@ -5425,20 +5578,167 @@ mod tests {
     }
 
     #[test]
-    fn an_xref_shorthand_is_a_documented_divergence() {
-        // The shorthand `<<id>>` is seen as `&lt;&lt;id&gt;&gt;` by macro time,
-        // so its delimiters are escaped `CharRef`s and the match is never
-        // verbatim; the single-pass builder leaves it unrecognized for a later
-        // increment.
+    fn an_xref_shorthand_becomes_a_ref_node() {
+        // The `<<id,text>>` shorthand builds the same `Ref{Xref}` node the
+        // `xref:` macro does, even though its `&lt;&lt;` / `&gt;&gt;` delimiters
+        // are `CharRef`s: the node consumes them and slices its verbatim inner.
+        let nodes = build_src(Span::new("<<install,Install Now>>"));
+
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_xref(&nodes[0]);
+
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(link_text_of(reference), "Install Now");
+        assert!(reference.roles.is_empty());
+        assert_eq!(reference.window, None);
+        assert_eq!(reference.resolved, None);
+
+        // Its location covers the whole shorthand, the `<<` / `>>` included.
+        assert_eq!(reference.location.data(), "<<install,Install Now>>");
+        assert_eq!(reference.location.line(), 1);
+        assert_eq!(reference.location.col(), 1);
+    }
+
+    #[test]
+    fn a_bare_xref_shorthand_has_no_children() {
+        // A shorthand without a `, reference text` yields no children; the fold
+        // reads that as "no text provided" and renders the bracketed `[id]`
+        // fallback, exactly as the empty `xref:id[]` macro does.
         let nodes = build_src(Span::new("<<install>>"));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert!(reference.children.is_empty());
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref("<<install>>")
+        );
+    }
+
+    #[test]
+    fn an_xref_shorthand_display_text_is_located_at_its_trimmed_source() {
+        // The reference text's `Text` child locates at the *trimmed* text within
+        // the shorthand, not at the whole shorthand and not including the
+        // surrounding whitespace the string replacer trims.
+        let nodes = build_src(Span::new("<<install, Install Now >>"));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(reference.children.len(), 1);
+
+        // `<<install, ` is 11 characters, so the text starts at column 12.
+        assert_text(&reference.children[0], "Install Now", 1, 12);
+    }
+
+    #[test]
+    fn an_xref_shorthand_is_recognized_inside_a_span() {
+        // A shorthand can appear inside a rendered span; the transducer descends
+        // into the span body and builds the node there.
+        let nodes = build_src(Span::new("*see <<x,X>>*"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+        assert_eq!(children.len(), 2);
+        assert_text(&children[0], "see ", 1, 2);
+
+        let reference = assert_xref(&children[1]);
+        assert_eq!(reference.target.as_ref(), "x");
+        assert_eq!(link_text_of(reference), "X");
+    }
+
+    #[test]
+    fn an_escaped_xref_shorthand_stays_literal() {
+        // `\<<id>>` drops the backslash and keeps the shorthand as literal text –
+        // no reference node – exactly as the string replacer's escape branch
+        // does. Its delimiters are non-verbatim `CharRef`s, so this also exercises
+        // the escape path that does not require a verbatim inner.
+        let source = "\\<<install,Install Now>>";
+        let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "the xref shorthand must be left unrecognized: {nodes:?}"
+            "an escaped shorthand must not produce a reference node: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
+    }
+
+    #[test]
+    fn an_inter_document_xref_shorthand_is_a_documented_divergence() {
+        // An inter-document shorthand target (`other#frag`) renders through a
+        // *derived* destination the `Ref` node does not carry, so the builder
+        // defers it (left literal), exactly as it defers the inter-document
+        // `xref:` macro form.
+        let source = "<<other#frag,Elsewhere>>";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an inter-document shorthand must be left unrecognized: {nodes:?}"
         );
 
         // The string pipeline, by contrast, *does* build a reference here.
-        assert!(golden_xref("<<install>>").contains("<a href"));
+        assert!(golden_xref(source).contains("<a href"));
+    }
+
+    #[test]
+    fn an_empty_xref_shorthand_is_a_documented_divergence() {
+        // `<<>>` names the document as a whole: an empty id that resolves through
+        // a *derived* destination the `Ref` node does not carry, so the builder
+        // defers it (left literal), exactly as it defers the empty `xref:#[]`
+        // macro form.
+        let source = "<<>>";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an empty shorthand must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a reference here.
+        assert!(golden_xref(source).contains("<a href"));
+    }
+
+    #[test]
+    fn an_xref_shorthand_with_empty_text_is_a_documented_divergence() {
+        // `<<id,>>` records a *present-but-empty* reference text: the string
+        // replacer renders an empty `<a href="#id"></a>`, whereas an empty child
+        // vector is indistinguishable from "no text provided" (the `[id]`
+        // fallback). The builder cannot represent the distinction, so it defers
+        // the whole shorthand (left literal).
+        let source = "<<install,>>";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a shorthand with an empty text must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline builds an anchor with an empty body, which the
+        // bracketed fallback the builder would produce does not match.
+        assert!(golden_xref(source).contains(r##"href="#install">"##));
+        assert!(!golden_xref(source).contains("[install]"));
+    }
+
+    #[test]
+    fn an_xref_shorthand_over_a_rendered_span_is_a_documented_divergence() {
+        // A shorthand whose reference text is a rendered span (`<<x,*bold*>>`) has
+        // a non-verbatim inner – the span is opaque – so the builder cannot slice
+        // its text from `'src` and leaves the shorthand unrecognized, exactly as
+        // it defers a macro crossing a rendered span.
+        let source = "<<x,*bold*>>";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a shorthand crossing a rendered span must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a reference here.
+        assert!(golden_xref(source).contains("<a href"));
     }
 
     #[test]

@@ -950,6 +950,38 @@ Each phase is a reviewable unit with a clear exit gate.
   image and auto-link increments document). This step is **additive**: nothing is wired into the
   parse path.
 
+  *Step 4b(ii) part 3b landed as (`Macros` → `Ref{Xref}`, the same-document `<<id>>` shorthand):*
+  the builder now recognizes the **shorthand cross-reference** (`<<id>>`, `<<id,Reference Text>>`)
+  as the same [`Ref`](../../parser/src/inlines/ref_node.rs)`{Xref}` node the `xref:` macro form
+  produces, folding through the identical `render_xref` so the output is byte-for-byte identical
+  (pinned by extending the part-3a differential corpus with shorthand fixtures). It reuses the
+  *same* shared `INLINE_XREF` pattern – the shorthand and macro forms are two branches of one
+  regex – so recognition is unchanged and only the *sink* differs. The shorthand's key wrinkle is
+  that, because special characters run before macros, its `<<`/`>>` delimiters are already escaped
+  [`CharRef`](../../parser/src/inlines/char_ref.rs)s (`&lt;&lt;`/`&gt;&gt;`) by macro time, so the
+  match is never *wholly* verbatim the way a `xref:` macro is. The recognizer therefore relaxes its
+  verbatim gate for this one form: the delimiters are `CharRef`s the node **consumes** (dropped by
+  [`rebuild_macro_level`](../../parser/src/content/inline_builder.rs), which emits atomic pieces
+  whole) rather than slices, so only the shorthand's *inner* text – the id and any reference text –
+  need be verbatim to slice from `'src`. The inner is split on the first `,` into an id and an
+  optional reference text, each **trimmed** exactly as the string replacer's shorthand branch does;
+  the trimmed text becomes the node's single [`Text`](../../parser/src/inlines/inline_node.rs) child
+  (borrowing `'src`), an absent one yields no children (the bracketed `[id]` fallback), and the whole
+  `<<…>>` is the node's `location`. An escaped `\<<…>>` drops its backslash and stays literal, handled
+  before the verbatim gate so it works even across a non-verbatim inner. Four forms are deferred, each
+  documented and pinned by a divergence test: an **inter-document** shorthand (`<<other#frag>>`, whose
+  derived destination the node cannot carry yet – the same block as the inter-document `xref:` form),
+  a **document-as-a-whole** shorthand (`<<>>`, an empty id resolving through a derived destination, as
+  `xref:#[]` defers), a **`<<id,>>` with an empty reference text** (which the string replacer records
+  as a *present-but-empty* text – an empty `<a>…</a>` – that an empty child vector cannot distinguish
+  from "no text provided"), and a shorthand whose **id or text crosses a special character or a
+  rendered span** (non-verbatim inner, the same boundary the macro form and the image/auto-link
+  increments document; this also subsumes the string replacer's "id already contains rendered markup"
+  guard, since such an id is non-verbatim). This step is **additive**: nothing is wired into the parse
+  path. The two node-blocked forms both spellings share – inter-document targets and attribute-list
+  text – remain for a later increment (part 3c), which needs new `Ref` fields pinned against a
+  consumer.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -966,8 +998,10 @@ Each phase is a reviewable unit with a clear exit gate.
          - ✅ **part 2.** auto-links and formal-URL links (`INLINE_LINK`) → `Ref{Link}`.
          - **part 3.** cross-references (`INLINE_XREF`) → `Ref{Xref}`, itself sliced:
            - ✅ **part 3a.** the same-document `xref:` macro form (`xref:id[text]`).
-           - **part 3b.** the shorthand (`<<id>>`), inter-document targets, and attribute-list
-             text – the forms part 3a defers.
+           - ✅ **part 3b.** the same-document `<<id>>` shorthand (`<<id>>` / `<<id,text>>`).
+           - **part 3c.** the node-blocked forms both spellings share – inter-document targets (a
+             *derived* destination) and an attribute-list text (an `Attrlist<'src>`) – which need
+             new `Ref` fields, pinned against a consumer.
          - **part 4.** `Footnote`, `IndexTerm`, `Stem`, `Anchor`.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
      `Callouts` – completing the vocabulary the recorder covers.
