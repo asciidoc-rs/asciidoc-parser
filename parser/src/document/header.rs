@@ -246,7 +246,7 @@ impl<'src> Header<'src> {
                 // like assigning the `title-separator` document attribute here, so
                 // both mechanisms share the same partitioning logic and the same
                 // modification-context lock check (an API-locked `title-separator`
-                // is not overwritten by this block attribute; see #1119).
+                // is not overwritten by this block attribute).
                 //
                 // The line is only intercepted when a document title eventually
                 // follows – possibly after further stacked block attribute lines,
@@ -2458,8 +2458,8 @@ mod tests {
 
     #[test]
     fn separator_block_attribute_does_not_override_api_locked_title_separator() {
-        // An API-locked `title-separator` (see #1119) must not be overwritten
-        // by a `[separator=…]` block attribute above the title, exactly as an
+        // An API-locked `title-separator` must not be overwritten by a
+        // `[separator=…]` block attribute above the title, exactly as an
         // ordinary `:title-separator:` header entry is already blocked.
         let doc = Parser::default()
             .with_intrinsic_attribute("title-separator", " -", ModificationContext::ApiOnly)

@@ -1411,9 +1411,9 @@ impl Parser {
     /// `true`, the partner is left untouched if it currently carries an
     /// [`ApiOnly`](ModificationContext::ApiOnly) override, so a document entry
     /// cannot use the linkage as a back door around an API lock on the
-    /// *other* spelling (see #1120). An API call always passes `false`,
-    /// since a later API call is always permitted to override an earlier one
-    /// (matching the "last call wins" contract of
+    /// *other* spelling. An API call always passes `false`, since a later API
+    /// call is always permitted to override an earlier one (matching the
+    /// "last call wins" contract of
     /// [`with_intrinsic_attribute()`](Self::with_intrinsic_attribute) and
     /// its siblings), including the partner it set.
     ///
@@ -2535,8 +2535,7 @@ impl Parser {
         // visibility toggle; keep the partner in sync (see
         // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
         // A document header entry must not use the linkage to route around an
-        // API lock on the partner spelling (see #1120), so the lock is
-        // enforced here.
+        // API lock on the partner spelling, so the lock is enforced here.
         self.apply_title_visibility_linkage(
             &attr_name,
             &value,
@@ -2596,9 +2595,9 @@ impl Parser {
     /// ([`ApiOnly`](ModificationContext::ApiOnly) or
     /// [`ApiOrDocumentBody`](ModificationContext::ApiOrDocumentBody)) is not
     /// silently overwritten just because the equivalent value arrived via
-    /// block-attribute syntax rather than an attribute entry (see #1119). The
-    /// write is dropped silently on a lock: this path has no attribute span
-    /// to attach an `AttributeValueIsLocked` warning to.
+    /// block-attribute syntax rather than an attribute entry. The write is
+    /// dropped silently on a lock: this path has no attribute span to attach
+    /// an `AttributeValueIsLocked` warning to.
     ///
     /// [`Header::parse()`]: crate::document::Header::parse
     pub(crate) fn set_attribute_by_value_from_header_checked<N: AsRef<str>, V: AsRef<str>>(
@@ -2728,8 +2727,7 @@ impl Parser {
         // visibility toggle; keep the partner in sync (see
         // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
         // A document body entry must not use the linkage to route around an
-        // API lock on the partner spelling (see #1120), so the lock is
-        // enforced here.
+        // API lock on the partner spelling, so the lock is enforced here.
         self.apply_title_visibility_linkage(
             &attr_name,
             &value,
@@ -4546,9 +4544,9 @@ mod tests {
 
         #[test]
         fn header_notitle_does_not_override_api_locked_showtitle() {
-            // Asciidoctor asciidoctor/asciidoctor#1120: an API-locked `showtitle`
-            // must win over a header `:notitle:` entry -- the linkage must not
-            // use the partner update as a back door around the lock.
+            // An API-locked `showtitle` must win over a header `:notitle:`
+            // entry -- the linkage must not use the partner update as a back
+            // door around the lock.
             let mut parser = Parser::default().with_intrinsic_attribute_bool(
                 "showtitle",
                 true,
