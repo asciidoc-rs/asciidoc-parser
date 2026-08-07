@@ -6089,6 +6089,9 @@ mod tests {
             // replacer) and an escaped `]` (unescaped by the macro form).
             "[[install, Installation ]]",
             "anchor:foo[a\\]b]",
+            // A shorthand whose reference text is whitespace only trims to empty:
+            // the node carries no reference text, exactly as the bare form.
+            "[[install, ]]",
             // Embedded in surrounding flow, and next to other constructs.
             "See [[here]] for details.",
             "text anchor:x[X] more",
@@ -6190,6 +6193,28 @@ mod tests {
 
         // `[[install, ` is 11 characters, so the trimmed text starts at column 12.
         assert_text(&reftext[0], "Installation", 1, 12);
+    }
+
+    #[test]
+    fn an_anchor_shorthand_reftext_that_is_whitespace_only_has_no_reftext() {
+        // A shorthand reference text that trims to empty (the pattern's `(.+?)`
+        // matched only the whitespace the string replacer's `trim_end` strips)
+        // leaves `reftext` `None`, the same shape as the bare `[[id]]` form – and
+        // it still folds to the same `<a id="…"></a>` the string pipeline emits.
+        let source = "[[install, ]]";
+        let nodes = build_src(Span::new(source));
+
+        let anchor = assert_anchor(&nodes[0]);
+        assert_eq!(anchor.id.as_ref(), "install");
+        assert!(
+            anchor.reftext.is_none(),
+            "a whitespace-only reftext trims away"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
     }
 
     #[test]
