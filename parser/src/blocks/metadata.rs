@@ -27,8 +27,9 @@ pub(crate) struct BlockMetadata<'src> {
     /// closing square brace pair, nor reftext if it exists.
     pub(crate) anchor: Option<Span<'src>>,
 
-    /// The block anchor's reftext, if any. The span includes only the portion
-    /// from the first comma to just inside the closing square brace pair.
+    /// The block anchor's reftext, if any. The span covers the portion from
+    /// just after the first comma to just inside the closing square brace
+    /// pair, with any leading or trailing whitespace trimmed.
     pub(crate) anchor_reftext: Option<Span<'src>>,
 
     /// The block's attribute list, if any.
@@ -104,9 +105,12 @@ impl<'src> BlockMetadata<'src> {
                             end: comma_position,
                         });
 
-                        let reftext_span = anchor_content.slice_from(RangeFrom {
-                            start: comma_position + 1,
-                        });
+                        let reftext_span = anchor_content
+                            .slice_from(RangeFrom {
+                                start: comma_position + 1,
+                            })
+                            .discard_whitespace()
+                            .trim_trailing_whitespace();
 
                         // Validate anchor name.
                         if anchor_span.is_xml_name() {
