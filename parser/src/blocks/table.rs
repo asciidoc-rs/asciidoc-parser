@@ -53,15 +53,29 @@ fn absolute_cell_directive_origin(
     }
 }
 
-/// Attributes that an AsciiDoc table cell may modify even when they are set in
-/// the parent document.
+/// Attributes that an AsciiDoc table cell may modify even when they hold a
+/// value inherited from the parent document.
 ///
 /// An AsciiDoc cell inherits the parent's attributes and cannot modify them,
 /// but the AsciiDoc specification carves out a handful of exceptions:
 /// `doctype`, `toc`, `notitle` (and its complement, `showtitle`), and
 /// `compat-mode`.
-const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
-    &["doctype", "toc", "notitle", "showtitle", "compat-mode"];
+///
+/// `sectnumlevels` is also listed here. It is header-settable (its built-in
+/// default carries a value of `3`) and an AsciiDoc cell is a nested, standalone
+/// document whose leading attribute lines form its own header, so the cell may
+/// set its own `sectnumlevels` – matching Asciidoctor, where a cell that
+/// assigns `:sectnumlevels:` is honored rather than pinned to the inherited
+/// default. Without this exception the built-in default value would lock the
+/// attribute for the cell, silently ignoring the cell-body assignment.
+const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] = &[
+    "doctype",
+    "toc",
+    "notitle",
+    "showtitle",
+    "compat-mode",
+    "sectnumlevels",
+];
 
 /// A table is a delimited block that arranges content into a grid of rows and
 /// columns.
@@ -1688,6 +1702,13 @@ fn process_content<'src>(
         // which a static lock could not do anyway once the cell changes its own
         // doctype.
         let saved_locks = parser.locked_attribute_names.clone();
+
+        // The cached section-numbering depth is frozen at the end of the
+        // enclosing document's header, so it holds the parent's value throughout
+        // the cell. A cell that assigns its own `sectnumlevels` refreshes it (see
+        // `Parser::set_attribute_from_body`); snapshot and restore it here so that
+        // refresh cannot leak back into the parent's numbering.
+        let saved_sectnumlevels = parser.sectnumlevels;
         {
             // Whether `name` (holding `value` in the inherited set) must be
             // locked for the cell. Kept separate from the insert so each source
@@ -1929,6 +1950,7 @@ fn process_content<'src>(
 
         parser.locked_attribute_names = saved_locks;
         parser.attribute_values = saved_attributes;
+        parser.sectnumlevels = saved_sectnumlevels;
         TableCellContent::AsciiDoc(cell)
     } else {
         let mut content = match replacement {
