@@ -609,8 +609,13 @@ pub(crate) fn normalize_text_lf_escaped_bracket(text: &str) -> String {
 /// engine has no look-ahead, so [`InlineIndextermReplacer`] re-creates that
 /// behavior by absorbing any trailing `)` that follow the matched `))`.
 ///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes index terms
+/// with the *exact* same pattern this string step matches with, changing only
+/// the recognition *sink* (a node instead of rendered markup).
+///
 /// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
-static INLINE_INDEXTERM: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_INDEXTERM: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                         # extended mode; dot matches newline
@@ -777,7 +782,11 @@ pub(crate) fn normalize_index_text(text: &str, unescape_brackets: bool) -> Strin
 /// text. By the time macros are processed, the special-characters substitution
 /// has already turned `>` into `&gt;` and `&` into `&amp;`, so the separators
 /// appear here as ` &gt;&gt; ` and ` &amp;&gt; `.
-fn strip_see_and_seealso(term: &str) -> String {
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) strips a visible
+/// shorthand term's `see`/`see-also` clause exactly as this string step does.
+pub(crate) fn strip_see_and_seealso(term: &str) -> String {
     // Cheap guard mirroring Asciidoctor's `term.include? ';&'`.
     if term.contains(";&") {
         if let Some((primary, _see)) = term.split_once(" &gt;&gt; ") {
