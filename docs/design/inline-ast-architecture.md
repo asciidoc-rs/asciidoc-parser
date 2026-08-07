@@ -1015,6 +1015,38 @@ Each phase is a reviewable unit with a clear exit gate.
   remaining macro families (`Footnote`, `IndexTerm`, `Stem`) and the node-blocked cross-reference
   forms (part 3c) are later sub-steps.
 
+  *Step 4b(ii) part 4b landed as (`Macros` → `IndexTerm`, index terms):* the builder now recognizes
+  **index terms** in both spellings – the `((term))` / `(((primary, secondary, tertiary)))` shorthand
+  and the `indexterm:[…]` (concealed) / `indexterm2:[…]` (flow) macro – as an
+  [`IndexTerm`](../../parser/src/inlines/index_term.rs) node, folding through the same
+  `render_index_term` the string step calls so the output is byte-for-byte identical (pinned by a new
+  differential corpus). It reuses the string pipeline's *exact* recognition –
+  [`INLINE_INDEXTERM`](../../parser/src/content/macros.rs) is now shared `pub(crate)`, alongside the
+  `strip_see_and_seealso` helper – so only the recognition *sink* changes. Like the anchor increment,
+  a **concealed** term renders to nothing (a function of no shown text), so it is recognized regardless
+  of what its argument crosses and its node carries an empty `terms`; a **visible** term shows its
+  text in the flow and is recognized whenever that text – reconstructed from the level's escaped match
+  string, so a `CharRef` entity or a stripped `see`/`see-also` clause (`&gt;&gt;` / `&amp;&gt;` by
+  macro time) is handled as parity, not a divergence – crosses no opaque span. The node mirrors the
+  Strategy-A recorder's shape (the shown term for a visible node, empty for a concealed one), leaving
+  the richer primary/secondary/tertiary structure to a re-flow consumer to pin (the field is
+  provisional, per the node's Phase-0 note). The shorthand reproduces the string replacer's
+  trailing-`)` absorption (its `(?!\))` look-ahead re-creation) by folding the absorbed parens into
+  the match, and keeps a literal parenthesis adjacent to a term via the shared `MacroMatch` sub-range
+  seam. One subtle string-pipeline behavior is reproduced exactly: a level of *only* concealed
+  shorthand terms (`(((coffee)))`, `(((a)))(((b)))`) accumulates no output and ends in a look-ahead
+  retry, so [`replace_with_lookahead`](../../parser/src/internal/regex.rs) returns `Cow::Borrowed` and
+  the string step leaves it **literal** – the builder detects that no-op and mirrors it. Two forms are
+  deferred, each documented and pinned by a divergence test: a **visible term crossing a rendered
+  span** (unreconstructable from the escaped string, the same verbatim boundary the other macro
+  families document) and an **`indexterm2:[…]` carrying an attribute list** (an `=`, deferred until
+  the node can hold an `Attrlist<'src>`, as the link/xref macros defer the same); the one escaped
+  paren-wrapped shorthand the string replacer re-renders (`\(((x)))` → `(x)`) is likewise left literal.
+  As throughout the additive builder, this performs *no* recognition side effect (the HTML backend
+  builds no index, so the string replacer has none to skip either). This step is **additive**: nothing
+  is wired into the parse path. The last macro family (`Footnote`) is a later sub-step; inline `Stem`
+  is handled at passthrough time (step 5), not in the macros step.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1035,9 +1067,12 @@ Each phase is a reviewable unit with a clear exit gate.
            - **part 3c.** the node-blocked forms both spellings share – inter-document targets (a
              *derived* destination) and an attribute-list text (an `Attrlist<'src>`) – which need
              new `Ref` fields, pinned against a consumer.
-         - **part 4.** `Anchor`, `Footnote`, `IndexTerm`, `Stem`, each its own sub-step:
+         - **part 4.** `Anchor`, `IndexTerm`, `Footnote`, each its own sub-step (inline `Stem` is
+           *not* a macros-step family – it is extracted at passthrough time, so it lands in step 5):
            - ✅ **part 4a.** inline anchors (`[[id]]` / `anchor:id[…]`, `INLINE_ANCHOR`) → `Anchor`.
-           - **part 4b.** `Footnote`, `IndexTerm`, `Stem`.
+           - ✅ **part 4b.** index terms (`((term))` / `(((primary, secondary)))` / `indexterm:[…]` /
+             `indexterm2:[…]`, `INLINE_INDEXTERM`) → `IndexTerm`.
+           - **part 4c.** `Footnote`.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
      `Callouts` – completing the vocabulary the recorder covers.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make

@@ -17,6 +17,20 @@ pub fn replace_with_lookahead<'h, LR: LookaheadReplacer>(
         // source.
         let mut it = regex.captures_iter(haystack).enumerate().peekable();
 
+        // KNOWN BUG — inline-ast: do NOT fix before the inline-AST cutover.
+        //
+        // On a retry iteration (reached via `SkipAheadAndRetry`), `new` can be
+        // empty because prior matches rendered *nothing* (e.g. a concealed
+        // index-term shorthand). Returning `Cow::Borrowed` here then conflates
+        // "no work done" with "work done, empty output", so the caller keeps the
+        // *original* text and a whole-content `(((concealed)))` is left literal
+        // instead of rendering empty. See asciidoc-rs/asciidoc-parser#1123.
+        //
+        // The `inline-ast` single-pass builder deliberately *reproduces* this
+        // behavior (see `content::inline_builder::indexterm_substitution_is_a_noop`)
+        // to preserve byte-for-byte parity during the additive phase. Fixing this
+        // now would change the golden output and break that branch's differential
+        // corpus; the fix lands with the cutover (design §5.2, Phase 4, step 6).
         if new.is_empty() && it.peek().is_none() {
             return Cow::Borrowed(haystack);
         }
