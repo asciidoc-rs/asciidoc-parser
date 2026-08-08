@@ -4687,6 +4687,47 @@ mod tests {
     }
 
     #[test]
+    fn a_match_whose_content_crosses_an_already_built_node_is_deferred() {
+        // In practice `apply_passthroughs` only ever runs on the pristine
+        // whole-source seed (it is `build`'s first step, ahead of every node
+        // that could make a range non-verbatim), so `range_is_verbatim`'s
+        // false branch is defensive – kept for the same reason every other
+        // macro family keeps the check. Exercise it directly, feeding a
+        // hand-built level whose triple-plus content spans an already-built
+        // `Styled` node, to document the intended fallback: the whole match
+        // is left unrecognized rather than mis-sliced.
+        let location = Span::new("+++");
+
+        let nodes = vec![
+            InlineNode::Text {
+                value: CowStr::from("+++"),
+                location,
+            },
+            InlineNode::Styled(Styled {
+                variant: StyleVariant::Strong,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: vec![],
+                attrs: None,
+                children: vec![],
+                location,
+            }),
+            InlineNode::Text {
+                value: CowStr::from("+++"),
+                location,
+            },
+        ];
+
+        let root = Span::new("+++");
+        let result = apply_passthroughs(nodes.clone(), root, &Parser::default());
+
+        assert_eq!(
+            result, nodes,
+            "a non-verbatim match must be left unrecognized"
+        );
+    }
+
+    #[test]
     fn triple_plus_borrows_its_content_unescaped() {
         // `SubstitutionGroup::None` applies nothing, so the content is genuinely
         // raw – not even special characters are escaped – and borrows `'src`.
