@@ -399,6 +399,11 @@ impl<'src> Header<'src> {
             // (`= {project-name} footnote:[…]`) is defined twice. This is a
             // rare combination – a document title is an unusual place for a
             // footnote or anchor to begin with – and no test exercises it.
+            // Tracked as a follow-up in #1132: fixing it well wants a way to
+            // resolve attribute references once and branch into the
+            // remaining substitution steps without re-invoking macros – a
+            // shape that may fall out more naturally once inline content is
+            // a materialized tree instead of a re-run string pipeline.
             let base = if !implicit_overridden_from_above
                 && let Some(raw) = title_source
                 && implicit_doctitle_str
