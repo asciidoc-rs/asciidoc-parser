@@ -1,0 +1,561 @@
+//! The character-replacements substitution step.
+
+use super::quotes::{Piece, build_match_string, emit_range, source_slice};
+use crate::{
+    Span,
+    content::{CharacterReplacement, character_replacements, maybe_has_replacements},
+    inlines::{CharRef, InlineNode},
+    parser::CharacterReplacementType,
+    strings::CowStr,
+};
+
+/// The character-replacements substitution, as a node transducer: each shared
+/// [`character_replacements`] rule is applied to the tree in order (its order
+/// encodes Asciidoctor's precedence), replacing every matched construct with a
+/// [`CharRef::Replacement`] (a typographic replacement such as `(C)` → `©`) or
+/// a [`CharRef::Entity`] (a restored named/numeric entity such as `&amp;copy;`
+/// → `&copy;`) leaf.
+///
+/// Like the string pipeline's step, the rules match over the level's
+/// **escaped** text (built by [`build_match_string`], where a
+/// [`CharRef::Special`] contributes its canonical entity) – which is exactly
+/// why the arrow (`-&gt;`, `&lt;-`) and entity (`&amp;copy;`) rules can
+/// straddle a `Text`/`CharRef` boundary. `root` is the whole-content source
+/// span; every leaf's precise `location` is sliced from it.
+pub(super) fn apply_character_replacements<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let mut nodes = nodes;
+
+    for repl in character_replacements() {
+        nodes = apply_one_replacement(repl, nodes, root);
+    }
+
+    nodes
+}
+
+/// Applies one [`CharacterReplacement`] rule to `nodes`, first descending into
+/// the [`Styled`](crate::inlines::Styled)/[`Ref`](InlineNode::Ref) children
+/// earlier steps created (a replacement inside a span is recognized just as the
+/// string pipeline recognizes one inside a rendered tag), then matching and
+/// replacing at this level.
+fn apply_one_replacement<'src>(
+    repl: &CharacterReplacement,
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let nodes: Vec<InlineNode<'src>> = nodes
+        .into_iter()
+        .map(|node| match node {
+            InlineNode::Styled(mut styled) => {
+                styled.children = apply_one_replacement(repl, styled.children, root);
+                InlineNode::Styled(styled)
+            }
+
+            InlineNode::Ref(mut reference) => {
+                reference.children = apply_one_replacement(repl, reference.children, root);
+                InlineNode::Ref(reference)
+            }
+
+            other => other,
+        })
+        .collect();
+
+    replace_level(repl, nodes, root)
+}
+
+/// One character-replacement match at a level, in absolute match-string byte
+/// offsets.
+struct ReplacementMatch {
+    /// The whole match, `[start, end)`.
+    full: std::ops::Range<usize>,
+
+    /// What to emit in place of `full`.
+    kind: ReplacementKind,
+}
+
+enum ReplacementKind {
+    /// An escaped construct (`\(C)`, `\-&gt;`, …): drop the single backslash at
+    /// this offset and keep the rest of the match as literal nodes, replacing
+    /// nothing – mirroring the string replacer's `caps[0].replace("\\", "")`.
+    Unescape { backslash: usize },
+
+    /// A recognized typographic replacement. Only the `consumed` sub-range
+    /// becomes a [`CharRef::Replacement`] leaf carrying `value` (the logical
+    /// character(s)); any word character the pattern anchors on (the `w` in
+    /// `w--`, or the letters around a `w'w` apostrophe) lies outside `consumed`
+    /// and is kept as literal text by the surrounding gaps.
+    Replace {
+        consumed: std::ops::Range<usize>,
+        value: &'static str,
+    },
+
+    /// A restored character reference (`&amp;copy;`): the whole match becomes a
+    /// [`CharRef::Entity`] leaf whose value is the named/numeric entity `name`
+    /// wrapped as `&name;`.
+    Entity { name: std::ops::Range<usize> },
+}
+
+/// Matches `repl` over this level's escaped text, replacing each match with the
+/// leaf node(s) it produces and leaving everything else in place.
+fn replace_level<'src>(
+    repl: &CharacterReplacement,
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let (s, pieces) = build_match_string(&nodes);
+
+    // Cheap pre-filter: skip the pattern sweep when nothing replaceable is
+    // present at this level.
+    if !maybe_has_replacements(&s) {
+        return nodes;
+    }
+
+    let matches = find_replacement_matches(repl, &s);
+
+    if matches.is_empty() {
+        return nodes;
+    }
+
+    rebuild_replacements(&nodes, &pieces, &s, &matches, root)
+}
+
+/// Finds every non-overlapping match of `repl` in the escaped match string `s`,
+/// left to right, exactly as the string pipeline's `replace_all` does.
+fn find_replacement_matches(repl: &CharacterReplacement, s: &str) -> Vec<ReplacementMatch> {
+    let mut matches = Vec::new();
+
+    for caps in repl.pattern.captures_iter(s) {
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let whole = caps.get(0).unwrap();
+
+        let full = whole.start()..whole.end();
+
+        // An escaped construct keeps its literal text with the single backslash
+        // dropped, and replaces nothing.
+        if let Some(rel) = whole.as_str().find('\\') {
+            matches.push(ReplacementMatch {
+                full,
+                kind: ReplacementKind::Unescape {
+                    backslash: whole.start() + rel,
+                },
+            });
+
+            continue;
+        }
+
+        matches.push(ReplacementMatch {
+            full: full.clone(),
+            kind: classify_replacement(repl, &caps, full),
+        });
+    }
+
+    matches
+}
+
+/// Classifies one non-escaped capture into the leaf it produces. Group presence
+/// distinguishes the two rules that share [`CharacterReplacementType`]: a bare
+/// `` `' `` apostrophe (no groups) versus a word-internal `w'w` one (two).
+fn classify_replacement(
+    repl: &CharacterReplacement,
+    caps: &regex::Captures<'_>,
+    full: std::ops::Range<usize>,
+) -> ReplacementKind {
+    let group = |i: usize| caps.get(i).map(|m| m.range());
+
+    // The whole match becomes a single replacement leaf with nothing kept.
+    let whole = |value| ReplacementKind::Replace {
+        consumed: full.clone(),
+        value,
+    };
+
+    match repl.type_ {
+        CharacterReplacementType::Copyright => whole("\u{a9}"),
+        CharacterReplacementType::Registered => whole("\u{ae}"),
+        CharacterReplacementType::Trademark => whole("\u{2122}"),
+        CharacterReplacementType::EmDashSurroundedBySpaces => whole("\u{2009}\u{2014}\u{2009}"),
+        CharacterReplacementType::Ellipsis => whole("\u{2026}\u{200b}"),
+        CharacterReplacementType::SingleLeftArrow => whole("\u{2190}"),
+        CharacterReplacementType::DoubleLeftArrow => whole("\u{21d0}"),
+        CharacterReplacementType::SingleRightArrow => whole("\u{2192}"),
+        CharacterReplacementType::DoubleRightArrow => whole("\u{21d2}"),
+
+        CharacterReplacementType::EmDashWithoutSpace => {
+            // `(\w)--`: the leading word character (group 1) stays; only the
+            // `--` after it is consumed.
+            let before = group(1).unwrap_or(full.start..full.start);
+
+            ReplacementKind::Replace {
+                consumed: before.end..full.end,
+                value: "\u{2014}\u{200b}",
+            }
+        }
+
+        CharacterReplacementType::TypographicApostrophe => match (group(1), group(2)) {
+            // `w'w`: the surrounding letters stay; only the apostrophe between
+            // them is consumed.
+            (Some(before), Some(after)) => ReplacementKind::Replace {
+                consumed: before.end..after.start,
+                value: "\u{2019}",
+            },
+
+            // `` `' ``: the whole match is the apostrophe.
+            _ => whole("\u{2019}"),
+        },
+
+        CharacterReplacementType::CharacterReference(_) => ReplacementKind::Entity {
+            name: group(1).unwrap_or(full),
+        },
+    }
+}
+
+/// Rebuilds a level's node list from its character-replacement matches: each
+/// gap keeps its original nodes; each match becomes its kept literal text plus
+/// the replacement leaf.
+fn rebuild_replacements<'src>(
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    s: &str,
+    matches: &[ReplacementMatch],
+    root: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+
+    for m in matches {
+        match &m.kind {
+            ReplacementKind::Unescape { backslash } => {
+                // Keep the whole match with the single backslash dropped.
+                emit_range(nodes, pieces, cursor..*backslash, &mut out);
+                emit_range(nodes, pieces, (*backslash + 1)..m.full.end, &mut out);
+                cursor = m.full.end;
+            }
+
+            ReplacementKind::Replace { consumed, value } => {
+                // The gap runs up to `consumed`, absorbing any kept leading word
+                // character; the cursor stops at `consumed.end`, so a kept
+                // trailing letter (the second letter of a `w'w` apostrophe) is
+                // absorbed by the next gap.
+                emit_range(nodes, pieces, cursor..consumed.start, &mut out);
+
+                out.push(InlineNode::CharRef {
+                    value: CharRef::Replacement(value),
+                    location: source_slice(pieces, consumed.clone(), root),
+                });
+
+                cursor = consumed.end;
+            }
+
+            ReplacementKind::Entity { name } => {
+                // The entity is emitted as written (`&copy;`); its `&`/`;` come
+                // from the pattern, its name from the level's escaped text.
+                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
+
+                let entity = format!("&{};", &s[name.clone()]);
+
+                out.push(InlineNode::CharRef {
+                    value: CharRef::Entity(CowStr::from(entity)),
+                    location: source_slice(pieces, m.full.clone(), root),
+                });
+
+                cursor = m.full.end;
+            }
+        }
+    }
+
+    if cursor < s.len() {
+        emit_range(nodes, pieces, cursor..s.len(), &mut out);
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::indexing_slicing)]
+    #![allow(clippy::panic)]
+    #![allow(clippy::unwrap_used)]
+
+    use super::{
+        super::test_support::{assert_styled, assert_text, build_src, fold_html},
+        apply_character_replacements,
+    };
+    use crate::{
+        Span,
+        content::{Content, SubstitutionStep},
+        inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
+        parser::HtmlSubstitutionRenderer,
+        strings::CowStr,
+    };
+
+    /// The string pipeline's output through the **post-replacement** step for
+    /// `source`, used as the golden oracle: the four steps [`build`] runs, in
+    /// order (special characters, quotes, character replacements, post
+    /// replacement). Attribute references and macros are skipped – exactly as
+    /// the additive builder skips them – so the fixtures deliberately contain
+    /// neither.
+    fn golden_replacements(source: &str) -> String {
+        let parser = crate::Parser::default();
+        let mut content = Content::from(Span::new(source));
+        SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
+        SubstitutionStep::Quotes.apply(&mut content, &parser, None);
+        SubstitutionStep::CharacterReplacements.apply(&mut content, &parser, None);
+        SubstitutionStep::PostReplacement.apply(&mut content, &parser, None);
+        content.rendered_str().to_string()
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_through_replacements() {
+        // For each fixture, folding the single-pass tree (special characters +
+        // quotes + character replacements + post replacement) reproduces the
+        // string pipeline's output byte-for-byte. This is the differential
+        // corpus (design §5.3) that pins this increment.
+        let fixtures = [
+            // No replacements.
+            "plain text",
+            "a < b & c > d",
+            "*bold* and _italic_",
+            // Symbols.
+            "(C)",
+            "(R)",
+            "(TM)",
+            "Copyright (C) 2026, Acme (R), Widget (TM)",
+            // Em dashes.
+            "a -- b",
+            "one--two",
+            "start -- of a thought",
+            "-- leading",
+            "trailing --",
+            "a--b--c",
+            // Ellipsis.
+            "wait...",
+            "a...b...c",
+            "...",
+            // Apostrophes.
+            "Sam's book",
+            "it's a girls' school",
+            "He said `'hello",
+            // Arrows (they straddle a Text/CharRef boundary once escaped).
+            "a -> b",
+            "a => b",
+            "a <- b",
+            "a <= b",
+            "if x -> y then z",
+            "->",
+            "<-",
+            // Entity restoration.
+            "&copy; 2026",
+            "&#8217;",
+            "&#x2019;",
+            "&hellip; and &mdash;",
+            // Escapes suppress the replacement.
+            "\\(C)",
+            "\\--",
+            "a\\--b",
+            "\\...",
+            "\\-> arrow",
+            "\\&copy;",
+            "It\\'s",
+            // Replacements inside spans.
+            "*Acme (C)*",
+            "_wait..._",
+            "`a -> b`",
+            "*a -- b* and _x...y_",
+            // Nesting with replacements.
+            "*a _b (C) c_ d*",
+            // Specials adjacent to replacement triggers.
+            "a<b (C) c>d",
+            "&amp; then (R)",
+            // Hard line breaks.
+            "foo +\nbar",
+            "a +\nb +\nc",
+            "no break here\nsecond line",
+            "line one +\nline two\nline three +\nline four",
+            "trailing space but no plus \nnext",
+            // A `+` and a newline are both present, but no line ends in ` +`, so
+            // no break is recognized.
+            "a + b\nc",
+            // The content ends exactly in a break, so nothing trails the last
+            // one.
+            "a\nfoo +",
+            // Line breaks interacting with replacements and spans.
+            "Acme (C) +\nnext line",
+            "*bold* +\nplain",
+            "a -> b +\nc <- d",
+            // Combinations.
+            "(C) 2026 -- Acme's widgets... see x -> y",
+            // Quote-like / replacement-like characters that do not match.
+            "1 -- 2 * 3",
+            "a_b_c",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_replacements(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    /// Asserts that `node` is a [`CharRef::Replacement`] carrying `value`,
+    /// located over source `data`.
+    fn assert_replacement(node: &InlineNode<'_>, value: &str, data: &str) {
+        match node {
+            InlineNode::CharRef {
+                value: CharRef::Replacement(got),
+                location,
+            } => {
+                assert_eq!(*got, value, "replacement value");
+                assert_eq!(location.data(), data, "replacement location");
+            }
+
+            other => panic!("expected CharRef::Replacement({value:?}), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn copyright_becomes_a_replacement_leaf() {
+        let nodes = build_src(Span::new("(C)"));
+
+        assert_eq!(nodes.len(), 1);
+        // The logical value is the copyright character; the fold encodes it as
+        // the numeric entity the string pipeline emits.
+        assert_replacement(&nodes[0], "\u{a9}", "(C)");
+
+        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "&#169;");
+    }
+
+    #[test]
+    fn an_arrow_replacement_spans_a_text_and_charref_boundary() {
+        // `->` is `-` (text) followed by `&gt;` (a `CharRef::Special` from the
+        // special-characters step), so the arrow rule must match across the two.
+        let nodes = build_src(Span::new("a -> b"));
+
+        // "a " kept, the arrow leaf over "->", then " b".
+        assert_eq!(nodes.len(), 3);
+        assert_text(&nodes[0], "a ", 1, 1);
+        assert_replacement(&nodes[1], "\u{2192}", "->");
+        assert_text(&nodes[2], " b", 1, 5);
+    }
+
+    #[test]
+    fn an_em_dash_without_space_keeps_the_leading_word_char() {
+        // `(\w)--`: the leading word character is kept, the `--` consumed.
+        let nodes = build_src(Span::new("one--two"));
+
+        assert_eq!(nodes.len(), 3);
+        assert_text(&nodes[0], "one", 1, 1);
+        assert_replacement(&nodes[1], "\u{2014}\u{200b}", "--");
+        assert_text(&nodes[2], "two", 1, 6);
+    }
+
+    #[test]
+    fn a_word_apostrophe_keeps_both_letters() {
+        // `w'w`: the surrounding letters are kept, the apostrophe consumed.
+        let nodes = build_src(Span::new("Sam's"));
+
+        assert_eq!(nodes.len(), 3);
+        assert_text(&nodes[0], "Sam", 1, 1);
+        assert_replacement(&nodes[1], "\u{2019}", "'");
+        assert_text(&nodes[2], "s", 1, 5);
+    }
+
+    #[test]
+    fn a_restored_entity_becomes_an_entity_leaf() {
+        let nodes = build_src(Span::new("&copy; 2026"));
+
+        assert_eq!(nodes.len(), 2);
+
+        match &nodes[0] {
+            InlineNode::CharRef {
+                value: CharRef::Entity(entity),
+                location,
+            } => {
+                assert_eq!(entity.as_ref(), "&copy;");
+                // The location covers the source the entity derives from.
+                assert_eq!(location.data(), "&copy;");
+            }
+
+            other => panic!("expected CharRef::Entity, got {other:?}"),
+        }
+
+        assert_text(&nodes[1], " 2026", 1, 7);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "&copy; 2026"
+        );
+    }
+
+    #[test]
+    fn an_escaped_replacement_stays_literal() {
+        // `\(C)` drops the backslash and keeps `(C)` as literal text – no
+        // replacement leaf.
+        let nodes = build_src(Span::new("\\(C)"));
+
+        assert!(
+            nodes
+                .iter()
+                .all(|n| !matches!(n, InlineNode::CharRef { .. })),
+            "an escaped replacement must not produce a char-ref leaf: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_replacements("\\(C)")
+        );
+    }
+
+    #[test]
+    fn a_replacement_inside_a_span_is_recognized() {
+        // A `(C)` inside a strong span is replaced just as the string pipeline
+        // replaces one inside a rendered `<strong>` tag.
+        let nodes = build_src(Span::new("*Acme (C)*"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+        assert_eq!(children.len(), 2);
+        assert_text(&children[0], "Acme ", 1, 2);
+        assert_replacement(&children[1], "\u{a9}", "(C)");
+    }
+
+    #[test]
+    fn character_replacements_recurse_into_ref_children() {
+        // A reference's display text is subject to replacements, just as the
+        // string pipeline processes it inside the rendered anchor. (No macros
+        // step yet builds `Ref` nodes, so this drives the recursion directly.)
+        let loc = Span::new("(C)");
+
+        let reference = InlineNode::Ref(Ref {
+            variant: RefVariant::Link,
+            target: CowStr::from("https://example.com"),
+            children: vec![InlineNode::Text {
+                value: CowStr::from(loc.data()),
+                location: loc,
+            }],
+            roles: vec![],
+            window: None,
+            resolved: None,
+            location: loc,
+        });
+
+        let out = apply_character_replacements(vec![reference], loc);
+
+        assert_eq!(out.len(), 1);
+
+        match &out[0] {
+            InlineNode::Ref(reference) => {
+                assert_eq!(reference.children.len(), 1);
+                assert_replacement(&reference.children[0], "\u{a9}", "(C)");
+            }
+
+            other => panic!("expected Ref, got {other:?}"),
+        }
+    }
+}
