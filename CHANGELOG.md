@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.15](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.14...v0.29.15)
+_08 August 2026_
+
+### Fixed
+
+* Union docinfo/docinfo2 scopes and veto conflicting notitle writes ([#1141](https://github.com/asciidoc-rs/asciidoc-parser/pull/1141))
+* Do not warn for a doctitle attribute reference resolved later in the header ([#1134](https://github.com/asciidoc-rs/asciidoc-parser/pull/1134))
+
+### Other
+
+* Leave revdate unset when the revision line's date field is empty ([#1133](https://github.com/asciidoc-rs/asciidoc-parser/pull/1133))
+
 ## [0.29.14](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.13...v0.29.14)
 _08 August 2026_
 
