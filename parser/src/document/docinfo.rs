@@ -108,6 +108,27 @@ impl Docinfo {
         // standalone boolean attributes are consulted as a fallback: `docinfo1`
         // is equivalent to `docinfo=shared`, and `docinfo2` is equivalent to
         // `docinfo=private,shared`.
+        // A `docinfo` value that resolves to exactly "private" -- whether
+        // from a bare `:docinfo:` entry or an explicit `:docinfo: private`
+        // (both read back as the literal `Value("private")` here, since
+        // `Parser::attribute_value` already resolves a bare boolean to its
+        // registered default) -- does not preclude the legacy
+        // `docinfo1`/`docinfo2` booleans from also contributing their
+        // shared-file component. Asciidoctor unions them rather than letting
+        // the literal `docinfo` value suppress the derived "shared"
+        // component: `docinfo docinfo2` resolves the same as `docinfo2`
+        // alone, regardless of which was set first. A `docinfo` value with
+        // any other content (e.g. `shared-head`) is left as the caller's
+        // explicit, complete scope.
+        let union_legacy_shared = |mut tokens: Vec<String>| -> Vec<String> {
+            if tokens == ["private"]
+                && (parser.is_attribute_set("docinfo1") || parser.is_attribute_set("docinfo2"))
+            {
+                tokens.push("shared".to_string());
+            }
+            tokens
+        };
+
         let tokens: Vec<String> = match parser.attribute_value("docinfo") {
             InterpretedValue::Unset => {
                 if parser.is_attribute_set("docinfo2") {
@@ -118,12 +139,21 @@ impl Docinfo {
                     return Self::default();
                 }
             }
-            InterpretedValue::Set => vec!["private".to_string()],
-            InterpretedValue::Value(v) => v
-                .split(',')
-                .map(|t| t.trim().to_ascii_lowercase())
-                .filter(|t| !t.is_empty())
-                .collect(),
+            // `docinfo` has a registered default (`"private"`, set in
+            // `built_in_default_values`), so `Parser::attribute_value`
+            // always resolves a bare boolean to that default -- see the
+            // `Value` arm below -- and never returns a bare `Set` for it.
+            // This arm exists only to satisfy match exhaustiveness.
+            InterpretedValue::Set => unreachable!(
+                "docinfo has a registered default, so Parser::attribute_value never returns \
+                 InterpretedValue::Set for it"
+            ),
+            InterpretedValue::Value(v) => union_legacy_shared(
+                v.split(',')
+                    .map(|t| t.trim().to_ascii_lowercase())
+                    .filter(|t| !t.is_empty())
+                    .collect(),
+            ),
         };
 
         if tokens.is_empty() {
@@ -254,7 +284,11 @@ fn docinfosubs_steps(parser: &Parser) -> SubstitutionGroup {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{Parser, SafeMode, document::DocinfoLocation, parser::DocinfoFileHandler};
+    use crate::{
+        Parser, SafeMode,
+        document::DocinfoLocation,
+        parser::{DocinfoFileHandler, ModificationContext},
+    };
 
     /// A minimal handler that resolves docinfo from a fixed file-name map.
     #[derive(Debug)]
@@ -389,6 +423,70 @@ mod tests {
         // document-private docinfo files are included, shared first.
         let head = head_for(
             "= Doc\n:docinfo2:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn bare_docinfo_and_docinfo2_union_to_private_and_shared() {
+        // A bare `:docinfo:` ("private" only) and `:docinfo2:` ("private" +
+        // "shared") set together union their effects rather than one
+        // suppressing the other's shared-file component: matches
+        // Asciidoctor's `docinfo docinfo2` test case, which is identical to
+        // `docinfo2` alone.
+        let head = head_for(
+            "= Doc\n:docinfo:\n:docinfo2:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+
+        // Order does not matter.
+        let head = head_for(
+            "= Doc\n:docinfo2:\n:docinfo:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn api_set_bare_docinfo_unions_with_docinfo2() {
+        // A bare `docinfo` boolean set via the intrinsic-attribute API
+        // (rather than a document `:docinfo:` header entry) still reads back
+        // as `Value("private")` -- `Parser::attribute_value` resolves a bare
+        // `Set` to its registered default regardless of how it was set --
+        // so it unions with a document `:docinfo2:` entry's shared scope the
+        // same way.
+        let head = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("mydoc.adoc")
+            .with_docinfo_file_handler(MapHandler::new(&[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ]))
+            .with_intrinsic_attribute_bool("docinfo", true, ModificationContext::Anywhere)
+            .parse("= Doc\n:docinfo2:\n\nBody.")
+            .docinfo(DocinfoLocation::Head)
+            .to_string();
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn bare_docinfo_and_docinfo1_union_to_private_and_shared() {
+        // Same union behavior applies against the `docinfo1` legacy toggle
+        // ("shared" only): the bare `docinfo` attribute's "private" scope is
+        // combined with it rather than suppressing it.
+        let head = head_for(
+            "= Doc\n:docinfo:\n:docinfo1:\n\nBody.",
             &[
                 ("docinfo.html", "SHARED"),
                 ("mydoc-docinfo.html", "PRIVATE"),
