@@ -1164,6 +1164,44 @@ Each phase is a reviewable unit with a clear exit gate.
   source text unchanged, exactly as an unrecognized macro is left for a later increment. This step is
   **additive**: nothing is wired into the parse path.
 
+  *Step 5c landed as (`Callouts` → `Callout`, verbatim-group content):* a new
+  [`apply_callouts`](../../parser/src/content/inline_builder.rs) step recognizes a trailing callout
+  token (`<1>`, `<.>`, or `<!--1-->` for XML) in literal, listing, and source blocks as a
+  [`Callout`](../../parser/src/inlines/callout.rs) node, folding through the same `render_callout` the
+  string step calls so the output is byte-for-byte identical. This is the first increment for
+  [`SubstitutionGroup::Verbatim`](../../parser/src/content/substitution_group.rs) rather than the
+  *normal* order every step through 5b runs: literal/listing/source blocks apply only
+  `SpecialCharacters` ahead of `Callouts`, so – unlike every other transducer in this module – the
+  function need not descend into `Styled`/`Ref` children, since neither can exist at this point in that
+  group's order. It reuses the string pipeline's *exact* recognition and trailing-position lookahead –
+  [`build_callout_regexes`](../../parser/src/content/substitution_step.rs) is now shared `pub(crate)` –
+  so only the recognition *sink* differs (§4.1): a match that fails the lookahead (not the last token on
+  its line) is simply left out of the match list, so the surrounding gap reproduces its original nodes
+  unchanged, the same outcome the string pipeline's `LookaheadReplacer` fallback produces.
+  Auto-numbering (`<.>`) is scoped to one call of the step, exactly as the string replacer's counter is
+  scoped to one block.
+
+  This is also the node vocabulary's first real consumer for `Callout`, so its field set (Phase 0
+  provisional) was refined here: alongside `number`, it now carries a `guard` – a new
+  [`CalloutGuard`](../../parser/src/inlines/callout.rs) enum (`LineComment(prefix)` / `Xml`) recording
+  which characters hide the callout in the raw source, decoupled from the render-seam's own
+  `CalloutGuard` the same way every other node is decoupled from its `*RenderParams` counterpart (§4.6):
+  the fold reconstructs `CalloutRenderParams` fresh from the node's `number` and `guard`, rather than the
+  node carrying a render-params type directly. The Phase 1/2 recorder
+  ([`inline_tree.rs`](../../parser/src/content/inline_tree.rs)), which had never captured a callout's
+  guard (its differential corpus fixtures happened not to need it), now captures it too, so the two
+  construction strategies agree on the node's shape.
+
+  An escaped callout (`\<1>`) drops its backslash and stays literal, mirroring every other macro
+  family's escape handling. As throughout the additive builder, this pass performs **no** recognition
+  side effect: it does not call `Parser::register_callout`, deferring the callout catalog's validation
+  to the cutover (step 6), exactly as the image and link increments defer their own catalog
+  registrations. A differential corpus pins bare/explicit and auto-numbered callouts, multiple callouts
+  on one line, XML callouts, the default line-comment prefixes, a custom or disabled `line-comment`
+  (block-attribute and document-attribute), escapes, non-trailing-position and half-XML-comment
+  non-matches, and both non-default `icons` renderings (font and image), alongside structural assertions
+  on the node's `guard`. This step is **additive**: nothing is wired into the parse path.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1196,7 +1234,7 @@ Each phase is a reviewable unit with a clear exit gate.
      - ✅ **5a.** Passthroughs, the delimited forms (`+++…+++`, `++…++`, `$$…$$`, bare
        `pass:[…]`) → `Raw`.
      - ✅ **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
-     - **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
+     - ✅ **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
      - **5d.** the deferred forms `5a` documents – an attribute-list-prefixed passthrough, a
        `pass:` macro with an explicit substitution list, the bare unconstrained `+text+` form,
        and inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`.

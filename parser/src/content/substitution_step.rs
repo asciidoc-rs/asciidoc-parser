@@ -1445,7 +1445,9 @@ static CUSTOM_CALLOUT_TAIL_RX: LazyLock<Regex> = LazyLock::new(|| {
 /// The default-mode regexes and both tail regexes are constant, so they are
 /// built once. Only a custom (non-empty) prefix requires building a regex from
 /// the attribute value, which is borrowed otherwise.
-fn build_callout_regexes(line_comment: Option<&str>) -> (Cow<'static, Regex>, &'static Regex) {
+pub(crate) fn build_callout_regexes(
+    line_comment: Option<&str>,
+) -> (Cow<'static, Regex>, &'static Regex) {
     match line_comment {
         // Default: recognize the common line-comment prefixes and XML callouts.
         None => (Cow::Borrowed(&DEFAULT_CALLOUT_RX), &DEFAULT_CALLOUT_TAIL_RX),

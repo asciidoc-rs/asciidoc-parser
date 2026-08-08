@@ -61,13 +61,13 @@ use crate::{
     Span,
     attributes::Attrlist,
     inlines::{
-        Anchor, Callout, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref, RefVariant,
-        SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui, UiKind,
+        Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref,
+        RefVariant, SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui, UiKind,
     },
     parser::{
-        CalloutRenderParams, FootnoteRenderParams, IconRenderParams, ImageRenderParams,
-        IndexTermRenderParams, InlineSubstitutionRenderer, LinkRenderParams, MenuRenderParams,
-        QuoteScope, QuoteType, XrefRenderParams,
+        CalloutGuard as ParserCalloutGuard, CalloutRenderParams, FootnoteRenderParams,
+        IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineSubstitutionRenderer,
+        LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -203,6 +203,7 @@ pub(crate) enum LeafNode {
     },
     Callout {
         number: String,
+        guard: CalloutGuardMeta,
     },
     IndexTerm {
         terms: Vec<String>,
@@ -214,6 +215,15 @@ pub(crate) enum LeafNode {
         number: Option<String>,
         is_reference: bool,
     },
+}
+
+/// Owned counterpart of [`crate::parser::CalloutGuard`], captured from
+/// [`CalloutRenderParams`] at recording time (this module stores owned
+/// strings throughout, matching Strategy A's "owned strings" limitation).
+#[derive(Clone, Debug)]
+pub(crate) enum CalloutGuardMeta {
+    LineComment(String),
+    Xml,
 }
 
 #[derive(Clone, Debug)]
@@ -490,9 +500,17 @@ impl InlineSubstitutionRenderer for RecordingRenderer {
         let mut fragment = String::new();
         self.inner.render_callout(params, &mut fragment);
 
+        let guard = match params.guard {
+            ParserCalloutGuard::LineComment(prefix) => {
+                CalloutGuardMeta::LineComment(prefix.to_string())
+            }
+            ParserCalloutGuard::Xml => CalloutGuardMeta::Xml,
+        };
+
         self.leaf(
             LeafNode::Callout {
                 number: params.number.to_string(),
+                guard,
             },
             &fragment,
             dest,
@@ -914,8 +932,14 @@ fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
             location: span,
         }),
 
-        LeafNode::Callout { number } => InlineNode::Callout(Callout {
+        LeafNode::Callout { number, guard } => InlineNode::Callout(Callout {
             number: CowStr::from(number.clone()),
+            guard: match guard {
+                CalloutGuardMeta::LineComment(prefix) => {
+                    CalloutGuard::LineComment(CowStr::from(prefix.clone()))
+                }
+                CalloutGuardMeta::Xml => CalloutGuard::Xml,
+            },
             location: span,
         }),
 
