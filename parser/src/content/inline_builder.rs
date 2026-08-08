@@ -7775,6 +7775,15 @@ mod tests {
             // constructs.
             "See footnote:[a note] here.",
             "*bold* then footnote:[fn] and _em_",
+            // An already-recognized construct as an *unrelated sibling* gap at
+            // the same level as a genuine footnote match – not nested inside
+            // the footnote's own content – exercising
+            // `emit_range_recursing_footnotes`'s `Ref` and non-`Styled`/`Ref`
+            // (`other`) branches, which nothing above reaches (every other
+            // fixture's nested construct sits *inside* a footnote's own
+            // content, built by the plain, non-recursing `emit_range`).
+            "image:x.png[X] footnote:[a note]",
+            "link:https://example.org[text] footnote:[a note]",
             // Escape: the macro stays literal, minus the backslash.
             "\\footnote:[not a footnote]",
             "\\footnote:disc[not a footnote]",
