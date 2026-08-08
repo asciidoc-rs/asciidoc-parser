@@ -1869,16 +1869,37 @@ fn is_asciidoc_file(target: &str) -> bool {
 /// filesystem access, and no safe-mode jailing (that is the handler's
 /// responsibility; see `resolve_target`'s contract).
 ///
-/// An absolute target (a leading `/` or `\`, or a Windows drive prefix such as
-/// `C:`) is kept as-is: however the handler interprets it, it does not need
-/// `container`'s directory to make sense of it.
+/// An absolute target (a leading `/` or `\`, a Windows drive prefix such as
+/// `C:`, or a URI such as `https://…`) is kept as-is: however the handler
+/// interprets it, it does not need `container`'s directory to make sense of
+/// it.
+///
+/// A `container` that is itself a URI (a host-supplied [`IncludeFileHandler`]
+/// may fetch remote content, even though this crate's own handlers never
+/// resolve one — see the `remote-fetch-not-planned` note on
+/// [`IncludeFileHandler::resolve_target`]) is joined with [`join_uri_path`],
+/// which folds `target`'s segments into the URI's path *without* disturbing
+/// its scheme and authority (`scheme://host:port`) — the naive
+/// separator-based join [`join_local_path`] performs would collapse the `//`
+/// after the scheme, since it looks like a doubled path separator.
 ///
 /// [`IncludeFileHandler::resolve_target`]: crate::parser::IncludeFileHandler::resolve_target
 fn nested_file_name(container: Option<&str>, target: &str) -> String {
-    if is_absolute_path(target) {
+    if is_uri(target) || is_absolute_path(target) {
         return target.to_owned();
     }
 
+    match container {
+        Some(container) if is_uri(container) => join_uri_path(container, target),
+        _ => join_local_path(container, target),
+    }
+}
+
+/// Joins `target` onto the directory of `container` (or, with no `container`,
+/// returns `target`'s own cleaned-up path) using plain `/`-separated
+/// (filesystem-style) path arithmetic. See [`nested_file_name`], which
+/// dispatches here for a `container` that is not a URI.
+fn join_local_path(container: Option<&str>, target: &str) -> String {
     let mut segments: Vec<&str> = Vec::new();
     if let Some(dir) = container.map(directory_of).filter(|dir| !dir.is_empty()) {
         for segment in dir.split(['/', '\\']) {
@@ -1890,6 +1911,33 @@ fn nested_file_name(container: Option<&str>, target: &str) -> String {
     }
 
     segments.join("/")
+}
+
+/// Joins `target` onto the directory of `container`, a URI (`container` must
+/// satisfy [`is_uri`]), keeping its scheme and authority
+/// (`scheme://host:port`) intact and folding path segments only in the
+/// portion that follows. See [`nested_file_name`], which dispatches here for
+/// a URI `container`.
+fn join_uri_path(container: &str, target: &str) -> String {
+    // `container` matched `is_uri`, so it has a `scheme://` prefix; the
+    // authority runs from there to the next `/` (or the end of the string, if
+    // the URI has no path component).
+    let scheme_end = container.find("://").map_or(0, |index| index + 3);
+    let authority_end = container[scheme_end..]
+        .find('/')
+        .map_or(container.len(), |index| scheme_end + index);
+    let origin = &container[..authority_end];
+    let path = &container[authority_end..];
+
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in directory_of(path).split('/') {
+        push_path_segment(&mut segments, segment);
+    }
+    for segment in target.split(['/', '\\']) {
+        push_path_segment(&mut segments, segment);
+    }
+
+    format!("{origin}/{}", segments.join("/"))
 }
 
 /// Folds a single path `segment` onto `segments`: `.` and empty components
@@ -4948,6 +4996,72 @@ mod tests {
             assert_eq!(
                 nested_file_name(Some(r"fixtures\outer-include.adoc"), r"subdir\middle.adoc"),
                 "fixtures/subdir/middle.adoc"
+            );
+        }
+
+        // A URI target is kept as-is, just like any other absolute target — a
+        // host-supplied `IncludeFileHandler` that fetches remote content
+        // (this crate's own handlers never resolve a URI; see
+        // `remote-fetch-not-planned`) does not need `container`'s directory
+        // to make sense of a fully-qualified URI.
+        #[test]
+        fn uri_target_is_kept_as_is() {
+            assert_eq!(
+                nested_file_name(
+                    Some("fixtures/outer-include.adoc"),
+                    "https://example.com/other.adoc"
+                ),
+                "https://example.com/other.adoc"
+            );
+        }
+
+        // A relative target joins onto the *path* of a URI container without
+        // disturbing its scheme and authority. A naive separator-based join
+        // would fold the `//` after the scheme as if it were a doubled path
+        // separator, corrupting it to a single `/` (breaking the URI); this
+        // is the regression this test guards against.
+        #[test]
+        fn relative_target_joins_a_uri_containers_path_without_corrupting_its_scheme() {
+            assert_eq!(
+                nested_file_name(
+                    Some("https://example.com/fixtures/outer-include.adoc"),
+                    "subdir/middle-include.adoc"
+                ),
+                "https://example.com/fixtures/subdir/middle-include.adoc"
+            );
+
+            // A further level nests the same way, each time relative to the
+            // immediately containing file's own directory.
+            assert_eq!(
+                nested_file_name(
+                    Some("https://example.com/fixtures/subdir/middle-include.adoc"),
+                    "inner-include.adoc"
+                ),
+                "https://example.com/fixtures/subdir/inner-include.adoc"
+            );
+        }
+
+        // A URI container with no path component (just an origin) still joins
+        // correctly, and a `..` that has nothing to pop is dropped at the
+        // origin root rather than climbing into the authority.
+        #[test]
+        fn uri_container_with_no_path_joins_at_the_origin_root() {
+            assert_eq!(
+                nested_file_name(Some("https://example.com"), "chapter.adoc"),
+                "https://example.com/chapter.adoc"
+            );
+        }
+
+        // A URI container's authority (host and port) is preserved verbatim
+        // and is never mistaken for a path segment to fold `..` against.
+        #[test]
+        fn uri_container_with_a_port_preserves_the_authority() {
+            assert_eq!(
+                nested_file_name(
+                    Some("http://example.com:9876/fixtures/outer-include.adoc"),
+                    "subdir/middle-include.adoc"
+                ),
+                "http://example.com:9876/fixtures/subdir/middle-include.adoc"
             );
         }
     }
