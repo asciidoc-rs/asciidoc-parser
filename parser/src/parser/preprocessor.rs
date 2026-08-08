@@ -822,6 +822,14 @@ impl<'p> PreprocessorState<'p> {
 
             let content_start = self.output.len();
 
+            // The file name to record for the included content: the target
+            // combined with the directory of the file containing this
+            // directive, so a further-nested include inside it — and any
+            // diagnostic or `SourceMap` entry attached to its content —
+            // resolves against the right directory rather than just the
+            // target as written here. See `nested_file_name`.
+            let nested_name = nested_file_name(file_name, &target);
+
             if is_asciidoc_file(&target) {
                 // Register the included AsciiDoc file so an
                 // inter-document cross reference whose target names it
@@ -889,14 +897,14 @@ impl<'p> PreprocessorState<'p> {
                 // AsciiDoc files are run through the preprocessor, so the
                 // include (and other) directives they contain are
                 // interpreted.
-                self.process_adoc_include(&selected, Some(&target), &nested_reindent);
+                self.process_adoc_include(&selected, Some(&nested_name), &nested_reindent);
 
                 self.max_include_depth = saved_max_depth;
             } else {
                 // Non-AsciiDoc files are merged verbatim; the preprocessor
                 // does not interpret any AsciiDoc directives within them
                 // (matching Asciidoctor).
-                self.process_nonadoc_include(&selected, Some(&target), &nested_reindent);
+                self.process_nonadoc_include(&selected, Some(&nested_name), &nested_reindent);
             }
 
             if let Some(encoding) = non_utf8_encoding {
@@ -1843,6 +1851,88 @@ fn is_asciidoc_file(target: &str) -> bool {
     }
 }
 
+/// Computes the file name to record for the content of a nested `include::`
+/// directive's target — the `source` a further-nested `include::` inside it
+/// resolves relative to (see [`IncludeFileHandler::resolve_target`]) and the
+/// file name attached to its content in diagnostics and the [`SourceMap`].
+///
+/// `target` is the directive's target exactly as written, which is relative
+/// to the directory of the file that contains the directive (`container`;
+/// `None` for the primary document). A target several levels deep must
+/// therefore be combined with `container`'s own directory to still name the
+/// right file — otherwise a directive nested inside a file that itself lives
+/// in a subdirectory resolves as if that subdirectory did not exist. This
+/// mirrors the path arithmetic Asciidoctor's `PreprocessorReader` performs
+/// when it pushes a nested include onto its stack (deriving the new cursor's
+/// `dir` from the containing cursor's `dir` and the target), but — like
+/// [`IncludeFileHandler::resolve_target`] itself — stays purely lexical: no
+/// filesystem access, and no safe-mode jailing (that is the handler's
+/// responsibility; see `resolve_target`'s contract).
+///
+/// An absolute target (a leading `/` or `\`, or a Windows drive prefix such as
+/// `C:`) is kept as-is: however the handler interprets it, it does not need
+/// `container`'s directory to make sense of it.
+///
+/// [`IncludeFileHandler::resolve_target`]: crate::parser::IncludeFileHandler::resolve_target
+fn nested_file_name(container: Option<&str>, target: &str) -> String {
+    if is_absolute_path(target) {
+        return target.to_owned();
+    }
+
+    let mut segments: Vec<&str> = Vec::new();
+    if let Some(dir) = container.map(directory_of).filter(|dir| !dir.is_empty()) {
+        for segment in dir.split(['/', '\\']) {
+            push_path_segment(&mut segments, segment);
+        }
+    }
+    for segment in target.split(['/', '\\']) {
+        push_path_segment(&mut segments, segment);
+    }
+
+    segments.join("/")
+}
+
+/// Folds a single path `segment` onto `segments`: `.` and empty components
+/// (e.g. from a doubled separator) are dropped, and `..` pops the previous
+/// segment — unless there is nothing to pop (an empty stack, or a `..` on
+/// top), in which case it is kept, so a target may still climb above the
+/// directory it started from.
+fn push_path_segment<'a>(segments: &mut Vec<&'a str>, segment: &'a str) {
+    match segment {
+        "" | "." => {}
+        ".." => match segments.last() {
+            Some(&last) if last != ".." => {
+                segments.pop();
+            }
+            _ => segments.push(".."),
+        },
+        other => segments.push(other),
+    }
+}
+
+/// Returns the directory portion of `path`: everything before the final path
+/// separator, or the empty string when `path` has none. Both `/` and `\` are
+/// honored, since a directive's target may have been written on either
+/// platform.
+fn directory_of(path: &str) -> &str {
+    match path.rfind(['/', '\\']) {
+        Some(index) => &path[..index],
+        None => "",
+    }
+}
+
+/// Whether `path` is absolute: it begins with `/` or `\`, or with a Windows
+/// drive prefix such as `C:`.
+fn is_absolute_path(path: &str) -> bool {
+    path.starts_with('/') || path.starts_with('\\') || {
+        let mut chars = path.chars();
+        matches!(
+            (chars.next(), chars.next()),
+            (Some(letter), Some(':')) if letter.is_ascii_alphabetic()
+        )
+    }
+}
+
 /// The [`Catalog`](crate::document::Catalog) include-registry key for an
 /// AsciiDoc include `target`: the target with its AsciiDoc file extension
 /// removed, matching the path an inter-document xref target interprets to (see
@@ -2609,6 +2699,76 @@ mod tests {
         assert_eq!(
             source_map.original_file_and_line(6),
             Some(SourceLine(Some("main.adoc".to_owned()), 5))
+        );
+    }
+
+    // Regression test for #131: a three-level include where the middle file
+    // lives in a subdirectory must resolve the *inner* include relative to
+    // that subdirectory (its own containing file's directory), not relative
+    // to the top-level document's directory. `InlineFileHandler` (used by the
+    // other tests in this module) ignores `source` entirely, so it can't
+    // exercise this; this handler instead mimics a filesystem-backed one by
+    // joining a relative `target` onto the directory of `source`, the way
+    // `FsIncludeFileHandler` (the crate's `html5` consumer's handler) does.
+    // Before the fix, the innermost include's `source` names the target as
+    // written in the *outer* file's directive (`subdir/middle-include.adoc`)
+    // rather than the middle file's own path
+    // (`fixtures/subdir/middle-include.adoc`), so this join lands on the
+    // wrong key and the include is left unresolved.
+    #[test]
+    fn nested_include_in_subdirectory_resolves_relative_to_its_own_file() {
+        #[derive(Debug)]
+        struct RecordingHandler {
+            calls: std::cell::RefCell<Vec<(Option<String>, String)>>,
+        }
+
+        impl IncludeFileHandler for RecordingHandler {
+            fn resolve_target<'src>(
+                &self,
+                source: Option<&str>,
+                target: &str,
+                _attrlist: &Attrlist<'src>,
+                _parser: &Parser,
+            ) -> IncludeResolution {
+                self.calls
+                    .borrow_mut()
+                    .push((source.map(str::to_owned), target.to_owned()));
+
+                let dir = source.and_then(|s| s.rfind('/').map(|i| &s[..i]));
+                let path = match dir {
+                    Some(dir) => format!("{dir}/{target}"),
+                    None => target.to_owned(),
+                };
+
+                let content = match path.as_str() {
+                    "fixtures/outer-include.adoc" => {
+                        "first line of outer\n\ninclude::subdir/middle-include.adoc[]\n\nlast line of outer"
+                    }
+                    "fixtures/subdir/middle-include.adoc" => {
+                        "first line of middle\n\ninclude::inner-include.adoc[]\n\nlast line of middle"
+                    }
+                    "fixtures/subdir/inner-include.adoc" => {
+                        "first line of inner\n\nlast line of inner"
+                    }
+                    _ => return IncludeResolution::NotFound,
+                };
+                IncludeResolution::Found(IncludeContent::new(content))
+            }
+        }
+
+        let handler = RecordingHandler {
+            calls: std::cell::RefCell::new(Vec::new()),
+        };
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, _warnings, _includes) =
+            preprocess("include::fixtures/outer-include.adoc[]", &parser);
+
+        assert_eq!(
+            processed_source,
+            "first line of outer\n\nfirst line of middle\n\nfirst line of inner\n\nlast line of inner\n\nlast line of middle\n\nlast line of outer\n"
         );
     }
 
@@ -3458,15 +3618,24 @@ mod tests {
 
         assert_eq!(
             source_map.original_file_and_line(8),
-            Some(SourceLine(Some("parts/section1.adoc".to_owned()), 1))
+            Some(SourceLine(
+                Some("content/parts/section1.adoc".to_owned()),
+                1
+            ))
         );
         assert_eq!(
             source_map.original_file_and_line(9),
-            Some(SourceLine(Some("parts/section1.adoc".to_owned()), 2))
+            Some(SourceLine(
+                Some("content/parts/section1.adoc".to_owned()),
+                2
+            ))
         );
         assert_eq!(
             source_map.original_file_and_line(10),
-            Some(SourceLine(Some("parts/section1.adoc".to_owned()), 3))
+            Some(SourceLine(
+                Some("content/parts/section1.adoc".to_owned()),
+                3
+            ))
         );
     }
 
@@ -4683,6 +4852,103 @@ mod tests {
             // A `lines` selection is partial even when `tags=**` is also present
             // (`lines` wins, matching the selection the preprocessor applies).
             assert!(!is_full("lines=1..2,tags=**"));
+        }
+    }
+
+    mod nested_file_name_tests {
+        use super::super::nested_file_name;
+
+        // With no containing file (the primary document), the target is
+        // returned as its own cleaned-up path.
+        #[test]
+        fn no_container_returns_the_target_unchanged() {
+            assert_eq!(nested_file_name(None, "chapter.adoc"), "chapter.adoc");
+            assert_eq!(
+                nested_file_name(None, "parts/chapter.adoc"),
+                "parts/chapter.adoc"
+            );
+        }
+
+        // A relative target combines with the *directory* of the containing
+        // file — the fix for #131: a target several levels deep must still
+        // resolve against the directory of the file that named it, not just
+        // the top-level document's directory.
+        #[test]
+        fn relative_target_joins_the_containers_directory() {
+            assert_eq!(
+                nested_file_name(Some("fixtures/outer-include.adoc"), "subdir/middle.adoc"),
+                "fixtures/subdir/middle.adoc"
+            );
+            assert_eq!(
+                nested_file_name(
+                    Some("fixtures/subdir/middle-include.adoc"),
+                    "inner-include.adoc"
+                ),
+                "fixtures/subdir/inner-include.adoc"
+            );
+        }
+
+        // A containing file with no directory (a bare file name) contributes
+        // no offset.
+        #[test]
+        fn container_without_a_directory_contributes_no_offset() {
+            assert_eq!(
+                nested_file_name(Some("main.adoc"), "chapter.adoc"),
+                "chapter.adoc"
+            );
+        }
+
+        // `.` and doubled separators are dropped, and `..` pops a preceding
+        // segment — including one contributed by the container's directory,
+        // so a target may climb back out of it.
+        #[test]
+        fn dot_and_parent_segments_are_resolved() {
+            assert_eq!(
+                nested_file_name(Some("parts/chapter.adoc"), "./section.adoc"),
+                "parts/section.adoc"
+            );
+            assert_eq!(
+                nested_file_name(Some("parts/chapter.adoc"), "../shared/notes.adoc"),
+                "shared/notes.adoc"
+            );
+        }
+
+        // A `..` with nothing to pop is kept, so the result can still climb
+        // above where it started (this performs no filesystem access or
+        // safe-mode jailing; a handler applies those separately).
+        #[test]
+        fn unpoppable_parent_segments_are_preserved() {
+            assert_eq!(nested_file_name(None, "../escape.adoc"), "../escape.adoc");
+            // `main.adoc` has no directory to contribute, so both `..`
+            // segments have nothing to pop and are kept.
+            assert_eq!(
+                nested_file_name(Some("main.adoc"), "../../escape.adoc"),
+                "../../escape.adoc"
+            );
+        }
+
+        // An absolute target (Posix root, or a Windows drive prefix) is kept
+        // as-is; the container's directory is irrelevant to it.
+        #[test]
+        fn absolute_target_is_kept_as_is() {
+            assert_eq!(
+                nested_file_name(Some("parts/chapter.adoc"), "/etc/passwd"),
+                "/etc/passwd"
+            );
+            assert_eq!(
+                nested_file_name(Some(r"parts\chapter.adoc"), r"C:\Windows\system32"),
+                r"C:\Windows\system32"
+            );
+        }
+
+        // A backslash-separated target or container (as a directive written
+        // on Windows might use) is handled the same as a forward-slash one.
+        #[test]
+        fn backslash_separators_are_honored() {
+            assert_eq!(
+                nested_file_name(Some(r"fixtures\outer-include.adoc"), r"subdir\middle.adoc"),
+                "fixtures/subdir/middle.adoc"
+            );
         }
     }
 }
