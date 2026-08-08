@@ -108,6 +108,27 @@ impl Docinfo {
         // standalone boolean attributes are consulted as a fallback: `docinfo1`
         // is equivalent to `docinfo=shared`, and `docinfo2` is equivalent to
         // `docinfo=private,shared`.
+        // A `docinfo` value that resolves to exactly "private" -- whether
+        // from a bare `:docinfo:` entry (an API-set bare boolean stays
+        // `InterpretedValue::Set`, but a document header/body entry's empty
+        // value is defaulted to the literal `"private"` before this method
+        // ever sees it) or an explicit `:docinfo: private` -- does not
+        // preclude the legacy `docinfo1`/`docinfo2` booleans from also
+        // contributing their shared-file component. Asciidoctor unions them
+        // rather than letting the literal `docinfo` value suppress the
+        // derived "shared" component (issue #1138): `docinfo docinfo2`
+        // resolves the same as `docinfo2` alone, regardless of which was set
+        // first. A `docinfo` value with any other content (e.g.
+        // `shared-head`) is left as the caller's explicit, complete scope.
+        let union_legacy_shared = |mut tokens: Vec<String>| -> Vec<String> {
+            if tokens == ["private"]
+                && (parser.is_attribute_set("docinfo1") || parser.is_attribute_set("docinfo2"))
+            {
+                tokens.push("shared".to_string());
+            }
+            tokens
+        };
+
         let tokens: Vec<String> = match parser.attribute_value("docinfo") {
             InterpretedValue::Unset => {
                 if parser.is_attribute_set("docinfo2") {
@@ -118,12 +139,13 @@ impl Docinfo {
                     return Self::default();
                 }
             }
-            InterpretedValue::Set => vec!["private".to_string()],
-            InterpretedValue::Value(v) => v
-                .split(',')
-                .map(|t| t.trim().to_ascii_lowercase())
-                .filter(|t| !t.is_empty())
-                .collect(),
+            InterpretedValue::Set => union_legacy_shared(vec!["private".to_string()]),
+            InterpretedValue::Value(v) => union_legacy_shared(
+                v.split(',')
+                    .map(|t| t.trim().to_ascii_lowercase())
+                    .filter(|t| !t.is_empty())
+                    .collect(),
+            ),
         };
 
         if tokens.is_empty() {
@@ -389,6 +411,48 @@ mod tests {
         // document-private docinfo files are included, shared first.
         let head = head_for(
             "= Doc\n:docinfo2:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn bare_docinfo_and_docinfo2_union_to_private_and_shared() {
+        // A bare `:docinfo:` ("private" only) and `:docinfo2:` ("private" +
+        // "shared") set together union their effects rather than one
+        // suppressing the other's shared-file component (issue #1138):
+        // matches Asciidoctor's `docinfo docinfo2` test case, which is
+        // identical to `docinfo2` alone.
+        let head = head_for(
+            "= Doc\n:docinfo:\n:docinfo2:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+
+        // Order does not matter.
+        let head = head_for(
+            "= Doc\n:docinfo2:\n:docinfo:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn bare_docinfo_and_docinfo1_union_to_private_and_shared() {
+        // Same union behavior applies against the `docinfo1` legacy toggle
+        // ("shared" only): the bare `docinfo` attribute's "private" scope is
+        // combined with it rather than suppressing it.
+        let head = head_for(
+            "= Doc\n:docinfo:\n:docinfo1:\n\nBody.",
             &[
                 ("docinfo.html", "SHARED"),
                 ("mydoc-docinfo.html", "PRIVATE"),

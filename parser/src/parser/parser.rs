@@ -1438,6 +1438,19 @@ impl Parser {
     /// [`with_intrinsic_attribute()`](Self::with_intrinsic_attribute) and
     /// its siblings), including the partner it set.
     ///
+    /// Returns whether the caller should proceed with storing `attr_name`'s
+    /// own direct assignment. This is `false` only for a document-originated
+    /// `notitle` entry whose partner `showtitle` is locked against the
+    /// write: `showtitle` takes precedence when resolving title visibility
+    /// (see [`resolve_show_title`](Self::resolve_show_title)), so a locked
+    /// `showtitle` must veto the conflicting `notitle` entry outright, not
+    /// merely skip the partner-sync side effect – otherwise a direct probe
+    /// of `notitle` (e.g. `ifdef::notitle[]`) would see the raw, rejected
+    /// document value instead of staying consistent with the lock (issue
+    /// #1139). The reverse does not hold: a locked `notitle` never vetoes a
+    /// `showtitle` entry, since `showtitle`'s own precedence already decides
+    /// the resolved visibility regardless of `notitle`'s raw value.
+    ///
     /// [set]: https://docs.asciidoctor.org/asciidoc/latest/attributes/set-attributes/
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     fn apply_title_visibility_linkage(
@@ -1447,17 +1460,17 @@ impl Parser {
         modification_context: ModificationContext,
         silent_when_locked: bool,
         write_scope: Option<DocumentWriteScope>,
-    ) {
+    ) -> bool {
         let partner = match attr_name {
             "notitle" => "showtitle",
             "showtitle" => "notitle",
-            _ => return,
+            _ => return true,
         };
 
         if let Some(scope) = write_scope
             && self.partner_write_is_locked(partner, scope)
         {
-            return;
+            return attr_name != "notitle";
         }
 
         // Either way the partner supersedes (and resets) any counter of the
@@ -1481,6 +1494,8 @@ impl Parser {
             // no prior partner entry does not clone the shared map.)
             Arc::make_mut(&mut self.attribute_values).remove(partner);
         }
+
+        true
     }
 
     /// Forces the `doctype` attribute to `value`.
@@ -2570,14 +2585,19 @@ impl Parser {
         // visibility toggle; keep the partner in sync (see
         // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
         // A document header entry must not use the linkage to route around a
-        // lock on the partner spelling, so the lock is enforced here.
-        self.apply_title_visibility_linkage(
+        // lock on the partner spelling, so the lock is enforced here. A
+        // locked `showtitle` also vetoes a conflicting `notitle` entry
+        // outright (see the method doc), so the write is dropped entirely in
+        // that case.
+        if !self.apply_title_visibility_linkage(
             &attr_name,
             &value,
             ModificationContext::Anywhere,
             false,
             Some(DocumentWriteScope::Header),
-        );
+        ) {
+            return;
+        }
 
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
@@ -2762,14 +2782,19 @@ impl Parser {
         // visibility toggle; keep the partner in sync (see
         // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
         // A document body entry must not use the linkage to route around a
-        // lock on the partner spelling, so the lock is enforced here.
-        self.apply_title_visibility_linkage(
+        // lock on the partner spelling, so the lock is enforced here. A
+        // locked `showtitle` also vetoes a conflicting `notitle` entry
+        // outright (see the method doc), so the write is dropped entirely in
+        // that case.
+        if !self.apply_title_visibility_linkage(
             &attr_name,
             &value,
             ModificationContext::Anywhere,
             false,
             Some(DocumentWriteScope::Body),
-        );
+        ) {
+            return;
+        }
 
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
@@ -4622,6 +4647,30 @@ mod tests {
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
             assert!(parser.is_attribute_set("showtitle"));
             assert!(parser.resolve_show_title(false));
+
+            // Issue #1139: the conflicting `:notitle:` entry must be rejected
+            // outright, not just have its partner-sync side effect skipped --
+            // otherwise a direct probe of `notitle` (e.g. `ifdef::notitle[]`)
+            // would see the raw document value instead of staying consistent
+            // with the `showtitle` lock, as Asciidoctor does.
+            assert!(!parser.has_attribute("notitle"));
+        }
+
+        #[test]
+        fn header_unset_notitle_entry_also_rejected_when_showtitle_is_api_locked() {
+            // The rejection applies to any conflicting `notitle` write, not
+            // just a `Set` one: an explicit `:!notitle:` unset entry must not
+            // create a `notitle` tombstone either, since that would still make
+            // a direct `ifdef::notitle[]` probe diverge from the lock.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                true,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n:!notitle:\n\nBody.");
+
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(!parser.has_attribute("notitle"));
         }
 
         #[test]
@@ -4660,6 +4709,9 @@ mod tests {
 
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
             assert!(parser.is_attribute_set("showtitle"));
+
+            // Issue #1139: rejected outright, same as the header case.
+            assert!(!parser.has_attribute("notitle"));
         }
 
         #[test]
@@ -4677,6 +4729,9 @@ mod tests {
 
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
             assert!(parser.is_attribute_set("showtitle"));
+
+            // Issue #1139: rejected outright, same as the `ApiOnly` case.
+            assert!(!parser.has_attribute("notitle"));
         }
 
         #[test]
