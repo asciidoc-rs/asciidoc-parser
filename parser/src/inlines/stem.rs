@@ -9,7 +9,16 @@ pub struct Stem<'src> {
     /// The notation the expression is written in.
     pub notation: StemNotation,
 
-    /// The raw expression, carried through verbatim.
+    /// The expression, with its resolved substitution group already applied
+    /// (special characters only, by default — [`SubstitutionGroup::Stem`]).
+    /// This mirrors a passthrough [`Raw`](crate::inlines::InlineNode::Raw)
+    /// node's `value`, which likewise holds already-substituted content
+    /// rather than the untouched source slice: STEM is an implicit
+    /// passthrough (extracted before every other step), so nothing further
+    /// acts on this text before the fold wraps it via
+    /// `render_quoted_substitution`.
+    ///
+    /// [`SubstitutionGroup::Stem`]: crate::content::SubstitutionGroup::Stem
     pub value: CowStr<'src>,
 
     /// The source location of the whole STEM macro.

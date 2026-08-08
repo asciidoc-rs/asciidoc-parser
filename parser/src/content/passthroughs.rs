@@ -541,7 +541,7 @@ impl Replacer for InlinePassReplacer<'_> {
 ///
 /// The content group requires at least one character whose final character is
 /// not a backslash, so an empty macro (e.g. `stem:[]`) is not recognized.
-static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
@@ -634,7 +634,7 @@ impl Replacer for InlineStemMacroReplacer<'_> {
 /// Resolves the STEM notation to apply for a bare `stem` macro or block from
 /// the `stem` document attribute. Any value other than `latexmath`, `latex`, or
 /// `tex` (including an unset, empty, or unrecognized value) maps to AsciiMath.
-fn stem_notation(parser: &Parser) -> QuoteType {
+pub(crate) fn stem_notation(parser: &Parser) -> QuoteType {
     match parser.attribute_value("stem").as_maybe_str() {
         Some("latexmath") | Some("latex") | Some("tex") => QuoteType::LatexMath,
         _ => QuoteType::AsciiMath,

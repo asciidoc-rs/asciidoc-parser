@@ -6,12 +6,13 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     inlines::{
         Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref,
-        RefVariant, SpanForm, Ui, UiKind,
+        RefVariant, SpanForm, Stem, StemNotation, Ui, UiKind,
     },
     parser::{
         CalloutGuard as ParserCalloutGuard, CalloutRenderParams, FootnoteRenderParams,
         IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineSubstitutionRenderer,
-        LinkRenderParams, MenuRenderParams, QuoteScope, SpecialCharacter, XrefRenderParams,
+        LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, SpecialCharacter,
+        XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -22,10 +23,12 @@ use crate::{
 /// kinds the transducer steps produce so far – [`Text`](InlineNode::Text),
 /// [`CharRef`](InlineNode::CharRef), [`Styled`](crate::inlines::Styled),
 /// [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui),
-/// [`Ref`](InlineNode::Ref) (both link and cross-reference), and
-/// [`LineBreak`](InlineNode::LineBreak), plus the design-legal
-/// [`Raw`](InlineNode::Raw) leaf; a later increment extends it as
-/// the transducer grows new kinds.
+/// [`Ref`](InlineNode::Ref) (both link and cross-reference),
+/// [`Anchor`](InlineNode::Anchor), [`IndexTerm`](InlineNode::IndexTerm),
+/// [`Footnote`](InlineNode::Footnote), [`Callout`](InlineNode::Callout),
+/// [`Stem`](InlineNode::Stem), and [`LineBreak`](InlineNode::LineBreak), plus
+/// the design-legal [`Raw`](InlineNode::Raw) leaf; a later increment extends
+/// it as the transducer grows new kinds.
 pub(crate) fn fold_html(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineSubstitutionRenderer,
@@ -136,6 +139,10 @@ fn fold_into_html(
                 fold_callout(callout, renderer, parser, out);
             }
 
+            InlineNode::Stem(stem) => {
+                fold_stem(stem, renderer, out);
+            }
+
             InlineNode::Styled(styled) => {
                 // Fold the children to the body, then wrap it exactly as the
                 // string pipeline's quotes step did: the same `QuoteType`,
@@ -162,10 +169,11 @@ fn fold_into_html(
                 // The steps wired up so far produce only `Text`,
                 // `CharRef::Special`, `Styled`, `Image`, `Ui`, `Ref` (link and
                 // cross-reference), `Anchor`, `IndexTerm`, `Footnote`,
-                // `Callout`, and `LineBreak` nodes, and this fold additionally
-                // emits the design-legal `Raw` leaf; no other node kind
-                // reaches the fold in this increment. A later increment
-                // fills in the arms above as the transducer grows new kinds.
+                // `Callout`, `Stem`, and `LineBreak` nodes, and this fold
+                // additionally emits the design-legal `Raw` leaf; no other
+                // node kind reaches the fold in this increment. A later
+                // increment fills in the arms above as the transducer grows
+                // new kinds.
                 // Guard against a premature caller in debug builds and emit
                 // nothing in release, mirroring the safe defensive fallback in
                 // [`content`](super::content).
@@ -512,6 +520,30 @@ fn fold_callout(
             guard,
             parser,
         },
+        out,
+    );
+}
+
+/// Folds a [`Stem`](InlineNode::Stem) through the same
+/// `render_quoted_substitution` the string pipeline's passthrough-restore step
+/// calls for a STEM entry (design §3.3.1's fold-time seam). The node's `value`
+/// already carries the resolved substitution group's output (special
+/// characters only, by default), so the fold passes it straight through as
+/// the body – no further processing is needed, mirroring how a STEM
+/// passthrough is restored with no attribute list or id (`INLINE_STEM_MACRO`
+/// captures neither).
+fn fold_stem(stem: &Stem<'_>, renderer: &dyn InlineSubstitutionRenderer, out: &mut String) {
+    let type_ = match stem.notation {
+        StemNotation::AsciiMath => QuoteType::AsciiMath,
+        StemNotation::LatexMath => QuoteType::LatexMath,
+    };
+
+    renderer.render_quoted_substitution(
+        type_,
+        QuoteScope::Unconstrained,
+        None,
+        None,
+        stem.value.as_ref(),
         out,
     );
 }

@@ -1202,6 +1202,39 @@ Each phase is a reviewable unit with a clear exit gate.
   non-matches, and both non-default `icons` renderings (font and image), alongside structural assertions
   on the node's `guard`. This step is **additive**: nothing is wired into the parse path.
 
+  *Step 5d landed as (inline STEM → `Stem`, the first of 5d's four deferred forms):* a new
+  [`apply_stem`](../../parser/src/content/inline_builder/stem_step.rs) step recognizes inline STEM
+  macros (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) as a [`Stem`](../../parser/src/inlines/stem.rs)
+  node, folding through the same `render_quoted_substitution` the string pipeline's passthrough-restore
+  step calls for a STEM entry, so the output is byte-for-byte identical. STEM is an **implicit
+  passthrough** – `Passthroughs::extract_from` extracts it last, after both passthrough-macro passes, so
+  that a passthrough placeholder nested inside a STEM expression survives – and `apply_stem` mirrors that
+  ordering exactly: it is its own step, run immediately after
+  [`apply_passthroughs`](../../parser/src/content/inline_builder/passthrough_step.rs) and ahead of every
+  other step, so a STEM expression's content is never touched by specialcharacters, quotes, replacements,
+  or macros (a `stem:[…]` written inside an already-extracted `+++…+++` passthrough is therefore *not*
+  re-extracted, matching the string pipeline). It reuses the string pipeline's *exact* recognition and
+  notation-resolution – `INLINE_STEM_MACRO` and `stem_notation` are now shared `pub(crate)` – so only the
+  recognition *sink* differs (§4.1). The node's `value` is *not* the untouched source slice (unlike a
+  macro node's target/display text elsewhere in this module): a STEM expression is unescaped (`\]` → `]`),
+  has its legacy `latexmath` `$…$` wrapper dropped, and is run through the real substitution pipeline
+  under its resolved substitution group ([`SubstitutionGroup::Stem`](../../parser/src/content/substitution_group.rs),
+  special characters only, for a bare macro) via the passthrough step's own `passthrough_text` helper
+  (now shared `pub(super)`) – so a custom `InlineSubstitutionRenderer`'s escaping is honored exactly as it
+  would be for the string pipeline's own restore step, at the cost of an owned value rather than a `'src`
+  borrow (the same trade-off the `++…++`/`$$…$$` passthrough forms make). The fold then passes that value
+  straight through as `render_quoted_substitution`'s body, with no attribute list or id (the macro's
+  pattern captures neither). The Phase-0 node doc (which described `value` as "the raw expression,
+  carried through verbatim") was updated to match this decision.
+
+  An escaped macro (`\stem:[…]`) drops its backslash and stays literal, mirroring every other macro
+  family's escape handling. One form is deferred, documented and pinned by a divergence test: a macro
+  carrying an **explicit substitution list** (`stem:c,q[…]`, whose content would need a richer subtree
+  than a single `Stem` leaf can hold – the same reason a `pass:` macro with an explicit list is deferred).
+  This step is **additive**: nothing is wired into the parse path. The remaining three forms 5a already
+  documents as deferred – an attribute-list-prefixed passthrough, a `pass:` macro with an explicit
+  substitution list, and the bare unconstrained `+text+` form – remain for a later increment.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1235,9 +1268,13 @@ Each phase is a reviewable unit with a clear exit gate.
        `pass:[…]`) → `Raw`.
      - ✅ **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
      - ✅ **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
-     - **5d.** the deferred forms `5a` documents – an attribute-list-prefixed passthrough, a
-       `pass:` macro with an explicit substitution list, the bare unconstrained `+text+` form,
-       and inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`.
+     - **5d.** the deferred forms `5a` documents, itself sliced into parts:
+       - ✅ **part 1.** inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`
+         (an explicit substitution list, `stem:c,q[…]`, is itself deferred).
+       - **part 2.** an attribute-list-prefixed passthrough (`[quotes]++text++`, `` [x-]`text` ``,
+         `[attrs]+text+`).
+       - **part 3.** a `pass:` macro carrying an explicit substitution list (`pass:c,q[…]`).
+       - **part 4.** the bare unconstrained `+text+` form.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
      `rendered_html()` a fold, delete the three production sentinel systems (§4.2), and retire
      the `with_inline_tree` opt-in flag (the deferred remainder of Phase 2). Re-attach the
