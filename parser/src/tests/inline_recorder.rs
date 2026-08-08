@@ -332,6 +332,7 @@ const VERBATIM_CORPUS: &[&str] = &[
     "verbatim < & > chars",
     "line of code <1>",
     "tag <.> auto callout",
+    "line of xml code <!--1-->",
 ];
 
 #[test]

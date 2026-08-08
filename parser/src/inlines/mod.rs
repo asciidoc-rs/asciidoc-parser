@@ -35,7 +35,7 @@ mod anchor;
 pub use anchor::Anchor;
 
 mod callout;
-pub use callout::Callout;
+pub use callout::{Callout, CalloutGuard};
 
 mod char_ref;
 pub use char_ref::CharRef;

@@ -124,8 +124,8 @@ mod tests {
     use crate::{
         HasSpan, Span,
         inlines::{
-            Anchor, Callout, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref, RefVariant,
-            SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui, UiKind,
+            Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref,
+            RefVariant, SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui, UiKind,
         },
         strings::CowStr,
     };
@@ -197,6 +197,7 @@ mod tests {
             }),
             InlineNode::Callout(Callout {
                 number: CowStr::from("1"),
+                guard: CalloutGuard::LineComment(CowStr::from("# ")),
                 location,
             }),
             InlineNode::Stem(Stem {
@@ -266,6 +267,11 @@ mod tests {
             },
         ];
 
+        let callout_guards = [
+            CalloutGuard::LineComment(CowStr::from("// ")),
+            CalloutGuard::Xml,
+        ];
+
         // Touch each collection so the constructed values are observed.
         assert_eq!(styles.len(), 9);
         assert_eq!(forms.len(), 2);
@@ -273,5 +279,6 @@ mod tests {
         assert_eq!(stems.len(), 2);
         assert_eq!(char_refs.len(), 3);
         assert_eq!(ui_kinds.len(), 3);
+        assert_eq!(callout_guards.len(), 2);
     }
 }
