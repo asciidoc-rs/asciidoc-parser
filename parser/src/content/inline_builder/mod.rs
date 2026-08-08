@@ -113,13 +113,20 @@
 //!   [`Stem`](InlineNode::Stem) leaf. Like [`apply_passthroughs`], it is an
 //!   implicit-passthrough step: it runs immediately after
 //!   [`apply_passthroughs`] (mirroring `Passthroughs::extract_from`'s own
-//!   ordering, which extracts STEM macros last, after both passthrough passes),
-//!   so a STEM expression's content is never touched by specialcharacters,
-//!   quotes, replacements, or macros. It reuses the shared
+//!   ordering, which extracts STEM macros last, after both passthrough passes,
+//!   *specifically so a nested passthrough placeholder survives*), so a STEM
+//!   expression's content is never touched by specialcharacters, quotes,
+//!   replacements, or macros. It reuses the shared
 //!   [`INLINE_STEM_MACRO`](crate::content::INLINE_STEM_MACRO) pattern and
 //!   [`stem_notation`](crate::content::stem_notation) helper, so only the
-//!   recognition *sink* differs. A macro carrying an explicit substitution list
-//!   (`stem:c,q[…]`) is deferred, the same reason `pass:c,q[…]` is deferred.
+//!   recognition *sink* differs. Because it runs right after
+//!   [`apply_passthroughs`], the only node kinds it can ever see are `Text` and
+//!   [`Raw`](InlineNode::Raw); a match embedding an already-extracted `Raw`
+//!   passthrough (`stem:[+++<b>x</b>+++]`) is never deferred – the `Raw` is
+//!   spliced into the node's value verbatim, unlike every other macro family's
+//!   "crosses an already-recognized construct" boundary. A macro carrying an
+//!   explicit substitution list (`stem:c,q[…]`) is deferred, the same reason
+//!   `pass:c,q[…]` is deferred.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes

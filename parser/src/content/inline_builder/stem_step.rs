@@ -3,9 +3,9 @@
 use regex::Captures;
 
 use super::{
-    macros::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level},
+    macros::{MacroMatch, MacroMatchKind, rebuild_macro_level},
     passthrough_step::passthrough_text,
-    quotes::{Piece, build_match_string, source_slice},
+    quotes::{Piece, build_match_string, emit_range, source_slice},
 };
 use crate::{
     Parser, Span,
@@ -19,18 +19,27 @@ use crate::{
 /// `latexmath:[…]`), replacing each with a [`Stem`](InlineNode::Stem) leaf.
 ///
 /// STEM is an **implicit passthrough**: [`Passthroughs::extract_from`]
-/// extracts it last, after both passthrough-macro passes, so that any
-/// passthrough placeholder nested inside a STEM expression survives.
-/// [`apply_stem`] mirrors that ordering – [`build`](super::build) runs it
-/// immediately after
-/// [`apply_passthroughs`](super::passthrough_step::apply_passthroughs)
-/// and ahead of every other step – so a STEM expression's content is never
+/// extracts it last, after both passthrough-macro passes, *specifically so
+/// that a passthrough placeholder nested inside a STEM expression survives
+/// and is recursively restored* (its own doc comment). [`apply_stem`] mirrors
+/// that ordering – [`build`](super::build) runs it immediately after
+/// [`apply_passthroughs`](super::passthrough_step::apply_passthroughs) and
+/// ahead of every other step – so a STEM expression's content is never
 /// touched by specialcharacters, quotes, replacements, or macros, exactly
 /// like a `+++…+++`/`++…++`/`$$…$$`/`pass:[…]` passthrough. It reuses the
 /// string pipeline's *exact* recognition – [`INLINE_STEM_MACRO`] is now
 /// shared `pub(crate)`, alongside the [`stem_notation`] helper that resolves
 /// a bare `stem:[…]` macro's notation from the `stem` document attribute –
 /// so only the recognition *sink* differs (§4.1).
+///
+/// Because it runs immediately after `apply_passthroughs`, the *only* node
+/// kinds `apply_stem` can ever see are `Text` and [`Raw`](InlineNode::Raw)
+/// (a nested, already-extracted passthrough) – no other step has run yet to
+/// build anything else. So, unlike every other macro family in this module,
+/// a STEM match is **never deferred** for crossing an already-recognized
+/// construct: [`build_stem_node`] embeds a crossed `Raw` node directly (see
+/// its doc comment), which is what makes the extraction ordering above
+/// actually pay off, rather than merely being followed.
 ///
 /// A recognized macro's expression is unescaped (`\]` → `]`), has its legacy
 /// enclosing `$…$` dropped for `latexmath` (backwards compatibility with
@@ -49,17 +58,11 @@ use crate::{
 /// An **escaped** macro (`\stem:[…]`) drops its backslash and stays literal,
 /// mirroring every other macro family's escape handling.
 ///
-/// Two forms are deferred, each documented and pinned by a divergence test:
-/// a macro carrying an **explicit substitution list** (`stem:c,q[…]`, whose
-/// content would need a richer subtree than a single `Stem` leaf can hold –
-/// the same reason a `pass:` macro with an explicit list is deferred), and a
-/// match whose expression **crosses an already-recognized construct**
-/// (non-verbatim – in practice this cannot yet happen, since `apply_stem`
-/// only ever runs on the seed
-/// [`apply_passthroughs`](super::passthrough_step::apply_passthroughs) has
-/// already refined into `Text`/[`Raw`](InlineNode::Raw) leaves, but the
-/// check is kept for the same reason every other family keeps it). This
-/// step is **additive**: nothing is wired into the parse path.
+/// One form is deferred, documented and pinned by a divergence test: a macro
+/// carrying an **explicit substitution list** (`stem:c,q[…]`, whose content
+/// would need a richer subtree than a single `Stem` leaf can hold – the same
+/// reason a `pass:` macro with an explicit list is deferred). This step is
+/// **additive**: nothing is wired into the parse path.
 ///
 /// [`Passthroughs::extract_from`]: crate::content::Passthroughs::extract_from
 /// [`InlineStemMacroReplacer`]: crate::content::passthroughs
@@ -75,7 +78,7 @@ pub(super) fn apply_stem<'src>(
         return nodes;
     }
 
-    let matches = find_stem_matches(&s, &pieces, root, parser);
+    let matches = find_stem_matches(&s, &nodes, &pieces, root, parser);
 
     if matches.is_empty() {
         return nodes;
@@ -89,6 +92,7 @@ pub(super) fn apply_stem<'src>(
 /// (an optional group [`INLINE_STEM_MACRO`] captures ahead of the bracket).
 fn find_stem_matches<'src>(
     s: &str,
+    nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
@@ -107,10 +111,6 @@ fn find_stem_matches<'src>(
             continue;
         }
 
-        if !range_is_verbatim(pieces, &full) {
-            continue;
-        }
-
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
@@ -122,7 +122,7 @@ fn find_stem_matches<'src>(
             continue;
         }
 
-        let node = build_stem_node(&caps, &full, pieces, root, parser);
+        let node = build_stem_node(&caps, &full, nodes, pieces, root, parser);
 
         matches.push(MacroMatch {
             kind: MacroMatchKind::Node {
@@ -136,12 +136,20 @@ fn find_stem_matches<'src>(
     matches
 }
 
-/// Builds one [`Stem`](InlineNode::Stem) node from a verbatim, unescaped STEM
-/// macro match – see [`apply_stem`] for how the expression is unescaped, has
-/// its legacy `$…$` wrapper dropped, and is substituted into `value`.
+/// Builds one [`Stem`](InlineNode::Stem) node from a STEM macro match – see
+/// [`apply_stem`] for how the expression is unescaped, has its legacy `$…$`
+/// wrapper dropped, and is substituted into `value`.
+///
+/// The expression body (capture group 4) is recovered via
+/// [`emit_range`] rather than sliced as one literal string, because it may
+/// embed an already-extracted [`Raw`](InlineNode::Raw) passthrough
+/// (`stem:[+++<b>x</b>+++]`) – the case `apply_stem`'s own doc comment
+/// explains the extraction ordering exists to support.
+/// [`stem_expression_value`] does the actual reconstruction.
 fn build_stem_node<'src>(
     caps: &Captures<'_>,
     full: &std::ops::Range<usize>,
+    nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
@@ -161,29 +169,90 @@ fn build_stem_node<'src>(
         },
     };
 
-    // Unescape any escaped closing brackets in the expression.
-    let mut expr = caps[4].to_string();
-    if expr.contains("\\]") {
-        expr = expr.replace("\\]", "]");
-    }
+    #[allow(clippy::unwrap_used)]
+    let expr_match = caps.get(4).unwrap();
+    let expr_range = expr_match.start()..expr_match.end();
 
-    // Drop legacy enclosing `$…$` around latexmath content (for backwards
-    // compatibility with AsciiDoc.py).
-    if notation == StemNotation::LatexMath
-        && expr.len() >= 2
-        && expr.starts_with('$')
-        && expr.ends_with('$')
-    {
-        expr = expr[1..expr.len() - 1].to_string();
-    }
+    let mut emitted = Vec::new();
+    emit_range(nodes, pieces, expr_range, &mut emitted);
 
-    let value = passthrough_text(&expr, &SubstitutionGroup::Stem, parser);
+    let value = stem_expression_value(&emitted, notation, parser);
 
     InlineNode::Stem(Stem {
         notation,
         value: CowStr::from(value),
         location,
     })
+}
+
+/// Computes a [`Stem`](InlineNode::Stem) node's `value` from the expression
+/// body's [`emit_range`]-recovered nodes.
+///
+/// The common case – the whole expression is one `Text` run, no nested
+/// passthrough – matches the string pipeline exactly: the raw source is
+/// unescaped (`\]` → `]`), has its legacy `latexmath` `$…$` wrapper dropped
+/// (AsciiDoc.py backward-compat), and is run through the resolved
+/// substitution group ([`SubstitutionGroup::Stem`] for a bare macro).
+///
+/// When the expression embeds one or more already-extracted
+/// [`Raw`](InlineNode::Raw) passthroughs, each `Text` run around them is
+/// unescaped and substituted the same way and each `Raw` run is spliced in
+/// **verbatim, with no further substitution** – mirroring how the string
+/// pipeline's passthrough-restore recursion re-splices a nested passthrough
+/// into an outer construct's already-substituted text
+/// (`PassthroughRestoreReplacer`'s own recursive `if … contains('\u{96}')`
+/// branch). The legacy `$…$` wrapper is dropped only in the single-`Text`-run
+/// case; a `$` immediately beside a nested passthrough is a narrower
+/// divergence, documented and pinned by a test.
+fn stem_expression_value(
+    emitted: &[InlineNode<'_>],
+    notation: StemNotation,
+    parser: &Parser,
+) -> String {
+    if let [InlineNode::Text { value: text, .. }] = emitted {
+        let mut expr = text.to_string();
+
+        if expr.contains("\\]") {
+            expr = expr.replace("\\]", "]");
+        }
+
+        if notation == StemNotation::LatexMath
+            && expr.len() >= 2
+            && expr.starts_with('$')
+            && expr.ends_with('$')
+        {
+            expr = expr[1..expr.len() - 1].to_string();
+        }
+
+        return passthrough_text(&expr, &SubstitutionGroup::Stem, parser);
+    }
+
+    let mut value = String::new();
+
+    for node in emitted {
+        match node {
+            InlineNode::Text { value: text, .. } => {
+                let mut text = text.to_string();
+
+                if text.contains("\\]") {
+                    text = text.replace("\\]", "]");
+                }
+
+                value.push_str(&passthrough_text(&text, &SubstitutionGroup::Stem, parser));
+            }
+
+            InlineNode::Raw { value: raw, .. } => {
+                value.push_str(raw);
+            }
+
+            // Unreachable: `apply_stem` runs immediately after
+            // `apply_passthroughs`, whose output is `Text`/`Raw` only – no
+            // other step has run yet to build any other kind.
+            _ => {}
+        }
+    }
+
+    value
 }
 
 #[cfg(test)]
@@ -198,9 +267,8 @@ mod tests {
     };
     use crate::{
         Parser, Span,
-        inlines::{InlineNode, SpanForm, Stem, StemNotation, StyleVariant, Styled},
+        inlines::{InlineNode, Stem, StemNotation},
         parser::HtmlSubstitutionRenderer,
-        strings::CowStr,
     };
 
     /// Asserts that `node` is a [`Stem`](InlineNode::Stem) of `notation`
@@ -230,53 +298,67 @@ mod tests {
     }
 
     #[test]
-    fn a_match_whose_content_crosses_an_already_built_node_is_deferred() {
-        // In practice `apply_stem` only ever runs on the level
-        // `apply_passthroughs` has already refined into `Text`/`Raw` leaves
-        // (never a `Styled` node), so `range_is_verbatim`'s false branch is
-        // defensive – kept for the same reason every other macro family keeps
-        // it (see `passthrough_step`'s own
-        // `a_match_whose_content_crosses_an_already_built_node_is_deferred`).
-        // Exercise it directly, feeding a hand-built level whose STEM match
-        // spans an already-built `Styled` node, to document the intended
-        // fallback: the whole match is left unrecognized rather than
-        // mis-sliced.
-        // `build_match_string` only treats a `Text` node as verbatim (rather
-        // than an opaque placeholder) when its `value` equals its own
-        // `location.data()` – so, unlike the passthrough version of this test
-        // (whose `+++` delimiter is the same literal on both sides), each
-        // `Text` node here needs its *own* matching span.
-        let prefix_location = Span::new("stem:[x");
-        let styled_location = Span::new("*b*");
-        let suffix_location = Span::new("]");
+    fn a_nested_delimited_passthrough_is_embedded_verbatim() {
+        // The whole reason `Passthroughs::extract_from` extracts STEM *after*
+        // both passthrough passes: a `+++…+++` inside a STEM expression is
+        // already a `Raw` node by the time `apply_stem` runs, and must be
+        // spliced into the STEM's value verbatim (no specialcharacters
+        // escaping) rather than deferred.
+        let nodes = build_src(Span::new("stem:[+++<b>x</b>+++]"));
 
-        let nodes = vec![
-            InlineNode::Text {
-                value: CowStr::from("stem:[x"),
-                location: prefix_location,
-            },
-            InlineNode::Styled(Styled {
-                variant: StyleVariant::Strong,
-                form: SpanForm::Constrained,
-                id: None,
-                roles: vec![],
-                attrs: None,
-                children: vec![],
-                location: styled_location,
-            }),
-            InlineNode::Text {
-                value: CowStr::from("]"),
-                location: suffix_location,
-            },
-        ];
+        assert_eq!(nodes.len(), 1);
+        assert_stem(&nodes[0], StemNotation::AsciiMath, "<b>x</b>");
+    }
 
-        let root = Span::new("stem:[x]");
-        let result = apply_stem(nodes.clone(), root, &Parser::default());
+    #[test]
+    fn a_nested_passthrough_beside_ordinary_text_mixes_both() {
+        // The surrounding text is still unescaped and substituted normally
+        // (special characters only, under the default `SubstitutionGroup::
+        // Stem`); only the passthrough's own content is exempt.
+        let nodes = build_src(Span::new("stem:[a < b +++<i>or</i>+++ c]"));
 
-        assert_eq!(
-            result, nodes,
-            "a non-verbatim match must be left unrecognized"
-        );
+        assert_eq!(nodes.len(), 1);
+        assert_stem(&nodes[0], StemNotation::AsciiMath, "a &lt; b <i>or</i> c");
+    }
+
+    #[test]
+    fn a_text_segment_beside_a_nested_passthrough_unescapes_a_closing_bracket() {
+        // Each `Text` segment around a nested passthrough is unescaped
+        // (`\]` → `]`) independently, exactly like the single-run case.
+        let nodes = build_src(Span::new(r"stem:[+++<b>x</b>+++ a\]b]"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_stem(&nodes[0], StemNotation::AsciiMath, "<b>x</b> a]b");
+    }
+
+    #[test]
+    fn a_nested_bare_pass_macro_is_embedded_verbatim() {
+        let nodes = build_src(Span::new("stem:[pass:[<b>x</b>]]"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_stem(&nodes[0], StemNotation::AsciiMath, "<b>x</b>");
+    }
+
+    #[test]
+    fn a_latexmath_dollar_wrapper_beside_a_nested_passthrough_is_a_documented_divergence() {
+        // The legacy `$…$` wrapper is dropped only on the common
+        // single-`Text`-run case; a `$` immediately beside a nested
+        // passthrough is a narrower, honestly-labeled divergence from the
+        // string pipeline (which strips it even here, since its `$…$` check
+        // runs on the raw captured text before the nested passthrough's
+        // sentinel is ever resolved).
+        let source = "latexmath:[$+++x+++$]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        // Not stripped here (divergence): the golden fold *does* strip it.
+        assert_stem(&nodes[0], StemNotation::LatexMath, "$x$");
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let golden = golden_passthroughs(source);
+
+        assert_ne!(folded, golden);
+        assert_eq!(golden, r"\(x\)");
     }
 
     #[test]
@@ -395,6 +477,13 @@ mod tests {
             "a stem:[x] and a stem:[y]",
             "*bold* stem:[x^2] *more bold*",
             r"\stem:[x]",
+            // A nested, already-extracted passthrough inside the expression –
+            // the case `Passthroughs::extract_from` orders STEM extraction
+            // after both passthrough passes to support.
+            "stem:[+++<b>x</b>+++]",
+            "stem:[a < b +++<i>or</i>+++ c]",
+            "stem:[pass:[<b>x</b>]]",
+            "latexmath:[+++x+++]",
         ];
 
         for source in fixtures {
