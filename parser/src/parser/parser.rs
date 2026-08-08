@@ -4532,6 +4532,29 @@ mod tests {
         }
 
         #[test]
+        fn unset_showtitle_alone_still_decides_when_notitle_is_absent() {
+            // A merely-present-but-unset `showtitle` only defers to `notitle`
+            // when `notitle` is actually present (see issue #1143 and
+            // `notitle_showtitle_linkage::header_unset_notitle_entry_applies_
+            // when_showtitle_is_api_hard_unset`). With no `notitle` in play at
+            // all, an `Unset` `showtitle` still decides the outcome (hidden),
+            // regardless of the default -- this exercises the case distinctly
+            // from `Anywhere`-context unsetting (as in
+            // `showtitle_takes_precedence_and_decides` above), where the
+            // toggle linkage itself plants a `notitle` entry as a side
+            // effect. An `ApiOnly` hard unset does not plant that side effect
+            // (see `apply_title_visibility_linkage`), so this is the only way
+            // to reach this branch with `notitle` genuinely absent.
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            assert!(!parser.has_attribute("notitle"));
+            assert!(!parser.resolve_show_title(true));
+        }
+
+        #[test]
         fn notitle_is_the_complement_when_showtitle_absent() {
             // notitle set -> hidden; notitle unset -> shown.
             assert!(!with("notitle", true).resolve_show_title(true));
