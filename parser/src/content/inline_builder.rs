@@ -7735,16 +7735,22 @@ mod tests {
         // to a literal `]` in the middle of the content's own node structure –
         // deferred, exactly as the anchor and cross-reference macros defer
         // their own escaped-bracket forms when they cannot represent the
-        // unescape without a similar rebuild.
-        let source = "footnote:[a note ending in a\\]bracket]";
-        let nodes = build_src(Span::new(source));
+        // unescape without a similar rebuild. Both the anonymous form and the
+        // id-carrying form share the same check (see `build_footnote_node`),
+        // so both are exercised here.
+        for source in [
+            "footnote:[a note ending in a\\]bracket]",
+            "footnote:disc[a note ending in a\\]bracket]",
+        ] {
+            let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Footnote(_))),
-            "a footnote with an escaped bracket must be left unrecognized: {nodes:?}"
-        );
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Footnote(_))),
+                "a footnote with an escaped bracket must be left unrecognized: {nodes:?}"
+            );
 
-        // The string pipeline, by contrast, does build a footnote marker here.
-        assert!(golden_macros(source).contains("class=\"footnote\""));
+            // The string pipeline, by contrast, does build a footnote marker here.
+            assert!(golden_macros(source).contains("class=\"footnote\""));
+        }
     }
 }
