@@ -1951,7 +1951,7 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
 /// that follows the match.
 ///
 /// [footnote]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
-static INLINE_FOOTNOTE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_FOOTNOTE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                     # extended mode; dot matches newline
@@ -2133,7 +2133,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
 /// each embedded newline to a space (Asciidoctor compacts a multi-line footnote
 /// onto a single line), and unescapes an escaped closing square bracket
 /// (`\]` -> `]`). Mirrors Asciidoctor's `normalize_text text, true, true`.
-fn normalize_footnote_text(content: &str) -> String {
+pub(crate) fn normalize_footnote_text(content: &str) -> String {
     content.trim().replace('\n', " ").replace("\\]", "]")
 }
 
