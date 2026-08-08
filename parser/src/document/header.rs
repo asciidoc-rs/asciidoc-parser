@@ -384,13 +384,21 @@ impl<'src> Header<'src> {
             // was overridden by a `doctitle` set above it, `title` already holds
             // that (resolved) value and is not re-substituted.
             //
-            // Residual edge: a title that *mixes* a counter with a later-defined
-            // reference (e.g. `= {counter:n} {project-name}`) still contains a
-            // `{` after the eager pass, so the re-resolution runs and advances the
-            // counter a second time. Re-resolving is done from the raw title (not
-            // the eager result) so that escaped `\{…}` and specialchars stay
-            // correct; the counter here is the price of that. This is a rare
-            // combination and no test exercises it.
+            // Residual edge: a title that *mixes* a stateful, one-shot
+            // substitution with a later-defined reference (e.g. `= {counter:n}
+            // {project-name}`) still contains a `{` after the eager pass, so the
+            // re-resolution runs that one-shot substitution a second time.
+            // Re-resolving is done from the raw title (not the eager result) so
+            // that escaped `\{…}` and specialchars stay correct; the duplicated
+            // side effect here is the price of that. Since the eager pass now
+            // uses the `Title` group, this extends beyond a `{counter:…}`
+            // advancing twice to any stateful macro sharing the title with a
+            // later-defined reference – an anchor
+            // (`= {project-name} [[id]]`) can raise a spurious
+            // `DuplicateId` warning on its second registration, and a footnote
+            // (`= {project-name} footnote:[…]`) is defined twice. This is a
+            // rare combination – a document title is an unusual place for a
+            // footnote or anchor to begin with – and no test exercises it.
             let base = if !implicit_overridden_from_above
                 && let Some(raw) = title_source
                 && implicit_doctitle_str
