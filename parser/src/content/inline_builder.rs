@@ -31,21 +31,19 @@
 //!   a flat run. It reuses the *exact* [`quote_subs`] the string pipeline
 //!   matches with (changing the recognition *sink*, not the recognition), so
 //!   its fold is byte-identical to the string step.
-//! - [`apply_attribute_references`] recognizes attribute references
-//!   (`{name}`), splicing a set attribute's resolved value into the node
-//!   stream, classified into [`Text`](InlineNode::Text) and
-//!   [`Raw`](InlineNode::Raw) runs per design §3.4.1 – a literal `<`/`>`/`&`
-//!   in the value is *not* re-escaped, since [`apply_special_characters`] has
-//!   already run. It reuses the shared [`ATTRIBUTE_REFERENCE`] pattern, so
-//!   only the recognition *sink* differs. A `counter`/`counter2` directive
-//!   and a missing-attribute reference under `AttributeMissing::Drop` /
-//!   `::DropLine` are deferred (see [`apply_attribute_references`] for why);
-//!   so is a construct *inside* an expanded value that
-//!   [`apply_character_replacements`]/[`apply_macros`] would otherwise
-//!   recognize – the value is a synthesized, non-`'src` run, and
-//!   [`build_match_string`] does not yet look inside one (the same
-//!   "not verbatim" boundary a macro over a rendered span already
-//!   documents).
+//! - [`apply_attribute_references`] recognizes attribute references (`{name}`),
+//!   splicing a set attribute's resolved value into the node stream, classified
+//!   into [`Text`](InlineNode::Text) and [`Raw`](InlineNode::Raw) runs per
+//!   design §3.4.1 – a literal `<`/`>`/`&` in the value is *not* re-escaped,
+//!   since [`apply_special_characters`] has already run. It reuses the shared
+//!   [`ATTRIBUTE_REFERENCE`] pattern, so only the recognition *sink* differs. A
+//!   `counter`/`counter2` directive and a missing-attribute reference under
+//!   `AttributeMissing::Drop` / `::DropLine` are deferred (see
+//!   [`apply_attribute_references`] for why); so is a construct *inside* an
+//!   expanded value that [`apply_character_replacements`]/[`apply_macros`]
+//!   would otherwise recognize – the value is a synthesized, non-`'src` run,
+//!   and [`build_match_string`] does not yet look inside one (the same "not
+//!   verbatim" boundary a macro over a rendered span already documents).
 //! - [`apply_character_replacements`] recognizes [character replacements] –
 //!   `(C)`, `--`, `...`, arrows, apostrophes, and restored entities – replacing
 //!   each with a [`CharRef::Replacement`] or [`CharRef::Entity`] leaf. It
