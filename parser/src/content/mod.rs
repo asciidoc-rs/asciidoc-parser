@@ -28,7 +28,7 @@ mod xref_target;
 
 pub(crate) mod passthroughs;
 pub use passthroughs::Passthrough;
-pub(crate) use passthroughs::Passthroughs;
+pub(crate) use passthroughs::{INLINE_PASS_MACRO, Passthroughs};
 
 mod substitution_group;
 pub use substitution_group::SubstitutionGroup;

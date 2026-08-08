@@ -167,7 +167,7 @@ impl Passthroughs {
 ///
 /// NOTE: We have to support an empty `pass:[]` for compatibility with
 /// AsciiDoc.py.
-static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
