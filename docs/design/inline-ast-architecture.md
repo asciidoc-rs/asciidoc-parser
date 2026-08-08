@@ -1088,6 +1088,43 @@ Each phase is a reviewable unit with a clear exit gate.
   increment does not attempt). This step is **additive**: nothing is wired into the parse path. With it,
   every macro family the recorder covers now has a single-pass counterpart.
 
+  *Step 5a landed as (Passthroughs → `Raw`, the delimited forms):* a new
+  [`apply_passthroughs`](../../parser/src/content/inline_builder.rs) step – the **first** step
+  [`build`](../../parser/src/content/inline_builder.rs) runs, ahead of `SpecialCharacters` –
+  recognizes the triple-plus (`+++…+++`), double-plus (`++…++`), double-dollar (`$$…$$`), and bare
+  `pass:[…]` macro (no explicit substitution list) as [`Raw`](../../parser/src/inlines/inline_node.rs)
+  leaves, mirroring
+  [`Passthroughs::extract_from`](../../parser/src/content/passthroughs.rs), which the string pipeline
+  runs *before* its own step loop – so a passthrough's content is never touched by specialcharacters,
+  quotes, replacements, or macros: it is a leaf, and every later step's match-string builder already
+  treats an unrecognized node kind as one opaque placeholder, exactly as it already does for an
+  earlier-built `Styled` span. It reuses the string pipeline's *exact* recognition –
+  [`INLINE_PASS_MACRO`](../../parser/src/content/passthroughs.rs) is now shared `pub(crate)` – so only
+  the recognition *sink* differs (§4.1). The triple-plus and bare `pass:[…]` forms resolve to
+  `SubstitutionGroup::None` (nothing applies), so their content borrows `'src` directly (a `pass:[…]`
+  body unescapes an escaped `\]`, as every other macro family's bracket content does, which makes the
+  unescaped case owned instead); the double-plus and double-dollar forms resolve to
+  `SubstitutionGroup::Verbatim` (special characters only) and are run through the real substitution
+  pipeline rather than hand-escaped, so a custom `InlineSubstitutionRenderer`'s escaping is honored –
+  the cost is an owned `Raw` value instead of a borrow.
+
+  Three forms are deferred, each documented and pinned by a divergence test: an
+  **attribute-list-prefixed** passthrough (`[quotes]++text++`, `[x-]\`text\``, `[attrs]+text+`), a
+  **`pass:` macro carrying an explicit substitution list** (`pass:c,q[…]`, whose content would need a
+  richer subtree than a single `Raw` leaf can hold – the same reason a footnote's content is
+  structured children rather than a literal value), and the **bare unconstrained form** (`+text+`,
+  matched by `INLINE_PASS` rather than `INLINE_PASS_MACRO` – its "must not follow a word" boundary
+  needs a lookbehind Rust's regex engine cannot express, which the string replacer works around with a
+  retry loop this increment does not reproduce). That same deferred boundary shows up once more,
+  indirectly: an **escaped triple- or double-plus** (`\+++text+++`, `\++text++`) drops its backslash
+  and keeps the delimited text literal here, but the string pipeline's *second* extraction pass
+  (`INLINE_PASS`) re-scans that same de-escaped text and consumes its leading `+++`/`++` as a bare
+  passthrough wrapping a shorter run – so these two escape forms are pinned as divergences rather than
+  folded into the main parity corpus; an escaped `$$…$$` or `pass:[…]` has no such residue and stays
+  parity. Inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) is an implicit passthrough too,
+  but folds through its own [`Stem`](../../parser/src/inlines/stem.rs) node rather than `Raw`, so it is
+  a separate, later increment. This step is **additive**: nothing is wired into the parse path.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1116,7 +1153,14 @@ Each phase is a reviewable unit with a clear exit gate.
            - ✅ **part 4c.** footnotes (`footnote:[…]` / `footnote:id[…]` / `footnote:id[]`,
              `INLINE_FOOTNOTE_MACRO`) → `Footnote` – the last macro family.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
-     `Callouts` – completing the vocabulary the recorder covers.
+     `Callouts` – completing the vocabulary the recorder covers, each its own sub-step:
+     - ✅ **5a.** Passthroughs, the delimited forms (`+++…+++`, `++…++`, `$$…$$`, bare
+       `pass:[…]`) → `Raw`.
+     - **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
+     - **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
+     - **5d.** the deferred forms `5a` documents – an attribute-list-prefixed passthrough, a
+       `pass:` macro with an explicit substitution list, the bare unconstrained `+text+` form,
+       and inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
      `rendered_html()` a fold, delete the three production sentinel systems (§4.2), and retire
      the `with_inline_tree` opt-in flag (the deferred remainder of Phase 2). Re-attach the
