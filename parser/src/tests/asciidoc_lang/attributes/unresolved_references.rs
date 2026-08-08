@@ -175,6 +175,19 @@ fn drop_line_only_drops_the_offending_line() {
 }
 
 #[test]
+fn drop_line_treats_an_explicitly_unset_attribute_as_missing() {
+    // `attribute-missing` fires for a reference to an attribute that was
+    // explicitly unset via a document `:name!:` entry, not only for one that
+    // was never assigned at all (issue #1117).
+    assert_eq!(
+        render_first_block(
+            ":attribute-missing: drop-line\n:version!:\n\nbootstrap.{version}.min.js"
+        ),
+        ""
+    );
+}
+
+#[test]
 fn attribute_missing_can_be_changed_mid_document() {
     // The setting is read each time references are replaced, so it can be
     // changed partway through a document.
