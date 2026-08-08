@@ -1900,18 +1900,69 @@ fn nested_file_name(container: Option<&str>, target: &str) -> String {
 /// returns `target`'s own cleaned-up path) using plain `/`-separated
 /// (filesystem-style) path arithmetic. See [`nested_file_name`], which
 /// dispatches here for a `container` that is not a URI.
+///
+/// `container`'s directory may itself be absolute (a Posix `/`, a Windows `\`
+/// or drive prefix, or a UNC/verbatim `\\` — see [`path_root`]); that root is
+/// carried through to the result rather than folded as a segment, so an
+/// absolute container's own absoluteness is not lost. Feeding it through
+/// [`push_path_segment`] undistinguished from an ordinary segment — as an
+/// earlier version of this function did — collapses a leading `/` (or `\\`)
+/// into an empty component and silently drops it, the same way a doubled
+/// separator would, turning `/tmp/docs/doc.adoc` into a relative-looking
+/// `tmp/docs/…`.
 fn join_local_path(container: Option<&str>, target: &str) -> String {
+    // The root must be split off *before* taking the directory: a container
+    // that names a file directly at its root (e.g. `/doc.adoc`) has nothing
+    // before its last separator, so finding the directory first and only then
+    // looking for a root would see an empty string and miss the root that was
+    // right there in the separator itself.
+    let (root, dir) = match container.map(path_root) {
+        Some((root, rest)) => (root, directory_of(rest)),
+        None => (String::new(), ""),
+    };
+
     let mut segments: Vec<&str> = Vec::new();
-    if let Some(dir) = container.map(directory_of).filter(|dir| !dir.is_empty()) {
-        for segment in dir.split(['/', '\\']) {
-            push_path_segment(&mut segments, segment);
-        }
+    for segment in dir.split(['/', '\\']) {
+        push_path_segment(&mut segments, segment);
     }
     for segment in target.split(['/', '\\']) {
         push_path_segment(&mut segments, segment);
     }
 
-    segments.join("/")
+    format!("{root}{}", segments.join("/"))
+}
+
+/// Splits `path` into its root — a Posix `/`, a two-separator UNC/verbatim
+/// prefix (`//` or `\\`), or a Windows drive prefix such as `C:/` or `C:\` —
+/// and the remainder that follows it, normalizing the root to forward
+/// slashes so it composes cleanly with the `/`-joined result
+/// [`join_local_path`] builds around it. A `path` with none of these (a
+/// relative path) has an empty root and is returned unchanged as the
+/// remainder.
+///
+/// Mirrors what [`is_absolute_path`] treats as absolute, but — unlike that
+/// predicate, which only asks yes/no — also hands back the root text
+/// separately from the rest of the path, so a caller can fold the remainder's
+/// segments (resolving `.`/`..`) without that folding mistaking the root's
+/// own separator(s) for empty segments to drop.
+fn path_root(path: &str) -> (String, &str) {
+    if path.starts_with("//") || path.starts_with(r"\\") {
+        return ("//".to_owned(), &path[2..]);
+    }
+
+    if let Some(rest) = path.strip_prefix(['/', '\\']) {
+        return ("/".to_owned(), rest);
+    }
+
+    let mut chars = path.chars();
+    if let (Some(letter), Some(':')) = (chars.next(), chars.next())
+        && letter.is_ascii_alphabetic()
+    {
+        let rest = path[2..].strip_prefix(['/', '\\']).unwrap_or(&path[2..]);
+        return (format!("{}:/", letter.to_ascii_uppercase()), rest);
+    }
+
+    (String::new(), path)
 }
 
 /// Joins `target` onto the directory of `container`, a URI (`container` must
@@ -5063,6 +5114,53 @@ mod tests {
                     "subdir/middle-include.adoc"
                 ),
                 "http://example.com:9876/fixtures/subdir/middle-include.adoc"
+            );
+        }
+
+        // A Posix-absolute container (e.g. a canonicalized primary document
+        // path, as a host application might supply) keeps its leading `/` in
+        // the result. Regression test: an earlier version fed the container's
+        // directory through the same segment-folding loop as an ordinary
+        // relative one, which treats a leading `/` as an empty (doubled
+        // separator) component and drops it — silently turning
+        // `/tmp/docs/doc.adoc` into a relative-looking `tmp/docs/…`.
+        #[test]
+        fn posix_absolute_container_keeps_its_leading_slash() {
+            assert_eq!(
+                nested_file_name(Some("/tmp/docs/doc.adoc"), "partials/section.adoc"),
+                "/tmp/docs/partials/section.adoc"
+            );
+
+            // A container that is itself the root has no directory segments
+            // to contribute, but the root is still kept.
+            assert_eq!(
+                nested_file_name(Some("/doc.adoc"), "chapter.adoc"),
+                "/chapter.adoc"
+            );
+        }
+
+        // A Windows drive-letter container keeps its drive prefix, normalized
+        // to a forward slash regardless of which separator the original path
+        // used.
+        #[test]
+        fn windows_drive_container_keeps_its_drive_prefix() {
+            assert_eq!(
+                nested_file_name(Some(r"C:\docs\doc.adoc"), r"partials\section.adoc"),
+                "C:/docs/partials/section.adoc"
+            );
+            assert_eq!(
+                nested_file_name(Some("d:/docs/doc.adoc"), "section.adoc"),
+                "D:/docs/section.adoc"
+            );
+        }
+
+        // A UNC (or Windows verbatim) container keeps its two-separator root
+        // rather than having it folded away as a doubled separator.
+        #[test]
+        fn unc_container_keeps_its_double_separator_root() {
+            assert_eq!(
+                nested_file_name(Some(r"\\server\share\docs\doc.adoc"), "section.adoc"),
+                "//server/share/docs/section.adoc"
             );
         }
     }
