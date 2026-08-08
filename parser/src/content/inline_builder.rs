@@ -204,12 +204,14 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
 /// passthrough's content is never touched by specialcharacters, quotes,
 /// replacements, or macros: it is a leaf, and every later step's
 /// [`build_match_string`] already treats a node it does not specifically
-/// handle (an already-built [`Styled`] span, and now a [`Raw`] leaf) as a
+/// handle (an already-built [`Styled`] span, and now a
+/// [`Raw`](InlineNode::Raw) leaf) as a
 /// single opaque placeholder.
 ///
 /// It reuses the string pipeline's *exact* recognition –
 /// [`INLINE_PASS_MACRO`] is now shared `pub(crate)` – so only the recognition
-/// *sink* differs (§4.1). Two forms fold through a [`Raw`] node whose `value`
+/// *sink* differs (§4.1). Two forms fold through a [`Raw`](InlineNode::Raw)
+/// node whose `value`
 /// is the *content itself*, since their substitution list applies nothing:
 /// the triple-plus (`+++text+++`) and bare `pass:[…]` macro (with no
 /// substitution list) both resolve to [`SubstitutionGroup::None`], and the
@@ -222,12 +224,12 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
 /// ([`passthrough_text`]) so a custom
 /// [`InlineSubstitutionRenderer`]'s escaping is honored, exactly as it would
 /// be for the string pipeline's own restore step – the cost is an owned
-/// [`Raw`] value rather than a `'src` borrow, since the pipeline's output is
-/// not guaranteed to coincide with the source.
+/// [`Raw`](InlineNode::Raw) value rather than a `'src` borrow, since the
+/// pipeline's output is not guaranteed to coincide with the source.
 ///
 /// Three forms are deferred, each documented and pinned by a divergence test:
 /// an **attribute-list-prefixed** passthrough (`[quotes]++text++`,
-/// `[x-]\`text\``, `[attrs]+text+`), a **`pass:` macro carrying an explicit
+/// `` [x-]`text` ``, `[attrs]+text+`), a **`pass:` macro carrying an explicit
 /// substitution list** (`pass:c,q[…]`, whose content would need a richer
 /// subtree than a single `Raw` leaf – the same reason a footnote's content
 /// is structured children rather than a literal value), and the **bare
@@ -296,7 +298,7 @@ fn find_passthrough_matches<'src>(
         let full = whole.start()..whole.end();
 
         // An attribute list ahead of the delimiters (`[quotes]++text++`,
-        // `[x-]\`text\``) is deferred.
+        // `` [x-]`text` ``) is deferred.
         if caps.get(2).is_some() {
             continue;
         }
@@ -398,8 +400,8 @@ fn build_passthrough_node<'src>(
 }
 
 /// Runs `text` through the real substitution pipeline under `subs`, returning
-/// the resulting owned string. Used to compute a [`Raw`] passthrough's
-/// `value` under [`SubstitutionGroup::Verbatim`] – mirroring
+/// the resulting owned string. Used to compute a [`Raw`](InlineNode::Raw)
+/// passthrough's `value` under [`SubstitutionGroup::Verbatim`] – mirroring
 /// `PassthroughRestoreReplacer`'s own `pass.subs.apply(…)` call in the string
 /// pipeline's restore step – so the result honors whatever
 /// [`InlineSubstitutionRenderer`] `parser` carries rather than a hand-rolled,
