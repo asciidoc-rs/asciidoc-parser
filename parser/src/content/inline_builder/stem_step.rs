@@ -198,8 +198,9 @@ mod tests {
     };
     use crate::{
         Parser, Span,
-        inlines::{InlineNode, Stem, StemNotation},
+        inlines::{InlineNode, SpanForm, Stem, StemNotation, StyleVariant, Styled},
         parser::HtmlSubstitutionRenderer,
+        strings::CowStr,
     };
 
     /// Asserts that `node` is a [`Stem`](InlineNode::Stem) of `notation`
@@ -226,6 +227,56 @@ mod tests {
         let nodes = apply_stem(seeded.clone(), source, &Parser::default());
 
         assert_eq!(nodes, seeded);
+    }
+
+    #[test]
+    fn a_match_whose_content_crosses_an_already_built_node_is_deferred() {
+        // In practice `apply_stem` only ever runs on the level
+        // `apply_passthroughs` has already refined into `Text`/`Raw` leaves
+        // (never a `Styled` node), so `range_is_verbatim`'s false branch is
+        // defensive – kept for the same reason every other macro family keeps
+        // it (see `passthrough_step`'s own
+        // `a_match_whose_content_crosses_an_already_built_node_is_deferred`).
+        // Exercise it directly, feeding a hand-built level whose STEM match
+        // spans an already-built `Styled` node, to document the intended
+        // fallback: the whole match is left unrecognized rather than
+        // mis-sliced.
+        // `build_match_string` only treats a `Text` node as verbatim (rather
+        // than an opaque placeholder) when its `value` equals its own
+        // `location.data()` – so, unlike the passthrough version of this test
+        // (whose `+++` delimiter is the same literal on both sides), each
+        // `Text` node here needs its *own* matching span.
+        let prefix_location = Span::new("stem:[x");
+        let styled_location = Span::new("*b*");
+        let suffix_location = Span::new("]");
+
+        let nodes = vec![
+            InlineNode::Text {
+                value: CowStr::from("stem:[x"),
+                location: prefix_location,
+            },
+            InlineNode::Styled(Styled {
+                variant: StyleVariant::Strong,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: vec![],
+                attrs: None,
+                children: vec![],
+                location: styled_location,
+            }),
+            InlineNode::Text {
+                value: CowStr::from("]"),
+                location: suffix_location,
+            },
+        ];
+
+        let root = Span::new("stem:[x]");
+        let result = apply_stem(nodes.clone(), root, &Parser::default());
+
+        assert_eq!(
+            result, nodes,
+            "a non-verbatim match must be left unrecognized"
+        );
     }
 
     #[test]
