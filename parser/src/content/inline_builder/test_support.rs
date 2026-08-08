@@ -10,7 +10,7 @@
 use super::{build, quotes::apply_quotes, special_chars::apply_special_characters};
 use crate::{
     Parser, Span,
-    content::{Content, SubstitutionStep},
+    content::{Content, Passthroughs, SubstitutionStep},
     inlines::{InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
     parser::HtmlSubstitutionRenderer,
     strings::CowStr,
@@ -151,4 +151,32 @@ pub(super) fn link_text_of(reference: &Ref<'_>) -> String {
     }
 
     s
+}
+
+/// The string pipeline's output for `source`, used as the golden oracle for
+/// both the passthrough and STEM increments (their steps share one
+/// extraction pass, [`Passthroughs::extract_from`]): extract passthroughs
+/// (including inline STEM macros), run the five steps [`build`] runs
+/// (special characters, quotes, character replacements, macros, post
+/// replacement), then restore them – exactly what
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup::apply)'s
+/// `run_pipeline` does for [`SubstitutionGroup::Normal`]. Attribute
+/// references are skipped, as elsewhere in this module's golden helpers.
+pub(super) fn golden_passthroughs_with(source: &str, parser: &Parser) -> String {
+    let mut content = Content::from(Span::new(source));
+    let passthroughs = Passthroughs::extract_from(&mut content, parser);
+
+    SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
+    SubstitutionStep::Quotes.apply(&mut content, parser, None);
+    SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
+    SubstitutionStep::Macros.apply(&mut content, parser, None);
+    SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
+
+    passthroughs.restore_to(&mut content, parser);
+    content.rendered_str().to_string()
+}
+
+/// [`golden_passthroughs_with`] with a default parser.
+pub(super) fn golden_passthroughs(source: &str) -> String {
+    golden_passthroughs_with(source, &Parser::default())
 }

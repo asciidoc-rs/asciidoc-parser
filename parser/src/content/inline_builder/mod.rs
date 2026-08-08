@@ -107,8 +107,19 @@
 //!   so – unlike the other families – a content crossing an already-recognized
 //!   construct is not deferred: nesting is the point. Only the deprecated
 //!   `footnoteref:` form and a content carrying an escaped closing bracket
-//!   (`\]`) are deferred. Inline STEM (a passthrough-time construct) and the
-//!   bibliography-anchor form are later increments.
+//!   (`\]`) are deferred. The bibliography-anchor form is a later increment.
+//! - [`apply_stem`] recognizes **inline STEM macros** (`stem:[…]`,
+//!   `asciimath:[…]`, `latexmath:[…]`), replacing each with a
+//!   [`Stem`](InlineNode::Stem) leaf. Like [`apply_passthroughs`], it is an
+//!   implicit-passthrough step: it runs immediately after
+//!   [`apply_passthroughs`] (mirroring `Passthroughs::extract_from`'s own
+//!   ordering, which extracts STEM macros last, after both passthrough passes),
+//!   so a STEM expression's content is never touched by specialcharacters,
+//!   quotes, replacements, or macros. It reuses the shared
+//!   [`INLINE_STEM_MACRO`](crate::content::INLINE_STEM_MACRO) pattern and
+//!   [`stem_notation`](crate::content::stem_notation) helper, so only the
+//!   recognition *sink* differs. A macro carrying an explicit substitution list
+//!   (`stem:c,q[…]`) is deferred, the same reason `pass:c,q[…]` is deferred.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
@@ -161,6 +172,7 @@ mod passthrough_step;
 mod post_replacements;
 mod quotes;
 mod special_chars;
+mod stem_step;
 
 #[cfg(test)]
 mod test_support;
@@ -179,6 +191,7 @@ use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;
 use special_chars::apply_special_characters;
+use stem_step::apply_stem;
 
 use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 
@@ -203,6 +216,12 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
     // its own step loop), so their content is never touched by
     // specialcharacters, quotes, replacements, or macros.
     let nodes = apply_passthroughs(seed, source, parser);
+
+    // Inline STEM is an implicit passthrough too, extracted last (mirroring
+    // `Passthroughs::extract_from`'s own ordering) so a passthrough
+    // placeholder nested inside a STEM expression survives.
+    let nodes = apply_stem(nodes, source, parser);
+
     let nodes = apply_special_characters(nodes);
     let nodes = apply_quotes(nodes, source, parser);
 

@@ -58,9 +58,11 @@ use crate::{
 /// replacer works around with a retry loop this increment does not yet
 /// reproduce). Inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) is
 /// an implicit passthrough too, but folds through its own
-/// [`Stem`](InlineNode::Stem) node rather than `Raw`, so it is a separate,
-/// later increment. This step is **additive**: nothing is wired into the
-/// parse path.
+/// [`Stem`](InlineNode::Stem) node rather than `Raw`, so it is recognized by
+/// its own step, [`apply_stem`](super::stem_step::apply_stem), run
+/// immediately after this one (mirroring `Passthroughs::extract_from`, which
+/// extracts STEM macros last, after both passthrough passes). This step is
+/// **additive**: nothing is wired into the parse path.
 ///
 /// The same deferred bare-form boundary shows up once more, indirectly: an
 /// **escaped triple- or double-plus** (`\+++text+++`, `\++text++`) drops its
@@ -226,7 +228,7 @@ fn build_passthrough_node<'src>(
 /// pipeline's restore step – so the result honors whatever
 /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
 /// `parser` carries rather than a hand-rolled, always-default escaping.
-fn passthrough_text(text: &str, subs: &SubstitutionGroup, parser: &Parser) -> String {
+pub(super) fn passthrough_text(text: &str, subs: &SubstitutionGroup, parser: &Parser) -> String {
     let mut content = Content::from(Span::new(text));
     subs.apply(&mut content, parser, None);
     content.rendered_str().to_string()
@@ -245,43 +247,15 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::{
-        super::test_support::{assert_raw, build_src, fold_html, seed},
+        super::test_support::{assert_raw, build_src, fold_html, golden_passthroughs, seed},
         apply_passthroughs,
     };
     use crate::{
         Parser, Span,
-        content::{Content, Passthroughs, SubstitutionStep},
         inlines::{InlineNode, SpanForm, StyleVariant, Styled},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
-
-    /// The string pipeline's output for `source`, used as the golden oracle
-    /// for the passthrough increment: extract passthroughs, run the five
-    /// steps [`build`](super::build) runs (special characters, quotes,
-    /// character replacements, macros, post replacement), then restore them
-    /// – exactly
-    /// what [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup::apply)'s
-    /// `run_pipeline` does for [`SubstitutionGroup::Normal`]. Attribute
-    /// references are skipped, as elsewhere in this module's golden helpers.
-    fn golden_passthroughs_with(source: &str, parser: &Parser) -> String {
-        let mut content = Content::from(Span::new(source));
-        let passthroughs = Passthroughs::extract_from(&mut content, parser);
-
-        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-        SubstitutionStep::Quotes.apply(&mut content, parser, None);
-        SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
-        SubstitutionStep::Macros.apply(&mut content, parser, None);
-        SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-
-        passthroughs.restore_to(&mut content, parser);
-        content.rendered_str().to_string()
-    }
-
-    /// [`golden_passthroughs_with`] with a default parser.
-    fn golden_passthroughs(source: &str) -> String {
-        golden_passthroughs_with(source, &Parser::default())
-    }
 
     #[test]
     fn apply_passthroughs_is_a_noop_without_passthrough_syntax() {
@@ -576,27 +550,5 @@ mod tests {
 
         assert_ne!(folded, golden);
         assert_eq!(folded, "a +text+ b");
-    }
-
-    #[test]
-    fn inline_stem_is_a_documented_divergence() {
-        // Inline STEM macros (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) are
-        // implicit passthroughs too, but fold through their own `Stem` node
-        // rather than `Raw`, so they are a separate, later increment; this
-        // step does not recognize them at all.
-        let source = "stem:[x^2]";
-        let nodes = build_src(Span::new(source));
-
-        assert!(
-            nodes
-                .iter()
-                .all(|n| !matches!(n, InlineNode::Raw { .. } | InlineNode::Stem(_))),
-            "inline STEM must be left unrecognized: {nodes:?}"
-        );
-
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        let golden = golden_passthroughs(source);
-
-        assert_ne!(folded, golden);
     }
 }
