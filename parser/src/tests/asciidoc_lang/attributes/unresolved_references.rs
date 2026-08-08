@@ -184,8 +184,8 @@ fn warn_still_fires_for_a_doctitle_reference_that_is_never_defined() {
     // issue #1124 fix: it still raises exactly one warning, from the
     // re-resolution pass against the final header state rather than the
     // eager, at-title-line pass.
-    let doc = Parser::default()
-        .parse(":attribute-missing: warn\n= {never-defined} Docs\n\n{doctitle}");
+    let doc =
+        Parser::default().parse(":attribute-missing: warn\n= {never-defined} Docs\n\n{doctitle}");
 
     let warnings: Vec<_> = doc.warnings().collect();
     assert_eq!(warnings.len(), 1);
