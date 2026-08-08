@@ -521,7 +521,7 @@ fn apply_quotes(content: &mut Content<'_>, parser: &Parser) {
     }
 }
 
-static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     // Either a `counter`/`counter2` directive (group 2) with its `name[:seed]`
     // expression (group 3), or a plain attribute name (group 4). This mirrors
     // the `counter2?:` branch of Asciidoctor's `AttributeReferenceRx`.

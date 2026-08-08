@@ -1125,6 +1125,45 @@ Each phase is a reviewable unit with a clear exit gate.
   but folds through its own [`Stem`](../../parser/src/inlines/stem.rs) node rather than `Raw`, so it is
   a separate, later increment. This step is **additive**: nothing is wired into the parse path.
 
+  *Step 5b landed as (`AttributeReferences` → expanded-value splicing):* a new
+  [`apply_attribute_references`](../../parser/src/content/inline_builder.rs) step is inserted between
+  `Quotes` and `CharacterReplacements` – its position in the *normal* effective order
+  (`specialcharacters → quotes → attributes → replacements → macros`, §3.4.1) – so whatever it splices
+  into the tree is exactly what the two steps still ahead of it see. It reuses the string pipeline's
+  *exact* recognition – [`ATTRIBUTE_REFERENCE`](../../parser/src/content/substitution_step.rs) is now
+  shared `pub(crate)` – so only the recognition *sink* differs (§4.1): a reference to a **set**
+  attribute has its resolved value spliced into the node stream, classified into
+  [`Text`](../../parser/src/inlines/inline_node.rs) and [`Raw`](../../parser/src/inlines/inline_node.rs)
+  runs by [`split_attribute_value`](../../parser/src/content/inline_builder.rs) – the §3.4.1 policy
+  applied for the first time: because `SpecialCharacters` has already run and will not run again over
+  spliced-in content, a literal `<`/`>`/`&` in the value becomes a `Raw` leaf (unescaped) rather than a
+  `CharRef` (which the fold would re-escape), while everything else stays `Text`. An **escaped**
+  reference (`\{name}`, `{name\}`, `\{name\}`) drops its backslash(es) and keeps the rest of its match
+  as literal nodes, replacing nothing, mirroring `AttributeReplacer`'s `caps[1]`/`caps[5]` branch – and,
+  because that check runs before any lookup, this works identically whether or not the named attribute
+  is set. An `InterpretedValue::Set`/`::Unset` attribute (no textual value – the language leaves this
+  case unclear, as the string replacer's own comment notes) expands to nothing, exactly as the string
+  pipeline's replacer does.
+
+  Three forms are deferred, each documented and pinned by a divergence test: a **`counter`/`counter2`
+  directive**, whose resolution *advances* a document counter – a required side effect this additive
+  step does not yet perform, the same reason every macro family deferred its own catalog/warning side
+  effect until the footnote and cutover increments; a reference to a **missing** attribute under
+  `AttributeMissing::Drop` / `::DropLine`, whose output *removes* content rather than leaving the
+  reference literal – the behavior this step *does* reproduce, since it is also what the default
+  `AttributeMissing::Skip` and `AttributeMissing::Warn` modes do (so those two are full parity, not a
+  divergence); and a **construct inside an expanded value** that `CharacterReplacements` or `Macros`
+  would recognize per §3.4.1 (a `(C)` becoming a `CharRef`, a `link:` becoming a `Ref`) but do not yet –
+  a spliced value is a synthesized run with no `'src` slice of its own, and
+  [`build_match_string`](../../parser/src/content/inline_builder.rs) (shared by those two steps and by
+  `Quotes`) only treats a *verbatim* `Text` node (`value == location.data()`) as literal content for
+  matching purposes; it does not yet look inside a synthesized one, so such a node is one opaque piece
+  to them, exactly like an already-built `Styled` span. Lifting that boundary is a follow-up that only
+  needs to extend `build_match_string` itself, not this step's splitting. All three deferred forms are
+  left **unrecognized** (no match, or no further node), so the surrounding gap logic reproduces the
+  source text unchanged, exactly as an unrecognized macro is left for a later increment. This step is
+  **additive**: nothing is wired into the parse path.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1156,7 +1195,7 @@ Each phase is a reviewable unit with a clear exit gate.
      `Callouts` – completing the vocabulary the recorder covers, each its own sub-step:
      - ✅ **5a.** Passthroughs, the delimited forms (`+++…+++`, `++…++`, `$$…$$`, bare
        `pass:[…]`) → `Raw`.
-     - **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
+     - ✅ **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
      - **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
      - **5d.** the deferred forms `5a` documents – an attribute-list-prefixed passthrough, a
        `pass:` macro with an explicit substitution list, the bare unconstrained `+text+` form,
