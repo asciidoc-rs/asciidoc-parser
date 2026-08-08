@@ -130,7 +130,7 @@ mod default_macros_substitution {
         // The document *title* line itself is not part of this "Headers" row
         // – it uses `SubstitutionGroup::Title` (the same steps as `Normal`),
         // so the same `icon:` macro there is rendered (verified against
-        // Asciidoctor 2.0.26; see #1121).
+        // Asciidoctor 2.0.26).
         let doc = Parser::default().parse("= Title icon:heart[]-less");
 
         let title = doc.header().title().unwrap();

@@ -202,11 +202,10 @@ pub(crate) fn this_document_reference(parser: &Parser) -> DerivedReference {
     let doctitle = parser.attribute_value("doctitle");
 
     // An empty `reftext` names nothing, so it falls through to the title just
-    // as an unset one does. The doctitle now carries real rendered markup
-    // (see #1121) – formatting, or even a live link from an autolinked bare
-    // URL – which cannot be embedded as-is inside this reference's own
-    // wrapping `<a>`, so it is sanitized down to plain text first, mirroring
-    // Asciidoctor.
+    // as an unset one does. The doctitle carries real rendered markup –
+    // formatting, or even a live link from an autolinked bare URL – which
+    // cannot be embedded as-is inside this reference's own wrapping `<a>`,
+    // so it is sanitized down to plain text first, mirroring Asciidoctor.
     let text = reftext
         .as_maybe_str()
         .filter(|reftext| !reftext.is_empty())

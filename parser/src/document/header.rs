@@ -1269,7 +1269,7 @@ fn split_author_entries(value: &str) -> Vec<&str> {
 /// substitution of the `= Title` line into the `doctitle` attribute. Unlike
 /// the restricted `Header` group used for author/revision lines and
 /// attribute-entry values, this renders quotes (formatting), replacements,
-/// and inline macros (e.g. `image:`) in the title itself (see #1121).
+/// and inline macros (e.g. `image:`) in the title itself.
 fn apply_title_subs(source: &str, parser: &Parser) -> String {
     let span = Span::new(source);
 
@@ -1352,7 +1352,7 @@ mod tests {
         // The document title line goes through the `Title` substitution group
         // (the same steps as `Normal`), not the restricted `Header` group
         // used for author/revision lines — so formatting (quotes) and inline
-        // macros (`image:`) render, matching Asciidoctor (see #1121).
+        // macros (`image:`) render, matching Asciidoctor.
         let doc = Parser::default()
             .parse("= *Document* image:logo.png[] _Title_ image:another-logo.png[another logo]");
 
@@ -1372,7 +1372,7 @@ mod tests {
     fn title_substitutions_apply_before_subtitle_partition() {
         // A subtitle carved out of the (now fully substituted) title retains
         // its own rendered formatting, rather than the literal, unprocessed
-        // source it kept before #1121 was fixed.
+        // source it used to keep.
         let doc = Parser::default().parse("= Main Title: *Subtitle*");
 
         assert_eq!(doc.header().main_title(), Some("Main Title"));
@@ -1381,10 +1381,11 @@ mod tests {
 
     #[test]
     fn author_and_revision_lines_keep_restricted_header_substitutions() {
-        // The #1121 fix is scoped to the title line only: author and revision
-        // lines must still see just the restricted `Header` group (special
-        // characters, attribute references, and the inline pass macro) —
-        // formatting is left as literal, unprocessed text.
+        // The fuller title substitution is scoped to the title line only:
+        // author and revision lines must still see just the restricted
+        // `Header` group (special characters, attribute references, and the
+        // inline pass macro) — formatting is left as literal, unprocessed
+        // text.
         let doc = Parser::default().parse("= Title\n*Jane Smith*\nv1, *2025-09-28*");
 
         let author_line = doc.header().author_line().unwrap();
@@ -1401,8 +1402,8 @@ mod tests {
     fn doctitle_sanitized_strips_rendered_markup_to_plain_text() {
         // Mirrors Ruby Asciidoctor's `Document#doctitle(sanitize: true)`,
         // used for contexts (like the standalone HTML `<title>` element)
-        // where markup is not allowed (see #1122). Depends on #1121: without
-        // the fuller title substitution there would be no rendered markup
+        // where markup is not allowed. Relies on the fuller title
+        // substitution above: without it there would be no rendered markup
         // (bold, italic, an `<img>` from `image:`) to strip in the first
         // place.
         let doc = Parser::default()

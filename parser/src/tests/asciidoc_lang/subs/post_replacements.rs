@@ -176,8 +176,7 @@ mod default_post_replacements_substitution {
         // The document *title* line itself is not part of this "Headers" row
         // – like a block or section title (see the `titles` test below), it
         // uses `SubstitutionGroup::Title`, so the same trailing ` +` there
-        // does convert to a line break (verified against Asciidoctor 2.0.26;
-        // see #1121).
+        // does convert to a line break (verified against Asciidoctor 2.0.26).
         let doc = Parser::default().parse("= abc +\ndef");
 
         let title = doc.header().title().unwrap();

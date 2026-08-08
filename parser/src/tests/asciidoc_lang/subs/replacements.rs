@@ -372,7 +372,7 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
         // The document *title* line itself is not part of this "Headers" row
         // – it uses `SubstitutionGroup::Title` (the same steps as `Normal`),
         // so the same `(C)` there is replaced (verified against Asciidoctor
-        // 2.0.26; see #1121).
+        // 2.0.26).
         let doc = Parser::default().parse("= Title (C) So On");
 
         let title = doc.header().title().unwrap();
