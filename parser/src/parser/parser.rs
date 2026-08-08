@@ -595,6 +595,24 @@ impl Default for Parser {
     }
 }
 
+/// The document scope a `notitle`/`showtitle` assignment originated from, for
+/// [`Parser::apply_title_visibility_linkage`]'s partner-lock check.
+///
+/// This mirrors the two document-side write-permission checks
+/// ([`Parser::set_attribute_from_header`] and
+/// [`Parser::set_attribute_from_body`]): which
+/// [`ModificationContext`] values block a write depends on whether the write
+/// is happening in the header or the body, since [`ApiOrHeader`] and
+/// [`ApiOrDocumentBody`] each permit one scope and forbid the other.
+///
+/// [`ApiOrHeader`]: ModificationContext::ApiOrHeader
+/// [`ApiOrDocumentBody`]: ModificationContext::ApiOrDocumentBody
+#[derive(Clone, Copy)]
+enum DocumentWriteScope {
+    Header,
+    Body,
+}
+
 impl Parser {
     /// The default value of [`max_block_nesting`](Self::max_block_nesting),
     /// mirroring the `max-block-nesting` built-in default (see
@@ -1406,6 +1424,20 @@ impl Parser {
     /// `{showtitle}` reference stays literal after `:notitle:` rather than
     /// silently resolving to an empty string).
     ///
+    /// `write_scope` distinguishes a document-originated assignment (a header
+    /// or body attribute entry) from an API-originated one: when `Some`, the
+    /// partner is left untouched if its current [`ModificationContext`]
+    /// forbids a write from that scope (the same rule
+    /// [`set_attribute_from_header`](Self::set_attribute_from_header) and
+    /// [`set_attribute_from_body`](Self::set_attribute_from_body) apply to
+    /// the attribute being assigned directly), so a document entry cannot use
+    /// the linkage as a back door around an API- or header/body-scoped lock
+    /// on the *other* spelling. An API call always passes `None`, since a
+    /// later API call is always permitted to override an earlier one
+    /// (matching the "last call wins" contract of
+    /// [`with_intrinsic_attribute()`](Self::with_intrinsic_attribute) and
+    /// its siblings), including the partner it set.
+    ///
     /// [set]: https://docs.asciidoctor.org/asciidoc/latest/attributes/set-attributes/
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
     fn apply_title_visibility_linkage(
@@ -1414,12 +1446,19 @@ impl Parser {
         value: &InterpretedValue,
         modification_context: ModificationContext,
         silent_when_locked: bool,
+        write_scope: Option<DocumentWriteScope>,
     ) {
         let partner = match attr_name {
             "notitle" => "showtitle",
             "showtitle" => "notitle",
             _ => return,
         };
+
+        if let Some(scope) = write_scope
+            && self.partner_write_is_locked(partner, scope)
+        {
+            return;
+        }
 
         // Either way the partner supersedes (and resets) any counter of the
         // same name, mirroring a direct assignment.
@@ -1529,7 +1568,7 @@ impl Parser {
 
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
-        self.apply_title_visibility_linkage(&name, &value, modification_context, false);
+        self.apply_title_visibility_linkage(&name, &value, modification_context, false, None);
 
         self.capture_attribute_baseline();
 
@@ -1583,7 +1622,7 @@ impl Parser {
 
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
-        self.apply_title_visibility_linkage(&name, &value, modification_context, true);
+        self.apply_title_visibility_linkage(&name, &value, modification_context, true, None);
 
         self.capture_attribute_baseline();
 
@@ -1920,6 +1959,18 @@ impl Parser {
         std::mem::take(&mut *self.catalog.borrow_mut())
     }
 
+    /// Returns a read-only borrow of the parser's current reference catalog,
+    /// without taking it.
+    ///
+    /// Used to resolve cross-references discovered outside the document's own
+    /// block tree (e.g. docinfo content) against the catalog while it is still
+    /// held by the parser – after the document body has been parsed (so the
+    /// catalog is complete) but before [`take_catalog`](Self::take_catalog)
+    /// transfers it to the `Document`.
+    pub(crate) fn catalog(&self) -> std::cell::Ref<'_, Catalog> {
+        self.catalog.borrow()
+    }
+
     /* Comment out until we're prepared to use and test this.
         /// Sets the default value for an [intrinsic attribute].
         ///
@@ -1990,7 +2041,7 @@ impl Parser {
 
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
-        self.apply_title_visibility_linkage(&name, &value, modification_context, false);
+        self.apply_title_visibility_linkage(&name, &value, modification_context, false, None);
 
         self.capture_attribute_baseline();
 
@@ -2040,7 +2091,7 @@ impl Parser {
 
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
-        self.apply_title_visibility_linkage(&name, &value, modification_context, true);
+        self.apply_title_visibility_linkage(&name, &value, modification_context, true, None);
 
         self.capture_attribute_baseline();
 
@@ -2518,11 +2569,14 @@ impl Parser {
         // `notitle` and `showtitle` are inverse spellings of one title-
         // visibility toggle; keep the partner in sync (see
         // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
+        // A document header entry must not use the linkage to route around a
+        // lock on the partner spelling, so the lock is enforced here.
         self.apply_title_visibility_linkage(
             &attr_name,
             &value,
             ModificationContext::Anywhere,
             false,
+            Some(DocumentWriteScope::Header),
         );
 
         let attribute_value = AttributeValue {
@@ -2561,6 +2615,41 @@ impl Parser {
 
         self.counter_values.borrow_mut().remove(&attr_name);
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
+    }
+
+    /// Called from [`Header::parse()`] for a value that is derived from a
+    /// block attribute above the document title (e.g. `[separator=::]` sets
+    /// `title-separator`) and that has a direct document-attribute-entry
+    /// equivalent.
+    ///
+    /// Unlike [`set_attribute_by_value_from_header()`](Self::set_attribute_by_value_from_header),
+    /// this applies the same modification-context lock check that an
+    /// ordinary `:title-separator:` header entry goes through (see
+    /// [`set_attribute_from_header()`](Self::set_attribute_from_header)), so
+    /// an attribute locked via the API
+    /// ([`ApiOnly`](ModificationContext::ApiOnly) or
+    /// [`ApiOrDocumentBody`](ModificationContext::ApiOrDocumentBody)) is not
+    /// silently overwritten just because the equivalent value arrived via
+    /// block-attribute syntax rather than an attribute entry. The write is
+    /// dropped silently on a lock: this path has no attribute span to attach
+    /// an `AttributeValueIsLocked` warning to.
+    ///
+    /// [`Header::parse()`]: crate::document::Header::parse
+    pub(crate) fn set_attribute_by_value_from_header_checked<N: AsRef<str>, V: AsRef<str>>(
+        &mut self,
+        name: N,
+        value: V,
+    ) {
+        let attr_name = remap_attr_name(name);
+
+        if let Some(existing_attr) = self.effective_attribute(&attr_name)
+            && (existing_attr.modification_context == ModificationContext::ApiOnly
+                || existing_attr.modification_context == ModificationContext::ApiOrDocumentBody)
+        {
+            return;
+        }
+
+        self.set_attribute_by_value_from_header(attr_name, value);
     }
 
     /// Applies the `imagesdir`-relative default for the `iconsdir` attribute.
@@ -2672,11 +2761,14 @@ impl Parser {
         // `notitle` and `showtitle` are inverse spellings of one title-
         // visibility toggle; keep the partner in sync (see
         // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
+        // A document body entry must not use the linkage to route around a
+        // lock on the partner spelling, so the lock is enforced here.
         self.apply_title_visibility_linkage(
             &attr_name,
             &value,
             ModificationContext::Anywhere,
             false,
+            Some(DocumentWriteScope::Body),
         );
 
         let attribute_value = AttributeValue {
@@ -2891,6 +2983,36 @@ impl Parser {
     fn attribute_is_locked(&self, name: &str) -> bool {
         self.effective_attribute(name)
             .is_some_and(|a| a.modification_context == ModificationContext::ApiOnly)
+    }
+
+    /// Reports whether `name` currently resolves to an attribute that a write
+    /// from `scope` is not permitted to change, for
+    /// [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)'s
+    /// partner-lock check.
+    ///
+    /// Applies the exact blocking condition
+    /// [`set_attribute_from_header`](Self::set_attribute_from_header) and
+    /// [`set_attribute_from_body`](Self::set_attribute_from_body) apply to
+    /// the attribute being assigned directly: a header write is blocked by
+    /// [`ApiOnly`](ModificationContext::ApiOnly) or
+    /// [`ApiOrDocumentBody`](ModificationContext::ApiOrDocumentBody) (the
+    /// latter permits only the body), and a body write is blocked by
+    /// [`ApiOnly`](ModificationContext::ApiOnly) or
+    /// [`ApiOrHeader`](ModificationContext::ApiOrHeader) (the latter permits
+    /// only the API or the header). Unlike
+    /// [`attribute_is_locked`](Self::attribute_is_locked), this also treats a
+    /// scope-mismatched `ApiOrHeader`/`ApiOrDocumentBody` value as locked, so
+    /// a header entry cannot use the linkage to reach a body-only partner (or
+    /// a body entry a header-only one).
+    fn partner_write_is_locked(&self, name: &str, scope: DocumentWriteScope) -> bool {
+        self.effective_attribute(name).is_some_and(|a| {
+            let mc = a.modification_context;
+            mc == ModificationContext::ApiOnly
+                || match scope {
+                    DocumentWriteScope::Header => mc == ModificationContext::ApiOrDocumentBody,
+                    DocumentWriteScope::Body => mc == ModificationContext::ApiOrHeader,
+                }
+        })
     }
 }
 
@@ -4482,6 +4604,108 @@ mod tests {
             // the linkage is a no-op for every other attribute.
             let parser = parse_header(":sectnums:");
             assert!(!parser.has_attribute("notitle"));
+            assert!(!parser.has_attribute("showtitle"));
+        }
+
+        #[test]
+        fn header_notitle_does_not_override_api_locked_showtitle() {
+            // An API-locked `showtitle` must win over a header `:notitle:`
+            // entry -- the linkage must not use the partner update as a back
+            // door around the lock.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                true,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n:notitle:\n\nBody.");
+
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("showtitle"));
+            assert!(parser.resolve_show_title(false));
+        }
+
+        #[test]
+        fn header_showtitle_does_not_override_api_locked_notitle() {
+            // Same as above, in the opposite direction: a header `:showtitle:`
+            // entry is itself unlocked (only `notitle` was API-locked), so the
+            // direct write is permitted -- but its partner-update side effect
+            // must not clobber the API-locked `notitle` value.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                true,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n:showtitle:\n\nBody.");
+
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("notitle"));
+
+            // `showtitle` itself was never locked, so the direct write stands,
+            // and per its documented precedence over `notitle` it decides the
+            // resolved visibility here -- that precedence rule is unrelated to
+            // the API lock on `notitle`'s raw value, which this test guards.
+            assert!(parser.resolve_show_title(false));
+        }
+
+        #[test]
+        fn body_notitle_does_not_override_api_locked_showtitle() {
+            // The lock is enforced from the document body too, not just the
+            // header.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                true,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n\nintro\n\n:notitle:\n\nmore");
+
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("showtitle"));
+        }
+
+        #[test]
+        fn header_notitle_does_not_override_document_body_locked_showtitle() {
+            // `ApiOrDocumentBody` permits only a *body* write, so a header
+            // `:notitle:` entry must not be able to use the linkage to reach
+            // an `ApiOrDocumentBody`-locked `showtitle` either -- not just an
+            // `ApiOnly` one.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                true,
+                ModificationContext::ApiOrDocumentBody,
+            );
+            let _ = parser.parse("= Doc\n:notitle:\n\nBody.");
+
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("showtitle"));
+        }
+
+        #[test]
+        fn body_showtitle_does_not_override_header_locked_notitle() {
+            // `ApiOrHeader` permits only the API or a *header* write, so a
+            // body `:showtitle:` entry must not be able to use the linkage to
+            // reach an `ApiOrHeader`-locked `notitle`.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                true,
+                ModificationContext::ApiOrHeader,
+            );
+            let _ = parser.parse("= Doc\n\nintro\n\n:showtitle:\n\nmore");
+
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("notitle"));
+        }
+
+        #[test]
+        fn api_reassignment_still_updates_locked_partner() {
+            // The partner lock is enforced only against a *document*
+            // assignment; a later API call is always permitted to override an
+            // earlier one (including the partner it previously set), matching
+            // the "last call wins" contract of `with_intrinsic_attribute*`.
+            let parser = Parser::default()
+                .with_intrinsic_attribute_bool("showtitle", true, ModificationContext::ApiOnly)
+                .with_intrinsic_attribute_bool("notitle", true, ModificationContext::ApiOnly);
+
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
             assert!(!parser.has_attribute("showtitle"));
         }
     }

@@ -26,5 +26,4 @@ mod substitution_step;
 pub use substitution_step::SubstitutionStep;
 pub(crate) use substitution_step::{
     AttributeMissing, substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
-    substitute_attributes_in_text,
 };
