@@ -4540,12 +4540,10 @@ const GRANDCHILD_INCLUDE_ADOC: &str = "first line of grandchild\n\nlast line of 
 // The `depth` attribute on an include directive bounds how many further levels
 // of include nesting are permitted beneath the included file. An include
 // directive in a file that already sits at the limit is left verbatim, with a
-// "maximum include depth exceeded" error at the directive's own file and line.
-//
-// (Asciidoctor resolves each nested target against the including file's
-// directory, so its message names `fixtures/child-include.adoc`; this crate
-// delegates path resolution to the include file handler and names the target
-// as written, `child-include.adoc`.)
+// "maximum include depth exceeded" error at the directive's own file and line,
+// named the way Asciidoctor names it: resolved against the including file's
+// directory (`fixtures/child-include.adoc`), not just the target as written in
+// the directive (`child-include.adoc`).
 #[test]
 fn include_directive_should_be_disabled_if_max_include_depth_has_been_exceeded() {
     verifies!(
@@ -4601,7 +4599,7 @@ fn include_directive_should_be_disabled_if_max_include_depth_has_been_exceeded()
     assert_eq!(
         source_map.original_file_and_line(output_line),
         Some(crate::parser::SourceLine(
-            Some("child-include.adoc".to_owned()),
+            Some("fixtures/child-include.adoc".to_owned()),
             3
         ))
     );
