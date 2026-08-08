@@ -9653,6 +9653,12 @@ mod tests {
             "<child/> <!--1-->",
             "First line <1-->",
             "require 'x' # \\<1>",
+            // Trailing content survives a recognized callout that is not the
+            // last thing in the level: the callout is still trailing-position
+            // *on its own line* (immediately followed by a newline), but more
+            // text follows on the next line, exercising the rebuild's final
+            // gap after the last match.
+            "line one <1>\nmore code after",
         ];
 
         for fixture in fixtures {
@@ -9746,6 +9752,26 @@ mod tests {
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].number.as_ref(), "5");
         assert_eq!(found[1].number.as_ref(), "6");
+    }
+
+    #[test]
+    fn content_after_the_last_callout_is_kept_as_a_trailing_node() {
+        // The callout is trailing-position on its own line (immediately
+        // followed by a newline), but more text follows on the next line, so
+        // the rebuild's final gap (after the last match) is non-empty.
+        let nodes = build_verbatim_src(Span::new("line one <1>\nmore code after"));
+        let found = callouts(&nodes);
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].number.as_ref(), "1");
+
+        match nodes.last() {
+            Some(InlineNode::Text { value, .. }) => {
+                assert_eq!(value.as_ref(), "\nmore code after");
+            }
+
+            other => panic!("expected a trailing Text node, got {other:?}"),
+        }
     }
 
     #[test]
