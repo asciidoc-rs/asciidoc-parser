@@ -308,8 +308,9 @@ fn store_attribute_with_negated_value() {
 
     // A negated name (`foo!` or `!foo`) stores the attribute as unset; the API
     // models this with `with_intrinsic_attribute_bool(name, false, ..)`. The
-    // unset value carries into a parsed document, and a `{foo}` reference
-    // resolves to nothing.
+    // unset value carries into a parsed document, and a `{foo}` reference is
+    // treated as a reference to a missing attribute: under the default
+    // `attribute-missing=skip` mode, it is left in place (issue #1117).
     let mut parser = Parser::default().with_intrinsic_attribute_bool(
         "foo",
         false,
@@ -317,7 +318,7 @@ fn store_attribute_with_negated_value() {
     );
     let doc = parser.parse("{foo}");
     assert_eq!(doc.attribute_value("foo"), InterpretedValue::Unset);
-    assert_eq!(rendered_paragraphs(&doc), vec![String::new()]);
+    assert_eq!(rendered_paragraphs(&doc), vec!["{foo}".to_string()]);
 }
 
 #[test]
