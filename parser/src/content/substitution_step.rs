@@ -764,8 +764,14 @@ impl Replacer for AttributeReplacer<'_> {
         // `key = $2.downcase`. The original spelling is still what is emitted
         // literally for a skipped or missing reference below.
         let lookup_name = attribute_lookup_name(attr_name);
+        let value = self.parser.attribute_value(&lookup_name);
 
-        if !self.parser.has_attribute(&lookup_name) {
+        // A reference is "missing" for `attribute-missing` purposes both when
+        // the attribute was never assigned at all and when it was explicitly
+        // unset (a document `:name!:` entry or an API override that unsets
+        // it) – both resolve to `InterpretedValue::Unset`. Only a value-less
+        // `Set` attribute or a concrete `Value` counts as present.
+        if !self.parser.has_attribute(&lookup_name) || matches!(value, InterpretedValue::Unset) {
             match self.mode {
                 AttributeMissing::Skip => dest.push_str(&caps[0]),
                 AttributeMissing::Drop => {
@@ -798,12 +804,11 @@ impl Replacer for AttributeReplacer<'_> {
             return;
         }
 
-        if let InterpretedValue::Value(value) = self.parser.attribute_value(&lookup_name) {
+        // A value-less `Set` attribute (e.g. `:foo:` with no `=value`)
+        // substitutes to an empty string, matching Asciidoctor.
+        if let InterpretedValue::Value(value) = value {
             dest.push_str(value.as_ref());
         }
-
-        // Language description is unclear as to what happens for "set" and
-        // "unset" attribute values. For now, we'll replace those with nothing.
     }
 }
 
@@ -1992,6 +1997,19 @@ mod tests {
             }
 
             #[test]
+            fn drop_line_removes_a_line_referencing_an_api_unset_attribute() {
+                // An attribute explicitly unset via the API (as opposed to one
+                // that was never assigned at all) still counts as "missing" for
+                // `attribute-missing` purposes (issue #1117).
+                let p = parser_with_mode("drop-line").with_intrinsic_attribute_bool(
+                    "version",
+                    false,
+                    ModificationContext::ApiOnly,
+                );
+                assert_eq!(render("bootstrap.{version}.min.js", &p), "");
+            }
+
+            #[test]
             fn drop_line_records_a_warning_for_the_dropped_reference() {
                 // Dropping the line is silent in Asciidoctor's output, but it
                 // logs an `INFO` diagnostic naming the missing attribute; the
@@ -2071,7 +2089,7 @@ mod tests {
             /// than the block substitution pipeline.
             mod free_standing_text {
                 use super::parser_with_mode;
-                use crate::content::substitute_attributes_in_text;
+                use crate::content::substitution_step::substitute_attributes_in_text;
 
                 #[test]
                 fn drop_removes_line_that_only_contained_the_reference() {

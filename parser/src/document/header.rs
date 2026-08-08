@@ -244,7 +244,9 @@ impl<'src> Header<'src> {
                 //
                 // A `separator` sets the subtitle separator; it behaves exactly
                 // like assigning the `title-separator` document attribute here, so
-                // both mechanisms share the same partitioning logic.
+                // both mechanisms share the same partitioning logic and the same
+                // modification-context lock check (an API-locked `title-separator`
+                // is not overwritten by this block attribute).
                 //
                 // The line is only intercepted when a document title eventually
                 // follows – possibly after further stacked block attribute lines,
@@ -256,7 +258,7 @@ impl<'src> Header<'src> {
                     id = Some(doc_id);
                 }
                 if let Some(separator) = metadata.separator {
-                    parser.set_attribute_by_value_from_header("title-separator", separator);
+                    parser.set_attribute_by_value_from_header_checked("title-separator", separator);
                 }
                 if let Some(reftext) = metadata.reftext {
                     parser.set_attribute_by_value_from_header("reftext", reftext);
@@ -2550,6 +2552,47 @@ mod tests {
 
         assert_eq!(header.main_title(), Some("Main Title"));
         assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn separator_block_attribute_does_not_override_api_locked_title_separator() {
+        // An API-locked `title-separator` must not be overwritten by a
+        // `[separator=…]` block attribute above the title, exactly as an
+        // ordinary `:title-separator:` header entry is already blocked.
+        let doc = Parser::default()
+            .with_intrinsic_attribute("title-separator", " -", ModificationContext::ApiOnly)
+            .parse("[separator=::]\n= Main Title - *Subtitle*\nAuthor Name\n\ncontent\n");
+
+        assert_eq!(
+            doc.attribute_value("title-separator"),
+            InterpretedValue::Value(" -")
+        );
+
+        let header = doc.header();
+        assert_eq!(header.main_title(), Some("Main Title"));
+    }
+
+    #[test]
+    fn separator_block_attribute_does_not_override_api_or_document_body_locked_title_separator() {
+        // `ApiOrDocumentBody` also locks `title-separator` against a *header*
+        // assignment (it may only be changed from the document body) -- the
+        // `[separator=…]` block attribute above the title is itself part of
+        // the header, so it must be rejected the same as `ApiOnly`.
+        let doc = Parser::default()
+            .with_intrinsic_attribute(
+                "title-separator",
+                " -",
+                ModificationContext::ApiOrDocumentBody,
+            )
+            .parse("[separator=::]\n= Main Title - *Subtitle*\n\ncontent\n");
+
+        assert_eq!(
+            doc.attribute_value("title-separator"),
+            InterpretedValue::Value(" -")
+        );
+
+        let header = doc.header();
+        assert_eq!(header.main_title(), Some("Main Title"));
     }
 
     #[test]
