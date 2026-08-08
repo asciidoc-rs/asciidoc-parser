@@ -42,22 +42,20 @@
 //!   the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
 //!   **auto-links and formal-URL links** (`https://example.org`,
 //!   `https://example.org[text]`), **cross-references** in both the
-//!   `xref:` macro form (`xref:id[text]`) and the `<<id>>` shorthand,
-//!   **inline anchors** (`[[id]]`, `[[id,reftext]]`, `anchor:id[reftext]`),
+//!   `xref:` macro form (`xref:id[text]`) and the `<<id>>` shorthand, and
+//!   **inline anchors** (`[[id]]`, `[[id,reftext]]`, `anchor:id[reftext]`) and
 //!   **index terms** (`((term))`, `(((primary, secondary)))`, `indexterm:[…]`,
-//!   `indexterm2:[…]`), and **footnotes** (`footnote:[…]`, `footnote:id[…]`,
-//!   `footnote:id[]`), replacing each with an [`Image`](InlineNode::Image),
+//!   `indexterm2:[…]`), replacing each with an [`Image`](InlineNode::Image),
 //!   [`Ui`](InlineNode::Ui), [`Ref`](InlineNode::Ref),
-//!   [`Anchor`](InlineNode::Anchor), [`IndexTerm`](InlineNode::IndexTerm), or
-//!   [`Footnote`](InlineNode::Footnote) node. An image node
+//!   [`Anchor`](InlineNode::Anchor), or [`IndexTerm`](InlineNode::IndexTerm)
+//!   node. An image node
 //!   captures its own owned [`Attrlist`] – the step that makes a macro node
 //!   *self-describing*; a link or cross-reference node bakes its computed display
 //!   text into [`Text`](InlineNode::Text) children so its fold needs no
 //!   build-time state. Each family reuses the shared pattern the string step
 //!   matches with ([`INLINE_IMAGE_MACRO`], [`INLINE_KBD_BTN_MACRO`],
 //!   [`INLINE_MENU_MACRO`], [`INLINE_LINK_MACRO`], [`INLINE_LINK`],
-//!   [`INLINE_XREF`], [`INLINE_ANCHOR`], [`INLINE_INDEXTERM`],
-//!   [`INLINE_FOOTNOTE_MACRO`]), builds
+//!   [`INLINE_XREF`], [`INLINE_ANCHOR`], [`INLINE_INDEXTERM`]), builds
 //!   `'src`-borrowing nodes for verbatim macros only (see [`apply_macros`] for
 //!   the boundary the escaped-content case defers), and – for the UI macros – is
 //!   recognized only under the `experimental` document attribute, exactly as the
@@ -70,19 +68,29 @@
 //!   Likewise a *concealed* index term (`indexterm:[…]`, `(((…)))`) renders
 //!   nothing, so it too is always recognized; a *visible* term (`indexterm2:[…]`,
 //!   `((term))`) is deferred only when its shown text crosses a rendered span or
-//!   carries an attribute list. The footnote pass runs **last**, after
-//!   cross-references, mirroring the string step's order, and is the one macro
-//!   family whose recognition performs a *required* side effect: a footnote's
-//!   marker digits are the number [`Parser::define_footnote`] /
-//!   [`Parser::footnote_index_for_id`] assign, so – unlike every other family –
-//!   registering it cannot be deferred to the cutover without breaking output
-//!   parity (see [`build_footnote_node`] for why this is safe to do from an
-//!   additive pass). Its content becomes structured children via [`emit_range`]
-//!   rather than a literal attribute value, so – unlike the other families – a
-//!   content crossing an already-recognized construct is not deferred: nesting is
-//!   the point. Only the deprecated `footnoteref:` form and a content carrying an
-//!   escaped closing bracket (`\]`) are deferred. Inline STEM (a passthrough-time
-//!   construct) and the bibliography-anchor form are later increments.
+//!   carries an attribute list.
+//! - [`apply_footnotes`] recognizes **footnotes** (`footnote:[…]`,
+//!   `footnote:id[…]`, `footnote:id[]`), replacing each with a
+//!   [`Footnote`](InlineNode::Footnote) node, folding through the shared
+//!   [`INLINE_FOOTNOTE_MACRO`] pattern like every other family. It is its **own
+//!   step** in [`build`], run once over the whole tree *after* [`apply_macros`]
+//!   has resolved every other family at every level, rather than a level pass
+//!   inside [`apply_macros`] – because it is the one macro family whose
+//!   recognition performs a *required* side effect: a footnote's marker digits
+//!   are the number [`Parser::define_footnote`] /
+//!   [`Parser::footnote_index_for_id`] assign, so numbering must follow true
+//!   left-to-right source order regardless of nesting depth, which
+//!   [`apply_macros`]'s depth-first child recursion does not guarantee (see
+//!   [`apply_footnotes`]'s doc comment). Registering the number cannot be
+//!   deferred to the cutover the way every other family's catalog/warning side
+//!   effect is, without breaking output parity (see [`build_footnote_node`]).
+//!   Its content becomes structured children via [`emit_range`] rather than a
+//!   literal attribute value, so – unlike the other families – a content
+//!   crossing an already-recognized construct is not deferred: nesting is the
+//!   point. Only the deprecated `footnoteref:` form and a content carrying an
+//!   escaped closing bracket (`\]`) are deferred. Inline STEM (a
+//!   passthrough-time construct) and the bibliography-anchor form are later
+//!   increments.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
@@ -168,6 +176,12 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
     let nodes = apply_quotes(nodes, source, parser);
     let nodes = apply_character_replacements(nodes, source);
     let nodes = apply_macros(nodes, source, parser);
+
+    // Footnotes are their own step, run once over the *whole* tree after
+    // every other macro family has been resolved at every level – see
+    // `apply_footnotes`'s doc comment for why this cannot be folded into
+    // `apply_macros` as an ordinary level pass.
+    let nodes = apply_footnotes(nodes, source, parser);
 
     apply_post_replacements(nodes, source)
 }
@@ -1305,15 +1319,17 @@ fn apply_macros<'src>(
 
     // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the
     // string step's order.
-    let nodes = xref_macros_level(nodes, root);
+    xref_macros_level(nodes, root)
 
-    // Footnotes (`footnote:[…]`) run last, after cross-references, mirroring
-    // the string step's order (macros.rs) – so that a construct already
-    // recognized earlier at this same level (an image, link, anchor, index
-    // term, or now a cross-reference) is captured as a *node* when it falls
-    // inside a footnote's extracted text, exactly as the string pipeline
-    // captures it as already-substituted markup (see [`footnote_macros_level`]).
-    footnote_macros_level(nodes, root, parser)
+    // Footnotes are **not** handled here. Every other family's recognition is
+    // order-independent (no cross-node side effect), so it is safe for them to
+    // run under this function's "resolve a whole subtree's children, then this
+    // level" recursion (see the closure at the top of this function). A
+    // footnote's assigned number is *not* order-independent, so it needs its
+    // own recursive walk that visits nodes in true left-to-right source order
+    // regardless of nesting depth – see [`apply_footnotes`], run once, as its
+    // own step in [`build`], after `apply_macros` has fully resolved every
+    // other family at every level.
 }
 
 /// One recognized macro match at a level, in absolute match-string byte
@@ -3260,40 +3276,232 @@ fn build_xref_shorthand_node<'src>(
 
 // ─── Footnotes (footnote:) ──────────────────────────────────────────────────
 
-/// Matches [`INLINE_FOOTNOTE_MACRO`] at this level's escaped text, replacing
-/// each recognized footnote occurrence with the
-/// [`Footnote`](InlineNode::Footnote) node it produces and leaving everything
-/// else in place.
+/// The footnote substitution, as a **whole-tree**, order-preserving
+/// transducer: matches [`INLINE_FOOTNOTE_MACRO`] at every level of `nodes`,
+/// replacing each recognized occurrence with the
+/// [`Footnote`](InlineNode::Footnote) node it produces, and recurses into
+/// every [`Styled`]/[`Ref`] child it finds along the way.
 ///
 /// This is the last macro family (design §5.2 Phase 4, step 4b(ii) part 4c)
-/// and runs last in [`apply_macros`], after the cross-reference pass,
-/// mirroring the string step's order exactly – and for the same reason: a
-/// footnote's text is extracted from the flow, so any construct the earlier
-/// passes at this level already recognized (an image, a link, an anchor, an
-/// index term, or now a cross-reference) is captured as *that construct's
-/// node* when it falls inside the extracted range, rather than being
-/// re-recognized from scratch (see [`footnote_children`]).
-fn footnote_macros_level<'src>(
+/// and runs as [`build`]'s own step, *after* [`apply_macros`] has fully
+/// resolved every other family at every level, mirroring the string step's
+/// order exactly: footnotes run last, once, over the whole (already
+/// substituted) string (macros.rs).
+///
+/// # Why this cannot be a level pass *within* [`apply_macros`]
+///
+/// Every other macro family is recognition-order-independent: nothing
+/// observes *when*, relative to a sibling subtree, an image or a link is
+/// recognized, so it is safe for [`apply_macros`] to resolve a node's
+/// children *before* resolving that node's own level (its recursion runs
+/// depth-first). A footnote's assigned **number** is the one exception – it
+/// is a side effect of recognition order itself (see
+/// [`build_footnote_node`]'s doc comment) – so depth-first recursion would
+/// number a footnote nested in an *earlier*-created [`Styled`] span (e.g. a
+/// span [`apply_quotes`] already built before [`apply_macros`] ever runs)
+/// **before** a footnote that precedes that span in the source, reversing
+/// their markers relative to the string pipeline's left-to-right sweep over
+/// one flat string. This function fixes that by walking `nodes` in true
+/// source order: it recognizes every footnote at *this* level, but recurses
+/// into a [`Styled`]/[`Ref`] child at exactly the point that child falls
+/// between two such recognitions (or before the first / after the last) –
+/// see [`rebuild_footnote_level`] and [`emit_range_recursing_footnotes`],
+/// which recurse in place of the generic [`rebuild_macro_level`] /
+/// [`emit_range`]'s verbatim clone.
+fn apply_footnotes<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
+    // A subtree with no `"tnote"` substring anywhere – the overwhelmingly
+    // common case – has nothing for this pass to do, so return it completely
+    // untouched: no clone, no rebuild. This check is not just an optimization.
+    // `rebuild_footnote_level`'s gap emission clones *every* atomic piece
+    // (any already-recognized `Image`/`Ui`/`Ref`/`Anchor`/`IndexTerm`/`Styled`
+    // node) it touches – including ones with nothing to do with footnotes –
+    // and cloning is not free of *observable* effect here: `CowStr`'s `Clone`
+    // opportunistically demotes a short-enough `Boxed` value to `Inlined`
+    // (see `strings.rs`), so an unconditional whole-tree rebuild would flip
+    // that representation on every short owned string in the document, purely
+    // as a side effect of a pass that found nothing to recognize. Skipping
+    // the rebuild entirely when there is nothing to find keeps every other
+    // family's nodes byte- *and* representation-identical to what
+    // `apply_macros` produced.
+    if !subtree_might_have_footnote(&nodes) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes);
 
     // Cheap pre-filter mirroring the string step's `found_macroish &&
     // text.contains("tnote")`: both `footnote:` and the deprecated
-    // `footnoteref:` contain "tnote".
-    if !s.contains("tnote") {
-        return nodes;
+    // `footnoteref:` contain "tnote". Even when this level's *own* text has
+    // no match, a `Styled`/`Ref` child might still carry one in its own
+    // subtree (that is what the pre-check above just confirmed), so the
+    // rebuild below runs regardless – it is what performs the recursion.
+    let matches = if s.contains("tnote") {
+        find_footnote_matches(&s, &pieces, &nodes, root, parser)
+    } else {
+        Vec::new()
+    };
+
+    rebuild_footnote_level(&nodes, &pieces, &s, matches, root, parser)
+}
+
+/// Reports whether `nodes`, or any [`Styled`]/[`Ref`] descendant's own
+/// subtree at any depth, might carry the `"tnote"` substring
+/// [`apply_footnotes`]'s pre-filter looks for. A read-only recursive check –
+/// it builds a match string per level exactly as [`apply_footnotes`] does
+/// (so it cannot miss a `"tnote"` split across two adjacent
+/// [`Text`](InlineNode::Text) pieces the way a per-node substring check
+/// could) but allocates no [`InlineNode`], letting a subtree with nothing to
+/// find come back from `apply_footnotes` completely unchanged.
+fn subtree_might_have_footnote(nodes: &[InlineNode<'_>]) -> bool {
+    let (s, _) = build_match_string(nodes);
+
+    if s.contains("tnote") {
+        return true;
     }
 
-    let matches = find_footnote_matches(&s, &pieces, &nodes, root, parser);
+    nodes.iter().any(|node| match node {
+        InlineNode::Styled(styled) => subtree_might_have_footnote(&styled.children),
+        InlineNode::Ref(reference) => subtree_might_have_footnote(&reference.children),
+        _ => false,
+    })
+}
 
-    if matches.is_empty() {
-        return nodes;
+/// Like [`rebuild_macro_level`], but for [`apply_footnotes`]: rebuilds a
+/// level's node list from its footnote matches, using
+/// [`emit_range_recursing_footnotes`] (not [`emit_range`]) for every gap, so
+/// a [`Styled`]/[`Ref`] child encountered between two matches is recursed
+/// into – in source order – rather than cloned whole.
+fn rebuild_footnote_level<'src>(
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    s: &str,
+    matches: Vec<MacroMatch<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<InlineNode<'src>> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+
+    for m in matches {
+        let MacroMatch { full, kind } = m;
+
+        match kind {
+            MacroMatchKind::Unescape { backslash } => {
+                emit_range_recursing_footnotes(
+                    nodes,
+                    pieces,
+                    cursor..backslash,
+                    root,
+                    parser,
+                    &mut out,
+                );
+                emit_range_recursing_footnotes(
+                    nodes,
+                    pieces,
+                    (backslash + 1)..full.end,
+                    root,
+                    parser,
+                    &mut out,
+                );
+            }
+
+            MacroMatchKind::Node { consumed, node } => {
+                emit_range_recursing_footnotes(
+                    nodes,
+                    pieces,
+                    cursor..consumed.start,
+                    root,
+                    parser,
+                    &mut out,
+                );
+                out.push(*node);
+                emit_range_recursing_footnotes(
+                    nodes,
+                    pieces,
+                    consumed.end..full.end,
+                    root,
+                    parser,
+                    &mut out,
+                );
+            }
+        }
+
+        cursor = full.end;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    if cursor < s.len() {
+        emit_range_recursing_footnotes(nodes, pieces, cursor..s.len(), root, parser, &mut out);
+    }
+
+    out
+}
+
+/// Like [`emit_range`], but recurses into a [`Styled`]/[`Ref`] piece's
+/// children with [`apply_footnotes`] instead of cloning the node whole – the
+/// piece that makes [`apply_footnotes`] a true whole-tree, source-order walk
+/// rather than a single level pass. Every other aspect (slicing a verbatim
+/// [`Text`](InlineNode::Text) run at the overlap, an empty range emitting
+/// nothing) is identical.
+fn emit_range_recursing_footnotes<'src>(
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    range: std::ops::Range<usize>,
+    root: Span<'src>,
+    parser: &Parser,
+    out: &mut Vec<InlineNode<'src>>,
+) {
+    if range.start >= range.end {
+        return;
+    }
+
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the requested range.
+        if p_end <= range.start || p_start >= range.end {
+            continue;
+        }
+
+        let Some(node) = nodes.get(piece.node_index) else {
+            continue;
+        };
+
+        if piece.atomic {
+            match node.clone() {
+                InlineNode::Styled(mut styled) => {
+                    styled.children = apply_footnotes(styled.children, root, parser);
+                    out.push(InlineNode::Styled(styled));
+                }
+
+                InlineNode::Ref(mut reference) => {
+                    reference.children = apply_footnotes(reference.children, root, parser);
+                    out.push(InlineNode::Ref(reference));
+                }
+
+                other => out.push(other),
+            }
+
+            continue;
+        }
+
+        // A verbatim text run: slice it to the overlap.
+        let lo = range.start.max(p_start) - p_start;
+        let hi = range.end.min(p_end) - p_start;
+
+        if let InlineNode::Text { location, .. } = node {
+            let sliced = location.slice(lo..hi);
+
+            out.push(InlineNode::Text {
+                value: CowStr::from(sliced.data()),
+                location: sliced,
+            });
+        }
+    }
 }
 
 /// Finds every recognized footnote occurrence at this level as a
@@ -3494,7 +3702,11 @@ fn build_footnote_node<'src>(
 /// on; it is the whole point – `emit_range` clones that construct's node
 /// whole into the footnote's subtree, exactly mirroring how the string
 /// pipeline's footnote text captures an already-substituted macro verbatim
-/// (see [`footnote_macros_level`]'s doc comment on ordering).
+/// (see [`apply_footnotes`]'s doc comment on ordering). This uses the plain
+/// [`emit_range`], not the recursing [`emit_range_recursing_footnotes`] –
+/// footnotes do not nest (the string pipeline's own lazy bracket match cannot
+/// recognize one inside another's content either, since it always stops at
+/// the *first* unescaped `]`), so a footnote's own content is captured as-is.
 fn footnote_children<'src>(
     range: std::ops::Range<usize>,
     pieces: &[Piece],
@@ -7752,5 +7964,117 @@ mod tests {
             // The string pipeline, by contrast, does build a footnote marker here.
             assert!(golden_macros(source).contains("class=\"footnote\""));
         }
+    }
+
+    #[test]
+    fn footnotes_number_in_source_order_across_nesting() {
+        // A footnote preceding a `Styled` span must be numbered *before* a
+        // footnote nested inside that span, even though `apply_macros`'s
+        // depth-first recursion (see `apply_footnotes`'s doc comment)
+        // resolves the span's children before the outer level. This is the
+        // regression the `apply_footnotes`/`rebuild_footnote_level` split
+        // fixes: numbering must follow true left-to-right source order, not
+        // tree depth.
+        let source = "footnote:[outer] *footnote:[inner]*";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, golden_macros(source));
+
+        let nodes = build_src(Span::new(source));
+        let outer = assert_footnote(&nodes[0]);
+        assert_eq!(outer.number.as_deref(), Some("1"));
+
+        let inner_children = assert_styled(&nodes[2], StyleVariant::Strong, SpanForm::Constrained);
+        let inner = assert_footnote(&inner_children[0]);
+        assert_eq!(inner.number.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn footnotes_number_in_source_order_across_a_footnote_bearing_link() {
+        // The opposite nesting from the test above: a *link* – a macro-built
+        // `Ref` node, created *during* `apply_macros` rather than already
+        // existing by the time it runs like a quotes-built `Styled` span –
+        // nested inside a footnote's own content. This is the valid
+        // direction to nest the two: because footnotes run *last* (after
+        // `link_macro_level`), the link's brackets are already consumed into
+        // a `Ref` node (no literal `[`/`]` left to collide with) by the time
+        // the footnote's own lazy bracket match runs, unlike the reverse
+        // nesting (see `a_footnote_nested_in_link_text_is_a_documented_divergence`
+        // just below, which explains why that direction can never be clean).
+        let source = "footnote:[outer] footnote:[see link:https://example.org[inner]]";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, golden_macros(source));
+
+        let nodes = build_src(Span::new(source));
+        let outer = assert_footnote(&nodes[0]);
+        assert_eq!(outer.number.as_deref(), Some("1"));
+
+        let inner = assert_footnote(&nodes[2]);
+        assert_eq!(inner.number.as_deref(), Some("2"));
+        assert_link(&inner.children[1]);
+    }
+
+    #[test]
+    fn a_footnote_nested_in_link_text_is_a_documented_divergence() {
+        // `link:` matches its bracketed label *lazily* – up to the first
+        // unescaped `]` – so an unbalanced inner bracket like
+        // `footnote:[note]` (itself containing a `]`) truncates the link's
+        // own match early, leaving `footnote:[note` as the link's label and a
+        // stray `]` as literal text after it (mirrored exactly by the
+        // builder's `link_macro_level`, which shares the same regex – see the
+        // `fold_matches_the_string_pipeline_through_link_macros` corpus for
+        // that shared behavior on its own). This is not specific to links: a
+        // footnote nested inside *any* bracket-delimited macro argument that
+        // runs *before* footnotes (image, index terms, anchors,
+        // cross-references – every family footnotes.rs runs after) hits the
+        // same collision, since footnote syntax's own `[`/`]` inherently
+        // satisfies that macro's lazy closing-bracket search before it
+        // reaches its intended one. It is fundamentally the reverse of the
+        // clean nesting
+        // `footnotes_number_in_source_order_across_a_footnote_bearing_link`
+        // exercises: nesting an *earlier*-running macro inside a footnote's
+        // content is fine (by the time footnotes run, that macro's brackets
+        // are already consumed into a node), but nesting *footnote* syntax
+        // inside an earlier macro's argument is not, in the string pipeline
+        // or otherwise.
+        //
+        // In the *string* pipeline, the footnote pass runs over the
+        // *already-rendered* flat string, where the link's `</a>` is just
+        // literal text no different from any other – so the footnote regex,
+        // finding only one `]` left in the whole string, matches straight
+        // through the `</a>` and consumes it as part of its own (nonsensical)
+        // content, producing malformed, never-closed markup. That is a direct
+        // consequence of matching over *rendered* text rather than structure
+        // – exactly the class of divergence
+        // `crossed_delimiters_are_a_documented_divergence` documents for
+        // quotes. A `Ref` node's closing tag is never a `Text` node in the
+        // tree (it exists only as fold *output*, not as node content), so
+        // the builder's footnote pass has no way to "reach into" it, and
+        // correctly does not: the link's label stays literal, unrecognized
+        // text, and the tree never reproduces the string pipeline's
+        // malformed markup here.
+        let source = "link:https://example.org[footnote:[note]]";
+        let nodes = build_src(Span::new(source));
+
+        let link = assert_link(&nodes[0]);
+        assert_text(&link.children[0], "footnote:[note", 1, 26);
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        assert_eq!(
+            folded,
+            "<a href=\"https://example.org\">footnote:[note</a>]"
+        );
+
+        // The string pipeline, by contrast, produces unclosed markup: the
+        // link's own closing `</a>` is consumed into the footnote's content,
+        // and the footnote's own numbered marker (with its *own*, unrelated
+        // `<a>…</a>`) takes its place.
+        assert_eq!(
+            golden_macros(source),
+            "<a href=\"https://example.org\"><sup class=\"footnote\">\
+             [<a id=\"_footnoteref_1\" class=\"footnote\" href=\"#_footnotedef_1\" \
+             title=\"View footnote.\">1</a>]</sup>"
+        );
     }
 }
