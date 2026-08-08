@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.14](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.13...v0.29.14)
+_08 August 2026_
+
+### Fixed
+
+* Apply full title substitution to document title; add sanitized doctitle accessor ([#1126](https://github.com/asciidoc-rs/asciidoc-parser/pull/1126))
+* Recognize docinfo1/docinfo2 and honor full docinfosubs step list ([#1128](https://github.com/asciidoc-rs/asciidoc-parser/pull/1128))
+* Respect API attribute locks for title-separator and notitle/showtitle ([#1127](https://github.com/asciidoc-rs/asciidoc-parser/pull/1127))
+* Trim whitespace around block anchor reftext after the comma ([#1112](https://github.com/asciidoc-rs/asciidoc-parser/pull/1112))
+
+### Other
+
+* Register block image:: macro targets in the document catalog ([#1131](https://github.com/asciidoc-rs/asciidoc-parser/pull/1131))
+* Treat explicitly-unset attributes as missing for attribute-missing ([#1129](https://github.com/asciidoc-rs/asciidoc-parser/pull/1129))
+
 ## [0.29.13](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.12...v0.29.13)
 _07 August 2026_
 
