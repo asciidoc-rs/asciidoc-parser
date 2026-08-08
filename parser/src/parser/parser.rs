@@ -1383,17 +1383,23 @@ impl Parser {
     /// Resolves whether a document title should be displayed, from the
     /// `showtitle`/`notitle` attribute pair (which are complements).
     ///
-    /// `showtitle` takes precedence: if present, the title shows precisely when
-    /// it is set. Otherwise `notitle`, if present, hides the title when set.
-    /// When neither attribute is present, `default_shown` decides – a
-    /// standalone document shows its title, while embedded output does not.
-    /// A nested AsciiDoc table cell is embedded output, so it passes
-    /// `default_shown = false`.
+    /// A *set* `showtitle` always takes precedence and shows the title. A
+    /// merely-*present-but-unset* `showtitle` (e.g. a hard API unset, an
+    /// `ApiOnly` lock to [`Unset`](InterpretedValue::Unset)) only decides the
+    /// outcome – hiding the title – when `notitle` is absent; it does not by
+    /// itself mean "hide the title" the way an explicit `notitle` entry does,
+    /// so a present `notitle` still gets to decide in that case. Otherwise
+    /// `notitle`, if present, hides the title when set. When neither
+    /// attribute is present, `default_shown` decides – a standalone document
+    /// shows its title, while embedded output does not. A nested AsciiDoc
+    /// table cell is embedded output, so it passes `default_shown = false`.
     pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
-        if self.has_attribute("showtitle") {
-            self.is_attribute_set("showtitle")
+        if self.is_attribute_set("showtitle") {
+            true
         } else if self.has_attribute("notitle") {
             !self.is_attribute_set("notitle")
+        } else if self.has_attribute("showtitle") {
+            false
         } else {
             default_shown
         }
@@ -1440,16 +1446,23 @@ impl Parser {
     ///
     /// Returns whether the caller should proceed with storing `attr_name`'s
     /// own direct assignment. This is `false` only for a document-originated
-    /// `notitle` entry whose partner `showtitle` is locked against the
-    /// write: `showtitle` takes precedence when resolving title visibility
-    /// (see [`resolve_show_title`](Self::resolve_show_title)), so a locked
-    /// `showtitle` must veto the conflicting `notitle` entry outright, not
-    /// merely skip the partner-sync side effect – otherwise a direct probe
-    /// of `notitle` (e.g. `ifdef::notitle[]`) would see the raw, rejected
-    /// document value instead of staying consistent with the lock. The
-    /// reverse does not hold: a locked `notitle` never vetoes a `showtitle`
-    /// entry, since `showtitle`'s own precedence already decides the
-    /// resolved visibility regardless of `notitle`'s raw value.
+    /// `notitle` entry whose partner `showtitle` is locked against the write
+    /// *and currently resolves to [`Set`](InterpretedValue::Set): a `Set`
+    /// `showtitle` takes precedence when resolving title visibility (see
+    /// [`resolve_show_title`](Self::resolve_show_title)), so it must veto the
+    /// conflicting `notitle` entry outright, not merely skip the
+    /// partner-sync side effect – otherwise a direct probe of `notitle`
+    /// (e.g. `ifdef::notitle[]`) would see the raw, rejected document value
+    /// instead of staying consistent with the lock. A locked `showtitle`
+    /// that is merely [`Unset`](InterpretedValue::Unset) (a hard API unset)
+    /// does *not* veto the `notitle` entry: hard-unsetting `showtitle` only
+    /// prevents the document from turning it on, it does not by itself mean
+    /// "hide the title", so `notitle`'s own (unlocked) entry still applies
+    /// normally (see [`resolve_show_title`](Self::resolve_show_title)'s
+    /// matching precedence rule). The reverse does not hold: a locked
+    /// `notitle` never vetoes a `showtitle` entry, since `showtitle`'s own
+    /// precedence already decides the resolved visibility regardless of
+    /// `notitle`'s raw value.
     ///
     /// [set]: https://docs.asciidoctor.org/asciidoc/latest/attributes/set-attributes/
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
@@ -1470,7 +1483,16 @@ impl Parser {
         if let Some(scope) = write_scope
             && self.partner_write_is_locked(partner, scope)
         {
-            return attr_name != "notitle";
+            // Only a partner locked to `Set` takes precedence over (and so
+            // vetoes) a conflicting `notitle` entry; a partner that is merely
+            // locked `Unset` (a hard API unset) is not decisive on its own,
+            // so the direct write proceeds normally instead.
+            let partner_forces_show = attr_name == "notitle"
+                && matches!(
+                    self.effective_attribute(partner).map(|a| &a.value),
+                    Some(InterpretedValue::Set)
+                );
+            return !partner_forces_show;
         }
 
         // Either way the partner supersedes (and resets) any counter of the
@@ -1478,16 +1500,26 @@ impl Parser {
         self.counter_values.borrow_mut().remove(partner);
 
         if let InterpretedValue::Unset = value {
-            // The toggle is off, so the partner turns on.
-            Arc::make_mut(&mut self.attribute_values).insert(
-                partner.to_string(),
-                AttributeValue {
-                    allowable_value: AllowableValue::Any,
-                    modification_context,
-                    silent_when_locked,
-                    value: InterpretedValue::Set,
-                },
-            );
+            // The toggle is off, so the partner turns on – except for a hard
+            // API unset (`ApiOnly`), which must not plant a matching lock on
+            // the *other* attribute: hard-unsetting `showtitle` (or
+            // `notitle`) only prevents the document from turning that one
+            // attribute on, it is not itself a request to force-hide (or
+            // force-show) via the partner. Leaving the partner untouched
+            // lets it – and any later document entry for it – resolve
+            // normally (see the precedence rule documented on
+            // [`resolve_show_title`](Self::resolve_show_title)).
+            if modification_context != ModificationContext::ApiOnly {
+                Arc::make_mut(&mut self.attribute_values).insert(
+                    partner.to_string(),
+                    AttributeValue {
+                        allowable_value: AllowableValue::Any,
+                        modification_context,
+                        silent_when_locked,
+                        value: InterpretedValue::Set,
+                    },
+                );
+            }
         } else if self.attribute_values.contains_key(partner) {
             // The toggle is on, so the partner turns off – and, matching
             // Asciidoctor, "off" means absent. (Guarded so the common case of
@@ -4500,6 +4532,29 @@ mod tests {
         }
 
         #[test]
+        fn unset_showtitle_alone_still_decides_when_notitle_is_absent() {
+            // A merely-present-but-unset `showtitle` only defers to `notitle`
+            // when `notitle` is actually present (see issue #1143 and
+            // `notitle_showtitle_linkage::header_unset_notitle_entry_applies_
+            // when_showtitle_is_api_hard_unset`). With no `notitle` in play at
+            // all, an `Unset` `showtitle` still decides the outcome (hidden),
+            // regardless of the default -- this exercises the case distinctly
+            // from `Anywhere`-context unsetting (as in
+            // `showtitle_takes_precedence_and_decides` above), where the
+            // toggle linkage itself plants a `notitle` entry as a side
+            // effect. An `ApiOnly` hard unset does not plant that side effect
+            // (see `apply_title_visibility_linkage`), so this is the only way
+            // to reach this branch with `notitle` genuinely absent.
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            assert!(!parser.has_attribute("notitle"));
+            assert!(!parser.resolve_show_title(true));
+        }
+
+        #[test]
         fn notitle_is_the_complement_when_showtitle_absent() {
             // notitle set -> hidden; notitle unset -> shown.
             assert!(!with("notitle", true).resolve_show_title(true));
@@ -4670,6 +4725,49 @@ mod tests {
             let _ = parser.parse("= Doc\n:!notitle:\n\nBody.");
 
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(!parser.has_attribute("notitle"));
+        }
+
+        #[test]
+        fn header_unset_notitle_entry_applies_when_showtitle_is_api_hard_unset() {
+            // Issue #1143: hard-unsetting `showtitle` via the API (`ApiOnly`
+            // lock to `Unset`, e.g. `Options::unset("showtitle")`) only
+            // prevents the document from turning `showtitle` on -- it does
+            // not by itself mean "hide the title" the way a locked `Set`
+            // does (see `header_unset_notitle_entry_also_rejected_when_
+            // showtitle_is_api_locked` above, which covers that `Set` case).
+            // Since `notitle` itself carries no lock here, the document's
+            // own `:!notitle:` entry should apply normally and the title
+            // should show, matching Asciidoctor (parity oracle:
+            // `test/document_test.rb`, "should be able to enable doctitle
+            // for embedded document", case `[{ 'showtitle' => false },
+            // [':!notitle:']]`).
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n:!notitle:\n\nBody.");
+
+            assert!(!parser.is_attribute_set("showtitle"));
+            assert!(parser.has_attribute("notitle"));
+            assert!(!parser.is_attribute_set("notitle"));
+            assert!(parser.resolve_show_title(false));
+        }
+
+        #[test]
+        fn api_hard_unset_of_showtitle_does_not_plant_a_locked_notitle_tombstone() {
+            // The hard-unset itself (no document entry at all) must not, as
+            // a side effect, create a `notitle` entry -- doing so would both
+            // misreport a direct `ifdef::notitle[]` probe and (being
+            // `ApiOnly`-locked) permanently block a later document
+            // `:!notitle:` / `:notitle:` entry from ever taking effect.
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+
             assert!(!parser.has_attribute("notitle"));
         }
 
