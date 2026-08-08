@@ -139,12 +139,15 @@ impl Docinfo {
                     return Self::default();
                 }
             }
-            // Unreachable in practice: `Parser::attribute_value` never
-            // returns a bare `Set` for `docinfo`, since it always resolves
-            // one to its registered default (`Value("private")`, handled by
-            // the arm below) before this method observes it. Kept only for
-            // exhaustiveness, mirroring that same default.
-            InterpretedValue::Set => union_legacy_shared(vec!["private".to_string()]),
+            // `docinfo` has a registered default (`"private"`, set in
+            // `built_in_default_values`), so `Parser::attribute_value`
+            // always resolves a bare boolean to that default -- see the
+            // `Value` arm below -- and never returns a bare `Set` for it.
+            // This arm exists only to satisfy match exhaustiveness.
+            InterpretedValue::Set => unreachable!(
+                "docinfo has a registered default, so Parser::attribute_value never returns \
+                 InterpretedValue::Set for it"
+            ),
             InterpretedValue::Value(v) => union_legacy_shared(
                 v.split(',')
                     .map(|t| t.trim().to_ascii_lowercase())
