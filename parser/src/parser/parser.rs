@@ -1446,10 +1446,10 @@ impl Parser {
     /// `showtitle` must veto the conflicting `notitle` entry outright, not
     /// merely skip the partner-sync side effect – otherwise a direct probe
     /// of `notitle` (e.g. `ifdef::notitle[]`) would see the raw, rejected
-    /// document value instead of staying consistent with the lock (issue
-    /// #1139). The reverse does not hold: a locked `notitle` never vetoes a
-    /// `showtitle` entry, since `showtitle`'s own precedence already decides
-    /// the resolved visibility regardless of `notitle`'s raw value.
+    /// document value instead of staying consistent with the lock. The
+    /// reverse does not hold: a locked `notitle` never vetoes a `showtitle`
+    /// entry, since `showtitle`'s own precedence already decides the
+    /// resolved visibility regardless of `notitle`'s raw value.
     ///
     /// [set]: https://docs.asciidoctor.org/asciidoc/latest/attributes/set-attributes/
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
@@ -4648,8 +4648,8 @@ mod tests {
             assert!(parser.is_attribute_set("showtitle"));
             assert!(parser.resolve_show_title(false));
 
-            // Issue #1139: the conflicting `:notitle:` entry must be rejected
-            // outright, not just have its partner-sync side effect skipped --
+            // The conflicting `:notitle:` entry must be rejected outright,
+            // not just have its partner-sync side effect skipped --
             // otherwise a direct probe of `notitle` (e.g. `ifdef::notitle[]`)
             // would see the raw document value instead of staying consistent
             // with the `showtitle` lock, as Asciidoctor does.
@@ -4710,7 +4710,7 @@ mod tests {
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
             assert!(parser.is_attribute_set("showtitle"));
 
-            // Issue #1139: rejected outright, same as the header case.
+            // Rejected outright, same as the header case.
             assert!(!parser.has_attribute("notitle"));
         }
 
@@ -4730,7 +4730,7 @@ mod tests {
             assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
             assert!(parser.is_attribute_set("showtitle"));
 
-            // Issue #1139: rejected outright, same as the `ApiOnly` case.
+            // Rejected outright, same as the `ApiOnly` case.
             assert!(!parser.has_attribute("notitle"));
         }
 
