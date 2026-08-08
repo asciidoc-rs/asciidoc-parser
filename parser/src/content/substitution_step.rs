@@ -2089,7 +2089,7 @@ mod tests {
             /// than the block substitution pipeline.
             mod free_standing_text {
                 use super::parser_with_mode;
-                use crate::content::substitute_attributes_in_text;
+                use crate::content::substitution_step::substitute_attributes_in_text;
 
                 #[test]
                 fn drop_removes_line_that_only_contained_the_reference() {
