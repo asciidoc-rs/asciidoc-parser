@@ -1874,8 +1874,9 @@ fn is_asciidoc_file(target: &str) -> bool {
 /// interprets it, it does not need `container`'s directory to make sense of
 /// it.
 ///
-/// A `container` that is itself a URI (a host-supplied [`IncludeFileHandler`]
-/// may fetch remote content, even though this crate's own handlers never
+/// A `container` that is itself a URI (a host-supplied
+/// [`IncludeFileHandler`](crate::parser::IncludeFileHandler) may fetch remote
+/// content, even though this crate's own handlers never
 /// resolve one — see the `remote-fetch-not-planned` note on
 /// [`IncludeFileHandler::resolve_target`]) is joined with [`join_uri_path`],
 /// which folds `target`'s segments into the URI's path *without* disturbing
