@@ -332,6 +332,21 @@ impl<'src> Document<'src> {
         self.header().doctitle()
     }
 
+    /// Return the document title (see [`doctitle`]) with any rendered markup
+    /// stripped down to plain text, mirroring Ruby Asciidoctor's
+    /// `Document#doctitle(sanitize: true)`.
+    ///
+    /// Use this in contexts where markup is not allowed, such as the text of
+    /// a standalone HTML `<title>` element: a title rendered with formatting
+    /// (`*bold*`) or an inline macro (`image:...[]`) has that markup removed
+    /// rather than passed through verbatim. Returns `None` when there is no
+    /// title, matching [`doctitle`].
+    ///
+    /// [`doctitle`]: Self::doctitle
+    pub fn doctitle_sanitized(&self) -> Option<String> {
+        self.header().doctitle_sanitized()
+    }
+
     /// Return the document subtitle, if the document title contained one.
     ///
     /// A subtitle is the text following the final subtitle separator (a colon

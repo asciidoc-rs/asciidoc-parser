@@ -117,10 +117,24 @@ mod default_macros_substitution {
 "#
         );
 
+        // This table row describes the *metadata* lines in a document header
+        // (author and revision information, and attribute-entry values),
+        // which stay on the restricted `Header` substitution group and so
+        // never see macro substitution: an `icon:` macro on the revision
+        // line is left as literal text.
+        let doc = Parser::default().parse("= Title\nJane Doe\nv1, 2025-09-28: icon:heart[]-less");
+
+        let revremark = doc.header().revision_line().unwrap().revremark().unwrap();
+        assert_eq!(revremark, "icon:heart[]-less");
+
+        // The document *title* line itself is not part of this "Headers" row
+        // – it uses `SubstitutionGroup::Title` (the same steps as `Normal`),
+        // so the same `icon:` macro there is rendered (verified against
+        // Asciidoctor 2.0.26).
         let doc = Parser::default().parse("= Title icon:heart[]-less");
 
         let title = doc.header().title().unwrap();
-        assert_eq!(title, "Title icon:heart[]-less");
+        assert_eq!(title, r#"Title <span class="icon">[heart&#93;</span>-less"#);
     }
 
     #[test]
