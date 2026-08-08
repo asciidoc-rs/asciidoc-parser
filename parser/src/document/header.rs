@@ -334,7 +334,27 @@ impl<'src> Header<'src> {
                     implicit_doctitle_str = Some(existing.clone());
                     title = Some(existing);
                 } else {
+                    let warnings_before_implicit_title = parser.substitution_warnings_len();
                     let title_str = apply_title_subs(title_span.data(), parser);
+
+                    // Under `attribute-missing: warn`, a reference to an
+                    // attribute defined later in the header is still
+                    // unresolved at this point in the scan and trips a
+                    // `SkippingReferenceToMissingAttribute` warning here, even
+                    // though the title is re-resolved against the final
+                    // header state below and, in that case, resolves
+                    // correctly. Discard the eager warning whenever that
+                    // later re-resolution will run – i.e. the substituted
+                    // text still contains a `{`, mirroring the condition at
+                    // the re-resolution site below – since that pass raises
+                    // its own warning if the reference is still genuinely
+                    // unresolved once the full header is known. Warnings from
+                    // a fully-resolved title, or from `drop`/`drop-line` mode
+                    // (which does not leave a `{` behind), are left as they
+                    // are not superseded by a later pass.
+                    if title_str.contains('{') {
+                        parser.truncate_substitution_warnings(warnings_before_implicit_title);
+                    }
 
                     parser.set_attribute_by_value_from_header("doctitle", &title_str);
 
