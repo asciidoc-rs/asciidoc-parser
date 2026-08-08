@@ -1044,8 +1044,49 @@ Each phase is a reviewable unit with a clear exit gate.
   paren-wrapped shorthand the string replacer re-renders (`\(((x)))` → `(x)`) is likewise left literal.
   As throughout the additive builder, this performs *no* recognition side effect (the HTML backend
   builds no index, so the string replacer has none to skip either). This step is **additive**: nothing
-  is wired into the parse path. The last macro family (`Footnote`) is a later sub-step; inline `Stem`
-  is handled at passthrough time (step 5), not in the macros step.
+  is wired into the parse path. Inline `Stem` is handled at passthrough time (step 5), not in the
+  macros step.
+
+  *Step 4b(ii) part 4c landed as (`Macros` → `Footnote`, the last macro family):* the builder now
+  recognizes **footnotes** (`footnote:[…]`, `footnote:id[…]`, `footnote:id[]`) as a
+  [`Footnote`](../../parser/src/inlines/footnote.rs) node, folding through the same `render_footnote`
+  the string step calls so the output is byte-for-byte identical (pinned by a new differential
+  corpus). It reuses the string pipeline's *exact* recognition –
+  [`INLINE_FOOTNOTE_MACRO`](../../parser/src/content/macros.rs) is now shared `pub(crate)`, alongside
+  the `normalize_footnote_text` helper – so only the recognition *sink* changes, and runs **last** in
+  `apply_macros`, after cross-references, mirroring the string step's order exactly: a footnote's text
+  is extracted from the flow, so any construct an earlier pass at this same level already recognized
+  (an image, a link, an anchor, an index term, or now a cross-reference) is captured as *that
+  construct's node* rather than being re-recognized from its source text.
+
+  Two things set this increment apart from every prior macro family:
+
+  - **Structured content, not a literal value.** A footnote's bracket content becomes the node's
+    `children` via [`emit_range`](../../parser/src/content/inline_builder.rs) rather than a literal
+    `'src` slice gated by [`range_is_verbatim`](../../parser/src/content/inline_builder.rs) the way a
+    target or display text is elsewhere. A content range crossing an already-recognized construct is
+    therefore *not* a boundary to defer on – nesting is the point, and `emit_range` clones that
+    construct's node whole into the footnote's subtree, exactly mirroring how the string pipeline's
+    footnote text captures an already-substituted macro verbatim.
+  - **One *required* recognition side effect.** Every prior macro family performs *no* recognition
+    side effect (no catalog registration, no warning), deferring that to the cutover (step 6) because
+    omitting it does not change the fold's output bytes. A footnote's marker digits *are* the assigned
+    footnote number, so this pass must call `Parser::footnote_index_for_id` / `Parser::define_footnote`
+    – the same document-counter-advancing calls the string replacer makes – or the differential corpus
+    could never pass. The two code paths never share a `Parser` (each independently numbers footnotes
+    over the same source in the same left-to-right order), so this never double-counts a registration.
+    The registered catalog `text` is a best-effort normalized rendering of the raw bracket content, not
+    a fold (building the tree must not itself invoke a renderer), so – like every other deferred
+    registration in this module – a tree-built footnote's `Document::catalog().footnotes()` entry is
+    not yet byte-faithful; only the returned *number* is relied on.
+
+  Two forms are deferred, each documented and pinned by a divergence test: the deprecated
+  `footnoteref:[id,text]` / `footnoteref:[id]` form (which packs its id and text into one bracket, split
+  differently, and – outside `compat-mode` – raises a deprecation warning neither of which this
+  increment implements), and content carrying an escaped closing bracket (`\]`, which would need
+  splicing a literal `]` into the middle of a `Text` piece the content range slices – a rebuild this
+  increment does not attempt). This step is **additive**: nothing is wired into the parse path. With it,
+  every macro family the recorder covers now has a single-pass counterpart.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -1072,7 +1113,8 @@ Each phase is a reviewable unit with a clear exit gate.
            - ✅ **part 4a.** inline anchors (`[[id]]` / `anchor:id[…]`, `INLINE_ANCHOR`) → `Anchor`.
            - ✅ **part 4b.** index terms (`((term))` / `(((primary, secondary)))` / `indexterm:[…]` /
              `indexterm2:[…]`, `INLINE_INDEXTERM`) → `IndexTerm`.
-           - **part 4c.** `Footnote`.
+           - ✅ **part 4c.** footnotes (`footnote:[…]` / `footnote:id[…]` / `footnote:id[]`,
+             `INLINE_FOOTNOTE_MACRO`) → `Footnote` – the last macro family.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
      `Callouts` – completing the vocabulary the recorder covers.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
