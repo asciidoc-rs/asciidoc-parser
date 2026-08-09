@@ -1932,22 +1932,44 @@ fn join_local_path(container: Option<&str>, target: &str) -> String {
     format!("{root}{}", segments.join("/"))
 }
 
-/// Splits `path` into its root — a Posix `/`, a two-separator UNC/verbatim
-/// prefix (`//` or `\\`), or a Windows drive prefix such as `C:/` or `C:\` —
+/// Splits `path` into its root — a Posix `/`, a UNC/verbatim authority
+/// (`//server/share`), or a Windows drive prefix such as `C:/` or `C:\` —
 /// and the remainder that follows it, normalizing the root to forward
-/// slashes so it composes cleanly with the `/`-joined result
-/// [`join_local_path`] builds around it. A `path` with none of these (a
-/// relative path) has an empty root and is returned unchanged as the
-/// remainder.
+/// slashes (with a single trailing one) so it concatenates directly onto the
+/// `/`-joined result [`join_local_path`] builds around it. A `path` with none
+/// of these (a relative path) has an empty root and is returned unchanged as
+/// the remainder.
 ///
 /// Mirrors what [`is_absolute_path`] treats as absolute, but — unlike that
 /// predicate, which only asks yes/no — also hands back the root text
 /// separately from the rest of the path, so a caller can fold the remainder's
 /// segments (resolving `.`/`..`) without that folding mistaking the root's
-/// own separator(s) for empty segments to drop.
+/// own separator(s) for empty segments to drop, or — for a UNC path — its
+/// server and share components for ordinary foldable segments a `..` could
+/// pop past. A UNC path's authority is exactly two components (`server` and
+/// `share`); Windows requires both, so both are folded into the root here —
+/// leaving either foldable, as an earlier version of this function did,
+/// would let enough `..` segments in the target climb past the share, or even
+/// the server, producing a malformed result such as `//server/other.adoc` or
+/// `//../other.adoc`. The same reasoning is why [`join_uri_path`] carves a
+/// URI's `scheme://host` out as an untouched origin rather than folding it.
 fn path_root(path: &str) -> (String, &str) {
     if path.starts_with("//") || path.starts_with(r"\\") {
-        return ("//".to_owned(), &path[2..]);
+        let rest = &path[2..];
+
+        // Consume the server and share components (each up to its own
+        // trailing separator, or the rest of the string if there is no
+        // further separator) into the root before folding begins.
+        let mut end = 0;
+        for _ in 0..2 {
+            end += match rest[end..].find(['/', '\\']) {
+                Some(index) => index + 1,
+                None => rest.len() - end,
+            };
+        }
+        let authority = rest[..end].trim_end_matches(['/', '\\']).replace('\\', "/");
+
+        return (format!("//{authority}/"), &rest[end..]);
     }
 
     if let Some(rest) = path.strip_prefix(['/', '\\']) {
@@ -5161,6 +5183,35 @@ mod tests {
             assert_eq!(
                 nested_file_name(Some(r"\\server\share\docs\doc.adoc"), "section.adoc"),
                 "//server/share/docs/section.adoc"
+            );
+        }
+
+        // A target with enough `..` segments to climb past a UNC container's
+        // directory must not be able to pop the server or share components
+        // themselves — those are the UNC path's authority, not ordinary
+        // foldable segments. Regression test: an earlier version protected
+        // only the leading `//` and left `server`/`share` in the same
+        // foldable stack as everything else, so three levels of `..` here
+        // (one for `docs`, two more with nothing left to pop but the
+        // authority) would have popped `share` and then `server` too,
+        // producing the malformed `//other.adoc` — losing the authority
+        // outright rather than the harmless (if unresolved) `..` a caller can
+        // still recognize and clean up further, as this fix now produces.
+        #[test]
+        fn unc_authority_cannot_be_climbed_past_with_parent_segments() {
+            assert_eq!(
+                nested_file_name(Some(r"\\server\share\docs\doc.adoc"), "../../../other.adoc"),
+                "//server/share/../../other.adoc"
+            );
+        }
+
+        // A UNC container with nothing below its share still keeps the full
+        // authority as its root.
+        #[test]
+        fn unc_container_with_no_further_path_keeps_the_full_authority() {
+            assert_eq!(
+                nested_file_name(Some(r"\\server\share\doc.adoc"), "chapter.adoc"),
+                "//server/share/chapter.adoc"
             );
         }
     }
