@@ -59,10 +59,13 @@ use crate::{
 /// mirroring every other macro family's escape handling.
 ///
 /// One form is deferred, documented and pinned by a divergence test: a macro
-/// carrying an **explicit substitution list** (`stem:c,q[…]`, whose content
-/// would need a richer subtree than a single `Stem` leaf can hold – the same
-/// reason a `pass:` macro with an explicit list is deferred). This step is
-/// **additive**: nothing is wired into the parse path.
+/// carrying an **explicit substitution list** (`stem:c,q[…]`) – the
+/// analogous `pass:c,q[…]` form is no longer deferred (it renders through
+/// the real substitution pipeline and folds through a single opaque `Raw`
+/// leaf, immune to reprocessing by this builder's own later steps – see
+/// `passthrough_step::apply_passthroughs`'s doc comment), but this
+/// increment hasn't yet picked up the same treatment for `Stem`. This step
+/// is **additive**: nothing is wired into the parse path.
 ///
 /// [`Passthroughs::extract_from`]: crate::content::Passthroughs::extract_from
 /// [`InlineStemMacroReplacer`]: crate::content::passthroughs
@@ -443,9 +446,10 @@ mod tests {
 
     #[test]
     fn a_stem_macro_with_an_explicit_subs_list_is_a_documented_divergence() {
-        // `stem:c[…]` names an explicit substitution list, which would need a
-        // richer subtree than a single `Stem` leaf can hold (the same reason
-        // `pass:c[…]` is deferred) – deferred to a later increment.
+        // `stem:c[…]` names an explicit substitution list. The analogous
+        // `pass:c[…]` form is handled (see `passthrough_step`'s
+        // `build_pass_macro_subs_value`), but `Stem` hasn't picked up the
+        // same treatment yet – deferred to a later increment.
         let source = "stem:c[a < b]";
         let nodes = build_src(Span::new(source));
 
