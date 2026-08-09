@@ -1,5 +1,7 @@
 //! The attribute-references substitution step.
 
+use std::collections::HashMap;
+
 use super::{
     passthrough_step::is_special,
     quotes::{Piece, build_match_string, emit_range, source_slice},
@@ -56,16 +58,42 @@ use crate::{
 /// [`AttributeMissing::DropLine`]: crate::content::AttributeMissing::DropLine
 /// [`AttributeMissing::Skip`]: crate::content::AttributeMissing::Skip
 /// [`AttributeMissing::Warn`]: crate::content::AttributeMissing::Warn
+///
+/// A `counter`/`counter2` directive's advance must happen in true left-to-right
+/// *document* order even though the splicing recursion below visits a
+/// [`Styled`](crate::inlines::Styled) child's content *before* its own level
+/// (so a later sub can match *inside* an earlier span – design note on
+/// [`apply_quotes`](super::quotes::apply_quotes)). Left uncorrected, that
+/// would advance a directive nested in an earlier-positioned span *after* one
+/// that sits later in the same source but outside any span. [`resolve_counters`]
+/// runs first, as a dedicated pass that interleaves this level's own matches
+/// with a `Styled` sibling's nested ones by source position, and records each
+/// directive's resolved value keyed by its absolute source byte offset; the
+/// splicing recursion then looks values up by that same key regardless of the
+/// order it happens to visit levels in.
 pub(super) fn apply_attribute_references<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
+    let mut counters = HashMap::new();
+    resolve_counters(&nodes, root, parser, &mut counters);
+
+    apply_attribute_references_recursive(nodes, root, parser, &counters)
+}
+
+fn apply_attribute_references_recursive<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+    counters: &HashMap<usize, String>,
+) -> Vec<InlineNode<'src>> {
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
         .map(|node| match node {
             InlineNode::Styled(mut styled) => {
-                styled.children = apply_attribute_references(styled.children, root, parser);
+                styled.children =
+                    apply_attribute_references_recursive(styled.children, root, parser, counters);
                 InlineNode::Styled(styled)
             }
 
@@ -73,7 +101,101 @@ pub(super) fn apply_attribute_references<'src>(
         })
         .collect();
 
-    attribute_references_level(nodes, root, parser)
+    attribute_references_level(nodes, root, parser, counters)
+}
+
+/// Resolves every `counter`/`counter2` directive in `nodes` (recursively,
+/// including inside a [`Styled`](crate::inlines::Styled) child's own content)
+/// via [`Parser::counter`], in genuine left-to-right document order, and
+/// records each one's advanced value in `out`, keyed by the directive's
+/// absolute source byte offset.
+///
+/// At each level this merges two kinds of event by source position – a
+/// counter match found directly at this level, and a `Styled` sibling's own
+/// placeholder position (a recursion point) – so a directive nested inside an
+/// *earlier* sibling span is resolved before a *later* plain-text directive
+/// at this same level, and vice versa. See [`apply_attribute_references`]'s
+/// doc comment for why this must be a separate pass from the splicing
+/// recursion.
+fn resolve_counters<'nodes, 'src>(
+    nodes: &'nodes [InlineNode<'src>],
+    root: Span<'src>,
+    parser: &Parser,
+    out: &mut HashMap<usize, String>,
+) {
+    let (s, pieces) = build_match_string(nodes);
+
+    // A counter match's `name`/`seed` borrow from `s`, a local match string
+    // that does not outlive this call, so they are owned rather than
+    // borrowed; a `Recurse` event's `children` borrows from `nodes` itself
+    // (`'nodes`), a distinct, longer-lived borrow.
+    enum Event<'nodes, 'src> {
+        Counter {
+            start: usize,
+            name: String,
+            seed: Option<String>,
+        },
+        Recurse {
+            start: usize,
+            children: &'nodes [InlineNode<'src>],
+        },
+    }
+
+    let mut events: Vec<Event<'nodes, 'src>> = Vec::new();
+
+    if s.contains('{') {
+        for caps in ATTRIBUTE_REFERENCE.captures_iter(&s) {
+            // An escaped directive (`\{counter:n}`) does not advance.
+            if caps.get(1).is_some() || caps.get(5).is_some() {
+                continue;
+            }
+
+            if caps.get(2).is_none() {
+                continue;
+            }
+
+            #[allow(clippy::unwrap_used)]
+            let expr = caps.get(3).unwrap().as_str();
+            #[allow(clippy::unwrap_used)]
+            let start = caps.get(0).unwrap().start();
+
+            let mut parts = expr.splitn(2, ':');
+            let name = parts.next().unwrap_or_default().to_string();
+            let seed = parts.next().map(str::to_string);
+
+            events.push(Event::Counter { start, name, seed });
+        }
+    }
+
+    for (node, piece) in nodes.iter().zip(&pieces) {
+        if let InlineNode::Styled(styled) = node {
+            events.push(Event::Recurse {
+                start: piece.s_start,
+                children: &styled.children,
+            });
+        }
+    }
+
+    // Both sources are already individually sorted by position (regex matches
+    // are found left to right; a piece's `s_start` strictly increases as
+    // `nodes` is walked in order), so this merges rather than reorders either.
+    events.sort_by_key(|event| match event {
+        Event::Counter { start, .. } | Event::Recurse { start, .. } => *start,
+    });
+
+    for event in events {
+        match event {
+            Event::Counter { start, name, seed } => {
+                let value = parser.counter(&name, seed.as_deref());
+                let offset = source_slice(&pieces, start..start, root).byte_offset();
+                out.insert(offset, value);
+            }
+
+            Event::Recurse { children, .. } => {
+                resolve_counters(children, root, parser, out);
+            }
+        }
+    }
 }
 
 /// One attribute-reference match at a level, in absolute match-string byte
@@ -99,21 +221,25 @@ enum AttributeMatchKind {
     /// kinds the language leaves unclear – see `AttributeReplacer`).
     Expand { value: String },
 
-    /// A `counter`/`counter2` directive: the named counter has already been
-    /// advanced (via [`Parser::counter`]) by the time this match is recorded.
-    /// `counter` splices its new `value` in, classified by
-    /// [`split_attribute_value`]; `counter2` (`display: false`) advances
-    /// silently and splices nothing.
-    Counter { display: bool, value: String },
+    /// A `counter`/`counter2` directive: the named counter's advanced value is
+    /// looked up from [`resolve_counters`]'s output (keyed by this match's
+    /// absolute source offset), *not* resolved here – see
+    /// [`apply_attribute_references`]'s doc comment for why resolution must
+    /// happen as a separate, document-order pass. `counter` splices the
+    /// looked-up value in, classified by [`split_attribute_value`];
+    /// `counter2` (`display: false`) advances silently and splices nothing.
+    Counter { display: bool },
 }
 
 /// Matches [`ATTRIBUTE_REFERENCE`] over this level's escaped text, replacing
 /// each recognized match with the node(s) it produces and leaving everything
-/// else in place.
+/// else in place. `counters` supplies each `counter`/`counter2` directive's
+/// already-resolved value (see [`resolve_counters`]).
 fn attribute_references_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    counters: &HashMap<usize, String>,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -129,16 +255,15 @@ fn attribute_references_level<'src>(
         return nodes;
     }
 
-    rebuild_attribute_level(&nodes, &pieces, &s, &matches, root)
+    rebuild_attribute_level(&nodes, &pieces, &s, &matches, root, counters)
 }
 
 /// Finds every non-overlapping [`ATTRIBUTE_REFERENCE`] match in the escaped
 /// match string `s`, left to right, exactly as the string pipeline's
-/// `replace_all` does (and, for a `counter`/`counter2` directive, advances the
-/// named counter in that same left-to-right order via [`Parser::counter`], so
-/// a repeated `{counter:n}` on one level numbers identically to the string
-/// pipeline). A reference to a missing attribute is left out of the returned
-/// list entirely – see the deferred forms documented on
+/// `replace_all` does. A `counter`/`counter2` directive is recorded as a
+/// match here but not yet resolved (see [`AttributeMatchKind::Counter`]); a
+/// reference to a missing attribute is left out of the returned list
+/// entirely – see the deferred forms documented on
 /// [`apply_attribute_references`].
 fn find_attribute_matches(s: &str, parser: &Parser) -> Vec<AttributeMatch> {
     let mut matches = Vec::new();
@@ -167,22 +292,13 @@ fn find_attribute_matches(s: &str, parser: &Parser) -> Vec<AttributeMatch> {
         // A `counter`/`counter2` directive resolves *and advances* the named
         // counter rather than looking up an existing attribute – mirroring
         // `AttributeReplacer`'s own counter branch exactly, including which
-        // directive spelling displays the new value.
+        // directive spelling displays the new value. The value itself was
+        // already resolved by `resolve_counters`.
         if let Some(directive) = caps.get(2) {
-            // Group 3 always participates when group 2 does (same
-            // alternation branch). The expression is `name` or `name:seed`.
-            #[allow(clippy::unwrap_used)]
-            let mut parts = caps.get(3).unwrap().as_str().splitn(2, ':');
-            let name = parts.next().unwrap_or_default();
-            let seed = parts.next();
-
-            let value = parser.counter(name, seed);
-
             matches.push(AttributeMatch {
                 full,
                 kind: AttributeMatchKind::Counter {
                     display: directive.as_str() == "counter",
-                    value,
                 },
             });
 
@@ -219,13 +335,15 @@ fn find_attribute_matches(s: &str, parser: &Parser) -> Vec<AttributeMatch> {
 /// Rebuilds a level's node list from its attribute-reference matches: each gap
 /// keeps its original nodes; each match becomes its unescaped literal text (an
 /// [`Unescape`](AttributeMatchKind::Unescape)) or its classified expansion (an
-/// [`Expand`](AttributeMatchKind::Expand)).
+/// [`Expand`](AttributeMatchKind::Expand)). `counters` supplies each
+/// [`Counter`](AttributeMatchKind::Counter) match's already-resolved value.
 fn rebuild_attribute_level<'src>(
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     s: &str,
     matches: &[AttributeMatch],
     root: Span<'src>,
+    counters: &HashMap<usize, String>,
 ) -> Vec<InlineNode<'src>> {
     let mut out = Vec::new();
     let mut cursor = 0usize;
@@ -258,7 +376,7 @@ fn rebuild_attribute_level<'src>(
                 cursor = m.full.end;
             }
 
-            AttributeMatchKind::Counter { display, value } => {
+            AttributeMatchKind::Counter { display } => {
                 emit_range(nodes, pieces, cursor..m.full.start, &mut out);
 
                 // `counter2` advances silently: the match is consumed but
@@ -266,6 +384,16 @@ fn rebuild_attribute_level<'src>(
                 // directive-name check.
                 if *display {
                     let location = source_slice(pieces, m.full.clone(), root);
+
+                    // `resolve_counters` records a value for every counter
+                    // match this same regex finds, keyed by this exact
+                    // absolute offset, so the lookup always hits; an empty
+                    // fallback only guards against the two passes somehow
+                    // disagreeing, which would itself be a bug.
+                    let value = counters
+                        .get(&location.byte_offset())
+                        .map(String::as_str)
+                        .unwrap_or_default();
                     split_attribute_value(value, location, &mut out);
                 }
 
@@ -632,6 +760,12 @@ mod tests {
             // Next to plain text, and inside a rendered span.
             "page {counter:page} of many",
             "*{counter:n}*",
+            // A directive outside a span and one nested inside it, in both
+            // relative orders – regression coverage for `resolve_counters`'s
+            // document-order pass (see
+            // `a_counter_directive_advances_in_true_document_order_across_a_span_boundary`).
+            "{counter:n} *{counter:n}*",
+            "*{counter:n}* {counter:n}",
             // An escaped directive stays literal and does not advance.
             "\\{counter:n} {counter:n}",
         ];
@@ -682,6 +816,35 @@ mod tests {
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
             "9",
+            "{nodes:?}"
+        );
+    }
+
+    #[test]
+    fn a_counter_directive_advances_in_true_document_order_across_a_span_boundary() {
+        // Regression test: `apply_attribute_references` (called recursively
+        // by `apply_attribute_references_recursive`) resolves a `Styled`
+        // child's own content *before* its own level, so a naive
+        // find-then-advance at match time would advance the directive nested
+        // in the *later* span before the plain directive that precedes it in
+        // the source – reversing the numbering. `resolve_counters` fixes this
+        // by resolving every directive, across the whole tree, in one
+        // document-order pass first.
+        let nodes = build(Span::new("{counter:n} *{counter:n}*"), &Parser::default());
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "1 <strong>2</strong>",
+            "{nodes:?}"
+        );
+
+        // The reverse arrangement (the span comes first in the source) must
+        // stay correct too.
+        let nodes = build(Span::new("*{counter:n}* {counter:n}"), &Parser::default());
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "<strong>1</strong> 2",
             "{nodes:?}"
         );
     }

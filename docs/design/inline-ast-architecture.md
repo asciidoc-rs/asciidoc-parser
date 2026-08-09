@@ -1166,23 +1166,42 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Follow-up landed as (the `counter`/`counter2` directive):*
   [`find_attribute_matches`](../../parser/src/content/inline_builder/attribute_refs.rs) now recognizes a
-  `counter`/`counter2` directive (`{counter:name}`, `{counter2:name:seed}`) in the same left-to-right
-  sweep as every other reference, resolving *and advancing* the named counter via the parser's own
-  [`counter`](../../parser/src/parser/parser.rs) method – the exact call `AttributeReplacer`'s counter
-  branch makes – so the digits this step produces are the real, advanced sequence, not a placeholder. This
-  is the same **required side effect** the footnote increment (part 4c) already established a precedent
-  for: unlike every other macro family's catalog/warning side effect, a directive's resolved *value* is
-  the number itself, so it cannot be deferred to the cutover without producing wrong output now. `counter`
-  splices its new value in, classified by the same
+  `counter`/`counter2` directive (`{counter:name}`, `{counter2:name:seed}`), resolving *and advancing* the
+  named counter via the parser's own [`counter`](../../parser/src/parser/parser.rs) method – the exact call
+  `AttributeReplacer`'s counter branch makes – so the digits this step produces are the real, advanced
+  sequence, not a placeholder. This is the same **required side effect** the footnote increment (part 4c)
+  already established a precedent for: unlike every other macro family's catalog/warning side effect, a
+  directive's resolved *value* is the number itself, so it cannot be deferred to the cutover without
+  producing wrong output now. `counter` splices its new value in, classified by the same
   [`split_attribute_value`](../../parser/src/content/inline_builder/attribute_refs.rs) every other resolved
   reference uses; `counter2` advances silently and splices nothing, mirroring which directive spelling
-  `AttributeReplacer` displays. Because this additive builder is not yet wired into any real parse, its own
-  `Parser` is never the one the authoritative string pipeline advances, so a differential fixture is free
-  to build and fold against one independent default parser and compare against the golden string pipeline's
-  own independent parser – exactly the two-independent-parsers discipline the footnote differential corpus
-  already established – without the two sequences crossing over. The two forms 5b's own landed-as note
-  still documents as deferred – a missing attribute under `Drop`/`DropLine`, and a construct inside an
-  expanded value – remain outstanding.
+  `AttributeReplacer` displays.
+
+  A review caught a genuine ordering bug in the first version of this follow-up:
+  [`apply_attribute_references`](../../parser/src/content/inline_builder/attribute_refs.rs) recurses into a
+  `Styled` child's own content *before* processing its own level (so a later quote sub can match *inside*
+  an earlier span – §4.1's nesting note), which means a directive nested in a span is, by construction,
+  advanced *before* a plain-text directive that precedes that span in the source – reversing the numbering
+  whenever a directive and a sibling span's own nested directive interleave (`{counter:n} *{counter:n}*`
+  numbered `2`, then `1`, backwards). The fix is a dedicated
+  [`resolve_counters`](../../parser/src/content/inline_builder/attribute_refs.rs) pass that runs once, before
+  the splicing recursion: it merges, by source position, a level's own directive matches with its `Styled`
+  siblings' placeholder positions (recursing into a sibling exactly when the merge reaches it), so every
+  directive across the whole tree is advanced in true left-to-right document order regardless of nesting.
+  Each resolved value is recorded keyed by the directive's absolute source byte offset, so the (unchanged)
+  splicing recursion – which still visits levels in its own, differently-ordered sequence – looks values up
+  by that stable key instead of resolving them itself, and the two passes agree because a `Styled` node's
+  own placeholder occupies exactly one codepoint in its parent's match string regardless of what its
+  (already-spliced-or-not) children contain, so recursion order never perturbs a parent level's own byte
+  offsets.
+
+  Because this additive builder is not yet wired into any real parse, its own `Parser` is never the one the
+  authoritative string pipeline advances, so a differential fixture is free to build and fold against one
+  independent default parser and compare against the golden string pipeline's own independent parser –
+  exactly the two-independent-parsers discipline the footnote differential corpus already established –
+  without the two sequences crossing over. The two forms 5b's own landed-as note still documents as
+  deferred – a missing attribute under `Drop`/`DropLine`, and a construct inside an expanded value – remain
+  outstanding.
 
   *Step 5c landed as (`Callouts` → `Callout`, verbatim-group content):* a new
   [`apply_callouts`](../../parser/src/content/inline_builder.rs) step recognizes a trailing callout
