@@ -609,6 +609,39 @@ mod tests {
     }
 
     #[test]
+    fn registers_an_image_nested_inside_a_refs_display_children() {
+        // A `Ref`'s display children can hold an `Image` too – `apply_macros`
+        // itself descends into a `Ref`'s own children before matching at its
+        // level (see `apply_macros_recognizes_a_macro_inside_reference_children`
+        // in `macros/mod.rs`'s own tests), so a hand-built `Ref` exercises the
+        // same container here.
+        use crate::inlines::{Ref, RefVariant};
+
+        let root = Span::new("image:a.png[]");
+        let image = build_with(root, &Parser::default());
+        assert_eq!(image.len(), 1);
+
+        let reference = InlineNode::Ref(Ref {
+            variant: RefVariant::Link,
+            target: CowStr::from("https://example.org"),
+            children: image,
+            roles: vec![],
+            window: None,
+            resolved: None,
+            derived: None,
+            location: root,
+        });
+
+        let parser = Parser::default().with_catalog_assets(true);
+        apply_image_side_effects(std::slice::from_ref(&reference), &parser, root);
+
+        let catalog = parser.catalog();
+        let images = catalog.images();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].target, "a.png");
+    }
+
+    #[test]
     fn matches_the_golden_pipelines_registration_for_a_broad_fixture_set() {
         // Each fixture uses its own pair of *independent* parsers (design
         // §5.3's two-independent-parsers discipline, already established by
