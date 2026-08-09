@@ -2,15 +2,75 @@
 
 use super::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level};
 use crate::{
-    Span,
+    Parser, Span,
     content::{
         INLINE_XREF,
         inline_builder::quotes::{Piece, build_match_string, source_slice},
-        xref_target::{XrefTarget, interpret_xref_target},
+        xref_target::{
+            XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
+        },
     },
     inlines::{InlineNode, Ref, RefVariant},
+    parser::DerivedReference,
     strings::CowStr,
 };
+
+/// Interprets a cross-reference `target` and computes the pieces the [`Ref`]
+/// node needs to render it, mirroring
+/// [`InlineXrefReplacer::replace_append`](crate::content::macros)'s own target
+/// interpretation exactly so the fold reproduces the same bytes:
+///
+/// - a same-document reference to a specific id resolves through the catalog
+///   later, so it carries no *derived* destination (`derived: None`);
+/// - the empty target (`xref:#[]`, `<<>>`) names the current document as a
+///   whole, and a target naming another document – or a file that was
+///   included into this one in full, which is a reference within it after all
+///   – carries a destination *derived* from the target itself, computed here
+///   from the path attributes in effect at the reference (no catalog
+///   consulted).
+///
+/// The returned target is the node's `Ref::target` (see its field docs): the
+/// interpreted id for a same-document reference, the fragment for a
+/// same-document inclusion, or the raw target as written for a genuine
+/// inter-document reference.
+fn xref_target_and_derived(
+    raw_target: &str,
+    macro_form: bool,
+    parser: &Parser,
+) -> (String, Option<DerivedReference>) {
+    match interpret_xref_target(raw_target, macro_form) {
+        XrefTarget::SameDocument(id) if id.is_empty() => {
+            (id, Some(this_document_reference(parser)))
+        }
+
+        XrefTarget::SameDocument(id) => (id, None),
+
+        // A target that names *this* document, or a file that was included
+        // into it in full, is a reference within it after all.
+        XrefTarget::OtherDocument {
+            path,
+            source,
+            fragment,
+        } if source
+            && (parser.docname().as_deref() == Some(path.as_str())
+                || parser.catalog_include_is_full(&path)) =>
+        {
+            match fragment {
+                Some(fragment) => (fragment, None),
+                None => (String::new(), Some(this_document_reference(parser))),
+            }
+        }
+
+        XrefTarget::OtherDocument {
+            path,
+            source,
+            fragment,
+        } => {
+            let derived = other_document_reference(parser, &path, source, fragment.as_deref());
+            (raw_target.to_string(), Some(derived))
+        }
+    }
+}
 
 /// Matches `INLINE_XREF` at this level's escaped text, replacing each
 /// recognized `xref:` macro with the [`Ref`](InlineNode::Ref)`{Xref}` node it
@@ -18,6 +78,7 @@ use crate::{
 pub(super) fn xref_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -31,7 +92,7 @@ pub(super) fn xref_macros_level<'src>(
         return nodes;
     }
 
-    let matches = find_xref_matches(&s, &pieces, root);
+    let matches = find_xref_matches(&s, &pieces, root, parser);
 
     if matches.is_empty() {
         return nodes;
@@ -44,7 +105,12 @@ pub(super) fn xref_macros_level<'src>(
 /// form and the `<<id>>` shorthand – skipping any match that is not verbatim
 /// enough to slice from `'src` or that this increment defers (see
 /// [`build_xref_node`] and [`build_xref_shorthand_node`]).
-fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<MacroMatch<'src>> {
+fn find_xref_matches<'src>(
+    s: &str,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
     for caps in INLINE_XREF.captures_iter(s) {
@@ -91,8 +157,8 @@ fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
         }
 
         let node = match &shorthand_inner {
-            Some(inner) => build_xref_shorthand_node(inner.clone(), &full, pieces, root),
-            None => build_xref_node(&caps, &full, pieces, root),
+            Some(inner) => build_xref_shorthand_node(inner.clone(), &full, pieces, root, parser),
+            None => build_xref_node(&caps, &full, pieces, root, parser),
         };
 
         match node {
@@ -104,9 +170,9 @@ fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
                 full,
             }),
 
-            // A form this increment defers (an inter-document target, an
-            // attribute-list-in-text macro, or a degenerate shorthand – see the
-            // two builders) is left as literal source for a later increment.
+            // A form this increment defers (an attribute-list-in-text macro or
+            // a degenerate shorthand – see the two builders) is left as
+            // literal source for a later increment.
             None => continue,
         }
     }
@@ -119,13 +185,17 @@ fn find_xref_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
 /// replacer does so the fold reproduces the same bytes. Returns `None` for a
 /// form this increment defers.
 ///
-/// The scope this builder claims is the **same-document** `xref:` macro form
-/// (`xref:id[]`, `xref:id[Reference Text]`); the `<<id>>` shorthand is built by
-/// [`build_xref_shorthand_node`]. Two macro-form targets are deferred, each to
-/// a later increment:
+/// The scope this builder claims is every macro-form target *except* a text
+/// carrying an attribute list; the `<<id>>` shorthand is built by
+/// [`build_xref_shorthand_node`]. A same-document reference to a specific id
+/// (`xref:install[]`) resolves through the catalog later (`derived: None`);
+/// the empty target (`xref:#[]`), a target naming another document
+/// (`xref:other.adoc#frag[]`), and a target naming this document (or a file
+/// included into it in full) all carry a destination *derived* from the
+/// target itself, computed by [`xref_target_and_derived`] exactly as the
+/// string replacer computes it – so this builder no longer defers any target
+/// shape. One form remains deferred to a later increment:
 ///
-/// - an **inter-document** target (`xref:other.adoc#frag[]`): its rendering
-///   needs a *derived* destination the [`Ref`] node does not carry;
 /// - a **text carrying an attribute list** (an `=`, for `window`/`role`/
 ///   `xrefstyle`): it is parsed as an [`Attrlist`](crate::attributes::Attrlist)
 ///   the node cannot hold yet, exactly as
@@ -147,27 +217,13 @@ fn build_xref_node<'src>(
     full: &std::ops::Range<usize>,
     pieces: &[Piece],
     root: Span<'src>,
+    parser: &Parser,
 ) -> Option<InlineNode<'src>> {
     // Group 3 is the `xref:` macro target; when it is absent the match is the
     // shorthand form, which this increment defers.
     let raw_target = caps.get(3)?.as_str();
 
-    // This increment recognizes only same-document references. An empty target
-    // (`xref:#[]`) points at the document as a whole – which carries a derived
-    // destination – and an inter-document target needs one too; both are
-    // deferred.
-    //
-    // The node's `target` is the *interpreted* id (a leading `#` stripped:
-    // `#install` → `install`), not the raw source spelling. This is deliberate:
-    // it is the value the renderer builds the `href` from and the value
-    // resolution keys on, so it matches both the string pipeline's rendering and
-    // the recorder tree's `target` (which stores the same interpreted value) –
-    // storing the raw `#install` would fold to `href="##install"` and break
-    // parity. See the `Ref::target` field docs.
-    let target = match interpret_xref_target(raw_target, true) {
-        XrefTarget::SameDocument(id) if !id.is_empty() => id,
-        _ => return None,
-    };
+    let (target, derived) = xref_target_and_derived(raw_target, true, parser);
 
     let raw_text = caps.get(4).map_or("", |m| m.as_str());
 
@@ -216,6 +272,7 @@ fn build_xref_node<'src>(
         roles: vec![],
         window: None,
         resolved: None,
+        derived,
         location,
     }))
 }
@@ -235,14 +292,16 @@ fn build_xref_node<'src>(
 /// provided" – the bracketed `[id]` fallback), and the whole `<<…>>` – its
 /// `CharRef` delimiters included – is the node's `location`.
 ///
-/// The scope this builder claims is the **same-document** shorthand
-/// (`<<id>>`, `<<id,Reference Text>>`). Three forms are deferred, each left as
-/// literal source for a later increment and pinned by a divergence test:
+/// The scope this builder claims is every shorthand target *except* one whose
+/// reference text is present but empty. A same-document shorthand
+/// (`<<install>>`) resolves through the catalog later (`derived: None`); an
+/// inter-document shorthand (`<<other#frag>>`) and the document-as-a-whole
+/// shorthand (`<<>>`, an empty id) both carry a destination *derived* from the
+/// target itself, computed by [`xref_target_and_derived`] exactly as the macro
+/// form's – so this builder no longer defers any target shape. One form
+/// remains deferred, left as literal source for a later increment and pinned
+/// by a divergence test:
 ///
-/// - an **inter-document** shorthand (`<<other#frag>>`): like the macro form,
-///   it needs a *derived* destination the [`Ref`] node does not carry;
-/// - a **document-as-a-whole** shorthand (`<<>>`, an empty id): it too resolves
-///   through a derived destination;
 /// - a **`<<id,>>` with an empty reference text**: the string replacer records
 ///   this as a *present-but-empty* text (rendering an empty `<a>…</a>`), which
 ///   an empty child vector cannot distinguish from "no text provided" – so the
@@ -262,6 +321,7 @@ fn build_xref_shorthand_node<'src>(
     full: &std::ops::Range<usize>,
     pieces: &[Piece],
     root: Span<'src>,
+    parser: &Parser,
 ) -> Option<InlineNode<'src>> {
     // The inner is verbatim (the caller checked), so its source slice's bytes
     // coincide with the match string's – a byte offset within `inner_data` maps
@@ -277,13 +337,7 @@ fn build_xref_shorthand_node<'src>(
         None => inner_data,
     };
 
-    // Only same-document shorthands are claimed. An inter-document target
-    // (`<<other#frag>>`) carries a derived destination, and an empty id
-    // (`<<>>`) names the document as a whole (also derived); both are deferred.
-    let target = match interpret_xref_target(raw_id.trim(), false) {
-        XrefTarget::SameDocument(id) if !id.is_empty() => id,
-        _ => return None,
-    };
+    let (target, derived) = xref_target_and_derived(raw_id.trim(), false, parser);
 
     let location = source_slice(pieces, full.clone(), root);
 
@@ -322,6 +376,7 @@ fn build_xref_shorthand_node<'src>(
         roles: vec![],
         window: None,
         resolved: None,
+        derived,
         location,
     }))
 }
@@ -383,10 +438,11 @@ mod tests {
         // For each fixture, folding the single-pass tree (all five steps)
         // reproduces the string pipeline's output byte-for-byte. This is the
         // differential corpus (design §5.3) that pins the cross-reference
-        // increment. Every fixture is a *verbatim*, same-document cross-reference
-        // in either spelling – the boundary this increment claims (an
-        // inter-document target, a document-as-a-whole reference, an
-        // attribute-list text, and a shorthand crossing a special/span are
+        // increment. Every fixture is a *verbatim* cross-reference in either
+        // spelling, whether it resolves through the catalog (same-document) or
+        // through a target-derived destination (inter-document, or the
+        // document-as-a-whole form) – the boundary this increment claims (an
+        // attribute-list text, and a shorthand crossing a special/span, are
         // deferred and live in divergence tests below).
         let fixtures = [
             // No cross-reference despite macro-ish characters.
@@ -399,6 +455,13 @@ mod tests {
             "xref:sect-one[Section One]",
             // An explicit same-document reference (`#id`).
             "xref:#install[Install]",
+            // An inter-document target – with and without a fragment, and a
+            // non-AsciiDoc extension kept as-is – and the document-as-a-whole
+            // form (an empty target).
+            "xref:other.adoc#frag[Elsewhere]",
+            "xref:other.adoc[]",
+            "xref:refcard.pdf[Reference Card]",
+            "xref:#[]",
             // An escaped `]` inside the text is unescaped.
             "xref:foo[a\\]b]",
             // A macro embedded in surrounding flow, and next to other constructs.
@@ -420,6 +483,11 @@ mod tests {
             "<<a.b.c>>",
             // The id and reference text are each trimmed around the comma.
             "<< spaced , Trimmed Text >>",
+            // An inter-document shorthand – with and without a fragment – and
+            // the document-as-a-whole shorthand (an empty id).
+            "<<other#frag,Elsewhere>>",
+            "<<other#>>",
+            "<<>>",
             // A shorthand embedded in surrounding flow, and next to other
             // constructs; and both spellings together.
             "See <<install>> now.",
@@ -635,39 +703,56 @@ mod tests {
     }
 
     #[test]
-    fn an_inter_document_xref_shorthand_is_a_documented_divergence() {
-        // An inter-document shorthand target (`other#frag`) renders through a
-        // *derived* destination the `Ref` node does not carry, so the builder
-        // defers it (left literal), exactly as it defers the inter-document
-        // `xref:` macro form.
+    fn an_inter_document_xref_shorthand_becomes_a_ref_node() {
+        // An inter-document shorthand target (`other#frag`) carries a *derived*
+        // destination computed from the target itself, exactly as the
+        // inter-document `xref:` macro form does.
         let source = "<<other#frag,Elsewhere>>";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an inter-document shorthand must be left unrecognized: {nodes:?}"
-        );
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "other#frag");
+        assert_eq!(link_text_of(reference), "Elsewhere");
+        assert_eq!(reference.resolved, None);
 
-        // The string pipeline, by contrast, *does* build a reference here.
-        assert!(golden_xref(source).contains("<a href"));
+        #[allow(clippy::expect_used)]
+        let derived = reference
+            .derived
+            .as_ref()
+            .expect("an inter-document shorthand carries a derived destination");
+        assert_eq!(derived.href, "other.html#frag");
+        assert_eq!(derived.text, "other.html");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
     }
 
     #[test]
-    fn an_empty_xref_shorthand_is_a_documented_divergence() {
+    fn an_empty_xref_shorthand_becomes_a_ref_node() {
         // `<<>>` names the document as a whole: an empty id that resolves through
-        // a *derived* destination the `Ref` node does not carry, so the builder
-        // defers it (left literal), exactly as it defers the empty `xref:#[]`
-        // macro form.
+        // a *derived* destination computed from the document's own attributes,
+        // exactly as the empty `xref:#[]` macro form does.
         let source = "<<>>";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an empty shorthand must be left unrecognized: {nodes:?}"
-        );
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "");
+        assert!(reference.children.is_empty());
+        assert_eq!(reference.resolved, None);
 
-        // The string pipeline, by contrast, *does* build a reference here.
-        assert!(golden_xref(source).contains("<a href"));
+        #[allow(clippy::expect_used)]
+        let derived = reference
+            .derived
+            .as_ref()
+            .expect("a document-as-a-whole shorthand carries a derived destination");
+        assert_eq!(derived.href, "#");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
     }
 
     #[test]
@@ -710,20 +795,36 @@ mod tests {
     }
 
     #[test]
-    fn an_inter_document_xref_is_a_documented_divergence() {
-        // An inter-document target (`other.adoc#frag`) renders through a
-        // *derived* destination the `Ref` node does not carry, so the single-pass
-        // builder defers it to a later increment (left literal).
+    fn an_inter_document_xref_becomes_a_ref_node() {
+        // An inter-document target (`other.adoc#frag`) carries a *derived*
+        // destination computed from the target itself – the AsciiDoc extension
+        // stripped, the output suffix substituted in – mirroring the string
+        // replacer's own target interpretation exactly.
         let source = "xref:other.adoc#frag[Elsewhere]";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an inter-document xref must be left unrecognized: {nodes:?}"
-        );
+        let reference = assert_xref(&nodes[0]);
 
-        // The string pipeline, by contrast, *does* build a reference here.
-        assert!(golden_xref(source).contains("<a href"));
+        // Unlike a same-document reference, the node's target is the raw target
+        // as written, not an interpreted id (see the `Ref::target` field docs).
+        assert_eq!(reference.target.as_ref(), "other.adoc#frag");
+        assert_eq!(link_text_of(reference), "Elsewhere");
+        assert_eq!(reference.resolved, None);
+
+        #[allow(clippy::expect_used)]
+        let derived = reference
+            .derived
+            .as_ref()
+            .expect("an inter-document xref carries a derived destination");
+        assert_eq!(derived.href, "other.html#frag");
+        assert_eq!(derived.text, "other.html");
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        assert!(
+            folded.contains(r#"href="other.html#frag""#),
+            "folded: {folded}"
+        );
+        assert_eq!(folded, golden_xref(source));
     }
 
     #[test]
@@ -765,21 +866,51 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_same_document_xref_is_a_documented_divergence() {
+    fn an_empty_same_document_xref_becomes_a_ref_node() {
         // `xref:#[]` names the document as a whole: an empty same-document id
         // that resolves through a *derived* destination (`this_document_
-        // reference`) the `Ref` node does not carry, so the builder defers it to
-        // a later increment (left literal) exactly as it defers an inter-document
-        // target.
+        // reference`), computed from the document's own attributes without
+        // consulting any catalog.
         let source = "xref:#[]";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an empty same-document xref must be left unrecognized: {nodes:?}"
-        );
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "");
+        assert!(reference.children.is_empty());
+        assert_eq!(reference.resolved, None);
 
-        // The string pipeline, by contrast, *does* build a reference here.
-        assert!(golden_xref(source).contains("<a href"));
+        #[allow(clippy::expect_used)]
+        let derived = reference
+            .derived
+            .as_ref()
+            .expect("a document-as-a-whole xref carries a derived destination");
+        assert_eq!(derived.href, "#");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
+    }
+
+    #[test]
+    fn a_this_document_xref_target_is_treated_as_same_document() {
+        // A target naming *this* document by its own `docname` (or a file
+        // included into it in full) is a reference within it after all: the
+        // element it names is in the catalog being built right now, so the node
+        // carries the same-document target (the fragment) with no derived
+        // destination – exactly as an explicit `#id` shorthand does.
+        let parser = Parser::default().with_primary_file_name("mydoc.adoc");
+
+        let source = "xref:mydoc.adoc#install[Install]";
+        let root = Span::new(source);
+        let nodes = super::super::super::build(root, &parser);
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(reference.derived, None);
+
+        let folded = super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+        assert!(folded.contains(r##"href="#install""##), "folded: {folded}");
+        assert_eq!(folded, golden_xref_with(source, &parser));
     }
 }

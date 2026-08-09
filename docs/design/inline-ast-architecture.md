@@ -982,6 +982,40 @@ Each phase is a reviewable unit with a clear exit gate.
   text – remain for a later increment (part 3c), which needs new `Ref` fields pinned against a
   consumer.
 
+  *Step 4b(ii) part 3c landed as (`Ref` grows a `derived` field, closing the inter-document half):*
+  part 3c turned out to split cleanly along its own two deferred forms – an inter-document/
+  document-as-a-whole target needs only a *destination* the node can carry opaquely (the exact
+  `DerivedReference` type [`ResolutionContext`](../../parser/src/parser/reference_resolver.rs)
+  already produces for the string pipeline's own non-catalog case), while an attribute-list-bearing
+  display text needs the node to parse and hold `window`/`role`/`xrefstyle`. The first needed no
+  "consumer" to pin its shape – it is a straight reuse of an existing, already-public type – so it
+  lands now; the second (part 3c's attribute-list half) remains deferred, still needing a real
+  consumer to pin how (or whether) `Ref` grows an `Attrlist<'src>`.
+  [`Ref`](../../parser/src/inlines/ref_node.rs) gains `derived: Option<DerivedReference>` –
+  `None` for a same-document reference (unchanged: still resolves through the catalog at the
+  cutover) and `always None` for a [`Link`](../../parser/src/inlines/ref_node.rs), populated only
+  for a cross-reference whose target carries its own destination. A new
+  `xref_target_and_derived` helper in
+  [`xref.rs`](../../parser/src/content/inline_builder/macros/xref.rs) mirrors
+  `InlineXrefReplacer::replace_append`'s own target-interpretation match *exactly* – including its
+  "a target naming this document, or a file included into it in full, is a same-document reference
+  after all" special case (`Parser::docname`/`Parser::catalog_include_is_full`) – so both the
+  `xref:` macro form and the `<<id>>` shorthand (which shares the helper, differing only in
+  `macro_form`) now recognize every target shape: a same-document id, an inter-document target
+  (`xref:other.adoc#frag[]`, `<<other#frag>>`), and the document-as-a-whole form (`xref:#[]`,
+  `<<>>`). [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) reconstructs
+  `XrefRenderParams.derived` straight from the node, so a derived-carrying reference now folds
+  through `render_xref`'s `(None, Some(derived))` branch instead of the unresolved fallback,
+  byte-for-byte identical to the string pipeline (`xrefstyle` stays `None` – it plays no part in
+  that branch, and the attribute-list half that would populate it for other cases is still
+  deferred). As throughout this module, this performs *no* recognition side effect and nothing is
+  wired into the parse path. A differential corpus extends the existing xref fixtures with
+  inter-document (with and without a fragment, and a non-AsciiDoc extension kept as-is) and
+  document-as-a-whole forms in both spellings, alongside a unit test pinning the
+  "target names this document" special case. The one remaining deferred xref form – a text
+  carrying an attribute list (part 3c's other half) – is unchanged, still pinned by its own
+  divergence test.
+
   *Step 4b(ii) part 4a landed as (`Macros` → `Anchor`, inline anchors):* the builder now recognizes
   **inline anchors** in both spellings – the `[[id]]` / `[[id,reftext]]` shorthand and the
   `anchor:id[reftext]` macro – as an [`Anchor`](../../parser/src/inlines/anchor.rs) node, folding
@@ -1407,9 +1441,12 @@ Each phase is a reviewable unit with a clear exit gate.
          - **part 3.** cross-references (`INLINE_XREF`) → `Ref{Xref}`, itself sliced:
            - ✅ **part 3a.** the same-document `xref:` macro form (`xref:id[text]`).
            - ✅ **part 3b.** the same-document `<<id>>` shorthand (`<<id>>` / `<<id,text>>`).
-           - **part 3c.** the node-blocked forms both spellings share – inter-document targets (a
-             *derived* destination) and an attribute-list text (an `Attrlist<'src>`) – which need
-             new `Ref` fields, pinned against a consumer.
+           - **part 3c.** the node-blocked forms both spellings share, split in two once landed:
+             - ✅ inter-document targets and the document-as-a-whole form (a *derived*
+               destination) – needed only an existing, already-public type (`Ref` gains
+               `derived: Option<DerivedReference>`), no consumer required to pin its shape.
+             - an attribute-list text (an `Attrlist<'src>`, for `window`/`role`/`xrefstyle`) –
+               still needs new `Ref` fields, pinned against a consumer.
          - **part 4.** `Anchor`, `IndexTerm`, `Footnote`, each its own sub-step (inline `Stem` is
            *not* a macros-step family – it is extracted at passthrough time, so it lands in step 5):
            - ✅ **part 4a.** inline anchors (`[[id]]` / `anchor:id[…]`, `INLINE_ANCHOR`) → `Anchor`.

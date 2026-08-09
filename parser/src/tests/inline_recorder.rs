@@ -2036,6 +2036,7 @@ fn unresolved_xref() -> InlineNode<'static> {
         roles: vec![],
         window: None,
         resolved: None,
+        derived: None,
         location: Span::new(""),
     })
 }
@@ -2060,6 +2061,7 @@ fn link_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
         roles: vec![],
         window: None,
         resolved: None,
+        derived: None,
         location: Span::new(""),
     })
 }

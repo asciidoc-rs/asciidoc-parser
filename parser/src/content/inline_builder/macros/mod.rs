@@ -133,7 +133,7 @@ pub(super) fn apply_macros<'src>(
 
     // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the
     // string step's order.
-    xref_macros_level(nodes, root)
+    xref_macros_level(nodes, root, parser)
 
     // Footnotes are **not** handled here. Every other family's recognition is
     // order-independent (no cross-node side effect), so it is safe for them to
@@ -261,6 +261,7 @@ mod tests {
             roles: vec![],
             window: None,
             resolved: None,
+            derived: None,
             location: root,
         });
 
