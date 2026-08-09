@@ -1270,11 +1270,39 @@ Each phase is a reviewable unit with a clear exit gate.
   delimited text as an ordinary (non-attrlisted) passthrough – a kept-literal-prefix-with-one-dropped-char
   plus a node for the remainder, a shape neither `MacroMatchKind` variant expresses – and the
   **"prohibited prefix"** the string replacer's own retry loop protects (a bare attrlisted match
-  immediately preceded by `\`, `:`, or `;`, the same missing-lookbehind class of gap the bare unconstrained
-  form documents): rather than reproduce the retry, such a match is simply left unrecognized. This step is
-  **additive**: nothing is wired into the parse path. The remaining two forms 5a documents as deferred – a
-  `pass:` macro with an explicit substitution list, and the bare unconstrained `+text+` form with no
-  attribute list at all – remain for a later increment.
+  immediately preceded by `\`, `:`, or `;`): rather than reproduce the retry, such a match is simply left
+  unrecognized. This step is **additive**: nothing is wired into the parse path. The remaining two forms 5a
+  documents as deferred – a `pass:` macro with an explicit substitution list, and the bare unconstrained
+  `+text+` form with no attribute list at all – remain for a later increment.
+
+  *Step 5d part 4 landed as (the bare unconstrained `+text+` form):* the last of the four forms 5a defers.
+  [`find_bare_attrlisted_matches`](../../parser/src/content/inline_builder/passthrough_step.rs) now also
+  recognizes `INLINE_PASS`'s third, attribute-list-free alternative, folding through a plain
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf – like the double-plus/double-dollar forms, an
+  absent attrlist means no stored `type_`, so the restore never wraps the text in a rendered span, unlike
+  the two attribute-list-prefixed bare forms part 2 landed. Unlike those two forms (matched via
+  `\b{start-half}`, which does not by itself exclude a `\`/`:`/`;` prefix and so needed the "prohibited
+  prefix" divergence just above), this form's own pattern already excludes that prefix directly in its
+  *consuming* boundary group (`[^\w;:\\]`, which also encodes the "must not follow a word" rule) – so no
+  runtime retry is needed at all: a match simply cannot start where the pattern's own character class would
+  reject it, parity by construction rather than a divergence. The boundary character the pattern does
+  consume ahead of the leading `+` (absent only when the match sits at the very start of the level) is not
+  part of the construct itself; it is kept as literal text before the node, reusing the same kept-prefix
+  `MacroMatch` sub-range the auto-link increment (part 2) introduced for a bare URL's own boundary prefix.
+  An escaped mark (`\+text+`) drops the single backslash and keeps the rest of the match – the boundary
+  character included – literal, with nothing left to re-scan it afterward (this is already the last pass),
+  so it is plain parity rather than a divergence.
+
+  Landing this form also **retired** the two divergences 5a's own escape handling documented: an escaped
+  triple- or double-plus (`\+++text+++`, `\++text++`) drops its backslash and keeps the delimited text
+  literal at the pass-macro level, and now that the bare unconstrained form is recognized too, the
+  bare-form second pass legitimately re-scans that same de-escaped text and consumes its leading `+++`/`++`
+  as a bare passthrough wrapping a shorter run (`+text` / `text`, one `+` left over as trailing literal
+  text) – exactly what the string pipeline's own second regex pass does over its own once-substituted text.
+  Both fixtures moved from their own divergence tests into the main differential corpus. The one form 5a
+  documents as deferred that remains outstanding is a `pass:` macro with an explicit substitution list
+  (`pass:c,q[…]`), which still needs a richer subtree than a single `Raw` leaf can hold. This step is
+  **additive**: nothing is wired into the parse path.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -1315,7 +1343,7 @@ Each phase is a reviewable unit with a clear exit gate.
        - ✅ **part 2.** an attribute-list-prefixed passthrough (`[quotes]++text++`, `` [x-]`text` ``,
          `[attrs]+text+`).
        - **part 3.** a `pass:` macro carrying an explicit substitution list (`pass:c,q[…]`).
-       - **part 4.** the bare unconstrained `+text+` form.
+       - ✅ **part 4.** the bare unconstrained `+text+` form.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
      `rendered_html()` a fold, delete the three production sentinel systems (§4.2), and retire
      the `with_inline_tree` opt-in flag (the deferred remainder of Phase 2). Re-attach the

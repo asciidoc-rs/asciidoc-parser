@@ -75,18 +75,27 @@ use crate::{
 /// first – and (per the `x-` marker below) extracted correctly by the
 /// recursive `Normal`-order substitution its body then runs through.
 ///
+/// The **bare unconstrained form** (`+text+`, no attribute list) folds
+/// through a plain [`Raw`](InlineNode::Raw) leaf – like the double-plus/
+/// double-dollar forms, an absent attrlist means no stored `type_`, so
+/// `PassthroughRestoreReplacer` never wraps the restored text in a rendered
+/// span. Unlike the two attribute-list-prefixed bare forms above (matched via
+/// `\b{start-half}`, which does not by itself exclude a `\`/`:`/`;` prefix),
+/// this form's own pattern already excludes that "prohibited prefix" – and the
+/// word-boundary rule the doc comment on [`find_bare_attrlisted_matches`]
+/// explains – directly in its *consuming* boundary group (`[^\w;:\\]`), so no
+/// runtime retry is needed: a match simply cannot start where the pattern's
+/// own character class would reject it. The boundary character it does
+/// consume (present unless the match sits at the very start of the level) is
+/// not part of the construct – it is kept as literal text before the node,
+/// reusing the same kept-prefix [`MacroMatch`] sub-range the auto-link
+/// increment introduced.
+///
 /// A **`pass:` macro carrying an explicit substitution list** (`pass:c,q[…]`,
 /// whose content would need a richer subtree than a single `Raw` leaf – the
 /// same reason a footnote's content is structured children rather than a
-/// literal value) and the **bare unconstrained form** (`+text+`, no
-/// attribute list – its "must not follow a word" boundary needs a lookbehind
-/// Rust's regex engine cannot express, which the string replacer works
-/// around with a retry loop this increment does not reproduce) remain
-/// deferred. So does the closely related **"prohibited prefix"** the string
-/// replacer's own retry loop protects (an attribute-list-prefixed bare match
-/// immediately preceded by `\`, `:`, or `;`): rather than reproduce the
-/// retry, such a match is simply left unrecognized – a documented divergence.
-/// Inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) is an implicit
+/// literal value) remains deferred. Inline STEM (`stem:[…]`, `asciimath:[…]`,
+/// `latexmath:[…]`) is an implicit
 /// passthrough too, but folds through its own [`Stem`](InlineNode::Stem) node
 /// rather than `Raw`, so it is recognized by its own step,
 /// [`apply_stem`](super::stem_step::apply_stem), run immediately after this
@@ -102,21 +111,22 @@ use crate::{
 /// unrecognized (a documented divergence); see
 /// `an_escaped_attrlist_bracket_is_a_documented_divergence`.
 ///
-/// The already-deferred bare-form boundary shows up once more, indirectly: an
-/// **escaped triple- or double-plus** (`\+++text+++`, `\++text++`) drops its
-/// backslash and keeps the delimited text literal here, but the string
-/// pipeline's *second* extraction pass ([`INLINE_PASS`]) re-scans that same
-/// de-escaped text and consumes its leading `+++`/`++` as a bare passthrough
-/// wrapping a shorter run – so these two escape forms are pinned as
-/// divergences (`an_escaped_triple_plus_stays_literal`,
-/// `an_escaped_double_plus_stays_literal`) rather than folded into the main
-/// parity corpus. An escaped `$$…$$` or `pass:[…]` has no such residue and
-/// stays parity, since [`INLINE_PASS`] never matches `$$` or `pass:` syntax.
-/// An escaped attribute-list-prefixed *delimiter* (`[attrs]\++text++`), by
-/// contrast, is **not** a divergence: the delimiter's own `Unescape` leaves
+/// An **escaped triple- or double-plus** (`\+++text+++`, `\++text++`) drops
+/// its backslash and keeps the delimited text literal at the pass-macro
+/// level, but – now that the bare unconstrained form is recognized too – the
+/// *second* pass ([`INLINE_PASS`]) legitimately re-scans that same de-escaped
+/// text and consumes its leading `+++`/`++` as a bare passthrough wrapping a
+/// shorter run (`+text` / `text`, one `+` left over as trailing literal
+/// text), exactly as the string pipeline's own second regex pass does over
+/// its own once-substituted text: parity, not a divergence
+/// (`an_escaped_triple_plus_reveals_a_nested_bare_passthrough`,
+/// `an_escaped_double_plus_reveals_a_nested_bare_passthrough`). An escaped
+/// `$$…$$` or `pass:[…]` has no such residue and stays parity for the same
+/// reason regardless, since [`INLINE_PASS`] never matches `$$` or `pass:`
+/// syntax. An escaped attribute-list-prefixed *delimiter* (`[attrs]\++text++`)
+/// is parity for the same reason: the delimiter's own `Unescape` leaves
 /// literal, unopaqued text behind, so the bare-form second pass legitimately
-/// re-recognizes it exactly as the string pipeline's own second regex pass
-/// does – parity, not residue.
+/// re-recognizes it.
 ///
 /// [`INLINE_PASS`]: crate::content::passthroughs
 /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer):
@@ -300,19 +310,18 @@ fn find_passthrough_matches<'src>(
     matches
 }
 
-/// Finds every attribute-list-prefixed bare passthrough at this level (the
-/// two [`INLINE_PASS`] options that carry an attribute list –
-/// `` [x-]`text` `` and `[attrs]+text+`), skipping the bare unconstrained form
-/// with no attribute list (`+text+`, deferred to a later increment: its
-/// "must not follow a word" boundary needs a lookbehind Rust's regex engine
-/// cannot express).
+/// Finds every bare passthrough at this level – the two attribute-list-
+/// prefixed [`INLINE_PASS`] options (`` [x-]`text` `` and `[attrs]+text+`)
+/// and the bare unconstrained form with no attribute list (`+text+`, built by
+/// [`build_bare_unconstrained_match`]).
 ///
-/// [`INLINE_PASS`] also needs a lookbehind the string replacer works around
-/// with a retry loop (`InlinePassReplacer`'s "prohibited prefix" check): a
-/// match immediately preceded by `\`, `:`, or `;` is not really a
-/// passthrough. This increment does not reproduce that retry; instead it
-/// simply leaves such a match unrecognized, a documented divergence pinned by
-/// a test.
+/// The two attribute-list-prefixed options also need a lookbehind the string
+/// replacer works around with a retry loop (`InlinePassReplacer`'s
+/// "prohibited prefix" check): a match immediately preceded by `\`, `:`, or
+/// `;` is not really a passthrough. This increment does not reproduce that
+/// retry for *them*; instead it simply leaves such a match unrecognized, a
+/// documented divergence pinned by a test. The bare unconstrained form needs
+/// no such handling – see [`build_bare_unconstrained_match`].
 fn find_bare_attrlisted_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -331,8 +340,12 @@ fn find_bare_attrlisted_matches<'src>(
         let is_backtick = caps.get(1).is_some();
         let is_plus_attrlisted = caps.get(3).is_some();
 
-        // The bare unconstrained form (no attribute list) is deferred.
         if !is_backtick && !is_plus_attrlisted {
+            // Option 3: the bare unconstrained form (no attribute list).
+            if let Some(m) = build_bare_unconstrained_match(&caps, &full, pieces, root, parser) {
+                matches.push(m);
+            }
+
             continue;
         }
 
@@ -385,6 +398,75 @@ fn find_bare_attrlisted_matches<'src>(
     }
 
     matches
+}
+
+/// Builds one [`MacroMatch`] for a bare unconstrained [`INLINE_PASS`] match
+/// (`+text+`, option 3 – no attribute list): a plain [`Raw`](InlineNode::Raw)
+/// leaf, computed through the real substitution pipeline under
+/// [`SubstitutionGroup::Verbatim`] exactly like the double-plus/double-dollar
+/// forms (an absent attrlist means no stored `type_`, so
+/// `PassthroughRestoreReplacer` never wraps the restored text in a rendered
+/// span – unlike [`build_bare_attrlisted_passthrough_node`]'s `Styled` result).
+///
+/// Group 8 (the body) always participates whenever this alternative matches at
+/// all, and the pattern's own leading/trailing `+` delimiters sit exactly one
+/// byte to either side of it, so their offsets are derived rather than
+/// captured separately. The optional boundary character the pattern consumes
+/// ahead of the leading `+` (Group 6 – absent only when the match sits at the
+/// very start of the level, via the pattern's `^` alternative) is not part of
+/// the construct itself; it is kept as literal text before the node via the
+/// same kept-prefix [`MacroMatchKind::Node`] sub-range the auto-link increment
+/// introduced for a bare URL's own boundary prefix.
+///
+/// An escaped mark (`\+text+`, Group 7) drops the single backslash and keeps
+/// the rest of the match – the boundary character included – as literal text,
+/// with nothing left to re-scan it afterward (this is already the last pass),
+/// so it is plain parity rather than a divergence.
+///
+/// Returns `None` for a non-verbatim match (crossing an escaped special or a
+/// rendered span), left unrecognized exactly as every other macro family in
+/// this module defers one.
+fn build_bare_unconstrained_match<'src>(
+    caps: &regex::Captures<'_>,
+    full: &std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Option<MacroMatch<'src>> {
+    if !range_is_verbatim(pieces, full) {
+        return None;
+    }
+
+    // The body (option 3's mandatory capture whenever this alternative
+    // matches) is always preceded immediately by the construct's opening `+`.
+    #[allow(clippy::unwrap_used)]
+    let body_m = caps.get(8).unwrap();
+    let delim_start = body_m.start() - 1;
+
+    if let Some(escape) = caps.get(7) {
+        return Some(MacroMatch {
+            kind: MacroMatchKind::Unescape {
+                backslash: escape.start(),
+            },
+            full: full.clone(),
+        });
+    }
+
+    let consumed = delim_start..full.end;
+    let location = source_slice(pieces, consumed.clone(), root);
+    let body_span = source_slice(pieces, body_m.start()..body_m.end(), root);
+    let value = passthrough_text(body_span.data(), &SubstitutionGroup::Verbatim, parser);
+
+    Some(MacroMatch {
+        kind: MacroMatchKind::Node {
+            consumed,
+            node: Box::new(InlineNode::Raw {
+                value: CowStr::from(value),
+                location,
+            }),
+        },
+        full: full.clone(),
+    })
 }
 
 /// Builds one [`Raw`](InlineNode::Raw) node from a verbatim, unescaped
@@ -667,7 +749,7 @@ mod tests {
         super::test_support::{
             assert_raw, assert_styled, build_src, fold_html, golden_passthroughs, seed,
         },
-        apply_passthroughs,
+        apply_pass_macro_level, apply_passthroughs,
     };
     use crate::{
         HasSpan, Parser, Span,
@@ -690,7 +772,7 @@ mod tests {
 
     #[test]
     fn a_match_whose_content_crosses_an_already_built_node_is_deferred() {
-        // In practice `apply_passthroughs` only ever runs on the pristine
+        // In practice `apply_pass_macro_level` only ever runs on the pristine
         // whole-source seed (it is `build`'s first step, ahead of every node
         // that could make a range non-verbatim), so `range_is_verbatim`'s
         // false branch is defensive – kept for the same reason every other
@@ -698,6 +780,13 @@ mod tests {
         // hand-built level whose triple-plus content spans an already-built
         // `Styled` node, to document the intended fallback: the whole match
         // is left unrecognized rather than mis-sliced.
+        //
+        // This calls `apply_pass_macro_level` (not the top-level
+        // `apply_passthroughs`) to isolate this guard from the bare
+        // unconstrained pass that runs after it: each leftover `+++` run is,
+        // on its own, itself a valid (non-crossing) bare passthrough – see
+        // `a_bare_unconstrained_match_whose_content_crosses_an_already_built_node_is_deferred`
+        // for that guard exercised directly on the second pass instead.
         let location = Span::new("+++");
 
         let nodes = vec![
@@ -721,7 +810,7 @@ mod tests {
         ];
 
         let root = Span::new("+++");
-        let result = apply_passthroughs(nodes.clone(), root, &Parser::default());
+        let result = apply_pass_macro_level(nodes.clone(), root, &Parser::default());
 
         assert_eq!(
             result, nodes,
@@ -803,44 +892,38 @@ mod tests {
     }
 
     #[test]
-    fn an_escaped_triple_plus_stays_literal() {
-        // The builder drops the single backslash and keeps `+++text+++`
-        // literal, mirroring every other family's `\image:…` escape handling.
-        // The string pipeline instead runs a *second* pass (`INLINE_PASS`,
-        // the deferred bare `+text+` form) over that same de-escaped text,
-        // which re-consumes its leading `+++` as a bare passthrough wrapping
-        // a single `+` – so this is a documented divergence, not parity, and
-        // stems from the same deferred boundary as the bare unconstrained
-        // form.
+    fn an_escaped_triple_plus_reveals_a_nested_bare_passthrough() {
+        // The pass-macro-level pass drops the single backslash and keeps
+        // `+++text+++` literal there, mirroring every other family's
+        // `\image:…` escape handling. Now that the bare unconstrained form is
+        // recognized, the *second* pass (`INLINE_PASS`) legitimately re-scans
+        // that same de-escaped text and consumes its leading `+++` as a bare
+        // passthrough wrapping a single `+` (the outer `+` is the delimiter,
+        // the middle `+` is the body), leaving the third `+` as literal text
+        // in front of `text+++` – exactly what the string pipeline's own
+        // second regex pass does over its own once-substituted text, so this
+        // is parity, not a divergence.
         let source = r"\+++text+++";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Raw { .. })),
-            "an escaped passthrough must not build a Raw node: {nodes:?}"
-        );
-
         let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        assert_eq!(folded, "+++text+++");
-        assert_ne!(folded, golden_passthroughs(source));
+        assert_eq!(folded, "++text++");
+        assert_eq!(folded, golden_passthroughs(source));
     }
 
     #[test]
-    fn an_escaped_double_plus_stays_literal() {
-        // Same divergence as `an_escaped_triple_plus_stays_literal`, one
-        // delimiter layer down: de-escaping `\++text++` to `++text++` leaves
-        // a leading `++` the deferred bare-form pass also re-consumes.
+    fn an_escaped_double_plus_reveals_a_nested_bare_passthrough() {
+        // Same mechanism as `an_escaped_triple_plus_reveals_a_nested_bare_passthrough`,
+        // one delimiter layer down: de-escaping `\++text++` to `++text++`
+        // leaves a leading `++` the bare-form pass now legitimately
+        // re-consumes as a bare passthrough wrapping `+text`, leaving a
+        // single trailing `+` as literal text.
         let source = r"\++text++";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Raw { .. })),
-            "an escaped passthrough must not build a Raw node: {nodes:?}"
-        );
-
         let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        assert_eq!(folded, "++text++");
-        assert_ne!(folded, golden_passthroughs(source));
+        assert_eq!(folded, "+text+");
+        assert_eq!(folded, golden_passthroughs(source));
     }
 
     #[test]
@@ -886,11 +969,10 @@ mod tests {
             // normally).
             "a +++x+++ and a ++y++ and a $$z$$ and a pass:[w]",
             "*bold* +++<raw/>+++ *more bold*",
-            // Escapes. The `+++`/`++` forms are handled elsewhere (see
-            // `an_escaped_triple_plus_stays_literal` and
-            // `an_escaped_double_plus_stays_literal`), since de-escaping them
-            // can leave a residue the deferred bare `+text+` pass would also
-            // consume – a documented divergence, not parity.
+            // Escapes. The `+++`/`++` forms are pinned separately (see
+            // `an_escaped_triple_plus_reveals_a_nested_bare_passthrough` and
+            // its double-plus counterpart), since de-escaping them leaves a
+            // residue the bare `+text+` pass now legitimately re-consumes.
             r"\$$text$$",
             r"\pass:[x]",
             // Attribute-list-prefixed delimited forms (`INLINE_PASS_MACRO`'s
@@ -955,6 +1037,27 @@ mod tests {
             "[x-]++stem:[x^2]++",
             "[x-]++footnote:[note text]++",
             "[x-]++image:x.png[X] and pass:[<i>]++",
+            // The bare unconstrained form (`INLINE_PASS`'s option 3, no
+            // attribute list): at the start of the flow, mid-flow (keeping
+            // its boundary prefix as literal text), and escaping specials
+            // only (quotes never run over the body).
+            "+text+",
+            "a +text+ b",
+            "+<b>*not quotes*</b>+",
+            "multiple +one+ and +two+ passthroughs",
+            // Escapes: the mark drops its backslash and stays literal, with
+            // the boundary prefix preserved.
+            r"see \+text+ end",
+            r"\+text+",
+            // A prefix the pattern's own consuming boundary group excludes
+            // (`\`, `:`, `;`) leaves the match unrecognized by both
+            // pipelines, so the source stays entirely literal.
+            r"a\+text+ b",
+            "a:+text+ b",
+            "a;+text+ b",
+            // Beside ordinary flow and next to other constructs.
+            "*bold* +text+ _em_",
+            "a copyright (C) then +text+",
         ];
 
         for source in fixtures {
@@ -1351,24 +1454,133 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_unconstrained_passthrough_is_a_documented_divergence() {
-        // The bare `+text+` form is matched by `INLINE_PASS`, not
-        // `INLINE_PASS_MACRO` – its "must not follow a word" boundary needs a
-        // lookbehind Rust's regex engine cannot express, which the string
-        // replacer works around with a retry loop this increment does not
-        // reproduce. Left unrecognized: the plus signs stay literal.
-        let source = "a +text+ b";
+    fn a_bare_unconstrained_passthrough_is_a_raw_node() {
+        // `+text+` with no attribute list folds through a plain `Raw` leaf –
+        // like the double-plus/double-dollar forms, an absent attrlist means
+        // no stored `type_`, so the restore never wraps the text in a
+        // rendered span.
+        let nodes = build_src(Span::new("a +text+ b"));
+
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "a text b");
+
+        match &nodes[1] {
+            InlineNode::Raw { value, location } => {
+                assert_eq!(value.as_ref(), "text");
+                assert_eq!(location.data(), "+text+");
+            }
+
+            other => panic!("expected Raw, got {other:?}"),
+        }
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs("a +text+ b")
+        );
+    }
+
+    #[test]
+    fn a_bare_unconstrained_passthrough_escapes_specials_only() {
+        // `SubstitutionGroup::Verbatim` applies only special characters, the
+        // same treatment the delimited `++…++`/`$$…$$` forms get.
+        let nodes = build_src(Span::new("+<b>*not quotes*</b>+"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw(&nodes[0], "&lt;b&gt;*not quotes*&lt;/b&gt;");
+    }
+
+    #[test]
+    fn a_bare_unconstrained_passthrough_at_the_very_start_has_no_kept_prefix() {
+        // At the very start of the level there is no boundary character to
+        // consume (the pattern's `^` alternative), so the node's location
+        // covers the construct alone.
+        let nodes = build_src(Span::new("+text+ after"));
+
+        assert_eq!(nodes.len(), 2);
+        assert_raw(&nodes[0], "text");
+        assert_eq!(nodes[0].span().data(), "+text+");
+    }
+
+    #[test]
+    fn an_escaped_bare_unconstrained_passthrough_stays_literal() {
+        // `\+text+` drops the single backslash and keeps `+text+` literal –
+        // no `Raw` node – with the boundary prefix (here "see ") preserved.
+        // Unlike the pass-macro level's own `+++`/`++` escapes, there is no
+        // further pass to re-scan the residue here (this is already the last
+        // pass), so this is plain parity, not a divergence.
+        let source = r"see \+text+ end";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Raw { .. })),
-            "a bare unconstrained passthrough must be left unrecognized: {nodes:?}"
+            "an escaped passthrough must not build a Raw node: {nodes:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        let golden = golden_passthroughs(source);
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
 
-        assert_ne!(folded, golden);
-        assert_eq!(folded, "a +text+ b");
+    #[test]
+    fn a_prohibited_prefix_before_a_bare_unconstrained_form_needs_no_retry() {
+        // Unlike the two attribute-list-prefixed bare forms (which need a
+        // documented divergence for this – see
+        // `a_prohibited_prefix_before_a_bare_attrlisted_form_is_a_documented_divergence`),
+        // the bare unconstrained form's own pattern already excludes a `\`,
+        // `:`, or `;` prefix in its consuming boundary group, so this is
+        // parity, not a divergence: the passthrough is correctly left
+        // unrecognized *and* the golden string pipeline agrees.
+        for source in [r"a\+text+ b", "a:+text+ b", "a;+text+ b"] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Raw { .. })),
+                "a prohibited-prefix match must be left unrecognized for {source:?}: {nodes:?}"
+            );
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_passthroughs(source),
+                "for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_unconstrained_match_whose_content_crosses_an_already_built_node_is_deferred() {
+        // A candidate bare-unconstrained match whose body spans an
+        // already-built (opaque) node – here a `Styled` span from a hand-built
+        // level, standing in for what an earlier pass-macro-level match would
+        // leave behind – is left unrecognized rather than mis-sliced, the same
+        // guard every other macro family in this module keeps.
+        let source = Span::new("+x+");
+
+        let nodes = vec![
+            InlineNode::Text {
+                value: CowStr::from("+"),
+                location: source.slice(0..1),
+            },
+            InlineNode::Styled(Styled {
+                variant: StyleVariant::Strong,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: vec![],
+                attrs: None,
+                children: vec![],
+                location: source.slice(1..2),
+            }),
+            InlineNode::Text {
+                value: CowStr::from("+"),
+                location: source.slice(2..3),
+            },
+        ];
+
+        let result = apply_passthroughs(nodes.clone(), source, &Parser::default());
+
+        assert_eq!(
+            result, nodes,
+            "a non-verbatim bare-unconstrained match must be left unrecognized"
+        );
     }
 }
