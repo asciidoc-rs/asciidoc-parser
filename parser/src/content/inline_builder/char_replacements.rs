@@ -542,6 +542,7 @@ mod tests {
             roles: vec![],
             window: None,
             resolved: None,
+            derived: None,
             location: loc,
         });
 

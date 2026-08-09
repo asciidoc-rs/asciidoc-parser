@@ -352,15 +352,17 @@ fn fold_link(
 /// `render_xref` the string pipeline's macros step feeds at resolution time,
 /// reconstructing the [`XrefRenderParams`] from the node: the provided text is
 /// the fold of the children (empty children ⇒ no text, so the renderer emits
-/// the bracketed `[id]` fallback), and the target/window/roles come straight
-/// off the node.
+/// the bracketed `[id]` fallback), and the target/window/roles/derived come
+/// straight off the node.
 ///
-/// This increment recognizes only same-document references, which the additive
-/// builder leaves **unresolved** (no catalog-resolution pass runs) and which
-/// carry no *derived* destination – so the fold always takes `render_xref`'s
-/// unresolved branch, where `xrefstyle` and `derived` play no part. The cutover
-/// (design §5.2 Phase 4, step 6) wires resolution to the tree, at which point a
-/// resolved reference renders through its resolved destination.
+/// This increment recognizes both a same-document reference to a specific id
+/// (unresolved – no catalog-resolution pass runs, so `resolved` is always
+/// `None` here) and a target that carries its own destination without a
+/// catalog (`derived`, populated at build time – see the `Ref::derived` field
+/// docs): an inter-document target, and the empty target naming the current
+/// document as a whole. It does not yet parse an attribute-list-bearing
+/// display text, so `xrefstyle` is always `None`; the cutover (design §5.2
+/// Phase 4, step 6) wires catalog resolution to the tree.
 fn fold_xref(
     reference: &Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
@@ -386,7 +388,7 @@ fn fold_xref(
         window: reference.window.as_deref(),
         roles: &roles,
         xrefstyle: None,
-        derived: None,
+        derived: reference.derived.as_ref(),
         resolved: reference.resolved.as_ref(),
     };
 

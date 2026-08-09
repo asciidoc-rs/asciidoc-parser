@@ -278,6 +278,7 @@ fn build_inline_link_node<'src>(
         roles,
         window,
         resolved: None,
+        derived: None,
         location,
     });
 
@@ -532,6 +533,7 @@ pub(super) fn build_link_node<'src>(
         roles,
         window,
         resolved: None,
+        derived: None,
         location,
     }))
 }

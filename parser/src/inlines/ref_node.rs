@@ -1,13 +1,20 @@
-use crate::{HasSpan, Span, inlines::InlineNode, parser::ResolvedReference, strings::CowStr};
+use crate::{
+    HasSpan, Span,
+    inlines::InlineNode,
+    parser::{DerivedReference, ResolvedReference},
+    strings::CowStr,
+};
 
 /// A link or cross-reference. ASG: `inlineRef`.
 ///
 /// The display text is held as child [`InlineNode`]s, so a formatted link text
 /// (`link:x[*bold*]`) is a tree. For a cross-reference, [`resolved`] is filled
 /// in by the resolution pass and remains `None` while unresolved or for a
-/// standalone (document-less) parse.
+/// standalone (document-less) parse; [`derived`] is filled in at build time
+/// instead, for a target that carries its own destination without any catalog.
 ///
 /// [`resolved`]: Self::resolved
+/// [`derived`]: Self::derived
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Ref<'src> {
     /// Whether this is a link or a cross-reference.
@@ -40,6 +47,15 @@ pub struct Ref<'src> {
     /// resolution pass. `None` while unresolved, or for a standalone parse with
     /// no catalog.
     pub resolved: Option<ResolvedReference>,
+
+    /// For a cross-reference whose target names another document, or the
+    /// empty target naming the current document as a whole, the destination
+    /// derived from the target itself — computed once, at build time, without
+    /// consulting any catalog (mirroring the string pipeline's own target
+    /// interpretation). `None` for a same-document reference to a specific id,
+    /// which resolves through [`resolved`](Self::resolved) instead, and always
+    /// `None` for a [`Link`](RefVariant::Link).
+    pub derived: Option<DerivedReference>,
 
     /// The source location of the whole reference.
     pub location: Span<'src>,
