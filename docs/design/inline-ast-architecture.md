@@ -1145,24 +1145,44 @@ Each phase is a reviewable unit with a clear exit gate.
   case unclear, as the string replacer's own comment notes) expands to nothing, exactly as the string
   pipeline's replacer does.
 
-  Three forms are deferred, each documented and pinned by a divergence test: a **`counter`/`counter2`
-  directive**, whose resolution *advances* a document counter – a required side effect this additive
-  step does not yet perform, the same reason every macro family deferred its own catalog/warning side
-  effect until the footnote and cutover increments; a reference to a **missing** attribute under
-  `AttributeMissing::Drop` / `::DropLine`, whose output *removes* content rather than leaving the
-  reference literal – the behavior this step *does* reproduce, since it is also what the default
-  `AttributeMissing::Skip` and `AttributeMissing::Warn` modes do (so those two are full parity, not a
-  divergence); and a **construct inside an expanded value** that `CharacterReplacements` or `Macros`
-  would recognize per §3.4.1 (a `(C)` becoming a `CharRef`, a `link:` becoming a `Ref`) but do not yet –
-  a spliced value is a synthesized run with no `'src` slice of its own, and
+  Three forms were initially deferred, each documented and pinned by a divergence test: a
+  **`counter`/`counter2` directive**, whose resolution *advances* a document counter – a required side
+  effect this additive step did not yet perform, the same reason every macro family deferred its own
+  catalog/warning side effect until the footnote and cutover increments; a reference to a **missing**
+  attribute under `AttributeMissing::Drop` / `::DropLine`, whose output *removes* content rather than
+  leaving the reference literal – the behavior this step *does* reproduce, since it is also what the
+  default `AttributeMissing::Skip` and `AttributeMissing::Warn` modes do (so those two are full parity,
+  not a divergence); and a **construct inside an expanded value** that `CharacterReplacements` or
+  `Macros` would recognize per §3.4.1 (a `(C)` becoming a `CharRef`, a `link:` becoming a `Ref`) but do
+  not yet – a spliced value is a synthesized run with no `'src` slice of its own, and
   [`build_match_string`](../../parser/src/content/inline_builder.rs) (shared by those two steps and by
   `Quotes`) only treats a *verbatim* `Text` node (`value == location.data()`) as literal content for
   matching purposes; it does not yet look inside a synthesized one, so such a node is one opaque piece
   to them, exactly like an already-built `Styled` span. Lifting that boundary is a follow-up that only
-  needs to extend `build_match_string` itself, not this step's splitting. All three deferred forms are
-  left **unrecognized** (no match, or no further node), so the surrounding gap logic reproduces the
+  needs to extend `build_match_string` itself, not this step's splitting. The last two deferred forms
+  are left **unrecognized** (no match, or no further node), so the surrounding gap logic reproduces the
   source text unchanged, exactly as an unrecognized macro is left for a later increment. This step is
   **additive**: nothing is wired into the parse path.
+
+  *Follow-up landed as (the `counter`/`counter2` directive):*
+  [`find_attribute_matches`](../../parser/src/content/inline_builder/attribute_refs.rs) now recognizes a
+  `counter`/`counter2` directive (`{counter:name}`, `{counter2:name:seed}`) in the same left-to-right
+  sweep as every other reference, resolving *and advancing* the named counter via the parser's own
+  [`counter`](../../parser/src/parser/parser.rs) method – the exact call `AttributeReplacer`'s counter
+  branch makes – so the digits this step produces are the real, advanced sequence, not a placeholder. This
+  is the same **required side effect** the footnote increment (part 4c) already established a precedent
+  for: unlike every other macro family's catalog/warning side effect, a directive's resolved *value* is
+  the number itself, so it cannot be deferred to the cutover without producing wrong output now. `counter`
+  splices its new value in, classified by the same
+  [`split_attribute_value`](../../parser/src/content/inline_builder/attribute_refs.rs) every other resolved
+  reference uses; `counter2` advances silently and splices nothing, mirroring which directive spelling
+  `AttributeReplacer` displays. Because this additive builder is not yet wired into any real parse, its own
+  `Parser` is never the one the authoritative string pipeline advances, so a differential fixture is free
+  to build and fold against one independent default parser and compare against the golden string pipeline's
+  own independent parser – exactly the two-independent-parsers discipline the footnote differential corpus
+  already established – without the two sequences crossing over. The two forms 5b's own landed-as note
+  still documents as deferred – a missing attribute under `Drop`/`DropLine`, and a construct inside an
+  expanded value – remain outstanding.
 
   *Step 5c landed as (`Callouts` → `Callout`, verbatim-group content):* a new
   [`apply_callouts`](../../parser/src/content/inline_builder.rs) step recognizes a trailing callout

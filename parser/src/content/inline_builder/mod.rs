@@ -37,9 +37,11 @@
 //!   design §3.4.1 – a literal `<`/`>`/`&` in the value is *not* re-escaped,
 //!   since [`apply_special_characters`] has already run. It reuses the shared
 //!   [`ATTRIBUTE_REFERENCE`](crate::content::ATTRIBUTE_REFERENCE) pattern, so
-//!   only the recognition *sink* differs. A `counter`/`counter2` directive and
-//!   a missing-attribute reference under `AttributeMissing::Drop` /
-//!   `::DropLine` are deferred (see [`apply_attribute_references`] for why); so
+//!   only the recognition *sink* differs. A `counter`/`counter2` directive
+//!   resolves *and advances* the named counter via [`Parser::counter`], the
+//!   same required side effect [`apply_footnotes`] performs for footnote
+//!   numbering. A missing-attribute reference under `AttributeMissing::Drop` /
+//!   `::DropLine` is deferred (see [`apply_attribute_references`] for why); so
 //!   is a construct *inside* an expanded value that
 //!   [`apply_character_replacements`]/[`apply_macros`] would otherwise
 //!   recognize – the value is a synthesized, non-`'src` run, and

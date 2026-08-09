@@ -20,12 +20,19 @@ use crate::{
 /// into the node stream, classified by [`split_attribute_value`] (design
 /// §3.4.1) rather than written into a `&mut String`.
 ///
-/// Three forms are deferred, each documented and pinned by a divergence test:
-/// a `counter`/`counter2` directive (whose resolution *advances* a document
-/// counter – a required side effect this additive step does not yet perform,
-/// the same reason every macro family deferred its own catalog/warning side
-/// effect until the [`apply_footnotes`](super::footnotes::apply_footnotes) and
-/// cutover increments); a reference to a **missing** attribute under
+/// A `counter`/`counter2` directive (`{counter:name}`, `{counter2:name:seed}`)
+/// is recognized like any other reference: it resolves *and advances* the
+/// named document counter via [`Parser::counter`] – the same required side
+/// effect [`apply_footnotes`](super::footnotes::apply_footnotes) performs for
+/// footnote numbering, and for the same reason it cannot be deferred to the
+/// cutover the way every other macro family's catalog/warning side effect is
+/// (skipping it would leave the directive's own digits wrong, not just an
+/// absent catalog entry). `counter` splices the advanced value in (classified
+/// by [`split_attribute_value`] exactly like a plain reference's value);
+/// `counter2` advances silently and splices nothing.
+///
+/// Two forms are still deferred, each documented and pinned by a divergence
+/// test: a reference to a **missing** attribute under
 /// [`AttributeMissing::Drop`] / [`AttributeMissing::DropLine`] (whose output
 /// *removes* content, unlike leaving the reference literal – the behavior this
 /// step *does* reproduce, since it is also what [`AttributeMissing::Skip`] (the
@@ -39,10 +46,11 @@ use crate::{
 /// [`Text`](InlineNode::Text) node (`value == location.data()`) as literal
 /// content; it does not yet look inside a synthesized one, so such a node is
 /// one opaque piece to them, exactly like an already-built
-/// [`Styled`](crate::inlines::Styled) span. All three are left **unrecognized**
-/// : no match is produced (or, for the third, no further node is produced), so
-/// the surrounding gap logic reproduces the source text unchanged, exactly as
-/// an unrecognized macro is left for a later increment.
+/// [`Styled`](crate::inlines::Styled) span. Both remaining forms are left
+/// **unrecognized**: no match is produced for the first, and no further node
+/// is produced for the second, so the surrounding gap logic reproduces the
+/// source text unchanged, exactly as an unrecognized macro is left for a
+/// later increment.
 ///
 /// [`AttributeMissing::Drop`]: crate::content::AttributeMissing::Drop
 /// [`AttributeMissing::DropLine`]: crate::content::AttributeMissing::DropLine
@@ -90,6 +98,13 @@ enum AttributeMatchKind {
     /// `value`, mirroring the string replacer (whose behavior for those two
     /// kinds the language leaves unclear – see `AttributeReplacer`).
     Expand { value: String },
+
+    /// A `counter`/`counter2` directive: the named counter has already been
+    /// advanced (via [`Parser::counter`]) by the time this match is recorded.
+    /// `counter` splices its new `value` in, classified by
+    /// [`split_attribute_value`]; `counter2` (`display: false`) advances
+    /// silently and splices nothing.
+    Counter { display: bool, value: String },
 }
 
 /// Matches [`ATTRIBUTE_REFERENCE`] over this level's escaped text, replacing
@@ -119,9 +134,12 @@ fn attribute_references_level<'src>(
 
 /// Finds every non-overlapping [`ATTRIBUTE_REFERENCE`] match in the escaped
 /// match string `s`, left to right, exactly as the string pipeline's
-/// `replace_all` does. A `counter`/`counter2` directive and a reference to a
-/// missing attribute are left out of the returned list entirely – see the
-/// deferred forms documented on [`apply_attribute_references`].
+/// `replace_all` does (and, for a `counter`/`counter2` directive, advances the
+/// named counter in that same left-to-right order via [`Parser::counter`], so
+/// a repeated `{counter:n}` on one level numbers identically to the string
+/// pipeline). A reference to a missing attribute is left out of the returned
+/// list entirely – see the deferred forms documented on
+/// [`apply_attribute_references`].
 fn find_attribute_matches(s: &str, parser: &Parser) -> Vec<AttributeMatch> {
     let mut matches = Vec::new();
 
@@ -146,10 +164,28 @@ fn find_attribute_matches(s: &str, parser: &Parser) -> Vec<AttributeMatch> {
             continue;
         }
 
-        // A `counter`/`counter2` directive resolves (and advances) a
-        // counter – deferred, see the doc comment on
-        // `apply_attribute_references`.
-        if caps.get(2).is_some() {
+        // A `counter`/`counter2` directive resolves *and advances* the named
+        // counter rather than looking up an existing attribute – mirroring
+        // `AttributeReplacer`'s own counter branch exactly, including which
+        // directive spelling displays the new value.
+        if let Some(directive) = caps.get(2) {
+            // Group 3 always participates when group 2 does (same
+            // alternation branch). The expression is `name` or `name:seed`.
+            #[allow(clippy::unwrap_used)]
+            let mut parts = caps.get(3).unwrap().as_str().splitn(2, ':');
+            let name = parts.next().unwrap_or_default();
+            let seed = parts.next();
+
+            let value = parser.counter(name, seed);
+
+            matches.push(AttributeMatch {
+                full,
+                kind: AttributeMatchKind::Counter {
+                    display: directive.as_str() == "counter",
+                    value,
+                },
+            });
+
             continue;
         }
 
@@ -218,6 +254,20 @@ fn rebuild_attribute_level<'src>(
 
                 let location = source_slice(pieces, m.full.clone(), root);
                 split_attribute_value(value, location, &mut out);
+
+                cursor = m.full.end;
+            }
+
+            AttributeMatchKind::Counter { display, value } => {
+                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
+
+                // `counter2` advances silently: the match is consumed but
+                // splices no node, mirroring `AttributeReplacer`'s own
+                // directive-name check.
+                if *display {
+                    let location = source_slice(pieces, m.full.clone(), root);
+                    split_attribute_value(value, location, &mut out);
+                }
 
                 cursor = m.full.end;
             }
@@ -556,19 +606,84 @@ mod tests {
     }
 
     #[test]
-    fn a_counter_directive_is_a_documented_divergence() {
-        // `counter`/`counter2` resolves *and advances* a document counter – a
-        // required side effect this additive step does not yet perform (see
-        // `apply_attribute_references`'s doc comment), so the reference is
-        // left unrecognized rather than replaced with the counter's value.
-        let parser = Parser::default();
-        let nodes = build(Span::new("{counter:x}"), &parser);
+    fn fold_matches_the_string_pipeline_through_counter_directives() {
+        // For each fixture, folding the single-pass tree reproduces the
+        // string pipeline's output byte-for-byte. Each fixture uses its own
+        // pair of *independent* default parsers (one for `build`, one for
+        // `golden_attributes_with`), so the counter each one advances never
+        // crosses over – the same test-independence footnote numbering needs
+        // (see `fold_matches_the_string_pipeline_through_footnotes` in
+        // `footnotes.rs`). As long as both recognize the same occurrences in
+        // the same left-to-right order, their numbering stays in lockstep.
+        let fixtures = [
+            // `counter` displays the advanced value; a repeat reference to the
+            // same name keeps advancing.
+            "{counter:n}",
+            "{counter:n}-{counter:n}",
+            // `counter2` advances silently.
+            "{counter2:n}{counter:n}",
+            "{counter2:n}",
+            // A seed supplies the first value; a later reference ignores it
+            // (the counter is already set).
+            "{counter:n:9}",
+            "{counter:n:9}-{counter:n:1}",
+            // Independent counter names track separately.
+            "{counter:a}-{counter:b}-{counter:a}",
+            // Next to plain text, and inside a rendered span.
+            "page {counter:page} of many",
+            "*{counter:n}*",
+            // An escaped directive stays literal and does not advance.
+            "\\{counter:n} {counter:n}",
+        ];
 
+        for fixture in fixtures {
+            let folded = fold_html(
+                &build(Span::new(fixture), &Parser::default()),
+                &HtmlSubstitutionRenderer {},
+            );
+
+            assert_eq!(
+                folded,
+                golden_attributes_with(fixture, &Parser::default()),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_counter_directive_advances_and_displays_the_new_value() {
+        let nodes = build(Span::new("{counter:n}-{counter:n}"), &Parser::default());
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "1-2",
+            "{nodes:?}"
+        );
+    }
+
+    #[test]
+    fn a_counter2_directive_advances_without_displaying() {
+        let nodes = build(Span::new("{counter2:n}{counter:n}"), &Parser::default());
+
+        // `counter2:n` advances the counter to `1` and splices no node;
+        // `counter:n` then advances it again and displays `2`.
         assert_eq!(nodes.len(), 1);
-        assert_text(&nodes[0], "{counter:x}", 1, 1);
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "2",
+            "{nodes:?}"
+        );
+    }
 
-        // The string pipeline, by contrast, resolves it to `1`.
-        assert_eq!(golden_attributes_with("{counter:x}", &parser), "1");
+    #[test]
+    fn a_counter_directive_with_a_seed_starts_from_it() {
+        let nodes = build(Span::new("{counter:n:9}"), &Parser::default());
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "9",
+            "{nodes:?}"
+        );
     }
 
     #[test]
