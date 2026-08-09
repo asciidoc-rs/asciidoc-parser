@@ -1418,8 +1418,11 @@ impl Parser {
     /// the call is a no-op for any other name. Turning the toggle *off* (an
     /// explicit [unset], e.g. `:!notitle:`) turns the partner *on* – it is
     /// stored [set] with the same `modification_context` and
-    /// `silent_when_locked` flag as the triggering assignment. Turning the
-    /// toggle *on* (an empty `Set` or an explicit value, e.g. `:notitle:`)
+    /// `silent_when_locked` flag as the triggering assignment, *except* that a
+    /// hard API unset (`ApiOnly`) always plants an unlocked
+    /// ([`Anywhere`](ModificationContext::Anywhere)) partner instead (see the
+    /// note on the `Unset` branch below; issue #1148). Turning the toggle
+    /// *on* (an empty `Set` or an explicit value, e.g. `:notitle:`)
     /// *removes* the partner entirely.
     ///
     /// The partner is removed – rather than left as an explicit unset
@@ -1500,26 +1503,41 @@ impl Parser {
         self.counter_values.borrow_mut().remove(partner);
 
         if let InterpretedValue::Unset = value {
-            // The toggle is off, so the partner turns on – except for a hard
-            // API unset (`ApiOnly`), which must not plant a matching lock on
-            // the *other* attribute: hard-unsetting `showtitle` (or
-            // `notitle`) only prevents the document from turning that one
-            // attribute on, it is not itself a request to force-hide (or
-            // force-show) via the partner. Leaving the partner untouched
-            // lets it – and any later document entry for it – resolve
-            // normally (see the precedence rule documented on
-            // [`resolve_show_title`](Self::resolve_show_title)).
-            if modification_context != ModificationContext::ApiOnly {
-                Arc::make_mut(&mut self.attribute_values).insert(
-                    partner.to_string(),
-                    AttributeValue {
-                        allowable_value: AllowableValue::Any,
-                        modification_context,
-                        silent_when_locked,
-                        value: InterpretedValue::Set,
-                    },
-                );
-            }
+            // The toggle is off, so the partner turns on. This mirroring
+            // must run even for a hard API unset (`ApiOnly`): a consumer may
+            // read either half of the pair directly instead of resolving the
+            // toggle itself (as `resolve_show_title` does), and with no
+            // competing document entry at all, that raw read is the only
+            // signal it has (issue #1148) – skipping the plant left it
+            // seeing neither attribute change.
+            //
+            // But the planted value must not itself become a *lock*:
+            // hard-unsetting `showtitle` (or `notitle`) only prevents the
+            // document from turning that one attribute on, it is not itself
+            // a request to force-hide (or force-show) that a later,
+            // unlocked document entry for the partner cannot override (issue
+            // #1143). So when the triggering write is `ApiOnly`, the plant
+            // always uses an unlocked ([`Anywhere`](ModificationContext::Anywhere))
+            // context instead of mirroring the trigger's own `ApiOnly`
+            // context – letting a later document entry for the partner
+            // resolve normally, exactly as if the API call had never
+            // touched it.
+            let partner_modification_context =
+                if modification_context == ModificationContext::ApiOnly {
+                    ModificationContext::Anywhere
+                } else {
+                    modification_context
+                };
+
+            Arc::make_mut(&mut self.attribute_values).insert(
+                partner.to_string(),
+                AttributeValue {
+                    allowable_value: AllowableValue::Any,
+                    modification_context: partner_modification_context,
+                    silent_when_locked,
+                    value: InterpretedValue::Set,
+                },
+            );
         } else if self.attribute_values.contains_key(partner) {
             // The toggle is on, so the partner turns off – and, matching
             // Asciidoctor, "off" means absent. (Guarded so the common case of
@@ -4532,25 +4550,22 @@ mod tests {
         }
 
         #[test]
-        fn unset_showtitle_alone_still_decides_when_notitle_is_absent() {
-            // A merely-present-but-unset `showtitle` only defers to `notitle`
-            // when `notitle` is actually present (see issue #1143 and
-            // `notitle_showtitle_linkage::header_unset_notitle_entry_applies_
-            // when_showtitle_is_api_hard_unset`). With no `notitle` in play at
-            // all, an `Unset` `showtitle` still decides the outcome (hidden),
-            // regardless of the default -- this exercises the case distinctly
-            // from `Anywhere`-context unsetting (as in
-            // `showtitle_takes_precedence_and_decides` above), where the
-            // toggle linkage itself plants a `notitle` entry as a side
-            // effect. An `ApiOnly` hard unset does not plant that side effect
-            // (see `apply_title_visibility_linkage`), so this is the only way
-            // to reach this branch with `notitle` genuinely absent.
+        fn unset_showtitle_alone_still_hides_via_the_mirrored_notitle() {
+            // A merely-present-but-unset `showtitle` decides the outcome
+            // (hidden) even with no document entry for either spelling at
+            // all. An `ApiOnly` hard unset mirrors an unlocked `notitle: Set`
+            // as a side effect (issue #1148; see
+            // `notitle_showtitle_linkage::api_hard_unset_of_showtitle_plants_
+            // an_unlocked_notitle_mirror`), so this resolves via the
+            // `notitle`-present branch rather than `showtitle`'s own
+            // present-but-unset fallback -- either way, the resolved
+            // visibility is the same.
             let parser = Parser::default().with_intrinsic_attribute_bool(
                 "showtitle",
                 false,
                 ModificationContext::ApiOnly,
             );
-            assert!(!parser.has_attribute("notitle"));
+            assert!(parser.has_attribute("notitle"));
             assert!(!parser.resolve_show_title(true));
         }
 
@@ -4756,19 +4771,46 @@ mod tests {
         }
 
         #[test]
-        fn api_hard_unset_of_showtitle_does_not_plant_a_locked_notitle_tombstone() {
-            // The hard-unset itself (no document entry at all) must not, as
-            // a side effect, create a `notitle` entry -- doing so would both
-            // misreport a direct `ifdef::notitle[]` probe and (being
-            // `ApiOnly`-locked) permanently block a later document
-            // `:!notitle:` / `:notitle:` entry from ever taking effect.
+        fn api_hard_unset_of_showtitle_plants_an_unlocked_notitle_mirror() {
+            // Issue #1148: a single-sided hard API unset -- no document
+            // entry for either spelling at all -- must still keep the pair
+            // mirrored, restoring the 0.29.15 behavior that #1145's blanket
+            // `ApiOnly` skip regressed. A downstream consumer that reads
+            // `notitle` directly (e.g. `ifdef::notitle[]`, or a renderer
+            // checking the raw attribute instead of resolving the toggle via
+            // `resolve_show_title`) needs to see it too.
             let parser = Parser::default().with_intrinsic_attribute_bool(
                 "showtitle",
                 false,
                 ModificationContext::ApiOnly,
             );
 
-            assert!(!parser.has_attribute("notitle"));
+            assert!(parser.has_attribute("notitle"));
+            assert!(parser.is_attribute_set("notitle"));
+
+            // Unlike the pre-#1143 behavior, the mirrored value is not
+            // itself locked: a later document entry for `notitle` can still
+            // override it (see
+            // `header_unset_notitle_entry_applies_when_showtitle_is_api_hard_unset`
+            // above, which exercises exactly that).
+        }
+
+        #[test]
+        fn api_hard_unset_of_notitle_plants_an_unlocked_showtitle_mirror() {
+            // Mirror of the above, in the other direction -- the exact repro
+            // from issue #1148 (`Options::unset("notitle")`, no document
+            // entries): the title should show, and a consumer reading
+            // `showtitle` directly should see it `Set`.
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+
+            assert!(!parser.is_attribute_set("notitle"));
+            assert!(parser.has_attribute("showtitle"));
+            assert!(parser.is_attribute_set("showtitle"));
+            assert!(parser.resolve_show_title(false));
         }
 
         #[test]
