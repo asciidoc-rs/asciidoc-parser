@@ -1402,7 +1402,7 @@ impl Parser {
     /// re-implementation of this exact logic repeatedly drifted out of sync
     /// with this one). After parsing, prefer
     /// [`Document::show_title`](crate::Document::show_title), which mirrors
-    /// this method and needs no [`Parser`](crate::Parser) in hand.
+    /// this method and needs no [`Parser`] in hand.
     pub fn resolve_show_title(&self, default_shown: bool) -> bool {
         if self.is_attribute_set("showtitle") {
             true

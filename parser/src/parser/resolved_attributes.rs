@@ -682,4 +682,75 @@ mod tests {
             InterpretedValue::Value("/some/dir".to_string())
         );
     }
+
+    mod resolve_show_title {
+        use std::{collections::HashMap, sync::Arc};
+
+        use crate::{
+            SafeMode,
+            document::InterpretedValue,
+            parser::{AllowableValue, AttributeValue, ModificationContext, ResolvedAttributes},
+        };
+
+        fn attrs(entries: &[(&str, InterpretedValue)]) -> ResolvedAttributes {
+            let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+            for (name, value) in entries {
+                attribute_values.insert(
+                    name.to_string(),
+                    AttributeValue {
+                        allowable_value: AllowableValue::Any,
+                        modification_context: ModificationContext::Anywhere,
+                        silent_when_locked: false,
+                        value: value.clone(),
+                    },
+                );
+            }
+
+            ResolvedAttributes::new(
+                Arc::new(attribute_values),
+                Arc::new(HashMap::new()),
+                HashMap::new(),
+                SafeMode::Secure,
+                None,
+                None,
+            )
+        }
+
+        #[test]
+        fn neither_present_uses_default() {
+            let empty = attrs(&[]);
+
+            assert!(empty.resolve_show_title(true));
+            assert!(!empty.resolve_show_title(false));
+        }
+
+        #[test]
+        fn set_showtitle_always_wins() {
+            let showtitle_set = attrs(&[("showtitle", InterpretedValue::Set)]);
+
+            assert!(showtitle_set.resolve_show_title(false));
+        }
+
+        #[test]
+        fn present_notitle_decides_when_showtitle_absent() {
+            let notitle_set = attrs(&[("notitle", InterpretedValue::Set)]);
+            let notitle_unset = attrs(&[("notitle", InterpretedValue::Unset)]);
+
+            assert!(!notitle_set.resolve_show_title(true));
+            assert!(notitle_unset.resolve_show_title(false));
+        }
+
+        #[test]
+        fn present_but_unset_showtitle_hides_when_notitle_absent() {
+            // This shape -- `showtitle` present and unset, with no `notitle`
+            // entry at all -- cannot arise from a normal document/API write
+            // (assigning `showtitle` always plants a `notitle` mirror; see
+            // `apply_title_visibility_linkage`), but a snapshot can still be
+            // constructed directly (as this test does), so the fallback must
+            // resolve it correctly too.
+            let showtitle_unset = attrs(&[("showtitle", InterpretedValue::Unset)]);
+
+            assert!(!showtitle_unset.resolve_show_title(true));
+        }
+    }
 }
