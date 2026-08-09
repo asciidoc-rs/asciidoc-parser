@@ -437,15 +437,16 @@ fn build_passthrough_node<'src>(
 /// Builds one [`Styled`] node from a verbatim, unescaped, attribute-listed
 /// `INLINE_PASS_MACRO` match (`[attrs]+++text+++`, `[attrs]++text++`,
 /// `[attrs]$$text$$`) – the delimited half of the attribute-list-prefixed
-/// forms this increment recognizes (see [`build_bare_attrlisted_passthrough_node`]
-/// for the bare half). Folds through the same `render_quoted_substitution`
-/// `PassthroughRestoreReplacer` calls when its stored passthrough carries a
-/// `type_`/`attrlist`, so the output is byte-for-byte identical.
+/// forms this increment recognizes (see
+/// [`build_bare_attrlisted_passthrough_node`] for the bare half). Folds through
+/// the same `render_quoted_substitution` `PassthroughRestoreReplacer` calls
+/// when its stored passthrough carries a `type_`/`attrlist`, so the output is
+/// byte-for-byte identical.
 ///
 /// Only the `++` boundary can trigger the legacy `x-` compatibility marker
-/// (`handle_quoted_text`'s `old_behavior`, see [`split_old_behavior_attrlist`]);
-/// `+++`/`$$` always keep the attrlist as written and never switch to the
-/// `Normal` substitution group.
+/// (`handle_quoted_text`'s `old_behavior`, see
+/// [`split_old_behavior_attrlist`]); `+++`/`$$` always keep the attrlist as
+/// written and never switch to the `Normal` substitution group.
 fn build_attrlisted_passthrough_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
