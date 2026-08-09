@@ -433,6 +433,33 @@ impl ResolvedAttributes {
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or_else(|| self.resolve_datetime_attribute(name).is_some())
     }
+
+    /// Resolves whether a document title should be displayed, from the
+    /// `showtitle`/`notitle` attribute pair (which are complements).
+    ///
+    /// Mirrors [`Parser::resolve_show_title`](crate::Parser::resolve_show_title)
+    /// exactly, so a lookup here returns the same value the parser would report
+    /// after `parse`. See that method's doc comment for the full precedence
+    /// rules. This is the accessor a renderer holding only a [`Document`]
+    /// (e.g. an *embed* consumer with no [`Parser`] in hand) should use to
+    /// decide whether to emit the title, rather than re-deriving the toggle
+    /// from a direct read of `notitle` / `showtitle` -- see issue
+    /// asciidoc-rs/asciidoc-parser#1148, where a downstream re-implementation
+    /// of this logic repeatedly drifted out of sync with the parser's.
+    ///
+    /// [`Document`]: crate::Document
+    /// [`Parser`]: crate::Parser
+    pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
+        if self.is_attribute_set("showtitle") {
+            true
+        } else if self.has_attribute("notitle") {
+            !self.is_attribute_set("notitle")
+        } else if self.has_attribute("showtitle") {
+            false
+        } else {
+            default_shown
+        }
+    }
 }
 
 #[cfg(test)]
