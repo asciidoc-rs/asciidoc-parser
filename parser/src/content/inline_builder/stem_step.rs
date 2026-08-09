@@ -15,6 +15,23 @@ use crate::{
     strings::CowStr,
 };
 
+/// Resolves the [`SubstitutionGroup`] a STEM macro's expression runs
+/// through: [`SubstitutionGroup::Stem`] (special characters only) for a bare
+/// macro, or the group an explicit substitution list (`stem:c,q[…]`)
+/// resolves to – mirroring [`SubstitutionGroup::from_custom_string`]/
+/// [`InlineStemMacroReplacer`](crate::content::passthroughs)'s own
+/// resolution exactly, including its "skip and keep going" handling of an
+/// unrecognized name. As throughout this module, this does *not* raise the
+/// string pipeline's own `InvalidSubstitutionTypeForStemMacro` warning for
+/// an invalid name, deferring that side effect to the cutover (design §5.2
+/// Phase 4, step 6), since it does not change the fold's output bytes.
+fn resolve_stem_subs(subs_list: Option<&str>) -> SubstitutionGroup {
+    match subs_list {
+        None => SubstitutionGroup::Stem,
+        Some(subs_list) => SubstitutionGroup::from_custom_string(None, subs_list).0,
+    }
+}
+
 /// Recognizes inline STEM macros (`stem:[…]`, `asciimath:[…]`,
 /// `latexmath:[…]`), replacing each with a [`Stem`](InlineNode::Stem) leaf.
 ///
@@ -58,14 +75,16 @@ use crate::{
 /// An **escaped** macro (`\stem:[…]`) drops its backslash and stays literal,
 /// mirroring every other macro family's escape handling.
 ///
-/// One form is deferred, documented and pinned by a divergence test: a macro
-/// carrying an **explicit substitution list** (`stem:c,q[…]`) – the
-/// analogous `pass:c,q[…]` form is no longer deferred (it renders through
-/// the real substitution pipeline and folds through a single opaque `Raw`
-/// leaf, immune to reprocessing by this builder's own later steps – see
-/// `passthrough_step::apply_passthroughs`'s doc comment), but this
-/// increment hasn't yet picked up the same treatment for `Stem`. This step
-/// is **additive**: nothing is wired into the parse path.
+/// A macro carrying an **explicit substitution list** (`stem:c,q[…]`) is
+/// recognized too: [`resolve_stem_subs`] resolves the list to a
+/// [`SubstitutionGroup`] exactly as [`InlineStemMacroReplacer`] does, and
+/// [`stem_expression_value`] runs the expression through that group instead
+/// of the bare macro's [`SubstitutionGroup::Stem`] – the analogous
+/// `pass:c,q[…]` form takes the same approach (see
+/// `passthrough_step::apply_passthroughs`'s doc comment), except a `Stem`
+/// node already has a single `value` field to hold the substituted result,
+/// so no richer subtree is needed here. This step is **additive**: nothing
+/// is wired into the parse path.
 ///
 /// [`Passthroughs::extract_from`]: crate::content::Passthroughs::extract_from
 /// [`InlineStemMacroReplacer`]: crate::content::passthroughs
@@ -90,9 +109,9 @@ pub(super) fn apply_stem<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every STEM macro at this level, skipping the deferred form
-/// [`apply_stem`] documents: a macro carrying an explicit substitution list
-/// (an optional group [`INLINE_STEM_MACRO`] captures ahead of the bracket).
+/// Finds every STEM macro at this level – both the bare form and one
+/// carrying an explicit substitution list (an optional group
+/// [`INLINE_STEM_MACRO`] captures ahead of the bracket).
 fn find_stem_matches<'src>(
     s: &str,
     nodes: &[InlineNode<'src>],
@@ -108,11 +127,6 @@ fn find_stem_matches<'src>(
         let whole = caps.get(0).unwrap();
 
         let full = whole.start()..whole.end();
-
-        // An explicit substitution list (`stem:c,q[…]`) is deferred.
-        if caps.get(3).is_some() {
-            continue;
-        }
 
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
@@ -179,7 +193,8 @@ fn build_stem_node<'src>(
     let mut emitted = Vec::new();
     emit_range(nodes, pieces, expr_range, &mut emitted);
 
-    let value = stem_expression_value(&emitted, notation, parser);
+    let subs = resolve_stem_subs(caps.get(3).map(|m| m.as_str()));
+    let value = stem_expression_value(&emitted, notation, &subs, parser);
 
     InlineNode::Stem(Stem {
         notation,
@@ -207,9 +222,14 @@ fn build_stem_node<'src>(
 /// branch). The legacy `$…$` wrapper is dropped only in the single-`Text`-run
 /// case; a `$` immediately beside a nested passthrough is a narrower
 /// divergence, documented and pinned by a test.
+///
+/// `subs` is the group the expression's `Text` runs are substituted through –
+/// [`SubstitutionGroup::Stem`] for a bare macro, or the group an explicit
+/// substitution list resolves to (see [`resolve_stem_subs`]).
 fn stem_expression_value(
     emitted: &[InlineNode<'_>],
     notation: StemNotation,
+    subs: &SubstitutionGroup,
     parser: &Parser,
 ) -> String {
     if let [InlineNode::Text { value: text, .. }] = emitted {
@@ -227,7 +247,7 @@ fn stem_expression_value(
             expr = expr[1..expr.len() - 1].to_string();
         }
 
-        return passthrough_text(&expr, &SubstitutionGroup::Stem, parser);
+        return passthrough_text(&expr, subs, parser);
     }
 
     let mut value = String::new();
@@ -241,7 +261,7 @@ fn stem_expression_value(
                     text = text.replace("\\]", "]");
                 }
 
-                value.push_str(&passthrough_text(&text, &SubstitutionGroup::Stem, parser));
+                value.push_str(&passthrough_text(&text, subs, parser));
             }
 
             InlineNode::Raw { value: raw, .. } => {
@@ -445,23 +465,90 @@ mod tests {
     }
 
     #[test]
-    fn a_stem_macro_with_an_explicit_subs_list_is_a_documented_divergence() {
-        // `stem:c[…]` names an explicit substitution list. The analogous
-        // `pass:c[…]` form is handled (see `passthrough_step`'s
-        // `build_pass_macro_subs_value`), but `Stem` hasn't picked up the
-        // same treatment yet – deferred to a later increment.
+    fn a_stem_macro_with_an_explicit_subs_list_applies_only_the_named_steps() {
+        // `stem:c[…]` names an explicit substitution list – here, special
+        // characters only, the same result the default `SubstitutionGroup::
+        // Stem` produces for this input, but taking the explicit-list path
+        // through `resolve_stem_subs` rather than the bare-macro default.
         let source = "stem:c[a < b]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        assert_stem(&nodes[0], StemNotation::AsciiMath, "a &lt; b");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_stem_macro_with_multiple_subs_applies_them_in_the_order_given() {
+        // `stem:q,c[…]` resolves to `Custom([Quotes, SpecialCharacters])` –
+        // the order written, not the *normal* effective order – mirroring
+        // the analogous `pass:q,c[…]` fixture exactly (see
+        // `passthrough_step`'s own test of the same name).
+        let source = "stem:q,c[<b> *bold*]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        assert_stem(
+            &nodes[0],
+            StemNotation::AsciiMath,
+            "&lt;b&gt; &lt;strong&gt;bold&lt;/strong&gt;",
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_stem_macro_with_an_unrecognized_subs_name_skips_it() {
+        // An unrecognized name resolves to zero steps rather than
+        // invalidating the whole list, mirroring `SubstitutionGroup::
+        // from_custom_string`'s "skip and keep going" resolution: with no
+        // steps at all the expression is substituted completely untouched.
+        let source = "stem:bogus[a < b]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        assert_stem(&nodes[0], StemNotation::AsciiMath, "a < b");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_recognized_stem_subs_name_beside_an_unrecognized_one_is_still_honored() {
+        // `stem:c,bogus[…]` resolves to the same `Custom([SpecialCharacters])`
+        // as `stem:c[…]` alone.
+        let nodes = build_src(Span::new("stem:c,bogus[a < b]"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_stem(&nodes[0], StemNotation::AsciiMath, "a &lt; b");
+    }
+
+    #[test]
+    fn an_escaped_stem_macro_with_a_subs_list_stays_literal() {
+        // `\stem:c[…]` drops the single backslash and keeps the whole
+        // `stem:c[…]` text literal, mirroring the escape branch every other
+        // form of this macro takes.
+        let source = r"\stem:c[a < b]";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Stem(_))),
-            "a stem: macro with an explicit subs list must be left unrecognized: {nodes:?}"
+            "an escaped STEM macro must not build a Stem node: {nodes:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        let golden = golden_passthroughs(source);
-
-        assert_ne!(folded, golden);
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
     }
 
     #[test]
@@ -488,6 +575,13 @@ mod tests {
             "stem:[a < b +++<i>or</i>+++ c]",
             "stem:[pass:[<b>x</b>]]",
             "latexmath:[+++x+++]",
+            // An explicit substitution list, in various shapes.
+            "stem:c[a < b]",
+            "stem:q,c[<b> *bold*]",
+            "stem:bogus[a < b]",
+            "stem:c,bogus[a < b]",
+            r"\stem:c[a < b]",
+            r"stem:c[a\]b]",
         ];
 
         for source in fixtures {

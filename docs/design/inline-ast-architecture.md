@@ -1301,12 +1301,31 @@ Each phase is a reviewable unit with a clear exit gate.
   carried through verbatim") was updated to match this decision.
 
   An escaped macro (`\stem:[…]`) drops its backslash and stays literal, mirroring every other macro
-  family's escape handling. One form is deferred, documented and pinned by a divergence test: a macro
-  carrying an **explicit substitution list** (`stem:c,q[…]`, whose content would need a richer subtree
-  than a single `Stem` leaf can hold – the same reason a `pass:` macro with an explicit list is deferred).
-  This step is **additive**: nothing is wired into the parse path. The remaining three forms 5a already
-  documents as deferred – an attribute-list-prefixed passthrough, a `pass:` macro with an explicit
-  substitution list, and the bare unconstrained `+text+` form – remain for a later increment.
+  family's escape handling. One form was initially deferred, documented and pinned by a divergence test: a
+  macro carrying an **explicit substitution list** (`stem:c,q[…]`). This step is **additive**: nothing is
+  wired into the parse path. The remaining three forms 5a already documents as deferred – an
+  attribute-list-prefixed passthrough, a `pass:` macro with an explicit substitution list, and the bare
+  unconstrained `+text+` form – remain for a later increment.
+
+  *Follow-up landed as (the `stem:c,q[…]` explicit substitution list):* unlike a `pass:` macro's explicit
+  list (deferred at the time, closed by step 5d part 3 below), a `Stem` node needs no richer subtree to
+  carry this form: it already has a single `value` field, so the same treatment part 3 goes on to give
+  `pass:` – running the expression through the **real substitution pipeline** under the list's resolved
+  [`SubstitutionGroup`](../../parser/src/content/substitution_group.rs) – applies directly. A new
+  `resolve_stem_subs` helper in
+  [`stem_step.rs`](../../parser/src/content/inline_builder/stem_step.rs) resolves an explicit list (or
+  falls back to [`SubstitutionGroup::Stem`] for a bare macro) via
+  [`SubstitutionGroup::from_custom_string`] – the exact call [`InlineStemMacroReplacer`] makes, including
+  its "skip and keep going" handling of an unrecognized name – and `stem_expression_value` substitutes the
+  expression's `Text` runs through the resolved group instead of the hard-coded `Stem` group, so the fold
+  is byte-for-byte identical to the string pipeline. As throughout this module, this does *not* raise the
+  string pipeline's own `InvalidSubstitutionTypeForStemMacro` warning for an invalid name, deferring that
+  side effect to the cutover (step 6) since it does not change the fold's output bytes. A differential
+  corpus extends the existing STEM fixtures with a single- and multi-step list (applied in the order
+  given), an unrecognized name skipped alongside a recognized one, and the escape form, mirroring the
+  `pass:c,q[…]` corpus exactly.
+
+  [`InlineStemMacroReplacer`]: ../../parser/src/content/passthroughs.rs
 
   *Step 5d part 2 landed as (an attribute-list-prefixed passthrough → `Styled`):*
   [`apply_passthroughs`](../../parser/src/content/inline_builder/passthrough_step.rs) now recognizes all
@@ -1461,8 +1480,8 @@ Each phase is a reviewable unit with a clear exit gate.
      - ✅ **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
      - ✅ **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
      - ✅ **5d.** the deferred forms `5a` documents, itself sliced into parts:
-       - ✅ **part 1.** inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`
-         (an explicit substitution list, `stem:c,q[…]`, is itself deferred).
+       - ✅ **part 1.** inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`,
+         including an explicit substitution list (`stem:c,q[…]`).
        - ✅ **part 2.** an attribute-list-prefixed passthrough (`[quotes]++text++`, `` [x-]`text` ``,
          `[attrs]+text+`).
        - ✅ **part 3.** a `pass:` macro carrying an explicit substitution list (`pass:c,q[…]`) → `Raw`,
