@@ -5214,5 +5214,20 @@ mod tests {
                 "//server/share/chapter.adoc"
             );
         }
+
+        // A UNC container whose authority is *incomplete* — cut off before a
+        // separator ends its second (share) component, here because the
+        // container is exactly the share itself with nothing beyond it —
+        // still doesn't panic. `path_root`'s authority scan looks for a
+        // trailing separator to end each of the two components it consumes;
+        // with none left to find for the second, it takes the rest of the
+        // string instead of indexing past the end.
+        #[test]
+        fn unc_container_with_no_trailing_separator_after_the_share_still_works() {
+            assert_eq!(
+                nested_file_name(Some(r"\\server\share"), "doc.adoc"),
+                "//server/share/doc.adoc"
+            );
+        }
     }
 }
