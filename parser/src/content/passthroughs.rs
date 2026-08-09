@@ -396,7 +396,7 @@ static PASS_WITH_INDEX: LazyLock<Regex> = LazyLock::new(|| {
 /// * `[x-]\`text\``
 ///
 /// NOTE: We do not support compat-mode in the Rust implementation.
-static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)

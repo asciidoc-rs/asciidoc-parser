@@ -1235,6 +1235,47 @@ Each phase is a reviewable unit with a clear exit gate.
   documents as deferred – an attribute-list-prefixed passthrough, a `pass:` macro with an explicit
   substitution list, and the bare unconstrained `+text+` form – remain for a later increment.
 
+  *Step 5d part 2 landed as (an attribute-list-prefixed passthrough → `Styled`):*
+  [`apply_passthroughs`](../../parser/src/content/inline_builder/passthrough_step.rs) now recognizes all
+  three attribute-list-prefixed forms 5a deferred – `[quotes]++text++`/`[quotes]+++text+++`/`[quotes]$$text$$`
+  (`INLINE_PASS_MACRO`'s own attrlist branch), `` [x-]`text` `` and `[attrs]+text+` (`INLINE_PASS`, now
+  shared `pub(crate)`) – each as a [`Styled`](../../parser/src/inlines/styled.rs) node (`Code` for
+  monospace, `Unquoted` otherwise; always `Unconstrained`) whose attrlist is parsed the same way an
+  attributed quote's is (the quotes step's `attributes_of`, now shared `pub(super)`), folding through the
+  same `render_quoted_substitution` `PassthroughRestoreReplacer` calls when its stored passthrough carries
+  a `type_`, so the output is byte-for-byte identical. The bare forms run as a genuinely **second pass**
+  ([`apply_bare_attrlisted_pass_level`](../../parser/src/content/inline_builder/passthrough_step.rs)) over
+  what the delimited pass leaves behind, mirroring `Passthroughs::extract_from`'s own two-regex order
+  (`INLINE_PASS_MACRO` before `INLINE_PASS`) – which turns out to matter: an attribute-list-prefixed
+  *delimiter* escape (`[attrs]\++text++`) drops its one backslash and leaves literal, unopaqued text
+  behind, which the second pass then legitimately **re-recognizes** as its own (different) match, exactly
+  as the string pipeline's own second regex pass does over its own once-substituted text – parity by
+  construction, not a coincidence, once both passes exist.
+
+  The legacy **`x-` compatibility marker** (an attrlist of exactly `x-`, or one ending in ` x-`) is the
+  one case whose body is not a single `Raw` leaf: it switches the variant to `Code` and re-threads the
+  body through the **full `Normal` substitution order** – special characters, quotes, attribute
+  references, character replacements, macros, post-replacement, `SubstitutionGroup::Normal`'s own step
+  list minus the passthrough/STEM extraction that already ran once, ahead of it – via a new
+  [`apply_normal_subs`](../../parser/src/content/inline_builder/passthrough_step.rs) helper that chains
+  the six existing step functions directly, mirroring `PassthroughRestoreReplacer`'s own recursive
+  `pass.subs.apply(…)` call for that case as a node transducer rather than a second string pass. Only the
+  `++` boundary (delimited) and the plus bare form trigger it; the backtick bare form's attrlist is
+  *always* `x-`-eligible (the regex itself requires it) but its format mark keeps `subs` at `Verbatim`
+  regardless, and `+++`/`$$` never switch at all – both mirrored exactly from `handle_quoted_text` and
+  `InlinePassReplacer`.
+
+  Two corner cases remain deferred, each documented and pinned by a divergence test: an **escaped
+  bracket** (`\[attrs]++text++`), which unescapes to a literal `[attrs]` prefix *and* still recognizes the
+  delimited text as an ordinary (non-attrlisted) passthrough – a kept-literal-prefix-with-one-dropped-char
+  plus a node for the remainder, a shape neither `MacroMatchKind` variant expresses – and the
+  **"prohibited prefix"** the string replacer's own retry loop protects (a bare attrlisted match
+  immediately preceded by `\`, `:`, or `;`, the same missing-lookbehind class of gap the bare unconstrained
+  form documents): rather than reproduce the retry, such a match is simply left unrecognized. This step is
+  **additive**: nothing is wired into the parse path. The remaining two forms 5a documents as deferred – a
+  `pass:` macro with an explicit substitution list, and the bare unconstrained `+text+` form with no
+  attribute list at all – remain for a later increment.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1271,7 +1312,7 @@ Each phase is a reviewable unit with a clear exit gate.
      - **5d.** the deferred forms `5a` documents, itself sliced into parts:
        - ✅ **part 1.** inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`
          (an explicit substitution list, `stem:c,q[…]`, is itself deferred).
-       - **part 2.** an attribute-list-prefixed passthrough (`[quotes]++text++`, `` [x-]`text` ``,
+       - ✅ **part 2.** an attribute-list-prefixed passthrough (`[quotes]++text++`, `` [x-]`text` ``,
          `[attrs]+text+`).
        - **part 3.** a `pass:` macro carrying an explicit substitution list (`pass:c,q[…]`).
        - **part 4.** the bare unconstrained `+text+` form.
