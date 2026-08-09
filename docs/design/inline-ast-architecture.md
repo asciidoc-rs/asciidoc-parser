@@ -1464,6 +1464,36 @@ Each phase is a reviewable unit with a clear exit gate.
   markup), and the escape/unescape forms. This step is **additive**: nothing is wired into the parse path.
   Landing it closes out step 5d and, with it, step 5 in full.
 
+  *Step 6 prep landed as (the image family's deferred recognition side effects, staged):* with step 5 done,
+  every macro family the recorder covers now has a single-pass counterpart, but each one still skips the
+  **recognition side effect** its string-pipeline replacer performs at the same point – registering an id,
+  link, or image target in the document catalog, or recording a warning – deferring it "to the cutover"
+  (step 6, below). Step 6 itself bundles a lot: swapping the recorder for the builder inside `Content`,
+  making `rendered_html()` a fold, deleting the three sentinel systems, retiring the `with_inline_tree`
+  flag, *and* re-attaching every deferred side effect all at once. Re-attaching the image family's own two
+  side effects – [`register_image`](../../parser/src/parser/parser.rs) (for `image:`, gated on
+  `catalog_assets`) and the `link=` dangerous-scheme/self-href warning `InlineImageMacroReplacer` records –
+  turns out not to need the cutover itself: it is a standalone function,
+  [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs), that walks an
+  already-built tree and reads each [`Image`](../../parser/src/inlines/image.rs) node's own stored `target`
+  and `attrs` instead of a regex capture, mirroring `InlineImageMacroReplacer::replace_append`'s own
+  `link=self`/`link=`-scheme rejection logic (`link_self_resolves_to_src`, `has_dangerous_scheme`,
+  `has_dangerous_self_href`, `is_uri_ish`) exactly. It recurses into every container an `Image` node can be
+  nested inside – a `Styled` span, a `Ref`, or a `Footnote`'s own children – so a nested or footnote-embedded
+  image is found too. Landing it now, ahead of the rest of step 6, gives the eventual cutover one fewer thing
+  to get right in one leap: this piece is already written, tested against a broad fixture set (including a
+  differential comparison against the golden string pipeline's own registrations, using the same
+  two-independent-parsers discipline the footnote increment established), and reviewed on its own. As with
+  every additive increment before it, **nothing is wired into a real parse path** – the function is called
+  only by its own tests, against their own `Parser` – so calling it for real still waits for step 6, when it
+  can be invoked exactly once per parse without double-counting a registration. A new
+  [`Parser::catalog`](../../parser/src/parser/parser.rs) test-only accessor was added alongside it, so a test
+  can inspect a `Parser`'s own live catalog directly (the registrations this function performs) without a
+  full `Document` parse, whose own `Document::catalog()` is a separate, later snapshot. The remaining
+  deferred side effects – an attributed span's and an anchor's own `register_ref` (plus the anchor's
+  duplicate-id warning and the bibliography-anchor form), and `register_link` for the four link-macro forms –
+  are unstaged and remain step 6's own work, alongside everything else step 6 bundles.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1519,6 +1549,11 @@ Each phase is a reviewable unit with a clear exit gate.
      the dangerous-scheme substitution warning. Doing this at the cutover (rather than in the
      additive passes, which run *alongside* the authoritative string pipeline) is what avoids
      double-counting each registration.
+     - ✅ **prep.** The image family's own two side effects (`register_image`, the `link=`
+       dangerous-scheme/self-href warning) are already written and tested as a standalone,
+       unwired function, [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs)
+       – see the step's own "landed as" note above. Calling it for real is still this step's job;
+       the anchor/attributed-span `register_ref` pair and `register_link` remain unstaged.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

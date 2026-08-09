@@ -154,6 +154,23 @@
 //! attribute expansion, and passthroughs, at which point it can replace the
 //! recorder, make `rendered_html()` a fold, and retire the sentinel systems.
 //!
+//! # Staging the cutover's recognition side effects
+//!
+//! Every macro family above deliberately skips a **recognition side effect**
+//! the string pipeline performs at the same point – registering an id, link,
+//! or image target in the document catalog, or recording a warning – because
+//! the additive builder still runs *alongside* the authoritative string
+//! pipeline (each against its own, independent [`Parser`]), so performing one
+//! here today would risk double-counting a registration once the two paths
+//! ever share a `Parser`. [`apply_image_side_effects`] is the first of these
+//! to be written: it re-attaches the `image:`/`icon:` family's own deferred
+//! side effects (`register_image`, the `link=` dangerous-scheme/self-href
+//! warning) as a function that walks an already-built tree, staged as its own
+//! reviewable building block for the cutover (design §5.2, Phase 4 step 6).
+//! It is exercised only by its own tests, against their own `Parser` – calling
+//! it for real means invoking it exactly once per parse, after the
+//! single-pass builder replaces the recorder as `Content`'s tree source.
+//!
 //! # A note on quote nesting
 //!
 //! The string pipeline realizes nesting by running the ordered [`quote_subs`]
@@ -202,6 +219,11 @@ use char_replacements::apply_character_replacements;
 pub(crate) use fold::fold_html;
 use footnotes::apply_footnotes;
 use macros::apply_macros;
+// Staged for the eventual cutover (see this module's own doc comment); not
+// yet called from any real parse path, so – like `fold_html` above – reachable
+// only via `cfg(test)` callers and future external callers today.
+#[allow(unused_imports)]
+pub(crate) use macros::image::apply_image_side_effects;
 use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;
