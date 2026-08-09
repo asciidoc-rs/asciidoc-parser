@@ -1,14 +1,8 @@
 //! The passthrough-extraction substitution step.
 
 use super::{
-    attribute_refs::apply_attribute_references,
-    char_replacements::apply_character_replacements,
-    macros::{
-        MacroMatch, MacroMatchKind, apply_macros, image::range_is_verbatim, rebuild_macro_level,
-    },
-    post_replacements::apply_post_replacements,
-    quotes::{Piece, apply_quotes, attributes_of, build_match_string, source_slice},
-    special_chars::apply_special_characters,
+    macros::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level},
+    quotes::{Piece, attributes_of, build_match_string, source_slice},
 };
 use crate::{
     Parser, Span,
@@ -20,7 +14,8 @@ use crate::{
 /// The passthrough-extraction step, as a node transducer: replaces each
 /// recognized passthrough with a [`Raw`](InlineNode::Raw) leaf and leaves
 /// everything else as the whole-source seed [`Text`](InlineNode::Text) node,
-/// for [`apply_special_characters`] and the later steps to refine.
+/// for [`apply_special_characters`](super::special_chars::apply_special_characters)
+/// and the later steps to refine.
 ///
 /// This is the **first** step [`build`](super::build) runs – mirroring
 /// [`Passthroughs::extract_from`](crate::content::Passthroughs::extract_from),
@@ -65,6 +60,20 @@ use crate::{
 /// ([`apply_bare_attrlisted_pass_level`]) after the delimited forms above,
 /// mirroring `Passthroughs::extract_from`'s own order (`INLINE_PASS_MACRO`
 /// before [`INLINE_PASS`]).
+///
+/// Running as a genuine second pass has one consequence worth calling out: a
+/// bare-attrlisted body whose content the *first* pass already recognizes on
+/// its own – an embedded `pass:[…]`, or a `+++…+++`/`++…++`/`$$…$$` delimited
+/// passthrough – is left **unrecognized** rather than wrapped, because the
+/// candidate match's body then spans the already-built (opaque) node the
+/// first pass left behind (the same `range_is_verbatim` boundary every macro
+/// family in this module documents). The *delimited* attrlisted forms do not
+/// share this gap: `INLINE_PASS_MACRO`'s own attrlist-prefixed alternative
+/// matches the *whole* construct (attrlist, delimiters, and body) as one
+/// leftmost match, so an embedded `pass:[…]` inside, say, `[x-]++pass:[<b>]++`
+/// is captured as part of that one match's body – never independently matched
+/// first – and (per the `x-` marker below) extracted correctly by the
+/// recursive `Normal`-order substitution its body then runs through.
 ///
 /// A **`pass:` macro carrying an explicit substitution list** (`pass:c,q[…]`,
 /// whose content would need a richer subtree than a single `Raw` leaf – the
@@ -604,31 +613,29 @@ fn split_old_behavior_attrlist(attrlist: Span<'_>) -> (Span<'_>, bool) {
     }
 }
 
-/// Runs `text` through the *normal* substitution order (special characters,
-/// quotes, attribute references, character replacements, macros, post
-/// replacement – [`SubstitutionGroup::Normal`]'s own step list) and returns
-/// the resulting node subtree, for the legacy `x-` compatibility marker's
-/// `Normal`-group passthrough body (see [`split_old_behavior_attrlist`]).
+/// Runs `text` through the full [`SubstitutionGroup::Normal`] pipeline and
+/// returns the resulting node subtree, for the legacy `x-` compatibility
+/// marker's `Normal`-group passthrough body (see
+/// [`split_old_behavior_attrlist`]).
 ///
 /// This mirrors `PassthroughRestoreReplacer`'s own `pass.subs.apply(…)` call
-/// for that case, except as a node transducer: `Normal`'s step list excludes
-/// [`apply_passthroughs`] and [`apply_stem`](super::apply_stem) (mirroring
-/// that passthrough/STEM extraction happens once, ahead of
-/// [`SubstitutionGroup::apply`], not inside it), so `text` is threaded
-/// through the remaining six steps directly, with itself as the root a
-/// child's `location` is sliced from.
+/// for that case. That call is *not* just the six named steps
+/// (`SpecialCharacters`, `Quotes`, `AttributeReferences`,
+/// `CharacterReplacements`, `Macros`, `PostReplacement`): `SubstitutionGroup`'s
+/// `run_pipeline` extracts passthroughs (and, as part of that same extraction,
+/// inline STEM) *before* running a group's steps whenever the group's step
+/// list includes `Macros` – which `Normal`'s does – so a passthrough or STEM
+/// macro nested in an `x-` body (`[x-]++pass:[<b>]++`) is itself extracted
+/// and restored, not left for `Macros` to walk over as plain text.
+/// [`build`](super::build)
+/// already threads a span through exactly that full sequence – passthroughs,
+/// STEM, then the six steps, footnotes included (the string pipeline's
+/// `Macros` step recognizes footnote macros too, so `Normal`'s semantics
+/// cover them; `build` only splits that recognition into its own step for
+/// numbering-order reasons, design §5.2 step 4b(ii) part 4c) – so this
+/// delegates to it directly rather than re-deriving a subset.
 fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
-    let nodes = vec![InlineNode::Text {
-        value: CowStr::from(text.data()),
-        location: text,
-    }];
-
-    let nodes = apply_special_characters(nodes);
-    let nodes = apply_quotes(nodes, text, parser);
-    let nodes = apply_attribute_references(nodes, text, parser);
-    let nodes = apply_character_replacements(nodes, text);
-    let nodes = apply_macros(nodes, text, parser);
-    apply_post_replacements(nodes, text)
+    super::build(text, parser)
 }
 
 /// Runs `text` through the real substitution pipeline under `subs`, returning
@@ -939,6 +946,15 @@ mod tests {
             // The bare-plus form's own delimiter escape: dropped backslash,
             // literal remainder, no further pass to re-scan a residue.
             r"[attrs]\+text+",
+            // The `x-` marker's `Normal`-order body extracts a nested
+            // passthrough/STEM/footnote/macro rather than walking over it as
+            // plain text (`SubstitutionGroup::Normal`'s `run_pipeline`
+            // extracts passthroughs, and thus STEM, ahead of its step list
+            // whenever `Macros` is in scope, which it is for `Normal`).
+            "[x-]++pass:[<b>]++",
+            "[x-]++stem:[x^2]++",
+            "[x-]++footnote:[note text]++",
+            "[x-]++image:x.png[X] and pass:[<i>]++",
         ];
 
         for source in fixtures {
@@ -1033,6 +1049,70 @@ mod tests {
 
             other => panic!("expected Styled, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_x_dash_marker_normal_subs_extracts_a_nested_passthrough() {
+        // `[x-]++pass:[<b>]++`: `SubstitutionGroup::Normal`'s own
+        // `run_pipeline` extracts passthroughs (and STEM) *before* running its
+        // step list whenever `Macros` is in scope – which it is for `Normal` –
+        // so a `pass:[…]` nested in the `x-` body is itself extracted and
+        // restored by `apply_normal_subs`'s delegation to `build`, rather than
+        // being left for `apply_macros` (which does not recognize `pass:` at
+        // all) to walk over as plain text.
+        let nodes = build_src(Span::new("[x-]++pass:[<b>]++"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Code, SpanForm::Unconstrained);
+        assert_raw(&children[0], "<b>");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs("[x-]++pass:[<b>]++")
+        );
+    }
+
+    #[test]
+    fn the_x_dash_marker_normal_subs_extracts_a_nested_stem_macro() {
+        // `[x-]++stem:[x^2]++`: STEM is extracted in the same pass as
+        // passthroughs (`Passthroughs::extract_from` runs both), so a nested
+        // STEM macro is likewise recognized rather than left as literal text.
+        let nodes = build_src(Span::new("[x-]++stem:[x^2]++"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Code, SpanForm::Unconstrained);
+        assert_eq!(children.len(), 1);
+        assert!(
+            matches!(children[0], InlineNode::Stem(_)),
+            "expected a nested Stem node, got {:?}",
+            children[0]
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs("[x-]++stem:[x^2]++")
+        );
+    }
+
+    #[test]
+    fn the_x_dash_marker_normal_subs_numbers_a_nested_footnote() {
+        // `[x-]++footnote:[…]++`: the string pipeline's `Macros` step
+        // recognizes footnote macros too, so `Normal`'s semantics cover them;
+        // `build` splits that recognition into its own `apply_footnotes` step
+        // (for numbering-order reasons), which delegating to `build` picks up
+        // for free.
+        let nodes = build_src(Span::new("[x-]++footnote:[note text]++"));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Code, SpanForm::Unconstrained);
+        assert_eq!(children.len(), 1);
+        assert!(
+            matches!(children[0], InlineNode::Footnote(_)),
+            "expected a nested Footnote node, got {:?}",
+            children[0]
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs("[x-]++footnote:[note text]++")
+        );
     }
 
     #[test]
@@ -1193,6 +1273,39 @@ mod tests {
             result, nodes,
             "a non-verbatim bare-attrlisted match must be left unrecognized"
         );
+    }
+
+    #[test]
+    fn a_bare_attrlisted_form_wrapping_an_embedded_macro_pass_is_a_documented_divergence() {
+        // `[method x-]+pass:[<b>]+`: the *macro* pass (`apply_pass_macro_level`,
+        // which runs first) recognizes the embedded `pass:[<b>]` on its own –
+        // `INLINE_PASS_MACRO`'s `pass:` alternative matches that substring
+        // regardless of surrounding context – *before* the bare-form second
+        // pass gets a chance to see `[method x-]+…+` as one attrlisted
+        // construct. The candidate bare-form match's body then spans the
+        // already-built (opaque) node the macro pass left behind, so
+        // `range_is_verbatim` defers it – the real-world trigger for
+        // `a_bare_attrlisted_match_whose_content_crosses_an_already_built_node_is_deferred`'s
+        // guard, rather than a hand-built level.
+        //
+        // The string pipeline instead reconciles this via a recursive
+        // sentinel-restoration step (`PassthroughRestoreReplacer` re-resolves
+        // a leftover placeholder against the *outer* passthrough list when a
+        // nested `Normal`-group substitution doesn't consume it) that has no
+        // counterpart in this tree-based, single-pass builder.
+        let source = "[method x-]+pass:[<b>]+";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Styled(_))),
+            "a bare-attrlisted match crossing an embedded macro must be left unrecognized: {nodes:?}"
+        );
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let golden = golden_passthroughs(source);
+
+        assert_ne!(folded, golden);
+        assert_eq!(golden, r#"<code class="method"><b></code>"#);
     }
 
     #[test]
