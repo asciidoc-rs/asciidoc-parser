@@ -828,7 +828,35 @@ impl<'p> PreprocessorState<'p> {
             // diagnostic or `SourceMap` entry attached to its content —
             // resolves against the right directory rather than just the
             // target as written here. See `nested_file_name`.
-            let nested_name = nested_file_name(file_name, &target);
+            //
+            // A directive written directly in the primary document is
+            // joined against `None` rather than `file_name`: there,
+            // `file_name` is the primary document's own name, which may
+            // carry a directory (or be a full filesystem path) that has
+            // nothing to do with how the target was written. Folding it
+            // in would record an absolute path in the `SourceMap` instead
+            // of the target as written/joined relative to the primary
+            // document, unlike Asciidoctor's own sourcemap. See
+            // `nested_file_name`'s doc comment: `container` is `None` for
+            // the primary document.
+            //
+            // This is *not* simply `include_depth == 1`: a table cell
+            // that itself came from an included file is preprocessed in
+            // its own top-level (depth 1) pass — see the `include::`
+            // handling in `blocks::table` — with that file's own
+            // (already directory-joined) name as `file_name`, and a
+            // directive directly in such a cell must still resolve
+            // against *that* directory, not `None`. Comparing against
+            // the parser's `primary_file_name` (rather than the depth
+            // counter, which resets to 0 for that inner pass) tells the
+            // two cases apart: it is only `Some(file_name) ==
+            // primary_file_name` when this call is processing the actual
+            // primary document text, at any depth-1 pass.
+            let nested_name = if file_name == self.parser.primary_file_name.as_deref() {
+                nested_file_name(None, &target)
+            } else {
+                nested_file_name(file_name, &target)
+            };
 
             if is_asciidoc_file(&target) {
                 // Register the included AsciiDoc file so an
@@ -2891,6 +2919,45 @@ mod tests {
         assert_eq!(
             processed_source,
             "first line of outer\n\nfirst line of middle\n\nfirst line of inner\n\nlast line of inner\n\nlast line of middle\n\nlast line of outer\n"
+        );
+    }
+
+    #[test]
+    fn first_level_include_is_not_joined_against_the_primary_documents_own_directory() {
+        // Regression test for
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/1157: a
+        // first-level include (one written directly in the primary
+        // document, not nested inside another include) must record its
+        // target as given/joined relative to the primary document — e.g.
+        // `partials/section.adoc` — not resolved against the *primary
+        // document's own* directory (which would turn it into
+        // `docs/partials/section.adoc`, or an absolute filesystem path if
+        // the primary document's name were one), matching Asciidoctor's
+        // sourcemap.
+        let source = "= Document Title\n\ninclude::partials/section.adoc[]";
+
+        let handler =
+            InlineFileHandler::from_pairs([("partials/section.adoc", "== Section\n\nParagraph.")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("docs/doc.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(
+            processed_source,
+            "= Document Title\n\n== Section\n\nParagraph.\n"
+        );
+
+        assert_eq!(
+            source_map.original_file_and_line(3),
+            Some(SourceLine(Some("partials/section.adoc".to_owned()), 1))
+        );
+        assert_eq!(
+            source_map.original_file_and_line(5),
+            Some(SourceLine(Some("partials/section.adoc".to_owned()), 3))
         );
     }
 
