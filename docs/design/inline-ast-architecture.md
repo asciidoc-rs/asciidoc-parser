@@ -1325,6 +1325,27 @@ Each phase is a reviewable unit with a clear exit gate.
   given), an unrecognized name skipped alongside a recognized one, and the escape form, mirroring the
   `pass:c,q[…]` corpus exactly.
 
+  A review caught a genuine correctness gap in the first version of this follow-up: when the expression
+  embeds an already-extracted [`Raw`](../../parser/src/inlines/inline_node.rs) passthrough (the case
+  `build_stem_node`'s own doc comment covers, e.g. `stem:[+++x+++ text]`), `stem_expression_value`
+  substitutes each surrounding `Text` run *independently* and splices the `Raw` back in verbatim between
+  them. That is safe for the bare macro's default group (special characters only – a per-character,
+  context-free substitution), which is the only group this splicing ever ran under before this follow-up –
+  but an explicit list naming a step that needs more than one `Text` run of context (`Quotes`,
+  `AttributeReferences`, `CharacterReplacements`, `Macros`, `PostReplacement`) can miss a construct whose
+  two halves fall on either side of the `Raw` (`stem:q[*a +++x+++ b*]`): the string pipeline substitutes
+  the *whole* expression as one string (the passthrough's content merely protected by its own sentinel, not
+  absent from the string), so it finds the quote pair; splicing per fragment never sees a complete pair in
+  either one. The fix is a new `subs_are_local` predicate – true when the resolved group's
+  [`steps()`](../../parser/src/content/substitution_group.rs) are empty or contain only
+  `SpecialCharacters` – that `build_stem_node` checks whenever the expression's `emit_range` recovers more
+  than one node: a non-local explicit list beside a nested passthrough is left unrecognized (the same
+  "documented divergence" shape every other boundary in this module takes) rather than silently diverging,
+  while a *local* explicit list (`stem:c[…]`) beside the same nested passthrough is unaffected and still
+  recognized. Two new tests pin this exactly: one confirming the local case still applies beside a nested
+  passthrough, one confirming the non-local case is left unrecognized and diverges from the golden string
+  pipeline's own (correct) output.
+
   [`InlineStemMacroReplacer`]: ../../parser/src/content/passthroughs.rs
 
   *Step 5d part 2 landed as (an attribute-list-prefixed passthrough → `Styled`):*
