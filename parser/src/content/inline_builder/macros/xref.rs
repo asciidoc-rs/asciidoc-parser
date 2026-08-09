@@ -913,4 +913,30 @@ mod tests {
         assert!(folded.contains(r##"href="#install""##), "folded: {folded}");
         assert_eq!(folded, golden_xref_with(source, &parser));
     }
+
+    #[test]
+    fn a_fragmentless_this_document_xref_target_is_document_as_a_whole() {
+        // A target naming *this* document with no fragment (`xref:mydoc.adoc[]`)
+        // is, like the empty target (`xref:#[]`), a reference to the document as
+        // a whole: the same `this_document_reference` derived destination, not a
+        // same-document id to resolve through the catalog.
+        let parser = Parser::default().with_primary_file_name("mydoc.adoc");
+
+        let source = "xref:mydoc.adoc[Home]";
+        let root = Span::new(source);
+        let nodes = super::super::super::build(root, &parser);
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "");
+
+        #[allow(clippy::expect_used)]
+        let derived = reference
+            .derived
+            .as_ref()
+            .expect("a fragmentless self-reference carries a derived destination");
+        assert_eq!(derived.href, "#");
+
+        let folded = super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+        assert_eq!(folded, golden_xref_with(source, &parser));
+    }
 }
