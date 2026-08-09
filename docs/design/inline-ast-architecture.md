@@ -1301,12 +1301,52 @@ Each phase is a reviewable unit with a clear exit gate.
   carried through verbatim") was updated to match this decision.
 
   An escaped macro (`\stem:[…]`) drops its backslash and stays literal, mirroring every other macro
-  family's escape handling. One form is deferred, documented and pinned by a divergence test: a macro
-  carrying an **explicit substitution list** (`stem:c,q[…]`, whose content would need a richer subtree
-  than a single `Stem` leaf can hold – the same reason a `pass:` macro with an explicit list is deferred).
-  This step is **additive**: nothing is wired into the parse path. The remaining three forms 5a already
-  documents as deferred – an attribute-list-prefixed passthrough, a `pass:` macro with an explicit
-  substitution list, and the bare unconstrained `+text+` form – remain for a later increment.
+  family's escape handling. One form was initially deferred, documented and pinned by a divergence test: a
+  macro carrying an **explicit substitution list** (`stem:c,q[…]`). This step is **additive**: nothing is
+  wired into the parse path. The remaining three forms 5a already documents as deferred – an
+  attribute-list-prefixed passthrough, a `pass:` macro with an explicit substitution list, and the bare
+  unconstrained `+text+` form – remain for a later increment.
+
+  *Follow-up landed as (the `stem:c,q[…]` explicit substitution list):* unlike a `pass:` macro's explicit
+  list (deferred at the time, closed by step 5d part 3 below), a `Stem` node needs no richer subtree to
+  carry this form: it already has a single `value` field, so the same treatment part 3 goes on to give
+  `pass:` – running the expression through the **real substitution pipeline** under the list's resolved
+  [`SubstitutionGroup`](../../parser/src/content/substitution_group.rs) – applies directly. A new
+  `resolve_stem_subs` helper in
+  [`stem_step.rs`](../../parser/src/content/inline_builder/stem_step.rs) resolves an explicit list (or
+  falls back to [`SubstitutionGroup::Stem`] for a bare macro) via
+  [`SubstitutionGroup::from_custom_string`] – the exact call [`InlineStemMacroReplacer`] makes, including
+  its "skip and keep going" handling of an unrecognized name – and `stem_expression_value` substitutes the
+  expression's `Text` runs through the resolved group instead of the hard-coded `Stem` group, so the fold
+  is byte-for-byte identical to the string pipeline. As throughout this module, this does *not* raise the
+  string pipeline's own `InvalidSubstitutionTypeForStemMacro` warning for an invalid name, deferring that
+  side effect to the cutover (step 6) since it does not change the fold's output bytes. A differential
+  corpus extends the existing STEM fixtures with a single- and multi-step list (applied in the order
+  given), an unrecognized name skipped alongside a recognized one, and the escape form, mirroring the
+  `pass:c,q[…]` corpus exactly.
+
+  A review caught a genuine correctness gap in the first version of this follow-up: when the expression
+  embeds an already-extracted [`Raw`](../../parser/src/inlines/inline_node.rs) passthrough (the case
+  `build_stem_node`'s own doc comment covers, e.g. `stem:[+++x+++ text]`), `stem_expression_value`
+  substitutes each surrounding `Text` run *independently* and splices the `Raw` back in verbatim between
+  them. That is safe for the bare macro's default group (special characters only – a per-character,
+  context-free substitution), which is the only group this splicing ever ran under before this follow-up –
+  but an explicit list naming a step that needs more than one `Text` run of context (`Quotes`,
+  `AttributeReferences`, `CharacterReplacements`, `Macros`, `PostReplacement`) can miss a construct whose
+  two halves fall on either side of the `Raw` (`stem:q[*a +++x+++ b*]`): the string pipeline substitutes
+  the *whole* expression as one string (the passthrough's content merely protected by its own sentinel, not
+  absent from the string), so it finds the quote pair; splicing per fragment never sees a complete pair in
+  either one. The fix is a new `subs_are_local` predicate – true when the resolved group's
+  [`steps()`](../../parser/src/content/substitution_group.rs) are empty or contain only
+  `SpecialCharacters` – that `build_stem_node` checks whenever the expression's `emit_range` recovers more
+  than one node: a non-local explicit list beside a nested passthrough is left unrecognized (the same
+  "documented divergence" shape every other boundary in this module takes) rather than silently diverging,
+  while a *local* explicit list (`stem:c[…]`) beside the same nested passthrough is unaffected and still
+  recognized. Two new tests pin this exactly: one confirming the local case still applies beside a nested
+  passthrough, one confirming the non-local case is left unrecognized and diverges from the golden string
+  pipeline's own (correct) output.
+
+  [`InlineStemMacroReplacer`]: ../../parser/src/content/passthroughs.rs
 
   *Step 5d part 2 landed as (an attribute-list-prefixed passthrough → `Styled`):*
   [`apply_passthroughs`](../../parser/src/content/inline_builder/passthrough_step.rs) now recognizes all
@@ -1461,8 +1501,8 @@ Each phase is a reviewable unit with a clear exit gate.
      - ✅ **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
      - ✅ **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
      - ✅ **5d.** the deferred forms `5a` documents, itself sliced into parts:
-       - ✅ **part 1.** inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`
-         (an explicit substitution list, `stem:c,q[…]`, is itself deferred).
+       - ✅ **part 1.** inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`,
+         including an explicit substitution list (`stem:c,q[…]`).
        - ✅ **part 2.** an attribute-list-prefixed passthrough (`[quotes]++text++`, `` [x-]`text` ``,
          `[attrs]+text+`).
        - ✅ **part 3.** a `pass:` macro carrying an explicit substitution list (`pass:c,q[…]`) → `Raw`,

@@ -127,10 +127,14 @@
 //!   passthrough (`stem:[+++<b>x</b>+++]`) is never deferred – the `Raw` is
 //!   spliced into the node's value verbatim, unlike every other macro family's
 //!   "crosses an already-recognized construct" boundary. A macro carrying an
-//!   explicit substitution list (`stem:c,q[…]`) is deferred – STEM's own
-//!   increment hasn't yet picked up the same
-//!   `passthrough_text`-through-the-real-pipeline treatment that resolved the
-//!   analogous `pass:c,q[…]` form (see [`apply_passthroughs`]'s doc comment).
+//!   explicit substitution list (`stem:c,q[…]`) is recognized too: the list
+//!   resolves to a [`SubstitutionGroup`](crate::content::SubstitutionGroup) the
+//!   expression runs through in place of the bare macro's
+//!   [`SubstitutionGroup::Stem`](crate::content::SubstitutionGroup::Stem) – the
+//!   same `passthrough_text`-through-the-real-pipeline treatment that resolves
+//!   the analogous `pass:c,q[…]` form (see [`apply_passthroughs`]'s doc
+//!   comment), except a `Stem` node already has a single `value` field to hold
+//!   the result, so no richer subtree is needed.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
