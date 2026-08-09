@@ -1304,6 +1304,53 @@ Each phase is a reviewable unit with a clear exit gate.
   (`pass:c,q[…]`), which still needs a richer subtree than a single `Raw` leaf can hold. This step is
   **additive**: nothing is wired into the parse path.
 
+  *Step 5d part 3 landed as (a `pass:` macro with an explicit substitution list → `Raw`, the last of 5d's
+  four deferred forms):* the one form step 5a and part 4 both name as outstanding,
+  [`build_pass_macro_subs_value`](../../parser/src/content/inline_builder/passthrough_step.rs), is
+  recognized – but not, in the end, via a richer node subtree. Prototyping that shape first (threading the
+  resolved [`SubstitutionGroup::Custom`] steps through this module's own transducers, the way the legacy
+  `x-` compatibility marker's body already does via [`apply_normal_subs`](../../parser/src/content/inline_builder/passthrough_step.rs))
+  surfaced a real bug, **pre-existing** in the already-landed `x-` marker path and independent of this
+  step: [`apply_passthroughs`] runs *first* in [`build`](../../parser/src/content/inline_builder/mod.rs),
+  so anything it splices is still visited by every one of `build`'s own later steps. That visit is a safe
+  no-op for `Quotes` (delimiters are consumed, so a second pass finds nothing left) and
+  `SpecialCharacters`/`CharacterReplacements`/`PostReplacement` (their own output is atomic or already
+  stripped of what they match on) – but **not** for `Macros`: a link or cross-reference node's display
+  text is *literal* text that reads exactly like the source it came from (by design, so the fold can
+  recover it with no build-time state), so a second `Macros` pass recognizes it all over again and nests
+  a second `Ref` inside the first. A prototype fixture (`[x-]++https://example.org++`, exercising the
+  already-merged step 5d part 2) reproduces this today: `<code><a href="…"><a href="…">…</a></a></code>`,
+  doubled. A list omitting a step `build`'s own fixed order still runs unconditionally (e.g. `pass:q[…]`,
+  which never asks for `SpecialCharacters`) fails the opposite way: content the author's list deliberately
+  left raw gets escaped anyway by `build`'s own later `SpecialCharacters` step. Solving this properly – so
+  a spliced subtree is visited by *exactly* the steps its own resolved list named, once – is a splice-time
+  protection mechanism this additive, pre-cutover module does not yet have; it is squarely the cutover's
+  job (step 6, which does not splice mid-`build` at all).
+
+  Given that, this increment takes the same shape every other deferred-until-now form in this file
+  eventually adopts once it becomes tractable: the resolved list's body is rendered through the **real,
+  string-based** substitution pipeline ([`SubstitutionGroup::apply`], via the passthrough step's own
+  [`passthrough_text`](../../parser/src/content/inline_builder/passthrough_step.rs) helper already used for
+  `++…++`/`$$…$$`/the bare unconstrained form) – exactly the call `PassthroughRestoreReplacer` makes for a
+  stored `Passthrough` – producing an already-final HTML string that becomes a single
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf's `value` verbatim, folding through the identical
+  byte-for-byte output the string pipeline produces. A `Raw` leaf is *opaque* to every one of `build`'s own
+  later steps (never descended into, never re-matched), so it sidesteps both failure modes above
+  regardless of which steps the author's list names or omits, and in which order – the list is applied
+  once, by the real pipeline, and never touched again. An unrecognized substitution name in the list (e.g.
+  `pass:bogus[…]`) is silently skipped – any recognized names are still honored – mirroring
+  `SubstitutionGroup::from_custom_string`/`InlinePassMacroReplacer`'s own resolution; this additive pass
+  does not yet raise the string pipeline's own `InvalidSubstitutionTypeForPassthroughMacro` warning for
+  it, deferring that side effect to the cutover like every other macro family's own catalog/warning side
+  effect, since it does not change the fold's output bytes. An escaped closing bracket (`pass:c[a\]b]`)
+  unescapes before rendering, the same treatment every other `pass:[…]` bracket content gets – no longer a
+  deferred corner the way a structured-children shape (a footnote's own content) would have forced. A
+  differential corpus pins single- and multi-step lists (applied in the order given, not the *normal*
+  effective order), an unrecognized name skipped alongside a recognized one, an empty resolved list (the
+  content spliced back completely untouched), a list naming `Macros` (folding through real rendered
+  markup), and the escape/unescape forms. This step is **additive**: nothing is wired into the parse path.
+  Landing it closes out step 5d and, with it, step 5 in full.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1337,12 +1384,14 @@ Each phase is a reviewable unit with a clear exit gate.
        `pass:[…]`) → `Raw`.
      - ✅ **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
      - ✅ **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
-     - **5d.** the deferred forms `5a` documents, itself sliced into parts:
+     - ✅ **5d.** the deferred forms `5a` documents, itself sliced into parts:
        - ✅ **part 1.** inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`
          (an explicit substitution list, `stem:c,q[…]`, is itself deferred).
        - ✅ **part 2.** an attribute-list-prefixed passthrough (`[quotes]++text++`, `` [x-]`text` ``,
          `[attrs]+text+`).
-       - **part 3.** a `pass:` macro carrying an explicit substitution list (`pass:c,q[…]`).
+       - ✅ **part 3.** a `pass:` macro carrying an explicit substitution list (`pass:c,q[…]`) → `Raw`,
+         rendered through the real substitution pipeline rather than a node subtree (see the step's own
+         landed-as note for why).
        - ✅ **part 4.** the bare unconstrained `+text+` form.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
      `rendered_html()` a fold, delete the three production sentinel systems (§4.2), and retire

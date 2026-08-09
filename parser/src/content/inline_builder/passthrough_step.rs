@@ -91,10 +91,21 @@ use crate::{
 /// reusing the same kept-prefix [`MacroMatch`] sub-range the auto-link
 /// increment introduced.
 ///
-/// A **`pass:` macro carrying an explicit substitution list** (`pass:c,q[…]`,
-/// whose content would need a richer subtree than a single `Raw` leaf – the
-/// same reason a footnote's content is structured children rather than a
-/// literal value) remains deferred. Inline STEM (`stem:[…]`, `asciimath:[…]`,
+/// A **`pass:` macro carrying an explicit substitution list**
+/// (`pass:c,q[…]`) folds through [`build_pass_macro_subs_value`], the same
+/// [`Raw`](InlineNode::Raw) shape [`build_passthrough_node`] gives every
+/// other `pass:`/delimiter form: `text` runs through the real, string-based
+/// substitution pipeline under the resolved
+/// [`SubstitutionGroup::Custom`] list (mirroring
+/// `PassthroughRestoreReplacer`'s own `pass.subs.apply(…)` call), producing
+/// an already-final HTML string that becomes the leaf's `value` verbatim.
+/// See [`build_pass_macro_subs_value`]'s own doc comment for why a `Raw`
+/// leaf – not a richer node subtree built from this module's own
+/// transducers – is the shape this increment needs: the resolved list can
+/// name any of the six steps in any order, and only an opaque leaf is immune
+/// to [`build`](super::build)'s own later steps reprocessing (or, for a step
+/// the list omits, wrongly applying to) that same content a second time.
+/// Inline STEM (`stem:[…]`, `asciimath:[…]`,
 /// `latexmath:[…]`) is an implicit
 /// passthrough too, but folds through its own [`Stem`](InlineNode::Stem) node
 /// rather than `Raw`, so it is recognized by its own step,
@@ -196,10 +207,9 @@ fn apply_bare_attrlisted_pass_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every passthrough at this level, skipping the deferred forms
-/// [`apply_passthroughs`] documents: a `pass:` macro carrying an explicit
-/// substitution list, and an attribute-list-prefixed match whose *bracket* is
-/// escaped (`\[attrs]++text++`) – the one remaining documented divergence. A
+/// Finds every passthrough at this level, skipping the one form
+/// [`apply_passthroughs`] still documents as deferred: an attribute-list-
+/// prefixed match whose *bracket* is escaped (`\[attrs]++text++`). A
 /// *delimiter* escape (`[attrs]\++text++`) is not deferred: it becomes an
 /// [`Unescape`](MacroMatchKind::Unescape) that drops one backslash and leaves
 /// the rest literal, exactly like an unattrlisted delimiter escape.
@@ -224,12 +234,6 @@ fn find_passthrough_matches<'src>(
         // reason every other family keeps it: a future caller of this
         // function over a non-seed level must not silently mis-slice.
         if !range_is_verbatim(pieces, &full) {
-            continue;
-        }
-
-        // A `pass:` macro carrying an explicit substitution list
-        // (`pass:c,q[…]`) is deferred.
-        if caps.get(14).is_some() {
             continue;
         }
 
@@ -506,23 +510,86 @@ fn build_passthrough_node<'src>(
         };
     }
 
-    // The bare `pass:[…]` macro (no explicit substitution list):
-    // `SubstitutionGroup::None` applies nothing, and an escaped closing
-    // bracket (`\]`) unescapes, mirroring the string replacer's
+    // The `pass:` macro (no delimiters). With an **explicit substitution
+    // list** (`pass:c,q[…]`, group 14), the body is rendered through the
+    // real substitution pipeline under the resolved `SubstitutionGroup::
+    // Custom` list – see [`build_pass_macro_subs_value`] for why this (and
+    // not a richer node subtree) is the safe shape for this increment.
+    // Without one (the bare `pass:[…]` form), `SubstitutionGroup::None`
+    // applies nothing. Either way, an escaped closing bracket (`\]`)
+    // unescapes first, mirroring the string replacer's
     // `text.replace("\\]", "]")` – the same treatment every other macro
     // family's bracket content gets.
     #[allow(clippy::unwrap_used)]
     let m = caps.get(15).unwrap();
     let content = source_slice(pieces, m.start()..m.end(), root);
     let raw = content.data();
+    let unescaped = raw.contains("\\]").then(|| raw.replace("\\]", "]"));
 
-    let value = if raw.contains("\\]") {
-        CowStr::from(raw.replace("\\]", "]"))
+    let value = if let Some(subs_list) = caps.get(14) {
+        let text = unescaped.as_deref().unwrap_or(raw);
+        CowStr::from(build_pass_macro_subs_value(
+            text,
+            subs_list.as_str(),
+            parser,
+        ))
+    } else if let Some(unescaped) = unescaped {
+        CowStr::from(unescaped)
     } else {
         CowStr::from(raw)
     };
 
     InlineNode::Raw { value, location }
+}
+
+/// Computes the rendered `value` for a `pass:` macro carrying an **explicit
+/// substitution list** (`pass:c,q[…]`) – the one deferred form 5a documented
+/// that a bare `SubstitutionGroup::None`/`::Verbatim` treatment cannot cover,
+/// since the list can name *any* of the six named steps, in any order and
+/// combination the author writes.
+///
+/// A naive extension would thread `text` through this module's own node
+/// transducers under the resolved step list, the way the legacy `x-`
+/// compatibility marker's body does ([`apply_normal_subs`]). That shape does
+/// not work here: [`build`](super::build) always runs its own fixed *normal*
+/// order over the level this passthrough is embedded in, so any structural
+/// node (`Styled`, `Ref`, …) this construct's own resolved subset produced
+/// would be visited *again* by whichever of `build`'s six steps come after
+/// this one – and unlike `Quotes` (whose delimiters are consumed, so a
+/// second pass finds nothing left to match) or `SpecialCharacters` (whose
+/// `CharRef` leaves are atomic), a macro's own display text is not
+/// idempotent under a second pass: a `Ref{Link}`'s display children are
+/// literal text that *looks* exactly like the source URL, so a second
+/// `Macros` pass would recognize it all over again and nest a nested link
+/// inside it. A resolved list omitting a step `build`'s own fixed order
+/// still runs (e.g. `pass:q[<b>]`, which never asks for
+/// `SpecialCharacters`) has the same problem in reverse: `build`'s own
+/// unconditional `SpecialCharacters` step would escape content the author's
+/// list deliberately left raw.
+///
+/// [`passthrough_text`] – already used for `++…++`/`$$…$$`/the bare
+/// unconstrained form – sidesteps both failure modes: it renders `text`
+/// through the **real, string-based** substitution pipeline
+/// ([`SubstitutionGroup::apply`], the same call
+/// `PassthroughRestoreReplacer` makes for a stored `Passthrough`), producing
+/// an already-final HTML string, then this function's caller wraps it in a
+/// single [`Raw`](InlineNode::Raw) leaf. A `Raw` leaf is *opaque* to every
+/// later step in this module (never descended into, never re-matched –
+/// design §4.2's passthrough-as-leaf convention), so it is immune to both
+/// failure modes above: nothing in `build`'s own remaining steps can touch
+/// it, whether or not the author's list included that step.
+///
+/// An unrecognized substitution name in the list (e.g. `pass:bogus[…]`) is
+/// silently skipped – any recognized names are still honored – mirroring
+/// [`SubstitutionGroup::from_custom_string`]/`InlinePassMacroReplacer`'s own
+/// resolution. Unlike the string pipeline, this additive pass does not yet
+/// raise the `InvalidSubstitutionTypeForPassthroughMacro` warning for it,
+/// deferring that side effect to the cutover exactly as every other macro
+/// family defers its own catalog/warning side effect (design §5.2 Phase 4
+/// step 6), since it does not change the fold's output bytes.
+fn build_pass_macro_subs_value(text: &str, subs_list: &str, parser: &Parser) -> String {
+    let (subs, _invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
+    passthrough_text(text, &subs, parser)
 }
 
 /// Builds one [`Styled`] node from a verbatim, unescaped, attribute-listed
@@ -964,6 +1031,20 @@ mod tests {
             "pass:[]",
             r"pass:[a\]b]",
             "pass:[*not quotes*]",
+            // The `pass:` macro with an explicit substitution list: a single
+            // step, several steps (applied in the order given, not the
+            // normal order), an unrecognized name skipped alongside a
+            // recognized one, an empty resolved body, and an escape.
+            "pass:c[<b>]",
+            "pass:q[*bold*]",
+            "pass:c,q[<b> *bold*]",
+            "pass:q,c[<b> *bold*]",
+            "pass:m[https://example.org]",
+            "pass:a[{missing-attr}]",
+            "pass:bogus[<b>]",
+            "pass:c,bogus[<b>]",
+            "pass:c[]",
+            r"\pass:c[<b>]",
             // Multiple passthroughs, and passthroughs beside ordinary quoted
             // text (proving the surrounding text is still substituted
             // normally).
@@ -1434,23 +1515,146 @@ mod tests {
     }
 
     #[test]
-    fn a_pass_macro_with_an_explicit_subs_list_is_a_documented_divergence() {
-        // `pass:c[…]` names an explicit substitution list, which would need a
-        // richer subtree than a single `Raw` leaf can hold (the same reason a
-        // footnote's content is structured children rather than a literal
-        // value) – deferred to a later increment.
+    fn a_pass_macro_with_a_special_characters_subs_list_is_a_raw_node() {
+        // `pass:c[…]` resolves to `Custom([SpecialCharacters])`: the body is
+        // rendered through the real pipeline under just that one step (see
+        // `build_pass_macro_subs_value`), so `<`/`>` are already escaped in
+        // the leaf's `value` – a single opaque `Raw` node, not `CharRef`
+        // leaves this builder's own `SpecialCharacters` transducer would
+        // produce.
         let source = "pass:c[<b>]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw(&nodes[0], "&lt;b&gt;");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_pass_macro_with_a_quotes_subs_list_renders_the_markup() {
+        // `pass:q[…]` resolves to `Custom([Quotes])`: rendered through the
+        // real pipeline, so the leaf's `value` already carries the
+        // `<strong>` markup `Quotes` produced – unescaped, since `Raw`'s
+        // fold emits `value` verbatim.
+        let source = "pass:q[*bold*]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw(&nodes[0], "<strong>bold</strong>");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_pass_macro_with_a_macros_subs_list_renders_a_nested_macro() {
+        // `pass:m[…]` resolves to `Custom([Macros])`: rendered through the
+        // real pipeline (which itself extracts passthroughs/STEM ahead of
+        // `Macros`, `run_pipeline`'s own gate), so the leaf's `value` already
+        // carries the rendered `<a href="…">` markup.
+        let source = "pass:m[https://example.org]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw(
+            &nodes[0],
+            r#"<a href="https://example.org" class="bare">https://example.org</a>"#,
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_pass_macro_with_multiple_subs_applies_them_in_the_order_given() {
+        // `pass:q,c[…]` resolves to `Custom([Quotes, SpecialCharacters])` –
+        // the order the author wrote, not the *normal* effective order
+        // (which always runs `SpecialCharacters` first). `Quotes` runs
+        // first here, wrapping `*bold*` in a literal `<strong>…</strong>`;
+        // `SpecialCharacters` then runs *second* and escapes every `<`/`>`
+        // it finds – tags included, since it has no way to tell them apart
+        // from `<b>`'s own literal angle brackets. This is the documented
+        // gotcha of naming `specialcharacters` after a step that emits
+        // markup, reproduced byte-for-byte from the real pipeline.
+        let nodes = build_src(Span::new("pass:q,c[<b> *bold*]"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw(&nodes[0], "&lt;b&gt; &lt;strong&gt;bold&lt;/strong&gt;");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs("pass:q,c[<b> *bold*]")
+        );
+    }
+
+    #[test]
+    fn a_pass_macro_with_an_unrecognized_subs_name_skips_it() {
+        // An unrecognized name resolves to zero steps – rather than
+        // invalidating the whole list – mirroring
+        // `SubstitutionGroup::from_custom_string`/`InlinePassMacroReplacer`'s
+        // own "skip and keep going" resolution. With no steps at all the
+        // rendered `value` is the content completely untouched (not even
+        // special characters are escaped).
+        let source = "pass:bogus[<b>]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw(&nodes[0], "<b>");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_recognized_name_beside_an_unrecognized_one_is_still_honored() {
+        // `pass:c,bogus[…]` resolves to the same `Custom([SpecialCharacters])`
+        // as `pass:c[…]` alone – the unrecognized name is skipped, not fatal
+        // to the rest of the list.
+        let nodes = build_src(Span::new("pass:c,bogus[<b>]"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw(&nodes[0], "&lt;b&gt;");
+    }
+
+    #[test]
+    fn an_escaped_pass_macro_with_a_subs_list_stays_literal() {
+        // `\pass:c[…]` drops the single backslash and reconstructs the whole
+        // `pass:c[…]` text literally, mirroring `InlinePassMacroReplacer`'s
+        // own `caps.get(13)` branch (which re-emits `pass:`, the subs list,
+        // and the bracketed content exactly as written).
+        let source = r"\pass:c[<b>]";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Raw { .. })),
-            "a pass: macro with an explicit subs list must be left unrecognized: {nodes:?}"
+            "an escaped passthrough must not apply its subs list: {nodes:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        let golden = golden_passthroughs(source);
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
 
-        assert_ne!(folded, golden);
+    #[test]
+    fn a_pass_macro_subs_list_unescapes_an_escaped_closing_bracket() {
+        // `pass:c[a\]b]`: the same `text.replace("\\]", "]")` unescape every
+        // other `pass:[…]` bracket content gets, applied before the resolved
+        // list renders it.
+        let nodes = build_src(Span::new(r"pass:c[a\]b]"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw(&nodes[0], "a]b");
     }
 
     #[test]
