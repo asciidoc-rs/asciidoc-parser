@@ -20,7 +20,7 @@ use crate::{
 /// The passthrough-extraction step, as a node transducer: replaces each
 /// recognized passthrough with a [`Raw`](InlineNode::Raw) leaf and leaves
 /// everything else as the whole-source seed [`Text`](InlineNode::Text) node,
-/// for [`apply_special_characters`](super::special_chars::apply_special_characters) and the later steps to refine.
+/// for [`apply_special_characters`] and the later steps to refine.
 ///
 /// This is the **first** step [`build`](super::build) runs – mirroring
 /// [`Passthroughs::extract_from`](crate::content::Passthroughs::extract_from),
@@ -28,7 +28,7 @@ use crate::{
 /// passthrough's content is never touched by specialcharacters, quotes,
 /// replacements, or macros: it is a leaf, and every later step's
 /// [`build_match_string`] already treats a node it does not specifically
-/// handle (an already-built [`Styled`](crate::inlines::Styled) span, and now a
+/// handle (an already-built [`Styled`] span, and now a
 /// [`Raw`](InlineNode::Raw) leaf) as a
 /// single opaque placeholder.
 ///

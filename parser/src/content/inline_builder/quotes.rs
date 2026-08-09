@@ -456,7 +456,7 @@ fn rebuild_level<'src>(
 /// Shared with the attribute-list-prefixed passthrough forms
 /// ([`passthrough_step`](super::passthrough_step)), which parse their own
 /// attrlist the same way and fold through the same
-/// [`Styled`](crate::inlines::Styled) node.
+/// [`Styled`] node.
 pub(super) fn attributes_of<'src>(
     source: Span<'src>,
     parser: &Parser,
