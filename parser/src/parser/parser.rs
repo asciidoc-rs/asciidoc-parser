@@ -1393,7 +1393,17 @@ impl Parser {
     /// attribute is present, `default_shown` decides – a standalone document
     /// shows its title, while embedded output does not. A nested AsciiDoc
     /// table cell is embedded output, so it passes `default_shown = false`.
-    pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
+    ///
+    /// Use this rather than reading `notitle` or `showtitle` directly:
+    /// re-deriving this precedence from a raw attribute read is easy to get
+    /// subtly wrong, as the pair's mirroring can leave one spelling's stored
+    /// value looking inconsistent with the toggle's true, resolved state
+    /// (see issue asciidoc-rs/asciidoc-parser#1148, where a downstream
+    /// re-implementation of this exact logic repeatedly drifted out of sync
+    /// with this one). After parsing, prefer
+    /// [`Document::show_title`](crate::Document::show_title), which mirrors
+    /// this method and needs no [`Parser`] in hand.
+    pub fn resolve_show_title(&self, default_shown: bool) -> bool {
         if self.is_attribute_set("showtitle") {
             true
         } else if self.has_attribute("notitle") {
@@ -4594,6 +4604,42 @@ mod tests {
             let mut parser = Parser::default();
             let _ = parser.parse(&format!("= Title\n{entries}\n\nbody"));
             parser
+        }
+
+        #[test]
+        fn header_notitle_entry_shows_title_when_showtitle_is_api_hard_unset() {
+            // Issue #1148 (reopened): a hard-unset `showtitle` lock
+            // (`Options::unset("showtitle")`) combined with an unrelated
+            // document `:!notitle:` entry must still resolve to showing the
+            // title end-to-end (parity oracle: `test/document_test.rb`,
+            // "should be able to enable doctitle for embedded document",
+            // case `[{ 'showtitle' => false }, [':!notitle:']]`).
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Document Title\n:!notitle:\n\nbody\n");
+
+            assert!(parser.resolve_show_title(false));
+        }
+
+        #[test]
+        fn header_showtitle_entry_shows_title_when_notitle_is_api_hard_unset() {
+            // Issue #1148 (reopened): a hard-unset `notitle` lock
+            // (`Options::unset("notitle")`) combined with an unrelated
+            // document `:!showtitle:` entry must still resolve to showing the
+            // title -- this was a regression from 0.29.15 introduced while
+            // fixing the case above (parity oracle: same Ruby test, case
+            // `[{ 'notitle' => nil }, [':!showtitle:']]`).
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Document Title\n:!showtitle:\n\nbody\n");
+
+            assert!(parser.resolve_show_title(false));
         }
 
         #[test]
