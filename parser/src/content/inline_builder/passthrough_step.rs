@@ -463,11 +463,17 @@ fn build_attrlisted_passthrough_node<'src>(
         .or_else(|| caps.get(10))
         .map_or("", |m| m.as_str());
 
-    let body = caps.get(5).or_else(|| caps.get(8)).or_else(|| caps.get(11));
-    let body_span = body.map_or_else(
-        || location.slice(0..0),
-        |m| source_slice(pieces, m.start()..m.end(), root),
-    );
+    // Each delimited alternative's body group is mandatory (its `(.*?)`
+    // participates, possibly empty, whenever that alternative matches at
+    // all) – exactly one of groups 5/8/11 is therefore always `Some` here,
+    // never a genuinely absent capture.
+    #[allow(clippy::unwrap_used)]
+    let body_m = caps
+        .get(5)
+        .or_else(|| caps.get(8))
+        .or_else(|| caps.get(11))
+        .unwrap();
+    let body_span = source_slice(pieces, body_m.start()..body_m.end(), root);
 
     let (attrlist_span, old_behavior) = if boundary == "++" {
         split_old_behavior_attrlist(attrlist_span)
@@ -540,10 +546,12 @@ fn build_bare_attrlisted_passthrough_node<'src>(
     let attrlist_m = attrlist.unwrap();
     let attrlist_span = source_slice(pieces, attrlist_m.start()..attrlist_m.end(), root);
 
-    let body_span = body.map_or_else(
-        || location.slice(0..0),
-        |m| source_slice(pieces, m.start()..m.end(), root),
-    );
+    // Both the backtick body (group 2, requiring at least one non-space
+    // character) and the plus body (group 5) are mandatory captures of
+    // whichever alternative matched – never a genuinely absent one.
+    #[allow(clippy::unwrap_used)]
+    let body_m = body.unwrap();
+    let body_span = source_slice(pieces, body_m.start()..body_m.end(), root);
 
     let (attrlist_span, old_behavior) = split_old_behavior_attrlist(attrlist_span);
 
@@ -927,6 +935,9 @@ mod tests {
             // then legitimately re-recognizes as its own (different) match,
             // exactly as the string pipeline's own second regex pass does.
             r"[.role]\++text++",
+            // The bare-plus form's own delimiter escape: dropped backslash,
+            // literal remainder, no further pass to re-scan a residue.
+            r"[attrs]\+text+",
         ];
 
         for source in fixtures {
@@ -1142,6 +1153,67 @@ mod tests {
 
         assert_ne!(folded, golden);
         assert_eq!(folded, source);
+    }
+
+    #[test]
+    fn a_bare_attrlisted_match_whose_content_crosses_an_already_built_node_is_deferred() {
+        // Exercises `find_bare_attrlisted_matches`'s own `range_is_verbatim`
+        // guard directly – the second pass's counterpart to
+        // `a_match_whose_content_crosses_an_already_built_node_is_deferred`.
+        // Reconstructed as flat text this level would read `[attrs]+x+`, but
+        // the single-character body sits on an already-built (opaque)
+        // `Styled` node rather than verbatim text, so the candidate match –
+        // whose `full` range still spans it – is left unrecognized.
+        let source = Span::new("[attrs]+x+");
+
+        let nodes = vec![
+            InlineNode::Text {
+                value: CowStr::from("[attrs]+"),
+                location: source.slice(0..8),
+            },
+            InlineNode::Styled(Styled {
+                variant: StyleVariant::Strong,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: vec![],
+                attrs: None,
+                children: vec![],
+                location: source.slice(8..9),
+            }),
+            InlineNode::Text {
+                value: CowStr::from("+"),
+                location: source.slice(9..10),
+            },
+        ];
+
+        let result = apply_passthroughs(nodes.clone(), source, &Parser::default());
+
+        assert_eq!(
+            result, nodes,
+            "a non-verbatim bare-attrlisted match must be left unrecognized"
+        );
+    }
+
+    #[test]
+    fn a_bare_plus_attrlisted_delimiter_escape_stays_literal() {
+        // `[attrs]\+text+`: honors the escape of the formatting mark – one
+        // backslash drops, the rest (attrlist brackets included) stays
+        // literal, mirroring `InlinePassReplacer`'s own `escape_count > 0`
+        // branch. Unlike the delimited form's own escape
+        // (`[.role]\++text++`), there is no further pass to re-scan the
+        // residue here – this second pass already is the last one – so the
+        // result is simple parity with the golden string pipeline.
+        let source = r"[attrs]\+text+";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Styled(_))),
+            "an escaped bare-attrlisted delimiter must not build a Styled node: {nodes:?}"
+        );
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        assert_eq!(folded, "[attrs]+text+");
+        assert_eq!(folded, golden_passthroughs(source));
     }
 
     #[test]
