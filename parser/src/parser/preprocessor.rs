@@ -829,18 +829,30 @@ impl<'p> PreprocessorState<'p> {
             // resolves against the right directory rather than just the
             // target as written here. See `nested_file_name`.
             //
-            // A first-level include (depth 1: written directly in the
-            // primary document, matching the `include_depth == 1` check
-            // below) is joined against `None` rather than `file_name`:
-            // `file_name` here is the primary document's own name, which
-            // may carry a directory (or be a full filesystem path) that
-            // has nothing to do with how the target was written. Folding
-            // it in would record an absolute path in the `SourceMap`
-            // instead of the target as written/joined relative to the
-            // primary document, unlike Asciidoctor's own sourcemap. See
+            // A directive written directly in the primary document is
+            // joined against `None` rather than `file_name`: there,
+            // `file_name` is the primary document's own name, which may
+            // carry a directory (or be a full filesystem path) that has
+            // nothing to do with how the target was written. Folding it
+            // in would record an absolute path in the `SourceMap` instead
+            // of the target as written/joined relative to the primary
+            // document, unlike Asciidoctor's own sourcemap. See
             // `nested_file_name`'s doc comment: `container` is `None` for
             // the primary document.
-            let nested_name = if self.include_depth == 1 {
+            //
+            // This is *not* simply `include_depth == 1`: a table cell
+            // that itself came from an included file is preprocessed in
+            // its own top-level (depth 1) pass — see the `include::`
+            // handling in `blocks::table` — with that file's own
+            // (already directory-joined) name as `file_name`, and a
+            // directive directly in such a cell must still resolve
+            // against *that* directory, not `None`. Comparing against
+            // the parser's `primary_file_name` (rather than the depth
+            // counter, which resets to 0 for that inner pass) tells the
+            // two cases apart: it is only `Some(file_name) ==
+            // primary_file_name` when this call is processing the actual
+            // primary document text, at any depth-1 pass.
+            let nested_name = if file_name == self.parser.primary_file_name.as_deref() {
                 nested_file_name(None, &target)
             } else {
                 nested_file_name(file_name, &target)
@@ -2924,10 +2936,8 @@ mod tests {
         // sourcemap.
         let source = "= Document Title\n\ninclude::partials/section.adoc[]";
 
-        let handler = InlineFileHandler::from_pairs([(
-            "partials/section.adoc",
-            "== Section\n\nParagraph.",
-        )]);
+        let handler =
+            InlineFileHandler::from_pairs([("partials/section.adoc", "== Section\n\nParagraph.")]);
 
         let parser = Parser::default()
             .with_safe_mode(SafeMode::Server)
