@@ -538,6 +538,63 @@ pub(super) fn build_link_node<'src>(
     }))
 }
 
+/// Performs the recognition side effect the string pipeline's four link
+/// replacers (`InlineLinkReplacer`'s angle/formal/bare branches and
+/// `InlineLinkMacroReplacer`, plus `InlineEmailReplacer`'s own registration for
+/// the bare e-mail form this module does not yet build) attach to a matched
+/// link – registering the target in the document's asset catalog – by walking
+/// an already-built tree and reading each [`Ref`](InlineNode::Ref)`{Link}`
+/// node's own stored `target` instead of a regex capture. `target` already
+/// holds exactly the string the string pipeline registers (see
+/// [`build_inline_link_node`] and [`build_link_node`]), so no recomputation is
+/// needed.
+///
+/// Every macro family this module recognizes defers exactly this kind of side
+/// effect (see [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'s
+/// own note): while the additive builder runs *alongside* the authoritative
+/// string pipeline – each against its own, independent [`Parser`] – performing
+/// it from every additive pass would risk double-counting a registration once
+/// the two paths ever share one `Parser`. This function is that deferred piece
+/// for the link family, staged as its own building block for the eventual
+/// cutover (design §5.2, Phase 4 step 6): re-attaching it for real means
+/// calling it exactly once per parse, after the single-pass builder replaces
+/// the recorder as `Content`'s tree source, so nothing here is wired into a
+/// real parse yet – it is exercised only by this module's own tests, against
+/// their own `Parser`.
+///
+/// Recurses into every container a `Ref` node can be nested inside –
+/// [`Styled`](InlineNode::Styled), another [`Ref`](InlineNode::Ref) (a link's
+/// own display children, or a cross-reference's), and
+/// [`Footnote`](InlineNode::Footnote) children – mirroring exactly where
+/// [`apply_macros`](super::apply_macros) and the footnote increment's own
+/// `emit_range` can place one. A cross-reference node itself is not
+/// registered – only a [`Link`](RefVariant::Link) has an asset-catalog entry –
+/// but its children are still walked, since a formatted cross-reference text
+/// could itself carry a nested link.
+pub(crate) fn apply_link_side_effects(nodes: &[InlineNode<'_>], parser: &Parser) {
+    for node in nodes {
+        match node {
+            InlineNode::Ref(reference) => {
+                if reference.variant == RefVariant::Link {
+                    parser.register_link(reference.target.to_string());
+                }
+
+                apply_link_side_effects(&reference.children, parser);
+            }
+
+            InlineNode::Styled(styled) => {
+                apply_link_side_effects(&styled.children, parser);
+            }
+
+            InlineNode::Footnote(footnote) => {
+                apply_link_side_effects(&footnote.children, parser);
+            }
+
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing)]
@@ -1147,5 +1204,125 @@ mod tests {
 
         // The string pipeline, by contrast, applies the role.
         assert!(golden_macros(source).contains(r#"class="hl""#));
+    }
+
+    // ---- `apply_link_side_effects` (staged for the eventual cutover) ------
+
+    use super::apply_link_side_effects;
+
+    /// Builds the single-pass tree for `source` against `parser` (unlike
+    /// [`build_src`], which always uses its own fresh default parser).
+    fn build_with<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
+        build(source, parser)
+    }
+
+    #[test]
+    fn registers_a_link_macro_target_when_catalog_assets_is_enabled() {
+        let source = "link:index.html[Docs]";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        let catalog = parser.catalog();
+        let links = catalog.links();
+        assert_eq!(links, ["index.html"]);
+    }
+
+    #[test]
+    fn registers_a_mailto_target_with_its_scheme() {
+        let source = "mailto:hello@example.org[Email us]";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(parser.catalog().links(), ["mailto:hello@example.org"]);
+    }
+
+    #[test]
+    fn registers_an_auto_link_and_a_formal_url_link_target() {
+        let source = "https://example.org and https://example.org/docs[Docs]";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(
+            parser.catalog().links(),
+            ["https://example.org", "https://example.org/docs"]
+        );
+    }
+
+    #[test]
+    fn does_not_register_a_cross_reference_as_a_link() {
+        // A cross-reference is also a `Ref` node, but only a `Link` variant has
+        // an asset-catalog entry.
+        let source = "xref:intro[Introduction]";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert!(parser.catalog().links().is_empty());
+    }
+
+    #[test]
+    fn registration_is_a_no_op_when_catalog_assets_is_disabled() {
+        let source = "link:index.html[Docs]";
+        let parser = Parser::default();
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert!(parser.catalog().links().is_empty());
+    }
+
+    #[test]
+    fn registers_a_link_nested_inside_a_styled_span_and_a_footnote() {
+        let source = "*see link:a.html[]* and footnote:[see link:b.html[]]";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(parser.catalog().links(), ["a.html", "b.html"]);
+    }
+
+    #[test]
+    fn matches_the_golden_pipelines_registration_for_a_broad_fixture_set() {
+        // Each fixture uses its own pair of *independent* parsers (design
+        // §5.3's two-independent-parsers discipline, already established by
+        // the image increment's own differential corpus): one that the
+        // additive builder builds against and this function then walks, one
+        // that the real string pipeline (`golden_macros_with`) runs against
+        // directly. Because neither path is wired into the other, comparing
+        // their two catalogs after the fact is the whole test.
+        let fixtures = [
+            "link:index.html[Docs]",
+            "link:[]",
+            "mailto:hello@example.org[Email us]",
+            "mailto:[]",
+            "https://example.org",
+            "https://example.org[Example]",
+            "link:https://example.org[Example]",
+            "\\link:index.html[Docs]",
+            "link:a.html[A]{sp}link:b.html[B]",
+        ];
+
+        for fixture in fixtures {
+            let builder_parser = Parser::default().with_catalog_assets(true);
+            let nodes = build_with(Span::new(fixture), &builder_parser);
+            apply_link_side_effects(&nodes, &builder_parser);
+
+            let golden_parser = Parser::default().with_catalog_assets(true);
+            golden_macros_with(fixture, &golden_parser);
+
+            assert_eq!(
+                builder_parser.catalog().links(),
+                golden_parser.catalog().links(),
+                "registered links diverged for {fixture:?}"
+            );
+        }
     }
 }
