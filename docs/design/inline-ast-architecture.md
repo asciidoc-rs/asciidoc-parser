@@ -1494,6 +1494,24 @@ Each phase is a reviewable unit with a clear exit gate.
   duplicate-id warning and the bibliography-anchor form), and `register_link` for the four link-macro forms –
   are unstaged and remain step 6's own work, alongside everything else step 6 bundles.
 
+  *Step 6 prep landed as (the link family's deferred `register_link`, staged):* the same treatment, applied
+  to the second of step 6's unstaged registrations. [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs)
+  is a standalone function that walks an already-built tree and, for each [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}`
+  node, calls [`register_link`](../../parser/src/parser/parser.rs) with the node's own stored `target` –
+  no recomputation needed, since `target` already holds exactly the string the string pipeline's four link
+  replacers (the `link:`/`mailto:` macro, the auto-link, and the formal-URL link – the bare e-mail form is a
+  later increment, not yet built by this module) register. A cross-reference is also a `Ref` node but is
+  never registered, mirroring the string pipeline's own link-only catalog. It recurses into every container
+  a `Ref` node can be nested inside – a `Styled` span, another `Ref`'s own display children (so a link
+  nested in a cross-reference's text, or vice versa, is found too), or a `Footnote`'s own children –
+  mirroring the image increment's own recursion. As with the image side effects, **nothing is wired into a
+  real parse path** – the function is exercised only by its own tests, against their own `Parser` – so
+  calling it for real still waits for step 6. A broad differential corpus compares its registrations against
+  the golden string pipeline's own, using the same two-independent-parsers discipline the image increment
+  established. The remaining deferred side effect – an attributed span's and an anchor's own `register_ref`
+  (plus the anchor's duplicate-id warning and the bibliography-anchor form) – is unstaged and remains step
+  6's own work.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1552,8 +1570,12 @@ Each phase is a reviewable unit with a clear exit gate.
      - ✅ **prep.** The image family's own two side effects (`register_image`, the `link=`
        dangerous-scheme/self-href warning) are already written and tested as a standalone,
        unwired function, [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs)
-       – see the step's own "landed as" note above. Calling it for real is still this step's job;
-       the anchor/attributed-span `register_ref` pair and `register_link` remain unstaged.
+       – see the step's own "landed as" note above.
+     - ✅ **prep (links).** `register_link` for the four link-macro forms is likewise staged as a
+       standalone, unwired function,
+       [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) – see the
+       step's own "landed as" note above. Calling it for real is still this step's job; the
+       anchor/attributed-span `register_ref` pair remains unstaged.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
