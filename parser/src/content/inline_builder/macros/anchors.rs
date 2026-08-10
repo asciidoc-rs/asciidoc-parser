@@ -2,13 +2,15 @@
 
 use super::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level};
 use crate::{
-    Span,
+    Parser, Span,
     content::{
         INLINE_ANCHOR,
         inline_builder::quotes::{Piece, build_match_string, source_slice},
     },
+    document::RefType,
     inlines::{Anchor, InlineNode},
     strings::CowStr,
+    warnings::WarningType,
 };
 
 /// Matches `INLINE_ANCHOR` at this level's escaped text, replacing each
@@ -205,6 +207,151 @@ fn build_anchor_reftext<'src>(
     Some(vec![child])
 }
 
+/// Performs the recognition side effects the string pipeline attaches to an
+/// assigned id at two distinct points – `InlineAnchorReplacer` (an inline
+/// anchor, `[[id]]` / `anchor:id[…]`) and the attributed-quote handling in
+/// [`SubstitutionStep::Quotes`](crate::content::SubstitutionStep::Quotes)
+/// (`[#id]#…#`) – by walking an already-built tree and reading each
+/// [`Anchor`](InlineNode::Anchor) node's own stored `id`/`reftext` and each
+/// [`Styled`](crate::inlines::Styled) span's own optional `id`, instead of a
+/// regex capture. Both register the id in the document's reference catalog
+/// under [`RefType::Anchor`] so a later cross-reference can resolve against
+/// it; only the inline-anchor form also raises a duplicate-id warning (the
+/// attributed-span form is silently non-fatal in the string pipeline too –
+/// see [`attributes_of`](super::super::quotes::attributes_of)'s own note).
+///
+/// Every macro family this module recognizes defers exactly this kind of side
+/// effect (see [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'s
+/// own note): while the additive builder runs *alongside* the authoritative
+/// string pipeline – each against its own, independent [`Parser`] – performing
+/// it from every additive pass would risk double-counting a registration once
+/// the two paths ever share one `Parser`. This function is the last of the
+/// deferred registrations, staged as its own building block for the eventual
+/// cutover (design §5.2, Phase 4 step 6): re-attaching it for real means
+/// calling it exactly once per parse, after the single-pass builder replaces
+/// the recorder as `Content`'s tree source, so nothing here is wired into a
+/// real parse yet – it is exercised only by this module's own tests, against
+/// their own `Parser`.
+///
+/// `source` is the whole original content span being processed, used – like
+/// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'s
+/// own `source` parameter – to locate the duplicate-id warning exactly as
+/// [`InlineAnchorReplacer`](crate::content::macros) does (against the
+/// content's own span, not the individual anchor's).
+///
+/// `leading_anchor_registered` mirrors
+/// [`apply_macros_with_leading_anchor_registered`](super::apply_macros)'s own
+/// parameter: a description-list term pre-registers its own leading
+/// `[[id]]`/`[[id,reftext]]` before running the macros pass (see
+/// `DefinedTerm::substitute` in `blocks::list_item_marker`), so – once this
+/// function is wired in for real at the same call site – passing `true` there
+/// suppresses the duplicate-id warning this function would otherwise raise
+/// for that very same anchor, which sits at byte offset `0` of `source`.
+/// Every other caller passes `false`.
+///
+/// Recurses into every container an id-bearing node can be nested inside –
+/// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref), and
+/// [`Footnote`](InlineNode::Footnote) children – mirroring exactly where the
+/// image and link increments' own side-effect functions recurse.
+pub(crate) fn apply_ref_side_effects(
+    nodes: &[InlineNode<'_>],
+    parser: &Parser,
+    source: Span<'_>,
+    leading_anchor_registered: bool,
+) {
+    for node in nodes {
+        match node {
+            InlineNode::Anchor(anchor) => {
+                if !is_bibliography_inner(anchor, source) {
+                    let reftext = anchor_reftext_str(anchor);
+
+                    if parser
+                        .register_ref(&anchor.id, reftext, RefType::Anchor)
+                        .is_err()
+                        && !(leading_anchor_registered
+                            && anchor.location.byte_offset() == source.byte_offset())
+                    {
+                        parser.record_substitution_warning(
+                            source,
+                            WarningType::DuplicateId(anchor.id.to_string()),
+                        );
+                    }
+                }
+            }
+
+            InlineNode::Styled(styled) => {
+                if let Some(id) = &styled.id {
+                    let _ = parser.register_ref(id, None, RefType::Anchor);
+                }
+
+                apply_ref_side_effects(&styled.children, parser, source, leading_anchor_registered);
+            }
+
+            InlineNode::Ref(reference) => {
+                apply_ref_side_effects(
+                    &reference.children,
+                    parser,
+                    source,
+                    leading_anchor_registered,
+                );
+            }
+
+            InlineNode::Footnote(footnote) => {
+                apply_ref_side_effects(
+                    &footnote.children,
+                    parser,
+                    source,
+                    leading_anchor_registered,
+                );
+            }
+
+            _ => {}
+        }
+    }
+}
+
+/// The reference text `str` a built [`Anchor`] node's `reftext` carries, when
+/// it is populated (a single verbatim [`Text`](InlineNode::Text) child – see
+/// [`build_anchor_reftext`]), mirroring the `Option<&str>`
+/// [`register_ref`](Parser::register_ref) itself expects.
+fn anchor_reftext_str<'a>(anchor: &'a Anchor<'_>) -> Option<&'a str> {
+    match anchor.reftext.as_deref() {
+        Some([InlineNode::Text { value, .. }]) => Some(value.as_ref()),
+        _ => None,
+    }
+}
+
+/// Mirrors `InlineAnchorReplacer`'s own `is_bibliography_inner` check: a
+/// shorthand `[[id]]` anchor immediately preceded by a `[` in the source is
+/// the inner anchor of a bibliography-style `[[[id]]]` sequence appearing
+/// *outside* a bibliography list item (a genuine bibliography anchor there is
+/// consumed whole by a separate, list-item-gated pass this builder does not
+/// yet recognize as its own node – `INLINE_BIBLIO_ANCHOR`, see
+/// [`content::macros`](crate::content::macros)). Asciidoctor's own
+/// inline-anchor *scan* excludes a `[[id]]` preceded by a `[`, so it renders
+/// the anchor (already handled by [`build_anchor_node`], which does not
+/// exclude this case – see its own doc) but never catalogs the id; this
+/// mirrors that by skipping only the registration, not the recognition. See
+/// #769.
+fn is_bibliography_inner(anchor: &Anchor<'_>, source: Span<'_>) -> bool {
+    if !anchor.location.data().starts_with("[[") {
+        return false;
+    }
+
+    let Some(local_offset) = anchor
+        .location
+        .byte_offset()
+        .checked_sub(source.byte_offset())
+    else {
+        return false;
+    };
+
+    local_offset
+        .checked_sub(1)
+        .and_then(|i| source.data().as_bytes().get(i))
+        == Some(&b'[')
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing)]
@@ -212,10 +359,10 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::super::super::test_support::{
-        assert_styled, assert_text, build_src, fold_html, golden_macros,
+        assert_styled, assert_text, build_src, fold_html, golden_macros, golden_macros_with,
     };
     use crate::{
-        Span,
+        Parser, Span,
         inlines::{Anchor, InlineNode, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
@@ -473,5 +620,217 @@ mod tests {
 
         // The consumed span does not render into the flow.
         assert!(!folded.contains("<strong>"), "folded: {folded}");
+    }
+
+    // ---- `apply_ref_side_effects` (staged for the eventual cutover) -------
+
+    use super::apply_ref_side_effects;
+    use crate::{content::inline_builder::build, document::RefType, warnings::WarningType};
+
+    /// Builds the single-pass tree for `source` against `parser` (unlike
+    /// [`build_src`], which always uses its own fresh default parser).
+    fn build_with<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
+        build(source, parser)
+    }
+
+    #[test]
+    fn registers_an_anchor_id_in_the_catalog() {
+        let source = "[[install]]";
+        let parser = Parser::default();
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        let catalog = parser.catalog();
+        assert!(catalog.contains_id("install"));
+        assert_eq!(catalog.get_ref("install").unwrap().reftext, None);
+    }
+
+    #[test]
+    fn registers_an_anchors_reftext() {
+        let source = "[[install,Installation]]";
+        let parser = Parser::default();
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        let catalog = parser.catalog();
+        assert_eq!(
+            catalog.get_ref("install").unwrap().reftext.as_deref(),
+            Some("Installation")
+        );
+    }
+
+    #[test]
+    fn records_a_duplicate_id_warning_for_a_repeated_anchor() {
+        let source = "[[a]] [[a]]";
+        let parser = Parser::default();
+        let nodes = build_with(Span::new(source), &parser);
+
+        let before = parser.substitution_warnings_len();
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+        let warnings = parser.drain_substitution_warnings_since(before);
+
+        // The first registration wins; the catalog holds one entry.
+        assert_eq!(parser.catalog().ids().collect::<Vec<_>>(), ["a"]);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::DuplicateId("a".to_string())
+        );
+    }
+
+    #[test]
+    fn registers_an_attributed_spans_id() {
+        // `[#anchor]*bold*` assigns an id to the span via its attribute list
+        // (see `attributes_of`'s own note on this deferred registration).
+        let source = "[#anchor]*bold*";
+        let parser = Parser::default();
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        assert!(parser.catalog().contains_id("anchor"));
+    }
+
+    #[test]
+    fn an_attributed_spans_duplicate_id_is_silently_non_fatal() {
+        // Unlike an inline anchor, a duplicate id assigned via an attributed
+        // span raises no warning, mirroring the string pipeline's own
+        // `let _ = register_ref(...)` in `SubstitutionStep::Quotes`.
+        let source = "[#dup]*a* [#dup]*b*";
+        let parser = Parser::default();
+        let nodes = build_with(Span::new(source), &parser);
+
+        let before = parser.substitution_warnings_len();
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        assert_eq!(parser.substitution_warnings_len(), before);
+        assert_eq!(parser.catalog().ids().collect::<Vec<_>>(), ["dup"]);
+    }
+
+    #[test]
+    fn does_not_register_the_inner_anchor_of_a_bibliography_style_triple_bracket() {
+        // The `[[id]]` inside `[[[id]]]` is recognized as an `Anchor` node
+        // (see the differential corpus above), but – outside a bibliography
+        // list item – the string pipeline renders it without cataloging its
+        // id (`is_bibliography_inner`); this mirrors that.
+        let source = "[[[id]]]";
+        let parser = Parser::default();
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        assert!(!parser.catalog().contains_id("id"));
+    }
+
+    #[test]
+    fn leading_anchor_registered_suppresses_the_warning_for_the_anchor_at_the_start() {
+        // Mirrors `DefinedTerm::substitute`'s own pre-registration dance: the
+        // id is already registered by the time this pass runs, and – because
+        // the anchor sits at byte offset `0` of `source` – the
+        // `leading_anchor_registered` flag suppresses the warning the second
+        // (redundant) registration attempt would otherwise raise.
+        let source = "[[install]]";
+        let parser = Parser::default();
+        parser
+            .register_ref("install", None, RefType::Anchor)
+            .unwrap();
+        let nodes = build_with(Span::new(source), &parser);
+
+        let before = parser.substitution_warnings_len();
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), true);
+
+        assert_eq!(parser.substitution_warnings_len(), before);
+    }
+
+    #[test]
+    fn leading_anchor_registered_still_warns_for_an_anchor_not_at_the_start() {
+        // The suppression is specific to the anchor at offset `0`; a
+        // duplicate anywhere else still warns even with the flag set.
+        let source = "x [[install]]";
+        let parser = Parser::default();
+        parser
+            .register_ref("install", None, RefType::Anchor)
+            .unwrap();
+        let nodes = build_with(Span::new(source), &parser);
+
+        let before = parser.substitution_warnings_len();
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), true);
+        let warnings = parser.drain_substitution_warnings_since(before);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::DuplicateId("install".to_string())
+        );
+    }
+
+    #[test]
+    fn registers_ids_nested_inside_a_styled_span_a_ref_and_a_footnote() {
+        use crate::inlines::{Ref, RefVariant};
+
+        let root = Span::new("[[nested]]");
+        let anchor = build_with(root, &Parser::default());
+        assert_eq!(anchor.len(), 1);
+
+        let reference = InlineNode::Ref(Ref {
+            variant: RefVariant::Link,
+            target: CowStr::from("https://example.org"),
+            children: anchor,
+            roles: vec![],
+            window: None,
+            resolved: None,
+            derived: None,
+            location: root,
+        });
+
+        let source = "*see [[a]]* and footnote:[see [[b]]]";
+        let parser = Parser::default();
+        let mut nodes = build_with(Span::new(source), &parser);
+        nodes.push(reference);
+
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        assert_eq!(
+            parser.catalog().ids().collect::<Vec<_>>(),
+            ["a", "b", "nested"]
+        );
+    }
+
+    #[test]
+    fn matches_the_golden_pipelines_registration_for_a_broad_fixture_set() {
+        // Each fixture uses its own pair of *independent* parsers (design
+        // §5.3's two-independent-parsers discipline, already established by
+        // the image increment's own differential corpus): one that the
+        // additive builder builds against and this function then walks, one
+        // that the real string pipeline (`golden_macros_with`, which also
+        // runs the `Quotes` step and so exercises the attributed-span
+        // registration too) runs against directly.
+        let fixtures = [
+            "[[install]]",
+            "[[install,Installation]]",
+            "anchor:install[Installation]",
+            "[#free_the_world]#free the world#",
+            "[[a]] [[a]]",
+            "[[[id]]]",
+            "*see [[x]]* and footnote:[see [[y]]]",
+        ];
+
+        for fixture in fixtures {
+            let builder_parser = Parser::default();
+            let nodes = build_with(Span::new(fixture), &builder_parser);
+            apply_ref_side_effects(&nodes, &builder_parser, Span::new(fixture), false);
+
+            let golden_parser = Parser::default();
+            golden_macros_with(fixture, &golden_parser);
+
+            assert_eq!(
+                builder_parser.catalog().ids().collect::<Vec<_>>(),
+                golden_parser.catalog().ids().collect::<Vec<_>>(),
+                "registered ids diverged for {fixture:?}"
+            );
+        }
     }
 }

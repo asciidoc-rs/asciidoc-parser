@@ -1512,6 +1512,34 @@ Each phase is a reviewable unit with a clear exit gate.
   (plus the anchor's duplicate-id warning and the bibliography-anchor form) – is unstaged and remains step
   6's own work.
 
+  *Step 6 prep landed as (the anchor and attributed-span family's deferred `register_ref`, staged – the
+  last of step 6's unstaged registrations):* [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs)
+  is a standalone function that walks an already-built tree and, for each [`Anchor`](../../parser/src/inlines/anchor.rs)
+  node and each id-carrying [`Styled`](../../parser/src/inlines/styled.rs) span, calls
+  [`register_ref`](../../parser/src/parser/parser.rs) under `RefType::Anchor` – reading the node's own
+  stored `id`/`reftext` instead of a regex capture. It reproduces the two divergent behaviors the string
+  pipeline's two call sites give this one catalog side effect: an inline anchor additionally raises the
+  duplicate-id warning `InlineAnchorReplacer` records (an attributed span's own registration stays silently
+  non-fatal, mirroring the quotes step's own `let _ = register_ref(...)`), and a shorthand `[[id]]`
+  immediately preceded by a `[` – the inner anchor of a `[[[id]]]` sequence appearing *outside* a
+  bibliography list item – is recognized (already, by the existing node builder) but never registered,
+  mirroring `InlineAnchorReplacer`'s own `is_bibliography_inner` check (recomputed here from the node's own
+  source span rather than a haystack index, since the tree walk has no regex capture to read it from). The
+  true bibliography-anchor construct itself (`[[[label]]]` inside a bibliography list item, `RefType::Bibliography`)
+  is a separate, list-item-gated pass (`INLINE_BIBLIO_ANCHOR`) this builder does not yet recognize as its own
+  node at all; that remains out of scope here, same as before. A description-list term's own leading-anchor
+  pre-registration (`DefinedTerm::substitute`, `apply_macros_with_leading_anchor_registered`) is mirrored by
+  a `leading_anchor_registered` parameter, so wiring this function in at that call site can suppress the same
+  duplicate-id warning the string pipeline suppresses there. It recurses into every container an id-bearing
+  node can be nested inside – a `Styled` span, a `Ref`'s own display children, or a `Footnote`'s own children
+  – mirroring the image and link increments' own recursion. As with those, **nothing is wired into a real
+  parse path** – the function is exercised only by its own tests, against their own `Parser` – so calling it
+  for real still waits for step 6. A broad differential corpus compares its registrations against the golden
+  string pipeline's own, using the same two-independent-parsers discipline the image increment established.
+  With this landed, every recognition side effect step 5's macro families skip is now staged as its own
+  unwired building block; step 6 itself – swapping the recorder for the builder, the fold, the sentinel
+  deletions, and calling each staged function exactly once per parse – remains fully outstanding.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1574,8 +1602,12 @@ Each phase is a reviewable unit with a clear exit gate.
      - ✅ **prep (links).** `register_link` for the four link-macro forms is likewise staged as a
        standalone, unwired function,
        [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) – see the
-       step's own "landed as" note above. Calling it for real is still this step's job; the
-       anchor/attributed-span `register_ref` pair remains unstaged.
+       step's own "landed as" note above.
+     - ✅ **prep (anchors).** The anchor/attributed-span `register_ref` pair – the last of step 6's
+       unstaged registrations – is likewise staged as a standalone, unwired function,
+       [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs) – see the
+       step's own "landed as" note above. Every deferred recognition side effect is now staged;
+       calling each one for real, exactly once per parse, remains this step's own job.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
