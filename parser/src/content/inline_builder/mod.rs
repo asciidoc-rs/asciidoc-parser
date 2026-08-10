@@ -220,12 +220,12 @@ use char_replacements::apply_character_replacements;
 #[allow(unused_imports)]
 pub(crate) use fold::fold_html;
 use footnotes::apply_footnotes;
-use macros::apply_macros;
 // Staged for the eventual cutover (see this module's own doc comment); not
 // yet called from any real parse path, so – like `fold_html` above – reachable
 // only via `cfg(test)` callers and future external callers today.
 #[allow(unused_imports)]
 pub(crate) use macros::apply_macro_side_effects;
+use macros::apply_macros;
 use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;

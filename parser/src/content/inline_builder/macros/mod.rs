@@ -148,10 +148,10 @@ pub(super) fn apply_macros<'src>(
 
 /// The eventual cutover's single entry point (design §5.2, Phase 4 step 6) for
 /// **every** recognition side effect the macro families above defer –
-/// composing [`image::apply_image_side_effects`], [`links::apply_link_side_effects`],
-/// and [`anchors::apply_ref_side_effects`], each staged and tested as its own
-/// standalone building block, into the one call the cutover makes exactly once
-/// per parse.
+/// composing [`image::apply_image_side_effects`],
+/// [`links::apply_link_side_effects`], and [`anchors::apply_ref_side_effects`],
+/// each staged and tested as its own standalone building block, into the one
+/// call the cutover makes exactly once per parse.
 ///
 /// # Ordering
 ///
@@ -344,8 +344,7 @@ mod side_effects_tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::super::test_support::golden_macros_with;
-    use super::apply_macro_side_effects;
+    use super::{super::test_support::golden_macros_with, apply_macro_side_effects};
     use crate::{Parser, Span, content::inline_builder::build, warnings::WarningType};
 
     #[test]
