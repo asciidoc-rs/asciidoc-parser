@@ -65,12 +65,12 @@ use crate::{
 /// (so a later sub can match *inside* an earlier span – design note on
 /// [`apply_quotes`](super::quotes::apply_quotes)). Left uncorrected, that
 /// would advance a directive nested in an earlier-positioned span *after* one
-/// that sits later in the same source but outside any span. [`resolve_counters`]
-/// runs first, as a dedicated pass that interleaves this level's own matches
-/// with a `Styled` sibling's nested ones by source position, and records each
-/// directive's resolved value keyed by its absolute source byte offset; the
-/// splicing recursion then looks values up by that same key regardless of the
-/// order it happens to visit levels in.
+/// that sits later in the same source but outside any span.
+/// [`resolve_counters`] runs first, as a dedicated pass that interleaves this
+/// level's own matches with a `Styled` sibling's nested ones by source
+/// position, and records each directive's resolved value keyed by its absolute
+/// source byte offset; the splicing recursion then looks values up by that same
+/// key regardless of the order it happens to visit levels in.
 pub(super) fn apply_attribute_references<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,

@@ -23,11 +23,10 @@ use crate::{
 /// - a same-document reference to a specific id resolves through the catalog
 ///   later, so it carries no *derived* destination (`derived: None`);
 /// - the empty target (`xref:#[]`, `<<>>`) names the current document as a
-///   whole, and a target naming another document – or a file that was
-///   included into this one in full, which is a reference within it after all
-///   – carries a destination *derived* from the target itself, computed here
-///   from the path attributes in effect at the reference (no catalog
-///   consulted).
+///   whole, and a target naming another document – or a file that was included
+///   into this one in full, which is a reference within it after all – carries
+///   a destination *derived* from the target itself, computed here from the
+///   path attributes in effect at the reference (no catalog consulted).
 ///
 /// The returned target is the node's `Ref::target` (see its field docs): the
 /// interpreted id for a same-document reference, the fragment for a

@@ -1607,6 +1607,17 @@ impl Parser {
         }
     }
 
+    /// Returns the parser's own live catalog, for tests that inspect a
+    /// registration recorded via [`register_image`](Self::register_image) or
+    /// [`register_link`](Self::register_link) directly against this `Parser`,
+    /// without going through a full [`Document`](crate::document::Document)
+    /// parse (whose own [`catalog`](crate::document::Document::catalog) is a
+    /// separate, later snapshot).
+    #[cfg(test)]
+    pub(crate) fn catalog(&self) -> std::cell::Ref<'_, crate::document::Catalog> {
+        self.catalog.borrow()
+    }
+
     /// Registers a callout number defined by a verbatim block.
     ///
     /// Takes `&self` so it can be called from the callouts substitution step,
