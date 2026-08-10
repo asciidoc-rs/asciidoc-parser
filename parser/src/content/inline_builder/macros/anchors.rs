@@ -338,13 +338,10 @@ fn is_bibliography_inner(anchor: &Anchor<'_>, source: Span<'_>) -> bool {
         return false;
     }
 
-    let Some(local_offset) = anchor
-        .location
-        .byte_offset()
-        .checked_sub(source.byte_offset())
-    else {
-        return false;
-    };
+    // `anchor.location` always falls within `source` (every node this builder
+    // produces slices from the same root it was built against), so this is
+    // never a subtraction underflow.
+    let local_offset = anchor.location.byte_offset() - source.byte_offset();
 
     local_offset
         .checked_sub(1)
