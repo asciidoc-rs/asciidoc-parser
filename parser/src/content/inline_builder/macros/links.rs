@@ -562,6 +562,32 @@ pub(super) fn build_link_node<'src>(
 /// real parse yet – it is exercised only by this module's own tests, against
 /// their own `Parser`.
 ///
+/// # Registration order across the two link forms
+///
+/// The string pipeline registers a link's target *when its own replacer's
+/// regex pass matches it* – `InlineLinkReplacer` (auto-links and formal-URL
+/// links, `INLINE_LINK`'s non-angle branch) runs as one whole-string pass, then
+/// `InlineLinkMacroReplacer` (`link:`/`mailto:`, `INLINE_LINK_MACRO`) runs as a
+/// *second*, later pass – exactly the order [`inline_link_level`] and
+/// [`link_macro_level`] apply the two families in. So the catalog ends up in
+/// **family-pass order, not true source order**: every auto-link/formal-URL
+/// link in the content registers before every `link:`/`mailto:` macro in it,
+/// regardless of which appears first in the source (see
+/// `catalog_records_link_targets_when_catalog_assets_enabled` in
+/// `tests/asciidoctor_rb/substitutions_test.rs`, which pins this exact
+/// behavior). A single tree walk in document order would get this wrong for a
+/// content that interleaves the two forms out of that relative order (for
+/// example `link:b.html[B] then https://a.example`, which the golden pipeline
+/// registers as `["https://a.example", "b.html"]`, not `["b.html",
+/// "https://a.example"]`), so this function makes **two** passes over the
+/// tree – all auto-link/formal-URL matches first, then all `link:`/`mailto:`
+/// macro matches – rather than one. [`link_form`] tells the two apart from the
+/// node's own `location` (a `link:`/`mailto:` macro's location always starts
+/// with its literal prefix; [`inline_link_level`] never builds a node for
+/// `INLINE_LINK`'s own link-macro branch, deferring that whole form to
+/// [`link_macro_level`] – see [`inline_link_level`]'s own doc comment – so this
+/// is a reliable, no-recomputation signal, not a heuristic).
+///
 /// Recurses into every container a `Ref` node can be nested inside –
 /// [`Styled`](InlineNode::Styled), another [`Ref`](InlineNode::Ref) (a link's
 /// own display children, or a cross-reference's), and
@@ -572,26 +598,58 @@ pub(super) fn build_link_node<'src>(
 /// but its children are still walked, since a formatted cross-reference text
 /// could itself carry a nested link.
 pub(crate) fn apply_link_side_effects(nodes: &[InlineNode<'_>], parser: &Parser) {
+    register_links_of_form(nodes, parser, LinkForm::AutoOrFormal);
+    register_links_of_form(nodes, parser, LinkForm::Macro);
+}
+
+/// Which of the two link-recognizing passes built a [`Ref`](InlineNode::Ref)
+/// node – see [`apply_link_side_effects`]'s own "Registration order" note.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LinkForm {
+    /// An auto-link or formal-URL link, built by [`inline_link_level`].
+    AutoOrFormal,
+
+    /// A `link:`/`mailto:` macro, built by [`link_macro_level`].
+    Macro,
+}
+
+/// Walks `nodes`, registering only the [`Ref`](InlineNode::Ref)`{Link}` nodes
+/// of the given `form`, in document order.
+fn register_links_of_form(nodes: &[InlineNode<'_>], parser: &Parser, form: LinkForm) {
     for node in nodes {
         match node {
             InlineNode::Ref(reference) => {
-                if reference.variant == RefVariant::Link {
+                if reference.variant == RefVariant::Link && link_form(reference) == form {
                     parser.register_link(reference.target.to_string());
                 }
 
-                apply_link_side_effects(&reference.children, parser);
+                register_links_of_form(&reference.children, parser, form);
             }
 
             InlineNode::Styled(styled) => {
-                apply_link_side_effects(&styled.children, parser);
+                register_links_of_form(&styled.children, parser, form);
             }
 
             InlineNode::Footnote(footnote) => {
-                apply_link_side_effects(&footnote.children, parser);
+                register_links_of_form(&footnote.children, parser, form);
             }
 
             _ => {}
         }
+    }
+}
+
+/// Tells which pass built a link [`Ref`](InlineNode::Ref) node from its own
+/// `location`: only [`link_macro_level`] ever builds a node whose matched
+/// source starts with a literal `link:`/`mailto:` prefix (see
+/// [`apply_link_side_effects`]'s own doc comment).
+fn link_form(reference: &Ref<'_>) -> LinkForm {
+    let text = reference.location.data();
+
+    if text.starts_with("link:") || text.starts_with("mailto:") {
+        LinkForm::Macro
+    } else {
+        LinkForm::AutoOrFormal
     }
 }
 
@@ -1255,6 +1313,31 @@ mod tests {
     }
 
     #[test]
+    fn registers_interleaved_forms_in_family_pass_order_not_source_order() {
+        // `link:b.html[B]` appears first in the source, but the golden
+        // pipeline's `link:`/`mailto:` pass runs *after* its auto-link/
+        // formal-URL pass (see `apply_link_side_effects`'s own "Registration
+        // order" doc note), so `https://a.example` – which appears second –
+        // registers first. A single document-order tree walk would get this
+        // backwards; the two-pass split must reproduce it.
+        let source = "link:b.html[B] then https://a.example then link:c.html[C]";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(
+            parser.catalog().links(),
+            ["https://a.example", "b.html", "c.html"]
+        );
+
+        // The golden string pipeline agrees.
+        let golden_parser = Parser::default().with_catalog_assets(true);
+        golden_macros_with(source, &golden_parser);
+        assert_eq!(golden_parser.catalog().links(), parser.catalog().links());
+    }
+
+    #[test]
     fn does_not_register_a_cross_reference_as_a_link() {
         // A cross-reference is also a `Ref` node, but only a `Link` variant has
         // an asset-catalog entry.
@@ -1308,6 +1391,10 @@ mod tests {
             "link:https://example.org[Example]",
             "\\link:index.html[Docs]",
             "link:a.html[A]{sp}link:b.html[B]",
+            // Interleaved forms, out of source order relative to the family
+            // passes that register them (see `apply_link_side_effects`'s own
+            // "Registration order" doc note).
+            "link:b.html[B]{sp}then{sp}https://a.example",
         ];
 
         for fixture in fixtures {

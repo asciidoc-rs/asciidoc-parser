@@ -1540,6 +1540,47 @@ Each phase is a reviewable unit with a clear exit gate.
   unwired building block; step 6 itself – swapping the recorder for the builder, the fold, the sentinel
   deletions, and calling each staged function exactly once per parse – remains fully outstanding.
 
+  *Step 6 prep landed as (a combined entry point for every staged side effect, plus a link-registration-order
+  fix it surfaced):* with all three families' side effects staged individually, the cutover's own job of
+  "calling each staged function exactly once per parse" needed one more piece: a single entry point that
+  composes them in the right relative order, since the two link-recognizing families and the image/anchor
+  families all write into catalogs and warnings the cutover must get right *together*, not just individually.
+  [`apply_macro_side_effects`](../../parser/src/content/inline_builder/macros/mod.rs) is that entry point –
+  it calls [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs), then
+  [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs), then
+  [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs) – the same relative
+  order the string pipeline's own macro passes run in (§4.1) – so that when more than one family's side
+  effect touches the *same* shared list (concretely, [`Parser::record_substitution_warning`](../../parser/src/parser/parser.rs)'s
+  one shared warnings list, which both the image family's dangerous-scheme warning and the anchor family's
+  duplicate-id warning write to) the combined call lands them in the golden pipeline's own order. A new
+  differential corpus exercises the composed call directly – a fixture mixing an image, both link forms, and
+  an anchor in one content, and a fixture whose image and anchor *both* warn, asserting the two warnings land
+  in image-then-anchor order against an independent golden parser (the same two-independent-parsers
+  discipline every prior staged function's own corpus uses).
+
+  Building that composed differential corpus surfaced a genuine ordering bug in the already-staged
+  [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs): the string pipeline
+  registers a link's target when its *own* replacer's pass matches it, and the auto-link/formal-URL pass
+  (`INLINE_LINK`) and the `link:`/`mailto:` macro pass (`INLINE_LINK_MACRO`) are two separate, sequential
+  whole-string passes (§4.1) – so the catalog ends up in **family-pass order, not true source order**: every
+  auto-link/formal-URL link registers before every `link:`/`mailto:` macro, regardless of which appears first
+  in the source (already pinned, independently of this module, by
+  `catalog_records_link_targets_when_catalog_assets_enabled` in `tests/asciidoctor_rb/substitutions_test.rs`).
+  The originally-staged function instead made one tree walk in document order, which is only ever correct by
+  coincidence – a content that interleaves the two forms out of that relative order (`link:b.html[B] then
+  https://a.example`) diverges: document order would register `b.html` first, but the golden catalog is
+  `["https://a.example", "b.html"]`. No existing test exercised mixed forms in one content, so this had gone
+  unnoticed. The fix makes two passes over the tree – every auto-link/formal-URL match first, then every
+  `link:`/`mailto:` macro match – distinguishing the two from a node's own `location` alone (a `link:`/
+  `mailto:` match's location always starts with its literal prefix, and the auto-link pass never builds a
+  node for `INLINE_LINK`'s own link-macro branch, deferring that whole form to the macro pass – see
+  [`inline_link_level`](../../parser/src/content/inline_builder/macros/links.rs)'s own doc comment – so this
+  is a reliable signal, not a heuristic, and needs no new node field). A new test pins the interleaved case
+  directly against the golden pipeline, and the broad differential fixture set gains an interleaved fixture
+  too. As with every prior increment in this module, nothing here is wired into a real parse path – calling
+  [`apply_macro_side_effects`] for real still waits for the single-pass builder to replace the recorder as
+  `Content`'s tree source, which remains step 6's own, still fully outstanding, job.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
