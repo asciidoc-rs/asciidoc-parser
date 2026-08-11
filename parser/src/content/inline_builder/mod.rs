@@ -299,17 +299,18 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
 /// passthrough extraction/restore or deferred cross-reference finalization
 /// alongside the other steps. That is enough to pin each step in isolation,
 /// but it never exercises the *fully assembled* pipeline
-/// [`SubstitutionGroup::Normal.apply`](crate::content::SubstitutionGroup::apply)
-/// runs in production – passthrough/STEM extraction, every step in true
-/// order, passthrough restore, and deferred-reference finalization, all
-/// against one `Content` – which is exactly what [`build`] (this module's own
-/// single call) must reproduce once the cutover (design §5.2, Phase 4 step 6)
-/// wires it in. This closes that gap: each fixture below mixes constructs
-/// that were previously verified only in separate, single-family corpora
-/// (quotes nested around an attribute reference, a footnote whose text itself
-/// carries an attribute reference, a passthrough beside a macro, a counter
-/// directive beside a formatted span, …), so a boundary-crossing interaction
-/// between two steps that individually pass would still be caught here.
+/// [`SubstitutionGroup::Normal.
+/// apply`](crate::content::SubstitutionGroup::apply) runs in production –
+/// passthrough/STEM extraction, every step in true order, passthrough restore,
+/// and deferred-reference finalization, all against one `Content` – which is
+/// exactly what [`build`] (this module's own single call) must reproduce once
+/// the cutover (design §5.2, Phase 4 step 6) wires it in. This closes that gap:
+/// each fixture below mixes constructs that were previously verified only in
+/// separate, single-family corpora (quotes nested around an attribute
+/// reference, a footnote whose text itself carries an attribute reference, a
+/// passthrough beside a macro, a counter directive beside a formatted span, …),
+/// so a boundary-crossing interaction between two steps that individually pass
+/// would still be caught here.
 ///
 /// As with every other corpus in this module, a fixture is chosen to stay
 /// inside the vocabulary [`build`] already covers – it avoids the forms still
