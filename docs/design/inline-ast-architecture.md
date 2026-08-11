@@ -1122,6 +1122,30 @@ Each phase is a reviewable unit with a clear exit gate.
   increment does not attempt). This step is **additive**: nothing is wired into the parse path. With it,
   every macro family the recorder covers now has a single-pass counterpart.
 
+  *Follow-up landed as (the deprecated `footnoteref:` form):* the first of part 4c's two deferred forms
+  is closed. [`build_footnoteref_node`](../../parser/src/content/inline_builder/footnotes.rs) mirrors
+  `InlineFootnoteMacroReplacer`'s own `raw.split_once(',')` exactly – `footnoteref:[id,text]` /
+  `footnoteref:[id]` packs both into one bracket rather than taking the id from the macro target the way
+  `footnote:id[…]` does, splitting on the *first* comma so a bracket with no comma is an id-only bare
+  reference and a trailing comma (`footnoteref:[id,]`) yields *empty*, not absent, content (a defining
+  occurrence with empty text) – a distinct shape from `footnote:id[]`'s own no-comma-at-all reference.
+  Once split, the (id, content) pair resolves through the *same* three cases `build_footnote_node`
+  already does (reuse an already-defined id's number, define a new id-carrying occurrence, or fall back
+  to an unresolved reference for an id never defined), folding through the identical `render_footnote`,
+  so the output is byte-for-byte identical to the golden pipeline's (pinned by extending the part 4c
+  differential corpus with `footnoteref:` fixtures). The escape check
+  (`whole.as_str().starts_with('\\')`) is hoisted ahead of the ref-vs-plain branch in
+  `find_footnote_matches`, mirroring the string replacer's own check order exactly – it previously ran
+  *after* the (then early-`continue`ing) `footnoteref:` branch, so an escaped `\footnoteref:[…]` was left
+  fully unrecognized (backslash and all) rather than unescaped; this is fixed as a side effect of
+  recognizing the form at all. As with every other macro family, the one side effect this increment does
+  *not* yet perform is the deprecation warning itself (`DeprecatedFootnoterefMacro`) – a diagnostic that
+  does not change the fold's output bytes, so – unlike the footnote number, which does – it remains
+  deferred to the cutover (step 6) like every other family's own catalog/warning side effect. The one
+  remaining deferred form from part 4c's own list, content carrying an escaped closing bracket (`\]`), is
+  unchanged and applies identically to `footnoteref:`'s own bracket content (pinned by its own divergence
+  test).
+
   *Step 5a landed as (Passthroughs → `Raw`, the delimited forms):* a new
   [`apply_passthroughs`](../../parser/src/content/inline_builder.rs) step – the **first** step
   [`build`](../../parser/src/content/inline_builder.rs) runs, ahead of `SpecialCharacters` –
