@@ -108,12 +108,12 @@
 //!   [`emit_range`](quotes::emit_range) rather than a literal attribute value,
 //!   so – unlike the other families – a content crossing an already-recognized
 //!   construct is not deferred: nesting is the point. The deprecated
-//!   `footnoteref:[id,text]` / `footnoteref:[id]` form (`build_footnoteref_node`)
-//!   is recognized too, splitting its one bracket on the first comma rather
-//!   than taking an id from the macro target; only its own deprecation
-//!   warning (a diagnostic, deferred to the cutover like every other family's)
-//!   and a content carrying an escaped closing bracket (`\]`) remain deferred.
-//!   The bibliography-anchor form is a later increment.
+//!   `footnoteref:[id,text]` / `footnoteref:[id]` form
+//!   (`build_footnoteref_node`) is recognized too, splitting its one bracket on
+//!   the first comma rather than taking an id from the macro target; only its
+//!   own deprecation warning (a diagnostic, deferred to the cutover like every
+//!   other family's) and a content carrying an escaped closing bracket (`\]`)
+//!   remain deferred. The bibliography-anchor form is a later increment.
 //! - [`apply_stem`] recognizes **inline STEM macros** (`stem:[…]`,
 //!   `asciimath:[…]`, `latexmath:[…]`), replacing each with a
 //!   [`Stem`](InlineNode::Stem) leaf. Like [`apply_passthroughs`], it is an
