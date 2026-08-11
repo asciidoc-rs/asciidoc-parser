@@ -1654,7 +1654,7 @@ Each phase is a reviewable unit with a clear exit gate.
   runs in production – passthrough/STEM extraction, every step in true order, passthrough restore, and
   deferred-reference finalization, all against one `Content` – which is exactly what [`build`] (this
   module's own single call) must reproduce once the cutover wires it in. A new differential corpus, in
-  [`inline_builder`](../../parser/src/content/inline_builder.rs)'s own test module, closes that gap: each
+  [`inline_builder`](../../parser/src/content/inline_builder/mod.rs)'s own test module, closes that gap: each
   fixture calls the real, public `SubstitutionGroup::Normal.apply` as the golden and `build` + `fold_html`
   as the candidate, and – unlike every prior corpus, each scoped to one family – **combines** several
   construct families in one piece of content (quotes wrapping an attribute reference, a footnote whose own
