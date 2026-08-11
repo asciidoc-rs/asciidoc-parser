@@ -162,14 +162,16 @@
 //! the additive builder still runs *alongside* the authoritative string
 //! pipeline (each against its own, independent [`Parser`]), so performing one
 //! here today would risk double-counting a registration once the two paths
-//! ever share a `Parser`. [`apply_image_side_effects`] is the first of these
-//! to be written: it re-attaches the `image:`/`icon:` family's own deferred
-//! side effects (`register_image`, the `link=` dangerous-scheme/self-href
-//! warning) as a function that walks an already-built tree, staged as its own
-//! reviewable building block for the cutover (design §5.2, Phase 4 step 6).
-//! It is exercised only by its own tests, against their own `Parser` – calling
-//! it for real means invoking it exactly once per parse, after the
-//! single-pass builder replaces the recorder as `Content`'s tree source.
+//! ever share a `Parser`. Each family's own deferred side effects are staged
+//! as their own reviewable building block – `register_image` and the `link=`
+//! dangerous-scheme/self-href warning for `image:`/`icon:`, `register_link`
+//! for the four link-macro forms, and the `register_ref` pair for anchors and
+//! id-carrying attributed spans – and [`apply_macro_side_effects`] composes
+//! all three, in the string pipeline's own family-pass order, into the single
+//! call the eventual cutover makes exactly once per parse (design §5.2, Phase
+//! 4 step 6). It is exercised only by its own tests (and its constituents'
+//! own), against their own `Parser` – calling it for real still waits for the
+//! single-pass builder to replace the recorder as `Content`'s tree source.
 //!
 //! # A note on quote nesting
 //!
@@ -218,12 +220,12 @@ use char_replacements::apply_character_replacements;
 #[allow(unused_imports)]
 pub(crate) use fold::fold_html;
 use footnotes::apply_footnotes;
-use macros::apply_macros;
 // Staged for the eventual cutover (see this module's own doc comment); not
 // yet called from any real parse path, so – like `fold_html` above – reachable
 // only via `cfg(test)` callers and future external callers today.
 #[allow(unused_imports)]
-pub(crate) use macros::image::apply_image_side_effects;
+pub(crate) use macros::apply_macro_side_effects;
+use macros::apply_macros;
 use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;

@@ -1,9 +1,9 @@
 //! The macros substitution step, split by macro family.
 
-mod anchors;
+pub(super) mod anchors;
 pub(super) mod image;
 mod indexterm;
-mod links;
+pub(super) mod links;
 mod ui;
 mod xref;
 
@@ -146,6 +146,57 @@ pub(super) fn apply_macros<'src>(
     // other family at every level.
 }
 
+/// The eventual cutover's single entry point (design §5.2, Phase 4 step 6) for
+/// **every** recognition side effect the macro families above defer –
+/// composing [`image::apply_image_side_effects`],
+/// [`links::apply_link_side_effects`], and [`anchors::apply_ref_side_effects`],
+/// each staged and tested as its own standalone building block, into the one
+/// call the cutover makes exactly once per parse.
+///
+/// # Ordering
+///
+/// The three are called in the same relative order the string pipeline's own
+/// macro passes run in (image/icon, …, links, …, anchors, …– see
+/// [`apply_macros`]'s own doc comment): image, then link, then anchor/ref.
+/// This is not cosmetic – it is what keeps this function's output identical to
+/// the golden pipeline's whenever more than one family's side effect touches
+/// the *same* shared list. Concretely, [`Parser::record_substitution_warning`]
+/// appends to one shared warnings list, and both
+/// [`image::apply_image_side_effects`]'s dangerous-link-scheme warning and
+/// [`anchors::apply_ref_side_effects`]'s duplicate-id warning write to it – a
+/// content whose image triggers the first and whose anchor triggers the
+/// second must see the image warning recorded first, exactly as it would from
+/// the string pipeline's own image-then-anchor pass order. (The asset/ref
+/// catalogs the three write to are otherwise disjoint from one another –
+/// images, links, and refs are three separate lists – so this ordering does
+/// not, by itself, need to hold *within* a single catalog; see
+/// [`links::apply_link_side_effects`]'s own doc comment for the finer-grained
+/// ordering *within* the link family that the golden pipeline also requires.)
+///
+/// Index terms, cross-references, and footnotes are not part of this
+/// function: index terms and cross-references perform no recognition side
+/// effect at all (an index term has no catalog in the HTML backend; a
+/// cross-reference is resolved, not registered), and a footnote's one
+/// required side effect – its assigned number – is not deferred in the first
+/// place (see [`apply_footnotes`](super::footnotes::apply_footnotes)'s own doc
+/// comment); it already runs during [`build`](super::build), not here.
+///
+/// As with each of the three functions it composes, **nothing here is wired
+/// into a real parse path yet** – it is exercised only by this module's own
+/// tests, against their own `Parser`. `source` and `leading_anchor_registered`
+/// are threaded straight through to
+/// [`anchors::apply_ref_side_effects`] – see its own doc comment for both.
+pub(crate) fn apply_macro_side_effects(
+    nodes: &[InlineNode<'_>],
+    parser: &Parser,
+    source: Span<'_>,
+    leading_anchor_registered: bool,
+) {
+    image::apply_image_side_effects(nodes, parser, source);
+    links::apply_link_side_effects(nodes, parser);
+    anchors::apply_ref_side_effects(nodes, parser, source, leading_anchor_registered);
+}
+
 /// One recognized macro match at a level, in absolute match-string byte
 /// offsets. Shared across the macro families (image/icon, UI, and later
 /// increments), which differ only in how they *build* a match's node.
@@ -234,11 +285,13 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::apply_macros;
+    use super::{super::test_support::golden_macros_with, apply_macro_side_effects, apply_macros};
     use crate::{
         Parser, Span,
+        content::inline_builder::build,
         inlines::{InlineNode, Ref, RefVariant},
         strings::CowStr,
+        warnings::WarningType,
     };
 
     #[test]
@@ -284,5 +337,83 @@ mod tests {
 
             other => panic!("expected the Ref to survive, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn registers_every_family_from_a_single_call() {
+        let source =
+            "image:a.png[] link:b.html[B] https://c.example [[anchor-id]] xref:anchor-id[]";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build(Span::new(source), &parser);
+
+        apply_macro_side_effects(&nodes, &parser, Span::new(source), false);
+
+        let catalog = parser.catalog();
+        assert_eq!(
+            catalog
+                .images()
+                .iter()
+                .map(|i| i.target.clone())
+                .collect::<Vec<_>>(),
+            ["a.png"]
+        );
+        assert_eq!(catalog.links(), ["https://c.example", "b.html"]);
+        assert!(catalog.contains_id("anchor-id"));
+    }
+
+    #[test]
+    fn matches_the_golden_pipelines_registrations_and_warning_order_for_mixed_families() {
+        // A content that exercises every family this function composes in one
+        // go: an image whose `link=` targets a dangerous scheme (a warning
+        // from the image family) *before* a duplicate anchor id (a warning
+        // from the anchor family) – the golden pipeline's own image-then-
+        // anchor pass order (`apply_macros`'s own doc comment) must land the
+        // two warnings in that order, not the reverse. Each side uses its own
+        // *independent* parser (design §5.3's two-independent-parsers
+        // discipline, established by the image increment's own differential
+        // corpus).
+        let source = "image:x.png[alt,link=javascript:alert(1)] then [[dup]] and [[dup]]";
+
+        let builder_parser = Parser::default().with_catalog_assets(true);
+        let nodes = build(Span::new(source), &builder_parser);
+        apply_macro_side_effects(&nodes, &builder_parser, Span::new(source), false);
+
+        let golden_parser = Parser::default().with_catalog_assets(true);
+        golden_macros_with(source, &golden_parser);
+
+        assert_eq!(
+            builder_parser
+                .catalog()
+                .images()
+                .iter()
+                .map(|i| i.target.clone())
+                .collect::<Vec<_>>(),
+            golden_parser
+                .catalog()
+                .images()
+                .iter()
+                .map(|i| i.target.clone())
+                .collect::<Vec<_>>(),
+        );
+
+        let builder_warnings: Vec<_> = builder_parser
+            .drain_substitution_warnings_since(0)
+            .into_iter()
+            .map(|w| w.warning)
+            .collect();
+        let golden_warnings: Vec<_> = golden_parser
+            .drain_substitution_warnings_since(0)
+            .into_iter()
+            .map(|w| w.warning)
+            .collect();
+
+        assert_eq!(builder_warnings, golden_warnings);
+        assert_eq!(
+            builder_warnings,
+            [
+                WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string()),
+                WarningType::DuplicateId("dup".to_string()),
+            ]
+        );
     }
 }

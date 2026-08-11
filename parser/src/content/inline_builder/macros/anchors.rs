@@ -221,8 +221,9 @@ fn build_anchor_reftext<'src>(
 /// see [`attributes_of`](super::super::quotes::attributes_of)'s own note).
 ///
 /// Every macro family this module recognizes defers exactly this kind of side
-/// effect (see [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'s
-/// own note): while the additive builder runs *alongside* the authoritative
+/// effect (see
+/// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'
+/// s own note): while the additive builder runs *alongside* the authoritative
 /// string pipeline – each against its own, independent [`Parser`] – performing
 /// it from every additive pass would risk double-counting a registration once
 /// the two paths ever share one `Parser`. This function is the last of the
@@ -234,8 +235,8 @@ fn build_anchor_reftext<'src>(
 /// their own `Parser`.
 ///
 /// `source` is the whole original content span being processed, used – like
-/// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'s
-/// own `source` parameter – to locate the duplicate-id warning exactly as
+/// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'
+/// s own `source` parameter – to locate the duplicate-id warning exactly as
 /// [`InlineAnchorReplacer`](crate::content::macros) does (against the
 /// content's own span, not the individual anchor's).
 ///
