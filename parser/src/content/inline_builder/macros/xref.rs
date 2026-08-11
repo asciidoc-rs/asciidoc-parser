@@ -3,6 +3,7 @@
 use super::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level};
 use crate::{
     Parser, Span,
+    attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_XREF,
         inline_builder::quotes::{Piece, build_match_string, source_slice},
@@ -11,7 +12,7 @@ use crate::{
         },
     },
     inlines::{InlineNode, Ref, RefVariant},
-    parser::DerivedReference,
+    parser::{DerivedReference, XrefStyle},
     strings::CowStr,
 };
 
@@ -184,28 +185,23 @@ fn find_xref_matches<'src>(
 /// replacer does so the fold reproduces the same bytes. Returns `None` for a
 /// form this increment defers.
 ///
-/// The scope this builder claims is every macro-form target *except* a text
+/// The scope this builder claims is every macro-form target, including a text
 /// carrying an attribute list; the `<<id>>` shorthand is built by
-/// [`build_xref_shorthand_node`]. A same-document reference to a specific id
-/// (`xref:install[]`) resolves through the catalog later (`derived: None`);
-/// the empty target (`xref:#[]`), a target naming another document
+/// [`build_xref_shorthand_node`] and never carries one (see
+/// [`Ref::xrefstyle`]'s field docs). A same-document reference to a specific
+/// id (`xref:install[]`) resolves through the catalog later (`derived:
+/// None`); the empty target (`xref:#[]`), a target naming another document
 /// (`xref:other.adoc#frag[]`), and a target naming this document (or a file
 /// included into it in full) all carry a destination *derived* from the
 /// target itself, computed by [`xref_target_and_derived`] exactly as the
-/// string replacer computes it – so this builder no longer defers any target
-/// shape. One form remains deferred to a later increment:
-///
-/// - a **text carrying an attribute list** (an `=`, for `window`/`role`/
-///   `xrefstyle`): it is parsed as an [`Attrlist`](crate::attributes::Attrlist)
-///   the node cannot hold yet, exactly as
-///   [`build_link_node`](super::links::build_link_node) defers the analogous
-///   link form.
+/// string replacer computes it.
 ///
 /// The display text becomes the node's children as a single
 /// [`Text`](InlineNode::Text), so the fold recovers the provided text by
 /// folding the children and needs no build-time state; an empty text yields no
 /// children, which the fold reads as "no text provided" (the bracketed `[id]`
-/// fallback).
+/// fallback). See [`xref_macro_text`] for how a text carrying an attribute
+/// list (an `=`) is interpreted.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect – notably it does **not** register the reference for resolution,
@@ -225,55 +221,147 @@ fn build_xref_node<'src>(
     let (target, derived) = xref_target_and_derived(raw_target, true, parser);
 
     let raw_text = caps.get(4).map_or("", |m| m.as_str());
-
-    // A text carrying an attribute list (an `=`) is parsed from a
-    // newline-normalized copy of the text into named attributes (`window`,
-    // `role`, `xrefstyle`); it cannot be carried on the node yet, so defer the
-    // whole macro, mirroring the string replacer's `raw_text.contains('=')`
-    // branch and [`build_link_node`](super::links::build_link_node).
-    if raw_text.contains('=') {
-        return None;
-    }
+    let (children, window, roles, xrefstyle) =
+        xref_macro_text(raw_text, caps.get(4), pieces, root, parser);
 
     let location = source_slice(pieces, full.clone(), root);
-
-    let children = if raw_text.is_empty() {
-        vec![]
-    } else {
-        // The provided text becomes the node's children, located at the
-        // bracketed text.
-        #[allow(clippy::unwrap_used)]
-        let text_span = caps.get(4).unwrap();
-
-        let text_location = source_slice(pieces, text_span.start()..text_span.end(), root);
-
-        // An escaped bracket (`\]`) makes the logical text a computed (owned)
-        // value – a *synthesized* `Text` whose value need not coincide with its
-        // source, mirroring the string replacer's `raw_text.replace`. Without
-        // one the text is verbatim, so it borrows the very bytes its location
-        // covers (the builder's `'src`-borrowing goal).
-        let value = if raw_text.contains("\\]") {
-            CowStr::from(raw_text.replace("\\]", "]"))
-        } else {
-            CowStr::from(text_location.data())
-        };
-
-        vec![InlineNode::Text {
-            value,
-            location: text_location,
-        }]
-    };
 
     Some(InlineNode::Ref(Ref {
         variant: RefVariant::Xref,
         target: CowStr::from(target),
         children,
-        roles: vec![],
-        window: None,
+        roles,
+        window,
         resolved: None,
         derived,
+        xrefstyle,
         location,
     }))
+}
+
+/// Interprets the bracketed display text of an `xref:` macro, mirroring
+/// [`InlineXrefReplacer::replace_append`](crate::content::macros)'s own text
+/// interpretation exactly so the fold reproduces the same bytes: a text
+/// carrying an `=` is parsed – from a newline-normalized copy, since the parse
+/// is not necessarily verbatim (mirroring the string replacer, which parses
+/// the same normalized copy rather than a source slice) – as an
+/// [`Attrlist`], whose first positional attribute becomes the display text
+/// and whose `window`/`role`/`xrefstyle` named attributes are honored. If the
+/// attrlist parse finds no named attribute – the sole positional value is the
+/// whole normalized text – the `=` was incidental (e.g. an already-rendered
+/// inner macro such as `xref:sec[image:...[]]`, whose HTML contains `=` and
+/// `"`), not a real attribute list; the text is then used as plain text with
+/// no named attributes, matching Asciidoctor's `extract_attributes_from_text`.
+///
+/// Returns the display-text children, the window, the roles, and the
+/// `xrefstyle` override (`None` unless the macro carries its own `xrefstyle=`
+/// attribute; the document-wide default is applied later, at fold time – see
+/// [`Ref::xrefstyle`]'s field docs).
+fn xref_macro_text<'src>(
+    raw_text: &str,
+    text_span: Option<regex::Match<'_>>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> (
+    Vec<InlineNode<'src>>,
+    Option<CowStr<'src>>,
+    Vec<CowStr<'src>>,
+    Option<XrefStyle>,
+) {
+    if raw_text.is_empty() {
+        return (vec![], None, vec![], None);
+    }
+
+    if raw_text.contains('=') {
+        let normalized = raw_text.replace('\n', " ");
+        let attrlist = Attrlist::parse(Span::new(&normalized), parser, AttrlistContext::Inline)
+            .item
+            .item;
+
+        let first = attrlist.nth_attribute(1).map(|a| a.value().to_string());
+
+        if first.as_deref() != Some(normalized.as_str()) {
+            let window = attrlist
+                .named_attribute("window")
+                .map(|a| CowStr::from(a.value().to_string()));
+
+            let roles = attrlist
+                .roles()
+                .iter()
+                .map(|r| CowStr::from(r.to_string()))
+                .collect();
+
+            let xrefstyle = attrlist
+                .named_attribute("xrefstyle")
+                .map(|a| XrefStyle::parse(a.value()));
+
+            let children = match first.filter(|s| !s.is_empty()) {
+                None => vec![],
+                Some(text) => {
+                    // `text_span` is always `Some` here: it is `None` only
+                    // when `raw_text` is empty, which returns above before
+                    // reaching this branch.
+                    #[allow(clippy::unwrap_used)]
+                    let span = text_span.unwrap();
+
+                    vec![InlineNode::Text {
+                        value: CowStr::from(text),
+                        // The parsed positional attribute is a synthesized
+                        // value with no `'src` slice of its own (it comes
+                        // from the normalized, attrlist-parsed copy, not the
+                        // source directly); it falls back to the bracketed
+                        // text's own span (design §4.4), mirroring the
+                        // synthesized-value location policy
+                        // `apply_attribute_references` already establishes.
+                        location: source_slice(pieces, span.start()..span.end(), root),
+                    }]
+                }
+            };
+
+            return (children, window, roles, xrefstyle);
+        }
+
+        // The `=` was incidental; fall through to plain-text handling.
+    }
+
+    (
+        plain_xref_text(raw_text, text_span, pieces, root),
+        None,
+        vec![],
+        None,
+    )
+}
+
+/// Builds the display-text children for a text with no attribute list (or one
+/// whose `=` was incidental), mirroring the string replacer's own
+/// `raw_text.replace("\\]", "]")` unescape.
+fn plain_xref_text<'src>(
+    raw_text: &str,
+    text_span: Option<regex::Match<'_>>,
+    pieces: &[Piece],
+    root: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    #[allow(clippy::unwrap_used)]
+    let span = text_span.unwrap();
+
+    let text_location = source_slice(pieces, span.start()..span.end(), root);
+
+    // An escaped bracket (`\]`) makes the logical text a computed (owned)
+    // value – a *synthesized* `Text` whose value need not coincide with its
+    // source, mirroring the string replacer's `raw_text.replace`. Without one
+    // the text is verbatim, so it borrows the very bytes its location covers
+    // (the builder's `'src`-borrowing goal).
+    let value = if raw_text.contains("\\]") {
+        CowStr::from(raw_text.replace("\\]", "]"))
+    } else {
+        CowStr::from(text_location.data())
+    };
+
+    vec![InlineNode::Text {
+        value,
+        location: text_location,
+    }]
 }
 
 /// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a `<<id>>` shorthand
@@ -376,6 +464,7 @@ fn build_xref_shorthand_node<'src>(
         window: None,
         resolved: None,
         derived,
+        xrefstyle: None,
         location,
     }))
 }
@@ -393,7 +482,7 @@ mod tests {
         Parser, Span,
         content::{Content, SubstitutionStep},
         inlines::{InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
-        parser::HtmlSubstitutionRenderer,
+        parser::{HtmlSubstitutionRenderer, XrefStyle},
     };
 
     /// The string pipeline's output through the **macros** step for `source`,
@@ -463,6 +552,19 @@ mod tests {
             "xref:#[]",
             // An escaped `]` inside the text is unescaped.
             "xref:foo[a\\]b]",
+            // A text carrying an attribute list (an `=`): the first positional
+            // attribute is the display text, and `window`/`role`/`xrefstyle`
+            // named attributes are honored.
+            "xref:install[Installation,role=hl]",
+            "xref:install[Installation,window=_blank]",
+            "xref:install[Installation,role=hl,window=_blank,xrefstyle=full]",
+            // An attribute list with no positional text at all: no display
+            // text, only the named attributes.
+            "xref:install[role=hl]",
+            // An `=` that is not a real attribute list: no valid attribute
+            // name precedes it, so the attrlist parse yields one positional
+            // value spanning the whole text – the incidental case.
+            "xref:install[=text]",
             // A macro embedded in surrounding flow, and next to other constructs.
             "See xref:install[the guide] for details.",
             "*bold* then xref:x[X] and _em_",
@@ -847,21 +949,97 @@ mod tests {
     }
 
     #[test]
-    fn an_xref_attribute_list_is_a_documented_divergence() {
-        // An `xref:` text carrying an `=` splits into an attribute list (here a
-        // role), which the string replacer parses from a newline-normalized copy
-        // of the text – not from `'src`. The builder cannot carry that as an
-        // `Attrlist<'src>` yet, so it defers the whole macro (left literal).
-        let source = "xref:install[Installation,role=hl]";
+    fn an_xref_attribute_list_text_populates_window_role_and_xrefstyle() {
+        // An `xref:` text carrying an `=` splits into an attribute list: the
+        // first positional attribute becomes the display text, and the
+        // `window`/`role`/`xrefstyle` named attributes populate the node's own
+        // fields, parsed from a newline-normalized copy of the text (mirroring
+        // `InlineXrefReplacer`'s own attrlist parse).
+        let source = "xref:install[Installation,role=hl,window=_blank,xrefstyle=full]";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an attribute-list-in-text xref must be left unrecognized: {nodes:?}"
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(link_text_of(reference), "Installation");
+        assert_eq!(
+            reference
+                .roles
+                .iter()
+                .map(|r| r.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["hl"]
+        );
+        assert_eq!(reference.window.as_deref(), Some("_blank"));
+        assert_eq!(reference.xrefstyle, Some(XrefStyle::Full));
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
+    }
+
+    #[test]
+    fn an_xref_attribute_list_with_no_positional_text_has_no_children() {
+        // An attribute list with no positional value at all (only named
+        // attributes) yields no display text – the same "no text provided"
+        // fallback an empty `xref:id[]` uses – but still honors the named
+        // attributes.
+        let source = "xref:install[role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert!(reference.children.is_empty());
+        assert_eq!(
+            reference
+                .roles
+                .iter()
+                .map(|r| r.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["hl"]
         );
 
-        // The string pipeline, by contrast, applies the role.
-        assert!(golden_xref(source).contains(r#"class="hl""#));
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
+    }
+
+    #[test]
+    fn an_xref_shorthand_never_carries_an_xrefstyle_override() {
+        // The `<<id>>` shorthand has no attribute-list text of its own (see the
+        // `Ref::xrefstyle` field docs): its node's `xrefstyle` override is
+        // always `None`, even though the document-wide default can still apply
+        // at fold time.
+        let nodes = build_src(Span::new("<<install,Install Now>>"));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.xrefstyle, None);
+    }
+
+    #[test]
+    fn an_incidental_equals_in_xref_text_is_not_an_attribute_list() {
+        // `=text` contains an `=`, but no valid attribute name precedes it (an
+        // attribute name cannot start with `=`), so the attrlist parse finds
+        // one positional value spanning the *whole* text rather than a named
+        // attribute – the `=` was incidental, mirroring
+        // `InlineXrefReplacer`'s own `extract_attributes_from_text` fallback.
+        // The text is then used as plain display text with no named
+        // attributes, exactly as if it carried no `=` at all.
+        let source = "xref:install[=text]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(link_text_of(reference), "=text");
+        assert!(reference.roles.is_empty());
+        assert_eq!(reference.window, None);
+        assert_eq!(reference.xrefstyle, None);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
     }
 
     #[test]

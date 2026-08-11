@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Span,
     inlines::InlineNode,
-    parser::{DerivedReference, ResolvedReference},
+    parser::{DerivedReference, ResolvedReference, XrefStyle},
     strings::CowStr,
 };
 
@@ -56,6 +56,17 @@ pub struct Ref<'src> {
     /// which resolves through [`resolved`](Self::resolved) instead, and always
     /// `None` for a [`Link`](RefVariant::Link).
     pub derived: Option<DerivedReference>,
+
+    /// For a cross-reference, the `xrefstyle=` override supplied via the
+    /// macro's own attribute-list text (`xref:id[text,xrefstyle=full]`).
+    /// `None` when the macro carries no such override — which does *not*
+    /// mean the target's reference text is used verbatim: the fold still
+    /// falls back to the document-wide `xrefstyle` attribute in effect for
+    /// this reference, mirroring `InlineXrefReplacer`'s own
+    /// `xrefstyle_override.or_else(|| document_xrefstyle(parser))`. Always
+    /// `None` for a [`Link`](RefVariant::Link) and for the `<<id>>` shorthand,
+    /// which has no attribute-list text of its own.
+    pub xrefstyle: Option<XrefStyle>,
 
     /// The source location of the whole reference.
     pub location: Span<'src>,

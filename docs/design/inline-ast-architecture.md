@@ -1016,6 +1016,46 @@ Each phase is a reviewable unit with a clear exit gate.
   carrying an attribute list (part 3c's other half) – is unchanged, still pinned by its own
   divergence test.
 
+  *Step 4b(ii) part 3c (attribute-list half) landed as (`Ref` grows `xrefstyle`, closing the last
+  deferred xref form):* the `xref:` macro's own remaining deferred form – a bracketed text
+  carrying an attribute list (an `=`, for `window`/`role`/`xrefstyle`) – is now recognized.
+  [`xref_macro_text`](../../parser/src/content/inline_builder/macros/xref.rs) mirrors
+  `InlineXrefReplacer::replace_append`'s own text interpretation exactly: it parses the text – from
+  a newline-normalized copy, since the parse is not necessarily verbatim, exactly as the string
+  replacer parses that same normalized copy rather than a source slice – as an
+  [`Attrlist`](../../parser/src/attributes/attrlist.rs) whose first positional attribute becomes the
+  display text and whose `window`/`role` named attributes populate the node's existing fields; a new
+  [`Ref::xrefstyle`](../../parser/src/inlines/ref_node.rs) field (`Option<XrefStyle>`) carries a
+  `xrefstyle=` override. As with the `<<other#frag>>` half, this needed no consumer to pin its
+  shape – `window`/`roles` already existed as plain fields (not an `Attrlist<'src>`) because
+  [`XrefRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs) itself takes them
+  that way, not a borrowed attribute list, so the node stores exactly what the fold already needs.
+  When the attrlist parse finds no named attribute – the sole positional value is the whole
+  normalized text – the `=` was incidental (mirroring Asciidoctor's own
+  `extract_attributes_from_text` fallback); the text is then used as plain display text with no
+  named attributes, exactly as if it carried no `=` at all. The parsed positional text becomes a
+  *synthesized* `Text` child (no `'src` slice of its own, since it comes from the normalized,
+  attrlist-parsed copy) whose location falls back to the bracketed text's own span (design §4.4),
+  the same synthesized-value policy `apply_attribute_references` (step 5b) already established.
+
+  Landing this also closed a latent gap the fold carried since the cross-reference increment first
+  landed (part 3a): the *document-wide* `xrefstyle` attribute – which applies to every reference,
+  not only one carrying its own `xrefstyle=` override – was never applied at all, because
+  [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) hard-coded `xrefstyle: None`. It now
+  combines the node's own override with the document-wide default exactly as
+  `InlineXrefReplacer` does (`xrefstyle_override.or_else(|| document_xrefstyle(parser))`), reusing
+  the string pipeline's own [`document_xrefstyle`](../../parser/src/content/macros.rs) helper (now
+  shared `pub(crate)`) rather than a second implementation. The `<<id>>` shorthand has no
+  attribute-list text of its own – its node's `xrefstyle` override is always `None` – but still
+  observes the document-wide default through this same fold-time combination, closing the sub-step
+  in full: every form the design names for part 3c is now recognized. A differential corpus extends
+  the existing xref fixtures with `role=`/`window=`/`xrefstyle=` combinations, a positional-text-free
+  attribute list, and the incidental-`=` case (verified reachable in the builder's own verbatim-gated
+  matching, unlike the nested-macro-substitution route the string pipeline's own incidental case
+  takes); hand-built-node tests in `fold.rs` pin the document-wide-default and override-precedence
+  behavior directly, since neither is observable through an unresolved fold (the tree does not yet
+  reach catalog resolution – that remains step 6's job).
+
   *Step 4b(ii) part 4a landed as (`Macros` → `Anchor`, inline anchors):* the builder now recognizes
   **inline anchors** in both spellings – the `[[id]]` / `[[id,reftext]]` shorthand and the
   `anchor:id[reftext]` macro – as an [`Anchor`](../../parser/src/inlines/anchor.rs) node, folding
@@ -1609,26 +1649,28 @@ Each phase is a reviewable unit with a clear exit gate.
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
   3. ✅ `CharacterReplacements` → `CharRef::Replacement`, and `PostReplacement` → `LineBreak`.
-  4. `Macros`, sliced by construct family, each capturing the owned `Attrlist<'src>` it carries –
+  4. ✅ `Macros`, sliced by construct family, each capturing the owned `Attrlist<'src>` it carries –
      the step that makes nodes **self-describing** (and the one that finally unblocks
      `render_with`):
      - ✅ **4a.** `Image` / icon (`image:` / `icon:`).
-     - **4b.** the remaining families, each its own sub-step:
+     - ✅ **4b.** the remaining families, each its own sub-step:
        - ✅ **4b(i).** `Ui` (`kbd:` / `btn:` / `menu:`).
-       - **4b(ii).** `Ref` (links / cross-references), `Footnote`, `IndexTerm`, `Stem`, `Anchor`,
+       - ✅ **4b(ii).** `Ref` (links / cross-references), `Footnote`, `IndexTerm`, `Stem`, `Anchor`,
          itself sliced into parts:
          - ✅ **part 1.** the `link:`/`mailto:` macro (`INLINE_LINK_MACRO`) → `Ref{Link}`.
          - ✅ **part 2.** auto-links and formal-URL links (`INLINE_LINK`) → `Ref{Link}`.
-         - **part 3.** cross-references (`INLINE_XREF`) → `Ref{Xref}`, itself sliced:
+         - ✅ **part 3.** cross-references (`INLINE_XREF`) → `Ref{Xref}`, itself sliced:
            - ✅ **part 3a.** the same-document `xref:` macro form (`xref:id[text]`).
            - ✅ **part 3b.** the same-document `<<id>>` shorthand (`<<id>>` / `<<id,text>>`).
-           - **part 3c.** the node-blocked forms both spellings share, split in two once landed:
+           - ✅ **part 3c.** the node-blocked forms both spellings share, split in two once landed:
              - ✅ inter-document targets and the document-as-a-whole form (a *derived*
                destination) – needed only an existing, already-public type (`Ref` gains
                `derived: Option<DerivedReference>`), no consumer required to pin its shape.
-             - an attribute-list text (an `Attrlist<'src>`, for `window`/`role`/`xrefstyle`) –
-               still needs new `Ref` fields, pinned against a consumer.
-         - **part 4.** `Anchor`, `IndexTerm`, `Footnote`, each its own sub-step (inline `Stem` is
+             - ✅ an attribute-list text (`window`/`role` reuse `Ref`'s existing plain fields; a
+               new `Ref::xrefstyle: Option<XrefStyle>` field carries the macro-level override) –
+               needed no consumer to pin its shape, since `XrefRenderParams` itself takes plain
+               fields, not a borrowed `Attrlist<'src>`.
+         - ✅ **part 4.** `Anchor`, `IndexTerm`, `Footnote`, each its own sub-step (inline `Stem` is
            *not* a macros-step family – it is extracted at passthrough time, so it lands in step 5):
            - ✅ **part 4a.** inline anchors (`[[id]]` / `anchor:id[…]`, `INLINE_ANCHOR`) → `Anchor`.
            - ✅ **part 4b.** index terms (`((term))` / `(((primary, secondary)))` / `indexterm:[…]` /

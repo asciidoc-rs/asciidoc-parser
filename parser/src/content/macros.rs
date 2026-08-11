@@ -1779,7 +1779,7 @@ struct InlineXrefReplacer<'p, 'x> {
 /// An unset attribute yields `None` (the target's reftext is used verbatim). A
 /// set-but-empty value (`:xrefstyle:`) and any unrecognized value both resolve
 /// to [`XrefStyle::Basic`], mirroring Asciidoctor.
-fn document_xrefstyle(parser: &Parser) -> Option<XrefStyle> {
+pub(crate) fn document_xrefstyle(parser: &Parser) -> Option<XrefStyle> {
     match parser.attribute_value("xrefstyle") {
         InterpretedValue::Value(value) => Some(XrefStyle::parse(&value)),
         InterpretedValue::Set => Some(XrefStyle::Basic),
