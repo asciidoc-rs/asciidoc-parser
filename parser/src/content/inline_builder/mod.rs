@@ -69,7 +69,7 @@
 //!   [`Ui`](InlineNode::Ui), [`Ref`](InlineNode::Ref),
 //!   [`Anchor`](InlineNode::Anchor), or [`IndexTerm`](InlineNode::IndexTerm)
 //!   node. An image node
-//!   captures its own owned [`Attrlist`](crate::attributes::Attrlist) – the step that makes a macro node
+//!   captures its own owned [`Attrlist`] – the step that makes a macro node
 //!   *self-describing*; a link or cross-reference node bakes its computed display
 //!   text into [`Text`](InlineNode::Text) children so its fold needs no
 //!   build-time state. Each family reuses the shared pattern the string step
