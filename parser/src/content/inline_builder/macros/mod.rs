@@ -285,11 +285,13 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::apply_macros;
+    use super::{super::test_support::golden_macros_with, apply_macro_side_effects, apply_macros};
     use crate::{
         Parser, Span,
+        content::inline_builder::build,
         inlines::{InlineNode, Ref, RefVariant},
         strings::CowStr,
+        warnings::WarningType,
     };
 
     #[test]
@@ -336,16 +338,6 @@ mod tests {
             other => panic!("expected the Ref to survive, got {other:?}"),
         }
     }
-}
-
-#[cfg(test)]
-mod side_effects_tests {
-    #![allow(clippy::indexing_slicing)]
-    #![allow(clippy::panic)]
-    #![allow(clippy::unwrap_used)]
-
-    use super::{super::test_support::golden_macros_with, apply_macro_side_effects};
-    use crate::{Parser, Span, content::inline_builder::build, warnings::WarningType};
 
     #[test]
     fn registers_every_family_from_a_single_call() {
