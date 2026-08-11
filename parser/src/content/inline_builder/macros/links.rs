@@ -279,6 +279,7 @@ fn build_inline_link_node<'src>(
         window,
         resolved: None,
         derived: None,
+        xrefstyle: None,
         location,
     });
 
@@ -534,6 +535,7 @@ pub(super) fn build_link_node<'src>(
         window,
         resolved: None,
         derived: None,
+        xrefstyle: None,
         location,
     }))
 }

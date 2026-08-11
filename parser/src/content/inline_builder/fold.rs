@@ -4,6 +4,7 @@ use super::{callouts::replacement_type_of, quotes::quote_type_of};
 use crate::{
     Parser,
     attributes::{Attrlist, AttrlistContext},
+    content::document_xrefstyle,
     inlines::{
         Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref,
         RefVariant, SpanForm, Stem, StemNotation, Ui, UiKind,
@@ -360,9 +361,12 @@ fn fold_link(
 /// `None` here) and a target that carries its own destination without a
 /// catalog (`derived`, populated at build time – see the `Ref::derived` field
 /// docs): an inter-document target, and the empty target naming the current
-/// document as a whole. It does not yet parse an attribute-list-bearing
-/// display text, so `xrefstyle` is always `None`; the cutover (design §5.2
-/// Phase 4, step 6) wires catalog resolution to the tree.
+/// document as a whole. The effective `xrefstyle` is the node's own
+/// macro-level override if present, otherwise the document-wide `xrefstyle`
+/// attribute in effect for this reference – mirroring `InlineXrefReplacer`'s
+/// own `xrefstyle_override.or_else(|| document_xrefstyle(parser))` exactly
+/// (see the `Ref::xrefstyle` field docs); the cutover (design §5.2 Phase 4,
+/// step 6) wires catalog resolution to the tree.
 fn fold_xref(
     reference: &Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
@@ -382,12 +386,14 @@ fn fold_xref(
     // materialized into a `String` vector for the borrow.
     let roles: Vec<String> = reference.roles.iter().map(|r| r.to_string()).collect();
 
+    let xrefstyle = reference.xrefstyle.or_else(|| document_xrefstyle(parser));
+
     let params = XrefRenderParams {
         target: reference.target.as_ref(),
         provided_text,
         window: reference.window.as_deref(),
         roles: &roles,
-        xrefstyle: None,
+        xrefstyle,
         derived: reference.derived.as_ref(),
         resolved: reference.resolved.as_ref(),
     };
@@ -556,11 +562,17 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::super::test_support::{build_src, fold_html};
+    use super::{
+        super::test_support::{build_src, fold_html},
+        fold_html as fold_html_with_parser,
+    };
     use crate::{
-        Span,
-        inlines::{CharRef, Image, InlineNode},
-        parser::HtmlSubstitutionRenderer,
+        Parser, Span,
+        inlines::{CharRef, Image, InlineNode, Ref, RefVariant},
+        parser::{
+            HtmlSubstitutionRenderer, ModificationContext, ResolvedReference, XrefSignifier,
+            XrefStyle,
+        },
         strings::CowStr,
     };
 
@@ -624,5 +636,78 @@ mod tests {
         let macro_built = fold_html(&build_src(location), &renderer);
 
         assert_eq!(fold_html(&[hand_built], &renderer), macro_built);
+    }
+
+    /// A resolved cross-reference to a target that carries a signifier (a
+    /// numbered/captioned element), with no explicit display text – the shape
+    /// `xrefstyle` formatting actually changes (design's `apply_xrefstyle`
+    /// only alters output when a signifier is present).
+    fn resolved_xref_with_signifier(xrefstyle: Option<XrefStyle>) -> InlineNode<'static> {
+        InlineNode::Ref(Ref {
+            variant: RefVariant::Xref,
+            target: CowStr::from("install"),
+            children: vec![],
+            roles: vec![],
+            window: None,
+            resolved: Some(ResolvedReference {
+                href: "#install".to_string(),
+                text: None,
+                signifier: Some(XrefSignifier {
+                    label: "Section 2".to_string(),
+                    emphasize: false,
+                }),
+            }),
+            derived: None,
+            xrefstyle,
+            location: Span::new(""),
+        })
+    }
+
+    #[test]
+    fn fold_xref_falls_back_to_the_document_wide_xrefstyle() {
+        // A node with no macro-level `xrefstyle` override still picks up the
+        // document-wide `xrefstyle` attribute in effect for the reference,
+        // mirroring `InlineXrefReplacer`'s own
+        // `xrefstyle_override.or_else(|| document_xrefstyle(parser))` (see the
+        // `Ref::xrefstyle` field docs) – this is the document-wide default a
+        // hand-built node with no override still observes.
+        let renderer = HtmlSubstitutionRenderer {};
+        let nodes = [resolved_xref_with_signifier(None)];
+
+        // With no document-wide `xrefstyle` set, the target's reference text
+        // (here `None`, so the bracketed fallback) is used verbatim.
+        let unstyled = fold_html_with_parser(&nodes, &renderer, &Parser::default());
+        assert!(!unstyled.contains("Section 2"), "folded: {unstyled}");
+
+        let parser = Parser::default().with_intrinsic_attribute(
+            "xrefstyle",
+            "full",
+            ModificationContext::Anywhere,
+        );
+
+        let styled = fold_html_with_parser(&nodes, &renderer, &parser);
+        assert!(styled.contains("Section 2, &#8220;"), "folded: {styled}");
+    }
+
+    #[test]
+    fn fold_xref_macro_level_xrefstyle_overrides_the_document_wide_default() {
+        // A macro-level `xrefstyle=` override (`Ref::xrefstyle`) wins over the
+        // document-wide `xrefstyle` attribute, exactly as
+        // `InlineXrefReplacer`'s own `xrefstyle_override` takes precedence.
+        let renderer = HtmlSubstitutionRenderer {};
+        let nodes = [resolved_xref_with_signifier(Some(XrefStyle::Short))];
+
+        let parser = Parser::default().with_intrinsic_attribute(
+            "xrefstyle",
+            "full",
+            ModificationContext::Anywhere,
+        );
+
+        let folded = fold_html_with_parser(&nodes, &renderer, &parser);
+
+        // `Short` shows only the signifier label, with none of `Full`'s
+        // quoted-title suffix.
+        assert!(folded.contains(">Section 2<"), "folded: {folded}");
+        assert!(!folded.contains("&#8220;"), "folded: {folded}");
     }
 }

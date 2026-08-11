@@ -781,6 +781,7 @@ mod tests {
             window: None,
             resolved: None,
             derived: None,
+            xrefstyle: None,
             location: root,
         });
 

@@ -873,6 +873,7 @@ fn node_of<'src>(rec: &Rec, span: Span<'src>) -> InlineNode<'src> {
                 window: window.clone().map(CowStr::from),
                 resolved: None,
                 derived: None,
+                xrefstyle: None,
                 location: span,
             }),
 
@@ -925,6 +926,7 @@ fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
             window: window.clone().map(CowStr::from),
             resolved: None,
             derived: None,
+            xrefstyle: None,
             location: span,
         }),
 
