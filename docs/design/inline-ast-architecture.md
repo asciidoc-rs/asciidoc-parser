@@ -1669,6 +1669,25 @@ Each phase is a reviewable unit with a clear exit gate.
   – not just its individual steps – reproduces the real production pipeline's output, ahead of step 6's own
   wiring work. As with every prior increment, nothing here is wired into a real parse path.
 
+  *Step 6 prep landed as (the `hardbreaks` option, closing a real cutover blocker):* auditing `build`'s
+  vocabulary against a corpus-wide differential run (rather than the hand-picked fixtures every prior corpus
+  in this module uses) surfaced that the `hardbreaks` block option was not just an unclaimed form like the
+  others this module documents as deferred, but a **real blocker**: golden tests already exercise it (design
+  §5.4's oracle), so cutting over `Content` to `build` while it stayed unhandled would have silently regressed
+  them, not merely left a construct unrecognized. [`apply_post_replacements`](../../parser/src/content/inline_builder/post_replacements.rs)
+  now takes the enclosing block's own `Attrlist` (`build` itself gains the same `Option<&Attrlist<'src>>`
+  parameter, threaded through from its caller – every other step ignores it) and, when
+  `parser.is_attribute_set("hardbreaks-option")` or the attrlist's own `%hardbreaks` option is set, runs a new
+  `apply_hardbreaks` in place of the default ` +`-only form: every line ending in the level's own match string
+  becomes a break, a redundant trailing ` +` is stripped rather than doubled, and the level's own last line
+  (nothing follows its `\n`) never gets one – mirroring the string pipeline's own `lines()`-split, per-line
+  `render_line_break`, rejoin exactly. Both forms now share one `emit_breaks` tail. A differential corpus pins
+  the block-attrlist and document-attribute forms of the option, a redundant-` +`-stripping fixture, a
+  single-line no-op, and recursion into a quoted span, against the real `SubstitutionGroup::Normal` pipeline;
+  the whole-pipeline combined-constructs corpus above gains a hardbreaks-plus-attribute-reference-plus-span
+  fixture too. As with every increment before it, this is purely additive: `build`'s new parameter is `None`
+  at every existing call site, so no real parse path is touched.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1744,6 +1763,11 @@ Each phase is a reviewable unit with a clear exit gate.
        byte-for-byte – see the step's own "landed as" note above. Wiring `build` into `Content` in
        place of the recorder, and calling `apply_macro_side_effects` for real, remain this step's
        own job.
+     - ✅ **prep (hardbreaks).** The `hardbreaks` block option – identified as a real cutover
+       blocker, not merely an unclaimed form, since golden tests already exercise it – is now
+       recognized by `apply_post_replacements`, which takes the enclosing block's `Attrlist` for
+       it; see the step's own "landed as" note above. `build`'s new `Attrlist` parameter is `None`
+       at every existing call site, so this is unwired like every other prep piece.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

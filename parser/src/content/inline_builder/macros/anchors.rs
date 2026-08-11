@@ -628,7 +628,7 @@ mod tests {
     /// Builds the single-pass tree for `source` against `parser` (unlike
     /// [`build_src`], which always uses its own fresh default parser).
     fn build_with<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
-        build(source, parser)
+        build(source, parser, None)
     }
 
     #[test]

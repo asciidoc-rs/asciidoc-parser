@@ -1080,7 +1080,7 @@ mod tests {
 
         let source = "xref:mydoc.adoc#install[Install]";
         let root = Span::new(source);
-        let nodes = super::super::super::build(root, &parser);
+        let nodes = super::super::super::build(root, &parser, None);
 
         let reference = assert_xref(&nodes[0]);
         assert_eq!(reference.target.as_ref(), "install");
@@ -1101,7 +1101,7 @@ mod tests {
 
         let source = "xref:mydoc.adoc[Home]";
         let root = Span::new(source);
-        let nodes = super::super::super::build(root, &parser);
+        let nodes = super::super::super::build(root, &parser, None);
 
         let reference = assert_xref(&nodes[0]);
         assert_eq!(reference.target.as_ref(), "");
