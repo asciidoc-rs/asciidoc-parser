@@ -562,8 +562,10 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::super::test_support::{build_src, fold_html};
-    use super::fold_html as fold_html_with_parser;
+    use super::{
+        super::test_support::{build_src, fold_html},
+        fold_html as fold_html_with_parser,
+    };
     use crate::{
         Parser, Span,
         inlines::{CharRef, Image, InlineNode, Ref, RefVariant},
