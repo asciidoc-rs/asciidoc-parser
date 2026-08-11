@@ -287,3 +287,163 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
 
     apply_post_replacements(nodes, source)
 }
+
+/// A whole-pipeline differential corpus: [`build`] against the *real*,
+/// public [`SubstitutionGroup::apply`] entry point, over fixtures that
+/// **combine** several construct families in one piece of content.
+///
+/// Every other differential corpus in this module (each landed alongside its
+/// own step, e.g. [`test_support::golden_macros`]) hand-chains only the
+/// [`SubstitutionStep`]s that step's own increment covers, skipping
+/// `AttributeReferences` unless the fixture needs it, and never runs
+/// passthrough extraction/restore or deferred cross-reference finalization
+/// alongside the other steps. That is enough to pin each step in isolation,
+/// but it never exercises the *fully assembled* pipeline
+/// [`SubstitutionGroup::Normal.
+/// apply`](crate::content::SubstitutionGroup::apply) runs in production –
+/// passthrough/STEM extraction, every step in true order, passthrough restore,
+/// and deferred-reference finalization, all against one `Content` – which is
+/// exactly what [`build`] (this module's own single call) must reproduce once
+/// the cutover (design §5.2, Phase 4 step 6) wires it in. This closes that gap:
+/// each fixture below mixes constructs that were previously verified only in
+/// separate, single-family corpora (quotes nested around an attribute
+/// reference, a footnote whose text itself carries an attribute reference, a
+/// passthrough beside a macro, a counter directive beside a formatted span, …),
+/// so a boundary-crossing interaction between two steps that individually pass
+/// would still be caught here.
+///
+/// As with every other corpus in this module, a fixture is chosen to stay
+/// inside the vocabulary [`build`] already covers – it avoids the forms still
+/// documented as deferred elsewhere in this module (e.g. an attribute value
+/// that itself embeds a construct `CharacterReplacements`/`Macros` would
+/// recognize, or the `hardbreaks` option, which needs the block attribute
+/// list `build` does not yet take).
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::build;
+    use crate::{
+        Parser, Span,
+        content::{Content, SubstitutionGroup, inline_builder::fold_html},
+        parser::{HtmlSubstitutionRenderer, ModificationContext},
+    };
+
+    /// Runs `source` through the real, public `SubstitutionGroup::Normal`
+    /// pipeline, exactly as a real block's content is substituted in
+    /// production.
+    fn golden(source: &str, parser: &Parser) -> String {
+        let mut content = Content::from(Span::new(source));
+        SubstitutionGroup::Normal.apply(&mut content, parser, None);
+        content.rendered_str().to_string()
+    }
+
+    /// Builds and folds the single-pass tree for `source` – the same [`build`]
+    /// a real cutover would call – through the built-in HTML renderer.
+    fn built(source: &str, parser: &Parser) -> String {
+        let nodes = build(Span::new(source), parser);
+        fold_html(&nodes, &HtmlSubstitutionRenderer {}, parser)
+    }
+
+    /// Asserts that `source` folds identically whether taken through the real
+    /// production pipeline or through the single-pass builder, under a
+    /// document configured by `configure`.
+    ///
+    /// `configure` is called once per side rather than sharing one `Parser`
+    /// between them: `golden`'s `SubstitutionGroup::apply` and `built`'s
+    /// `build` each advance document counters (footnote numbers,
+    /// `{counter:...}` values) for real, so sharing a parser would double
+    /// them. Two independently-built parsers, identically configured, see
+    /// the same fixture in the same left-to-right order and so stay in
+    /// lockstep – the same two-independent-parsers discipline this module's
+    /// other differential corpora already use (see e.g. `footnotes.rs`).
+    fn assert_parity_with(source: &str, configure: impl Fn() -> Parser) {
+        assert_eq!(
+            golden(source, &configure()),
+            built(source, &configure()),
+            "fold diverged from the real pipeline for {source:?}"
+        );
+    }
+
+    fn assert_parity(source: &str) {
+        assert_parity_with(source, Parser::default);
+    }
+
+    #[test]
+    fn fold_matches_the_real_pipeline_across_combined_constructs() {
+        let with_product = || {
+            Parser::default().with_intrinsic_attribute(
+                "product",
+                "Widget",
+                ModificationContext::Anywhere,
+            )
+        };
+
+        // Quotes wrapping an attribute reference: the quotes step matches
+        // `*...*` before the reference expands, so the splice must still
+        // reach inside the already-built `Styled` span.
+        assert_parity_with("The {product} is *fast* and reliable.", with_product);
+
+        // A cross-reference and a footnote in the same sentence, the
+        // footnote's own text carrying a nested attribute reference.
+        assert_parity_with(
+            "See <<intro>> for details.footnote:[Also check the {product} docs.]",
+            with_product,
+        );
+
+        // A delimited passthrough beside a quoted span and an image macro.
+        assert_parity("+++<u>raw</u>+++ combined with *bold* and image:foo.png[Alt Text].");
+
+        // Inline STEM beside a quoted span and a character replacement.
+        assert_parity("Equation stem:[x^2+y^2=z^2] appears in *bold* text with (C) 2024.");
+
+        // UI macros (kbd/menu, gated on `experimental`) beside a quoted span.
+        assert_parity_with(
+            "kbd:[Ctrl+Alt+Del] opens the *Task Manager* via menu:File[Save].",
+            || {
+                Parser::default().with_intrinsic_attribute_bool(
+                    "experimental",
+                    true,
+                    ModificationContext::Anywhere,
+                )
+            },
+        );
+
+        // Several link forms and a cross-reference in one sentence.
+        assert_parity(
+            "Visit https://example.org[the site] or mailto:a@example.org[email us], \
+             then see <<conclusion,the conclusion>>.",
+        );
+
+        // A `counter` directive beside a quoted span carrying an attribute
+        // reference and a STEM expression – the ordering fix documented in
+        // this module's `attribute_refs.rs` follow-up note.
+        assert_parity_with(
+            "{counter:step}. Step one uses *{product}* and stem:[x+1].",
+            with_product,
+        );
+
+        // An inline anchor, a quoted span, an index term, and an attribute
+        // reference together.
+        assert_parity_with(
+            "[[custom-id]]Anchored *text* referencing ((index term)) and {product}.",
+            with_product,
+        );
+
+        // Escaped constructs (quotes, a character replacement) beside a live
+        // attribute reference.
+        assert_parity_with(
+            r"An escaped \*not bold\* attribute {product} and \(C) not replaced.",
+            with_product,
+        );
+
+        // Multiple footnotes (numbered in document order) and a
+        // cross-reference, one footnote's text carrying an attribute
+        // reference.
+        assert_parity_with(
+            "First footnote:[a {product} note] then footnote:[b unrelated note], \
+             and finally <<see-also>>.",
+            with_product,
+        );
+    }
+}

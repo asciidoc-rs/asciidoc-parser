@@ -1645,6 +1645,30 @@ Each phase is a reviewable unit with a clear exit gate.
   [`apply_macro_side_effects`] for real still waits for the single-pass builder to replace the recorder as
   `Content`'s tree source, which remains step 6's own, still fully outstanding, job.
 
+  *Step 6 prep landed as (a whole-pipeline differential corpus against the real `SubstitutionGroup::apply`
+  entry point):* every differential corpus landed so far (one per step/family) hand-chains only the
+  [`SubstitutionStep`]s that step's own increment covers – skipping `AttributeReferences` unless the fixture
+  needs it, and never running passthrough extraction/restore or deferred cross-reference finalization
+  alongside the other steps. That pins each step in isolation, but it had never exercised the *fully
+  assembled* pipeline [`SubstitutionGroup::Normal::apply`](../../parser/src/content/substitution_group.rs)
+  runs in production – passthrough/STEM extraction, every step in true order, passthrough restore, and
+  deferred-reference finalization, all against one `Content` – which is exactly what [`build`] (this
+  module's own single call) must reproduce once the cutover wires it in. A new differential corpus, in
+  [`inline_builder`](../../parser/src/content/inline_builder/mod.rs)'s own test module, closes that gap: each
+  fixture calls the real, public `SubstitutionGroup::Normal.apply` as the golden and `build` + `fold_html`
+  as the candidate, and – unlike every prior corpus, each scoped to one family – **combines** several
+  construct families in one piece of content (quotes wrapping an attribute reference, a footnote whose own
+  text carries a nested attribute reference, a passthrough beside an image macro, a `counter` directive
+  beside a formatted span carrying an attribute reference and a STEM expression, an inline anchor beside an
+  index term, escaped constructs beside a live attribute reference, …), so a boundary-crossing interaction
+  between two steps that individually pass would still be caught. As with every prior corpus, a fixture stays
+  inside the vocabulary `build` already covers, avoiding the forms still documented as deferred elsewhere in
+  this module (an attribute value that itself embeds a construct `CharacterReplacements`/`Macros` would
+  recognize, the `hardbreaks` option, a menu's `>` submenu form, …). Every fixture passed without needing a
+  code change, giving the first real, end-to-end confirmation that the fully assembled single-pass builder
+  – not just its individual steps – reproduces the real production pipeline's output, ahead of step 6's own
+  wiring work. As with every prior increment, nothing here is wired into a real parse path.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1715,6 +1739,11 @@ Each phase is a reviewable unit with a clear exit gate.
        [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs) – see the
        step's own "landed as" note above. Every deferred recognition side effect is now staged;
        calling each one for real, exactly once per parse, remains this step's own job.
+     - ✅ **prep (whole-pipeline parity).** A combined, multi-family differential corpus confirms
+       `build` reproduces the real, public `SubstitutionGroup::Normal::apply` entry point
+       byte-for-byte – see the step's own "landed as" note above. Wiring `build` into `Content` in
+       place of the recorder, and calling `apply_macro_side_effects` for real, remain this step's
+       own job.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
