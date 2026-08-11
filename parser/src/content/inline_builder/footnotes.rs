@@ -248,7 +248,7 @@ fn emit_range_recursing_footnotes<'src>(
 
 /// Finds every recognized footnote occurrence at this level as a
 /// [`MacroMatch`], skipping the forms this increment defers (see
-/// [`build_footnote_node`]).
+/// [`build_footnote_node`] and [`build_footnoteref_node`]).
 fn find_footnote_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -265,24 +265,41 @@ fn find_footnote_matches<'src>(
 
         let full = whole.start()..whole.end();
 
-        // The deprecated `footnoteref:[id,text]` / `footnoteref:[id]` form
-        // (group 1) packs its id and text into one bracket, split on the first
-        // comma, and – outside `compat-mode` – raises a deprecation warning.
-        // Neither the alternate splitting nor the warning is implemented by
-        // this increment, so the form is left unrecognized for a later one
-        // (divergence test:
-        // `a_deprecated_footnoteref_macro_is_a_documented_divergence`).
-        if caps.get(1).is_some() {
-            continue;
-        }
-
-        // An escape (`\footnote:…`) is honored by dropping the backslash and
-        // keeping the rest literal, mirroring the string replacer's leading
-        // `caps[0].starts_with('\\')` check.
+        // An escape (`\footnote:…`, `\footnoteref:…`) is honored by dropping
+        // the backslash and keeping the rest literal, mirroring the string
+        // replacer's leading `caps[0].starts_with('\\')` check – which runs
+        // *before* the ref-vs-plain branch below, so this must too.
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
                     backslash: full.start,
+                },
+                full,
+            });
+
+            continue;
+        }
+
+        // The deprecated `footnoteref:[id,text]` / `footnoteref:[id]` form
+        // (group 1) packs its id and text into one bracket, split on the
+        // first comma, rather than taking the id from the macro target the
+        // way `footnote:id[…]` does.
+        if caps.get(1).is_some() {
+            // With no bracketed text at all (`footnoteref:[]`), it is left
+            // unrecognized – mirroring the string replacer's `next $&`.
+            let Some(raw) = caps.get(3) else {
+                continue;
+            };
+
+            let Some(node) = build_footnoteref_node(raw, &full, s, pieces, nodes, root, parser)
+            else {
+                continue;
+            };
+
+            matches.push(MacroMatch {
+                kind: MacroMatchKind::Node {
+                    consumed: full.clone(),
+                    node: Box::new(node),
                 },
                 full,
             });
@@ -338,8 +355,6 @@ fn find_footnote_matches<'src>(
 ///
 /// # Deferred forms
 ///
-/// - The deprecated `footnoteref:` form (checked by the caller before this is
-///   reached).
 /// - Content containing an escaped closing bracket (`\]`): unescaping it would
 ///   mean splicing a literal `]` into the middle of a `Text` piece the content
 ///   range slices, which – unlike a single-node substitution such as `xref`'s
@@ -435,6 +450,101 @@ fn build_footnote_node<'src>(
         children,
         location,
     }))
+}
+
+/// Builds one [`Footnote`](InlineNode::Footnote) node from a `footnoteref:`
+/// match – the deprecated form's own counterpart to [`build_footnote_node`].
+/// Unlike `footnote:id[…]`, which takes its id from the macro target,
+/// `footnoteref:[id,text]` / `footnoteref:[id]` packs both into one bracket
+/// (`raw`, group 3 of [`INLINE_FOOTNOTE_MACRO`]), split on the **first**
+/// comma – mirroring `InlineFootnoteMacroReplacer`'s own `raw.split_once(',')`
+/// exactly, including that an id is *always* present (a bracket with no
+/// comma is the id alone, with no text – a bare reference) and that a
+/// trailing comma (`footnoteref:[id,]`) yields an *empty*, not absent,
+/// content (a defining occurrence with empty text), unlike `footnote:id[]`'s
+/// own no-comma-at-all "reference" shape. Once split, the (id, content) pair
+/// resolves through the exact same three cases
+/// [`build_footnote_node`] does (reuse an already-defined id's number, define
+/// a new id-carrying occurrence, or fall back to an unresolved reference) –
+/// see that function's own doc comment for the shared reasoning (the
+/// required `footnote_index_for_id`/`define_footnote` side effect, and why a
+/// content-side `\]` is deferred, which applies here identically since `raw`
+/// is matched by the very same bracket group).
+///
+/// The one thing this increment does **not** yet do is the deprecation
+/// warning `InlineFootnoteMacroReplacer` records outside `compat-mode`: like
+/// every other macro family's own catalog/warning side effect, that is a
+/// diagnostic that does not change the fold's output bytes, so – unlike the
+/// footnote number itself – it is left to the cutover (design §5.2 Phase 4,
+/// step 6) rather than performed here.
+fn build_footnoteref_node<'src>(
+    raw: regex::Match<'_>,
+    full: &std::ops::Range<usize>,
+    s: &str,
+    pieces: &[Piece],
+    nodes: &[InlineNode<'src>],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Option<InlineNode<'src>> {
+    let location = source_slice(pieces, full.clone(), root);
+
+    if s[raw.range()].contains("\\]") {
+        return None;
+    }
+
+    // Split on the first comma: `id` is everything before it (the whole raw
+    // text when there is no comma at all), `content` is everything after it
+    // (present, possibly empty, only when a comma was found).
+    let (id_range, content_range) = match s[raw.range()].find(',') {
+        Some(offset) => (
+            raw.start()..(raw.start() + offset),
+            Some((raw.start() + offset + 1)..raw.end()),
+        ),
+
+        None => (raw.range(), None),
+    };
+
+    let id = CowStr::from(source_slice(pieces, id_range, root).data());
+
+    if let Some(number) = parser.footnote_index_for_id(id.as_ref()) {
+        // A reference to an already-defined footnote: reuse its number.
+        return Some(InlineNode::Footnote(Footnote {
+            id: Some(id),
+            number: Some(CowStr::from(number)),
+            is_reference: true,
+            children: vec![],
+            location,
+        }));
+    }
+
+    match content_range {
+        Some(content_range) => {
+            // A defining occurrence that also carries an id.
+            let children = footnote_children(content_range.clone(), pieces, nodes);
+            let number =
+                register_footnote_number(parser, Some(id.as_ref()), &s[content_range], location);
+
+            Some(InlineNode::Footnote(Footnote {
+                id: Some(id),
+                number: Some(CowStr::from(number)),
+                is_reference: false,
+                children,
+                location,
+            }))
+        }
+
+        // A reference to an id that was never defined. The string replacer
+        // warns here (`InvalidFootnoteReference`); this pass, like every
+        // other diagnostic the additive builder skips, leaves that to the
+        // cutover.
+        None => Some(InlineNode::Footnote(Footnote {
+            id: Some(id),
+            number: None,
+            is_reference: true,
+            children: vec![],
+            location,
+        })),
+    }
 }
 
 /// Builds a footnote's `children` from its bracket content's match-string
@@ -572,6 +682,17 @@ mod tests {
             // A footnote inside a rendered span (recognized inside the body).
             "*see footnote:[fn]*",
             "_footnote:x[fn] in em_",
+            // The deprecated `footnoteref:` form: an anonymous-looking id+text
+            // defining occurrence, a bare reference to an id defined the
+            // ordinary way, a trailing comma (empty, not absent, content), the
+            // empty-bracket non-match, and the escape.
+            "footnoteref:[disc,a discussion]",
+            "footnote:disc[a discussion] then footnoteref:[disc].",
+            "footnoteref:[missing]",
+            "footnoteref:[disc,]",
+            "footnoteref:[]",
+            "\\footnoteref:[disc,a discussion]",
+            "footnoteref:[disc,the *strong* evidence]",
         ];
 
         let renderer = HtmlSubstitutionRenderer {};
@@ -714,21 +835,125 @@ mod tests {
     }
 
     #[test]
-    fn a_deprecated_footnoteref_macro_is_a_documented_divergence() {
+    fn a_deprecated_footnoteref_macro_with_an_id_and_text_is_recognized() {
         // The deprecated `footnoteref:[id,text]` form packs its id and text
-        // into one bracket, split differently from `footnote:id[text]`, and
-        // (outside `compat-mode`) raises a deprecation warning. Neither the
-        // alternate splitting nor the warning is implemented by this
-        // increment, so the whole macro is left unrecognized.
+        // into one bracket, split on the first comma – a different split
+        // from `footnote:id[text]`'s own (id from the macro target, text
+        // from the bracket) – but resolves into the same node shape and
+        // folds through the same `render_footnote`, so its output is
+        // byte-for-byte identical to the golden pipeline's (the deprecation
+        // warning itself remains deferred to the cutover; it does not affect
+        // the fold's output bytes – see `build_footnoteref_node`'s doc
+        // comment).
         let source = "footnoteref:[disc,a discussion]";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, golden_macros(source));
+
+        let nodes = build_src(Span::new(source));
+        let footnote = assert_footnote(&nodes[0]);
+        assert_eq!(footnote.id.as_deref(), Some("disc"));
+        assert_eq!(footnote.number.as_deref(), Some("1"));
+        assert!(!footnote.is_reference);
+        assert_eq!(footnote.children.len(), 1);
+        assert_text(&footnote.children[0], "a discussion", 1, 19);
+    }
+
+    #[test]
+    fn a_deprecated_footnoteref_macro_referencing_an_id_reuses_its_number() {
+        // A comma-free `footnoteref:[id]` is a bare reference to an
+        // already-defined footnote – the same shape `footnote:id[]` produces,
+        // just spelled the deprecated way.
+        let source = "footnote:disc[a discussion] then footnoteref:[disc].";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, golden_macros(source));
+
+        let nodes = build_src(Span::new(source));
+        let reference = assert_footnote(&nodes[2]);
+        assert!(reference.is_reference);
+        assert_eq!(reference.number.as_deref(), Some("1"));
+        assert_eq!(reference.id.as_deref(), Some("disc"));
+        assert!(reference.children.is_empty());
+    }
+
+    #[test]
+    fn a_deprecated_footnoteref_macro_referencing_an_undefined_id_falls_back_to_it() {
+        // A comma-free `footnoteref:[id]` whose id was never defined resolves
+        // through the same unresolved fallback `footnote:id[]` does (the
+        // string replacer's own `InvalidFootnoteReference` warning is a
+        // diagnostic, deferred to the cutover like every other one this
+        // builder skips).
+        let source = "footnoteref:[missing]";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, golden_macros(source));
+
+        let nodes = build_src(Span::new(source));
+        let footnote = assert_footnote(&nodes[0]);
+        assert!(footnote.is_reference);
+        assert!(footnote.number.is_none());
+        assert_eq!(footnote.id.as_deref(), Some("missing"));
+        assert!(footnote.children.is_empty());
+    }
+
+    #[test]
+    fn a_deprecated_footnoteref_macro_with_a_trailing_comma_has_empty_content() {
+        // `footnoteref:[id,]` splits into an id and an *empty* content
+        // (present, not absent) – a defining occurrence with empty text,
+        // unlike the no-comma-at-all `footnoteref:[id]` reference shape.
+        let source = "footnoteref:[disc,]";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, golden_macros(source));
+
+        let nodes = build_src(Span::new(source));
+        let footnote = assert_footnote(&nodes[0]);
+        assert!(!footnote.is_reference);
+        assert!(footnote.children.is_empty());
+    }
+
+    #[test]
+    fn an_empty_footnoteref_macro_stays_literal() {
+        // `footnoteref:[]` carries no bracketed text at all, so it is left
+        // unrecognized – mirroring the string replacer's `next $&` branch,
+        // the same way `footnote:[]` is.
+        let nodes = build_src(Span::new("footnoteref:[]"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_text(&nodes[0], "footnoteref:[]", 1, 1);
+    }
+
+    #[test]
+    fn an_escaped_footnoteref_macro_drops_the_backslash() {
+        let source = "\\footnoteref:[disc,a discussion]";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Footnote(_))),
-            "a footnoteref: macro must be left unrecognized: {nodes:?}"
+            "an escaped footnoteref: macro must not produce a Footnote: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, does build a footnote marker here.
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_footnoteref_macro_with_an_escaped_bracket_is_a_documented_divergence() {
+        // The same escaped-closing-bracket boundary
+        // `a_footnote_with_an_escaped_bracket_is_a_documented_divergence`
+        // documents for `footnote:`, since `build_footnoteref_node` checks
+        // its own captured `raw` text the same way.
+        let source = "footnoteref:[disc,a note ending in a\\]bracket]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Footnote(_))),
+            "a footnoteref: macro with an escaped bracket must be left unrecognized: {nodes:?}"
+        );
+
         assert!(golden_macros(source).contains("class=\"footnote\""));
     }
 
