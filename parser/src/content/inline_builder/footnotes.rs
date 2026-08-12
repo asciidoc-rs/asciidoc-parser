@@ -185,9 +185,9 @@ fn rebuild_footnote_level<'src>(
 /// [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref) piece's
 /// children with [`apply_footnotes`] instead of cloning the node whole – the
 /// piece that makes [`apply_footnotes`] a true whole-tree, source-order walk
-/// rather than a single level pass. Every other aspect (slicing a verbatim
-/// [`Text`](InlineNode::Text) run at the overlap, an empty range emitting
-/// nothing) is identical.
+/// rather than a single level pass. Every other aspect (slicing a verbatim or
+/// synthesized [`Text`](InlineNode::Text) run at the overlap, an empty range
+/// emitting nothing) is identical.
 fn emit_range_recursing_footnotes<'src>(
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
@@ -231,17 +231,29 @@ fn emit_range_recursing_footnotes<'src>(
             continue;
         }
 
-        // A verbatim text run: slice it to the overlap.
+        // A verbatim or synthesized text run: slice it to the overlap (see
+        // [`emit_range`]'s own synthesized branch).
         let lo = range.start.max(p_start) - p_start;
         let hi = range.end.min(p_end) - p_start;
 
-        if let InlineNode::Text { location, .. } = node {
-            let sliced = location.slice(lo..hi);
+        if let InlineNode::Text { value, location } = node {
+            if piece.synthesized {
+                let Some(sliced) = value.get(lo..hi) else {
+                    continue;
+                };
 
-            out.push(InlineNode::Text {
-                value: CowStr::from(sliced.data()),
-                location: sliced,
-            });
+                out.push(InlineNode::Text {
+                    value: CowStr::from(sliced.to_string()),
+                    location: *location,
+                });
+            } else {
+                let sliced = location.slice(lo..hi);
+
+                out.push(InlineNode::Text {
+                    value: CowStr::from(sliced.data()),
+                    location: sliced,
+                });
+            }
         }
     }
 }
@@ -615,6 +627,90 @@ mod tests {
 
             other => panic!("expected a Footnote, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn emit_range_recursing_footnotes_skips_a_synthesized_piece_whose_declared_length_overruns_its_value()
+     {
+        // The same defensive posture as
+        // `quotes::tests::emit_range_skips_a_synthesized_piece_whose_declared_length_overruns_its_value`,
+        // exercised directly against this module's own copy of the
+        // synthesized-slicing branch (see `emit_range_recursing_footnotes`'s
+        // own doc comment for why it duplicates `emit_range` rather than
+        // calling it).
+        use super::{Piece, emit_range_recursing_footnotes};
+        use crate::Parser;
+
+        let location = Span::new("{x}");
+
+        let node = InlineNode::Text {
+            value: CowStr::from("ab"),
+            location,
+        };
+
+        let piece = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 5, // overruns "ab"'s 2 bytes
+            src_offset: location.byte_offset(),
+            src_len: location.data().len(),
+            atomic: false,
+            synthesized: true,
+        };
+
+        let mut out = Vec::new();
+        emit_range_recursing_footnotes(
+            std::slice::from_ref(&node),
+            std::slice::from_ref(&piece),
+            0..5,
+            location,
+            &Parser::default(),
+            &mut out,
+        );
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn an_attribute_reference_beside_a_footnote_keeps_its_resolved_value() {
+        // Regression test: `emit_range_recursing_footnotes` (used for every
+        // *gap* around a recognized footnote, not the footnote's own content –
+        // see `footnote_content_children`) has its own copy of `emit_range`'s
+        // verbatim-slicing logic, and until it also special-cased a
+        // `synthesized` piece (see `quotes::Piece::synthesized`), it applied a
+        // match-string-coordinate range straight to the node's *source*
+        // `location` – valid for a verbatim run (whose `s_len` and source
+        // length agree) but not for a synthesized one (an attribute
+        // expansion), where they can differ. Concretely, `{product}`
+        // (9 source bytes) expanding to `"Widget"` (6 bytes) corrupted the gap
+        // *before* a sibling footnote into a truncated slice of the raw
+        // source (`"{produ"`) instead of the resolved value.
+        use crate::{
+            Parser,
+            content::{Content, SubstitutionGroup, inline_builder::build},
+            parser::ModificationContext,
+        };
+
+        // Two *independent* parsers (design §5.3's discipline, established by
+        // this module's own differential corpus below): `build` and the real
+        // pipeline each advance the footnote registry for real, so sharing
+        // one parser would double-count the footnote's assigned number.
+        let configure = || {
+            Parser::default().with_intrinsic_attribute(
+                "product",
+                "Widget",
+                ModificationContext::Anywhere,
+            )
+        };
+
+        let source = "The {product} is great, footnote:[x] right?";
+        let nodes = build(Span::new(source), &configure(), None);
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+        let mut golden = Content::from(Span::new(source));
+        SubstitutionGroup::Normal.apply(&mut golden, &configure(), None);
+
+        assert_eq!(folded, golden.rendered_str(), "{nodes:#?}");
+        assert!(folded.contains("Widget"), "{folded:?}");
     }
 
     #[test]

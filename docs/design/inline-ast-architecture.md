@@ -1301,6 +1301,57 @@ Each phase is a reviewable unit with a clear exit gate.
   deferred – a missing attribute under `Drop`/`DropLine`, and a construct inside an expanded value – remain
   outstanding.
 
+  *Follow-up landed as (a character replacement inside an expanded value):* the *construct inside an
+  expanded value* half of 5b's own deferred pair is closed for
+  [`apply_character_replacements`](../../parser/src/content/inline_builder/char_replacements.rs) (the
+  *macro* half remains deferred – see below). The shared match-string builder,
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs), previously treated *any*
+  non-verbatim node – a rendered span exactly as much as a synthesized (attribute-expanded) `Text` run – as
+  one opaque placeholder, which is why a `(C)` inside `{note}` (`"(C) 2024"`) stayed unrecognized: the
+  `Text` node's `value` differs from `location.data()`, so it fell through to that opaque case. It now
+  splits a synthesized run into its own [`Piece`](../../parser/src/content/inline_builder/quotes.rs) kind –
+  contributing the run's own `value` bytes to the match string (so a pattern sweep can match inside it) but
+  flagged [`synthesized`](../../parser/src/content/inline_builder/quotes.rs), since those bytes have no
+  honest `'src` counterpart. [`emit_range`](../../parser/src/content/inline_builder/quotes.rs) slices a
+  synthesized piece's *value* (not its `location`) to the overlap and keeps the whole original `location` as
+  every resulting fragment's coarse fallback span (design §4.4 – the same policy
+  [`split_attribute_value`](../../parser/src/content/inline_builder/attribute_refs.rs) already gives every
+  fragment of an expansion), and [`source_slice`](../../parser/src/content/inline_builder/quotes.rs) gained
+  a start/end [`Bias`](../../parser/src/content/inline_builder/quotes.rs) so a boundary landing *inside* a
+  synthesized piece falls back to that piece's whole node span while a boundary landing exactly on one of
+  its own edges still resolves honestly (critically, to whatever construct comes immediately *after* it,
+  not back into the synthesized run – see below).
+
+  Because [`build_match_string`] is shared by every step in this module, this fix is also what keeps a
+  *macro* family's own verbatim gate correctly rejecting a synthesized run now that it is no longer
+  atomic: [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) (every macro
+  family's own gate) and a new, narrower
+  [`range_overlaps_synthesized`](../../parser/src/content/inline_builder/quotes.rs) (for the two macro
+  families – the index-term shorthand and `indexterm2:[…]` – whose own recognition boundary was a bespoke
+  opaque-span check rather than `range_is_verbatim`, since neither needs an honest `'src` slice for its
+  *output*, only for deciding whether its *shown text* is reconstructable) both now reject a synthesized
+  piece explicitly, so a macro inside an expanded value remains a documented divergence exactly as before,
+  pinned by the existing (and one new, index-term) divergence test.
+
+  Auditing every other consumer of the boundary-mapping helpers surfaced two real bugs, both fixed as part
+  of this same follow-up rather than left as new divergences: (1) a boundary landing *exactly* on a
+  synthesized piece's own edge was initially resolved via the same coarse whole-node-span fallback as an
+  interior boundary, which is wrong whenever the piece's match-string length differs from its source
+  length (the whole reason a piece is synthesized in the first place) – a construct recognized
+  *immediately after* a synthesized run (e.g. a second `image:` macro right after an `{sp}` attribute
+  reference) had its own location wrongly swallow the synthesized run's source bytes, corrupting an
+  unrelated node's `is_icon` classification in one differential-corpus fixture; the fix skips that
+  boundary to whichever piece comes next (or the past-the-last-piece fallback) instead of letting the
+  synthesized piece claim it. (2) [`apply_footnotes`](../../parser/src/content/inline_builder/footnotes.rs)
+  keeps its *own* copy of `emit_range`'s verbatim-slicing logic for the gaps around a recognized footnote
+  ([`emit_range_recursing_footnotes`], which additionally recurses into a `Styled`/`Ref` child in place of
+  cloning it whole); this copy had not been updated in step with `emit_range`'s own synthesized branch, so
+  a plain attribute reference sitting beside (not inside) a footnote – reachable through the ordinary
+  pipeline, since `apply_attribute_references` runs well before `apply_footnotes` – produced a corrupted,
+  truncated `Text` value. Both are pinned by regression tests reproducing the exact fixture shapes that
+  caught them, alongside unit tests exercising the fixed boundary-mapping helpers directly. This step is
+  **additive**: nothing is wired into the parse path.
+
   *Step 5c landed as (`Callouts` → `Callout`, verbatim-group content):* a new
   [`apply_callouts`](../../parser/src/content/inline_builder.rs) step recognizes a trailing callout
   token (`<1>`, `<.>`, or `<!--1-->` for XML) in literal, listing, and source blocks as a
