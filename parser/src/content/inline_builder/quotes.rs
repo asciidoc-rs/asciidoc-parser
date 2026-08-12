@@ -81,10 +81,22 @@ pub(super) struct Piece {
     pub(super) src_len: usize,
 
     /// Whether the piece is indivisible. Only a verbatim
-    /// [`Text`](InlineNode::Text) run can be split by a match boundary;
-    /// everything else ([`CharRef`](InlineNode::CharRef) entities, opaque
-    /// spans) is atomic.
+    /// [`Text`](InlineNode::Text) run or a [`synthesized`](Self::synthesized)
+    /// one can be split by a match boundary; everything else
+    /// ([`CharRef`](InlineNode::CharRef) entities, opaque spans) is atomic.
     pub(super) atomic: bool,
+
+    /// Whether the piece is a [`Text`](InlineNode::Text) run whose `value`
+    /// was synthesized (an attribute expansion, a `counter` directive, …) –
+    /// its `value` differs from `location.data()`, so unlike a verbatim run
+    /// its match-string bytes do **not** correspond one-to-one with source
+    /// bytes. It contributes its `value` to the match string so a later step
+    /// (design §3.4.1: character replacements, macros) can still recognize a
+    /// construct inside it, but a match landing here has no honest `'src`
+    /// slice: [`emit_range`] slices the node's *value* instead of its
+    /// location, and [`s_to_src`] falls back to the piece's whole node span
+    /// (design §4.4's coarse fallback) rather than a proportional one.
+    pub(super) synthesized: bool,
 }
 
 /// Matches `sub` once at this level, wrapping each accepted match in a
@@ -115,11 +127,19 @@ fn match_level<'src>(
 /// Reconstructs the escaped match string for a level and the [`Piece`] map back
 /// to its nodes.
 ///
-/// A [`Text`](InlineNode::Text) run contributes its (special-free) value; a
-/// [`CharRef`](InlineNode::CharRef) contributes its canonical entity, so the
-/// boundary classes the quote patterns key off (`&`, `;`) see exactly what the
-/// string pipeline's escaped text presents; every other node contributes a
-/// single opaque [`SPAN_PLACEHOLDER`].
+/// A verbatim [`Text`](InlineNode::Text) run contributes its (special-free)
+/// value; a [`CharRef`](InlineNode::CharRef) contributes its canonical entity,
+/// so the boundary classes the quote patterns key off (`&`, `;`) see exactly
+/// what the string pipeline's escaped text presents; a *synthesized*
+/// `Text` run (design §3.4.1 – an attribute expansion, a `counter` directive)
+/// contributes its `value` too, so [`apply_character_replacements`]
+/// (design §3.4.1: `replacements` still runs over an expanded value) can
+/// recognize a construct inside it, but is flagged
+/// [`synthesized`](Piece::synthesized) since those bytes have no honest
+/// `'src` counterpart; every other node contributes a single opaque
+/// [`SPAN_PLACEHOLDER`].
+///
+/// [`apply_character_replacements`]: super::char_replacements::apply_character_replacements
 pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece>) {
     let mut s = String::new();
     let mut pieces = Vec::with_capacity(nodes.len());
@@ -138,6 +158,25 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
                     src_offset: location.byte_offset(),
                     src_len: location.data().len(),
                     atomic: false,
+                    synthesized: false,
+                });
+            }
+
+            InlineNode::Text { value, location } => {
+                // A synthesized run (its value has no `'src` slice of its
+                // own): still splittable for matching purposes, but any
+                // resulting node falls back to this node's whole `location`
+                // (design §4.4) rather than a proportional slice of it.
+                s.push_str(value);
+
+                pieces.push(Piece {
+                    node_index,
+                    s_start,
+                    s_len: value.len(),
+                    src_offset: location.byte_offset(),
+                    src_len: location.data().len(),
+                    atomic: false,
+                    synthesized: true,
                 });
             }
 
@@ -155,13 +194,14 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
                     src_offset: location.byte_offset(),
                     src_len: location.data().len(),
                     atomic: true,
+                    synthesized: false,
                 });
             }
 
             other => {
-                // A span from an earlier sub (or any node with a synthesized
-                // value) is opaque: a single placeholder that a quote pattern
-                // sees as one boundary character.
+                // A span from an earlier sub (or any other synthesized-value
+                // node, e.g. a `Raw` leaf) is opaque: a single placeholder
+                // that a quote pattern sees as one boundary character.
                 s.push(SPAN_PLACEHOLDER);
 
                 let location = other.span();
@@ -173,12 +213,36 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
                     src_offset: location.byte_offset(),
                     src_len: location.data().len(),
                     atomic: true,
+                    synthesized: false,
                 });
             }
         }
     }
 
     (s, pieces)
+}
+
+/// Reports whether any piece overlapping the match-string range `range` is
+/// [`synthesized`](Piece::synthesized). A macro family that reconstructs its
+/// *shown* text straight from the match string (rather than needing an honest
+/// `'src` slice – e.g. an index term's `arg`/`term_src`, already checked
+/// against [`SPAN_PLACEHOLDER`] for a crossed span) still needs this check
+/// too: a synthesized run's bytes have no source counterpart, and design
+/// §3.4.1 leaves recognizing a macro *inside* one for a later increment (see
+/// [`apply_attribute_references`](super::attribute_refs::apply_attribute_references)'s
+/// doc comment) – distinct from [`range_is_verbatim`](super::macros::image::range_is_verbatim),
+/// which a family needing to *slice* `'src` (a target, an `Attrlist<'src>`)
+/// uses instead and which already rejects a synthesized piece outright.
+pub(in crate::content::inline_builder) fn range_overlaps_synthesized(
+    pieces: &[Piece],
+    range: &std::ops::Range<usize>,
+) -> bool {
+    pieces.iter().any(|piece| {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        piece.synthesized && p_end > range.start && p_start < range.end
+    })
 }
 
 /// The canonical special-character entity a [`CharRef::Special`] contributes to
@@ -527,17 +591,33 @@ pub(super) fn emit_range<'src>(
             continue;
         }
 
-        // A verbatim text run: slice it to the overlap.
+        // A verbatim or synthesized text run: slice it to the overlap.
         let lo = range.start.max(p_start) - p_start;
         let hi = range.end.min(p_end) - p_start;
 
-        if let InlineNode::Text { location, .. } = node {
-            let sliced = location.slice(lo..hi);
+        if let InlineNode::Text { value, location } = node {
+            if piece.synthesized {
+                // No `'src` slice exists for these bytes: slice the node's
+                // *value* instead, keeping the whole original `location` as
+                // the coarse fallback span (design §4.4) – the same policy
+                // `split_attribute_value` already applies to every fragment
+                // of an expanded value.
+                let Some(sliced) = value.get(lo..hi) else {
+                    continue;
+                };
 
-            out.push(InlineNode::Text {
-                value: CowStr::from(sliced.data()),
-                location: sliced,
-            });
+                out.push(InlineNode::Text {
+                    value: CowStr::from(sliced.to_string()),
+                    location: *location,
+                });
+            } else {
+                let sliced = location.slice(lo..hi);
+
+                out.push(InlineNode::Text {
+                    value: CowStr::from(sliced.data()),
+                    location: sliced,
+                });
+            }
         }
     }
 }
@@ -545,29 +625,60 @@ pub(super) fn emit_range<'src>(
 /// Maps a match-string range back to its source [`Span`], sliced from `root`.
 ///
 /// A boundary inside a verbatim [`Text`](InlineNode::Text) run maps one-to-one
-/// (its match text is its source text); a boundary inside an atomic piece snaps
-/// to the nearer edge (it never legitimately falls there).
+/// (its match text is its source text); a boundary inside an atomic or
+/// [`synthesized`](Piece::synthesized) piece has no such honest source
+/// position, so it falls back to that piece's own edges (design §4.4) –
+/// snapping to the *nearer* one for an atomic piece (it never legitimately
+/// falls there), or to the edge [`Bias`] names for a synthesized one, so a
+/// range wholly inside a synthesized run maps to that run's *whole* node span
+/// regardless of exactly where the range's boundaries land in it – the same
+/// coarse policy [`split_attribute_value`](super::attribute_refs::split_attribute_value)
+/// already gives every fragment of an expanded value.
 pub(super) fn source_slice<'src>(
     pieces: &[Piece],
     range: std::ops::Range<usize>,
     root: Span<'src>,
 ) -> Span<'src> {
-    let start = s_to_src(pieces, range.start);
-    let end = s_to_src(pieces, range.end);
+    let start = s_to_src(pieces, range.start, Bias::Start);
+    let end = s_to_src(pieces, range.end, Bias::End);
 
     let base = root.byte_offset();
     root.slice(start.saturating_sub(base)..end.saturating_sub(base))
 }
 
+/// Which edge of a piece [`s_to_src`] falls back to when a boundary lands
+/// inside a [`synthesized`](Piece::synthesized) piece, matching whether the
+/// boundary is a range's start or end.
+#[derive(Clone, Copy)]
+enum Bias {
+    Start,
+    End,
+}
+
 /// Maps a single match-string byte offset back to an absolute source byte
-/// offset.
-fn s_to_src(pieces: &[Piece], x: usize) -> usize {
+/// offset. `bias` only matters for a boundary landing inside a `synthesized`
+/// piece; an atomic piece keeps its own nearer-edge snap regardless of it.
+fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
     for piece in pieces {
         let p_start = piece.s_start;
         let p_end = piece.s_start + piece.s_len;
 
         if x < p_start {
             break;
+        }
+
+        // A boundary exactly at the *end* of a synthesized piece belongs to
+        // whatever comes next, not to this piece: unlike a verbatim piece
+        // (whose `s_len` and `src_len` always agree, so its own end edge and
+        // the next piece's start edge are numerically the same value either
+        // way), a synthesized piece's `value` generally has a *different*
+        // byte length than its source span, so the plain linear mapping below
+        // is only honest at this piece's own `p_start` (a zero delta) – never
+        // at `p_end`. Skipping to the next piece (or the past-the-last-piece
+        // fallback, if there is none) lets that boundary resolve correctly
+        // instead.
+        if piece.synthesized && x == p_end {
+            continue;
         }
 
         if x <= p_end {
@@ -578,6 +689,18 @@ fn s_to_src(pieces: &[Piece], x: usize) -> usize {
                     piece.src_offset
                 } else {
                     piece.src_offset + piece.src_len
+                };
+            }
+
+            // A boundary strictly *inside* a synthesized piece (not on its
+            // `p_start` edge – already excluded `p_end` above, and `p_start`
+            // is exact via the plain mapping just like a verbatim piece) has
+            // no honest source position, so it falls back to the edge `bias`
+            // names (design §4.4's coarse fallback).
+            if piece.synthesized && x > p_start {
+                return match bias {
+                    Bias::Start => piece.src_offset,
+                    Bias::End => piece.src_offset + piece.src_len,
                 };
             }
 
@@ -749,12 +872,13 @@ mod tests {
 
     #[test]
     fn s_to_src_guards_are_defensive() {
-        use super::{Piece, s_to_src};
+        use super::{Bias, Piece, s_to_src};
 
         // In practice every boundary `s_to_src` maps falls on a literal
         // delimiter (a text position), so the atomic-snap, before-first, and
         // past-last branches are defensive. Exercise them directly to document
-        // the intended fallback.
+        // the intended fallback. Bias is irrelevant to an atomic piece, so
+        // `Bias::Start` is used throughout.
         let atomic = Piece {
             node_index: 0,
             s_start: 0,
@@ -762,14 +886,15 @@ mod tests {
             src_offset: 10,
             src_len: 1,
             atomic: true,
+            synthesized: false,
         };
 
         // A boundary inside an atomic piece snaps to the nearer edge.
-        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 1), 10);
-        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 3), 11);
+        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 1, Bias::Start), 10);
+        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 3, Bias::Start), 11);
 
         // A boundary past the last piece falls back to the source end.
-        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 9), 11);
+        assert_eq!(s_to_src(std::slice::from_ref(&atomic), 9, Bias::Start), 11);
 
         // A boundary before the first piece begins breaks out to the same
         // fallback.
@@ -778,10 +903,104 @@ mod tests {
             ..atomic
         };
 
-        assert_eq!(s_to_src(std::slice::from_ref(&offset), 0), 11);
+        assert_eq!(s_to_src(std::slice::from_ref(&offset), 0, Bias::Start), 11);
 
         // No pieces (an empty level) anchors at the source start.
-        assert_eq!(s_to_src(&[], 0), 0);
+        assert_eq!(s_to_src(&[], 0, Bias::Start), 0);
+    }
+
+    #[test]
+    fn s_to_src_biases_a_synthesized_piece_to_its_whole_node_span() {
+        use super::{Bias, Piece, s_to_src};
+
+        // A boundary landing *strictly inside* a synthesized piece (its
+        // match-string bytes have no honest source counterpart, since its
+        // `s_len` here – 9 – differs from its `src_len` – 10) falls back to
+        // the whole node span: its start edge (100) for a `Bias::Start`
+        // boundary, its end edge (110) for a `Bias::End` one.
+        //
+        // Its own two edges (`x == 0`, `x == 9`) are a distinct case, pinned
+        // by `s_to_src_resolves_a_synthesized_pieces_own_edges_exactly`
+        // below: `p_start` already has an honest position (delta zero) and
+        // `p_end` is skipped to whatever comes next, so *neither* runs
+        // through this bias fallback – only interior positions like `3` do.
+        let synthesized = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 9,
+            src_offset: 100,
+            src_len: 10,
+            atomic: false,
+            synthesized: true,
+        };
+
+        assert_eq!(
+            s_to_src(std::slice::from_ref(&synthesized), 3, Bias::Start),
+            100
+        );
+        assert_eq!(
+            s_to_src(std::slice::from_ref(&synthesized), 3, Bias::End),
+            110
+        );
+    }
+
+    #[test]
+    fn s_to_src_resolves_a_synthesized_pieces_own_edges_exactly() {
+        use super::{Bias, Piece, s_to_src};
+
+        // A boundary landing exactly on a synthesized piece's own start or
+        // end edge has an honest position regardless of `bias` – unlike an
+        // interior boundary (see the test above), it never falls back to the
+        // coarse whole-node span. This is what keeps a construct recognized
+        // *immediately after* a synthesized run (e.g. a second `image:` macro
+        // right after an `{sp}` attribute reference) from having its node's
+        // location wrongly swallow the synthesized run's own source bytes –
+        // a real regression this test reproduces at the `Piece` level
+        // (see `image::tests::matches_the_golden_pipelines_registration_for_a_broad_fixture_set`
+        // for the end-to-end fixture that first caught it).
+        fn synthesized_piece() -> Piece {
+            Piece {
+                node_index: 0,
+                s_start: 5,
+                s_len: 9, // match-string range [5, 14)
+                src_offset: 100,
+                src_len: 10, // source range [100, 110)
+                atomic: false,
+                synthesized: true,
+            }
+        }
+
+        // A lone synthesized piece: its own start edge is exact for both
+        // biases; its own end edge has no *next* piece to defer to, so it
+        // falls back to the past-the-last-piece anchor, which for this piece
+        // alone is its own end – numerically the same as the whole-node-span
+        // fallback here, but arrived at without going through `Bias` at all.
+        let pieces = [synthesized_piece()];
+        assert_eq!(s_to_src(&pieces, 5, Bias::Start), 100);
+        assert_eq!(s_to_src(&pieces, 5, Bias::End), 100);
+        assert_eq!(s_to_src(&pieces, 14, Bias::Start), 110);
+        assert_eq!(s_to_src(&pieces, 14, Bias::End), 110);
+
+        // With a verbatim piece immediately following (the common case – a
+        // recognized construct starting right where the synthesized run
+        // ends), the shared boundary (`x == 14`) resolves through the
+        // *following* piece's own honest linear mapping instead, giving the
+        // same edge value (110) as the piece-alone case above, but arrived
+        // at correctly rather than by the synthesized piece's own (invalid,
+        // since `s_len != src_len` for it) linear mapping.
+        let following = Piece {
+            node_index: 1,
+            s_start: 14,
+            s_len: 4,
+            src_offset: 110,
+            src_len: 4,
+            atomic: false,
+            synthesized: false,
+        };
+        let pieces = [synthesized_piece(), following];
+        assert_eq!(s_to_src(&pieces, 14, Bias::Start), 110);
+        assert_eq!(s_to_src(&pieces, 14, Bias::End), 110);
+        assert_eq!(s_to_src(&pieces, 16, Bias::Start), 112);
     }
 
     #[test]
@@ -797,11 +1016,49 @@ mod tests {
             src_offset: 0,
             src_len: 1,
             atomic: true,
+            synthesized: false,
         };
 
         let mut out = Vec::new();
         emit_range(&[], std::slice::from_ref(&piece), 0..1, &mut out);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn emit_range_skips_a_synthesized_piece_whose_declared_length_overruns_its_value() {
+        use super::{Piece, emit_range};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        // A synthesized piece's `s_len` is expected to equal its node's
+        // `value.len()` (how `build_match_string` constructs one); a piece
+        // declaring a longer `s_len` than its node's actual `value` – an
+        // internal invariant slip – is skipped rather than panicking, the
+        // same defensive posture as a stale `node_index` above.
+        let location = Span::new("{x}");
+
+        let node = InlineNode::Text {
+            value: CowStr::from("ab"),
+            location,
+        };
+
+        let piece = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 5, // overruns "ab"'s 2 bytes
+            src_offset: location.byte_offset(),
+            src_len: location.data().len(),
+            atomic: false,
+            synthesized: true,
+        };
+
+        let mut out = Vec::new();
+        emit_range(
+            std::slice::from_ref(&node),
+            std::slice::from_ref(&piece),
+            0..5,
+            &mut out,
+        );
+        assert!(out.is_empty(), "{out:?}");
     }
 
     #[test]

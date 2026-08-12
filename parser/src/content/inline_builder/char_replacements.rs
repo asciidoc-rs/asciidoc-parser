@@ -20,8 +20,16 @@ use crate::{
 /// **escaped** text (built by [`build_match_string`], where a
 /// [`CharRef::Special`] contributes its canonical entity) – which is exactly
 /// why the arrow (`-&gt;`, `&lt;-`) and entity (`&amp;copy;`) rules can
-/// straddle a `Text`/`CharRef` boundary. `root` is the whole-content source
-/// span; every leaf's precise `location` is sliced from it.
+/// straddle a `Text`/`CharRef` boundary, and, since a
+/// [`synthesized`](super::quotes::Piece::synthesized) run (an
+/// attribute-expanded value) contributes its own `value` there too, why they
+/// can straddle a `Text`/synthesized-`Text` boundary as well (design §3.4.1) –
+/// pinned by
+/// `attribute_refs::tests::a_replacement_straddling_a_synthesized_and_a_real_piece_is_recognized`.
+/// `root` is the whole-content source span; every leaf's precise `location`
+/// is sliced from it – or, for a leaf recognized *inside* a synthesized run,
+/// falls back to that run's own whole span (design §4.4), since its bytes
+/// have no honest source counterpart of their own.
 pub(super) fn apply_character_replacements<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,

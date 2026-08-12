@@ -33,26 +33,32 @@ use crate::{
 /// by [`split_attribute_value`] exactly like a plain reference's value);
 /// `counter2` advances silently and splices nothing.
 ///
-/// Two forms are still deferred, each documented and pinned by a divergence
-/// test: a reference to a **missing** attribute under
-/// [`AttributeMissing::Drop`] / [`AttributeMissing::DropLine`] (whose output
-/// *removes* content, unlike leaving the reference literal – the behavior this
-/// step *does* reproduce, since it is also what [`AttributeMissing::Skip`] (the
-/// default) and [`AttributeMissing::Warn`] do); and a construct (a character
-/// replacement, a macro) *inside* an expanded value, which
-/// [`apply_character_replacements`](super::char_replacements::apply_character_replacements)
-/// and [`apply_macros`](super::macros::apply_macros) would recognize per design
-/// §3.4.1 but do not yet – a spliced value is a synthesized run with no `'src`
-/// slice of its own, and [`build_match_string`] (shared by those two steps and
-/// by [`apply_quotes`](super::quotes::apply_quotes)) only treats a verbatim
-/// [`Text`](InlineNode::Text) node (`value == location.data()`) as literal
-/// content; it does not yet look inside a synthesized one, so such a node is
-/// one opaque piece to them, exactly like an already-built
-/// [`Styled`](crate::inlines::Styled) span. Both remaining forms are left
-/// **unrecognized**: no match is produced for the first, and no further node
-/// is produced for the second, so the surrounding gap logic reproduces the
-/// source text unchanged, exactly as an unrecognized macro is left for a
-/// later increment.
+/// One form is still deferred, documented and pinned by a divergence test: a
+/// reference to a **missing** attribute under [`AttributeMissing::Drop`] /
+/// [`AttributeMissing::DropLine`] (whose output *removes* content, unlike
+/// leaving the reference literal – the behavior this step *does* reproduce,
+/// since it is also what [`AttributeMissing::Skip`] (the default) and
+/// [`AttributeMissing::Warn`] do). It is left **unrecognized**: no match is
+/// produced, so the surrounding gap logic reproduces the source text
+/// unchanged, exactly as an unrecognized macro is left for a later increment.
+///
+/// A **character replacement** *inside* an expanded value ((C) → © and
+/// friends) is, by contrast, recognized: [`build_match_string`] (shared by
+/// [`apply_character_replacements`](super::char_replacements::apply_character_replacements),
+/// [`apply_macros`](super::macros::apply_macros), and
+/// [`apply_quotes`](super::quotes::apply_quotes)) now contributes a
+/// synthesized run's own `value` to the match string too – flagged
+/// [`synthesized`](super::quotes::Piece::synthesized) rather than opaque –
+/// so `apply_character_replacements`'s pattern sweep, still ahead in the
+/// effective order, can match inside it exactly as it would over any other
+/// run (a follow-up to this step, closing the gap this doc comment used to
+/// describe). A **macro** *inside* an expanded value remains deferred,
+/// though: a macro node bakes its target/attribute list straight from an
+/// honest `'src` slice, which a synthesized run – its bytes have no source
+/// counterpart of their own – cannot supply; see
+/// [`range_is_verbatim`](super::macros::image::range_is_verbatim), which
+/// every macro family gates recognition on, and which rejects a synthesized
+/// piece for exactly this reason.
 ///
 /// [`AttributeMissing::Drop`]: crate::content::AttributeMissing::Drop
 /// [`AttributeMissing::DropLine`]: crate::content::AttributeMissing::DropLine
@@ -418,11 +424,10 @@ fn rebuild_attribute_level<'src>(
 /// content that design §3.4.1 says
 /// [`apply_character_replacements`](super::char_replacements::apply_character_replacements) and [`apply_macros`](super::macros::apply_macros) (still ahead in the
 /// effective order) should recognize normally (a `(C)` in the value becomes
-/// a `CharRef`, a `link:` in it becomes a `Ref`); this increment does not yet
-/// reach that (see [`apply_attribute_references`]'s doc comment for why), so
-/// the resulting `Text` node's value stays untouched by those later steps for
-/// now, but is shaped so a later increment only needs to extend
-/// [`build_match_string`], not this splitting.
+/// a `CharRef`, a `link:` in it becomes a `Ref`) – true today for the former
+/// (a follow-up to this step extended [`build_match_string`] to look inside a
+/// synthesized run, so no change was needed here), still deferred for the
+/// latter (see [`apply_attribute_references`]'s doc comment for why).
 ///
 /// Both node kinds carry the reference's own `location` as their coarse
 /// fallback span (design §4.4: a synthesized value has no source of its own).
@@ -678,28 +683,72 @@ mod tests {
     }
 
     #[test]
-    fn a_replacement_inside_an_expanded_value_is_a_documented_divergence() {
+    fn a_replacement_inside_an_expanded_value_is_recognized() {
         // Design §3.4.1 says `replacements` still runs over an expanded
-        // value, so a `(C)` inside it should become a `CharRef`. It does not
-        // yet: a synthesized `Text` node's `value` differs from
-        // `location.data()`, so `build_match_string` (shared by
-        // `apply_character_replacements` and `apply_macros`) treats it as one
-        // opaque piece – the same "not verbatim" boundary every macro family
-        // already documents for content it cannot slice from `'src`. Lifting
-        // this needs `build_match_string` itself to look inside a synthesized
-        // run, tracked as a follow-up to this increment.
+        // value, so a `(C)` inside it becomes a `CharRef` – closing the gap
+        // `build_match_string` documented as a follow-up: a synthesized
+        // `Text` piece now contributes its own `value` to the match string
+        // (flagged [`synthesized`](super::super::quotes::Piece::synthesized)
+        // rather than opaque), so `apply_character_replacements`'s pattern
+        // sweep can match inside it exactly as it would over any other run.
         let parser = parser_with_attribute("note", "(C) 2024");
         let nodes = build(Span::new("{note}"), &parser, None);
 
         assert!(
             nodes
                 .iter()
-                .all(|n| !matches!(n, InlineNode::CharRef { .. })),
-            "a replacement inside a spliced value must not yet be recognized: {nodes:?}"
+                .any(|n| matches!(n, InlineNode::CharRef { .. })),
+            "a replacement inside a spliced value must be recognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, *does* recognize it.
-        assert_eq!(golden_attributes_with("{note}", &parser), "&#169; 2024");
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_attributes_with("{note}", &parser),
+        );
+    }
+
+    #[test]
+    fn a_replacement_straddling_a_synthesized_and_a_real_piece_is_recognized() {
+        // The em-dash-without-space rule (`(\w)--`) needs its leading word
+        // character from one piece and its `--` from the next – exercised
+        // here across the boundary between a synthesized (attribute-expanded)
+        // piece and the real, verbatim text that follows it, the case that
+        // first exposed `s_to_src`'s own edge-vs-interior bug (see
+        // `quotes::tests::s_to_src_resolves_a_synthesized_pieces_own_edges_exactly`).
+        let parser = parser_with_attribute("word", "hello");
+        let source = "{word}--world";
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_attributes_with(source, &parser),
+        );
+    }
+
+    #[test]
+    fn a_construct_immediately_after_a_synthesized_run_keeps_its_own_location() {
+        // Regression coverage for the bug the `{sp}`-then-`image:` fixture in
+        // `macros::image::tests::matches_the_golden_pipelines_registration_for_a_broad_fixture_set`
+        // first caught: a construct recognized by a *later* step
+        // (`apply_character_replacements`, standing in for any step that
+        // shares `build_match_string`) immediately after a synthesized piece
+        // must not have its own location swallow the synthesized run's
+        // source bytes.
+        let parser = parser_with_attribute("word", "hello");
+        let nodes = build(Span::new("{word}(C)"), &parser, None);
+
+        let replacement = nodes
+            .iter()
+            .find(|n| matches!(n, InlineNode::CharRef { .. }))
+            .unwrap_or_else(|| panic!("expected a CharRef among {nodes:?}"));
+
+        match replacement {
+            InlineNode::CharRef { location, .. } => {
+                assert_eq!(location.data(), "(C)", "{nodes:?}");
+            }
+
+            other => panic!("expected CharRef, got {other:?}"),
+        }
     }
 
     #[test]

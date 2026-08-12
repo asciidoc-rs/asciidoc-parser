@@ -90,9 +90,16 @@ fn find_image_matches<'src>(
 }
 
 /// Reports whether every piece overlapping the match-string range `range` is a
-/// verbatim [`Text`](InlineNode::Text) run (non-atomic). Only then does the
-/// range map one-to-one onto contiguous source, so its captures can slice
-/// `'src` directly.
+/// verbatim [`Text`](InlineNode::Text) run (non-atomic, non-synthesized). Only
+/// then does the range map one-to-one onto contiguous source, so its captures
+/// can slice `'src` directly. A [`synthesized`](Piece::synthesized) piece
+/// (an attribute-expanded value, a `counter` directive) is rejected here too:
+/// [`apply_character_replacements`](super::super::char_replacements::apply_character_replacements)
+/// can recognize a construct inside one (it produces a leaf needing no `'src`
+/// slice of its own – design §4.4's coarse fallback), but a macro node bakes
+/// its target/attribute list straight from source, so it still needs a real
+/// `'src` slice a synthesized run cannot provide – the same boundary an
+/// escaped-special or a rendered span already documents.
 pub(in crate::content::inline_builder) fn range_is_verbatim(
     pieces: &[Piece],
     range: &std::ops::Range<usize>,
@@ -106,7 +113,7 @@ pub(in crate::content::inline_builder) fn range_is_verbatim(
             continue;
         }
 
-        if piece.atomic {
+        if piece.atomic || piece.synthesized {
             return false;
         }
     }

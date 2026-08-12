@@ -41,13 +41,15 @@
 //!   resolves *and advances* the named counter via [`Parser::counter`], the
 //!   same required side effect [`apply_footnotes`] performs for footnote
 //!   numbering. A missing-attribute reference under `AttributeMissing::Drop` /
-//!   `::DropLine` is deferred (see [`apply_attribute_references`] for why); so
-//!   is a construct *inside* an expanded value that
-//!   [`apply_character_replacements`]/[`apply_macros`] would otherwise
-//!   recognize – the value is a synthesized, non-`'src` run, and
-//!   [`build_match_string`](quotes::build_match_string) does not yet look
-//!   inside one (the same "not verbatim" boundary a macro over a rendered span
-//!   already documents).
+//!   `::DropLine` is deferred (see [`apply_attribute_references`] for why). A
+//!   character replacement *inside* an expanded value ((C) → ©, `--`, …) is
+//!   recognized, a follow-up increment having taught
+//!   [`build_match_string`](quotes::build_match_string) to look inside a
+//!   [`synthesized`](quotes::Piece::synthesized) run instead of treating it as
+//!   opaque; a **macro** inside one remains deferred (a macro node needs an
+//!   honest `'src` slice for its target/attribute list, which a synthesized
+//!   run's bytes – no source counterpart of their own – cannot supply; see
+//!   [`range_is_verbatim`](macros::image::range_is_verbatim)).
 //! - [`apply_character_replacements`] recognizes [character replacements] –
 //!   `(C)`, `--`, `...`, arrows, apostrophes, and restored entities – replacing
 //!   each with a [`CharRef::Replacement`](crate::inlines::CharRef::Replacement)
