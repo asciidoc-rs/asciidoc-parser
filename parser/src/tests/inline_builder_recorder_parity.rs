@@ -30,27 +30,27 @@
 //!
 //! - `location` — the recorder gives every node the whole-content span (the
 //!   design §4.4 "migration stage" fallback every recorder-built node still
-//!   uses); the builder gives each node its own precise span (§4.4's
-//!   "precision stage", issue #944). Comparing spans here would fail by
-//!   design on every single fixture.
+//!   uses); the builder gives each node its own precise span (§4.4's "precision
+//!   stage", issue #944). Comparing spans here would fail by design on every
+//!   single fixture.
 //! - `attrs` (on [`Styled`](crate::inlines::Styled)/[`Ref`]/[`Image`]) — the
-//!   recorder's `'static` second pass cannot carry a borrowed
-//!   `Attrlist<'src>` into a node (see the design doc's Phase 3 step 2 note),
-//!   so it is always `None`; the builder captures the real, parsed attribute
-//!   list. The builder is strictly more informative, never less.
+//!   recorder's `'static` second pass cannot carry a borrowed `Attrlist<'src>`
+//!   into a node (see the design doc's Phase 3 step 2 note), so it is always
+//!   `None`; the builder captures the real, parsed attribute list. The builder
+//!   is strictly more informative, never less.
 //! - `derived` / `xrefstyle` (on [`Ref`]) — likewise always `None` from the
 //!   recorder (Phase 4 part 3c's own landed-as note); the builder populates
 //!   them.
 //! - `resolved` (on [`Ref`]) — both sides are built here with no resolution
-//!   pass, so it is `None` on both regardless; excluded for robustness
-//!   rather than because it is expected to differ.
-//! - `reftext` (on [`Anchor`](crate::inlines::Anchor)) — an anchor's HTML is
-//!   a function of its `id` alone, so `reftext` renders nothing the recorder
-//!   could ever recover it from and is always `None` there, while the
-//!   builder still carries it as a structural fact.
+//!   pass, so it is `None` on both regardless; excluded for robustness rather
+//!   than because it is expected to differ.
+//! - `reftext` (on [`Anchor`](crate::inlines::Anchor)) — an anchor's HTML is a
+//!   function of its `id` alone, so `reftext` renders nothing the recorder
+//!   could ever recover it from and is always `None` there, while the builder
+//!   still carries it as a structural fact.
 //! - `is_icon` (on [`Image`]) — the recorder's own recorded marker does not
-//!   distinguish `icon:` from `image:` (both fold through the same kind), so
-//!   it always reports `false`; the builder sets it honestly.
+//!   distinguish `icon:` from `image:` (both fold through the same kind), so it
+//!   always reports `false`; the builder sets it honestly.
 //!
 //! Several more differences are structural rather than field-level, so they
 //! are handled by the comparator itself instead of being excluded outright.
@@ -64,64 +64,63 @@
 //! - A handful of character-replacement types combine more than one output
 //!   character into a single logical value (an em dash surrounded by spaces –
 //!   [`CharacterReplacementType::EmDashSurroundedBySpaces`](crate::parser::CharacterReplacementType)
-//!   – renders as *thin space, em dash, thin space*, three characters from
-//!   one source match). The builder recognizes the whole match as **one**
+//!   – renders as *thin space, em dash, thin space*, three characters from one
+//!   source match). The builder recognizes the whole match as **one**
 //!   [`CharRef::Replacement`](crate::inlines::CharRef::Replacement) leaf
 //!   carrying the combined value; the recorder sees three separate numeric-
 //!   entity references in the output string and recovers **three** adjacent
 //!   leaves, one per entity. Both fold to the same HTML.
-//! - Adjacent `Text` node boundaries can legitimately differ: the builder
-//!   gives an attribute-expanded run its own node even when it is plain text
-//!   with no escaping of its own (design §3.4.1), so it sits as a distinct
-//!   sibling beside the literal text around it, while the recorder – with no
-//!   marker around plain text – recovers the whole run as one `Text` node.
+//! - Adjacent `Text` node boundaries can legitimately differ: the builder gives
+//!   an attribute-expanded run its own node even when it is plain text with no
+//!   escaping of its own (design §3.4.1), so it sits as a distinct sibling
+//!   beside the literal text around it, while the recorder – with no marker
+//!   around plain text – recovers the whole run as one `Text` node.
 //! - A source `&amp;`/`&lt;`/`&gt;`/`&#8217;`/… that the author wrote out
-//!   literally passes through Asciidoctor's `specialcharacters` step
-//!   unchanged (it is already a valid entity), rendering byte-identical to
-//!   whatever *live* substitution – a special-character escape, or a
-//!   typographic replacement that happens to render as the same entity –
-//!   produces the same output. From already-rendered output alone the
-//!   recorder cannot tell "the author wrote this entity"
-//!   ([`CharRef::Entity`], the builder's classification) apart from the live
-//!   classification that coincides with it – exactly the same set of
-//!   entities [`classify_entity`](crate::content::inline_tree) (the
-//!   recorder's own recovery table) hard-codes, reproduced in
-//!   [`RECORDER_ENTITY_TABLE`] so the two stay in lockstep.
-//! - A passthrough's content becomes its own [`Raw`](InlineNode::Raw) leaf
-//!   in the builder's tree – but a passthrough's *restore* is a direct
-//!   string splice with no renderer call for the recorder to intercept
-//!   (design §4.2's "re-splicing is just keeping the node in place" describes
-//!   the target architecture, not what today's post-hoc string recorder can
-//!   observe), so the recorder recovers its content as indistinguishable
-//!   plain `Text`/`CharRef` leaves (its own `<`/`>`/`&` still show up as
-//!   entities in the output even though the builder's `Raw` value has
-//!   already encoded them, since a passthrough's content still passes
-//!   through `specialcharacters` when its own effective substitution order
-//!   includes it, design §3.4.1).
+//!   literally passes through Asciidoctor's `specialcharacters` step unchanged
+//!   (it is already a valid entity), rendering byte-identical to whatever
+//!   *live* substitution – a special-character escape, or a typographic
+//!   replacement that happens to render as the same entity – produces the same
+//!   output. From already-rendered output alone the recorder cannot tell "the
+//!   author wrote this entity" ([`CharRef::Entity`], the builder's
+//!   classification) apart from the live classification that coincides with it
+//!   – exactly the same set of entities
+//!   [`classify_entity`](crate::content::inline_tree) (the recorder's own
+//!   recovery table) hard-codes, reproduced in [`RECORDER_ENTITY_TABLE`] so the
+//!   two stay in lockstep.
+//! - A passthrough's content becomes its own [`Raw`](InlineNode::Raw) leaf in
+//!   the builder's tree – but a passthrough's *restore* is a direct string
+//!   splice with no renderer call for the recorder to intercept (design §4.2's
+//!   "re-splicing is just keeping the node in place" describes the target
+//!   architecture, not what today's post-hoc string recorder can observe), so
+//!   the recorder recovers its content as indistinguishable plain
+//!   `Text`/`CharRef` leaves (its own `<`/`>`/`&` still show up as entities in
+//!   the output even though the builder's `Raw` value has already encoded them,
+//!   since a passthrough's content still passes through `specialcharacters`
+//!   when its own effective substitution order includes it, design §3.4.1).
 //!
-//! - An **unresolved** cross-reference's `children` (the author's own
-//!   display text, `<<id,text>>`/`xref:id[text]`) is a structural fact the
-//!   builder bakes in at build time regardless of resolution (design §4.1's
-//!   own note on the node: "an empty text yields no children ... the fold
-//!   reads as 'no text provided'"). The recorder can only recover what
-//!   actually got *rendered*, and Asciidoctor's own unresolved-xref fallback
-//!   renders the bracketed `[target]` form – never the author's display text
-//!   – so the recorder's `children` for such a node is legitimately empty
-//!   even when the builder's is not. This corpus builds both trees with no
-//!   resolution pass, so every cross-reference is in exactly this state; a
-//!   resolved reference (out of scope here) would not have this gap, since
-//!   resolution mirrors the *destination*, not the text, onto a `children`
-//!   list the builder already populated correctly.
-//! - A footnote **reference** occurrence's own `id` (`footnote:disc[]`)
-//!   never reaches the renderer's params at all once it *resolves* to a
-//!   number – the fold renders just the number, dropping `id` – so the
-//!   recorder cannot recover it, while the builder still carries it as a
-//!   structural fact (see [`assert_node_equivalent`]'s own `Footnote` arm).
-//! - A [`Link`](RefVariant::Link)'s `roles`/`window` fields are not
-//!   populated from its own attribute-list display text (`Ref::attrs`'s own
-//!   doc comment) – the fold reads those straight off `attrs` instead – so
-//!   they are skipped whenever `attrs` is present (see
-//!   [`assert_node_equivalent`]'s own `Ref` arm).
+//! - An **unresolved** cross-reference's `children` (the author's own display
+//!   text, `<<id,text>>`/`xref:id[text]`) is a structural fact the builder
+//!   bakes in at build time regardless of resolution (design §4.1's own note on
+//!   the node: "an empty text yields no children ... the fold reads as 'no text
+//!   provided'"). The recorder can only recover what actually got *rendered*,
+//!   and Asciidoctor's own unresolved-xref fallback renders the bracketed
+//!   `[target]` form – never the author's display text – so the recorder's
+//!   `children` for such a node is legitimately empty even when the builder's
+//!   is not. This corpus builds both trees with no resolution pass, so every
+//!   cross-reference is in exactly this state; a resolved reference (out of
+//!   scope here) would not have this gap, since resolution mirrors the
+//!   *destination*, not the text, onto a `children` list the builder already
+//!   populated correctly.
+//! - A footnote **reference** occurrence's own `id` (`footnote:disc[]`) never
+//!   reaches the renderer's params at all once it *resolves* to a number – the
+//!   fold renders just the number, dropping `id` – so the recorder cannot
+//!   recover it, while the builder still carries it as a structural fact (see
+//!   [`assert_node_equivalent`]'s own `Footnote` arm).
+//! - A [`Link`](RefVariant::Link)'s `roles`/`window` fields are not populated
+//!   from its own attribute-list display text (`Ref::attrs`'s own doc comment)
+//!   – the fold reads those straight off `attrs` instead – so they are skipped
+//!   whenever `attrs` is present (see [`assert_node_equivalent`]'s own `Ref`
+//!   arm).
 //!
 //! The corpus reuses (and, for the general-purpose sweep, duplicates
 //! verbatim) the fixture sets already proven — by
