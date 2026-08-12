@@ -41,8 +41,7 @@ use crate::{
 /// - A **formal text carrying an attribute list** (an `=` selecting roles / id
 ///   / title / window) is deferred, exactly as [`link_macro_level`] defers it:
 ///   the attribute list is parsed from a newline-normalized *copy* of the text,
-///   so it cannot ride on the node as an
-///   [`Attrlist`]`<'src>` yet.
+///   so it cannot ride on the node as an [`Attrlist`]`<'src>` yet.
 /// - A **non-verbatim match** – a URL crossing an escaped special
 ///   ([`CharRef`](InlineNode::CharRef)) or a rendered
 ///   [`Styled`](crate::inlines::Styled) span – is deferred exactly as the image
@@ -354,8 +353,7 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 ///   (its `subject`/`body`) or an `=` in a `link:` text (roles / id / title /
 ///   window) – is deferred, because that attribute list is parsed from a
 ///   newline-normalized *copy* of the text (not from `'src`) and so cannot be
-///   carried as an [`Attrlist`]`<'src>` on the
-///   node yet.
+///   carried as an [`Attrlist`]`<'src>` on the node yet.
 /// - **A non-verbatim match** – a macro whose target or text crosses an escaped
 ///   special ([`CharRef`](InlineNode::CharRef)) or a rendered
 ///   [`Styled`](crate::inlines::Styled) span (`link:a&b[]`, `link:x[*bold*]`) –
@@ -1017,6 +1015,27 @@ mod tests {
             "mailto:team@example.org?subject=Hello%20there"
         );
         assert_eq!(link_text_of(reference), "Team");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_mailto_text_with_a_quoted_comma_and_no_subject_is_not_encoded() {
+        // A comma inside a quoted positional value (`"Full, Name"`) is not a
+        // subject/body separator: `extract_attributes_from_text` still parses
+        // only *one* positional attribute, so `nth_attribute(2)` is `None` and
+        // no `?subject=` is appended – the target stays the bare address,
+        // exactly as the golden pipeline leaves it.
+        let source = "mailto:team@example.org[\"Full, Name\"]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "mailto:team@example.org");
+        assert!(!reference.target.contains("subject="));
+        assert_eq!(link_text_of(reference), "Full, Name");
 
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
