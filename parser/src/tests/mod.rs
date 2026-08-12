@@ -9,6 +9,7 @@ pub(crate) mod assert_dom;
 mod block_nesting_depth;
 pub(crate) mod fixtures;
 mod hash;
+mod inline_builder_recorder_parity;
 mod inline_recorder;
 mod inline_substitution_renderer;
 mod origin;
