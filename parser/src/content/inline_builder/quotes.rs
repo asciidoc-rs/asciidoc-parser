@@ -230,7 +230,8 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
 /// too: a synthesized run's bytes have no source counterpart, and design
 /// §3.4.1 leaves recognizing a macro *inside* one for a later increment (see
 /// [`apply_attribute_references`](super::attribute_refs::apply_attribute_references)'s
-/// doc comment) – distinct from [`range_is_verbatim`](super::macros::image::range_is_verbatim),
+/// doc comment) – distinct from
+/// [`range_is_verbatim`](super::macros::image::range_is_verbatim),
 /// which a family needing to *slice* `'src` (a target, an `Attrlist<'src>`)
 /// uses instead and which already rejects a synthesized piece outright.
 pub(in crate::content::inline_builder) fn range_overlaps_synthesized(
@@ -632,8 +633,9 @@ pub(super) fn emit_range<'src>(
 /// falls there), or to the edge [`Bias`] names for a synthesized one, so a
 /// range wholly inside a synthesized run maps to that run's *whole* node span
 /// regardless of exactly where the range's boundaries land in it – the same
-/// coarse policy [`split_attribute_value`](super::attribute_refs::split_attribute_value)
-/// already gives every fragment of an expanded value.
+/// coarse policy `split_attribute_value` (in
+/// [`attribute_refs`](super::attribute_refs)) already gives every fragment of
+/// an expanded value.
 pub(super) fn source_slice<'src>(
     pieces: &[Piece],
     range: std::ops::Range<usize>,
