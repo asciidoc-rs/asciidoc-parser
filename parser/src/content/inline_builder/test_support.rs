@@ -25,10 +25,11 @@ pub(super) fn fold_html(nodes: &[InlineNode<'_>], renderer: &HtmlSubstitutionRen
     super::fold_html(nodes, renderer, &Parser::default())
 }
 
-/// Builds the single-pass tree for `source` with a default parser (the
-/// parser is consulted only for attributed-quote attribute lists).
+/// Builds the single-pass tree for `source` with a default parser and no
+/// block attribute list (the parser is consulted only for attributed-quote
+/// attribute lists and the document-wide `hardbreaks-option` attribute).
 pub(super) fn build_src(source: Span<'_>) -> Vec<InlineNode<'_>> {
-    build(source, &Parser::default())
+    build(source, &Parser::default(), None)
 }
 
 /// Seeds the whole-source [`Text`](InlineNode::Text) node the transducer

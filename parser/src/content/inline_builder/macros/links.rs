@@ -762,7 +762,7 @@ mod tests {
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
-                &build(Span::new(fixture), &parser),
+                &build(Span::new(fixture), &parser, None),
                 &renderer,
                 &parser,
             );
@@ -1043,7 +1043,7 @@ mod tests {
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
-                &build(Span::new(fixture), &parser),
+                &build(Span::new(fixture), &parser, None),
                 &renderer,
                 &parser,
             );
@@ -1274,7 +1274,7 @@ mod tests {
     /// Builds the single-pass tree for `source` against `parser` (unlike
     /// [`build_src`], which always uses its own fresh default parser).
     fn build_with<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
-        build(source, parser)
+        build(source, parser, None)
     }
 
     #[test]

@@ -294,7 +294,7 @@ mod tests {
 
     /// Builds the single-pass tree for `source` under [`experimental_parser`].
     fn build_ui(source: Span<'_>) -> Vec<InlineNode<'_>> {
-        build(source, &experimental_parser())
+        build(source, &experimental_parser(), None)
     }
 
     #[test]
@@ -347,7 +347,7 @@ mod tests {
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
-                &build(Span::new(fixture), &parser),
+                &build(Span::new(fixture), &parser, None),
                 &renderer,
                 &parser,
             );

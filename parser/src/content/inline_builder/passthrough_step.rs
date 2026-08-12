@@ -784,7 +784,7 @@ fn split_old_behavior_attrlist(attrlist: Span<'_>) -> (Span<'_>, bool) {
 /// numbering-order reasons, design §5.2 step 4b(ii) part 4c) – so this
 /// delegates to it directly rather than re-deriving a subset.
 fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
-    super::build(text, parser)
+    super::build(text, parser, None)
 }
 
 /// Runs `text` through the real substitution pipeline under `subs`, returning

@@ -69,7 +69,7 @@
 //!   [`Ui`](InlineNode::Ui), [`Ref`](InlineNode::Ref),
 //!   [`Anchor`](InlineNode::Anchor), or [`IndexTerm`](InlineNode::IndexTerm)
 //!   node. An image node
-//!   captures its own owned [`Attrlist`](crate::attributes::Attrlist) – the step that makes a macro node
+//!   captures its own owned [`Attrlist`] – the step that makes a macro node
 //!   *self-describing*; a link or cross-reference node bakes its computed display
 //!   text into [`Text`](InlineNode::Text) children so its fold needs no
 //!   build-time state. Each family reuses the shared pattern the string step
@@ -140,7 +140,12 @@
 //!   comment), except a `Stem` node already has a single `value` field to hold
 //!   the result, so no richer subtree is needed.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
-//!   into a [`LineBreak`](InlineNode::LineBreak) leaf.
+//!   into a [`LineBreak`](InlineNode::LineBreak) leaf. Under the block-wide
+//!   `hardbreaks` option – the enclosing block's own `attrlist`, or the
+//!   document's `hardbreaks-option` attribute – it instead turns *every* line
+//!   ending into a break, stripping a redundant trailing ` +` rather than
+//!   doubling it, mirroring [`apply_post_replacements`]'s own string-pipeline
+//!   counterpart exactly.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
 //!   through an
 //!   [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
@@ -236,7 +241,7 @@ use quotes::apply_quotes;
 use special_chars::apply_special_characters;
 use stem_step::apply_stem;
 
-use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
+use crate::{Parser, Span, attributes::Attrlist, inlines::InlineNode, strings::CowStr};
 
 /// Builds the inline tree for `source` in a single forward pass.
 ///
@@ -245,10 +250,17 @@ use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 /// text to process, so a caller controls precisely what is built; reconciling
 /// with a block's line filtering and joining is a later increment's concern.
 ///
-/// `parser` is consulted only to parse the attribute list of an attributed
-/// quote (`[.role]#…#`); a caller with no document context can pass a default
-/// [`Parser`].
-pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
+/// `parser` is consulted to parse the attribute list of an attributed quote
+/// (`[.role]#…#`) and to read the document-wide `hardbreaks-option`
+/// attribute; a caller with no document context can pass a default
+/// [`Parser`]. `attrlist` is the enclosing block's own attribute list (for
+/// its `hardbreaks` option, [`apply_post_replacements`]'s only consumer of
+/// it today); a caller with no block context can pass `None`.
+pub(crate) fn build<'src>(
+    source: Span<'src>,
+    parser: &Parser,
+    attrlist: Option<&Attrlist<'src>>,
+) -> Vec<InlineNode<'src>> {
     let seed = vec![InlineNode::Text {
         value: CowStr::from(source.data()),
         location: source,
@@ -285,7 +297,7 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
     // `apply_macros` as an ordinary level pass.
     let nodes = apply_footnotes(nodes, source, parser);
 
-    apply_post_replacements(nodes, source)
+    apply_post_replacements(nodes, source, parser, attrlist)
 }
 
 /// A whole-pipeline differential corpus: [`build`] against the *real*,
@@ -316,8 +328,7 @@ pub(crate) fn build<'src>(source: Span<'src>, parser: &Parser) -> Vec<InlineNode
 /// inside the vocabulary [`build`] already covers – it avoids the forms still
 /// documented as deferred elsewhere in this module (e.g. an attribute value
 /// that itself embeds a construct `CharacterReplacements`/`Macros` would
-/// recognize, or the `hardbreaks` option, which needs the block attribute
-/// list `build` does not yet take).
+/// recognize).
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -341,7 +352,7 @@ mod tests {
     /// Builds and folds the single-pass tree for `source` – the same [`build`]
     /// a real cutover would call – through the built-in HTML renderer.
     fn built(source: &str, parser: &Parser) -> String {
-        let nodes = build(Span::new(source), parser);
+        let nodes = build(Span::new(source), parser, None);
         fold_html(&nodes, &HtmlSubstitutionRenderer {}, parser)
     }
 
@@ -444,6 +455,22 @@ mod tests {
             "First footnote:[a {product} note] then footnote:[b unrelated note], \
              and finally <<see-also>>.",
             with_product,
+        );
+
+        // The document-wide `hardbreaks-option` attribute breaking every
+        // line, one of which carries a quoted span and an attribute
+        // reference.
+        assert_parity_with(
+            "Line one uses *{product}*.\nLine two is plain.\nLine three too.",
+            || {
+                Parser::default()
+                    .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+                    .with_intrinsic_attribute_bool(
+                        "hardbreaks-option",
+                        true,
+                        ModificationContext::Anywhere,
+                    )
+            },
         );
     }
 }

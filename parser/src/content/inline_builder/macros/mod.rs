@@ -345,7 +345,7 @@ mod tests {
         let source =
             "image:a.png[] link:b.html[B] https://c.example [[anchor-id]] xref:anchor-id[]";
         let parser = Parser::default().with_catalog_assets(true);
-        let nodes = build(Span::new(source), &parser);
+        let nodes = build(Span::new(source), &parser, None);
 
         apply_macro_side_effects(&nodes, &parser, Span::new(source), false);
 
@@ -376,7 +376,7 @@ mod tests {
         let source = "image:x.png[alt,link=javascript:alert(1)] then [[dup]] and [[dup]]";
 
         let builder_parser = Parser::default().with_catalog_assets(true);
-        let nodes = build(Span::new(source), &builder_parser);
+        let nodes = build(Span::new(source), &builder_parser, None);
         apply_macro_side_effects(&nodes, &builder_parser, Span::new(source), false);
 
         let golden_parser = Parser::default().with_catalog_assets(true);

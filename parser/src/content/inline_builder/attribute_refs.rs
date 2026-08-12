@@ -541,7 +541,7 @@ mod tests {
                 );
 
             let folded = fold_html(
-                &build(Span::new(fixture), &parser),
+                &build(Span::new(fixture), &parser, None),
                 &HtmlSubstitutionRenderer {},
             );
 
@@ -560,7 +560,7 @@ mod tests {
             let parser = parser_with_attribute(name, value);
 
             let folded = fold_html(
-                &build(Span::new(fixture), &parser),
+                &build(Span::new(fixture), &parser, None),
                 &HtmlSubstitutionRenderer {},
             );
 
@@ -579,7 +579,7 @@ mod tests {
 
         for fixture in ["before{flag-on}after", "before{flag-off}after"] {
             let folded = fold_html(
-                &build(Span::new(fixture), &bool_parser),
+                &build(Span::new(fixture), &bool_parser, None),
                 &HtmlSubstitutionRenderer {},
             );
 
@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn a_reference_to_a_set_attribute_expands_to_a_text_node() {
         let parser = parser_with_attribute("greeting", "Hello");
-        let nodes = build(Span::new("say {greeting}!"), &parser);
+        let nodes = build(Span::new("say {greeting}!"), &parser, None);
 
         // [Text("say "), Text("Hello") (synthesized), Text("!")].
         assert_eq!(nodes.len(), 3);
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn a_reference_to_a_missing_attribute_stays_literal() {
-        let nodes = build(Span::new("{undefined-thing}"), &Parser::default());
+        let nodes = build(Span::new("{undefined-thing}"), &Parser::default(), None);
 
         assert_eq!(nodes.len(), 1);
         assert_text(&nodes[0], "{undefined-thing}", 1, 1);
@@ -634,7 +634,7 @@ mod tests {
             ("\\{name\\}", "{name}"),
             ("\\{counter:x}", "{counter:x}"),
         ] {
-            let nodes = build(Span::new(source), &Parser::default());
+            let nodes = build(Span::new(source), &Parser::default(), None);
 
             assert!(
                 nodes.iter().all(|n| matches!(n, InlineNode::Text { .. })),
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn a_reference_expanding_to_a_special_character_becomes_raw() {
         let parser = parser_with_attribute("tag", "<b>");
-        let nodes = build(Span::new("{tag}"), &parser);
+        let nodes = build(Span::new("{tag}"), &parser, None);
 
         // The expansion splits into `Raw("<")`, `Text("b")`, `Raw(">")` –
         // design §3.4.1's mix of node kinds, since `specialcharacters` has
@@ -689,7 +689,7 @@ mod tests {
         // this needs `build_match_string` itself to look inside a synthesized
         // run, tracked as a follow-up to this increment.
         let parser = parser_with_attribute("note", "(C) 2024");
-        let nodes = build(Span::new("{note}"), &parser);
+        let nodes = build(Span::new("{note}"), &parser, None);
 
         assert!(
             nodes
@@ -708,7 +708,7 @@ mod tests {
         // `a_replacement_inside_an_expanded_value_is_a_documented_divergence`,
         // for the macros step.
         let parser = parser_with_attribute("linktext", "link:https://example.org[Example]");
-        let nodes = build(Span::new("see {linktext} now"), &parser);
+        let nodes = build(Span::new("see {linktext} now"), &parser, None);
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
@@ -721,7 +721,7 @@ mod tests {
     #[test]
     fn a_reference_inside_a_span_is_recognized() {
         let parser = parser_with_attribute("greeting", "Hello");
-        let nodes = build(Span::new("*{greeting}*"), &parser);
+        let nodes = build(Span::new("*{greeting}*"), &parser, None);
 
         assert_eq!(nodes.len(), 1);
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
@@ -772,7 +772,7 @@ mod tests {
 
         for fixture in fixtures {
             let folded = fold_html(
-                &build(Span::new(fixture), &Parser::default()),
+                &build(Span::new(fixture), &Parser::default(), None),
                 &HtmlSubstitutionRenderer {},
             );
 
@@ -786,7 +786,11 @@ mod tests {
 
     #[test]
     fn a_counter_directive_advances_and_displays_the_new_value() {
-        let nodes = build(Span::new("{counter:n}-{counter:n}"), &Parser::default());
+        let nodes = build(
+            Span::new("{counter:n}-{counter:n}"),
+            &Parser::default(),
+            None,
+        );
 
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
@@ -797,7 +801,11 @@ mod tests {
 
     #[test]
     fn a_counter2_directive_advances_without_displaying() {
-        let nodes = build(Span::new("{counter2:n}{counter:n}"), &Parser::default());
+        let nodes = build(
+            Span::new("{counter2:n}{counter:n}"),
+            &Parser::default(),
+            None,
+        );
 
         // `counter2:n` advances the counter to `1` and splices no node;
         // `counter:n` then advances it again and displays `2`.
@@ -811,7 +819,7 @@ mod tests {
 
     #[test]
     fn a_counter_directive_with_a_seed_starts_from_it() {
-        let nodes = build(Span::new("{counter:n:9}"), &Parser::default());
+        let nodes = build(Span::new("{counter:n:9}"), &Parser::default(), None);
 
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
@@ -830,7 +838,11 @@ mod tests {
         // the source – reversing the numbering. `resolve_counters` fixes this
         // by resolving every directive, across the whole tree, in one
         // document-order pass first.
-        let nodes = build(Span::new("{counter:n} *{counter:n}*"), &Parser::default());
+        let nodes = build(
+            Span::new("{counter:n} *{counter:n}*"),
+            &Parser::default(),
+            None,
+        );
 
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
@@ -840,7 +852,11 @@ mod tests {
 
         // The reverse arrangement (the span comes first in the source) must
         // stay correct too.
-        let nodes = build(Span::new("*{counter:n}* {counter:n}"), &Parser::default());
+        let nodes = build(
+            Span::new("*{counter:n}* {counter:n}"),
+            &Parser::default(),
+            None,
+        );
 
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
@@ -860,7 +876,7 @@ mod tests {
         );
 
         let source = "before {undefined-thing} after";
-        let nodes = build(Span::new(source), &parser);
+        let nodes = build(Span::new(source), &parser, None);
 
         // Left unrecognized: the reference stays literal rather than being
         // dropped.
@@ -883,7 +899,7 @@ mod tests {
         );
 
         let source = "a line with {undefined-thing} in it";
-        let nodes = build(Span::new(source), &parser);
+        let nodes = build(Span::new(source), &parser, None);
 
         // Left unrecognized: the whole line is not dropped (this step has no
         // line-granularity concept; the string pipeline's line-drop mode is
