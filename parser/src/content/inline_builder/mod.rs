@@ -76,7 +76,7 @@
 //!   text into [`Text`](InlineNode::Text) children so its fold needs no
 //!   build-time state. A link whose display text carried its own attribute list
 //!   (`link:x[text,role=hl]`) likewise carries the parsed
-//!   [`Attrlist`](crate::attributes::Attrlist) on [`Ref::attrs`](crate::inlines::Ref::attrs)
+//!   [`Attrlist`] on [`Ref::attrs`](crate::inlines::Ref::attrs)
 //!   – needed because `render_link` reads more out of it than `roles`/`window`
 //!   alone (an `id`, a `title`, the `nofollow`/`noopener` options) – recognized
 //!   whenever that text has no embedded newline, so it can be sliced honestly

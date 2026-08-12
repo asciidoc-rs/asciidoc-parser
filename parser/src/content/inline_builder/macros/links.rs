@@ -42,7 +42,7 @@ use crate::{
 ///   / title / window) is deferred, exactly as [`link_macro_level`] defers it:
 ///   the attribute list is parsed from a newline-normalized *copy* of the text,
 ///   so it cannot ride on the node as an
-///   [`Attrlist`](crate::attributes::Attrlist)`<'src>` yet.
+///   [`Attrlist`]`<'src>` yet.
 /// - A **non-verbatim match** – a URL crossing an escaped special
 ///   ([`CharRef`](InlineNode::CharRef)) or a rendered
 ///   [`Styled`](crate::inlines::Styled) span – is deferred exactly as the image
@@ -354,7 +354,7 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 ///   (its `subject`/`body`) or an `=` in a `link:` text (roles / id / title /
 ///   window) – is deferred, because that attribute list is parsed from a
 ///   newline-normalized *copy* of the text (not from `'src`) and so cannot be
-///   carried as an [`Attrlist`](crate::attributes::Attrlist)`<'src>` on the
+///   carried as an [`Attrlist`]`<'src>` on the
 ///   node yet.
 /// - **A non-verbatim match** – a macro whose target or text crosses an escaped
 ///   special ([`CharRef`](InlineNode::CharRef)) or a rendered
