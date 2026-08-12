@@ -22,7 +22,12 @@
 //! these refinements:
 //!
 //! - [`build`] seeds a single borrowed whole-source [`Text`](InlineNode::Text)
-//!   node and threads it through the steps.
+//!   node and threads it through the steps; [`build_from_value`] generalizes
+//!   the seed to the `(value, location)` pair [`Content`](crate::content::Content)
+//!   itself is built from, so a genuinely multi-line, filtered block – whose
+//!   joined text has no single contiguous `'src` slice – can be processed
+//!   too, with every node it produces falling back to `location` as its
+//!   coarse span (design §4.4).
 //! - [`apply_special_characters`] splits each `Text` run on `<`/`>`/`&` into
 //!   precise-span [`Text`](InlineNode::Text) and
 //!   [`CharRef`](InlineNode::CharRef) nodes.
@@ -263,8 +268,13 @@ use crate::{Parser, Span, attributes::Attrlist, inlines::InlineNode, strings::Co
 ///
 /// The tree is seeded as one borrowed whole-source [`Text`](InlineNode::Text)
 /// node and refined by each substitution step in turn. `source` is the exact
-/// text to process, so a caller controls precisely what is built; reconciling
-/// with a block's line filtering and joining is a later increment's concern.
+/// text to process, so a caller controls precisely what is built.
+///
+/// This is the common-case wrapper around [`build_from_value`] for a `source`
+/// that is itself the verbatim seed (the overwhelming majority of content,
+/// per [`Content::from_filtered_lines`](crate::content::Content::from_filtered_lines)'s
+/// own single-surviving-line fast path); see `build_from_value` for the
+/// filtered/joined case a real block's content can also produce.
 ///
 /// `parser` is consulted to parse the attribute list of an attributed quote
 /// (`[.role]#…#`) and to read the document-wide `hardbreaks-option`
@@ -277,24 +287,68 @@ pub(crate) fn build<'src>(
     parser: &Parser,
     attrlist: Option<&Attrlist<'src>>,
 ) -> Vec<InlineNode<'src>> {
-    let seed = vec![InlineNode::Text {
-        value: CowStr::from(source.data()),
-        location: source,
-    }];
+    build_from_value(CowStr::from(source.data()), source, parser, attrlist)
+}
+
+/// Builds the inline tree from an already-computed content **value**,
+/// anchored at `location` — the single-pass counterpart of the `(value,
+/// location)` pair [`Content`](crate::content::Content) itself is built from
+/// (see [`Content::from_filtered`](crate::content::Content::from_filtered) /
+/// [`Content::from_filtered_lines`](crate::content::Content::from_filtered_lines)).
+///
+/// `location` seeds every downstream construct's coarse-fallback span (design
+/// §4.4) and is threaded through as each step's own `root`/`source`
+/// parameter, so it must be a `Span` that contains — and is used consistently
+/// with — the source bytes `value` was ultimately derived from.
+///
+/// Two cases fall out of the relationship between `value` and `location`,
+/// exactly mirroring the verbatim/synthesized split
+/// [`apply_special_characters`](special_chars::apply_special_characters)'s
+/// own [`split_text`](special_chars) already makes for a single node deeper
+/// in the tree:
+///
+/// - **`value` is exactly `location.data()`** (the common case — a plain
+///   paragraph, or any content
+///   [`from_filtered_lines`](crate::content::Content::from_filtered_lines)'s
+///   single-surviving-line fast path borrowed unmodified): every node built
+///   from it gets an honest, precise `'src` span, sliced straight from
+///   `location` (issue #944).
+/// - **`value` differs from `location.data()`** (a multi-line block whose
+///   surviving lines were joined with `\n`, or any other filtered value with
+///   no single contiguous `'src` slice of its own): the seed is *synthesized*
+///   — every node the pipeline builds from it still gets a real `InlineNode`,
+///   but one whose `location` coarsely falls back to the whole of `location`
+///   (design §4.4's documented migration-stage policy), the same fallback an
+///   attribute-reference expansion or a `counter` directive's resolved value
+///   already receives. This is what lets the single-pass builder process a
+///   real, multi-line, filtered block's content — not just a single
+///   contiguous source span — while every already-landed step's shared
+///   [`build_match_string`](quotes::build_match_string) /
+///   [`source_slice`](quotes::source_slice) machinery handles the fallback
+///   with no further change: it already treats *any* non-verbatim `Text`
+///   node this way, regardless of where in the tree — or how early — that
+///   node was produced.
+pub(crate) fn build_from_value<'src>(
+    value: CowStr<'src>,
+    location: Span<'src>,
+    parser: &Parser,
+    attrlist: Option<&Attrlist<'src>>,
+) -> Vec<InlineNode<'src>> {
+    let seed = vec![InlineNode::Text { value, location }];
 
     // Passthroughs are extracted before every other step (mirroring
     // `Passthroughs::extract_from`, which the string pipeline runs ahead of
     // its own step loop), so their content is never touched by
     // specialcharacters, quotes, replacements, or macros.
-    let nodes = apply_passthroughs(seed, source, parser);
+    let nodes = apply_passthroughs(seed, location, parser);
 
     // Inline STEM is an implicit passthrough too, extracted last (mirroring
     // `Passthroughs::extract_from`'s own ordering) so a passthrough
     // placeholder nested inside a STEM expression survives.
-    let nodes = apply_stem(nodes, source, parser);
+    let nodes = apply_stem(nodes, location, parser);
 
     let nodes = apply_special_characters(nodes);
-    let nodes = apply_quotes(nodes, source, parser);
+    let nodes = apply_quotes(nodes, location, parser);
 
     // Attribute references sit here in the *normal* effective order
     // (specialcharacters → quotes → attributes → replacements → macros,
@@ -302,18 +356,18 @@ pub(crate) fn build<'src>(
     // and quoted spans are already `Styled` nodes, and whatever this step
     // splices in is exactly what `apply_character_replacements` and
     // `apply_macros` – still ahead – see and refine.
-    let nodes = apply_attribute_references(nodes, source, parser);
+    let nodes = apply_attribute_references(nodes, location, parser);
 
-    let nodes = apply_character_replacements(nodes, source);
-    let nodes = apply_macros(nodes, source, parser);
+    let nodes = apply_character_replacements(nodes, location);
+    let nodes = apply_macros(nodes, location, parser);
 
     // Footnotes are their own step, run once over the *whole* tree after
     // every other macro family has been resolved at every level – see
     // `apply_footnotes`'s doc comment for why this cannot be folded into
     // `apply_macros` as an ordinary level pass.
-    let nodes = apply_footnotes(nodes, source, parser);
+    let nodes = apply_footnotes(nodes, location, parser);
 
-    apply_post_replacements(nodes, source, parser, attrlist)
+    apply_post_replacements(nodes, location, parser, attrlist)
 }
 
 /// A whole-pipeline differential corpus: [`build`] against the *real*,
@@ -349,11 +403,12 @@ pub(crate) fn build<'src>(
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use super::build;
+    use super::{build, build_from_value};
     use crate::{
         Parser, Span,
         content::{Content, SubstitutionGroup, inline_builder::fold_html},
         parser::{HtmlSubstitutionRenderer, ModificationContext},
+        strings::CowStr,
     };
 
     /// Runs `source` through the real, public `SubstitutionGroup::Normal`
@@ -602,5 +657,114 @@ mod tests {
                     )
             },
         );
+    }
+
+    /// [`build_from_value`] against the real pipeline, seeded from a
+    /// **synthesized** value – one that differs from the `location` span it
+    /// is anchored at, the shape `Content::from_filtered_lines` produces for
+    /// a genuinely multi-line block once per-line filtering (leading-indent
+    /// stripping, in these fixtures) leaves the joined text with no single
+    /// contiguous `'src` slice of its own.
+    ///
+    /// Each fixture pairs an indented multi-line `source` (the `location`,
+    /// standing in for the block's real, unfiltered span) with the
+    /// corresponding de-indented `filtered` text (the `value`, standing in
+    /// for `Content::rendered` after per-line filtering). The golden
+    /// comparison is against `filtered` taken through the real pipeline as
+    /// ordinary contiguous source – exactly the text a real `Content` would
+    /// hold pre-substitution – since that is the logical content being
+    /// substituted regardless of which span it is anchored at. This is the
+    /// same kind of blocker-audit `fold_matches_the_real_pipeline_across_a_broad_general_purpose_sweep`
+    /// already caught once for `hardbreaks`: it exercises every step through
+    /// [`build_from_value`]'s synthesized-seed path, at the tree's *root*
+    /// rather than a nested spliced value. A macro construct that needs its
+    /// own verbatim `'src` slice (a link/xref/image target or id) is *not*
+    /// exercised here – see
+    /// `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
+    /// below for that documented boundary.
+    #[test]
+    fn fold_matches_the_real_pipeline_when_seeded_from_a_synthesized_value() {
+        let fixtures = [
+            ("  plain text", "plain text"),
+            ("  a < b && c > d", "a < b && c > d"),
+            ("  *bold* and _emphasis_", "*bold* and _emphasis_"),
+            ("  line one\n  *bold* line two", "line one\n*bold* line two"),
+            (
+                "  a (C) mark\n  and an em -- dash",
+                "a (C) mark\nand an em -- dash",
+            ),
+            (
+                "  A claim.footnote:[the *evidence*]\n  continues here.",
+                "A claim.footnote:[the *evidence*]\ncontinues here.",
+            ),
+            ("  first line +\n  second line", "first line +\nsecond line"),
+        ];
+
+        for (source, filtered) in fixtures {
+            let golden_parser = Parser::default();
+            let built_parser = Parser::default();
+
+            let golden = golden(filtered, &golden_parser);
+
+            let nodes = build_from_value(
+                CowStr::from(filtered.to_string()),
+                Span::new(source),
+                &built_parser,
+                None,
+            );
+            let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+
+            assert_eq!(
+                built, golden,
+                "fold diverged from the real pipeline for synthesized value {filtered:?} \
+                 (location {source:?})"
+            );
+        }
+    }
+
+    /// A documented divergence, not a bug: a macro family whose recognition
+    /// needs an honest `'src` slice for its own target/id (a link, image, or
+    /// cross-reference) is left unrecognized when the *whole* seed is
+    /// synthesized – the same
+    /// [`range_is_verbatim`](macros::image::range_is_verbatim) boundary that
+    /// already defers a macro *nested inside* an attribute expansion's
+    /// spliced value (see [`apply_attribute_references`]'s own doc comment),
+    /// now reached at the tree's root instead of a nested splice.
+    /// [`build_from_value`] does not lift this boundary: it only unblocks a
+    /// synthesized (filtered/joined multi-line) seed for the steps that
+    /// never needed a verbatim slice in the first place (quotes,
+    /// specialcharacters, attribute references, character replacements,
+    /// post-replacement, and a macro family – like a bare `footnote:[…]` –
+    /// whose own content is captured as children rather than a literal
+    /// value). Lifting it for link/image/xref/anchor/index-term targets, so a
+    /// real multi-line block carrying one of those still folds identically
+    /// through `build_from_value`, remains a later increment's job.
+    #[test]
+    fn a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized() {
+        let filtered = "see <<target>> here";
+        let source = "  see <<target>> here";
+
+        let golden_parser = Parser::default();
+        let golden = golden(filtered, &golden_parser);
+        assert!(
+            golden.contains("href=\"#target\""),
+            "golden fixture stopped recognizing the xref: {golden:?}"
+        );
+
+        let built_parser = Parser::default();
+        let nodes = build_from_value(
+            CowStr::from(filtered.to_string()),
+            Span::new(source),
+            &built_parser,
+            None,
+        );
+        let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+
+        assert_ne!(
+            built, golden,
+            "expected the documented divergence to still reproduce; the boundary may have \
+             been lifted – if so, fold this fixture back into the parity sweep above"
+        );
+        assert_eq!(built, "see &lt;&lt;target&gt;&gt; here");
     }
 }
