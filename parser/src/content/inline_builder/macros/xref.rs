@@ -235,6 +235,7 @@ fn build_xref_node<'src>(
         resolved: None,
         derived,
         xrefstyle,
+        attrs: None,
         location,
     }))
 }
@@ -465,6 +466,7 @@ fn build_xref_shorthand_node<'src>(
         resolved: None,
         derived,
         xrefstyle: None,
+        attrs: None,
         location,
     }))
 }
@@ -946,6 +948,27 @@ mod tests {
 
         // The string pipeline, by contrast, *does* build a reference here.
         assert!(golden_xref(source).contains("<a href"));
+    }
+
+    #[test]
+    fn an_xref_macro_display_text_over_a_rendered_span_is_a_documented_divergence() {
+        // The macro form's own version of the boundary
+        // `an_xref_shorthand_over_a_rendered_span_is_a_documented_divergence`
+        // pins for the shorthand: a display text containing a quoted span
+        // (`*bold*`) has already become a `Styled` node by the time macros
+        // run, which the node's single `Text` child cannot absorb.
+        let source = "xref:sec[with *bold* reftext]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a display text crossing a rendered span must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a reference here,
+        // with the span rendered inside the anchor text.
+        assert!(golden_xref(source).contains("<a href"));
+        assert!(golden_xref(source).contains("<strong>bold</strong>"));
     }
 
     #[test]

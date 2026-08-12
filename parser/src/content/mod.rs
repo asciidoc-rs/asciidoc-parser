@@ -20,8 +20,9 @@ pub(crate) use macros::{
     INLINE_ANCHOR, INLINE_FOOTNOTE_MACRO, INLINE_IMAGE_MACRO, INLINE_INDEXTERM,
     INLINE_KBD_BTN_MACRO, INLINE_LINK, INLINE_LINK_MACRO, INLINE_MENU_MACRO, INLINE_XREF,
     NormalizedCaps, URI_SNIFF, apply_macros_with_leading_anchor_registered, basename,
-    document_xrefstyle, normalize_footnote_text, normalize_index_text,
-    normalize_text_lf_escaped_bracket, split_kbd_keys, strip_see_and_seealso,
+    document_xrefstyle, encode_uri_component, extract_attributes_from_text,
+    normalize_footnote_text, normalize_index_text, normalize_text_lf_escaped_bracket,
+    split_kbd_keys, strip_see_and_seealso,
 };
 
 mod xref_target;

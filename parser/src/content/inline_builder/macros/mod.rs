@@ -316,6 +316,7 @@ mod tests {
             resolved: None,
             derived: None,
             xrefstyle: None,
+            attrs: None,
             location: root,
         });
 
