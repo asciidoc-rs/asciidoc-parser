@@ -312,9 +312,11 @@ fn fold_ui(
 /// the string pipeline's macros step calls, reconstructing the
 /// [`LinkRenderParams`] from the node: the display text is the fold of the
 /// children, the extra roles (`bare`) ride on the node's `roles`, and the
-/// target/window come straight off the node. The attribute list is empty
-/// because this increment recognizes only the attribute-list-free link forms
-/// (see `link_macro_level`).
+/// target/window come straight off the node. The attribute list is the
+/// node's own [`Ref::attrs`] when its display text carried one (an `id`, a
+/// `title`, a `role=`/`window=`/`nofollow`/`noopener` — see that field's own
+/// docs for why `render_link` needs the real list, not just `roles`/`window`),
+/// or an empty one otherwise.
 fn fold_link(
     reference: &Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
@@ -324,16 +326,25 @@ fn fold_link(
     let mut link_text = String::new();
     fold_into_html(&reference.children, renderer, parser, &mut link_text);
 
-    // A link built by this increment carries no attribute list; fold through an
-    // empty one, sliced (empty) from the node's own location so its lifetime
-    // matches.
-    let attrlist = Attrlist::parse(
-        reference.location.slice(0..0),
-        parser,
-        AttrlistContext::Inline,
-    )
-    .item
-    .item;
+    // Sliced (empty) from the node's own location so its lifetime matches when
+    // no attribute list was parsed.
+    let empty_attrlist;
+
+    let attrlist: &Attrlist<'_> = match &reference.attrs {
+        Some(attrs) => attrs,
+
+        None => {
+            empty_attrlist = Attrlist::parse(
+                reference.location.slice(0..0),
+                parser,
+                AttrlistContext::Inline,
+            )
+            .item
+            .item;
+
+            &empty_attrlist
+        }
+    };
 
     let extra_roles: Vec<&str> = reference.roles.iter().map(|r| r.as_ref()).collect();
 
@@ -342,7 +353,7 @@ fn fold_link(
         link_text,
         extra_roles,
         window: reference.window.as_deref(),
-        attrlist: &attrlist,
+        attrlist,
         parser,
     };
 
@@ -659,6 +670,7 @@ mod tests {
             }),
             derived: None,
             xrefstyle,
+            attrs: None,
             location: Span::new(""),
         })
     }

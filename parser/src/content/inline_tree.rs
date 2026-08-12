@@ -874,6 +874,7 @@ fn node_of<'src>(rec: &Rec, span: Span<'src>) -> InlineNode<'src> {
                 resolved: None,
                 derived: None,
                 xrefstyle: None,
+                attrs: None,
                 location: span,
             }),
 
@@ -927,6 +928,7 @@ fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
             resolved: None,
             derived: None,
             xrefstyle: None,
+            attrs: None,
             location: span,
         }),
 

@@ -1142,7 +1142,7 @@ impl Replacer for InlineLinkReplacer<'_> {
             link_text = link_text.replace("\\]", "]");
 
             if link_text.contains('=') {
-                let (lt, attrs) = extract_attributes_from_text(&span_for_attrlist, self.0, None);
+                let (lt, attrs) = extract_attributes_from_text(span_for_attrlist, self.0, None);
 
                 // Only adopt the parsed result when a real named attribute split
                 // off (the positional value differs from the whole text).
@@ -1307,7 +1307,7 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
             if let Some(_mailto) = mailto {
                 if link_text.contains(',') {
                     let (lt, attrs) =
-                        extract_attributes_from_text(&span_for_attrlist, self.parser, None);
+                        extract_attributes_from_text(span_for_attrlist, self.parser, None);
 
                     link_text = lt;
 
@@ -1329,7 +1329,7 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
                 }
             } else if link_text.contains('=') {
                 let (lt, attrs) =
-                    extract_attributes_from_text(&span_for_attrlist, self.parser, None);
+                    extract_attributes_from_text(span_for_attrlist, self.parser, None);
                 link_text = lt;
 
                 attrlist = Some(attrs);
@@ -1389,12 +1389,18 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
 ///
 /// Precondition: Any new-line characters (`\n`) must be replaced with spaces
 /// prior to calling this function.
-fn extract_attributes_from_text<'src>(
-    text: &'src Span<'src>,
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) can parse a link's
+/// attribute-list-bearing display text with the *exact* same interpretation
+/// this string step uses, changing only the recognition *sink* (a node field
+/// instead of a `LinkRenderParams::attrlist` borrow).
+pub(crate) fn extract_attributes_from_text<'src>(
+    text: Span<'src>,
     parser: &Parser,
     default_text: Option<&str>,
 ) -> (String, Attrlist<'src>) {
-    let attrlist_maw = Attrlist::parse(*text, parser, AttrlistContext::Inline);
+    let attrlist_maw = Attrlist::parse(text, parser, AttrlistContext::Inline);
     let attrs = attrlist_maw.item.item;
 
     if let Some(resolved_text) = attrs.nth_attribute(1) {
@@ -1455,7 +1461,11 @@ const CGI_ESCAPE_SET: &AsciiSet = &CONTROLS
     .add(b'|')
     .add(b'}');
 
-fn encode_uri_component(s: &str) -> String {
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) can encode a `mailto:`
+/// subject/body into the target exactly as this string step does when
+/// recognizing a `mailto:` macro's own comma-delimited attribute-list text.
+pub(crate) fn encode_uri_component(s: &str) -> String {
     // First escape with percent-encoding.
     let encoded = utf8_percent_encode(s, CGI_ESCAPE_SET).to_string();
 

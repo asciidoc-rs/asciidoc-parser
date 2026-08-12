@@ -3,8 +3,10 @@
 use super::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level};
 use crate::{
     Parser, Span,
+    attributes::Attrlist,
     content::{
-        INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
+        INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF, encode_uri_component,
+        extract_attributes_from_text,
         inline_builder::quotes::{Piece, build_match_string, source_slice},
     },
     inlines::{InlineNode, Ref, RefVariant},
@@ -228,15 +230,40 @@ fn build_inline_link_node<'src>(
 
     let mut window: Option<CowStr<'src>> = None;
     let mut bare = false;
+    let mut attrs: Option<Attrlist<'src>> = None;
 
     let link_text = if let Some(mut link_text) = link_text {
         link_text = link_text.replace("\\]", "]");
 
-        // A text carrying an `=` splits into an attribute list, parsed from a
-        // newline-normalized copy of the text (not from `'src`); defer the whole
-        // macro until the node can carry an `Attrlist<'src>`.
+        // A text carrying an `=` splits into an attribute list. `InlineLink
+        // Replacer` parses it from a newline-normalized *copy* of the text;
+        // when the text has no embedded newline that copy is byte-identical
+        // to the bracketed text's own `'src` slice, so the node can carry the
+        // real, honestly-borrowed `Attrlist<'src>` `render_link` needs
+        // (`Ref::attrs`'s own field docs explain why `roles`/`window` alone
+        // are not enough). A text that *does* embed a newline still needs a
+        // synthesized (owned) copy the node cannot hold yet, so that one form
+        // remains deferred.
         if link_text.contains('=') {
-            return None;
+            #[allow(clippy::unwrap_used)]
+            let range = text_location_range.clone().unwrap();
+            let text_span = source_slice(pieces, range, root);
+
+            if text_span.data().contains('\n') {
+                return None;
+            }
+
+            let (lt, parsed) = extract_attributes_from_text(text_span, parser, None);
+
+            // Mirrors `InlineLinkReplacer`'s own guard: only adopt the parsed
+            // result when a real named attribute actually split off from the
+            // text (otherwise the `=` was incidental and `extract_attributes_
+            // from_text` already returned the text unchanged with an empty
+            // attrlist, matching this fallthrough).
+            if lt != text_span.data() {
+                link_text = lt.replace("\\\"", "\"");
+                attrs = Some(parsed);
+            }
         }
 
         if link_text.ends_with('^') {
@@ -277,6 +304,7 @@ fn build_inline_link_node<'src>(
         children,
         roles,
         window,
+        attrs,
         resolved: None,
         derived: None,
         xrefstyle: None,
@@ -447,7 +475,7 @@ pub(super) fn build_link_node<'src>(
     let is_mailto = caps.get(1).is_some();
     let target_str = caps.get(3).map_or("", |m| m.as_str());
 
-    let target = if is_mailto {
+    let mut target = if is_mailto {
         format!("mailto:{target_str}")
     } else {
         target_str.to_string()
@@ -462,21 +490,65 @@ pub(super) fn build_link_node<'src>(
     }
 
     let mut window: Option<CowStr<'src>> = None;
+    let mut attrs: Option<Attrlist<'src>> = None;
 
-    let mut link_text = caps
-        .get(5)
-        .map_or_else(String::new, |m| m.as_str().to_string());
+    let raw_text_m = caps.get(5);
+    let mut link_text = raw_text_m.map_or_else(String::new, |m| m.as_str().to_string());
 
     if !link_text.is_empty() {
-        // An attribute list embedded in the text (`mailto:` subject/body via a
-        // comma, or `link:` roles/id/title via an `=`) is parsed from a
-        // newline-normalized copy of the text, so it cannot be carried as an
-        // `Attrlist<'src>` on the node yet; defer the whole macro.
-        if (is_mailto && link_text.contains(',')) || (!is_mailto && link_text.contains('=')) {
-            return None;
-        }
-
         link_text = link_text.replace("\\]", "]");
+
+        // An attribute list embedded in the text (`mailto:` subject/body via a
+        // comma, or `link:` roles/id/title via an `=`) is parsed by
+        // `InlineLinkMacroReplacer` from a newline-normalized *copy* of the
+        // (pre-`\]`-unescape) bracketed text; when that text has no embedded
+        // newline the copy is byte-identical to the bracket's own `'src`
+        // slice, so the node can carry the real `Attrlist<'src>` `render_link`
+        // needs (`Ref::attrs`'s own field docs). A text that *does* embed a
+        // newline still needs a synthesized copy the node cannot hold yet, so
+        // that one form remains deferred.
+        if is_mailto {
+            if link_text.contains(',') {
+                #[allow(clippy::unwrap_used)]
+                let m = raw_text_m.unwrap();
+                let text_span = source_slice(pieces, m.start()..m.end(), root);
+
+                if text_span.data().contains('\n') {
+                    return None;
+                }
+
+                let (lt, parsed) = extract_attributes_from_text(text_span, parser, None);
+                link_text = lt;
+
+                if let Some(target_attr) = parsed.nth_attribute(2) {
+                    target = format!(
+                        "{target}?subject={subject}",
+                        subject = encode_uri_component(target_attr.value())
+                    );
+
+                    if let Some(body) = parsed.nth_attribute(3) {
+                        target = format!(
+                            "{target}&amp;body={body}",
+                            body = encode_uri_component(body.value())
+                        );
+                    }
+                }
+
+                attrs = Some(parsed);
+            }
+        } else if link_text.contains('=') {
+            #[allow(clippy::unwrap_used)]
+            let m = raw_text_m.unwrap();
+            let text_span = source_slice(pieces, m.start()..m.end(), root);
+
+            if text_span.data().contains('\n') {
+                return None;
+            }
+
+            let (lt, parsed) = extract_attributes_from_text(text_span, parser, None);
+            link_text = lt;
+            attrs = Some(parsed);
+        }
 
         if link_text.ends_with('^') {
             link_text.truncate(link_text.len() - 1);
@@ -533,6 +605,7 @@ pub(super) fn build_link_node<'src>(
         children,
         roles,
         window,
+        attrs,
         resolved: None,
         derived: None,
         xrefstyle: None,
@@ -679,10 +752,11 @@ mod tests {
         // For each fixture, folding the single-pass tree (all five steps)
         // reproduces the string pipeline's output byte-for-byte. This is the
         // differential corpus (design §5.3) that pins the `link:`/`mailto:`
-        // macro increment. Every fixture is a *verbatim*, attribute-list-free
-        // `link:`/`mailto:` macro – the boundary this increment claims (a URL
-        // target, an attribute list in the text, or a special character inside
-        // the macro is deferred and lives in a divergence test below).
+        // macro increment. Every fixture is a *verbatim* `link:`/`mailto:`
+        // macro – the boundary this increment claims (a URL target, a
+        // multi-line attribute-list text, a display text crossing a rendered
+        // span, or a special character inside the macro is deferred and lives
+        // in a divergence test below).
         let fixtures = [
             // No link macro despite macro-ish characters.
             "plain text with a colon: but no bracket",
@@ -696,9 +770,20 @@ mod tests {
             "link:index.html[Open^]",
             // An escaped `]` inside the text is unescaped.
             "link:index.html[a\\]b]",
+            // A text carrying an attribute list (an `=`): the first positional
+            // attribute is the display text, and the named `role` attribute is
+            // honored. The `^` suffix still applies after the attrlist split.
+            "link:index.html[Docs,role=hl]",
+            "link:index.html[Docs,role=hl^]",
+            // An `=` that is not a real attribute list (the incidental case).
+            "link:index.html[=text]",
             // mailto: labeled and bare (bare shows the address).
             "mailto:hello@example.org[Email us]",
             "mailto:hello@example.org[]",
+            // A `mailto:` text carrying a `,` encodes a subject (and, with a
+            // second `,`, a body) into the target.
+            "mailto:team@example.org[Team,Hello there]",
+            "mailto:team@example.org[Team,Hello,Body text]",
             // Degenerate empty targets: a bare link/mailto with no display text.
             "link:[]",
             "mailto:[]",
@@ -893,38 +978,105 @@ mod tests {
     }
 
     #[test]
-    fn a_link_text_attribute_list_is_a_documented_divergence() {
+    fn a_link_text_attribute_list_populates_the_nodes_attrs() {
         // A `link:` text carrying an `=` splits into an attribute list (here a
-        // role), which the string replacer parses from a newline-normalized copy
-        // of the text – not from `'src`. The builder cannot carry that as an
-        // `Attrlist<'src>` yet, so it defers the whole macro (left literal),
-        // pending the increment that adds an attribute list to the link node.
+        // role): the first positional attribute becomes the display text, and
+        // the parsed `Attrlist<'src>` rides on the node's own `attrs` field, so
+        // the fold reproduces the role exactly as the string replacer does.
         let source = "link:index.html[Docs,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "index.html");
+        assert_eq!(link_text_of(reference), "Docs");
+        assert_eq!(
+            reference
+                .attrs
+                .as_ref()
+                .and_then(|a| a.roles().into_iter().next()),
+            Some("hl")
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_mailto_subject_and_body_are_encoded_into_the_target() {
+        // A `mailto:` text carrying a `,` encodes a `subject` (and optional
+        // `body`) into the target, mirroring `InlineLinkMacroReplacer`'s own
+        // `extract_attributes_from_text` handling exactly.
+        let source = "mailto:team@example.org[Team,Hello there]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(
+            reference.target.as_ref(),
+            "mailto:team@example.org?subject=Hello%20there"
+        );
+        assert_eq!(link_text_of(reference), "Team");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_mailto_subject_with_a_body_is_encoded_into_the_target() {
+        let source = "mailto:team@example.org[Team,Hello,Body text]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(
+            reference.target.as_ref(),
+            "mailto:team@example.org?subject=Hello&amp;body=Body%20text"
+        );
+        assert_eq!(link_text_of(reference), "Team");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_link_text_attribute_list_over_a_multi_line_text_is_a_documented_divergence() {
+        // A text carrying an `=`/`,` still needs a real `'src` slice with no
+        // embedded newline to carry the parsed `Attrlist<'src>` honestly (see
+        // `build_link_node`'s own doc comment); a multi-line attribute-list
+        // text is deferred, exactly as the crossed-special/rendered-span forms
+        // are.
+        let source = "link:index.html[Docs\nmore,role=hl]";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an attribute-list-in-text link must be left unrecognized: {nodes:?}"
+            "a multi-line attribute-list-in-text link must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, applies the role.
+        // The string pipeline, by contrast, joins the lines with a space and
+        // applies the role.
         assert!(golden_macros(source).contains(r#"class="hl""#));
     }
 
     #[test]
-    fn a_mailto_subject_is_a_documented_divergence() {
-        // A `mailto:` text carrying a `,` encodes a `subject` (and optional
-        // `body`) into the target – the same attribute-list-from-a-copy handling
-        // the builder defers.
-        let source = "mailto:team@example.org[Team,Hello there]";
+    fn a_mailto_subject_over_a_multi_line_text_is_a_documented_divergence() {
+        // The same multi-line boundary as
+        // `a_link_text_attribute_list_over_a_multi_line_text_is_a_documented_divergence`,
+        // for a `mailto:` text carrying a subject/body.
+        let source = "mailto:team@example.org[Team,Hello\nthere]";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a mailto with a subject must be left unrecognized: {nodes:?}"
+            "a multi-line mailto subject must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, encodes the subject into the href.
+        // The string pipeline, by contrast, joins the lines with a space and
+        // encodes the subject.
         assert!(golden_macros(source).contains("subject="));
     }
 
@@ -948,10 +1100,10 @@ mod tests {
         // For each fixture, folding the single-pass tree (all five steps)
         // reproduces the string pipeline's output byte-for-byte. This is the
         // differential corpus (design §5.3) that pins the auto-link / formal-URL
-        // link increment. Every fixture is a *verbatim*, attribute-list-free
-        // link – the boundary this increment claims (an angle form, a URL
-        // crossing a special, or an attribute-list text is deferred and lives in
-        // a divergence test below).
+        // link increment. Every fixture is a *verbatim* link – the boundary
+        // this increment claims (an angle form, a URL crossing a special, a
+        // multi-line attribute-list text, or a display text crossing a
+        // rendered span is deferred and lives in a divergence test below).
         let fixtures = [
             // No auto-link despite a colon or a `//`.
             "plain text with a colon: but no scheme",
@@ -986,6 +1138,13 @@ mod tests {
             "https://example.org[^]",
             // An escaped `]` inside the text is unescaped.
             "https://example.org[a\\]b]",
+            // A text carrying an attribute list (an `=`): the first positional
+            // attribute is the display text, and the named `role` attribute is
+            // honored.
+            "https://example.org[Example,role=hl]",
+            "https://example.org[Example,role=hl^]",
+            // An `=` that is not a real attribute list (the incidental case).
+            "https://example.org[=text]",
             // A bare scheme with nothing left after trimming is left literal by
             // both (a `://`-only rejection).
             "http://; is not a link",
@@ -1250,21 +1409,90 @@ mod tests {
     }
 
     #[test]
-    fn a_formal_url_link_attribute_list_is_a_documented_divergence() {
-        // A formal URL text carrying an `=` splits into an attribute list (here a
-        // role), which the string replacer parses from a newline-normalized copy
-        // of the text – not from `'src`. The builder cannot carry that as an
-        // `Attrlist<'src>` yet, so it defers the whole macro (left literal).
+    fn a_formal_url_link_attribute_list_populates_the_nodes_attrs() {
+        // A formal URL text carrying an `=` splits into an attribute list
+        // (here a role): the first positional attribute becomes the display
+        // text, and the parsed `Attrlist<'src>` rides on the node's own
+        // `attrs` field, so the fold reproduces the role exactly as the
+        // string replacer does.
         let source = "https://example.org[Example,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(link_text_of(reference), "Example");
+        assert_eq!(
+            reference
+                .attrs
+                .as_ref()
+                .and_then(|a| a.roles().into_iter().next()),
+            Some("hl")
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_formal_url_link_attribute_list_over_a_multi_line_text_is_a_documented_divergence() {
+        // The same multi-line boundary `build_link_node` documents: an
+        // honest `'src` slice is available only when the bracketed text has
+        // no embedded newline.
+        let source = "https://example.org[Example\nmore,role=hl]";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an attribute-list-in-text link must be left unrecognized: {nodes:?}"
+            "a multi-line attribute-list-in-text link must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, applies the role.
+        // The string pipeline, by contrast, joins the lines with a space and
+        // applies the role.
         assert!(golden_macros(source).contains(r#"class="hl""#));
+    }
+
+    #[test]
+    fn an_incidental_equals_in_link_text_is_not_an_attribute_list() {
+        // `=text` contains an `=`, but no valid attribute name precedes it, so
+        // the attrlist parse yields one positional value spanning the *whole*
+        // text rather than a named attribute – the `=` was incidental,
+        // mirroring `InlineLinkReplacer`'s own `extract_attributes_from_text`
+        // fallback (the same case `xref`'s own part 3c increment pins).
+        let source = "https://example.org[=text]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(link_text_of(reference), "=text");
+        assert!(reference.attrs.is_none() || reference.attrs.as_ref().unwrap().roles().is_empty());
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_link_display_text_over_a_rendered_span_is_a_documented_divergence() {
+        // The macros step matches over *escaped, already-rendered* text, so a
+        // display text containing a quoted span (`*bold*`) has already become
+        // a `Styled` node by the time macros run – an opaque piece the node's
+        // single `Text` child cannot absorb without becoming structured
+        // children (the same shape a footnote's own content needs). Left
+        // unrecognized for a later increment.
+        let source = "link:https://example.org[with *bold* text]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a display text crossing a rendered span must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a link here, with the
+        // span rendered inside the anchor text.
+        assert!(golden_macros(source).contains("<a href"));
+        assert!(golden_macros(source).contains("<strong>bold</strong>"));
     }
 
     // ---- `apply_link_side_effects` (staged for the eventual cutover) ------

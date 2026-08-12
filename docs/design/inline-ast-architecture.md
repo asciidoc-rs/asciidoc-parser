@@ -923,6 +923,45 @@ Each phase is a reviewable unit with a clear exit gate.
   into the parse path. Cross-references (`Ref{Xref}`), footnotes, index terms, STEM, and anchors
   remain later sub-steps.
 
+  *Follow-up landed as (the link family's own attribute-list-bearing display text, closing
+  `Ref{Link}`'s last deferred form):* both link-recognizing passes now recognize a display text
+  carrying an `=` (`link:x[text,role=hl]`, `https://x[text,role=hl]`) and a `mailto:` text
+  carrying a `,` subject/body (`mailto:x[Team,Hello there]`) – the pair step 4b(ii) itself defers,
+  and the mirror of the `xref:` macro's own attribute-list text (part 3c below). Unlike that xref
+  form, a link's attribute list cannot be reduced to a few plain fields: `render_link` reads an
+  `id`, a `title`, and the `nofollow`/`noopener` options straight off the `Attrlist` itself (not
+  just `roles`/`window`, which `XrefRenderParams` alone needs), so `Ref` gains an
+  `attrs: Option<Attrlist<'src>>` field – `None` unless a `Link`'s display text carried its own
+  attribute list, always `None` for an `Xref`. This is also what step 4b(ii)'s own deferral notes
+  as the blocker ("deferred until the node can hold an `Attrlist<'src>`"): the string replacers
+  parse the attrlist from a *newline-normalized copy* of the text (so a multi-line
+  `link[Foo\nBar,role=x]` reads as `Foo Bar`), which cannot become an honestly-borrowed
+  `Attrlist<'src>` – but when the text has **no embedded newline**, that copy is byte-identical to
+  the bracketed text's own `'src` slice, so the node can parse the *real* source span instead and
+  carry a genuine borrow. A text that does embed a newline still needs the synthesized copy the
+  node cannot hold, so that one narrow form remains deferred (pinned by its own divergence test,
+  for both the `=` and `,` cases). Both call sites reuse
+  [`extract_attributes_from_text`](../../parser/src/content/macros.rs) (now shared `pub(crate)`,
+  its own signature relaxed from `&'src Span<'src>` to `Span<'src>` since `Span` is `Copy` and the
+  reference added nothing the by-value form doesn't already give a caller building a node with the
+  *same* `'src` as its input) and
+  [`encode_uri_component`](../../parser/src/content/macros.rs) (likewise now shared `pub(crate)`,
+  for the `mailto:` subject/body encoding), so the interpretation – including the "incidental `=`"
+  fallback (`extract_attributes_from_text`'s own guard) and, for the `link:`/`mailto:` macro form,
+  the exact unconditional-adoption behavior `InlineLinkMacroReplacer` has and
+  `InlineLinkReplacer` does not (see the two call sites' own doc comments) – is reused byte-for-byte
+  rather than re-derived. [`fold_link`](../../parser/src/content/inline_builder/fold.rs) now passes
+  the node's own `attrs` through to `render_link` when present, falling back to the empty attrlist
+  every other link already folds through. A display or reference text crossing a rendered span
+  (`link:x[*bold*]`, `xref:id[*bold*]`, `<<id,*bold*>>`) remains a **separate**, still-fully-open
+  boundary for every reference-bearing family (not touched by this follow-up): by the time macros
+  run, `*bold*` is already a `Styled` node, not text, so recognizing it would need the node's
+  display text to become structured children – the shape a footnote's own content already has –
+  which no reference family has yet grown; each now carries its own divergence test pinning this
+  (previously only the `<<id,*bold*>>` shorthand had one). Differential corpora extend the existing
+  link/formal-URL fixtures with `role=`/multi-attribute and mailto subject/body combinations,
+  alongside the incidental-`=` case and the multi-line divergence.
+
   *Step 4b(ii) part 3a landed as (`Macros` → `Ref{Xref}`, the same-document `xref:` macro form):*
   the builder now recognizes the **`xref:` cross-reference macro** (`xref:id[]`,
   `xref:id[Reference Text]`), each as a [`Ref`](../../parser/src/inlines/ref_node.rs)`{Xref}` node.

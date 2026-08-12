@@ -74,17 +74,31 @@
 //!   captures its own owned [`Attrlist`] – the step that makes a macro node
 //!   *self-describing*; a link or cross-reference node bakes its computed display
 //!   text into [`Text`](InlineNode::Text) children so its fold needs no
-//!   build-time state. Each family reuses the shared pattern the string step
+//!   build-time state. A link whose display text carried its own attribute list
+//!   (`link:x[text,role=hl]`) likewise carries the parsed
+//!   [`Attrlist`](crate::attributes::Attrlist) on [`Ref::attrs`](crate::inlines::Ref::attrs)
+//!   – needed because `render_link` reads more out of it than `roles`/`window`
+//!   alone (an `id`, a `title`, the `nofollow`/`noopener` options) – recognized
+//!   whenever that text has no embedded newline, so it can be sliced honestly
+//!   from `'src` rather than a synthesized copy; a `mailto:` text's own
+//!   comma-delimited subject/body is encoded straight into the target, the same
+//!   way. Each family reuses the shared pattern the string step
 //!   matches with ([`INLINE_IMAGE_MACRO`](crate::content::INLINE_IMAGE_MACRO), [`INLINE_KBD_BTN_MACRO`](crate::content::INLINE_KBD_BTN_MACRO),
 //!   [`INLINE_MENU_MACRO`](crate::content::INLINE_MENU_MACRO), [`INLINE_LINK_MACRO`](crate::content::INLINE_LINK_MACRO), [`INLINE_LINK`](crate::content::INLINE_LINK),
 //!   [`INLINE_XREF`](crate::content::INLINE_XREF), [`INLINE_ANCHOR`](crate::content::INLINE_ANCHOR), [`INLINE_INDEXTERM`](crate::content::INLINE_INDEXTERM)), builds
 //!   `'src`-borrowing nodes for verbatim macros only (see [`apply_macros`] for
 //!   the boundary the escaped-content case defers), and – for the UI macros – is
 //!   recognized only under the `experimental` document attribute, exactly as the
-//!   string step gates them. The cross-reference pass claims the same-document
-//!   form in both spellings (`xref:id[text]` and `<<id>>` / `<<id,text>>`);
-//!   inter-document targets, a document-as-a-whole reference, and an
-//!   attribute-list text are deferred. An anchor renders from its id alone, so it
+//!   string step gates them. The cross-reference pass claims the same-document,
+//!   inter-document, and document-as-a-whole target forms in both spellings
+//!   (`xref:id[text]` and `<<id>>` / `<<id,text>>`), and the `xref:` macro's own
+//!   attribute-list text; only the shorthand's own `,>`-empty-text form remains
+//!   deferred. A display/reference text crossing a rendered span
+//!   (`link:x[*bold*]`, `xref:id[*bold*]`, `<<id,*bold*>>`) remains deferred for
+//!   every reference-bearing family, since a rendered span is an opaque piece
+//!   the node's single `Text` child cannot absorb without becoming structured
+//!   children (the shape a footnote's own content already needs). An anchor
+//!   renders from its id alone, so it
 //!   is *always* recognized (never deferred): only a non-verbatim reference text
 //!   – which does not reach the flow – leaves the node's `reftext` unpopulated.
 //!   Likewise a *concealed* index term (`indexterm:[…]`, `(((…)))`) renders
@@ -380,6 +394,120 @@ mod tests {
 
     fn assert_parity(source: &str) {
         assert_parity_with(source, Parser::default);
+    }
+
+    /// A broad, general-purpose sweep of inline fixtures – reusing the shape
+    /// of the Phase 1 byte-parity corpus
+    /// ([`NORMAL_CORPUS`](crate::tests::inline_recorder)) that pins the
+    /// Strategy-A recorder – run against `build` + `fold_html` instead. Unlike
+    /// the hand-picked combined-constructs corpus above, this one is not
+    /// curated to stay inside `build`'s claimed vocabulary, so it is exactly
+    /// the kind of audit that caught the `hardbreaks` cutover blocker (see the
+    /// design doc's own "step 6 prep" note on that increment): a fixture here
+    /// that turns out to diverge is either a real, previously-unknown blocker
+    /// (fix it) or a form some other increment already documents as deferred
+    /// (drop it from this sweep and make sure it has its own divergence test
+    /// instead – e.g. a link/xref display text crossing a rendered span).
+    #[test]
+    fn fold_matches_the_real_pipeline_across_a_broad_general_purpose_sweep() {
+        let fixtures = [
+            "",
+            "plain text with no constructs",
+            "text with trailing spaces   and   runs",
+            "a < b && c > d",
+            "1 < 2 & 3 > 0",
+            "<>&",
+            "One *word* is strong.",
+            "An _emphasized_ phrase.",
+            "Some `monospaced` text.",
+            "A #highlighted# span.",
+            "H~2~O and E = mc^2^.",
+            "A bold *phrase of text* here.",
+            "Bold c**hara**cter**s** in a word.",
+            "un__frac__tured emphasis",
+            "a##b##c",
+            "*a _b_ c*",
+            "*bold _and italic_ mix*",
+            "_*strong inside emphasis*_",
+            "[.myrole]#roled text#",
+            "[#anchor]#anchored#",
+            "[.a.b]#multi role#",
+            "*a < b* and _c > d_",
+            "code `x < y && z` here",
+            "\"`double`\" and '`single`' quotes",
+            "(C) (R) (TM)",
+            "An em -- dash and an ellipsis...",
+            "arrows -> => <- <=",
+            "Sam's apostrophe",
+            "named &amp; numeric &#8217; entities",
+            "plain {backend} attribute",
+            "See https://example.org for details.",
+            "A link:https://example.org[example] link.",
+            "mailto:a@b.com[email me]",
+            "an image:photo.png[Alt Text] inline",
+            "image:pic.png[Scaled,200,100]",
+            "see <<target>> for more",
+            "see <<target,the target>> now",
+            "xref:other.adoc#frag[Other] doc",
+            "A claim.footnote:[the evidence]",
+            "Named.footnote:disc[a discussion] then footnote:disc[].",
+            "A claim.footnote:[the *strong* evidence and a link:https://e.org[source]]",
+            "Two notes.footnote:[first] and again.footnote:[second]",
+            "Press kbd:[Ctrl+T] now.",
+            "Press kbd:[Ctrl,Shift,N] now.",
+            "Click btn:[Save] please.",
+            "Choose menu:File[Save As > PDF].",
+            "A flow ((visible term)) here.",
+            "A concealed (((primary,secondary))) term.",
+            "[[the-anchor]]Anchored paragraph.",
+            "first line +\nsecond line",
+            "*bold* _em_ `code` (C) https://x.y[link] <<ref>> image:i.png[i]",
+            "A mix of {backend}, *bold < text*, and a footnote:[with `code`].",
+            r"a \*not bold* b",
+            r"an \_not emphasized_ here",
+            r"literal \`backtick\` text",
+            "*a _b `c` d_ e*",
+            "*one* *two* *three*",
+            "_a_ and _b_ and _c_",
+            "`code with *stars* inside`",
+            "pre**mid**post and a__b__c",
+            "x^sup^y and p~sub~q",
+            "[.role1.role2#the-id]#decorated#",
+            "[#only-id]#text#",
+            "`a < b > c & d`",
+            "(C) then (R) then (TM) end",
+            "First... then -- and -> arrows <-",
+            "a &amp; b and &#8482; and &copy;",
+            "an {undefined-attr} reference",
+            "link:https://example.org[Example,role=external,window=_blank]",
+            "https://example.org[Example^]",
+            "a https://example.org[] bare-macro link",
+            "visit https://example.org/path?q=1 now",
+            "image:a.png[An image with spaces,role=thumb]",
+            "before image:b.svg[Vector] after",
+            "<<a>> and <<b>> and <<c,C text>>",
+            "a ((flow term)) and (((c1, c2, c3))) end",
+            "indexterm:[primary, secondary]",
+            "indexterm2:[shown]",
+            "[[mid-anchor]] after the anchor",
+            "text before anchor:named[Ref Text] and after",
+            "a +++<b>raw</b>+++ passthrough",
+            "inline pass:[<i>x</i>] macro",
+            "math $$a < b$$ here",
+            "a +literal *stars*+ b",
+            "line one +\nline two +\nline three",
+            "stem:[a < b] expression",
+            "asciimath:[a < b] inline",
+            "latexmath:[x < y] inline",
+            "an icon:home[] icon",
+            "icon:star[2x,role=gold] rated",
+            "   ",
+            "a\nb\nc",
+        ];
+
+        for fixture in fixtures {
+            assert_parity(fixture);
+        }
     }
 
     #[test]

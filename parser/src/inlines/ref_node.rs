@@ -1,5 +1,6 @@
 use crate::{
     HasSpan, Span,
+    attributes::Attrlist,
     inlines::InlineNode,
     parser::{DerivedReference, ResolvedReference, XrefStyle},
     strings::CowStr,
@@ -67,6 +68,17 @@ pub struct Ref<'src> {
     /// `None` for a [`Link`](RefVariant::Link) and for the `<<id>>` shorthand,
     /// which has no attribute-list text of its own.
     pub xrefstyle: Option<XrefStyle>,
+
+    /// For a [`Link`](RefVariant::Link) whose display text carried its own
+    /// attribute list (`link:x[text,role=hl]`, `https://x[text,role=hl]`),
+    /// the parsed list — needed because `render_link` reads more out of it
+    /// than `roles`/`window` alone (an `id`, a `title`, the `nofollow` /
+    /// `noopener` options), unlike a cross-reference's own attribute-list
+    /// text, whose `window`/`role`/`xrefstyle` the plain fields above already
+    /// cover in full. `None` when the link carries no attribute-list text
+    /// (or the `=` was incidental — see `extract_attributes_from_text`), and
+    /// always `None` for an [`Xref`](RefVariant::Xref).
+    pub attrs: Option<Attrlist<'src>>,
 
     /// The source location of the whole reference.
     pub location: Span<'src>,
