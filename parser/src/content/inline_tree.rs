@@ -176,8 +176,8 @@ pub(crate) enum ContainerNode {
 /// output is re-consumed by later steps, so bracketing it would perturb
 /// recognition); instead they are recovered by splitting text runs on the
 /// entities the wrapped renderer emits.
-#[derive(Clone, Debug)]
-enum CharRefKind {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum CharRefKind {
     Special(char),
     Replacement(&'static str),
     Entity(String),
@@ -678,7 +678,7 @@ fn push_text(text: &str, out: &mut Vec<Rec>) {
     }
 }
 
-fn classify_entity(entity: &str) -> CharRefKind {
+pub(crate) fn classify_entity(entity: &str) -> CharRefKind {
     match entity {
         "&lt;" => CharRefKind::Special('<'),
         "&gt;" => CharRefKind::Special('>'),

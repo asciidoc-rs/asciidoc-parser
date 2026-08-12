@@ -1778,6 +1778,57 @@ Each phase is a reviewable unit with a clear exit gate.
   fixture too. As with every increment before it, this is purely additive: `build`'s new parameter is `None`
   at every existing call site, so no real parse path is touched.
 
+  *Step 6 prep landed as (a structural cross-check against the Strategy-A recorder):* with the
+  vocabulary essentially complete, the last thing missing before the real tree-source swap is the
+  due-diligence design §4.1 and §5.5's own risk table call for directly: "the node stream is
+  cross-checked against Strategy A's recorder to catch structural regressions the HTML oracle
+  cannot see" – because "two node trees fold to identical HTML, masking a structural bug" is
+  exactly the risk every prior corpus in this module, pinning HTML-fold parity alone, cannot rule
+  out. A new test module,
+  [`inline_builder_recorder_parity`](../../parser/src/tests/inline_builder_recorder_parity.rs),
+  builds both trees for the same fixture – the recorder's via `Content::inlines()` under
+  [`Parser::with_inline_tree`](../../parser/src/parser/parser.rs), the builder's via `build` – and
+  compares them structurally, node kind by node kind, over the same broad general-purpose and
+  combined-constructs fixture sets [`inline_builder`](../../parser/src/content/inline_builder.rs)'s
+  own whole-pipeline corpus already proved stay inside `build`'s claimed vocabulary.
+
+  The comparator ignores exactly the fields already documented elsewhere as one-sidedly richer on
+  the builder (`attrs`, `derived`, `xrefstyle`, `resolved`, an anchor's `reftext`, an image's
+  `is_icon`) and resolves every *leaf-boundary* difference – a builder `Text`/`Raw`/`CharRef` node
+  whose rendered bytes are only a sub-range of what the recorder recovered, or vice versa – through
+  one shared mechanism,
+  [`consume_rendered_prefix`](../../parser/src/tests/inline_builder_recorder_parity.rs): it renders
+  each recorder leaf back to the bytes it would fold to (a `Text` leaf verbatim, a `CharRef` leaf
+  through the same table
+  [`classify_entity`](../../parser/src/content/inline_tree.rs) uses, reproduced as
+  `RECORDER_ENTITY_TABLE` so the two stay in lockstep) and matches a run of them against the
+  builder leaf's own value, splitting a trailing `Text` leaf when the match ends part-way through
+  it. This one mechanism is what makes a combined `CharRef::Replacement` (an em dash surrounded by
+  spaces, recovered by the recorder as three adjacent entity leaves), an attribute-expansion `Text`
+  boundary the builder draws but the recorder cannot see, a passthrough's `Raw` content (which the
+  recorder – no renderer call to intercept during restore – recovers as plain `Text`/`CharRef`
+  leaves instead), and a source-written entity that coincides byte-for-byte with a live
+  classification (`&amp;`, `&#8217;`, …) all resolve the same way, rather than as separate
+  special cases.
+
+  Two further, non-leaf differences turned out to be genuine (if narrow) structural facts, not
+  bugs, and are excluded with their own documented reasoning: an **unresolved** cross-reference's
+  `children` is legitimately empty on the recorder side (Asciidoctor's own unresolved-xref fallback
+  renders the bracketed target, never the author's display text, so the recorder – recovering only
+  what actually rendered – has nothing to see), while the builder always bakes the display text in
+  as a structural fact independent of resolution; and a footnote **reference** occurrence's `id`
+  stops reaching the renderer's own params the moment it resolves to a number (`fold_footnote`
+  renders just the number then), so the recorder cannot recover it there either, while the builder
+  still carries it. A `Link`'s `roles`/`window` fields are also skipped whenever its own
+  attribute-list display text populated `attrs` instead (`render_link` reads `role`/`window`
+  straight off `attrs` in that case, so the plain fields are never populated from it – the same
+  asymmetry `Ref::attrs`'s own doc comment already describes).
+
+  Every fixture passed once these were accounted for, without needing a code change to `build`
+  itself – the first structural (not merely byte-parity) confirmation that the single-pass
+  builder's tree is a faithful counterpart to the recorder's, ahead of the real swap. As with every
+  prior increment, nothing here is wired into the parse path.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1858,6 +1909,12 @@ Each phase is a reviewable unit with a clear exit gate.
        recognized by `apply_post_replacements`, which takes the enclosing block's `Attrlist` for
        it; see the step's own "landed as" note above. `build`'s new `Attrlist` parameter is `None`
        at every existing call site, so this is unwired like every other prep piece.
+     - ✅ **prep (structural cross-check).** A corpus-wide comparison of the builder's tree against
+       the Strategy-A recorder's, structurally rather than by HTML-fold parity alone – the
+       due-diligence design §4.1/§5.5 call for before the swap – found every difference to be
+       already-documented one-sided richness or a leaf-boundary artifact of recovering structure
+       from rendered output, and none a genuine regression; see the step's own "landed as" note
+       above. Wiring `build` into `Content` in place of the recorder remains this step's own job.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
