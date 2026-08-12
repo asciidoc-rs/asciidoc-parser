@@ -83,10 +83,10 @@
 //!   output. From already-rendered output alone the recorder cannot tell "the
 //!   author wrote this entity" ([`CharRef::Entity`], the builder's
 //!   classification) apart from the live classification that coincides with it
-//!   – exactly the same set of entities
-//!   [`classify_entity`](crate::content::inline_tree) (the recorder's own
-//!   recovery table) hard-codes, reproduced in [`RECORDER_ENTITY_TABLE`] so the
-//!   two stay in lockstep.
+//!   – exactly the same set of entities [`classify_entity`] (the recorder's own
+//!   recovery table) hard-codes, reproduced in [`RECORDER_ENTITY_TABLE`] and
+//!   kept in lockstep with it by
+//!   [`recorder_entity_table_matches_production_classify_entity`].
 //! - A passthrough's content becomes its own [`Raw`](InlineNode::Raw) leaf in
 //!   the builder's tree – but a passthrough's *restore* is a direct string
 //!   splice with no renderer call for the recorder to intercept (design §4.2's
@@ -141,7 +141,11 @@ use std::{borrow::Cow, collections::VecDeque};
 
 use crate::{
     Parser, Span,
-    content::{Content, SubstitutionGroup, inline_builder::build},
+    content::{
+        Content, SubstitutionGroup,
+        inline_builder::build,
+        inline_tree::{CharRefKind, classify_entity},
+    },
     inlines::{CharRef, InlineNode, RefVariant},
     parser::ModificationContext,
     strings::CowStr,
@@ -205,16 +209,32 @@ fn assert_trees_equivalent(recorder: &[InlineNode<'_>], builder: &[InlineNode<'_
         // mechanism covers every leaf-boundary difference the module doc
         // comment documents. Only when that fails (or `b` is not a leaf at
         // all) do the two front nodes get popped and compared node-for-node.
-        let target: Option<Cow<'_, str>> = match b {
-            InlineNode::Text { value, .. } | InlineNode::Raw { value, .. } => {
-                Some(Cow::Borrowed(value.as_ref()))
+        //
+        // `allowed` restricts which *recorder* leaf kinds may participate,
+        // so a byte-coincidental match can never paper over a genuine kind
+        // regression: a `Text` target only ever matches recorder `Text`
+        // (an ordinary `Text` node's value never contains an escaped
+        // special character, so it has no business matching a `CharRef`'s
+        // rendered entity), and a `CharRef` target only ever matches
+        // recorder `CharRef`. `Raw` (a passthrough) is the one documented
+        // exception that legitimately spans both kinds – its content still
+        // passes through `specialcharacters`, so the recorder can recover
+        // it as a mix of plain text and entities (design §3.4.1).
+        let target: Option<(Cow<'_, str>, LeafKinds)> = match b {
+            InlineNode::Text { value, .. } => {
+                Some((Cow::Borrowed(value.as_ref()), LeafKinds::TextOnly))
             }
-            InlineNode::CharRef { value, .. } => Some(char_ref_rendered(value)),
+            InlineNode::Raw { value, .. } => {
+                Some((Cow::Borrowed(value.as_ref()), LeafKinds::Mixed))
+            }
+            InlineNode::CharRef { value, .. } => {
+                Some((char_ref_rendered(value), LeafKinds::CharRefOnly))
+            }
             _ => None,
         };
 
-        if let Some(target) = target
-            && consume_rendered_prefix(&mut recorder, target.as_ref())
+        if let Some((target, allowed)) = target
+            && consume_rendered_prefix(&mut recorder, target.as_ref(), allowed)
         {
             builder.pop_front();
             continue;
@@ -228,14 +248,24 @@ fn assert_trees_equivalent(recorder: &[InlineNode<'_>], builder: &[InlineNode<'_
 }
 
 /// The recorder's own entity-recovery table
-/// ([`classify_entity`](crate::content::inline_tree) in
-/// `content/inline_tree.rs`), reproduced here as `(entity, recorded
-/// CharRef)` pairs so this module can go in both directions: rendering a
-/// [`CharRef`] back to the output bytes it folds to
+/// ([`classify_entity`] in `content/inline_tree.rs`), reproduced here as
+/// `(entity, recorded CharRef)` pairs so this module can go in both
+/// directions: rendering a [`CharRef`] back to the output bytes it folds to
 /// ([`char_ref_rendered`]), and, by the same table, recognizing when a
 /// recorder leaf run and a builder leaf coincide on those bytes even though
 /// their [`CharRef`] *classifications* differ (the `&amp;`/`&#8217;`/…
 /// ambiguity the module doc comment describes).
+///
+/// This is a hand-reproduced copy of `classify_entity`'s own match arms, not
+/// a shared definition (the two functions map in opposite directions – entity
+/// to kind there, kind to entity here – over different types, the recorder's
+/// own internal `CharRefKind` there and the public `CharRef` here), so it can
+/// drift from its source silently.
+/// [`recorder_entity_table_matches_production_classify_entity`] below guards
+/// against that: it feeds every entity in this table through
+/// the real `classify_entity` and asserts the result still matches, so a
+/// future change to the production table fails this test immediately rather
+/// than silently weakening (or spuriously failing) the parity corpus above.
 const RECORDER_ENTITY_TABLE: &[(&str, CharRef<'static>)] = &[
     ("&lt;", CharRef::Special('<')),
     ("&gt;", CharRef::Special('>')),
@@ -255,9 +285,33 @@ const RECORDER_ENTITY_TABLE: &[(&str, CharRef<'static>)] = &[
     ("&#8216;", CharRef::Replacement("\u{2018}")),
 ];
 
+/// Guards [`RECORDER_ENTITY_TABLE`] against drifting from its source of
+/// truth (see that constant's own doc comment): feeds every entity in the
+/// table through the real, production [`classify_entity`] and asserts the
+/// recovered kind still matches what the table claims.
+#[test]
+fn recorder_entity_table_matches_production_classify_entity() {
+    for (entity, expected) in RECORDER_ENTITY_TABLE {
+        let kind = classify_entity(entity);
+
+        let matches = match (&kind, expected) {
+            (CharRefKind::Special(a), CharRef::Special(b)) => a == b,
+            (CharRefKind::Replacement(a), CharRef::Replacement(b)) => a == b,
+            (CharRefKind::Entity(a), CharRef::Entity(b)) => a.as_str() == b.as_ref(),
+            _ => false,
+        };
+
+        assert!(
+            matches,
+            "RECORDER_ENTITY_TABLE's entry for {entity:?} ({expected:?}) no longer matches \
+             production's classify_entity ({kind:?}) — update the table to match"
+        );
+    }
+}
+
 /// Renders a [`CharRef`] to the output bytes it folds to: the exact inverse
-/// of [`classify_entity`](crate::content::inline_tree), via the same
-/// [`RECORDER_ENTITY_TABLE`]. Falls back to the value/name itself for a
+/// of [`classify_entity`], via the same [`RECORDER_ENTITY_TABLE`]. Falls
+/// back to the value/name itself for a
 /// [`CharRef::Entity`] the table does not name (an author-written entity
 /// `classify_entity` has no special case for is carried through unchanged,
 /// on both sides, the same way). A multi-character
@@ -296,6 +350,32 @@ fn entity_for_char(c: char) -> Option<&'static str> {
         .map(|(entity, _)| *entity)
 }
 
+/// Which recorder leaf kinds [`consume_rendered_prefix`] may draw on for a
+/// given builder target – see that function's own doc comment, and
+/// [`assert_trees_equivalent`]'s own note on why this restriction exists
+/// (so a byte-coincidental match can never paper over a genuine leaf-kind
+/// regression).
+#[derive(Clone, Copy, PartialEq)]
+enum LeafKinds {
+    /// Only a recorder [`Text`](InlineNode::Text) leaf may participate.
+    TextOnly,
+    /// Only a recorder [`CharRef`](InlineNode::CharRef) leaf may
+    /// participate.
+    CharRefOnly,
+    /// Either may participate (a builder `Raw` target only).
+    Mixed,
+}
+
+impl LeafKinds {
+    fn allows_text(self) -> bool {
+        matches!(self, Self::TextOnly | Self::Mixed)
+    }
+
+    fn allows_char_ref(self) -> bool {
+        matches!(self, Self::CharRefOnly | Self::Mixed)
+    }
+}
+
 /// The single mechanism behind every leaf-boundary difference this module's
 /// own doc comment documents: if a prefix of `recorder`'s front nodes –
 /// each [`Text`](InlineNode::Text) leaf contributing its value verbatim,
@@ -305,8 +385,8 @@ fn entity_for_char(c: char) -> Option<&'static str> {
 /// atomic (only ever consumed whole); a trailing `Text` leaf is split when
 /// `target` ends part-way through it, so the unconsumed remainder is kept in
 /// place for the next call. Stops (and returns `false`, leaving `recorder`
-/// untouched) at the first node that is neither, or whose bytes do not fit
-/// `target`.
+/// untouched) at the first node that is neither, whose kind `allowed`
+/// excludes, or whose bytes do not fit `target`.
 ///
 /// This one function is what lets [`assert_trees_equivalent`] treat as
 /// equivalent: a builder `Text` node against a wider (or narrower) recorder
@@ -316,7 +396,11 @@ fn entity_for_char(c: char) -> Option<&'static str> {
 /// recorder's one-leaf-per-entity recovery of the same; and a builder
 /// `CharRef::Entity` against the recorder's differently-classified but
 /// byte-identical recovery.
-fn consume_rendered_prefix(recorder: &mut VecDeque<InlineNode<'_>>, target: &str) -> bool {
+fn consume_rendered_prefix(
+    recorder: &mut VecDeque<InlineNode<'_>>,
+    target: &str,
+    allowed: LeafKinds,
+) -> bool {
     enum Plan {
         WholeNodes(usize),
         SplitLast {
@@ -331,8 +415,12 @@ fn consume_rendered_prefix(recorder: &mut VecDeque<InlineNode<'_>>, target: &str
 
     for node in recorder.iter() {
         let piece: Cow<'_, str> = match node {
-            InlineNode::Text { value, .. } => Cow::Borrowed(value.as_ref()),
-            InlineNode::CharRef { value, .. } => char_ref_rendered(value),
+            InlineNode::Text { value, .. } if allowed.allows_text() => {
+                Cow::Borrowed(value.as_ref())
+            }
+            InlineNode::CharRef { value, .. } if allowed.allows_char_ref() => {
+                char_ref_rendered(value)
+            }
             _ => break,
         };
 
@@ -354,7 +442,8 @@ fn consume_rendered_prefix(recorder: &mut VecDeque<InlineNode<'_>>, target: &str
 
         // The whole piece doesn't fit; a splittable `Text` leaf whose own
         // *prefix* exactly completes `target` still counts as a match.
-        if let InlineNode::Text { value, .. } = node
+        if allowed.allows_text()
+            && let InlineNode::Text { value, .. } = node
             && let Some(remainder) = value.as_ref().strip_prefix(remaining_target)
         {
             plan = Some(Plan::SplitLast {
@@ -452,9 +541,16 @@ fn assert_node_equivalent(r: &InlineNode<'_>, b: &InlineNode<'_>, source: &str) 
             // cross-reference's display text never reaches the recorder's
             // recovered `children` at all (Asciidoctor's own fallback
             // renders the bracketed target, not the text), while the
-            // builder always bakes it in. Every other combination is still
-            // compared exactly.
-            let unresolved_xref_text = rr.variant == RefVariant::Xref && rr.children.is_empty();
+            // builder always bakes it in. This exemption is scoped as
+            // narrowly as the asymmetry itself: it fires only when the
+            // recorder's `children` is empty *and* the builder's is not –
+            // exactly the shape the documented gap produces. Both sides
+            // empty (a shorthand `<<id>>` with no display text at all,
+            // where there is nothing to lose) still goes through the
+            // ordinary comparison below, and a recorder holding unexpected
+            // content is never silently waved through.
+            let unresolved_xref_text =
+                rr.variant == RefVariant::Xref && rr.children.is_empty() && !br.children.is_empty();
 
             if !unresolved_xref_text {
                 assert_trees_equivalent(&rr.children, &br.children, source);
