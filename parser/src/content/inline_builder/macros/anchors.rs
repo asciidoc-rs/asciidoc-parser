@@ -1,11 +1,15 @@
 //! Inline anchor recognition (`[[id]]`, `[[id,reftext]]`, `anchor:id[…]`).
 
-use super::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level};
+use super::{
+    MacroMatch, MacroMatchKind, image::range_is_verbatim_or_synthesized, rebuild_macro_level,
+};
 use crate::{
     Parser, Span,
     content::{
         INLINE_ANCHOR,
-        inline_builder::quotes::{Piece, build_match_string, source_slice},
+        inline_builder::quotes::{
+            Piece, build_match_string, range_overlaps_synthesized, source_slice, text_slice,
+        },
     },
     document::RefType,
     inlines::{Anchor, InlineNode},
@@ -30,7 +34,7 @@ pub(super) fn anchor_macros_level<'src>(
         return nodes;
     }
 
-    let matches = find_anchor_matches(&s, &pieces, root);
+    let matches = find_anchor_matches(&nodes, &s, &pieces, root);
 
     if matches.is_empty() {
         return nodes;
@@ -46,19 +50,22 @@ pub(super) fn anchor_macros_level<'src>(
 /// alone**, and an id admits no special character (the pattern's id class is
 /// letters/digits/`_`/`-`/`:`/`.`), so an id crossing an *escaped special* or a
 /// *rendered span* can never occur – unlike the link/xref families, an anchor
-/// is never deferred on *that* boundary. It can still fail the narrower
-/// verbatim-`'src`-slice test, though: an id's characters can themselves come
+/// is never deferred on *that* boundary. An id's characters can, though, come
 /// from a [`synthesized`](Piece::synthesized) run (an attribute reference whose
-/// expanded value happens to contain `[[id]]`), which has no honest source
-/// counterpart of its own to slice (design §3.4.1/§4.1's "a macro inside an
-/// expanded value" boundary, reached here through the id rather than a
-/// target/attribute list). [`build_anchor_node`] checks the id's own range for
-/// that and returns `None` when it fails, leaving the anchor unrecognized for a
-/// later increment; a non-verbatim *reference text* (one carrying a rendered
-/// span or an escaped special) is a narrower case that does not reach the flow
-/// at all, so it only leaves the node's `reftext` unpopulated rather than
-/// deferring the whole anchor (see [`build_anchor_reftext`]).
+/// expanded value happens to contain `[[id]]`, or – reached at a tree's root –
+/// a filtered multi-line block's own joined seed): [`build_anchor_node`] no
+/// longer defers on that alone, recovering the id's exact text via
+/// [`text_slice`] even though it has no honest `'src` slice of its own (design
+/// §3.4.1/§4.1's "a macro inside an expanded value" boundary, reached here
+/// through the id rather than a target/attribute list) – the node's
+/// `location` still falls back to the coarse enclosing span design §4.4
+/// documents, since only the *text* needed the precision. A non-verbatim
+/// *reference text* (one carrying a rendered span or an escaped special) is a
+/// narrower case that does not reach the flow at all, so it only leaves the
+/// node's `reftext` unpopulated rather than deferring the whole anchor (see
+/// [`build_anchor_reftext`]).
 pub(super) fn find_anchor_matches<'src>(
+    nodes: &[InlineNode<'src>],
     s: &str,
     pieces: &[Piece],
     root: Span<'src>,
@@ -90,12 +97,14 @@ pub(super) fn find_anchor_matches<'src>(
             continue;
         }
 
-        let node = match build_anchor_node(&caps, &full, pieces, root) {
+        let node = match build_anchor_node(&caps, &full, pieces, root, nodes) {
             Some(node) => node,
 
-            // The id itself is not verbatim (see `build_anchor_node`); left as
-            // literal source for a later increment, exactly as every other
-            // macro family defers a match it cannot slice honestly.
+            // The id itself crosses an atomic piece (an escaped special or a
+            // rendered span – never actually reachable given the id's own
+            // character class, kept for symmetry with every other macro
+            // family's own gate); left as literal source, exactly as every
+            // other macro family defers a match it cannot slice at all.
             None => continue,
         };
 
@@ -112,36 +121,40 @@ pub(super) fn find_anchor_matches<'src>(
 }
 
 /// Builds one [`Anchor`](InlineNode::Anchor) node from an inline-anchor match,
-/// slicing the id straight from `'src` so the fold reproduces the string
-/// replacer's `<a id="…"></a>` exactly. Returns `None` when the id is not
-/// verbatim (see below) – a form this increment defers.
+/// recovering the id's exact text via [`text_slice`] so the fold reproduces
+/// the string replacer's `<a id="…"></a>` exactly. Returns `None` only when
+/// the id crosses an [`atomic`](Piece::atomic) piece (see below) – a form this
+/// increment still defers.
 ///
 /// Two spellings share this builder: the `[[id,reftext]]` shorthand (groups
 /// 2/3) and the `anchor:id[reftext]` macro (groups 4/5). Exactly one id group
 /// matches.
 ///
 /// An id's character class (letters/digits/`_`/`-`/`:`/`.`) admits no escaped
-/// special or rendered span, but its bytes can still come from a
+/// special or rendered span, so [`range_is_verbatim_or_synthesized`]'s atomic
+/// check can in practice never fail for an id – it is kept for symmetry with
+/// every other macro family's own gate. Its bytes *can* come from a
 /// [`synthesized`](Piece::synthesized) run – an attribute reference whose
-/// expanded value happens to contain `[[id]]` – which has no honest `'src`
-/// slice of its own (design §3.4.1's "a macro inside an expanded value"
-/// boundary). [`range_is_verbatim`] catches that (and the never-actually-
-/// reachable atomic case, kept for symmetry with every other macro family's
-/// own gate) before the id is sliced, so a non-verbatim id defers the whole
-/// anchor rather than building a node whose `id`/`location` would silently
-/// fall back to the enclosing synthesized run's coarse span (design §4.4)
-/// instead of the real id text.
+/// expanded value happens to contain `[[id]]`, or – reached at a tree's root –
+/// a filtered multi-line block's own joined seed (design §3.4.1's "a macro
+/// inside an expanded value" boundary) – and [`text_slice`] recovers the exact
+/// id text for that case too, unlike [`source_slice`], which would silently
+/// fall back to the enclosing synthesized run's *coarse* span (design §4.4)
+/// for both the id and the node's `location`. Only `location` keeps that
+/// coarse fallback here; the id text itself is always precise.
 ///
 /// The optional reference text is captured as the node's `reftext` – a single
-/// [`Text`](InlineNode::Text) child – **when it is verbatim** (the common case,
-/// borrowing `'src`; a shorthand's trailing whitespace is trimmed and a macro's
-/// escaped `\]` is unescaped into an owned value, mirroring the string
-/// replacer). A reference text that carries a rendered span or an escaped
-/// special is non-verbatim; because it never reaches the flow (the anchor
-/// renders from its id alone), the anchor is still recognized but its `reftext`
-/// is left `None` rather than sliced wrongly from `'src` – a narrower boundary
-/// than the id's own, and a shape a re-flow consumer can refine later (the
-/// field is provisional, per the node's Phase-0 note).
+/// [`Text`](InlineNode::Text) child – whenever it does not cross an atomic
+/// piece (the common verbatim case borrows `'src`; a synthesized one is
+/// recovered via [`text_slice`] into an owned value, `location` falling back
+/// to the coarse span exactly as the id's own does). A shorthand's trailing
+/// whitespace is trimmed and a macro's escaped `\]` is unescaped, mirroring
+/// the string replacer. A reference text that carries a rendered span or an
+/// escaped special is left non-verbatim; because it never reaches the flow
+/// (the anchor renders from its id alone), the anchor is still recognized but
+/// its `reftext` is left `None` rather than sliced wrongly – a narrower
+/// boundary than the id's own, and a shape a re-flow consumer can refine later
+/// (the field is provisional, per the node's Phase-0 note).
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect – notably it does **not** `register_ref` the id in the catalog (so a
@@ -153,6 +166,7 @@ fn build_anchor_node<'src>(
     full: &std::ops::Range<usize>,
     pieces: &[Piece],
     root: Span<'src>,
+    nodes: &[InlineNode<'src>],
 ) -> Option<InlineNode<'src>> {
     let location = source_slice(pieces, full.clone(), root);
 
@@ -170,15 +184,14 @@ fn build_anchor_node<'src>(
 
     let id_range = id_match.start()..id_match.end();
 
-    if !range_is_verbatim(pieces, &id_range) {
+    if !range_is_verbatim_or_synthesized(pieces, &id_range) {
         return None;
     }
 
-    let id_span = source_slice(pieces, id_range, root);
-    let id = CowStr::from(id_span.data());
+    let id = text_slice(nodes, pieces, id_range)?;
 
     let reftext = reftext_match
-        .and_then(|m| build_anchor_reftext(m.start()..m.end(), pieces, root, is_shorthand));
+        .and_then(|m| build_anchor_reftext(m.start()..m.end(), pieces, root, nodes, is_shorthand));
 
     Some(InlineNode::Anchor(Anchor {
         id,
@@ -189,52 +202,71 @@ fn build_anchor_node<'src>(
 
 /// Builds an inline anchor's `reftext` – a single [`Text`](InlineNode::Text)
 /// child – from the reference-text capture's match-string `range`, or `None`
-/// when the reference text is non-verbatim or trims to empty (see
-/// [`build_anchor_node`] for why a non-verbatim reference text is not an
-/// error).
+/// when the reference text crosses an atomic piece or trims to empty (see
+/// [`build_anchor_node`] for why crossing an atomic piece is not an error for
+/// the anchor as a whole).
 ///
 /// A `shorthand` reference text has its trailing whitespace stripped (the
-/// string replacer's `trim_end`; leading whitespace was already excluded by the
-/// pattern's `, \s*`). A macro reference text unescapes an escaped `\]` into an
-/// owned value, mirroring the replacer's `replace("\\]", "]")`; without one it
-/// borrows `'src`.
+/// string replacer's `trim_end`; leading whitespace was already excluded by
+/// the pattern's `, \s*`). A macro reference text unescapes an escaped `\]`
+/// into an owned value, mirroring the replacer's `replace("\\]", "]")`.
+///
+/// The verbatim case (the common one) keeps its exact prior shape: the value
+/// borrows `'src`, and a shorthand's `location` is sliced down to the trimmed
+/// text precisely. A [`synthesized`](Piece::synthesized) range instead
+/// recovers its exact text via [`text_slice`] but keeps the whole range's
+/// coarse `location` regardless of trimming or unescaping (design §4.4) –
+/// sub-slicing a location has no honest meaning for bytes with no `'src`
+/// counterpart of their own, the same policy
+/// [`emit_range`](super::super::quotes::emit_range) already applies to every
+/// fragment of an expanded value.
 fn build_anchor_reftext<'src>(
     range: std::ops::Range<usize>,
     pieces: &[Piece],
     root: Span<'src>,
+    nodes: &[InlineNode<'src>],
     shorthand: bool,
 ) -> Option<Vec<InlineNode<'src>>> {
-    if !range_is_verbatim(pieces, &range) {
+    if !range_is_verbatim_or_synthesized(pieces, &range) {
         return None;
     }
 
-    let span = source_slice(pieces, range, root);
-    let raw = span.data();
+    let synthesized = range_overlaps_synthesized(pieces, &range);
+    let location = source_slice(pieces, range.clone(), root);
+    let text = text_slice(nodes, pieces, range)?;
 
     let child = if shorthand {
-        let trimmed_len = raw.trim_end().len();
+        let trimmed = text.trim_end();
 
-        if trimmed_len == 0 {
+        if trimmed.is_empty() {
             return None;
         }
 
-        let text_location = span.slice(0..trimmed_len);
+        if synthesized {
+            InlineNode::Text {
+                value: CowStr::from(trimmed.to_string()),
+                location,
+            }
+        } else {
+            let text_location = location.slice(0..trimmed.len());
 
-        InlineNode::Text {
-            value: CowStr::from(text_location.data()),
-            location: text_location,
+            InlineNode::Text {
+                value: CowStr::from(text_location.data()),
+                location: text_location,
+            }
         }
-    } else if raw.contains("\\]") {
-        // An escaped bracket makes the logical text a synthesized (owned) value
-        // whose `location` still covers the raw source it derives from.
+    } else if text.contains("\\]") {
+        // An escaped bracket makes the logical text an owned value whose
+        // `location` still covers the raw source (or its coarse fallback) it
+        // derives from.
         InlineNode::Text {
-            value: CowStr::from(raw.replace("\\]", "]")),
-            location: span,
+            value: CowStr::from(text.replace("\\]", "]")),
+            location,
         }
     } else {
         InlineNode::Text {
-            value: CowStr::from(raw),
-            location: span,
+            value: text,
+            location,
         }
     };
 
@@ -368,7 +400,30 @@ fn anchor_reftext_str<'a>(anchor: &'a Anchor<'_>) -> Option<&'a str> {
 /// exclude this case – see its own doc) but never catalogs the id; this
 /// mirrors that by skipping only the registration, not the recognition. See
 /// #769.
+///
+/// This peeks at `anchor.location`'s own bytes and the byte immediately
+/// before it in `source`, which is only honest for a **verbatim** anchor: its
+/// `location` is then a precise slice of the real source, so both reads are
+/// meaningful. A **synthesized** anchor's `id` (design §4.4's coarse-fallback
+/// case, lifted for this family by [`text_slice`]) instead carries a
+/// `location` that is only the enclosing run's *whole* coarse span, not the
+/// exact `[[id]]` text – peeking at a byte relative to that span would answer
+/// a question about the wrong bytes (the source immediately before the
+/// *attribute reference*, not before the *id* inside its expanded value), so
+/// this bails out to `false` (not bibliography-inner) for any non-verbatim id
+/// rather than risk a wrong answer in either direction from bytes that were
+/// never the id's own. A genuinely bibliography-style `[[[id]]]` sequence
+/// reached through an attribute expansion is therefore registered as an
+/// ordinary reference rather than suppressed – a narrower, documented gap the
+/// eventual `apply_ref_side_effects` wiring (design §5.2 Phase 4, step 6) can
+/// close if it proves to matter, the same "a coarse fallback trades precision
+/// for correctness of the common case" policy design §4.4 already establishes
+/// elsewhere.
 fn is_bibliography_inner(anchor: &Anchor<'_>, source: Span<'_>) -> bool {
+    if !matches!(anchor.id, CowStr::Borrowed(_)) {
+        return false;
+    }
+
     if !anchor.location.data().starts_with("[[") {
         return false;
     }
@@ -675,19 +730,18 @@ mod tests {
     }
 
     #[test]
-    fn an_anchor_inside_an_expanded_attribute_value_is_a_documented_divergence() {
+    fn an_anchor_inside_an_expanded_attribute_value_is_now_recognized() {
         // An attribute reference whose resolved value happens to contain
         // `[[id]]` (design §3.4.1's "a macro inside an expanded value" case,
         // reached here through an anchor's own id instead of a target/
         // attribute list). The string pipeline splices the value in during
         // `AttributeReferences`, then genuinely recognizes the anchor when
-        // `Macros` runs over the now-literal `[[custom-id]]` text. The
-        // additive builder does not yet recognize a macro whose target/id
-        // comes from a synthesized (spliced) run at all – the same boundary
-        // every other macro family already documents – so, since
-        // `build_anchor_node` now checks the id's own verbatim-ness (the fix
-        // this test pins), the id is correctly left unrecognized here rather
-        // than built from the wrong bytes.
+        // `Macros` runs over the now-literal `[[custom-id]]` text. Once this
+        // was a documented divergence (#1177 made `build_anchor_node` defer
+        // here rather than build a wrongly-sourced node); this increment
+        // lifts it: [`text_slice`] recovers the id's exact text from the
+        // synthesized run, so the anchor is now recognized and the fold
+        // matches the golden string pipeline byte-for-byte.
         use crate::parser::ModificationContext;
 
         let parser = Parser::default().with_intrinsic_attribute(
@@ -699,11 +753,18 @@ mod tests {
         let source = "before {myattr} after";
         let nodes = build(Span::new(source), &parser, None);
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Anchor(_))),
-            "an id inside a synthesized run must not build a (wrongly-sourced) \
-             anchor node: {nodes:?}"
-        );
+        let anchor = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Anchor(anchor) => Some(anchor),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected an Anchor node: {nodes:?}"));
+
+        assert_eq!(anchor.id.as_ref(), "custom-id");
+        // The id has no honest `'src` slice of its own (it comes from the
+        // attribute's resolved value), so it is necessarily owned.
+        assert!(matches!(anchor.id, CowStr::Boxed(_)));
 
         let golden = golden_attributes_with(source, &parser);
         assert!(
@@ -717,12 +778,102 @@ mod tests {
             &parser,
         );
 
-        assert_ne!(
-            folded, golden,
-            "expected the documented divergence to still reproduce; if the boundary \
-             was lifted, fold this fixture into a parity corpus instead"
+        assert_eq!(folded, golden, "fold diverged from the string pipeline");
+    }
+
+    #[test]
+    fn an_anchor_is_recognized_when_the_whole_seed_is_synthesized() {
+        // The same boundary as the test above, reached at the tree's root
+        // instead of a nested splice: `build_from_value`'s synthesized-seed
+        // path (design §4.4, the shape `Content::from_filtered_lines`
+        // produces for a genuinely multi-line, filtered block) now also
+        // recognizes an anchor, mirroring `mod.rs`'s own
+        // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
+        // – which still pins this boundary for the *other* macro families
+        // (link/image/xref) this increment does not touch.
+        use crate::content::inline_builder::build_from_value;
+
+        let filtered = "see [[target]] here";
+        let source = "  see [[target]] here";
+
+        let parser = Parser::default();
+        let nodes = build_from_value(
+            CowStr::from(filtered.to_string()),
+            Span::new(source),
+            &parser,
+            None,
         );
-        assert_eq!(folded, "before [[custom-id]] after");
+
+        let anchor = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Anchor(anchor) => Some(anchor),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected an Anchor node: {nodes:?}"));
+
+        assert_eq!(anchor.id.as_ref(), "target");
+
+        let golden = golden_macros(filtered);
+        assert!(
+            golden.contains(r##"id="target""##),
+            "golden fixture stopped recognizing the anchor: {golden:?}"
+        );
+
+        let folded = crate::content::inline_builder::fold_html(
+            &nodes,
+            &HtmlSubstitutionRenderer {},
+            &parser,
+        );
+        assert_eq!(folded, golden, "fold diverged from the real pipeline");
+    }
+
+    #[test]
+    fn an_anchors_reftext_inside_an_expanded_attribute_value_is_now_recognized() {
+        // `build_anchor_reftext`'s own synthesized branch: the reference text
+        // – not just the id – can come from a synthesized run too. Its
+        // `location` falls back to the coarse enclosing span (design §4.4)
+        // rather than a sub-slice of it, since there is no honest source
+        // position to slice for owned bytes; only the recovered `value` is
+        // exact.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute(
+            "myattr",
+            "[[custom-id,Custom Text]]",
+            ModificationContext::Anywhere,
+        );
+
+        let source = "before {myattr} after";
+        let nodes = build(Span::new(source), &parser, None);
+
+        let anchor = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Anchor(anchor) => Some(anchor),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected an Anchor node: {nodes:?}"));
+
+        assert_eq!(anchor.id.as_ref(), "custom-id");
+
+        let reftext = anchor.reftext.as_ref().unwrap();
+        assert_eq!(reftext.len(), 1);
+        match &reftext[0] {
+            InlineNode::Text { value, .. } => {
+                assert_eq!(value.as_ref(), "Custom Text");
+                assert!(matches!(value, CowStr::Boxed(_)));
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+
+        let golden = golden_attributes_with(source, &parser);
+        let folded = crate::content::inline_builder::fold_html(
+            &nodes,
+            &HtmlSubstitutionRenderer {},
+            &parser,
+        );
+        assert_eq!(folded, golden, "fold diverged from the string pipeline");
     }
 
     // ---- `apply_ref_side_effects` (staged for the eventual cutover) -------
@@ -826,6 +977,45 @@ mod tests {
         apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
 
         assert!(!parser.catalog().contains_id("id"));
+    }
+
+    #[test]
+    fn a_bibliography_style_triple_bracket_reached_through_a_synthesized_run_still_registers() {
+        // `is_bibliography_inner`'s own documented gap: it only recognizes the
+        // `[[[id]]]` shape via a *verbatim* anchor's `location`, since a
+        // synthesized anchor's `location` is only the enclosing run's coarse
+        // span (not the literal `[[id]]` text), so peeking at its bytes could
+        // never answer the "preceded by `[`" question honestly. Unlike the
+        // test above (a literal `[[[id]]]` in real source, suppressed), the
+        // same shape reached through an attribute expansion is registered as
+        // an ordinary reference instead – the anchor is still recognized (its
+        // id is exact, per the fold-parity tests above), just not suppressed.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute(
+            "myattr",
+            "[[[id]]]",
+            ModificationContext::Anywhere,
+        );
+
+        let source = "before {myattr} after";
+        let nodes = build_with(Span::new(source), &parser);
+
+        let anchor = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Anchor(anchor) => Some(anchor),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected an Anchor node: {nodes:?}"));
+        assert!(matches!(anchor.id, CowStr::Boxed(_)), "id is synthesized");
+
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        assert!(
+            parser.catalog().contains_id("id"),
+            "a synthesized bibliography-style anchor is registered, not suppressed"
+        );
     }
 
     #[test]

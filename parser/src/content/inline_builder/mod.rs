@@ -51,10 +51,15 @@
 //!   recognized, a follow-up increment having taught
 //!   [`build_match_string`](quotes::build_match_string) to look inside a
 //!   [`synthesized`](quotes::Piece::synthesized) run instead of treating it as
-//!   opaque; a **macro** inside one remains deferred (a macro node needs an
-//!   honest `'src` slice for its target/attribute list, which a synthesized
-//!   run's bytes – no source counterpart of their own – cannot supply; see
-//!   [`range_is_verbatim`](macros::image::range_is_verbatim)).
+//!   opaque; a **macro** needing an honest `'src` slice for its own
+//!   target/attribute list (a link, image, or cross-reference) still defers
+//!   when that slice sits inside one, since a synthesized run's bytes have no
+//!   source counterpart to slice for a type that requires a real `Span` (see
+//!   [`range_is_verbatim`](macros::image::range_is_verbatim)) – but a macro
+//!   needing only its own *text* (no `Span`-typed field), like an anchor's id,
+//!   can now be recovered exactly via [`text_slice`](quotes::text_slice)
+//!   instead (see
+//!   [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized)).
 //! - [`apply_character_replacements`] recognizes [character replacements] –
 //!   `(C)`, `--`, `...`, arrows, apostrophes, and restored entities – replacing
 //!   each with a [`CharRef::Replacement`](crate::inlines::CharRef::Replacement)
@@ -103,13 +108,17 @@
 //!   every reference-bearing family, since a rendered span is an opaque piece
 //!   the node's single `Text` child cannot absorb without becoming structured
 //!   children (the shape a footnote's own content already needs). An anchor
-//!   renders from its id alone, so it is recognized whenever that id is
-//!   verbatim – which its character class guarantees against an escaped
-//!   special or a rendered span, though not against sitting inside a
-//!   [`synthesized`](quotes::Piece::synthesized) run (an attribute expansion),
-//!   the one boundary an anchor still defers on like every other family: only a
-//!   non-verbatim reference text – which does not reach the flow – leaves the
-//!   node's `reftext` unpopulated without deferring the whole anchor.
+//!   renders from its id alone, so it is recognized whenever that id does not
+//!   cross a rendered span – its character class rules out an escaped special
+//!   entirely. Unlike every other reference-bearing family, an anchor is now
+//!   recognized even when its id sits inside a
+//!   [`synthesized`](quotes::Piece::synthesized) run (an attribute expansion,
+//!   or – reached at a tree's root – a filtered multi-line block's own joined
+//!   seed): [`text_slice`](quotes::text_slice) recovers the id's exact text
+//!   there, with only the node's `location` falling back to the coarse
+//!   enclosing span (design §4.4). A non-verbatim reference text – which does
+//!   not reach the flow – still just leaves the node's `reftext` unpopulated
+//!   without deferring the whole anchor.
 //!   Likewise a *concealed* index term (`indexterm:[…]`, `(((…)))`) renders
 //!   nothing, so it too is always recognized; a *visible* term (`indexterm2:[…]`,
 //!   `((term))`) is deferred only when its shown text crosses a rendered span or

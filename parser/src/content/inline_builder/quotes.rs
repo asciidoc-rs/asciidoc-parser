@@ -623,6 +623,63 @@ pub(super) fn emit_range<'src>(
     }
 }
 
+/// Returns the literal text `range` covers, reusing [`emit_range`]'s own
+/// verbatim/synthesized slicing to recover it *exactly* even when `range`
+/// falls inside a [`synthesized`](Piece::synthesized) piece (an attribute
+/// expansion, or – reached at a tree's root – a filtered multi-line block's
+/// own joined seed): unlike [`source_slice`], which snaps a boundary landing
+/// *inside* a synthesized piece to that piece's own coarse edge (design
+/// §4.4) because it must return an honest `'src` [`Span`], this slices the
+/// piece's own `value` instead, so the returned text is precise rather than
+/// approximate – the same recovery [`emit_range`] already gives a kept
+/// [`Text`](InlineNode::Text) run, just concatenated into one value instead
+/// of a node list. Still yields `None` when `range` touches an
+/// [`atomic`](Piece::atomic) piece (an escaped special or a rendered span) –
+/// that boundary is unchanged; a caller checks
+/// [`range_is_verbatim_or_synthesized`](super::macros::image::range_is_verbatim_or_synthesized)
+/// first and is expected to defer exactly as before when it fails.
+pub(super) fn text_slice<'src>(
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    range: std::ops::Range<usize>,
+) -> Option<CowStr<'src>> {
+    if range.start >= range.end {
+        return Some(CowStr::from(""));
+    }
+
+    let mut emitted = Vec::new();
+    emit_range(nodes, pieces, range, &mut emitted);
+
+    let mut parts = emitted.into_iter();
+
+    let first = parts.next()?;
+    let InlineNode::Text { value: first, .. } = first else {
+        return None;
+    };
+
+    match parts.next() {
+        None => Some(first),
+
+        Some(second) => {
+            let InlineNode::Text { value: second, .. } = second else {
+                return None;
+            };
+
+            let mut owned = first.into_string();
+            owned.push_str(&second);
+
+            for part in parts {
+                let InlineNode::Text { value, .. } = part else {
+                    return None;
+                };
+                owned.push_str(&value);
+            }
+
+            Some(CowStr::from(owned))
+        }
+    }
+}
+
 /// Maps a match-string range back to its source [`Span`], sliced from `root`.
 ///
 /// A boundary inside a verbatim [`Text`](InlineNode::Text) run maps one-to-one
@@ -1061,6 +1118,311 @@ mod tests {
             &mut out,
         );
         assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn text_slice_of_an_empty_range_is_empty() {
+        use super::text_slice;
+
+        assert_eq!(text_slice(&[], &[], 3..3).unwrap().as_ref(), "");
+    }
+
+    #[test]
+    fn text_slice_borrows_from_a_single_verbatim_piece() {
+        use super::{Piece, text_slice};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        let location = Span::new("hello");
+        let node = InlineNode::Text {
+            value: CowStr::from("hello"),
+            location,
+        };
+        let piece = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 5,
+            src_offset: location.byte_offset(),
+            src_len: location.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let result = text_slice(
+            std::slice::from_ref(&node),
+            std::slice::from_ref(&piece),
+            1..4,
+        )
+        .unwrap();
+
+        assert_eq!(result.as_ref(), "ell");
+        assert!(matches!(result, CowStr::Borrowed(_)));
+    }
+
+    #[test]
+    fn text_slice_recovers_exact_text_from_a_single_synthesized_piece() {
+        use super::{Piece, text_slice};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        // The recovered text ("value") differs from `location`'s own source
+        // bytes ("{x}") – the exact shape a spliced attribute expansion
+        // produces – which is what `source_slice`'s coarse fallback cannot
+        // recover but `text_slice` can.
+        let location = Span::new("{x}");
+        let node = InlineNode::Text {
+            value: CowStr::from("expanded value"),
+            location,
+        };
+        let piece = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: "expanded value".len(),
+            src_offset: location.byte_offset(),
+            src_len: location.data().len(),
+            atomic: false,
+            synthesized: true,
+        };
+
+        let result = text_slice(
+            std::slice::from_ref(&node),
+            std::slice::from_ref(&piece),
+            9..14,
+        )
+        .unwrap();
+
+        assert_eq!(result.as_ref(), "value");
+        assert!(matches!(result, CowStr::Boxed(_)));
+    }
+
+    #[test]
+    fn text_slice_concatenates_across_multiple_pieces() {
+        use super::{Piece, text_slice};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        let loc_a = Span::new("ab");
+        let node_a = InlineNode::Text {
+            value: CowStr::from("ab"),
+            location: loc_a,
+        };
+        let piece_a = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 2,
+            src_offset: loc_a.byte_offset(),
+            src_len: loc_a.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let loc_b = Span::new("{y}");
+        let node_b = InlineNode::Text {
+            value: CowStr::from("cd"),
+            location: loc_b,
+        };
+        let piece_b = Piece {
+            node_index: 1,
+            s_start: 2,
+            s_len: 2,
+            src_offset: loc_b.byte_offset(),
+            src_len: loc_b.data().len(),
+            atomic: false,
+            synthesized: true,
+        };
+
+        let nodes = [node_a, node_b];
+        let pieces = [piece_a, piece_b];
+
+        let result = text_slice(&nodes, &pieces, 0..4).unwrap();
+
+        assert_eq!(result.as_ref(), "abcd");
+        assert!(
+            matches!(result, CowStr::Boxed(_)),
+            "a multi-piece result is always owned, even when every piece is verbatim"
+        );
+    }
+
+    #[test]
+    fn text_slice_concatenates_across_three_or_more_pieces() {
+        use super::{Piece, text_slice};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        // Exercises the tail of the concatenation loop (past the first two
+        // pieces), which the two-piece test above cannot reach.
+        let text_piece = |node_index, s_start, data: &'static str| {
+            let location = Span::new(data);
+            (
+                InlineNode::Text {
+                    value: CowStr::from(data),
+                    location,
+                },
+                Piece {
+                    node_index,
+                    s_start,
+                    s_len: data.len(),
+                    src_offset: location.byte_offset(),
+                    src_len: location.data().len(),
+                    atomic: false,
+                    synthesized: false,
+                },
+            )
+        };
+
+        let (node_a, piece_a) = text_piece(0, 0, "a");
+        let (node_b, piece_b) = text_piece(1, 1, "b");
+        let (node_c, piece_c) = text_piece(2, 2, "c");
+
+        let nodes = [node_a, node_b, node_c];
+        let pieces = [piece_a, piece_b, piece_c];
+
+        let result = text_slice(&nodes, &pieces, 0..3).unwrap();
+        assert_eq!(result.as_ref(), "abc");
+    }
+
+    #[test]
+    fn text_slice_returns_none_when_a_third_piece_is_atomic() {
+        use super::{Piece, text_slice};
+        use crate::{
+            Span,
+            inlines::{CharRef, InlineNode},
+            strings::CowStr,
+        };
+
+        // Covers the concatenation loop's own atomic check for a piece past
+        // the *second* one – distinct from
+        // `text_slice_returns_none_when_a_later_piece_is_atomic`, which stops
+        // at the second.
+        let loc_a = Span::new("a");
+        let node_a = InlineNode::Text {
+            value: CowStr::from("a"),
+            location: loc_a,
+        };
+        let piece_a = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 1,
+            src_offset: loc_a.byte_offset(),
+            src_len: loc_a.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let loc_b = Span::new("b");
+        let node_b = InlineNode::Text {
+            value: CowStr::from("b"),
+            location: loc_b,
+        };
+        let piece_b = Piece {
+            node_index: 1,
+            s_start: 1,
+            s_len: 1,
+            src_offset: loc_b.byte_offset(),
+            src_len: loc_b.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let loc_c = Span::new("&amp;");
+        let node_c = InlineNode::CharRef {
+            value: CharRef::Special('&'),
+            location: loc_c,
+        };
+        let piece_c = Piece {
+            node_index: 2,
+            s_start: 2,
+            s_len: 5,
+            src_offset: loc_c.byte_offset(),
+            src_len: loc_c.data().len(),
+            atomic: true,
+            synthesized: false,
+        };
+
+        let nodes = [node_a, node_b, node_c];
+        let pieces = [piece_a, piece_b, piece_c];
+
+        assert!(text_slice(&nodes, &pieces, 0..7).is_none());
+    }
+
+    #[test]
+    fn text_slice_returns_none_when_a_later_piece_is_atomic() {
+        use super::{Piece, text_slice};
+        use crate::{
+            Span,
+            inlines::{CharRef, InlineNode},
+            strings::CowStr,
+        };
+
+        // The atomic-rejection test above hits it on the *first* piece; this
+        // covers the loop's own atomic check for a piece after the first.
+        let loc_a = Span::new("a");
+        let node_a = InlineNode::Text {
+            value: CowStr::from("a"),
+            location: loc_a,
+        };
+        let piece_a = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 1,
+            src_offset: loc_a.byte_offset(),
+            src_len: loc_a.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let loc_b = Span::new("&amp;");
+        let node_b = InlineNode::CharRef {
+            value: CharRef::Special('&'),
+            location: loc_b,
+        };
+        let piece_b = Piece {
+            node_index: 1,
+            s_start: 1,
+            s_len: 5,
+            src_offset: loc_b.byte_offset(),
+            src_len: loc_b.data().len(),
+            atomic: true,
+            synthesized: false,
+        };
+
+        let nodes = [node_a, node_b];
+        let pieces = [piece_a, piece_b];
+
+        assert!(text_slice(&nodes, &pieces, 0..6).is_none());
+    }
+
+    #[test]
+    fn text_slice_returns_none_across_an_atomic_piece() {
+        use super::{Piece, text_slice};
+        use crate::{
+            Span,
+            inlines::{CharRef, InlineNode},
+        };
+
+        // Mirrors `range_is_verbatim_or_synthesized`'s own atomic rejection:
+        // an escaped special (or a rendered span) is cloned whole by
+        // `emit_range`, so it never reduces to a `Text` node `text_slice` can
+        // return a value for.
+        let location = Span::new("&amp;");
+        let node = InlineNode::CharRef {
+            value: CharRef::Special('&'),
+            location,
+        };
+        let piece = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 5,
+            src_offset: location.byte_offset(),
+            src_len: location.data().len(),
+            atomic: true,
+            synthesized: false,
+        };
+
+        assert!(
+            text_slice(
+                std::slice::from_ref(&node),
+                std::slice::from_ref(&piece),
+                0..5
+            )
+            .is_none()
+        );
     }
 
     #[test]
