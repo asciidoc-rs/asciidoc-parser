@@ -1241,6 +1241,154 @@ mod tests {
     }
 
     #[test]
+    fn text_slice_concatenates_across_three_or_more_pieces() {
+        use super::{Piece, text_slice};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        // Exercises the tail of the concatenation loop (past the first two
+        // pieces), which the two-piece test above cannot reach.
+        let text_piece = |node_index, s_start, data: &'static str| {
+            let location = Span::new(data);
+            (
+                InlineNode::Text {
+                    value: CowStr::from(data),
+                    location,
+                },
+                Piece {
+                    node_index,
+                    s_start,
+                    s_len: data.len(),
+                    src_offset: location.byte_offset(),
+                    src_len: location.data().len(),
+                    atomic: false,
+                    synthesized: false,
+                },
+            )
+        };
+
+        let (node_a, piece_a) = text_piece(0, 0, "a");
+        let (node_b, piece_b) = text_piece(1, 1, "b");
+        let (node_c, piece_c) = text_piece(2, 2, "c");
+
+        let nodes = [node_a, node_b, node_c];
+        let pieces = [piece_a, piece_b, piece_c];
+
+        let result = text_slice(&nodes, &pieces, 0..3).unwrap();
+        assert_eq!(result.as_ref(), "abc");
+    }
+
+    #[test]
+    fn text_slice_returns_none_when_a_third_piece_is_atomic() {
+        use super::{Piece, text_slice};
+        use crate::{
+            Span,
+            inlines::{CharRef, InlineNode},
+            strings::CowStr,
+        };
+
+        // Covers the concatenation loop's own atomic check for a piece past
+        // the *second* one – distinct from
+        // `text_slice_returns_none_when_a_later_piece_is_atomic`, which stops
+        // at the second.
+        let loc_a = Span::new("a");
+        let node_a = InlineNode::Text {
+            value: CowStr::from("a"),
+            location: loc_a,
+        };
+        let piece_a = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 1,
+            src_offset: loc_a.byte_offset(),
+            src_len: loc_a.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let loc_b = Span::new("b");
+        let node_b = InlineNode::Text {
+            value: CowStr::from("b"),
+            location: loc_b,
+        };
+        let piece_b = Piece {
+            node_index: 1,
+            s_start: 1,
+            s_len: 1,
+            src_offset: loc_b.byte_offset(),
+            src_len: loc_b.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let loc_c = Span::new("&amp;");
+        let node_c = InlineNode::CharRef {
+            value: CharRef::Special('&'),
+            location: loc_c,
+        };
+        let piece_c = Piece {
+            node_index: 2,
+            s_start: 2,
+            s_len: 5,
+            src_offset: loc_c.byte_offset(),
+            src_len: loc_c.data().len(),
+            atomic: true,
+            synthesized: false,
+        };
+
+        let nodes = [node_a, node_b, node_c];
+        let pieces = [piece_a, piece_b, piece_c];
+
+        assert!(text_slice(&nodes, &pieces, 0..7).is_none());
+    }
+
+    #[test]
+    fn text_slice_returns_none_when_a_later_piece_is_atomic() {
+        use super::{Piece, text_slice};
+        use crate::{
+            Span,
+            inlines::{CharRef, InlineNode},
+            strings::CowStr,
+        };
+
+        // The atomic-rejection test above hits it on the *first* piece; this
+        // covers the loop's own atomic check for a piece after the first.
+        let loc_a = Span::new("a");
+        let node_a = InlineNode::Text {
+            value: CowStr::from("a"),
+            location: loc_a,
+        };
+        let piece_a = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 1,
+            src_offset: loc_a.byte_offset(),
+            src_len: loc_a.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let loc_b = Span::new("&amp;");
+        let node_b = InlineNode::CharRef {
+            value: CharRef::Special('&'),
+            location: loc_b,
+        };
+        let piece_b = Piece {
+            node_index: 1,
+            s_start: 1,
+            s_len: 5,
+            src_offset: loc_b.byte_offset(),
+            src_len: loc_b.data().len(),
+            atomic: true,
+            synthesized: false,
+        };
+
+        let nodes = [node_a, node_b];
+        let pieces = [piece_a, piece_b];
+
+        assert!(text_slice(&nodes, &pieces, 0..6).is_none());
+    }
+
+    #[test]
     fn text_slice_returns_none_across_an_atomic_piece() {
         use super::{Piece, text_slice};
         use crate::{
