@@ -44,11 +44,20 @@ pub(super) fn anchor_macros_level<'src>(
 ///
 /// An anchor's HTML rendering (`<a id="…"></a>`) is a function of its **id
 /// alone**, and an id admits no special character (the pattern's id class is
-/// letters/digits/`_`/`-`/`:`/`.`), so an id is always verbatim and an anchor
-/// is *always* recognized – unlike the link/xref families, an anchor is never
-/// deferred on a non-verbatim boundary. A non-verbatim *reference text* (one
-/// carrying a rendered span or an escaped special) does not reach the flow, so
-/// it only leaves the node's `reftext` unpopulated (see [`build_anchor_node`]).
+/// letters/digits/`_`/`-`/`:`/`.`), so an id crossing an *escaped special* or a
+/// *rendered span* can never occur – unlike the link/xref families, an anchor
+/// is never deferred on *that* boundary. It can still fail the narrower
+/// verbatim-`'src`-slice test, though: an id's characters can themselves come
+/// from a [`synthesized`](Piece::synthesized) run (an attribute reference whose
+/// expanded value happens to contain `[[id]]`), which has no honest source
+/// counterpart of its own to slice (design §3.4.1/§4.1's "a macro inside an
+/// expanded value" boundary, reached here through the id rather than a
+/// target/attribute list). [`build_anchor_node`] checks the id's own range for
+/// that and returns `None` when it fails, leaving the anchor unrecognized for a
+/// later increment; a non-verbatim *reference text* (one carrying a rendered
+/// span or an escaped special) is a narrower case that does not reach the flow
+/// at all, so it only leaves the node's `reftext` unpopulated rather than
+/// deferring the whole anchor (see [`build_anchor_reftext`]).
 pub(super) fn find_anchor_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -81,7 +90,14 @@ pub(super) fn find_anchor_matches<'src>(
             continue;
         }
 
-        let node = build_anchor_node(&caps, &full, pieces, root);
+        let node = match build_anchor_node(&caps, &full, pieces, root) {
+            Some(node) => node,
+
+            // The id itself is not verbatim (see `build_anchor_node`); left as
+            // literal source for a later increment, exactly as every other
+            // macro family defers a match it cannot slice honestly.
+            None => continue,
+        };
 
         matches.push(MacroMatch {
             kind: MacroMatchKind::Node {
@@ -96,12 +112,25 @@ pub(super) fn find_anchor_matches<'src>(
 }
 
 /// Builds one [`Anchor`](InlineNode::Anchor) node from an inline-anchor match,
-/// slicing the id straight from `'src` (an id is always verbatim) so the fold
-/// reproduces the string replacer's `<a id="…"></a>` exactly.
+/// slicing the id straight from `'src` so the fold reproduces the string
+/// replacer's `<a id="…"></a>` exactly. Returns `None` when the id is not
+/// verbatim (see below) – a form this increment defers.
 ///
 /// Two spellings share this builder: the `[[id,reftext]]` shorthand (groups
 /// 2/3) and the `anchor:id[reftext]` macro (groups 4/5). Exactly one id group
 /// matches.
+///
+/// An id's character class (letters/digits/`_`/`-`/`:`/`.`) admits no escaped
+/// special or rendered span, but its bytes can still come from a
+/// [`synthesized`](Piece::synthesized) run – an attribute reference whose
+/// expanded value happens to contain `[[id]]` – which has no honest `'src`
+/// slice of its own (design §3.4.1's "a macro inside an expanded value"
+/// boundary). [`range_is_verbatim`] catches that (and the never-actually-
+/// reachable atomic case, kept for symmetry with every other macro family's
+/// own gate) before the id is sliced, so a non-verbatim id defers the whole
+/// anchor rather than building a node whose `id`/`location` would silently
+/// fall back to the enclosing synthesized run's coarse span (design §4.4)
+/// instead of the real id text.
 ///
 /// The optional reference text is captured as the node's `reftext` – a single
 /// [`Text`](InlineNode::Text) child – **when it is verbatim** (the common case,
@@ -110,9 +139,9 @@ pub(super) fn find_anchor_matches<'src>(
 /// replacer). A reference text that carries a rendered span or an escaped
 /// special is non-verbatim; because it never reaches the flow (the anchor
 /// renders from its id alone), the anchor is still recognized but its `reftext`
-/// is left `None` rather than sliced wrongly from `'src` – the same verbatim
-/// boundary the other macro families document, and a shape a re-flow consumer
-/// can refine later (the field is provisional, per the node's Phase-0 note).
+/// is left `None` rather than sliced wrongly from `'src` – a narrower boundary
+/// than the id's own, and a shape a re-flow consumer can refine later (the
+/// field is provisional, per the node's Phase-0 note).
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect – notably it does **not** `register_ref` the id in the catalog (so a
@@ -124,7 +153,7 @@ fn build_anchor_node<'src>(
     full: &std::ops::Range<usize>,
     pieces: &[Piece],
     root: Span<'src>,
-) -> InlineNode<'src> {
+) -> Option<InlineNode<'src>> {
     let location = source_slice(pieces, full.clone(), root);
 
     // Exactly one id group matches: group 2 for the `[[…]]` shorthand (with its
@@ -139,18 +168,23 @@ fn build_anchor_node<'src>(
         (caps.get(4).unwrap(), caps.get(5), false)
     };
 
-    // An id admits no special character, so it is verbatim and borrows `'src`.
-    let id_span = source_slice(pieces, id_match.start()..id_match.end(), root);
+    let id_range = id_match.start()..id_match.end();
+
+    if !range_is_verbatim(pieces, &id_range) {
+        return None;
+    }
+
+    let id_span = source_slice(pieces, id_range, root);
     let id = CowStr::from(id_span.data());
 
     let reftext = reftext_match
         .and_then(|m| build_anchor_reftext(m.start()..m.end(), pieces, root, is_shorthand));
 
-    InlineNode::Anchor(Anchor {
+    Some(InlineNode::Anchor(Anchor {
         id,
         reftext,
         location,
-    })
+    }))
 }
 
 /// Builds an inline anchor's `reftext` – a single [`Text`](InlineNode::Text)
@@ -618,6 +652,77 @@ mod tests {
 
         // The consumed span does not render into the flow.
         assert!(!folded.contains("<strong>"), "folded: {folded}");
+    }
+
+    /// The string pipeline's output through the **attribute-references** step
+    /// for `source`, run against `parser` – the six steps [`build`] runs, in
+    /// order (special characters, quotes, attribute references, character
+    /// replacements, macros, post replacement). Unlike [`golden_macros_with`],
+    /// this exercises `AttributeReferences` too, so an attribute whose
+    /// expanded value contains `[[id]]` is spliced in before `Macros` runs –
+    /// the scenario the divergence test below needs.
+    fn golden_attributes_with(source: &str, parser: &Parser) -> String {
+        use crate::content::{Content, SubstitutionStep};
+
+        let mut content = Content::from(Span::new(source));
+        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
+        SubstitutionStep::Quotes.apply(&mut content, parser, None);
+        SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+        SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
+        SubstitutionStep::Macros.apply(&mut content, parser, None);
+        SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
+        content.rendered_str().to_string()
+    }
+
+    #[test]
+    fn an_anchor_inside_an_expanded_attribute_value_is_a_documented_divergence() {
+        // An attribute reference whose resolved value happens to contain
+        // `[[id]]` (design §3.4.1's "a macro inside an expanded value" case,
+        // reached here through an anchor's own id instead of a target/
+        // attribute list). The string pipeline splices the value in during
+        // `AttributeReferences`, then genuinely recognizes the anchor when
+        // `Macros` runs over the now-literal `[[custom-id]]` text. The
+        // additive builder does not yet recognize a macro whose target/id
+        // comes from a synthesized (spliced) run at all – the same boundary
+        // every other macro family already documents – so, since
+        // `build_anchor_node` now checks the id's own verbatim-ness (the fix
+        // this test pins), the id is correctly left unrecognized here rather
+        // than built from the wrong bytes.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute(
+            "myattr",
+            "[[custom-id]]",
+            ModificationContext::Anywhere,
+        );
+
+        let source = "before {myattr} after";
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Anchor(_))),
+            "an id inside a synthesized run must not build a (wrongly-sourced) \
+             anchor node: {nodes:?}"
+        );
+
+        let golden = golden_attributes_with(source, &parser);
+        assert!(
+            golden.contains(r##"id="custom-id""##),
+            "golden fixture stopped recognizing the anchor: {golden:?}"
+        );
+
+        let folded = crate::content::inline_builder::fold_html(
+            &nodes,
+            &HtmlSubstitutionRenderer {},
+            &parser,
+        );
+
+        assert_ne!(
+            folded, golden,
+            "expected the documented divergence to still reproduce; if the boundary \
+             was lifted, fold this fixture into a parity corpus instead"
+        );
+        assert_eq!(folded, "before [[custom-id]] after");
     }
 
     // ---- `apply_ref_side_effects` (staged for the eventual cutover) -------

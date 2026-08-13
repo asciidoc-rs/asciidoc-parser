@@ -103,9 +103,13 @@
 //!   every reference-bearing family, since a rendered span is an opaque piece
 //!   the node's single `Text` child cannot absorb without becoming structured
 //!   children (the shape a footnote's own content already needs). An anchor
-//!   renders from its id alone, so it
-//!   is *always* recognized (never deferred): only a non-verbatim reference text
-//!   – which does not reach the flow – leaves the node's `reftext` unpopulated.
+//!   renders from its id alone, so it is recognized whenever that id is
+//!   verbatim – which its character class guarantees against an escaped
+//!   special or a rendered span, though not against sitting inside a
+//!   [`synthesized`](quotes::Piece::synthesized) run (an attribute expansion),
+//!   the one boundary an anchor still defers on like every other family: only a
+//!   non-verbatim reference text – which does not reach the flow – leaves the
+//!   node's `reftext` unpopulated without deferring the whole anchor.
 //!   Likewise a *concealed* index term (`indexterm:[…]`, `(((…)))`) renders
 //!   nothing, so it too is always recognized; a *visible* term (`indexterm2:[…]`,
 //!   `((term))`) is deferred only when its shown text crosses a rendered span or
