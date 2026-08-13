@@ -1943,6 +1943,74 @@ Each phase is a reviewable unit with a clear exit gate.
   then the string pipeline still performs every registration), deleting the three production
   sentinel systems, and retiring the `with_inline_tree` flag.
 
+  *Step 6 prep landed as (the §3.4.1 classification for an order that never escapes, closing a
+  second real cutover blocker):* with the tree-source swap done, the next thing the remaining half
+  of step 6 needs – making `rendered_html()` an **authoritative** fold – is to know where the fold
+  still diverges from the string pipeline over the *whole* corpus, not over the hand-picked
+  fixtures each family's own differential corpus uses. A corpus-wide audit (tree building forced on
+  for every parse in the test suite, each content's tree folded and compared against that same
+  content's own rendered string) – the same due-diligence sweep that surfaced the `hardbreaks`
+  blocker above – found a second one of exactly that kind: not an unclaimed form the tree merely
+  leaves literal, but a **wrong answer** for content golden tests already exercise.
+
+  The cause is design §3.4's own definition read one step too narrowly. A
+  [`Text`](../../parser/src/inlines/inline_node.rs) node is *logical* text that **the fold
+  escapes**, which is exactly right when the `SpecialCharacters` step acted on the content – and
+  exactly wrong when that step never runs, because there the string pipeline emits the author's
+  `<`/`>`/`&` untouched. Every group whose effective order omits `specialcharacters` took that
+  path and folded escaped entities where the string pipeline emits raw ones: a passthrough block
+  ([`Pass`](../../parser/src/content/substitution_group.rs)), a comment block
+  ([`None`](../../parser/src/content/substitution_group.rs)), and every `subs=` custom list that
+  omits it (`subs=quotes`, `subs=attributes`, `subs=macros`, `subs=callouts` on a listing block,
+  the empty `subs=","` list, …). This is §3.4.1's own policy – "the kind a fragment becomes is
+  **not** a fixed property of where it came from; it is decided by which substitution steps still
+  act on it under the group's effective order" – applied to the *seed* rather than, as step 5b
+  first applied it, to a spliced attribute value: a literal special no `SpecialCharacters` step
+  ever acts on is a [`Raw`](../../parser/src/inlines/inline_node.rs) leaf.
+
+  [`classify_unescaped_specials`](../../parser/src/content/inline_builder/special_chars.rs) is that
+  classification. It shares its whole split with
+  [`apply_special_characters`](../../parser/src/content/inline_builder/special_chars.rs) – one
+  `SpecialLeaf` discriminant now selects `CharRef::Special` or `Raw`, so the two cannot drift on
+  where a boundary falls – and therefore keeps the same span discipline: a verbatim run's leaves
+  are sliced from `'src` with honest `line`/`col`/`offset` (#944) while a synthesized run's fall
+  back to the whole enclosing span (§4.4). [`build_for_group`](../../parser/src/content/inline_builder/mod.rs)
+  runs it **last**, after the group's own steps, gated on
+  `!steps.contains(&SubstitutionStep::SpecialCharacters)` – and running it last, rather than in
+  place of the step that is absent, is what keeps it faithful: under such an order the string
+  pipeline's own steps also match over text in which the specials are still literal, so every
+  transducer must go on seeing them as ordinary `Text` characters, not as the opaque leaf a `Raw`
+  node is to [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs). Only the
+  finished tree's *classification* differs; nothing about recognition changes. It recurses into
+  every container a text run can be nested inside – a `Styled` span, a `Ref`'s display children,
+  an `Anchor`'s reference text, and a `Footnote`'s own children – mirroring the containers
+  [`fold_html`](../../parser/src/content/inline_builder/fold.rs) itself descends into, since a
+  `subs=` list omitting `specialcharacters` can still name `quotes` and `macros`.
+
+  A new differential corpus crosses a set of specials-bearing fixtures (bare specials in every
+  position; specials that would look like a construct *once escaped*, so the classification is
+  pinned not to perturb – or depend on – recognition; specials beside and inside each construct
+  these orders can build; multi-line runs) with every real group that takes this path, each
+  fixture driven through the real, public `SubstitutionGroup::apply` as the golden. Two existing
+  tests that pinned the *old* shape – "`Pass`/`None` yield one untouched `Text` run" and
+  `subs=quotes`'s own "`<` stays literal text" – are rewritten to assert the classification
+  instead; neither had called the module's own `assert_group_parity` helper, which is precisely
+  why the divergence went unnoticed, so both now do. As with every prep piece before it, nothing
+  further is wired in: `rendered_html()` remains the string pipeline's own string, and this changes
+  only what a tree consumer reads back (and what the eventual authoritative fold will emit).
+
+  The audit also leaves the rest of step 6 a map. Every remaining whole-corpus divergence under the
+  *normal* order is a form this file already documents as deferred – a display or reference text
+  crossing a rendered span, an angle-bracketed `<url>` link, a bare e-mail auto-link, `<<id,>>`'s
+  present-but-empty text, the `menu:View[Zoom > Reset]` submenu form, a macro inside an expanded
+  attribute value, a missing attribute under `AttributeMissing::Drop`/`::DropLine`, and the
+  bibliography anchor (`[[[label]]]`) – plus one category not previously named: an effective order
+  that runs `SpecialCharacters` **after** a step that already produced markup (`subs=quotes,
+  specialcharacters`), where the string pipeline escapes the very tags the earlier step emitted.
+  That last one is structurally different from the rest, and harder: a tree whose markup exists
+  only at fold time has no rendered tags for a later escaping step to act on, so it needs its own
+  policy rather than another recognition increment.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2067,6 +2135,15 @@ Each phase is a reviewable unit with a clear exit gate.
        "landed as" note above. The remaining half – `rendered_html()` as an authoritative fold,
        `apply_macro_side_effects` called for real, the sentinel deletions, and the flag's
        retirement – is still outstanding.
+     - ✅ **prep (unescaped specials).** A corpus-wide fold-parity audit – the same sweep that
+       identified `hardbreaks` – surfaced a second real blocker: under an effective order whose
+       steps omit `specialcharacters` (a `Pass` or `None` block, or a `subs=` list without it),
+       a literal `<`/`>`/`&` must be a `Raw` leaf the fold emits verbatim, not the `Text` run the
+       fold escapes (§3.4.1 applied to the seed).
+       [`classify_unescaped_specials`](../../parser/src/content/inline_builder/special_chars.rs)
+       runs last in `build_for_group` for exactly those orders; see the step's own "landed as"
+       note above, which also records what the audit leaves outstanding for the authoritative
+       fold.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

@@ -1,4 +1,5 @@
-//! The special-characters substitution step.
+//! The special-characters substitution step, and its §3.4.1 counterpart for an
+//! effective order that never runs it.
 
 use super::passthrough_step::is_special;
 use crate::{
@@ -6,6 +7,23 @@ use crate::{
     inlines::{CharRef, InlineNode},
     strings::CowStr,
 };
+
+/// Which leaf kind a literal `<`/`>`/`&` becomes when a text run is split.
+///
+/// Design §3.4.1: the kind a fragment becomes is **not** a fixed property of
+/// where it came from; it is decided by which substitution steps still act on
+/// it under the group's effective order.
+#[derive(Clone, Copy)]
+enum SpecialLeaf {
+    /// A [`CharRef::Special`] the fold escapes – what the `SpecialCharacters`
+    /// step itself produces when it acts on a run.
+    CharRef,
+
+    /// A [`Raw`](InlineNode::Raw) leaf the fold emits verbatim – what a
+    /// literal special is under an effective order that never runs
+    /// `SpecialCharacters`, since the string pipeline leaves it untouched.
+    Raw,
+}
 
 /// The special-characters substitution, as a node transducer: every
 /// [`Text`](InlineNode::Text) run is split on `<`/`>`/`&` into
@@ -26,7 +44,7 @@ pub(super) fn apply_special_characters<'src>(
     for node in nodes {
         match node {
             InlineNode::Text { value, location } => {
-                split_text(value, location, &mut out);
+                split_text(value, location, SpecialLeaf::CharRef, &mut out);
             }
 
             InlineNode::Styled(mut styled) => {
@@ -46,8 +64,75 @@ pub(super) fn apply_special_characters<'src>(
     out
 }
 
+/// Classifies every literal `<`/`>`/`&` left in the finished tree as a
+/// [`Raw`](InlineNode::Raw) leaf – the §3.4.1 policy for an effective
+/// substitution order whose steps **never include**
+/// [`SpecialCharacters`](crate::content::SubstitutionStep::SpecialCharacters).
+///
+/// A [`Text`](InlineNode::Text) node is *logical* text the fold escapes (§3.4),
+/// which is exactly right when the `SpecialCharacters` step acted on the
+/// content — and exactly wrong when it never ran, because there the string
+/// pipeline emits the author's `<` unescaped. `subs=quotes` on a paragraph, a
+/// passthrough block ([`Pass`](crate::content::SubstitutionGroup::Pass)), a
+/// comment block ([`None`](crate::content::SubstitutionGroup::None)), and
+/// `subs=callouts` on a listing block all take that path, so the classification
+/// has to follow the *order*, not the node's origin.
+///
+/// This runs **after** every one of the group's own steps rather than in place
+/// of `apply_special_characters`, and that ordering is what keeps it faithful:
+/// under such an order the string pipeline's own steps also match over text in
+/// which the specials are still literal, so every transducer must see them as
+/// ordinary [`Text`](InlineNode::Text) characters – not as the opaque leaf a
+/// `Raw` node is to [`build_match_string`](super::quotes::build_match_string).
+/// Only the finished tree's *classification* differs, so nothing about
+/// recognition changes.
+///
+/// It recurses into every container a text run can be nested inside – a
+/// [`Styled`](crate::inlines::Styled) span, a [`Ref`](crate::inlines::Ref)'s
+/// own display children, an [`Anchor`](crate::inlines::Anchor)'s reference
+/// text, and a [`Footnote`](crate::inlines::Footnote)'s own children –
+/// mirroring the containers [`fold_html`](super::fold_html) itself descends
+/// into.
+pub(super) fn classify_unescaped_specials<'src>(
+    nodes: Vec<InlineNode<'src>>,
+) -> Vec<InlineNode<'src>> {
+    let mut out = Vec::with_capacity(nodes.len());
+
+    for node in nodes {
+        match node {
+            InlineNode::Text { value, location } => {
+                split_text(value, location, SpecialLeaf::Raw, &mut out);
+            }
+
+            InlineNode::Styled(mut styled) => {
+                styled.children = classify_unescaped_specials(styled.children);
+                out.push(InlineNode::Styled(styled));
+            }
+
+            InlineNode::Ref(mut reference) => {
+                reference.children = classify_unescaped_specials(reference.children);
+                out.push(InlineNode::Ref(reference));
+            }
+
+            InlineNode::Anchor(mut anchor) => {
+                anchor.reftext = anchor.reftext.map(classify_unescaped_specials);
+                out.push(InlineNode::Anchor(anchor));
+            }
+
+            InlineNode::Footnote(mut footnote) => {
+                footnote.children = classify_unescaped_specials(footnote.children);
+                out.push(InlineNode::Footnote(footnote));
+            }
+
+            other => out.push(other),
+        }
+    }
+
+    out
+}
+
 /// Splits a [`Text`](InlineNode::Text) node's logical `value` into alternating
-/// text runs and `<`/`>`/`&` [`CharRef`](InlineNode::CharRef) specials.
+/// text runs and `<`/`>`/`&` leaves of the kind `leaf` names.
 ///
 /// When `value` is exactly the source its `location` covers – the common
 /// verbatim run – each sub-node is sliced from `location`, so its
@@ -55,11 +140,16 @@ pub(super) fn apply_special_characters<'src>(
 /// `'src`. When `value` is *synthesized* – it has no source of its own – the
 /// runs are owned slices of the value and every sub-node falls back to the
 /// whole `location` span, the documented coarse fallback (design §4.4).
-fn split_text<'src>(value: CowStr<'src>, location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
+fn split_text<'src>(
+    value: CowStr<'src>,
+    location: Span<'src>,
+    leaf: SpecialLeaf,
+    out: &mut Vec<InlineNode<'src>>,
+) {
     if value.as_ref() == location.data() {
-        split_verbatim(location, out);
+        split_verbatim(location, leaf, out);
     } else {
-        split_synthesized(value.as_ref(), location, out);
+        split_synthesized(value.as_ref(), location, leaf, out);
     }
 }
 
@@ -67,7 +157,7 @@ fn split_text<'src>(value: CowStr<'src>, location: Span<'src>, out: &mut Vec<Inl
 /// covers – slicing each sub-span from `location` with the crate's span
 /// primitives so `line`/`col`/`offset` stay honest; a run is never emitted
 /// empty.
-fn split_verbatim<'src>(location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
+fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<InlineNode<'src>>) {
     let mut rest = location;
 
     while let Some(pos) = rest.position(is_special) {
@@ -84,11 +174,16 @@ fn split_verbatim<'src>(location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
         // The three specials are ASCII, so the match is exactly one byte wide.
         let ch_span = rest.slice(pos..pos + 1);
 
-        let ch = ch_span.data().chars().next().unwrap_or('\u{FFFD}');
+        out.push(match leaf {
+            SpecialLeaf::CharRef => InlineNode::CharRef {
+                value: CharRef::Special(ch_span.data().chars().next().unwrap_or('\u{FFFD}')),
+                location: ch_span,
+            },
 
-        out.push(InlineNode::CharRef {
-            value: CharRef::Special(ch),
-            location: ch_span,
+            SpecialLeaf::Raw => InlineNode::Raw {
+                value: CowStr::from(ch_span.data()),
+                location: ch_span,
+            },
         });
 
         rest = rest.slice_from(pos + 1..);
@@ -103,10 +198,15 @@ fn split_verbatim<'src>(location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
 }
 
 /// Splits a synthesized `value` – text with no source span of its own – into
-/// owned [`Text`](InlineNode::Text) runs and [`CharRef`](InlineNode::CharRef)
-/// specials, each carrying the whole `location` as its coarse fallback span; a
-/// run is never emitted empty.
-fn split_synthesized<'src>(value: &str, location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
+/// owned [`Text`](InlineNode::Text) runs and specials of the kind `leaf` names,
+/// each carrying the whole `location` as its coarse fallback span; a run is
+/// never emitted empty.
+fn split_synthesized<'src>(
+    value: &str,
+    location: Span<'src>,
+    leaf: SpecialLeaf,
+    out: &mut Vec<InlineNode<'src>>,
+) {
     let mut rest = value;
 
     while let Some(pos) = rest.find(is_special) {
@@ -121,9 +221,16 @@ fn split_synthesized<'src>(value: &str, location: Span<'src>, out: &mut Vec<Inli
         // The three specials are ASCII, so the match is exactly one byte wide.
         let ch = rest[pos..].chars().next().unwrap_or('\u{FFFD}');
 
-        out.push(InlineNode::CharRef {
-            value: CharRef::Special(ch),
-            location,
+        out.push(match leaf {
+            SpecialLeaf::CharRef => InlineNode::CharRef {
+                value: CharRef::Special(ch),
+                location,
+            },
+
+            SpecialLeaf::Raw => InlineNode::Raw {
+                value: CowStr::from(ch.to_string()),
+                location,
+            },
         });
 
         rest = &rest[pos + 1..];
@@ -145,12 +252,14 @@ mod tests {
 
     use super::{
         super::test_support::{assert_text, build_src, build_through_special, fold_html},
-        apply_special_characters,
+        apply_special_characters, classify_unescaped_specials,
     };
     use crate::{
         Span,
         content::{Content, SubstitutionStep},
-        inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled},
+        inlines::{
+            Anchor, CharRef, Footnote, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled,
+        },
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
@@ -389,6 +498,207 @@ mod tests {
         let mut content = Content::from(Span::new(source));
         SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
         content.rendered_str().to_string()
+    }
+
+    /// Asserts that `node` is a [`Raw`](InlineNode::Raw) leaf holding `ch`,
+    /// located at `col` on line 1 with `offset`.
+    fn assert_raw_special(node: &InlineNode<'_>, ch: char, col: usize, offset: usize) {
+        match node {
+            InlineNode::Raw { value, location } => {
+                assert_eq!(value.as_ref(), ch.to_string());
+                assert_eq!(location.data(), ch.to_string());
+                assert_eq!(location.col(), col, "col for {ch:?}");
+                assert_eq!(location.byte_offset(), offset, "offset for {ch:?}");
+            }
+
+            other => panic!("expected Raw({ch:?}), got {other:?}"),
+        }
+    }
+
+    /// A single borrowed [`Text`](InlineNode::Text) node over the whole of
+    /// `source`, the seed shape `build_for_group` starts every group from.
+    fn seed(source: &str) -> Vec<InlineNode<'_>> {
+        let location = Span::new(source);
+
+        vec![InlineNode::Text {
+            value: CowStr::from(location.data()),
+            location,
+        }]
+    }
+
+    #[test]
+    fn classification_splits_specials_into_raw_with_precise_spans() {
+        // The `Raw` counterpart of `splits_text_and_specials_with_precise_spans`
+        // above: the same split, keeping the same honest per-node spans, but
+        // classifying each special as the verbatim leaf an order that never
+        // runs `SpecialCharacters` calls for (design §3.4.1).
+        let nodes = classify_unescaped_specials(seed("a<b>c&d"));
+
+        assert_eq!(nodes.len(), 7);
+        assert_text(&nodes[0], "a", 1, 1);
+        assert_raw_special(&nodes[1], '<', 2, 1);
+        assert_text(&nodes[2], "b", 1, 3);
+        assert_raw_special(&nodes[3], '>', 4, 3);
+        assert_text(&nodes[4], "c", 1, 5);
+        assert_raw_special(&nodes[5], '&', 6, 5);
+        assert_text(&nodes[6], "d", 1, 7);
+    }
+
+    #[test]
+    fn classification_leaves_specials_free_text_untouched() {
+        // Nothing to classify: the seed passes through as the single borrowed
+        // run it already was, so the common case allocates nothing new.
+        let nodes = classify_unescaped_specials(seed("plain text"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_text(&nodes[0], "plain text", 1, 1);
+    }
+
+    #[test]
+    fn classification_preserves_a_synthesized_text_value() {
+        // The synthesized (attribute-expansion) counterpart of
+        // `special_characters_preserves_a_synthesized_text_value`: the split
+        // follows the *logical value*, and every fragment keeps the whole
+        // `location` as its coarse fallback span (design §4.4).
+        let location = Span::new("{x}");
+
+        let out = classify_unescaped_specials(vec![InlineNode::Text {
+            value: CowStr::from("a<b".to_string()),
+            location,
+        }]);
+
+        assert_eq!(out.len(), 3);
+
+        match (&out[0], &out[1], &out[2]) {
+            (
+                InlineNode::Text {
+                    value: leading,
+                    location: leading_loc,
+                },
+                InlineNode::Raw {
+                    value: special,
+                    location: special_loc,
+                },
+                InlineNode::Text {
+                    value: trailing,
+                    location: trailing_loc,
+                },
+            ) => {
+                assert_eq!(leading.as_ref(), "a");
+                assert_eq!(special.as_ref(), "<");
+                assert_eq!(trailing.as_ref(), "b");
+
+                for loc in [leading_loc, special_loc, trailing_loc] {
+                    assert_eq!(loc.data(), "{x}");
+                }
+            }
+
+            other => panic!("expected Text/Raw/Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classification_recurses_into_every_container_the_fold_descends_into() {
+        // A `subs=` order that omits `specialcharacters` can still build a
+        // `Styled` span (`quotes`), a `Ref` and a `Footnote` (`macros`), and an
+        // `Anchor` with a reference text, so the classification must reach the
+        // text nested inside each of them — the same containers `fold_html`
+        // itself descends into.
+        let loc = Span::new("a<b");
+
+        let child = || {
+            vec![InlineNode::Text {
+                value: CowStr::from(loc.data()),
+                location: loc,
+            }]
+        };
+
+        let out = classify_unescaped_specials(vec![
+            InlineNode::Styled(Styled {
+                variant: StyleVariant::Strong,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: vec![],
+                attrs: None,
+                children: child(),
+                location: loc,
+            }),
+            InlineNode::Ref(Ref {
+                variant: RefVariant::Link,
+                target: CowStr::from("https://example.com"),
+                children: child(),
+                roles: vec![],
+                window: None,
+                resolved: None,
+                derived: None,
+                xrefstyle: None,
+                attrs: None,
+                location: loc,
+            }),
+            InlineNode::Anchor(Anchor {
+                id: CowStr::from("id"),
+                reftext: Some(child()),
+                location: loc,
+            }),
+            InlineNode::Footnote(Footnote {
+                id: None,
+                number: Some(CowStr::from("1")),
+                is_reference: false,
+                children: child(),
+                location: loc,
+            }),
+        ]);
+
+        assert_eq!(out.len(), 4);
+
+        let assert_classified = |children: &[InlineNode<'_>], what: &str| {
+            assert_eq!(children.len(), 3, "children of {what}: {children:?}");
+            assert_text(&children[0], "a", 1, 1);
+            assert_raw_special(&children[1], '<', 2, 1);
+            assert_text(&children[2], "b", 1, 3);
+        };
+
+        match (&out[0], &out[1], &out[2], &out[3]) {
+            (
+                InlineNode::Styled(styled),
+                InlineNode::Ref(reference),
+                InlineNode::Anchor(anchor),
+                InlineNode::Footnote(footnote),
+            ) => {
+                assert_classified(&styled.children, "Styled");
+                assert_classified(&reference.children, "Ref");
+                match anchor.reftext.as_deref() {
+                    Some(reftext) => assert_classified(reftext, "Anchor"),
+                    None => panic!("the anchor's reftext went missing: {out:?}"),
+                }
+                assert_classified(&footnote.children, "Footnote");
+            }
+
+            other => panic!("expected Styled/Ref/Anchor/Footnote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classification_passes_other_nodes_through() {
+        // A node kind carrying no text of its own (here a line break) is
+        // forwarded unchanged, and an already-`Raw` passthrough leaf is never
+        // re-split.
+        let location = Span::new("<raw>");
+
+        let out = classify_unescaped_specials(vec![
+            InlineNode::LineBreak { location },
+            InlineNode::Raw {
+                value: CowStr::from(location.data()),
+                location,
+            },
+        ]);
+
+        assert_eq!(out.len(), 2);
+        assert!(matches!(out[0], InlineNode::LineBreak { .. }));
+        assert!(
+            matches!(&out[1], InlineNode::Raw { value, .. } if value.as_ref() == "<raw>"),
+            "an existing Raw leaf must pass through whole: {out:?}"
+        );
     }
 
     #[test]

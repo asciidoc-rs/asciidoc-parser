@@ -283,7 +283,7 @@ use macros::apply_macros;
 use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;
-use special_chars::apply_special_characters;
+use special_chars::{apply_special_characters, classify_unescaped_specials};
 use stem_step::apply_stem;
 
 use crate::{
@@ -455,6 +455,16 @@ pub(crate) fn build_for_group<'src>(
 
             SubstitutionStep::Callouts => apply_callouts(nodes, location, parser, attrlist),
         };
+    }
+
+    // Design §3.4.1: a literal `<`/`>`/`&` that no `SpecialCharacters` step
+    // ever acted on is emitted verbatim by the string pipeline, so it is a
+    // `Raw` leaf here rather than the `Text` run the fold would escape. This
+    // runs last, after the group's own steps, so every transducer still sees
+    // the specials as ordinary text — exactly as the string pipeline's steps
+    // do under such an order.
+    if !steps.contains(&SubstitutionStep::SpecialCharacters) {
+        nodes = classify_unescaped_specials(nodes);
     }
 
     nodes
@@ -819,6 +829,7 @@ mod tests {
     /// selection and the passthrough-extraction gate (`Macros` in the steps,
     /// or the `Header` group), which mirror `run_pipeline`'s own.
     mod build_for_group {
+        #![allow(clippy::panic)]
         #![allow(clippy::unwrap_used)]
 
         use super::super::{build_for_group, fold_html};
@@ -918,6 +929,14 @@ mod tests {
 
         #[test]
         fn pass_and_none_groups_yield_the_untouched_seed() {
+            // Neither group runs a single step, so the seed reaches the fold
+            // untouched *as text* – but "untouched" is a claim about the bytes
+            // the fold emits, not about the node kinds: because no
+            // `SpecialCharacters` step ever acted on it, a literal `<`/`>`/`&`
+            // is a `Raw` leaf the fold emits verbatim, not a `Text` run the
+            // fold would escape (design §3.4.1). Everything between the
+            // specials is one borrowed `Text` run, and nothing else is
+            // recognized.
             let source = "<b>raw</b> *not bold* {product}";
             let parser = parser_with_product();
 
@@ -925,12 +944,28 @@ mod tests {
                 let nodes = build_group(&group, source, &parser);
 
                 assert!(
-                    matches!(
-                        nodes.as_slice(),
-                        [InlineNode::Text { value, .. }] if value.as_ref() == source
-                    ),
-                    "expected the untouched single text run under {group:?}: {nodes:?}"
+                    nodes
+                        .iter()
+                        .all(|n| matches!(n, InlineNode::Text { .. } | InlineNode::Raw { .. })),
+                    "expected only text and raw-special leaves under {group:?}: {nodes:?}"
                 );
+
+                let rejoined: String = nodes
+                    .iter()
+                    .map(|n| match n {
+                        InlineNode::Text { value, .. } | InlineNode::Raw { value, .. } => {
+                            value.as_ref()
+                        }
+                        other => panic!("unexpected node kind: {other:?}"),
+                    })
+                    .collect();
+
+                assert_eq!(
+                    rejoined, source,
+                    "the leaves must rejoin to the untouched seed under {group:?}"
+                );
+
+                assert_group_parity(&group, source);
             }
         }
 
@@ -957,8 +992,10 @@ mod tests {
 
         #[test]
         fn a_custom_list_runs_exactly_the_named_steps_in_order() {
-            // `subs=quotes` alone: `*bold*` is recognized, `<` stays literal
-            // text (never escaped), and `{product}` stays unexpanded.
+            // `subs=quotes` alone: `*bold*` is recognized, `<` is emitted
+            // unescaped (a `Raw` leaf, not a `CharRef` – design §3.4.1, since
+            // no `SpecialCharacters` step acts on it), and `{product}` stays
+            // unexpanded.
             let (group, invalid) = SubstitutionGroup::from_custom_string(None, "quotes");
             assert!(invalid.is_empty());
 
@@ -979,9 +1016,17 @@ mod tests {
             assert!(
                 nodes
                     .iter()
+                    .any(|n| matches!(n, InlineNode::Raw { value, .. } if value.as_ref() == "<")),
+                "the unescaped `<` must be a Raw leaf for subs=quotes: {nodes:?}"
+            );
+            assert!(
+                nodes
+                    .iter()
                     .any(|n| matches!(n, InlineNode::Text { value, .. } if value.as_ref().contains("{product}"))),
                 "the attribute reference must stay literal for subs=quotes: {nodes:?}"
             );
+
+            assert_group_parity(&group, source);
         }
 
         #[test]
@@ -1009,6 +1054,83 @@ mod tests {
             );
 
             assert_group_parity(&group, source);
+        }
+
+        /// A differential corpus for the §3.4.1 classification the group-aware
+        /// entry point applies last: under an effective order whose steps
+        /// **never include** `SpecialCharacters`, a literal `<`/`>`/`&` is
+        /// emitted verbatim by the string pipeline, so it must fold verbatim
+        /// here too.
+        ///
+        /// This is the case a `Text` node cannot express on its own — `Text`
+        /// is logical text the fold *escapes* (design §3.4) — so every fixture
+        /// below folded to escaped entities before the classification landed,
+        /// diverging from the real pipeline. The corpus crosses a set of
+        /// specials-bearing fixtures with every real group that takes this
+        /// path: the two step-less groups (`Pass` for a passthrough block,
+        /// `None` for a comment block) and the `subs=` custom lists that omit
+        /// `specialcharacters`.
+        #[test]
+        fn a_group_that_never_escapes_folds_its_specials_verbatim() {
+            let custom = |subs: &str| {
+                let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs);
+                assert!(invalid.is_empty(), "unexpected invalid subs in {subs:?}");
+                group
+            };
+
+            let groups = [
+                SubstitutionGroup::Pass,
+                SubstitutionGroup::None,
+                // `subs=","` resolves to an empty step list (Ruby's
+                // `split(',')` drops the trailing empties), the third way to
+                // reach a group that runs nothing at all.
+                custom(","),
+                custom("quotes"),
+                custom("attributes"),
+                custom("replacements"),
+                custom("macros"),
+                custom("post_replacements"),
+                custom("callouts"),
+                custom("quotes,attributes"),
+                custom("quotes,attributes,replacements,macros,post_replacements"),
+            ];
+
+            let fixtures = [
+                // Bare specials, in every position a run can put them.
+                "<b>raw</b>",
+                "a < b & c > d",
+                "<",
+                "&",
+                "leading < text",
+                "text trailing >",
+                "<>&",
+                "a<b>c",
+                // Specials that would look like a construct once escaped —
+                // the escaped `&lt;&lt;` is what an `<<id>>` shorthand keys
+                // off, and an escaped `&` is what a restored entity keys off,
+                // so these pin that the classification does not perturb (or
+                // depend on) recognition.
+                "<<tigers>> stays literal",
+                "&#169; stays literal",
+                "-> and <- stay literal",
+                // Specials beside each construct these orders *can*
+                // recognize, so the classification is exercised inside and
+                // around a built node's own children.
+                "keep *bold < text* and a < b",
+                "a < b {product} > c",
+                "an <b>image</b> image:pic.png[Alt] here",
+                "a footnote:[note < text] and a < b",
+                "line one < +\nline two > end",
+                // Multi-line, so a run spanning a newline is split the same
+                // way as a single-line one.
+                "first < line\nsecond & line\nthird > line",
+            ];
+
+            for group in &groups {
+                for source in fixtures {
+                    assert_group_parity(group, source);
+                }
+            }
         }
     }
 
