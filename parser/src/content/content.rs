@@ -86,13 +86,16 @@ pub struct Content<'src> {
     passthroughs: Vec<Passthrough>,
 
     /// The inline AST for this content: the structured representation of its
-    /// inline nodes, folded from the same substitution pass that produced
-    /// [`rendered`](Self::rendered).
+    /// inline nodes, built by the single-pass builder
+    /// (the crate-internal `inline_builder` module) directly from the
+    /// pre-substitution source, in parallel with the substitution pass that
+    /// produced [`rendered`](Self::rendered).
     ///
-    /// This is a **derived artifact** – a projection of the rendered content,
-    /// not an independent source of truth (yet; see the [inline AST
-    /// architecture] design, Phase 2). It is populated only when inline-tree
-    /// building is enabled on the [`Parser`](crate::Parser)
+    /// This is a **derived artifact** – built alongside the rendered content,
+    /// which remains the source of truth (making the tree canonical, with
+    /// `rendered_html()` a fold of it, is the remaining half of the [inline
+    /// AST architecture] design's step 6). It is populated only when
+    /// inline-tree building is enabled on the [`Parser`](crate::Parser)
     /// ([`with_inline_tree`](crate::Parser::with_inline_tree)); otherwise it is
     /// empty and the default parse path is byte- and performance-identical to
     /// before. Because it is derived, it is deliberately excluded from
@@ -401,10 +404,18 @@ impl<'src> Content<'src> {
     /// This is populated only when inline-tree building is enabled on the
     /// [`Parser`](crate::Parser) (see
     /// [`with_inline_tree`](crate::Parser::with_inline_tree)); it is an empty
-    /// slice otherwise. The tree is a projection of the rendered content – the
-    /// fold of the tree reproduces [`rendered_html`](Self::rendered_html)
-    /// byte-for-byte – and is not yet the canonical representation (see the
-    /// [inline AST architecture design], Phase 2).
+    /// slice otherwise. The tree is built by the single-pass builder
+    /// (the crate-internal `inline_builder` module) directly from the
+    /// pre-substitution source, so each node carries its own precise source
+    /// [`Span`] (a node born from a transformation, such as an attribute
+    /// expansion, falls back to a documented coarser span) and a macro node
+    /// carries its own parsed attribute list. The fold of the tree reproduces
+    /// [`rendered_html`](Self::rendered_html) byte-for-byte across the
+    /// builder's supported vocabulary; a small set of forms is documented as
+    /// deferred (documented in the `inline_builder`
+    /// module), each left as literal text in the tree rather than a wrong
+    /// node. The tree is not yet the canonical representation (see the
+    /// [inline AST architecture design], Phase 4 step 6).
     ///
     /// Cross-references in the tree carry their resolved destination once a
     /// full [`Parser::parse`](crate::Parser::parse) has resolved the document's
@@ -420,8 +431,8 @@ impl<'src> Content<'src> {
         &self.inlines
     }
 
-    /// Installs the inline AST built for this content by the recording pass
-    /// (see [`inline_tree`](crate::content::inline_tree)).
+    /// Installs the inline AST built for this content by the single-pass
+    /// builder (see [`inline_builder`](crate::content::inline_builder)).
     pub(crate) fn set_inlines(&mut self, inlines: Vec<InlineNode<'src>>) {
         self.inlines = inlines;
     }
@@ -681,27 +692,24 @@ impl<'src> Content<'src> {
             return;
         }
 
-        let mut next = 0;
-        assign_tree_xrefs(&mut self.inlines, block_ordered, &mut next);
+        // The correlation is positional, so it requires the tree to hold
+        // exactly one node per segment. The single-pass builder leaves a
+        // documented set of divergent forms unrecognized (e.g. a display text
+        // crossing a rendered span – see the `inline_builder` module), so the
+        // tree can legitimately hold *fewer* cross-reference nodes than the
+        // string pipeline deferred. When the counts differ the positional
+        // pairing is unknowable; the mirror is skipped for that list – leaving
+        // its nodes in their honest unresolved state – rather than assigning
+        // destinations to the wrong nodes.
+        if count_tree_xrefs(&self.inlines) == block_ordered.len() {
+            let mut next = 0;
+            assign_tree_xrefs(&mut self.inlines, block_ordered, &mut next);
+        }
 
-        // Each block-level segment must line up with exactly one tree node. A
-        // mismatch means the recording pass and the authoritative pass
-        // enumerated cross-references differently, which would silently misplace
-        // a resolved destination; catch that in debug/test builds.
-        debug_assert_eq!(
-            next,
-            block_ordered.len(),
-            "inline tree cross-reference count diverged from the resolved segments",
-        );
-
-        let mut next = 0;
-        assign_footnote_tree_xrefs(&mut self.inlines, footnote_ordered, &mut next);
-
-        debug_assert_eq!(
-            next,
-            footnote_ordered.len(),
-            "inline tree footnote cross-reference count diverged from the re-homed segments",
-        );
+        if count_footnote_tree_xrefs(&self.inlines) == footnote_ordered.len() {
+            let mut next = 0;
+            assign_footnote_tree_xrefs(&mut self.inlines, footnote_ordered, &mut next);
+        }
     }
 
     /// Rebuilds [`Content::rendered`] from the deferred template and the
@@ -767,6 +775,44 @@ pub(crate) fn footnote_tree_xrefs(
         .filter(|(index, _)| !template.contains(&Content::xref_placeholder(*index)))
         .map(|(_, xref)| xref.resolved.clone())
         .collect()
+}
+
+/// Counts the [`Xref`](RefVariant::Xref) nodes an [`assign_tree_xrefs`] walk
+/// over `nodes` would visit – i.e. the block-level cross-reference slots of the
+/// tree, excluding footnote subtrees (which [`count_footnote_tree_xrefs`]
+/// covers). Used to verify the positional correlation before assigning.
+fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
+    nodes
+        .iter()
+        .map(|node| match node {
+            InlineNode::Ref(reference) => {
+                usize::from(reference.variant == RefVariant::Xref)
+                    + count_tree_xrefs(&reference.children)
+            }
+
+            InlineNode::Styled(styled) => count_tree_xrefs(&styled.children),
+
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Counts the [`Xref`](RefVariant::Xref) nodes an
+/// [`assign_footnote_tree_xrefs`] walk over `nodes` would visit – i.e. the
+/// cross-reference slots inside the tree's footnote subtrees.
+fn count_footnote_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
+    nodes
+        .iter()
+        .map(|node| match node {
+            InlineNode::Footnote(footnote) => count_tree_xrefs(&footnote.children),
+
+            InlineNode::Ref(reference) => count_footnote_tree_xrefs(&reference.children),
+
+            InlineNode::Styled(styled) => count_footnote_tree_xrefs(&styled.children),
+
+            _ => 0,
+        })
+        .sum()
 }
 
 /// Walks an inline node slice in document order and installs each

@@ -1,11 +1,18 @@
-//! Builds the inline AST as a **live artifact of a parsed [`Content`]**.
+//! Builds an inline AST by **recording the string pipeline's own renderer
+//! calls** – the retired "Strategy A" construction, kept as **test-only oracle
+//! machinery**.
 //!
-//! This is the production home of the tree-building machinery that landed in
-//! Phase 1 as a test-only oracle ([`inline_recorder`]). It promotes that
-//! machinery into the parser proper so that – when tree building is enabled on
-//! the [`Parser`] – every [`Content`] carries a
-//! [`Vec<InlineNode>`](crate::inlines::InlineNode) alongside its rendered
-//! string.
+//! This module was the production tree source through Phase 2 and Phase 4's
+//! additive increments: when tree building was enabled on the [`Parser`],
+//! `SubstitutionGroup::apply` re-ran the pipeline through the
+//! [`RecordingRenderer`] and parsed the recorded markers into each
+//! [`Content`]'s tree. The Phase 4 single-pass builder
+//! ([`inline_builder`](crate::content::inline_builder)) has since replaced it
+//! as `Content`'s tree source (the first half of the design's step 6
+//! cutover), so this module is now compiled only for tests, where it remains
+//! the independent construction the differential harness
+//! ([`inline_recorder`]) and the structural cross-check
+//! (`tests::inline_builder_recorder_parity`) compare the builder against.
 //!
 //! # Strategy A, unchanged
 //!
@@ -25,25 +32,18 @@
 //! Because the decorator wraps whatever renderer the [`Parser`] carries, the
 //! fold reproduces *that* renderer's bytes, not a hard-coded HTML backend.
 //!
-//! # Why a second pass (for now)
+//! # Why a second pass
 //!
 //! Making the tree the recognition sink directly – so there is no second pass
-//! and no markers – is "Strategy B", the Phase 4 single-pass builder. Until
-//! then the tree is built by a **second, counter-safe substitution pass**: the
-//! caller clones the [`Parser`] *before* the authoritative pass advances any
-//! document counter, so the recording pass numbers footnotes, callouts, and
-//! counters exactly as the authoritative pass did, then discards the clone. The
-//! authoritative rendered string is never produced by the recorder, so this is
-//! purely additive and cannot regress output.
-//!
-//! # Status
-//!
-//! This is the "promote the tree into [`Content`]" step of Phase 2. The tree is
-//! a real, live artifact, but it is built behind an **opt-in** flag
-//! ([`Parser::with_inline_tree`]) so the default parse path is byte- and
-//! performance-identical to before. Making the tree *canonical* (with
-//! `rendered_html()` folding it, and the three production sentinel systems
-//! retired) is the remainder of Phase 2 and Phase 4.
+//! and no markers – is "Strategy B", the Phase 4 single-pass builder that has
+//! now replaced this module in production. Here the tree is built by a
+//! **second, counter-safe substitution pass**: the caller clones the
+//! [`Parser`] *before* the authoritative pass advances any document counter,
+//! so the recording pass numbers footnotes, callouts, and counters exactly as
+//! the authoritative pass did, then discards the clone. The authoritative
+//! rendered string is never produced by the recorder, so the pass is purely
+//! additive and cannot regress output – which is also what makes it a clean
+//! *independent* construction for the cross-check to compare against.
 //!
 //! [`inline_recorder`]: ../../tests/inline_recorder.rs
 //! [`Content`]: crate::content::Content

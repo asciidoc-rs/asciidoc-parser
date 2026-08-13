@@ -1890,6 +1890,59 @@ Each phase is a reviewable unit with a clear exit gate.
   identically through `build_from_value` — remains a later increment's job, alongside the rest of step
   6's own wiring work. As with every prior increment, nothing here is wired into the parse path.
 
+  *Step 6, first half, landed as (the tree-source swap: the single-pass builder replaces the
+  recorder as `Content`'s tree source):* with every prep piece in place, the swap each of them
+  named as "this step's own job" is done.
+  [`SubstitutionGroup::apply`](../../parser/src/content/substitution_group.rs) no longer runs the
+  Strategy-A recording pass at all: when tree building is enabled
+  ([`Parser::with_inline_tree`](../../parser/src/parser/parser.rs)), it snapshots the
+  **pre-substitution content value** and a clone of the parser before the authoritative pass runs
+  – the same counter-safe discipline the recorder used, so footnote numbers and `{counter:…}`
+  values come out identical to the authoritative output – then builds the tree with a new
+  group-aware entry point,
+  [`build_for_group`](../../parser/src/content/inline_builder/mod.rs), and stores it on
+  [`Content::inlines`](../../parser/src/content/content.rs). `build_for_group` mirrors
+  `run_pipeline`'s own step selection exactly: passthrough/STEM extraction runs first **iff** the
+  group's steps include `Macros` or the group is `Header` (the same gate `run_pipeline` places on
+  `Passthroughs::extract_from`), then each of the group's
+  [`steps()`](../../parser/src/content/substitution_group.rs) runs in the group's own order, each
+  recast as its node transducer – so a `subs=` custom list, the verbatim group's `Callouts`, the
+  header/attribute-entry-value groups' two-step list, and the empty `Pass`/`None` lists (whose
+  tree is the untouched seed) all follow the string pipeline's own selection, pinned by new
+  per-group parity and structure tests. `build_from_value` is now the `Normal`-group special case
+  of this entry point.
+
+  What the swap changes for a tree consumer: every node now carries its **honest, precise span**
+  (issue #944's precision stage, with the documented §4.4 coarse fallback for synthesized values)
+  and macro nodes are **self-describing** (their own `Attrlist<'src>`, `derived`, `xrefstyle`) –
+  the recorder's whole-content-span, `attrs: None` tree is gone from production. The fold-parity
+  guarantee is now scoped to the builder's claimed vocabulary: a form documented as deferred
+  (e.g. a display text crossing a rendered span) is left as **literal text** in the tree – never
+  a wrong node – where the recorder, recovering structure from rendered output, could represent
+  it. That scoping surfaced in exactly one production seam: the positional cross-reference
+  resolution mirror (`mirror_tree_xref_resolution`), whose count-parity debug assertions assumed
+  the tree holds one node per deferred segment. The mirror now **counts each list's slots first
+  and skips a list whose count diverges** – leaving those nodes in their honest unresolved state
+  rather than assigning destinations positionally onto the wrong nodes – pinned by new tests for
+  both the block-level and footnote-embedded skip paths. The recorder's stateful-renderer hazard
+  (its debug assertion, and the "requires a side-effect-free renderer" caveat on
+  `with_inline_tree`) retires with the second rendering pass itself: the builder consults the
+  configured renderer only where a node's *value* is defined as already-substituted text (a
+  delimited passthrough's or STEM expression's body), so a stateful custom renderer now gets a
+  logical, unpolluted tree – repinned by the corresponding test.
+
+  The recorder ([`inline_tree`](../../parser/src/content/inline_tree.rs)) is not deleted but
+  **retired to test-only oracle machinery** (`#[cfg(test)]`), exactly the §4.1 bring-up-oracle
+  role: the differential harness drives it directly, and the structural cross-check
+  ([`inline_builder_recorder_parity`](../../parser/src/tests/inline_builder_recorder_parity.rs))
+  now builds its recorder side by driving that machinery itself – the production accessor returns
+  the builder's tree, so reading `Content::inlines()` for both sides would compare the builder to
+  itself – keeping the two independent constructions honestly comparable. The remainder of step 6
+  is unchanged and still outstanding: making `rendered_html()` an authoritative fold of this
+  tree, calling `apply_macro_side_effects` for real (which must wait for the fold, since until
+  then the string pipeline still performs every registration), deleting the three production
+  sentinel systems, and retiring the `with_inline_tree` flag.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2006,6 +2059,14 @@ Each phase is a reviewable unit with a clear exit gate.
        divergence` test #1177 added is now a parity test instead of a divergence test, per its own
        "if lifted, fold this into a parity corpus" note. Wiring `build`/`build_from_value` into
        `Content` in place of the recorder remains this step's own job.
+     - ✅ **first half: the tree-source swap.** `SubstitutionGroup::apply` builds each content's
+       tree with the single-pass builder – via the new group-aware
+       [`build_for_group`](../../parser/src/content/inline_builder/mod.rs), mirroring
+       `run_pipeline`'s own step selection per substitution group – in place of the Strategy-A
+       recording pass, which is retired to test-only oracle machinery; see the step's own
+       "landed as" note above. The remaining half – `rendered_html()` as an authoritative fold,
+       `apply_macro_side_effects` called for real, the sentinel deletions, and the flag's
+       retirement – is still outstanding.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

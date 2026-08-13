@@ -478,14 +478,14 @@ pub struct Parser {
     datetime_context: RefCell<Option<DatetimeContext>>,
 
     /// When `true`, each [`Content`](crate::content::Content) also builds its
-    /// inline AST (an additional, counter-safe recording substitution pass; see
-    /// [`content::inline_tree`](crate::content::inline_tree)) and stores it for
+    /// inline AST (an additional, counter-safe single-pass recognition over
+    /// the same source; see `content::inline_builder`) and stores it for
     /// [`Content::inlines`](crate::content::Content::inlines).
     ///
     /// `false` by default, in which case the parse path is byte- and
     /// performance-identical to before the inline AST existed. Enable it with
     /// [`with_inline_tree`](Self::with_inline_tree). This is an opt-in switch
-    /// while the inline AST is being brought up (design Phase 2); it will
+    /// while the inline AST is being brought up (design Phase 4); it will
     /// eventually become the canonical representation and the flag will retire.
     pub(crate) build_inline_tree: bool,
 }
@@ -1720,37 +1720,6 @@ impl Parser {
         index
     }
 
-    /// The number of footnotes registered so far in the current document's
-    /// registry.
-    ///
-    /// Read by the inline-tree recording pass, which snapshots this count
-    /// before re-running the substitution pipeline so it can pick out exactly
-    /// the footnotes that pass defined; see
-    /// [`footnote_texts_from`](Self::footnote_texts_from).
-    pub(crate) fn footnote_count(&self) -> usize {
-        self.catalog.borrow().footnotes.len()
-    }
-
-    /// The already-substituted text of each footnote registered at or after
-    /// `start`, in registration (document) order.
-    ///
-    /// A footnote's text is extracted out of the flow of the block it was
-    /// written in, so it never reaches the block's rendered string; this is how
-    /// the inline-tree recording pass recovers it. During that pass the text
-    /// carries the recorder's markers, so it parses into the footnote's own
-    /// inline subtree (see
-    /// [`attach_footnote_subtrees`](crate::content::inline_tree::attach_footnote_subtrees)).
-    pub(crate) fn footnote_texts_from(&self, start: usize) -> Vec<String> {
-        self.catalog
-            .borrow()
-            .footnotes
-            .get(start..)
-            .unwrap_or_default()
-            .iter()
-            .map(|footnote| footnote.text.clone())
-            .collect()
-    }
-
     /// Removes and returns the current document's footnote list, leaving an
     /// empty list behind. Used to give a nested document (an AsciiDoc table
     /// cell) its own footnote registry; see [`restore_footnotes`].
@@ -2174,32 +2143,25 @@ impl Parser {
     /// its [`Content`](crate::content::Content) via
     /// [`Content::inlines`](crate::content::Content::inlines) (or, at the block
     /// level, [`IsBlock::inlines`](crate::blocks::IsBlock::inlines)). The tree
-    /// is a projection of the rendered output: folding it reproduces
-    /// [`Content::rendered_html`](crate::content::Content::rendered_html)
-    /// byte-for-byte.
+    /// is built by the single-pass builder
+    /// (`content::inline_builder`) directly from the pre-substitution source,
+    /// so its nodes carry precise source spans and their own parsed attribute
+    /// lists; see
+    /// [`Content::inlines`](crate::content::Content::inlines) for the tree's
+    /// guarantees (including the small set of documented deferred forms).
     ///
-    /// This is **off by default**. Building the tree currently costs a second,
-    /// counter-safe substitution pass per block (design Phase 2, "promote the
-    /// tree into `Content`"), so the default parse path is unchanged in both
-    /// output and performance. The switch is expected to retire once the inline
-    /// AST becomes the canonical representation.
+    /// This is **off by default**. Building the tree costs an additional,
+    /// counter-safe recognition pass per block over the same source, so the
+    /// default parse path is unchanged in both output and performance. The
+    /// switch is expected to retire once the inline AST becomes the canonical
+    /// representation (with `rendered_html()` a fold of it – the remaining
+    /// half of the design's step 6 cutover).
     ///
-    /// # Requires a side-effect-free renderer
-    ///
-    /// That second pass re-invokes the configured
-    /// [`InlineSubstitutionRenderer`]
-    /// and the registered asset handlers (for example the
-    /// [`ImageFileHandler`]), so it assumes
-    /// they are **idempotent**: rendering the same content twice must produce
-    /// the same bytes. The built-in HTML renderer and the default handlers
-    /// satisfy this. A *stateful* custom renderer (one whose output depends on
-    /// mutable internal state) or a *one-shot* asset handler may therefore be
-    /// invoked twice while this is enabled, and could make the tree diverge
-    /// from [`rendered_html`](crate::content::Content::rendered_html) – a
-    /// divergence caught by a debug assertion. Externally-visible reads
-    /// (such as loading an image for a `data-uri`) likewise occur an extra
-    /// time. The Phase 4 single-pass builder removes the second pass and
-    /// this caveat with it.
+    /// A custom [`InlineSubstitutionRenderer`] is consulted while the tree is
+    /// built only where a node's *value* is defined as already-substituted
+    /// text (a delimited passthrough's or STEM expression's body, whose
+    /// special characters it escapes); it is not otherwise re-run over the
+    /// content, and the registered asset handlers are not re-invoked.
     #[must_use]
     pub fn with_inline_tree(mut self, enabled: bool) -> Self {
         self.build_inline_tree = enabled;

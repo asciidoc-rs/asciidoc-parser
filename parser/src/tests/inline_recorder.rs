@@ -1,22 +1,26 @@
-//! Differential oracle for the inline AST, over the production
-//! [`inline_tree`](crate::content::inline_tree) module.
+//! Differential oracle for the inline AST, over the
+//! [`inline_tree`](crate::content::inline_tree) recorder and the flag-gated
+//! production tree path.
 //!
 //! This began as the Phase 1 bring-up oracle (a test-only recorder). In Phase 2
-//! the recorder machinery moved into the parser proper
-//! ([`inline_tree`](crate::content::inline_tree)); this module is now the
-//! **harness** that drives it, keeping the same corpus and the two invariants
-//! it proves:
+//! the recorder machinery moved into the parser proper and became the
+//! production tree source; in Phase 4 the single-pass builder
+//! ([`inline_builder`](crate::content::inline_builder)) replaced it there (the
+//! step 6 tree-source swap) and the recorder returned to test-only status.
+//! This module remains the **harness** for both:
 //!
-//! 1. Stripping/folding the recorder's marked string reproduces the built-in
-//!    renderer's `rendered_html()` output **byte-for-byte** (the
-//!    *no-perturbation* invariant).
-//! 2. The recovered [`InlineNode`] tree is structurally faithful (node kinds,
-//!    nesting, and the `constructs <= markers <= events` cross-check).
-//!
-//! Because the machinery is now the production code path, this corpus doubles
-//! as the differential test for what
-//! [`Content::inlines`](crate::content::Content) stores when inline-tree
-//! building is enabled on the [`Parser`].
+//! 1. The recorder-driven corpus keeps proving Strategy A's own invariants –
+//!    stripping/folding the marked string reproduces the built-in renderer's
+//!    `rendered_html()` output **byte-for-byte** (the *no-perturbation*
+//!    invariant), and the recovered [`InlineNode`] tree is structurally
+//!    faithful (node kinds, nesting, and the `constructs <= markers <= events`
+//!    cross-check) – so the recorder stays honest as the independent
+//!    construction the structural cross-check
+//!    (`tests::inline_builder_recorder_parity`) compares the builder against.
+//! 2. The `with_inline_tree` wiring tests drive the **production** tree path –
+//!    now the single-pass builder – asserting what
+//!    [`Content::inlines`](crate::content::Content) stores for real parsed
+//!    documents, and that enabling the flag never changes rendered output.
 //!
 //! [inline AST architecture]: ../../../docs/design/inline-ast-architecture.md
 
@@ -1086,6 +1090,179 @@ fn has_styled(nodes: &[InlineNode<'_>], variant: StyleVariant) -> bool {
 }
 
 #[test]
+fn inline_tree_honors_a_blocks_custom_subs_list() {
+    // A `subs="quotes"` paragraph runs only the quotes step, so the
+    // group-aware tree builder must mirror the string pipeline's own step
+    // selection: the tree carries a `Styled` node for `*bold*`, while `<`
+    // stays inside a plain `Text` run (no `CharRef` – the special-characters
+    // step never ran) exactly as the rendered string leaves it unescaped.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[subs=quotes]\nkeep *bold* and a < b\n");
+
+    let tree = first_simple_inlines(&doc);
+
+    assert!(
+        has_styled(tree, StyleVariant::Strong),
+        "the quotes step did not run for the custom subs list: {tree:?}"
+    );
+
+    assert!(
+        !tree
+            .iter()
+            .any(|node| matches!(node, InlineNode::CharRef { .. })),
+        "the special-characters step ran despite being absent from the subs list: {tree:?}"
+    );
+}
+
+#[test]
+fn inline_tree_for_none_group_content_is_the_untouched_seed() {
+    // A `[pass]`-style paragraph applies no substitutions at all, so its tree
+    // is the untouched seed: one `Text` run holding the content exactly as
+    // written, mirroring the string pipeline leaving the text unchanged.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[pass]\n<b>raw</b> and *not bold*\n");
+
+    let tree = first_simple_inlines(&doc);
+
+    assert_eq!(tree.len(), 1, "expected the untouched seed: {tree:?}");
+    assert!(
+        matches!(
+            &tree[0],
+            InlineNode::Text { value, .. } if value.as_ref() == "<b>raw</b> and *not bold*"
+        ),
+        "expected the untouched text run: {tree:?}"
+    );
+}
+
+#[test]
+fn inline_tree_for_a_listing_block_carries_callout_nodes() {
+    use crate::blocks::{Block, FindBlocks, IsBlock};
+
+    // A listing block applies the verbatim group (special characters, then
+    // callouts), so its tree must carry a `Callout` node for the trailing
+    // `<1>` – driving the group-aware builder's `Callouts` dispatch through a
+    // real parse.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("----\ncode line <1>\n----\n");
+
+    let listing = doc
+        .descendant_blocks()
+        .find(|block| matches!(block, Block::RawDelimited(_)))
+        .expect("a listing block");
+
+    let tree = listing.inlines().expect("a content-bearing block");
+
+    assert!(
+        tree.iter()
+            .any(|node| matches!(node, InlineNode::Callout(_))),
+        "expected a callout node in the listing tree: {tree:?}"
+    );
+}
+
+#[test]
+fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
+    // `xref:sec[with *bold* reftext]` is a documented builder divergence (a
+    // display text crossing a rendered span is left unrecognized), so the
+    // tree holds *fewer* cross-reference nodes than the string pipeline
+    // deferred. The positional resolution mirror must detect the count
+    // mismatch and skip – leaving the tree in its honest unresolved state –
+    // rather than assign destinations to the wrong nodes (or panic).
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[with *bold* reftext].");
+
+    // The rendered output is unaffected (the string pipeline is
+    // authoritative), …
+    let rendered = collect_rendered(&doc);
+    assert!(
+        rendered
+            .iter()
+            .any(|s| s.contains("href=\"#sec\"") && s.contains("<strong>bold</strong>")),
+        "the rendered xref regressed: {rendered:?}"
+    );
+
+    // … and the tree simply carries no node for the deferred form.
+    let refs = collect_refs(&doc);
+    assert!(
+        refs.iter().all(|r| r.variant != RefVariant::Xref),
+        "expected the deferred xref form to stay unrecognized in the tree: {refs:?}"
+    );
+}
+
+#[test]
+fn footnote_xref_mirror_is_skipped_when_the_subtree_defers_a_reference_form() {
+    // The footnote-side counterpart: one of the footnote's two embedded
+    // cross-references is a documented builder divergence, so the footnote
+    // subtree's slot count (1) differs from the re-homed segment count (2)
+    // and the footnote mirror must skip rather than misassign. The block-side
+    // mirror is unaffected and still resolves the block-level reference.
+    let mut parser = Parser::default().with_inline_tree(true);
+    let doc = parser
+        .parse("[[a]]A target.\n\n[[c]]Another.\n\nSee <<c>>.footnote:[see <<a,*b*>> and <<c>>]");
+
+    let refs = collect_refs(&doc);
+
+    // The block-level `<<c>>` still mirrors its resolved destination …
+    assert!(
+        refs.iter().any(|r| r.variant == RefVariant::Xref
+            && r.resolved.as_ref().is_some_and(|res| res.href == "#c")),
+        "the block-level xref should still resolve: {refs:?}"
+    );
+
+    // … while the footnote's recognized `<<c>>` is left unresolved (its
+    // sibling's deferred form broke the positional correlation for the
+    // subtree's list).
+    let footnote_refs = collect_footnote_refs(&doc);
+    assert!(
+        !footnote_refs.is_empty(),
+        "expected the footnote's recognized xref node: {footnote_refs:?}"
+    );
+    assert!(
+        footnote_refs.iter().all(|r| r.resolved.is_none()),
+        "the footnote mirror must skip on a count mismatch: {footnote_refs:?}"
+    );
+}
+
+/// Collects every cross-reference/link node found inside footnote subtrees of
+/// simple blocks in `doc`.
+fn collect_footnote_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+    use crate::blocks::Block;
+
+    fn walk<'a>(
+        nodes: &[InlineNode<'a>],
+        in_footnote: bool,
+        out: &mut Vec<crate::inlines::Ref<'a>>,
+    ) {
+        for node in nodes {
+            match node {
+                InlineNode::Footnote(footnote) => walk(&footnote.children, true, out),
+
+                InlineNode::Ref(reference) => {
+                    if in_footnote {
+                        out.push(reference.clone());
+                    }
+
+                    walk(&reference.children, in_footnote, out);
+                }
+
+                InlineNode::Styled(styled) => walk(&styled.children, in_footnote, out),
+
+                _ => {}
+            }
+        }
+    }
+
+    let mut out = vec![];
+
+    for block in doc.child_blocks() {
+        if let Block::Simple(simple) = block {
+            walk(simple.content().inlines(), false, &mut out);
+        }
+    }
+
+    out
+}
+
+#[test]
 fn inline_tree_numbers_footnotes_in_document_order() {
     // The recording pass clones the parser *before* the authoritative pass
     // advances the footnote counter, so a footnote in the second paragraph is
@@ -1355,17 +1532,17 @@ fn inline_tree_xref_resolution_matches_the_rendered_string() {
 
 // The guard lives in `SubstitutionGroup::build_inline_tree` as a
 // `debug_assert!`, so both the test and the stateful renderer it needs are
-// gated on `debug_assertions` – otherwise the renderer is unused in release
-// (and `#![deny(warnings)]` rejects the dead code).
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "diverged from rendered_html()")]
-fn inline_tree_build_rejects_a_stateful_renderer() {
+fn inline_tree_build_tolerates_a_stateful_renderer() {
     /// A renderer whose output depends on mutable internal state: it emits
-    /// different bytes on its second invocation. Because the recording pass
-    /// shares the same renderer instance as the authoritative pass, such a
-    /// renderer makes the recorded tree fold to something other than
-    /// `rendered_html()`.
+    /// different bytes on each invocation. Under the retired Strategy-A
+    /// recorder, tree building re-ran the whole pipeline through the shared
+    /// renderer instance, so such a renderer poisoned the recorded tree (and a
+    /// debug assertion rejected it). The single-pass builder derives the tree
+    /// from source instead – a `CharRef` node carries the *logical* character,
+    /// not renderer output – so a stateful renderer is now safe: the
+    /// authoritative rendered string sees the renderer's stateful bytes, and
+    /// the tree stays logical.
     #[derive(Debug, Default)]
     struct FlipRenderer {
         flipped: std::cell::Cell<bool>,
@@ -1385,14 +1562,38 @@ fn inline_tree_build_rejects_a_stateful_renderer() {
         }
     }
 
-    // A stateful renderer is invoked a second time by the recording pass and
-    // diverges, which the debug assertion catches rather than silently storing a
-    // wrong tree.
     let mut parser = Parser::default()
         .with_inline_substitution_renderer(FlipRenderer::default())
         .with_inline_tree(true);
 
-    let _doc = parser.parse("a < b");
+    let doc = parser.parse("a < b");
+
+    let block = doc.child_blocks().next().unwrap();
+    let content = match block {
+        crate::blocks::Block::Simple(simple) => simple.content(),
+        _ => panic!("expected a simple block"),
+    };
+
+    // The authoritative rendered string reflects the stateful renderer's
+    // (first-invocation) output …
+    assert_eq!(content.rendered_html(), "a [first] b");
+
+    // … while the tree carries the logical special character, unpolluted by
+    // the renderer's state.
+    let has_logical_charref = content.inlines().iter().any(|node| {
+        matches!(
+            node,
+            InlineNode::CharRef {
+                value: CharRef::Special('<'),
+                ..
+            }
+        )
+    });
+    assert!(
+        has_logical_charref,
+        "expected a logical CharRef('<') in the tree: {:?}",
+        content.inlines()
+    );
 }
 
 // ─── Wiring: title cross-reference resolution reaches the tree ───────────────
