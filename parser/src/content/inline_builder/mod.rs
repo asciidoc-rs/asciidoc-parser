@@ -23,11 +23,11 @@
 //!
 //! - [`build`] seeds a single borrowed whole-source [`Text`](InlineNode::Text)
 //!   node and threads it through the steps; [`build_from_value`] generalizes
-//!   the seed to the `(value, location)` pair [`Content`](crate::content::Content)
-//!   itself is built from, so a genuinely multi-line, filtered block – whose
-//!   joined text has no single contiguous `'src` slice – can be processed
-//!   too, with every node it produces falling back to `location` as its
-//!   coarse span (design §4.4).
+//!   the seed to the `(value, location)` pair
+//!   [`Content`](crate::content::Content) itself is built from, so a genuinely
+//!   multi-line, filtered block – whose joined text has no single contiguous
+//!   `'src` slice – can be processed too, with every node it produces falling
+//!   back to `location` as its coarse span (design §4.4).
 //! - [`apply_special_characters`] splits each `Text` run on `<`/`>`/`&` into
 //!   precise-span [`Text`](InlineNode::Text) and
 //!   [`CharRef`](InlineNode::CharRef) nodes.
@@ -303,9 +303,8 @@ pub(crate) fn build<'src>(
 ///
 /// Two cases fall out of the relationship between `value` and `location`,
 /// exactly mirroring the verbatim/synthesized split
-/// [`apply_special_characters`](special_chars::apply_special_characters)'s
-/// own [`split_text`](special_chars) already makes for a single node deeper
-/// in the tree:
+/// [`apply_special_characters`]'s own [`split_text`](special_chars) already
+/// makes for a single node deeper in the tree:
 ///
 /// - **`value` is exactly `location.data()`** (the common case — a plain
 ///   paragraph, or any content
@@ -314,20 +313,20 @@ pub(crate) fn build<'src>(
 ///   from it gets an honest, precise `'src` span, sliced straight from
 ///   `location` (issue #944).
 /// - **`value` differs from `location.data()`** (a multi-line block whose
-///   surviving lines were joined with `\n`, or any other filtered value with
-///   no single contiguous `'src` slice of its own): the seed is *synthesized*
-///   — every node the pipeline builds from it still gets a real `InlineNode`,
-///   but one whose `location` coarsely falls back to the whole of `location`
+///   surviving lines were joined with `\n`, or any other filtered value with no
+///   single contiguous `'src` slice of its own): the seed is *synthesized* —
+///   every node the pipeline builds from it still gets a real `InlineNode`, but
+///   one whose `location` coarsely falls back to the whole of `location`
 ///   (design §4.4's documented migration-stage policy), the same fallback an
 ///   attribute-reference expansion or a `counter` directive's resolved value
 ///   already receives. This is what lets the single-pass builder process a
-///   real, multi-line, filtered block's content — not just a single
-///   contiguous source span — while every already-landed step's shared
+///   real, multi-line, filtered block's content — not just a single contiguous
+///   source span — while every already-landed step's shared
 ///   [`build_match_string`](quotes::build_match_string) /
-///   [`source_slice`](quotes::source_slice) machinery handles the fallback
-///   with no further change: it already treats *any* non-verbatim `Text`
-///   node this way, regardless of where in the tree — or how early — that
-///   node was produced.
+///   [`source_slice`](quotes::source_slice) machinery handles the fallback with
+///   no further change: it already treats *any* non-verbatim `Text` node this
+///   way, regardless of where in the tree — or how early — that node was
+///   produced.
 pub(crate) fn build_from_value<'src>(
     value: CowStr<'src>,
     location: Span<'src>,
@@ -674,7 +673,8 @@ mod tests {
     /// ordinary contiguous source – exactly the text a real `Content` would
     /// hold pre-substitution – since that is the logical content being
     /// substituted regardless of which span it is anchored at. This is the
-    /// same kind of blocker-audit `fold_matches_the_real_pipeline_across_a_broad_general_purpose_sweep`
+    /// same kind of blocker-audit
+    /// `fold_matches_the_real_pipeline_across_a_broad_general_purpose_sweep`
     /// already caught once for `hardbreaks`: it exercises every step through
     /// [`build_from_value`]'s synthesized-seed path, at the tree's *root*
     /// rather than a nested spliced value. A macro construct that needs its
