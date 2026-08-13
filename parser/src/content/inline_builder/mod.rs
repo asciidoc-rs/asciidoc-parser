@@ -190,31 +190,42 @@
 //! [character replacements]:
 //!     https://docs.asciidoctor.org/asciidoc/latest/subs/replacements/
 //!
-//! It is **additive and non-regressing**: nothing here is wired into the parse
-//! path yet, so the authoritative string pipeline and the Strategy-A
-//! [`Content::inlines`](crate::content::Content::inlines) tree are untouched.
-//! Later increments extend the transducer to the remaining macro families,
-//! attribute expansion, and passthroughs, at which point it can replace the
-//! recorder, make `rendered_html()` a fold, and retire the sentinel systems.
+//! This module is now **the production tree source**: when inline-tree
+//! building is enabled ([`Parser::with_inline_tree`](crate::Parser)),
+//! `SubstitutionGroup::apply` calls [`build_for_group`] – the group-aware
+//! entry point mirroring its own `run_pipeline` step selection – over the
+//! pre-substitution content value, against a counter-safe clone of the
+//! parser, and stores the result on
+//! [`Content::inlines`](crate::content::Content::inlines). This replaced the
+//! Strategy-A recorder (`content::inline_tree`, now test-only oracle
+//! machinery) as the design's step 6 tree-source swap. The authoritative
+//! rendered string is still produced by the string pipeline; making
+//! `rendered_html()` a fold of this tree – and deleting the three production
+//! sentinel systems – is the remaining half of the cutover. A form documented
+//! as deferred elsewhere in this module is left as literal text in the tree
+//! (never a wrong node), so the fold-parity guarantee is scoped to the
+//! claimed vocabulary.
 //!
 //! # Staging the cutover's recognition side effects
 //!
 //! Every macro family above deliberately skips a **recognition side effect**
 //! the string pipeline performs at the same point – registering an id, link,
 //! or image target in the document catalog, or recording a warning – because
-//! the additive builder still runs *alongside* the authoritative string
-//! pipeline (each against its own, independent [`Parser`]), so performing one
-//! here today would risk double-counting a registration once the two paths
-//! ever share a `Parser`. Each family's own deferred side effects are staged
-//! as their own reviewable building block – `register_image` and the `link=`
-//! dangerous-scheme/self-href warning for `image:`/`icon:`, `register_link`
-//! for the four link-macro forms, and the `register_ref` pair for anchors and
-//! id-carrying attributed spans – and [`apply_macro_side_effects`] composes
-//! all three, in the string pipeline's own family-pass order, into the single
-//! call the eventual cutover makes exactly once per parse (design §5.2, Phase
-//! 4 step 6). It is exercised only by its own tests (and its constituents'
-//! own), against their own `Parser` – calling it for real still waits for the
-//! single-pass builder to replace the recorder as `Content`'s tree source.
+//! the builder still runs *alongside* the authoritative string pipeline
+//! (against a counter-safe clone of the parser, whose mutations are
+//! discarded), so performing one here today would double-count the
+//! registration the string pipeline already performs. Each family's own
+//! deferred side effects are staged as their own reviewable building block –
+//! `register_image` and the `link=` dangerous-scheme/self-href warning for
+//! `image:`/`icon:`, `register_link` for the four link-macro forms, and the
+//! `register_ref` pair for anchors and id-carrying attributed spans – and
+//! [`apply_macro_side_effects`] composes all three, in the string pipeline's
+//! own family-pass order, into the single call the cutover's remaining half
+//! makes exactly once per parse (design §5.2, Phase 4 step 6): once
+//! `rendered_html()` is a fold of this tree, the string pipeline no longer
+//! performs the registrations and this call takes over. Until then it is
+//! exercised only by its own tests (and its constituents' own), against
+//! their own `Parser`.
 //!
 //! # A note on quote nesting
 //!
@@ -235,8 +246,10 @@
 //! [`Text`]: InlineNode::Text
 //! [`quote_subs`]: crate::content::quote_subs
 
-// The transducer framework is deliberately broader than the single step wired
-// up so far; later Strategy-B increments consume the rest.
+// The fold ([`fold_html`]) and the staged recognition side effects
+// ([`apply_macro_side_effects`] and its constituents) are consumed only by
+// tests until the authoritative-fold half of the cutover wires them into
+// `Content` (design §5.2, Phase 4 step 6).
 #![allow(dead_code)]
 
 mod attribute_refs;
@@ -255,17 +268,17 @@ mod stem_step;
 mod test_support;
 
 use attribute_refs::apply_attribute_references;
+use callouts::apply_callouts;
 use char_replacements::apply_character_replacements;
-// Reachable only via `cfg(test)` callers and future external callers today
-// (mirroring the crate-wide `#![allow(dead_code)]` above), so unlike the
-// other step re-exports below (each consumed by `build`), this one is not
-// itself consumed within this module.
+// Consumed only by `cfg(test)` callers and future external callers until the
+// authoritative-fold half of the cutover wires it into `Content`.
 #[allow(unused_imports)]
 pub(crate) use fold::fold_html;
 use footnotes::apply_footnotes;
-// Staged for the eventual cutover (see this module's own doc comment); not
-// yet called from any real parse path, so – like `fold_html` above – reachable
-// only via `cfg(test)` callers and future external callers today.
+// Staged for the eventual authoritative-fold half of the cutover (see this
+// module's own doc comment); not yet called from any real parse path, so –
+// unlike the step re-exports below – reachable only via `cfg(test)` callers
+// and future external callers today.
 #[allow(unused_imports)]
 pub(crate) use macros::apply_macro_side_effects;
 use macros::apply_macros;
@@ -275,7 +288,13 @@ use quotes::apply_quotes;
 use special_chars::apply_special_characters;
 use stem_step::apply_stem;
 
-use crate::{Parser, Span, attributes::Attrlist, inlines::InlineNode, strings::CowStr};
+use crate::{
+    Parser, Span,
+    attributes::Attrlist,
+    content::{SubstitutionGroup, SubstitutionStep},
+    inlines::InlineNode,
+    strings::CowStr,
+};
 
 /// Builds the inline tree for `source` in a single forward pass.
 ///
@@ -346,40 +365,101 @@ pub(crate) fn build_from_value<'src>(
     parser: &Parser,
     attrlist: Option<&Attrlist<'src>>,
 ) -> Vec<InlineNode<'src>> {
-    let seed = vec![InlineNode::Text { value, location }];
+    build_for_group(
+        &SubstitutionGroup::Normal,
+        value,
+        location,
+        parser,
+        attrlist,
+    )
+}
+
+/// Builds the inline tree from an already-computed content **value** under the
+/// substitution group that governs the content – the group-aware counterpart
+/// of [`build_from_value`], mirroring the step selection
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup)'s own
+/// `run_pipeline` makes for the string.
+///
+/// The mapping reproduces `run_pipeline` exactly:
+///
+/// - Passthrough (and, with it, inline-STEM) extraction runs first, ahead of
+///   every step, **iff** the group's steps include
+///   [`Macros`](SubstitutionStep::Macros) or the group is
+///   [`Header`](SubstitutionGroup::Header) – the same condition `run_pipeline`
+///   gates `Passthroughs::extract_from` on.
+/// - Each of the group's [`steps()`](SubstitutionGroup::steps) then runs in
+///   the group's own order, each recast as its node transducer. The
+///   [`Macros`](SubstitutionStep::Macros) step runs [`apply_macros`] and then
+///   [`apply_footnotes`] – footnotes are part of the string pipeline's macros
+///   step, but are their own transducer here so numbering follows true
+///   source order (see [`apply_footnotes`]'s doc comment).
+///
+/// A group whose steps are empty ([`Pass`](SubstitutionGroup::Pass) /
+/// [`None`](SubstitutionGroup::None), or an empty custom list) yields the
+/// untouched seed: a single [`Text`](InlineNode::Text) node holding `value`,
+/// exactly as the string pipeline leaves such content's text unchanged.
+pub(crate) fn build_for_group<'src>(
+    group: &SubstitutionGroup,
+    value: CowStr<'src>,
+    location: Span<'src>,
+    parser: &Parser,
+    attrlist: Option<&Attrlist<'src>>,
+) -> Vec<InlineNode<'src>> {
+    let steps = group.steps();
+
+    let mut nodes = vec![InlineNode::Text { value, location }];
 
     // Passthroughs are extracted before every other step (mirroring
     // `Passthroughs::extract_from`, which the string pipeline runs ahead of
-    // its own step loop), so their content is never touched by
-    // specialcharacters, quotes, replacements, or macros.
-    let nodes = apply_passthroughs(seed, location, parser);
+    // its own step loop, under the same group condition), so their content is
+    // never touched by specialcharacters, quotes, replacements, or macros.
+    if steps.contains(&SubstitutionStep::Macros) || group == &SubstitutionGroup::Header {
+        nodes = apply_passthroughs(nodes, location, parser);
 
-    // Inline STEM is an implicit passthrough too, extracted last (mirroring
-    // `Passthroughs::extract_from`'s own ordering) so a passthrough
-    // placeholder nested inside a STEM expression survives.
-    let nodes = apply_stem(nodes, location, parser);
+        // Inline STEM is an implicit passthrough too, extracted last
+        // (mirroring `Passthroughs::extract_from`'s own ordering) so a
+        // passthrough placeholder nested inside a STEM expression survives.
+        nodes = apply_stem(nodes, location, parser);
+    }
 
-    let nodes = apply_special_characters(nodes);
-    let nodes = apply_quotes(nodes, location, parser);
+    for step in steps {
+        nodes = match step {
+            SubstitutionStep::SpecialCharacters => apply_special_characters(nodes),
 
-    // Attribute references sit here in the *normal* effective order
-    // (specialcharacters → quotes → attributes → replacements → macros,
-    // design §3.4.1): by this point `<`/`>`/`&` are already `CharRef` leaves
-    // and quoted spans are already `Styled` nodes, and whatever this step
-    // splices in is exactly what `apply_character_replacements` and
-    // `apply_macros` – still ahead – see and refine.
-    let nodes = apply_attribute_references(nodes, location, parser);
+            SubstitutionStep::Quotes => apply_quotes(nodes, location, parser),
 
-    let nodes = apply_character_replacements(nodes, location);
-    let nodes = apply_macros(nodes, location, parser);
+            // In the *normal* effective order (specialcharacters → quotes →
+            // attributes → replacements → macros, design §3.4.1), by this
+            // point `<`/`>`/`&` are already `CharRef` leaves and quoted spans
+            // are already `Styled` nodes, and whatever this step splices in
+            // is exactly what the steps still ahead see and refine.
+            SubstitutionStep::AttributeReferences => {
+                apply_attribute_references(nodes, location, parser)
+            }
 
-    // Footnotes are their own step, run once over the *whole* tree after
-    // every other macro family has been resolved at every level – see
-    // `apply_footnotes`'s doc comment for why this cannot be folded into
-    // `apply_macros` as an ordinary level pass.
-    let nodes = apply_footnotes(nodes, location, parser);
+            SubstitutionStep::CharacterReplacements => {
+                apply_character_replacements(nodes, location)
+            }
 
-    apply_post_replacements(nodes, location, parser, attrlist)
+            SubstitutionStep::Macros => {
+                // Footnotes are their own transducer, run once over the
+                // *whole* tree after every other macro family has been
+                // resolved at every level – see `apply_footnotes`'s doc
+                // comment for why this cannot be folded into `apply_macros`
+                // as an ordinary level pass.
+                let nodes = apply_macros(nodes, location, parser);
+                apply_footnotes(nodes, location, parser)
+            }
+
+            SubstitutionStep::PostReplacement => {
+                apply_post_replacements(nodes, location, parser, attrlist)
+            }
+
+            SubstitutionStep::Callouts => apply_callouts(nodes, location, parser, attrlist),
+        };
+    }
+
+    nodes
 }
 
 /// A whole-pipeline differential corpus: [`build`] against the *real*,
@@ -732,6 +812,205 @@ mod tests {
                 "fold diverged from the real pipeline for synthesized value {filtered:?} \
                  (location {source:?})"
             );
+        }
+    }
+
+    /// The group-aware entry point ([`build_for_group`]) against the real
+    /// pipeline, for the substitution groups whose step lists differ from
+    /// [`SubstitutionGroup::Normal`] – pinning both the per-group step
+    /// selection and the passthrough-extraction gate (`Macros` in the steps,
+    /// or the `Header` group), which mirror `run_pipeline`'s own.
+    mod build_for_group {
+        #![allow(clippy::unwrap_used)]
+
+        use super::super::{build_for_group, fold_html};
+        use crate::{
+            Parser, Span,
+            content::{Content, SubstitutionGroup},
+            inlines::InlineNode,
+            parser::{HtmlSubstitutionRenderer, ModificationContext},
+            strings::CowStr,
+        };
+
+        fn parser_with_product() -> Parser {
+            Parser::default().with_intrinsic_attribute(
+                "product",
+                "Widget",
+                ModificationContext::Anywhere,
+            )
+        }
+
+        fn build_group<'src>(
+            group: &SubstitutionGroup,
+            source: &'src str,
+            parser: &Parser,
+        ) -> Vec<InlineNode<'src>> {
+            build_for_group(group, CowStr::from(source), Span::new(source), parser, None)
+        }
+
+        /// Runs `source` through the real pipeline under `group` and asserts
+        /// the group-aware tree folds to the same bytes.
+        fn assert_group_parity(group: &SubstitutionGroup, source: &str) {
+            let golden_parser = parser_with_product();
+            let mut content = Content::from(Span::new(source));
+            group.apply(&mut content, &golden_parser, None);
+            let golden = content.rendered_str().to_string();
+
+            let built_parser = parser_with_product();
+            let nodes = build_group(group, source, &built_parser);
+            let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+
+            assert_eq!(
+                built, golden,
+                "group-aware fold diverged from the real pipeline for {source:?} under {group:?}"
+            );
+        }
+
+        #[test]
+        fn header_group_extracts_passthroughs_and_expands_attributes() {
+            // The header group runs special characters and attribute
+            // references only – but, uniquely among the non-`Macros` groups,
+            // it *does* extract passthroughs (`run_pipeline`'s own gate).
+            let source = "v pass:[<raw>] {product} *plain* < end";
+            let parser = parser_with_product();
+            let nodes = build_group(&SubstitutionGroup::Header, source, &parser);
+
+            // The pass macro was extracted (a `Raw` leaf) …
+            assert!(
+                nodes.iter().any(
+                    |n| matches!(n, InlineNode::Raw { value, .. } if value.as_ref() == "<raw>")
+                ),
+                "expected the pass macro's Raw leaf: {nodes:?}"
+            );
+
+            // … the attribute reference expanded …
+            assert!(
+                nodes
+                    .iter()
+                    .any(|n| matches!(n, InlineNode::Text { value, .. } if value.as_ref().contains("Widget"))),
+                "expected the expanded attribute value: {nodes:?}"
+            );
+
+            // … and the quotes step did not run.
+            assert!(
+                !nodes.iter().any(|n| matches!(n, InlineNode::Styled(_))),
+                "the quotes step must not run for the header group: {nodes:?}"
+            );
+
+            assert_group_parity(&SubstitutionGroup::Header, source);
+        }
+
+        #[test]
+        fn attribute_entry_value_group_does_not_extract_passthroughs() {
+            // The attribute-entry-value group runs the same two steps as the
+            // header group but does *not* extract passthroughs, so a
+            // `pass:[…]` stays literal text – mirroring `run_pipeline`'s
+            // extraction gate exactly.
+            let source = "v pass:[x] {product}";
+            let parser = parser_with_product();
+            let nodes = build_group(&SubstitutionGroup::AttributeEntryValue, source, &parser);
+
+            assert!(
+                !nodes.iter().any(|n| matches!(n, InlineNode::Raw { .. })),
+                "a pass macro must stay literal for the attribute-entry-value group: {nodes:?}"
+            );
+
+            assert_group_parity(&SubstitutionGroup::AttributeEntryValue, source);
+        }
+
+        #[test]
+        fn pass_and_none_groups_yield_the_untouched_seed() {
+            let source = "<b>raw</b> *not bold* {product}";
+            let parser = parser_with_product();
+
+            for group in [SubstitutionGroup::Pass, SubstitutionGroup::None] {
+                let nodes = build_group(&group, source, &parser);
+
+                assert!(
+                    matches!(
+                        nodes.as_slice(),
+                        [InlineNode::Text { value, .. }] if value.as_ref() == source
+                    ),
+                    "expected the untouched single text run under {group:?}: {nodes:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn stem_group_applies_special_characters_only() {
+            let source = "*a* < {product}";
+            let parser = parser_with_product();
+            let nodes = build_group(&SubstitutionGroup::Stem, source, &parser);
+
+            // `<` became a CharRef; `*a*` and `{product}` stayed literal.
+            assert!(
+                nodes
+                    .iter()
+                    .any(|n| matches!(n, InlineNode::CharRef { .. })),
+                "expected the escaped special character: {nodes:?}"
+            );
+            assert!(
+                !nodes.iter().any(|n| matches!(n, InlineNode::Styled(_))),
+                "the quotes step must not run for the stem group: {nodes:?}"
+            );
+
+            assert_group_parity(&SubstitutionGroup::Stem, source);
+        }
+
+        #[test]
+        fn a_custom_list_runs_exactly_the_named_steps_in_order() {
+            // `subs=quotes` alone: `*bold*` is recognized, `<` stays literal
+            // text (never escaped), and `{product}` stays unexpanded.
+            let (group, invalid) = SubstitutionGroup::from_custom_string(None, "quotes");
+            assert!(invalid.is_empty());
+
+            let source = "keep *bold* and a < b with {product}";
+            let parser = parser_with_product();
+            let nodes = build_group(&group, source, &parser);
+
+            assert!(
+                nodes.iter().any(|n| matches!(n, InlineNode::Styled(_))),
+                "expected the quoted span: {nodes:?}"
+            );
+            assert!(
+                !nodes
+                    .iter()
+                    .any(|n| matches!(n, InlineNode::CharRef { .. })),
+                "the special-characters step must not run for subs=quotes: {nodes:?}"
+            );
+            assert!(
+                nodes
+                    .iter()
+                    .any(|n| matches!(n, InlineNode::Text { value, .. } if value.as_ref().contains("{product}"))),
+                "the attribute reference must stay literal for subs=quotes: {nodes:?}"
+            );
+        }
+
+        #[test]
+        fn a_custom_list_including_macros_extracts_passthroughs() {
+            // A custom list naming `macros` triggers passthrough extraction
+            // (the same `steps.contains(Macros)` gate `run_pipeline` uses), so
+            // a `+++…+++` passthrough is a `Raw` leaf even under a custom
+            // list.
+            let (group, invalid) = SubstitutionGroup::from_custom_string(None, "macros");
+            assert!(invalid.is_empty());
+
+            let source = "a +++<u>raw</u>+++ and image:pic.png[Alt]";
+            let parser = parser_with_product();
+            let nodes = build_group(&group, source, &parser);
+
+            assert!(
+                nodes.iter().any(
+                    |n| matches!(n, InlineNode::Raw { value, .. } if value.as_ref() == "<u>raw</u>")
+                ),
+                "expected the passthrough's Raw leaf: {nodes:?}"
+            );
+            assert!(
+                nodes.iter().any(|n| matches!(n, InlineNode::Image(_))),
+                "expected the image macro's node: {nodes:?}"
+            );
+
+            assert_group_parity(&group, source);
         }
     }
 

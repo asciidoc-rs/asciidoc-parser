@@ -13,6 +13,13 @@ pub(crate) use content::{
 
 pub(crate) mod inline_builder;
 
+// The Strategy-A recorder, retired from the production parse path when the
+// single-pass builder (`inline_builder`) replaced it as `Content`'s tree
+// source. It survives as test-only oracle machinery: the differential harness
+// (`tests::inline_recorder`) still drives it directly, and the structural
+// cross-check (`tests::inline_builder_recorder_parity`) compares its tree
+// against the builder's.
+#[cfg(test)]
 pub(crate) mod inline_tree;
 
 mod macros;

@@ -49,7 +49,7 @@ use crate::{
 /// does not call `Parser::register_callout`, deferring the callout catalog's
 /// validation to the cutover (design §5.2 Phase 4, step 6), exactly as the
 /// image and link increments defer their own catalog registrations.
-fn apply_callouts<'src>(
+pub(super) fn apply_callouts<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,

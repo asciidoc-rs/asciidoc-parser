@@ -1,11 +1,7 @@
-use std::rc::Rc;
-
 use crate::{
     HasSpan, Parser,
     attributes::Attrlist,
-    content::{
-        Content, Passthroughs, SubstitutionStep, inline_tree, inline_tree::RecordingRenderer,
-    },
+    content::{Content, Passthroughs, SubstitutionStep},
     warnings::WarningType,
 };
 
@@ -224,33 +220,44 @@ impl SubstitutionGroup {
         (Self::Custom(deduped), invalid)
     }
 
-    pub(crate) fn apply(
+    pub(crate) fn apply<'src>(
         &self,
-        content: &mut Content<'_>,
+        content: &mut Content<'src>,
         parser: &Parser,
-        attrlist: Option<&Attrlist>,
+        attrlist: Option<&Attrlist<'src>>,
     ) {
-        // Snapshot the content and parser *before* the authoritative pass runs,
-        // when inline-tree building is enabled. The clone captures every
-        // document counter (footnote/callout numbers, `{counter:…}` values) at
-        // its pre-substitution value, so the recording pass below numbers
-        // constructs exactly as the authoritative pass does; the clone's
-        // mutations are then discarded, leaving the real parser advanced once.
-        let recording_seed = if parser.build_inline_tree {
-            Some((content.clone(), parser.clone()))
+        // Snapshot the pre-substitution value and the parser *before* the
+        // authoritative pass runs, when inline-tree building is enabled. The
+        // parser clone captures every document counter (footnote/callout
+        // numbers, `{counter:…}` values) at its pre-substitution value, so the
+        // single-pass builder below numbers constructs exactly as the
+        // authoritative pass does; the clone's mutations are then discarded,
+        // leaving the real parser advanced once.
+        let tree_seed = if parser.build_inline_tree {
+            Some((content.rendered.clone(), parser.clone()))
         } else {
             None
         };
 
         self.run_pipeline(content, parser, attrlist);
 
-        if let Some((mut recording_content, mut recording_parser)) = recording_seed {
-            self.build_inline_tree(
-                content,
-                &mut recording_content,
-                &mut recording_parser,
+        if let Some((value, mut tree_parser)) = tree_seed {
+            // The builder must not recurse into tree building itself: a
+            // passthrough with its own substitution list re-enters
+            // `SubstitutionGroup::apply` for its body (via
+            // `passthrough_text`), and that nested content needs no tree of
+            // its own.
+            tree_parser.build_inline_tree = false;
+
+            let tree = crate::content::inline_builder::build_for_group(
+                self,
+                value,
+                content.original(),
+                &tree_parser,
                 attrlist,
             );
+
+            content.set_inlines(tree);
         }
     }
 
@@ -289,73 +296,6 @@ impl SubstitutionGroup {
         // references are resolved. This is a no-op when no cross-references were
         // found.
         content.finalize_deferred(&*parser.renderer);
-    }
-
-    /// Builds the inline AST for `content` by re-running the pipeline over the
-    /// pre-substitution snapshot with a [`RecordingRenderer`] wrapped around
-    /// the parser's own renderer, then parsing the recorded markers into a
-    /// tree and storing it on `content`, then populating each footnote node's
-    /// subtree from the footnote texts that pass registered.
-    ///
-    /// This is Strategy A (design §4.1): a transparent recording pass whose
-    /// fold reproduces the authoritative `rendered_html()` byte-for-byte. It is
-    /// a second pass for now; the Phase 4 single-pass builder retires it.
-    fn build_inline_tree(
-        &self,
-        content: &mut Content<'_>,
-        recording_content: &mut Content<'_>,
-        recording_parser: &mut Parser,
-        attrlist: Option<&Attrlist>,
-    ) {
-        let (recorder, events) = RecordingRenderer::new(recording_parser.renderer.clone());
-        recording_parser.renderer = Rc::new(recorder);
-
-        // The recording pass must not recurse into tree building itself (nested
-        // content would clone the parser again and again); it only needs to
-        // record this content's own constructs.
-        recording_parser.build_inline_tree = false;
-
-        // A footnote's text is extracted out of the block, so it never reaches
-        // the marked string below; it is recovered from the footnotes this pass
-        // registers. Snapshot the registry length first so only *this* content's
-        // footnotes are picked up (the clone carries the ones defined earlier in
-        // the document).
-        let footnote_start = recording_parser.footnote_count();
-
-        self.run_pipeline(recording_content, recording_parser, attrlist);
-
-        let footnote_texts = recording_parser.footnote_texts_from(footnote_start);
-
-        let marked = recording_content.rendered_owned();
-        let events = events.borrow();
-        let mut tree = inline_tree::build_inline_tree(&marked, &events, content.original());
-
-        inline_tree::attach_footnote_subtrees(
-            &mut tree,
-            &footnote_texts,
-            &events,
-            content.original(),
-        );
-
-        // The recording pass re-runs the pipeline through a *clone* of the
-        // parser, but the clone shares the same `Rc`-held inline renderer and
-        // asset handlers as the authoritative pass. That is correct for the
-        // built-in (stateless) renderer and the default handlers, but a
-        // *stateful* custom renderer – or a one-shot asset handler – could
-        // observe different state the second time and make the recorded tree
-        // fold to something other than the authoritative `rendered_html()`. Assert
-        // parity so such a renderer fails loudly in debug/test builds rather
-        // than silently storing a divergent tree. (Retired with the second pass
-        // itself by the Phase 4 single-pass builder.)
-        debug_assert_eq!(
-            inline_tree::fold_marked(&marked, &events),
-            content.rendered_str(),
-            "inline tree fold diverged from rendered_html(); the configured inline \
-             renderer or an asset handler is stateful and unsafe for inline-tree \
-             building",
-        );
-
-        content.set_inlines(tree);
     }
 
     /// Applies any block style masquerade and `subs` attribute override from

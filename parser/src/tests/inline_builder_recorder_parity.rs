@@ -1,6 +1,7 @@
 //! Structural cross-check: the Phase 4 single-pass builder's tree
-//! ([`inline_builder::build`]) against the Strategy-A recorder's tree
-//! (`Content::inlines()`, populated via [`Parser::with_inline_tree`]).
+//! ([`inline_builder::build`]) against the Strategy-A recorder's tree (built
+//! directly by the now test-only `inline_tree` machinery, reproducing the
+//! retired production recording path).
 //!
 //! Design §4.1 calls for exactly this during bring-up ("the node stream is
 //! cross-checked against Strategy A's recorder to catch structural
@@ -17,12 +18,15 @@
 //! With Phase 4 step 5 landed, the builder now covers essentially the whole
 //! vocabulary the recorder does, so a real structural mismatch here — not
 //! merely a difference in one of the fields below — would be a genuine
-//! regression, not an expected divergence. This is the last piece of
-//! due-diligence design §5.2's own "next steps" list calls for before the
-//! Phase 4 "cutover" (step 6) can safely replace the recorder with the
-//! builder as `Content`'s tree source: it gives confidence that swap changes
-//! only *how* the tree is built, not *what* tree callers of
-//! [`Content::inlines`] see.
+//! regression, not an expected divergence. This was the last piece of
+//! due-diligence design §5.2's own "next steps" list called for before the
+//! Phase 4 "cutover" (step 6) could safely replace the recorder with the
+//! builder as `Content`'s tree source — a swap that has since landed, which
+//! is why the recorder side here is built by driving the (now test-only)
+//! recorder machinery directly rather than by reading `Content::inlines()`:
+//! the production accessor now returns the builder's own tree, and comparing
+//! that to itself would prove nothing. The cross-check stays on as the
+//! regression guard that the two independent constructions keep agreeing.
 //!
 //! A handful of fields are **intentionally** excluded from the comparison,
 //! each already documented elsewhere in this crate as a known difference
@@ -137,17 +141,20 @@
 
 #![allow(clippy::unwrap_used)]
 
-use std::{borrow::Cow, collections::VecDeque};
+use std::{borrow::Cow, collections::VecDeque, rc::Rc};
 
 use crate::{
     Parser, Span,
     content::{
         Content, SubstitutionGroup,
         inline_builder::build,
-        inline_tree::{CharRefKind, classify_entity},
+        inline_tree::{
+            CharRefKind, RecordingRenderer, attach_footnote_subtrees, build_inline_tree,
+            classify_entity,
+        },
     },
     inlines::{CharRef, InlineNode, RefVariant},
-    parser::ModificationContext,
+    parser::{HtmlSubstitutionRenderer, ModificationContext},
     strings::CowStr,
 };
 
@@ -158,16 +165,51 @@ use crate::{
 /// corpora use, for the same reason: both sides advance real document
 /// counters, such as footnote numbers, so sharing a parser would double
 /// them), then asserts they are the same shape.
+///
+/// The recorder side reproduces the *retired* Strategy-A production path
+/// directly – a [`RecordingRenderer`] wrapped around the built-in HTML
+/// renderer, the real pipeline run over it, the recorded markers parsed into
+/// a tree, and each defining footnote's subtree attached from the footnote
+/// texts that pass registered – exactly what `SubstitutionGroup::apply` did
+/// before the single-pass builder replaced the recorder as `Content`'s tree
+/// source (the swap this module's cross-check cleared the way for). The
+/// builder side is the production path's own [`build`].
 fn assert_shapes_with(source: &str, configure: impl Fn() -> Parser) {
-    let recorder_parser = configure().with_inline_tree(true);
+    let (recorder, events) = RecordingRenderer::new(Rc::new(HtmlSubstitutionRenderer {}));
+    let recorder_parser = configure().with_inline_substitution_renderer(recorder);
+
+    // A footnote's text never reaches the marked block string (it is extracted
+    // out of the flow), so it is recovered from the footnotes the recording
+    // pass registers; snapshot the registry length first so only this
+    // content's own footnotes are picked up.
+    let footnote_start = recorder_parser.catalog().footnotes.len();
+
     let mut content = Content::from(Span::new(source));
     SubstitutionGroup::Normal.apply(&mut content, &recorder_parser, None);
-    let recorder_tree = content.inlines();
+
+    let footnote_texts: Vec<String> = recorder_parser
+        .catalog()
+        .footnotes
+        .get(footnote_start..)
+        .unwrap_or_default()
+        .iter()
+        .map(|footnote| footnote.text.clone())
+        .collect();
+
+    let marked = content.rendered_owned();
+    let events = events.borrow();
+    let mut recorder_tree = build_inline_tree(&marked, &events, Span::new(source));
+    attach_footnote_subtrees(
+        &mut recorder_tree,
+        &footnote_texts,
+        &events,
+        Span::new(source),
+    );
 
     let builder_parser = configure();
     let builder_tree = build(Span::new(source), &builder_parser, None);
 
-    assert_trees_equivalent(recorder_tree, &builder_tree, source);
+    assert_trees_equivalent(&recorder_tree, &builder_tree, source);
 }
 
 fn assert_shapes(source: &str) {
