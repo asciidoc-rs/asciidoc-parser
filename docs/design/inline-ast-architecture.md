@@ -1829,6 +1829,43 @@ Each phase is a reviewable unit with a clear exit gate.
   builder's tree is a faithful counterpart to the recorder's, ahead of the real swap. As with every
   prior increment, nothing here is wired into the parse path.
 
+  *Step 6 prep landed as (a synthesized-seed entry point, for a real block's filtered/joined
+  content):* the last structural piece the tree-source swap needs is an answer to *what `Span<'src>`
+  does `build` even run on*, given that a real block's `Content` does not always hold one: the common
+  single-surviving-line case
+  ([`Content::from_filtered_lines`](../../parser/src/content/content.rs)) borrows a contiguous `'src`
+  slice, but a genuinely multi-line block (or any other filtered value) joins its surviving lines into
+  an *owned* string with no honest `'src` slice of its own – exactly the shape
+  `build`'s own `source: Span<'src>` parameter could not accept. [`build_from_value`](../../parser/src/content/inline_builder.rs)
+  closes this: it generalizes `build`'s seed from a bare `Span<'src>` to the `(value, location)` pair
+  `Content` itself is already built from, so `build` becomes a thin wrapper
+  (`build_from_value(CowStr::from(source.data()), source, …)`) over it. When `value` coincides with
+  `location.data()` this is the existing verbatim path, unchanged; when it does not, the seed is
+  *synthesized* – and every downstream step already knows what to do with that, because it is the same
+  verbatim/synthesized split [`apply_special_characters`](../../parser/src/content/inline_builder/special_chars.rs)'s
+  own `split_text` already makes for a single node deeper in the tree, and the same coarse-fallback
+  policy (design §4.4) an attribute-reference expansion or a `counter` directive's resolved value
+  already receives. No step needed a code change: `build_match_string` and `source_slice`
+  ([`quotes.rs`](../../parser/src/content/inline_builder/quotes.rs)) already treat *any* non-verbatim
+  `Text` node this way regardless of where in the tree — or how early — it was produced, so a
+  wholly-synthesized *root* seed is just the same mechanism reached one level higher than any increment
+  had exercised it before.
+
+  This closes the gap for every step that never needed a verbatim `'src` slice in the first place –
+  quotes, specialcharacters, attribute references, character replacements, post-replacement (including
+  `hardbreaks`), and a macro family (a bare `footnote:[…]`) whose own content is captured as children
+  rather than a literal value – pinned by a differential corpus comparing `build_from_value` against the
+  real pipeline for a simulated multi-line, indentation-filtered block. It does **not** lift the
+  existing "a macro inside a synthesized run is deferred" boundary (§4.1's `apply_macros` note,
+  [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs)) for a family that
+  needs its own verbatim target/id — a link, image, cross-reference, anchor, or non-concealed index
+  term — since that boundary was written for a run *nested inside* an otherwise-verbatim tree and reads
+  identically when the *whole* seed is that run; a wholly-synthesized `<<id>>` is therefore still left
+  unrecognized today, a documented divergence pinned by its own test rather than silently regressed.
+  Lifting that boundary — so a real multi-line block carrying one of those constructs also folds
+  identically through `build_from_value` — remains a later increment's job, alongside the rest of step
+  6's own wiring work. As with every prior increment, nothing here is wired into the parse path.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -1915,6 +1952,14 @@ Each phase is a reviewable unit with a clear exit gate.
        already-documented one-sided richness or a leaf-boundary artifact of recovering structure
        from rendered output, and none a genuine regression; see the step's own "landed as" note
        above. Wiring `build` into `Content` in place of the recorder remains this step's own job.
+     - ✅ **prep (synthesized seed).** [`build_from_value`](../../parser/src/content/inline_builder.rs)
+       generalizes `build`'s seed from a bare `Span<'src>` to the `(value, location)` pair `Content`
+       itself is built from, so a genuinely multi-line, filtered block (whose joined `rendered` text
+       has no single contiguous `'src` slice) can be processed too, not only the common
+       single-surviving-line case – see the step's own "landed as" note above. A macro family needing
+       its own verbatim target/id remains deferred for a wholly-synthesized seed, a documented
+       divergence pinned by its own test. Wiring `build`/`build_from_value` into `Content` in place of
+       the recorder remains this step's own job.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
