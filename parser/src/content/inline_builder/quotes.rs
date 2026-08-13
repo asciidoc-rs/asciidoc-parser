@@ -623,6 +623,63 @@ pub(super) fn emit_range<'src>(
     }
 }
 
+/// Returns the literal text `range` covers, reusing [`emit_range`]'s own
+/// verbatim/synthesized slicing to recover it *exactly* even when `range`
+/// falls inside a [`synthesized`](Piece::synthesized) piece (an attribute
+/// expansion, or – reached at a tree's root – a filtered multi-line block's
+/// own joined seed): unlike [`source_slice`], which snaps a boundary landing
+/// *inside* a synthesized piece to that piece's own coarse edge (design
+/// §4.4) because it must return an honest `'src` [`Span`], this slices the
+/// piece's own `value` instead, so the returned text is precise rather than
+/// approximate – the same recovery [`emit_range`] already gives a kept
+/// [`Text`](InlineNode::Text) run, just concatenated into one value instead
+/// of a node list. Still yields `None` when `range` touches an
+/// [`atomic`](Piece::atomic) piece (an escaped special or a rendered span) –
+/// that boundary is unchanged; a caller checks
+/// [`range_is_verbatim_or_synthesized`](super::macros::image::range_is_verbatim_or_synthesized)
+/// first and is expected to defer exactly as before when it fails.
+pub(super) fn text_slice<'src>(
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    range: std::ops::Range<usize>,
+) -> Option<CowStr<'src>> {
+    if range.start >= range.end {
+        return Some(CowStr::from(""));
+    }
+
+    let mut emitted = Vec::new();
+    emit_range(nodes, pieces, range, &mut emitted);
+
+    let mut parts = emitted.into_iter();
+
+    let first = parts.next()?;
+    let InlineNode::Text { value: first, .. } = first else {
+        return None;
+    };
+
+    match parts.next() {
+        None => Some(first),
+
+        Some(second) => {
+            let InlineNode::Text { value: second, .. } = second else {
+                return None;
+            };
+
+            let mut owned = first.into_string();
+            owned.push_str(&second);
+
+            for part in parts {
+                let InlineNode::Text { value, .. } = part else {
+                    return None;
+                };
+                owned.push_str(&value);
+            }
+
+            Some(CowStr::from(owned))
+        }
+    }
+}
+
 /// Maps a match-string range back to its source [`Span`], sliced from `root`.
 ///
 /// A boundary inside a verbatim [`Text`](InlineNode::Text) run maps one-to-one

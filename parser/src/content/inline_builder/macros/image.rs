@@ -121,6 +121,40 @@ pub(in crate::content::inline_builder) fn range_is_verbatim(
     true
 }
 
+/// The relaxed counterpart of [`range_is_verbatim`]: also accepts a range
+/// that overlaps a [`synthesized`](Piece::synthesized) piece (an attribute
+/// expansion, or – reached at a tree's root – a filtered multi-line block's
+/// own joined seed), rejecting only an [`atomic`](Piece::atomic) overlap (an
+/// escaped special or a rendered span) – the boundary every macro family
+/// still enforces unchanged. A caller that accepts a range under this check
+/// still cannot slice `'src` directly for it (the same reason
+/// [`range_is_verbatim`] exists at all); it needs
+/// [`text_slice`](super::super::quotes::text_slice) rather than
+/// [`source_slice`] to recover the
+/// range's own *text* precisely, since `source_slice` only ever offers a
+/// synthesized piece's coarse *location* fallback (design §4.4), never its
+/// exact bytes.
+pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
+    pieces: &[Piece],
+    range: &std::ops::Range<usize>,
+) -> bool {
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the range.
+        if p_end <= range.start || p_start >= range.end {
+            continue;
+        }
+
+        if piece.atomic {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Builds one [`Image`](InlineNode::Image) node from a verbatim image/icon
 /// match: it slices the target and attribute list straight from `'src` and
 /// pre-extracts the alt/width/height the way the string replacer does, so the

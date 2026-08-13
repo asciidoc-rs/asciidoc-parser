@@ -1984,6 +1984,28 @@ Each phase is a reviewable unit with a clear exit gate.
        its own verbatim target/id remains deferred for a wholly-synthesized seed, a documented
        divergence pinned by its own test. Wiring `build`/`build_from_value` into `Content` in place of
        the recorder remains this step's own job.
+     - ✅ **prep (anchor synthesized boundary lifted).** The "macro inside a synthesized run"
+       boundary §4.1/§4.4 describe – and the synthesized-seed note directly above still pins for
+       link/image/xref – is **lifted for the anchor family**, the one macro whose node needs no
+       `Span`-typed field beyond its own `location` (an id and an optional reftext, both plain
+       text). A new [`text_slice`](../../parser/src/content/inline_builder/quotes.rs) helper
+       reuses `emit_range`'s own verbatim/synthesized slicing to recover a macro's target *text*
+       exactly – concatenating a synthesized piece's `value` instead of `source_slice`'s coarse
+       whole-piece fallback – and a new
+       [`range_is_verbatim_or_synthesized`](../../parser/src/content/inline_builder/macros/image.rs)
+       gate accepts a synthesized overlap while still rejecting an atomic one (an escaped special
+       or a rendered span, the boundary every family keeps). `build_anchor_node` and
+       `build_anchor_reftext` (`macros/anchors.rs`) now use these instead of deferring: an id or
+       reftext coming from an attribute expansion, or – reached at a tree's root via
+       `build_from_value` – a filtered multi-line block's own joined seed, is recognized with its
+       exact text, while the node's `location` keeps the coarse enclosing-span fallback design §4.4
+       already establishes elsewhere (only the *text* needed precision; `Attrlist`-bearing families
+       like image/link still cannot lift this boundary the same way, since `Attrlist::parse` reads
+       its `source: Span<'src>`'s bytes as content, not just as a location tag – a real `'src` slice
+       is not optional there). The `an_anchor_inside_an_expanded_attribute_value_is_a_documented_
+       divergence` test #1177 added is now a parity test instead of a divergence test, per its own
+       "if lifted, fold this into a parity corpus" note. Wiring `build`/`build_from_value` into
+       `Content` in place of the recorder remains this step's own job.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
