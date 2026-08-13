@@ -400,7 +400,30 @@ fn anchor_reftext_str<'a>(anchor: &'a Anchor<'_>) -> Option<&'a str> {
 /// exclude this case – see its own doc) but never catalogs the id; this
 /// mirrors that by skipping only the registration, not the recognition. See
 /// #769.
+///
+/// This peeks at `anchor.location`'s own bytes and the byte immediately
+/// before it in `source`, which is only honest for a **verbatim** anchor: its
+/// `location` is then a precise slice of the real source, so both reads are
+/// meaningful. A **synthesized** anchor's `id` (design §4.4's coarse-fallback
+/// case, lifted for this family by [`text_slice`]) instead carries a
+/// `location` that is only the enclosing run's *whole* coarse span, not the
+/// exact `[[id]]` text – peeking at a byte relative to that span would answer
+/// a question about the wrong bytes (the source immediately before the
+/// *attribute reference*, not before the *id* inside its expanded value), so
+/// this bails out to `false` (not bibliography-inner) for any non-verbatim id
+/// rather than risk a wrong answer in either direction from bytes that were
+/// never the id's own. A genuinely bibliography-style `[[[id]]]` sequence
+/// reached through an attribute expansion is therefore registered as an
+/// ordinary reference rather than suppressed – a narrower, documented gap the
+/// eventual `apply_ref_side_effects` wiring (design §5.2 Phase 4, step 6) can
+/// close if it proves to matter, the same "a coarse fallback trades precision
+/// for correctness of the common case" policy design §4.4 already establishes
+/// elsewhere.
 fn is_bibliography_inner(anchor: &Anchor<'_>, source: Span<'_>) -> bool {
+    if !matches!(anchor.id, CowStr::Borrowed(_)) {
+        return false;
+    }
+
     if !anchor.location.data().starts_with("[[") {
         return false;
     }
@@ -954,6 +977,45 @@ mod tests {
         apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
 
         assert!(!parser.catalog().contains_id("id"));
+    }
+
+    #[test]
+    fn a_bibliography_style_triple_bracket_reached_through_a_synthesized_run_still_registers() {
+        // `is_bibliography_inner`'s own documented gap: it only recognizes the
+        // `[[[id]]]` shape via a *verbatim* anchor's `location`, since a
+        // synthesized anchor's `location` is only the enclosing run's coarse
+        // span (not the literal `[[id]]` text), so peeking at its bytes could
+        // never answer the "preceded by `[`" question honestly. Unlike the
+        // test above (a literal `[[[id]]]` in real source, suppressed), the
+        // same shape reached through an attribute expansion is registered as
+        // an ordinary reference instead – the anchor is still recognized (its
+        // id is exact, per the fold-parity tests above), just not suppressed.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute(
+            "myattr",
+            "[[[id]]]",
+            ModificationContext::Anywhere,
+        );
+
+        let source = "before {myattr} after";
+        let nodes = build_with(Span::new(source), &parser);
+
+        let anchor = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Anchor(anchor) => Some(anchor),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected an Anchor node: {nodes:?}"));
+        assert!(matches!(anchor.id, CowStr::Boxed(_)), "id is synthesized");
+
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        assert!(
+            parser.catalog().contains_id("id"),
+            "a synthesized bibliography-style anchor is registered, not suppressed"
+        );
     }
 
     #[test]

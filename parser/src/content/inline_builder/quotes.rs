@@ -1121,6 +1121,163 @@ mod tests {
     }
 
     #[test]
+    fn text_slice_of_an_empty_range_is_empty() {
+        use super::text_slice;
+
+        assert_eq!(text_slice(&[], &[], 3..3).unwrap().as_ref(), "");
+    }
+
+    #[test]
+    fn text_slice_borrows_from_a_single_verbatim_piece() {
+        use super::{Piece, text_slice};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        let location = Span::new("hello");
+        let node = InlineNode::Text {
+            value: CowStr::from("hello"),
+            location,
+        };
+        let piece = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 5,
+            src_offset: location.byte_offset(),
+            src_len: location.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let result = text_slice(
+            std::slice::from_ref(&node),
+            std::slice::from_ref(&piece),
+            1..4,
+        )
+        .unwrap();
+
+        assert_eq!(result.as_ref(), "ell");
+        assert!(matches!(result, CowStr::Borrowed(_)));
+    }
+
+    #[test]
+    fn text_slice_recovers_exact_text_from_a_single_synthesized_piece() {
+        use super::{Piece, text_slice};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        // The recovered text ("value") differs from `location`'s own source
+        // bytes ("{x}") – the exact shape a spliced attribute expansion
+        // produces – which is what `source_slice`'s coarse fallback cannot
+        // recover but `text_slice` can.
+        let location = Span::new("{x}");
+        let node = InlineNode::Text {
+            value: CowStr::from("expanded value"),
+            location,
+        };
+        let piece = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: "expanded value".len(),
+            src_offset: location.byte_offset(),
+            src_len: location.data().len(),
+            atomic: false,
+            synthesized: true,
+        };
+
+        let result = text_slice(
+            std::slice::from_ref(&node),
+            std::slice::from_ref(&piece),
+            9..14,
+        )
+        .unwrap();
+
+        assert_eq!(result.as_ref(), "value");
+        assert!(matches!(result, CowStr::Boxed(_)));
+    }
+
+    #[test]
+    fn text_slice_concatenates_across_multiple_pieces() {
+        use super::{Piece, text_slice};
+        use crate::{Span, inlines::InlineNode, strings::CowStr};
+
+        let loc_a = Span::new("ab");
+        let node_a = InlineNode::Text {
+            value: CowStr::from("ab"),
+            location: loc_a,
+        };
+        let piece_a = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 2,
+            src_offset: loc_a.byte_offset(),
+            src_len: loc_a.data().len(),
+            atomic: false,
+            synthesized: false,
+        };
+
+        let loc_b = Span::new("{y}");
+        let node_b = InlineNode::Text {
+            value: CowStr::from("cd"),
+            location: loc_b,
+        };
+        let piece_b = Piece {
+            node_index: 1,
+            s_start: 2,
+            s_len: 2,
+            src_offset: loc_b.byte_offset(),
+            src_len: loc_b.data().len(),
+            atomic: false,
+            synthesized: true,
+        };
+
+        let nodes = [node_a, node_b];
+        let pieces = [piece_a, piece_b];
+
+        let result = text_slice(&nodes, &pieces, 0..4).unwrap();
+
+        assert_eq!(result.as_ref(), "abcd");
+        assert!(
+            matches!(result, CowStr::Boxed(_)),
+            "a multi-piece result is always owned, even when every piece is verbatim"
+        );
+    }
+
+    #[test]
+    fn text_slice_returns_none_across_an_atomic_piece() {
+        use super::{Piece, text_slice};
+        use crate::{
+            Span,
+            inlines::{CharRef, InlineNode},
+        };
+
+        // Mirrors `range_is_verbatim_or_synthesized`'s own atomic rejection:
+        // an escaped special (or a rendered span) is cloned whole by
+        // `emit_range`, so it never reduces to a `Text` node `text_slice` can
+        // return a value for.
+        let location = Span::new("&amp;");
+        let node = InlineNode::CharRef {
+            value: CharRef::Special('&'),
+            location,
+        };
+        let piece = Piece {
+            node_index: 0,
+            s_start: 0,
+            s_len: 5,
+            src_offset: location.byte_offset(),
+            src_len: location.data().len(),
+            atomic: true,
+            synthesized: false,
+        };
+
+        assert!(
+            text_slice(
+                std::slice::from_ref(&node),
+                std::slice::from_ref(&piece),
+                0..5
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn style_variant_maps_non_quote_types_to_unquoted() {
         use super::style_variant;
 
