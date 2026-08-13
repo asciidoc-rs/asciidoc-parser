@@ -452,7 +452,7 @@ fn fold_anchor(
 /// the string pipeline's bytes exactly.
 ///
 /// The node's `terms` mirrors what the
-/// [`inline_tree`](crate::content::inline_tree) recorder stores – the single
+/// (test-only) `inline_tree` recorder stores – the single
 /// shown term for a visible node, empty for a concealed one; the richer
 /// primary/secondary/tertiary structure the field can hold is left to a re-flow
 /// consumer to pin (the field is provisional, per the node's Phase-0 note),

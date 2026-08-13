@@ -87,7 +87,7 @@ pub struct Content<'src> {
 
     /// The inline AST for this content: the structured representation of its
     /// inline nodes, built by the single-pass builder
-    /// ([`inline_builder`](crate::content::inline_builder)) directly from the
+    /// (the crate-internal `inline_builder` module) directly from the
     /// pre-substitution source, in parallel with the substitution pass that
     /// produced [`rendered`](Self::rendered).
     ///
@@ -405,14 +405,14 @@ impl<'src> Content<'src> {
     /// [`Parser`](crate::Parser) (see
     /// [`with_inline_tree`](crate::Parser::with_inline_tree)); it is an empty
     /// slice otherwise. The tree is built by the single-pass builder
-    /// ([`inline_builder`](crate::content::inline_builder)) directly from the
+    /// (the crate-internal `inline_builder` module) directly from the
     /// pre-substitution source, so each node carries its own precise source
     /// [`Span`] (a node born from a transformation, such as an attribute
     /// expansion, falls back to a documented coarser span) and a macro node
     /// carries its own parsed attribute list. The fold of the tree reproduces
     /// [`rendered_html`](Self::rendered_html) byte-for-byte across the
     /// builder's supported vocabulary; a small set of forms is documented as
-    /// deferred (see the [`inline_builder`](crate::content::inline_builder)
+    /// deferred (documented in the `inline_builder`
     /// module), each left as literal text in the tree rather than a wrong
     /// node. The tree is not yet the canonical representation (see the
     /// [inline AST architecture design], Phase 4 step 6).

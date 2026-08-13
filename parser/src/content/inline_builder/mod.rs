@@ -2,7 +2,7 @@
 //!
 //! This is the first brick of "Strategy B" (design §4.1): rather than recover
 //! the tree from a post-substitution *marked string* – the
-//! [`inline_tree`](crate::content::inline_tree) recorder's "Strategy A" – each
+//! `inline_tree` recorder's "Strategy A", now test-only – each
 //! substitution step is recast as a **transducer** over a node list,
 //! `Vec<InlineNode<'src>> -> Vec<InlineNode<'src>>`, that refines the tree in
 //! place. Two properties fall out that Strategy A cannot offer:
@@ -166,13 +166,12 @@
 //!   spliced into the node's value verbatim, unlike every other macro family's
 //!   "crosses an already-recognized construct" boundary. A macro carrying an
 //!   explicit substitution list (`stem:c,q[…]`) is recognized too: the list
-//!   resolves to a [`SubstitutionGroup`](crate::content::SubstitutionGroup) the
-//!   expression runs through in place of the bare macro's
-//!   [`SubstitutionGroup::Stem`](crate::content::SubstitutionGroup::Stem) – the
-//!   same `passthrough_text`-through-the-real-pipeline treatment that resolves
-//!   the analogous `pass:c,q[…]` form (see [`apply_passthroughs`]'s doc
-//!   comment), except a `Stem` node already has a single `value` field to hold
-//!   the result, so no richer subtree is needed.
+//!   resolves to a [`SubstitutionGroup`] the expression runs through in place
+//!   of the bare macro's [`SubstitutionGroup::Stem`] – the same
+//!   `passthrough_text`-through-the-real-pipeline treatment that resolves the
+//!   analogous `pass:c,q[…]` form (see [`apply_passthroughs`]'s doc comment),
+//!   except a `Stem` node already has a single `value` field to hold the
+//!   result, so no richer subtree is needed.
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf. Under the block-wide
 //!   `hardbreaks` option – the enclosing block's own `attrlist`, or the
@@ -184,7 +183,7 @@
 //!   through an
 //!   [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
 //!   – the first fold over the *public* [`InlineNode`] tree (the recorder's
-//!   [`fold_into`] folds an intermediate representation, not the public tree).
+//!   `fold_into` folds an intermediate representation, not the public tree).
 //!
 //! [quoted text]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
 //! [character replacements]:
@@ -242,7 +241,6 @@
 //! pipeline's match-through-rendered-tags behavior for pathological cross-span
 //! inputs; the differential corpus (§5.3) pins the cases this increment claims.
 //!
-//! [`fold_into`]: crate::content::inline_tree
 //! [`Text`]: InlineNode::Text
 //! [`quote_subs`]: crate::content::quote_subs
 
@@ -387,12 +385,12 @@ pub(crate) fn build_from_value<'src>(
 ///   [`Macros`](SubstitutionStep::Macros) or the group is
 ///   [`Header`](SubstitutionGroup::Header) – the same condition `run_pipeline`
 ///   gates `Passthroughs::extract_from` on.
-/// - Each of the group's [`steps()`](SubstitutionGroup::steps) then runs in
-///   the group's own order, each recast as its node transducer. The
+/// - Each of the group's [`steps()`](SubstitutionGroup::steps) then runs in the
+///   group's own order, each recast as its node transducer. The
 ///   [`Macros`](SubstitutionStep::Macros) step runs [`apply_macros`] and then
 ///   [`apply_footnotes`] – footnotes are part of the string pipeline's macros
-///   step, but are their own transducer here so numbering follows true
-///   source order (see [`apply_footnotes`]'s doc comment).
+///   step, but are their own transducer here so numbering follows true source
+///   order (see [`apply_footnotes`]'s doc comment).
 ///
 /// A group whose steps are empty ([`Pass`](SubstitutionGroup::Pass) /
 /// [`None`](SubstitutionGroup::None), or an empty custom list) yields the

@@ -17,8 +17,8 @@
 //!    cross-check) – so the recorder stays honest as the independent
 //!    construction the structural cross-check
 //!    (`tests::inline_builder_recorder_parity`) compares the builder against.
-//! 2. The `with_inline_tree` wiring tests drive the **production** tree path
-//!    – now the single-pass builder – asserting what
+//! 2. The `with_inline_tree` wiring tests drive the **production** tree path –
+//!    now the single-pass builder – asserting what
 //!    [`Content::inlines`](crate::content::Content) stores for real parsed
 //!    documents, and that enabling the flag never changes rendered output.
 //!
