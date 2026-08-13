@@ -1128,6 +1128,30 @@ Each phase is a reviewable unit with a clear exit gate.
   remaining macro families (`Footnote`, `IndexTerm`, `Stem`) and the node-blocked cross-reference
   forms (part 3c) are later sub-steps.
 
+  *Follow-up landed as (an anchor id inside an expanded attribute value, a latent correctness gap):*
+  an audit of every macro family's own verbatim gate, prompted by the design's own "a macro inside an
+  expanded value" boundary (§3.4.1, §4.1's `apply_macros` note) still being open for this family after
+  step 5b closed it for `CharacterReplacements`, surfaced that part 4a's own claim – "an id is always
+  verbatim … an anchor is *always* recognized" – was true only against the escaped-special/rendered-span
+  boundary every other macro family documents, not against the *synthesized* one: unlike every other
+  family, [`find_anchor_matches`] never checked the id capture against [`range_is_verbatim`] before
+  slicing it, so an attribute reference whose expanded value happened to contain `[[id]]` (e.g.
+  `:myattr: [[custom-id]]` then `{myattr}`)
+  built an [`Anchor`](../../parser/src/inlines/anchor.rs) node whose `id`/`location` silently fell back
+  to the *enclosing synthesized run's* coarse span (`{myattr}` itself) rather than the real id text –
+  a wrong node, not a documented divergence, though unreachable from any real parse today since this
+  module is not yet wired in (§5.2 Phase 4 step 6). [`build_anchor_node`] now checks the id's own range
+  with the same [`range_is_verbatim`] every other family already uses and returns `None` when it fails,
+  leaving the anchor unrecognized for a later increment exactly like every other family's own boundary –
+  closing the gap between the doc comment's claim and the code. A new divergence test pins the exact
+  scenario that exposed it (an attribute expanding to `[[custom-id]]`), alongside the golden pipeline's
+  own confirmation that it *does* recognize the anchor once the value is spliced in, so a future
+  boundary-lifting increment that fixes this for real has a corpus fixture ready to move out of the
+  divergence test and into a parity one.
+
+  [`find_anchor_matches`]: ../../parser/src/content/inline_builder/macros/anchors.rs
+  [`range_is_verbatim`]: ../../parser/src/content/inline_builder/macros/image.rs
+
   *Step 4b(ii) part 4b landed as (`Macros` → `IndexTerm`, index terms):* the builder now recognizes
   **index terms** in both spellings – the `((term))` / `(((primary, secondary, tertiary)))` shorthand
   and the `indexterm:[…]` (concealed) / `indexterm2:[…]` (flow) macro – as an
