@@ -96,9 +96,12 @@
 //!   way. A bare address needs no attribute list at all – it folds through the
 //!   same `render_link` with a `mailto:` target and the address as its display
 //!   text – so, like an anchor's id, it is recognized even inside a
-//!   [`synthesized`](quotes::Piece::synthesized) run; only an address carrying
-//!   an escaped `&` is deferred. Each family reuses the shared pattern the
-//!   string step
+//!   [`synthesized`](quotes::Piece::synthesized) run; an address carrying an
+//!   escaped `&`, or one abutting an already-recognized construct (whose
+//!   *rendered* last character the pattern's mismatch-prefix group reads and a
+//!   placeholder hides – the same boundary the auto-link family's own required
+//!   prefix already enforces), is deferred. Each family reuses the shared
+//!   pattern the string step
 //!   matches with ([`INLINE_IMAGE_MACRO`](crate::content::INLINE_IMAGE_MACRO), [`INLINE_KBD_BTN_MACRO`](crate::content::INLINE_KBD_BTN_MACRO),
 //!   [`INLINE_MENU_MACRO`](crate::content::INLINE_MENU_MACRO), [`INLINE_LINK_MACRO`](crate::content::INLINE_LINK_MACRO), [`INLINE_LINK`](crate::content::INLINE_LINK),
 //!   [`INLINE_EMAIL`](crate::content::INLINE_EMAIL),
@@ -607,6 +610,8 @@ mod tests {
             "A link:https://example.org[example] link.",
             "mailto:a@b.com[email me]",
             "write to doc.writer@example.com today",
+            "**bold**doc@example.com",
+            "link:index.html[Docs]doc@example.com",
             "an image:photo.png[Alt Text] inline",
             "image:pic.png[Scaled,200,100]",
             "see <<target>> for more",

@@ -11,7 +11,9 @@ use crate::{
     content::{
         INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
         encode_uri_component, extract_attributes_from_text,
-        inline_builder::quotes::{Piece, build_match_string, source_slice, text_slice},
+        inline_builder::quotes::{
+            Piece, SPAN_PLACEHOLDER, build_match_string, source_slice, text_slice,
+        },
     },
     inlines::{InlineNode, Ref, RefVariant},
     parser::has_dangerous_scheme,
@@ -640,18 +642,40 @@ pub(super) fn build_link_node<'src>(
 /// nodes here (they are already-rendered `<a …>` markup there), so an address
 /// *inside* one is never re-recognized.
 ///
-/// One form is left **unrecognized** for a later increment, documented and
-/// pinned by its own divergence test: an address carrying a literal `&`
-/// (`a&b@example.org`), which reaches this pass as an atomic
-/// [`CharRef`](InlineNode::CharRef) (`&amp;`, admitted by the pattern's own
-/// local-part class) that a node cannot carry as text – the same
-/// escaped-special boundary every other macro family documents. An address's
-/// bytes *may*, however, come from a [`synthesized`](Piece::synthesized) run
-/// (an attribute expansion, or – reached at a tree's root – a filtered
-/// multi-line block's own joined seed): like an anchor's id, and unlike a URL
-/// link's own target, an e-mail node needs no `Span`-typed field, so
-/// [`build_email_node`] recovers the exact address text there too rather than
-/// deferring.
+/// Two forms are left **unrecognized** for a later increment, each documented
+/// and pinned by its own divergence test:
+///
+/// - An address carrying a literal `&` (`a&b@example.org`), which reaches this
+///   pass as an atomic [`CharRef`](InlineNode::CharRef) (`&amp;`, admitted by
+///   the pattern's own local-part class) that a node cannot carry as text – the
+///   same escaped-special boundary every other macro family documents.
+/// - An address **abutting an already-recognized construct**
+///   (`**bold**doc@example.org`, `link:x[y]doc@example.org`,
+///   `image:x.png[]doc@example.org`). The mismatch-prefix group reads the
+///   character immediately before the address; in the string pipeline that is
+///   the preceding construct's *rendered* last character (`</strong>`, `</a>`,
+///   and `<img …>` all end in `>`, a mismatch character, so the address stays
+///   literal there), while here [`build_match_string`] stands the construct in
+///   as one opaque [`SPAN_PLACEHOLDER`] belonging to no mismatch class. A tree
+///   whose markup exists only at fold time cannot reproduce that decision, so
+///   the address is left literal rather than recognized into a link the string
+///   pipeline does not build. The sibling auto-link family reaches the same
+///   outcome structurally – [`INLINE_LINK`]'s own boundary-prefix group is
+///   *required*, so a placeholder simply fails its match
+///   (`**bold**https://example.org` is already deferred for exactly this
+///   reason, independently of this pass). The deferral is deliberately
+///   unconditional rather than keyed on what the preceding node *would* render
+///   to: a construct that renders to nothing (a concealed index term) or to
+///   text not ending in a mismatch character (a STEM expression, a
+///   passthrough) is one the string pipeline *does* link, so those defer too –
+///   reading that would mean invoking a renderer while building the tree.
+///
+/// An address's bytes *may*, by contrast, come from a
+/// [`synthesized`](Piece::synthesized) run (an attribute expansion, or –
+/// reached at a tree's root – a filtered multi-line block's own joined seed):
+/// like an anchor's id, and unlike a URL link's own target, an e-mail node
+/// needs no `Span`-typed field, so [`build_email_node`] recovers the exact
+/// address text there too rather than deferring.
 pub(super) fn email_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -710,6 +734,27 @@ fn find_email_matches<'src>(
             // Any other prefix (`>`, `:`, `/`) makes the string replacer emit
             // the whole match unchanged – which is exactly what recording no
             // match at all does here.
+            continue;
+        }
+
+        // The mismatch-prefix group above read an *empty* prefix – but that
+        // decision is only faithful when the tree can actually see the
+        // character the string pipeline reads there. When the address abuts an
+        // already-recognized construct (`**bold**doc@example.org`,
+        // `link:x[y]doc@example.org`), the string pipeline reads that
+        // construct's *rendered* last character – `</strong>`, `</a>`, and
+        // `<img …>` all end in `>`, one of the three mismatch characters – and
+        // suppresses the address, while [`build_match_string`] stands the
+        // construct in as one opaque [`SPAN_PLACEHOLDER`], which no mismatch
+        // class contains. Recognizing here would build a link the string
+        // pipeline does not, so this defers instead – leaving the address as
+        // literal text, never a wrong node, exactly as the sibling auto-link
+        // family already behaves for the same input ([`INLINE_LINK`]'s own
+        // boundary-prefix group is *required*, so a placeholder simply fails
+        // its match). See [`email_level`]'s own scope note.
+        if s.get(..full.start)
+            .is_some_and(|before| before.ends_with(SPAN_PLACEHOLDER))
+        {
             continue;
         }
 
@@ -1910,6 +1955,105 @@ mod tests {
         // falls back to the enclosing synthesized run's coarse span (design
         // §4.4) while its text stays exact.
         assert_eq!(reference.location.data(), "{contact}");
+    }
+
+    #[test]
+    fn an_email_abutting_a_rendered_construct_stays_literal() {
+        // The mismatch-prefix group reads the character immediately before the
+        // address. The string pipeline reads it out of already-rendered markup
+        // – `</strong>`, `</a>`, and `<img …>` all end in `>`, a mismatch
+        // character – and so leaves the address literal. The tree stands the
+        // construct in as one opaque placeholder, which belongs to no mismatch
+        // class, so `find_email_matches` defers explicitly instead of building
+        // a link the string pipeline does not: parity, not a divergence, for
+        // every construct whose rendering ends in one of `\`, `>`, `:`, `/`.
+        for source in [
+            "**bold**doc@example.com",
+            "__em__doc@example.com",
+            "link:index.html[Docs]doc@example.com",
+            "https://example.org[Site]doc@example.com",
+            "image:x.png[]doc@example.com",
+            "icon:home[]doc@example.com",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                !nodes.iter().any(
+                    |n| matches!(n, InlineNode::Ref(reference) if reference.target.starts_with("mailto:"))
+                ),
+                "an address abutting a rendered construct must stay literal: {nodes:?}"
+            );
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_email_abutting_a_construct_that_hides_its_boundary_is_a_documented_divergence() {
+        // What the unconditional deferral above costs, pinned exactly. In each
+        // of these the string pipeline's mismatch-prefix group does *not* see a
+        // mismatch character before the address, so it links it – a concealed
+        // index term renders to nothing, and a passthrough or STEM expression
+        // is still masked by its own sentinel when the macros step runs (it is
+        // restored afterwards), so neither presents rendered markup there. The
+        // tree cannot tell those apart from a construct that *did* render
+        // markup without folding the preceding node while building, so all of
+        // them defer – see `email_level`'s own scope note.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let concealed_term = "indexterm:[a]doc@example.com";
+        let nodes = build_src(Span::new(concealed_term));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an address abutting an opaque construct must stay literal: {nodes:?}"
+        );
+        assert!(golden_macros(concealed_term).contains(r#"href="mailto:doc@example.com""#));
+
+        // A passthrough and a STEM expression, whose goldens need the
+        // extract/restore pass around the steps.
+        for source in [
+            "+++raw/+++doc@example.com",
+            "pass:[x]doc@example.com",
+            "stem:[x]doc@example.com",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "an address abutting an opaque construct must stay literal: {nodes:?}"
+            );
+
+            assert!(
+                golden_passthroughs(source).contains(r#"href="mailto:doc@example.com""#),
+                "golden fixture stopped linking the address for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_auto_link_abutting_a_rendered_span_is_a_documented_divergence() {
+        // The mirror image of the boundary above, in the sibling auto-link
+        // family, which predates the e-mail pass: `INLINE_LINK`'s own
+        // boundary-prefix group *requires* one of `^`, a blank, or
+        // `[>()\[\];"']`. The string pipeline reads `</strong>`'s own `>`
+        // there and builds a link; the placeholder standing in for the span
+        // here belongs to no such class, so the pattern simply fails to match
+        // and the URL is left literal. Pinned here so the two directions of
+        // this one boundary are recorded together.
+        let source = "**bold**https://example.org";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a URL abutting a rendered span must be left unrecognized: {nodes:?}"
+        );
+
+        assert!(golden_macros(source).contains(r#"href="https://example.org""#));
     }
 
     #[test]

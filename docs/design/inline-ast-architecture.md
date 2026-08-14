@@ -2032,11 +2032,39 @@ Each phase is a reviewable unit with a clear exit gate.
   opaque node here (inside already-rendered `<a …>` markup there), so it is never re-recognized in
   either pipeline. A `\` escape drops its backslash and leaves the address literal; any other
   mismatch prefix (`>`, `:`, `/`) leaves the whole match untouched, which is exactly what recording
-  no match at all does. Only one form is left unrecognized, documented and pinned by its own
-  divergence test: an address carrying a literal `&` (`a&b@example.org`, admitted by the pattern's own
-  `&amp;` local-part alternative), which is an atomic
+  no match at all does. Two forms are left unrecognized, each documented and pinned by its own
+  divergence test. The first is an address carrying a literal `&` (`a&b@example.org`, admitted by the
+  pattern's own `&amp;` local-part alternative), which is an atomic
   [`CharRef`](../../parser/src/inlines/char_ref.rs) by macro time – the same escaped-special boundary
-  every other macro family documents. An address sitting inside a
+  every other macro family documents.
+
+  The second is new in kind, and worth recording as its own category for the authoritative fold: an
+  address **abutting an already-recognized construct** (`**bold**doc@example.org`,
+  `link:x[y]doc@example.org`). The mismatch-prefix group reads the character immediately *before* the
+  address, and in the string pipeline that character comes out of already-rendered markup –
+  `</strong>`, `</a>`, and `<img …>` all end in `>`, one of the three mismatch characters, so the
+  address stays literal there – while
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stands the construct in as
+  one opaque `SPAN_PLACEHOLDER` that belongs to no mismatch class. This is the "a tree whose markup
+  exists only at fold time has no rendered tags for a later step to act on" category the audit note
+  above names, reached through a *boundary class* rather than an escaping step; a review of the first
+  version of this increment (which recognized the address, building a link the string pipeline does
+  not) surfaced it. [`find_email_matches`](../../parser/src/content/inline_builder/macros/links.rs)
+  now defers on a placeholder immediately before the address, so the tree carries literal text rather
+  than a wrong node – the same outcome the sibling **auto-link** family already reaches structurally,
+  its own boundary-prefix group being *required*, so a placeholder simply fails its match. That
+  pre-existing instance (`**bold**https://example.org`, which the string pipeline links and this
+  module has always left literal) was undocumented; it now has its own divergence test alongside the
+  e-mail one, so both directions of the one boundary are recorded together. The deferral is
+  deliberately **unconditional** rather than keyed on what the preceding node would render to: a
+  construct that renders to nothing (a concealed index term) or that is still sentinel-masked when the
+  macros step runs (a passthrough, a STEM expression) is one the string pipeline *does* link, so those
+  defer too – reading that would mean invoking a renderer while building the tree, which this module
+  does not do. (The Strategy-A recorder cannot pin this shape either: its marker-emitting renderer
+  changes the very boundary character the pattern reads, so it links the address where the plain
+  pipeline does not – which is why the structural cross-check's fixture set deliberately excludes it.)
+
+  An address sitting inside a
   [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run is, by contrast, **not**
   deferred: like an anchor's id (and unlike a URL link's own target or attribute list), an e-mail node
   carries no `Span`-typed field, so [`text_slice`](../../parser/src/content/inline_builder/quotes.rs)
@@ -2202,8 +2230,11 @@ Each phase is a reviewable unit with a clear exit gate.
        [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) gains
        the third registration pass its own family-pass order requires; see the step's own "landed
        as" note above. Recognized inside a synthesized run too (an e-mail node carries no
-       `Span`-typed field, like an anchor's id); only an address carrying an escaped `&` is
-       deferred.
+       `Span`-typed field, like an anchor's id). Two forms defer: an address carrying an escaped
+       `&`, and one abutting an already-recognized construct – the latter a newly-named category
+       (a *boundary class* the string pipeline reads out of rendered markup, which a placeholder
+       hides), whose pre-existing mirror image in the auto-link family
+       (`**bold**https://example.org`) is now documented and pinned too.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
