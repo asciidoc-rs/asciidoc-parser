@@ -847,6 +847,21 @@ fn first_simple_inlines<'a>(doc: &'a crate::Document<'a>) -> &'a [InlineNode<'a>
     panic!("no simple block found");
 }
 
+/// The rendered (string-pipeline) content of the first simple block in `doc` –
+/// the counterpart of [`first_simple_inlines`], for a test that pins both
+/// views of the same content.
+fn first_simple_rendered<'a>(doc: &'a crate::Document<'a>) -> &'a str {
+    use crate::blocks::Block;
+
+    for block in doc.child_blocks() {
+        if let Block::Simple(simple) = block {
+            return simple.content().rendered_html();
+        }
+    }
+
+    panic!("no simple block found");
+}
+
 #[test]
 fn inline_tree_is_empty_by_default() {
     let mut parser = Parser::default();
@@ -1117,21 +1132,38 @@ fn inline_tree_honors_a_blocks_custom_subs_list() {
 #[test]
 fn inline_tree_for_none_group_content_is_the_untouched_seed() {
     // A `[pass]`-style paragraph applies no substitutions at all, so its tree
-    // is the untouched seed: one `Text` run holding the content exactly as
-    // written, mirroring the string pipeline leaving the text unchanged.
+    // is the untouched seed: the content exactly as written, mirroring the
+    // string pipeline leaving the text unchanged. It is not a *single* `Text`
+    // run, though: because no `SpecialCharacters` step ever acted on it, each
+    // literal `<`/`>`/`&` is a `Raw` leaf the fold emits verbatim rather than
+    // a `Text` character the fold would escape (design §3.4.1).
     let mut parser = Parser::default().with_inline_tree(true);
     let doc = parser.parse("[pass]\n<b>raw</b> and *not bold*\n");
 
     let tree = first_simple_inlines(&doc);
 
-    assert_eq!(tree.len(), 1, "expected the untouched seed: {tree:?}");
-    assert!(
-        matches!(
-            &tree[0],
-            InlineNode::Text { value, .. } if value.as_ref() == "<b>raw</b> and *not bold*"
-        ),
-        "expected the untouched text run: {tree:?}"
+    let rejoined: String = tree
+        .iter()
+        .map(|node| match node {
+            InlineNode::Text { value, .. } | InlineNode::Raw { value, .. } => value.as_ref(),
+            other => panic!("expected only text and raw-special leaves, got {other:?}"),
+        })
+        .collect();
+
+    assert_eq!(
+        rejoined, "<b>raw</b> and *not bold*",
+        "expected the untouched seed: {tree:?}"
     );
+
+    assert!(
+        tree.iter()
+            .any(|node| matches!(node, InlineNode::Raw { value, .. } if value.as_ref() == "<")),
+        "expected the unescaped `<` to be a Raw leaf: {tree:?}"
+    );
+
+    // The rendered string is the string pipeline's own, unescaped output — the
+    // invariant the classification above exists to let the fold reproduce.
+    assert_eq!(first_simple_rendered(&doc), "<b>raw</b> and *not bold*");
 }
 
 #[test]
