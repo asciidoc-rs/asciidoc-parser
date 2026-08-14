@@ -10,7 +10,7 @@ mod xref;
 use anchors::anchor_macros_level;
 use image::image_macros_level;
 use indexterm::indexterm_macros_level;
-use links::{inline_link_level, link_macro_level};
+use links::{email_level, inline_link_level, link_macro_level};
 use ui::{kbd_btn_macros_level, menu_macros_level};
 use xref::xref_macros_level;
 
@@ -21,9 +21,10 @@ use crate::{Parser, Span, inlines::InlineNode};
 ///
 /// This increment recognizes **image and icon macros** (`image:target[…]`,
 /// `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
-/// the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`), and
+/// the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
 /// **auto-links and formal-URL links** (`https://example.org`,
-/// `https://example.org[text]`), replacing each with an
+/// `https://example.org[text]`), and **bare e-mail addresses**
+/// (`doc@example.org`), replacing each with an
 /// [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui), or
 /// [`Ref`](InlineNode::Ref) node. An image node carries its own owned
 /// [`Attrlist`](crate::attributes::Attrlist) – the step that makes a macro node
@@ -31,17 +32,19 @@ use crate::{Parser, Span, inlines::InlineNode};
 /// the same `render_image`/`render_icon` the string step calls; a UI node
 /// carries the keys / label / menu path the string replacer computed, so its
 /// fold calls the same `render_keyboard`/`render_button`/`render_menu`; a link
-/// node (whether a `link:`/`mailto:` macro or an auto-link) carries the
+/// node (whether a `link:`/`mailto:` macro, an auto-link, or a bare e-mail
+/// address) carries the
 /// computed target, display text (as [`Text`](InlineNode::Text) children), and
 /// roles/window, so its fold calls the same `render_link`. The remaining macro
 /// families (cross-references, footnotes, index terms, anchors, STEM) are later
-/// increments (see [`link_macro_level`] and [`inline_link_level`] for the link
-/// forms this increment defers).
+/// increments (see [`link_macro_level`], [`inline_link_level`], and
+/// [`email_level`] for the link forms this increment defers).
 ///
 /// Each family is applied at each level in the **same order the string step
 /// applies them** – keyboard/button, then menu, then image/icon, then
 /// auto-links (`INLINE_LINK`), then the `link:`/`mailto:` macro
-/// (`INLINE_LINK_MACRO`) – so a level's overlapping constructs resolve
+/// (`INLINE_LINK_MACRO`), then a bare e-mail address (`INLINE_EMAIL`) – so a
+/// level's overlapping constructs resolve
 /// identically. Like the other steps it descends
 /// into the [`Styled`](crate::inlines::Styled)/[`Ref`](InlineNode::Ref)
 /// children earlier steps created – a macro can appear inside a rendered span
@@ -121,14 +124,19 @@ pub(super) fn apply_macros<'src>(
     // string step's order.
     let nodes = link_macro_level(nodes, root, parser);
 
+    // A bare e-mail address (`doc@example.org`) runs after both URL-link
+    // families and before the anchor pass, exactly where the string step runs
+    // `InlineEmailReplacer` – so an address that is really the tail of a URL, or
+    // a `mailto:` macro's own target, is already inside an opaque node (there,
+    // already-rendered `<a …>` markup) and is not re-recognized.
+    let nodes = email_level(nodes, root);
+
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
-    // before cross-references, mirroring the string step's order. The e-mail
-    // pass the string step runs between the link macro and the anchor is a later
-    // increment, so with it absent this preserves the relative order for the
-    // constructs the builder recognizes so far. The bibliography-anchor pass the
-    // string step runs *first* (a `^`-anchored `[[[id]]]`) fires only inside a
-    // bibliography list item – a context the additive builder is not wired into –
-    // so it is a cutover concern, not this pass's.
+    // before cross-references, mirroring the string step's order. The
+    // bibliography-anchor pass the string step runs *first* (a `^`-anchored
+    // `[[[id]]]`) fires only inside a bibliography list item – a context the
+    // additive builder is not wired into – so it is a cutover concern, not this
+    // pass's.
     let nodes = anchor_macros_level(nodes, root);
 
     // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the

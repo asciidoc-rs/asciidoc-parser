@@ -2011,6 +2011,57 @@ Each phase is a reviewable unit with a clear exit gate.
   only at fold time has no rendered tags for a later escaping step to act on, so it needs its own
   policy rather than another recognition increment.
 
+  *Step 6 prep landed as (`Macros` → the bare e-mail auto-link, the last of the link family's
+  spellings, closing one of that map's divergences):* the audit above leaves the remaining half of
+  step 6 an itemized list of whole-corpus divergences to close before `rendered_html()` can become
+  an **authoritative** fold; this closes the first of them. The builder now recognizes a **bare
+  e-mail address** written in the flow (`doc.writer@example.com`) as the same
+  [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}` node the two URL-link passes build, folding
+  through the identical `render_link` so the output is byte-for-byte identical. It reuses the string
+  pipeline's *exact* recognition – [`INLINE_EMAIL`](../../parser/src/content/macros.rs) is now shared
+  `pub(crate)` – so only the recognition *sink* differs (§4.1), and no field is added to `Ref`: the
+  target is the address prefixed with `mailto:` and the display text is the address itself, baked
+  into a single [`Text`](../../parser/src/inlines/inline_node.rs) child, with no `bare` role and no
+  `hide-uri-scheme` handling (`InlineEmailReplacer` passes `extra_roles: vec![]` and the raw address,
+  unlike the bare-URL auto-link's own branch).
+
+  [`email_level`](../../parser/src/content/inline_builder/macros/links.rs) runs **after** both
+  URL-link passes and before the anchor pass, exactly where the string step runs
+  `InlineEmailReplacer` – which is what makes the pattern's own "prefix that causes a mismatch" group
+  reproduce identically: a `mailto:` macro's target or a URL's user-info/path is, by then, inside an
+  opaque node here (inside already-rendered `<a …>` markup there), so it is never re-recognized in
+  either pipeline. A `\` escape drops its backslash and leaves the address literal; any other
+  mismatch prefix (`>`, `:`, `/`) leaves the whole match untouched, which is exactly what recording
+  no match at all does. Only one form is left unrecognized, documented and pinned by its own
+  divergence test: an address carrying a literal `&` (`a&b@example.org`, admitted by the pattern's own
+  `&amp;` local-part alternative), which is an atomic
+  [`CharRef`](../../parser/src/inlines/char_ref.rs) by macro time – the same escaped-special boundary
+  every other macro family documents. An address sitting inside a
+  [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run is, by contrast, **not**
+  deferred: like an anchor's id (and unlike a URL link's own target or attribute list), an e-mail node
+  carries no `Span`-typed field, so [`text_slice`](../../parser/src/content/inline_builder/quotes.rs)
+  recovers the exact address from an attribute expansion – or from a filtered multi-line block's own
+  joined seed, reached at a tree's root through
+  [`build_from_value`](../../parser/src/content/inline_builder.rs) – with only the node's `location`
+  taking design §4.4's coarse fallback.
+
+  The family's own deferred recognition side effect is staged along with it:
+  [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) – already the
+  staged `register_link` for the four URL-link forms – now makes a **third** pass for the bare
+  address, since the string pipeline's `InlineEmailReplacer` is a third whole-string pass after
+  `INLINE_LINK` and `INLINE_LINK_MACRO`, so the catalog lands in family-pass order (an address
+  registers after every URL link in the content regardless of source order), exactly the ordering
+  concern the combined-entry-point increment already surfaced *within* the link family. The two forms
+  are told apart with no new node field: only `email_level` builds a `mailto:`-scheme target whose
+  own `location` does not start with a literal `mailto:`/`link:` prefix. Differential corpora pin the
+  address forms, the mismatch prefixes, the escape, an address beside and inside other constructs and
+  inside a footnote's own extracted text, and the registration order (against an independent golden
+  parser, the same two-independent-parsers discipline every prior staged function's corpus uses);
+  fixtures are added to the whole-pipeline combined-constructs corpus (including the
+  attribute-expanded address, which needs the real `AttributeReferences` step), to the
+  synthesized-seed sweep, and to the structural recorder cross-check. As with every prep piece before
+  it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2144,6 +2195,15 @@ Each phase is a reviewable unit with a clear exit gate.
        runs last in `build_for_group` for exactly those orders; see the step's own "landed as"
        note above, which also records what the audit leaves outstanding for the authoritative
        fold.
+     - ✅ **prep (bare e-mail auto-link).** The first of that audit's own itemized divergences is
+       closed: [`email_level`](../../parser/src/content/inline_builder/macros/links.rs) recognizes a
+       bare address (`doc@example.org`, `INLINE_EMAIL`) as the same `Ref{Link}` node the two
+       URL-link passes build – the last of the link family's spellings – and
+       [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) gains
+       the third registration pass its own family-pass order requires; see the step's own "landed
+       as" note above. Recognized inside a synthesized run too (an e-mail node carries no
+       `Span`-typed field, like an anchor's id); only an address carrying an escaped `&` is
+       deferred.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

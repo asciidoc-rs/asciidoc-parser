@@ -1481,7 +1481,12 @@ pub(crate) fn encode_uri_component(s: &str) -> String {
 ///
 /// # Example
 /// `doc.writer@example.com`
-static INLINE_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
+///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes bare e-mail
+/// auto-links with the *exact* same pattern this string step matches with,
+/// changing only the recognition *sink* (a node instead of rendered markup).
+pub(crate) static INLINE_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?x)                         # verbose mode (ignore whitespace & comments)
