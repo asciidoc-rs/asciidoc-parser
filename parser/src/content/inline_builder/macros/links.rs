@@ -389,10 +389,12 @@ fn build_inline_link_node<'src>(
 /// replacer branches.)
 ///
 /// Like the rest of this additive builder it performs no `register_link` side
-/// effect; [`apply_link_side_effects`] stages that for the cutover, and needs no
-/// angle-specific case – an angle node is `InlineLinkReplacer`'s own pass, so
-/// [`link_form`] already classifies it as
+/// effect; [`apply_link_side_effects`] stages that for the cutover, and needs
+/// no angle-specific case – an angle node is `InlineLinkReplacer`'s own pass,
+/// so [`link_form`] already classifies it as
 /// [`AutoOrFormal`](LinkForm::AutoOrFormal) from its `location` and `target`.
+///
+/// [`InlineLinkReplacer`]: crate::content::macros
 fn build_angle_link_node<'src>(
     n: &NormalizedCaps<'_, '_>,
     scheme_m: &regex::Match<'_>,
@@ -469,8 +471,8 @@ fn build_angle_link_node<'src>(
 /// Neither of the two callers can be left with nothing by the strip:
 /// [`INLINE_LINK`]'s bare branch rejects a bare scheme with no body upstream,
 /// and its ANGLE branch's `<url>` alternative requires at least one character
-/// between the delimiters – so, unlike a bare `link:`/`mailto:` macro, this does
-/// *not* fall back to the whole target.
+/// between the delimiters – so, unlike a bare `link:`/`mailto:` macro, this
+/// does *not* fall back to the whole target.
 fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
     if parser.is_attribute_set("hide-uri-scheme") {
         URI_SNIFF.replace_all(target, "").into_owned()
