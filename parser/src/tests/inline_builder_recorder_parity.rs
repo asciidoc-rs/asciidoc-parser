@@ -732,6 +732,8 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "named &amp; numeric &#8217; entities",
         "plain {backend} attribute",
         "See https://example.org for details.",
+        "An angle-bracketed <https://example.org> link.",
+        "<https://example.org[the site] keeps its bracket.",
         "A link:https://example.org[example] link.",
         "mailto:a@b.com[email me]",
         "write to doc.writer@example.com today",

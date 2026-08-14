@@ -607,6 +607,9 @@ mod tests {
             "named &amp; numeric &#8217; entities",
             "plain {backend} attribute",
             "See https://example.org for details.",
+            "An angle-bracketed <https://example.org> link.",
+            "<https://example.org[the site] keeps its bracket.",
+            "unterminated <https://example.org stays literal",
             "A link:https://example.org[example] link.",
             "mailto:a@b.com[email me]",
             "write to doc.writer@example.com today",
@@ -729,6 +732,15 @@ mod tests {
         assert_parity(
             "Visit https://example.org or link:docs.html[the docs], \
              or just write to doc@example.org.",
+        );
+
+        // Every spelling of the URL-link family, including both ANGLE-branch
+        // forms, beside a quoted span and a character replacement – the
+        // delimiters of the angle forms are escaped specials, so this crosses
+        // the relaxed verbatim gate with the other families live.
+        assert_parity(
+            "See <https://example.org> and <https://example.org/docs[the docs] \
+             beside *bold* text and (C) 2024, plus https://plain.example.",
         );
 
         // A bare e-mail address spliced in by an attribute reference – a

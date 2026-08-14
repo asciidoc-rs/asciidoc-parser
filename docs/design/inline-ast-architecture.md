@@ -2090,6 +2090,58 @@ Each phase is a reviewable unit with a clear exit gate.
   synthesized-seed sweep, and to the structural recorder cross-check. As with every prep piece before
   it, nothing further is wired in.
 
+  *Step 6 prep landed as (`Macros` → the angle-bracketed URL, the second of that map's divergences):*
+  the builder now recognizes [`INLINE_LINK`](../../parser/src/content/macros.rs)'s **ANGLE branch** –
+  an angle-bracketed URL (`<https://example.org>`) and the bracketed spelling that keeps its `&lt;`
+  (`<https://example.org[text]`) – as the same [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}`
+  node the branch's non-angle sibling builds, folding through the identical `render_link`.
+
+  What blocked it was the *shape* of the family's verbatim gate rather than anything about the branch
+  itself. Every macro family requires its whole match to be verbatim `'src` before it will build a
+  self-describing node, and this branch's own delimiters are by construction the one thing that check
+  rejects: `&lt;` and `&gt;` reach the macros step as escaped
+  [`CharRef`](../../parser/src/inlines/inline_node.rs) leaves – atomic pieces – under every effective
+  order that escapes specials, so `range_is_verbatim` refused the branch outright, whatever the URL
+  between them looked like. But those delimiters carry no value a node ever slices: the string
+  replacer's own angle path emits **neither** of them, replacing the whole match with the rendered
+  link. So the gate moves out of `find_inline_link_matches` and into
+  [`build_inline_link_node`](../../parser/src/content/inline_builder/macros/links.rs) – where the
+  branch's own capture groups are already resolved – and, for the ANGLE branch, covers only the
+  **interior** between the delimiters: the scheme, the URL, and any `[…]` attribute list, the only
+  parts a node reads. Nothing about the boundary itself is relaxed: an angle URL crossing an escaped
+  special (`<https://example.org/?a=1&b=2>`) or a display text crossing a rendered span
+  (`<https://example.org[*bold*]`) still defers, each with its own divergence test, exactly as its
+  non-angle sibling does, and a wholly-synthesized seed still defers as the URL-link family already
+  documents (its target needs an honest `'src` slice).
+
+  The branch's three alternatives then split the way the replacer's own
+  `is_angle && attrlist.is_none()` condition splits them. `<url>` is a *separate computation* there –
+  no boundary prefix kept, no trailing-punctuation strip, no bare-scheme rejection (so `<http://;>`
+  is a link whose target is `http://;`, the very target the bare branch rejects), always the `bare`
+  role – and is mirrored by a new
+  [`build_angle_link_node`](../../parser/src/content/inline_builder/macros/links.rs) whose node
+  `consumed` range is the **whole match**, delimiters included, so `rebuild_macro_level` re-emits
+  neither. `<url[text]` keeps its `&lt;` and needs no new code at all: it flows through the general
+  path, whose `consumed` range already starts at the scheme, so the kept prefix is emitted straight
+  from the `CharRef`'s own node. The third – an unterminated `<url`, with no closing `&gt;` and no
+  `[…]` – the replacer emits unchanged, so the builder builds nothing for it either. Both escapes the
+  angle path honors (a `\` before the `<`, and one before the scheme) become the same
+  `Unescape` the family already had, and no field is added to `Ref`: the target is the scheme plus
+  the bracketed body, and the display text is that target under the `hide-uri-scheme` strip both
+  forms already share.
+
+  The family's staged registration needs no angle-specific case either: an angle link is
+  `InlineLinkReplacer`'s *own* pass – the first of the three link passes – and
+  [`link_form`](../../parser/src/content/inline_builder/macros/links.rs) already classifies it there
+  from the node's `location` and `target`, so
+  [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) picks it up in
+  family-pass order unchanged, pinned by a new test against an independent golden parser. A new
+  differential corpus pins the branch's spellings, both escapes, the missing strip and missing
+  bare-scheme rejection, `hide-uri-scheme`, and the form beside and inside other constructs and inside
+  a footnote's own extracted text; fixtures are added to the whole-pipeline combined-constructs
+  corpus, the broad general-purpose sweep, and the structural recorder cross-check. As with every prep
+  piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2235,6 +2287,18 @@ Each phase is a reviewable unit with a clear exit gate.
        (a *boundary class* the string pipeline reads out of rendered markup, which a placeholder
        hides), whose pre-existing mirror image in the auto-link family
        (`**bold**https://example.org`) is now documented and pinned too.
+     - ✅ **prep (angle-bracketed URL).** The second of that audit's divergences is closed:
+       `INLINE_LINK`'s **ANGLE branch** – `<https://example.org>`, and the
+       `<https://example.org[text]` spelling that keeps its `&lt;` – is recognized as the same
+       `Ref{Link}` node its non-angle sibling builds. The family's verbatim gate moves into
+       [`build_inline_link_node`](../../parser/src/content/inline_builder/macros/links.rs) and, for
+       this branch, covers only the *interior* between the `&lt;`/`&gt;` delimiters – themselves
+       escaped `CharRef`s, and emitted by neither pipeline – with
+       [`build_angle_link_node`](../../parser/src/content/inline_builder/macros/links.rs) mirroring
+       the replacer's own `<url>` special case (whole match consumed, no trailing-punctuation strip,
+       always `bare`); see the step's own "landed as" note above. The branch's third alternative (an
+       unterminated `<url`) stays literal in both pipelines, and an interior crossing an escaped
+       special or a rendered span still defers, each with its own divergence test.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

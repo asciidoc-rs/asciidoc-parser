@@ -984,7 +984,17 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
         self.caps.get(self.attrlist)
     }
 
-    fn angle_url(&self) -> Option<Match<'t>> {
+    /// The URL captured between an angle-bracketed link's `&lt;` and `&gt;`
+    /// (the ANGLE branch's `<url>` alternative), if that alternative
+    /// participated. `None` for the branch's two other alternatives (a
+    /// bracketed attribute list, or an unterminated bare URL) and for both
+    /// non-angle branches.
+    ///
+    /// Shared `pub(crate)` (with the string replacer) so the single-pass
+    /// [`inline_builder`](crate::content::inline_builder) tells the ANGLE
+    /// branch's three alternatives apart through the *same* group-numbering
+    /// logic the replacer uses.
+    pub(crate) fn angle_url(&self) -> Option<Match<'t>> {
         self.angle_url.and_then(|g| self.caps.get(g))
     }
 
