@@ -160,7 +160,11 @@ fn split_text<'src>(
 fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<InlineNode<'src>>) {
     let mut rest = location;
 
-    while let Some(pos) = rest.position(is_special) {
+    // Finding the character alongside its offset keeps the special's own
+    // `char` in hand, so neither arm below has to re-derive it from the sliced
+    // span through a fallible `chars().next()` whose failure branch could
+    // never be reached (and so could never be tested).
+    while let Some((pos, ch)) = rest.data().char_indices().find(|(_, ch)| is_special(*ch)) {
         // Emit the borrowed text run preceding the special, when non-empty.
         if pos > 0 {
             let text = rest.slice_to(..pos);
@@ -172,11 +176,12 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
         }
 
         // The three specials are ASCII, so the match is exactly one byte wide.
-        let ch_span = rest.slice(pos..pos + 1);
+        let end = pos + ch.len_utf8();
+        let ch_span = rest.slice(pos..end);
 
         out.push(match leaf {
             SpecialLeaf::CharRef => InlineNode::CharRef {
-                value: CharRef::Special(ch_span.data().chars().next().unwrap_or('\u{FFFD}')),
+                value: CharRef::Special(ch),
                 location: ch_span,
             },
 
@@ -186,7 +191,7 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
             },
         });
 
-        rest = rest.slice_from(pos + 1..);
+        rest = rest.slice_from(end..);
     }
 
     if !rest.data().is_empty() {
@@ -209,7 +214,9 @@ fn split_synthesized<'src>(
 ) {
     let mut rest = value;
 
-    while let Some(pos) = rest.find(is_special) {
+    // As in [`split_verbatim`], the character comes back with its offset, so
+    // there is no unreachable fallback to re-derive it through.
+    while let Some((pos, ch)) = rest.char_indices().find(|(_, ch)| is_special(*ch)) {
         // Emit the owned text run preceding the special, when non-empty.
         if pos > 0 {
             out.push(InlineNode::Text {
@@ -217,9 +224,6 @@ fn split_synthesized<'src>(
                 location,
             });
         }
-
-        // The three specials are ASCII, so the match is exactly one byte wide.
-        let ch = rest[pos..].chars().next().unwrap_or('\u{FFFD}');
 
         out.push(match leaf {
             SpecialLeaf::CharRef => InlineNode::CharRef {
@@ -233,7 +237,8 @@ fn split_synthesized<'src>(
             },
         });
 
-        rest = &rest[pos + 1..];
+        // The three specials are ASCII, so each is exactly one byte wide.
+        rest = &rest[pos + ch.len_utf8()..];
     }
 
     if !rest.is_empty() {
@@ -667,10 +672,10 @@ mod tests {
             ) => {
                 assert_classified(&styled.children, "Styled");
                 assert_classified(&reference.children, "Ref");
-                match anchor.reftext.as_deref() {
-                    Some(reftext) => assert_classified(reftext, "Anchor"),
-                    None => panic!("the anchor's reftext went missing: {out:?}"),
-                }
+                // An absent reftext yields an empty slice, which
+                // `assert_classified` rejects on its own length check — so the
+                // missing case still fails loudly, with no unreachable arm.
+                assert_classified(anchor.reftext.as_deref().unwrap_or(&[]), "Anchor");
                 assert_classified(&footnote.children, "Footnote");
             }
 

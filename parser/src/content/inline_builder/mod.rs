@@ -857,13 +857,19 @@ mod tests {
             build_for_group(group, CowStr::from(source), Span::new(source), parser, None)
         }
 
-        /// Runs `source` through the real pipeline under `group` and asserts
-        /// the group-aware tree folds to the same bytes.
-        fn assert_group_parity(group: &SubstitutionGroup, source: &str) {
+        /// The real pipeline's own output for `source` under `group` — the
+        /// golden every parity assertion in this module compares against.
+        fn golden_for_group(group: &SubstitutionGroup, source: &str) -> String {
             let golden_parser = parser_with_product();
             let mut content = Content::from(Span::new(source));
             group.apply(&mut content, &golden_parser, None);
-            let golden = content.rendered_str().to_string();
+            content.rendered_str().to_string()
+        }
+
+        /// Runs `source` through the real pipeline under `group` and asserts
+        /// the group-aware tree folds to the same bytes.
+        fn assert_group_parity(group: &SubstitutionGroup, source: &str) {
+            let golden = golden_for_group(group, source);
 
             let built_parser = parser_with_product();
             let nodes = build_group(group, source, &built_parser);
@@ -950,19 +956,21 @@ mod tests {
                     "expected only text and raw-special leaves under {group:?}: {nodes:?}"
                 );
 
-                let rejoined: String = nodes
-                    .iter()
-                    .map(|n| match n {
-                        InlineNode::Text { value, .. } | InlineNode::Raw { value, .. } => {
-                            value.as_ref()
-                        }
-                        other => panic!("unexpected node kind: {other:?}"),
-                    })
-                    .collect();
+                assert!(
+                    nodes.iter().any(
+                        |n| matches!(n, InlineNode::Raw { value, .. } if value.as_ref() == "<")
+                    ),
+                    "expected the unescaped `<` to be a Raw leaf under {group:?}: {nodes:?}"
+                );
 
+                // That the leaves rejoin to the *untouched* seed is what the
+                // parity assertion itself pins: neither group runs a step, so
+                // the string pipeline's own output for this content is the
+                // source verbatim, and the fold must reproduce it.
                 assert_eq!(
-                    rejoined, source,
-                    "the leaves must rejoin to the untouched seed under {group:?}"
+                    golden_for_group(&group, source),
+                    source,
+                    "the string pipeline must leave this content untouched under {group:?}"
                 );
 
                 assert_group_parity(&group, source);
