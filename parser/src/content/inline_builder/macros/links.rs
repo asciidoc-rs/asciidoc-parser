@@ -28,7 +28,10 @@ use crate::{
 ///
 /// This increment covers [`INLINE_LINK`]'s **non-angle branch** – a bare
 /// auto-linked URL (`https://example.org`) and a formal URL link
-/// (`https://example.org[text]`, `https://example.org[]`) – in its verbatim,
+/// (`https://example.org[text]`, `https://example.org[]`) – and its **ANGLE
+/// branch** – an angle-bracketed URL (`<https://example.org>`) and the
+/// bracketed form that keeps its `&lt;` (`<https://example.org[text]`) – in
+/// their verbatim,
 /// attribute-list-free forms, reproducing the string replacer's boundary-prefix
 /// preservation, bare-URL trailing-punctuation stripping, `^` new-window
 /// suffix, `hide-uri-scheme` display text, and `\` scheme escape. It
@@ -36,10 +39,6 @@ use crate::{
 /// each left as literal source here (so the differential corpus only pins the
 /// forms this increment claims):
 ///
-/// - The **angle-bracketed URL** form (`<https://example.org>`) requires a
-///   leading `&lt;`, which is always an escaped
-///   [`CharRef`](InlineNode::CharRef) by the time macros run – so its match is
-///   never verbatim, exactly the boundary the image increment documents.
 /// - The **`link:` URL macro** form (`link:https://example.org[text]`, the
 ///   pattern's LINK-MACRO branch) is left to [`link_macro_level`], which folds
 ///   the identical node; running that pass second mirrors the string step's
@@ -51,12 +50,16 @@ use crate::{
 /// - A **non-verbatim match** – a URL crossing an escaped special
 ///   ([`CharRef`](InlineNode::CharRef)) or a rendered
 ///   [`Styled`](crate::inlines::Styled) span – is deferred exactly as the image
-///   increment defers `image:a&b.png[]`.
+///   increment defers `image:a&b.png[]`. For the ANGLE branch this means the
+///   URL *between* the delimiters: the delimiters themselves are escaped
+///   specials by construction (see [`build_inline_link_node`]).
 ///
 /// An invalid quoted bare URL (`"https://example.org`) and a bare scheme with no
 /// body (`http://;`) are left literal by the string step *and* the builder, so
 /// they render identically and are covered by the differential corpus rather
-/// than a divergence test.
+/// than a divergence test. So is an ANGLE-branch URL with **no** closing `&gt;`
+/// and no `[…]` (`<https://example.org`), which the string replacer's own angle
+/// path emits unchanged.
 pub(super) fn inline_link_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -79,9 +82,12 @@ pub(super) fn inline_link_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every recognized auto-link / formal-URL link at this level, skipping
-/// an angle-bracketed or `link:` macro match, a non-verbatim match, and any
-/// form [`build_inline_link_node`] defers (see [`inline_link_level`]).
+/// Finds every recognized auto-link / formal-URL / angle-bracketed link at this
+/// level, skipping a `link:` macro match and any form
+/// [`build_inline_link_node`] defers – including a non-verbatim one, whose gate
+/// now lives inside that function (it needs the branch's own capture groups to
+/// know which sub-range of the match must be verbatim; see
+/// [`inline_link_level`]).
 fn find_inline_link_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -99,17 +105,9 @@ fn find_inline_link_matches<'src>(
 
         let n = NormalizedCaps::new(&caps);
 
-        // The angle-bracketed form always crosses a `&lt;` `CharRef` (so it is
-        // never verbatim), and the `link:` URL macro form is left to
-        // `link_macro_level`, which folds the identical node.
-        if n.is_angle() || n.is_link_macro() {
-            continue;
-        }
-
-        // Only a wholly-verbatim match can slice its target/text from `'src`; a
-        // match crossing an escaped special or a rendered span is left for a
-        // later increment.
-        if !range_is_verbatim(pieces, &full) {
+        // The `link:` URL macro form is left to `link_macro_level`, which folds
+        // the identical node.
+        if n.is_link_macro() {
             continue;
         }
 
@@ -117,8 +115,9 @@ fn find_inline_link_matches<'src>(
             Some(m) => matches.push(m),
 
             // A deferred or invalid form (an escaped scheme is handled inside as
-            // an `Unescape`; a quoted bare URL, a bare scheme, or an
-            // attribute-list text is left as literal source).
+            // an `Unescape`; a non-verbatim match, a quoted bare URL, a bare
+            // scheme, an unterminated angle-bracketed URL, or an attribute-list
+            // text is left as literal source).
             None => continue,
         }
     }
@@ -126,7 +125,7 @@ fn find_inline_link_matches<'src>(
     matches
 }
 
-/// Builds one [`MacroMatch`] for a verbatim non-angle [`INLINE_LINK`] match: a
+/// Builds one [`MacroMatch`] for a verbatim [`INLINE_LINK`] match: a
 /// [`Ref`](InlineNode::Ref) link node (with the boundary prefix kept before it
 /// and any stripped trailing punctuation kept after it), or an
 /// [`Unescape`](MacroMatchKind::Unescape) for an escaped scheme. Returns `None`
@@ -136,7 +135,26 @@ fn find_inline_link_matches<'src>(
 /// The value computation mirrors [`InlineLinkReplacer`] exactly – target, bare
 /// vs. labeled display text, `hide-uri-scheme`, the `^` window suffix, and the
 /// trailing-punctuation strip – so the fold reproduces the same bytes through
-/// the same `render_link` [`link_macro_level`]'s nodes fold through.
+/// the same `render_link` [`link_macro_level`]'s nodes fold through. The
+/// replacer's own angle-bracketed special case (`<url>`: no boundary prefix
+/// kept, no trailing-punctuation strip, the whole match consumed) is mirrored
+/// by [`build_angle_link_node`], to which this delegates on the same condition
+/// the replacer branches on.
+///
+/// # The verbatim gate lives here
+///
+/// Only a wholly-verbatim match can slice its target / attribute list from
+/// `'src`, so a match crossing an escaped special
+/// ([`CharRef`](InlineNode::CharRef)) or a rendered
+/// [`Styled`](crate::inlines::Styled) span is deferred. *Which* sub-range must
+/// be verbatim depends on the branch, which is why the check sits here rather
+/// than in [`find_inline_link_matches`]: the ANGLE branch's `&lt;` prefix and
+/// `&gt;` terminator are themselves escaped specials – atomic pieces – under
+/// every effective order that escapes them, so requiring the whole match to be
+/// verbatim would defer that branch outright. Those two delimiters carry no
+/// value a node slices (the replacer emits neither), so for the ANGLE branch
+/// the gate covers only the interior between them: the scheme, the URL, and any
+/// `[…]` attribute list.
 ///
 /// Like every macro family in this additive builder, it deliberately performs
 /// *no* recognition side effect: it does **not** `register_link` the target in
@@ -156,10 +174,29 @@ fn build_inline_link_node<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Option<MacroMatch<'src>> {
-    // `scheme_match` is always present in a non-angle match (the branch cannot
-    // match without it); fall through defensively if it is somehow absent.
+    // `scheme_match` is always present (no branch can match without it); fall
+    // through defensively if it is somehow absent.
     let scheme_m = n.scheme_match()?;
     let scheme = scheme_m.as_str();
+
+    // The sub-range that must be verbatim source (see this function's own
+    // "verbatim gate" note): the whole match, except for the ANGLE branch,
+    // whose escaped-special delimiters sit outside the interior.
+    let verbatim_range = if n.is_angle() {
+        scheme_m.start()..n.angle_url().map_or(full.end, |m| m.end())
+    } else {
+        full.clone()
+    };
+
+    if !range_is_verbatim(pieces, &verbatim_range) {
+        return None;
+    }
+
+    // The `<url>` form is a separate computation in the string replacer, taken
+    // on exactly this condition.
+    if n.is_angle() && n.attrlist().is_none() {
+        return build_angle_link_node(n, &scheme_m, full, pieces, root, parser);
+    }
 
     // An escaped scheme (`\https://…`) keeps the boundary prefix and drops the
     // single backslash, leaving the rest of the match literal – no link node.
@@ -325,12 +362,117 @@ fn build_inline_link_node<'src>(
     })
 }
 
+/// Builds one [`MacroMatch`] for an angle-bracketed URL (`<https://example.org>`
+/// – [`INLINE_LINK`]'s ANGLE branch with no `[…]`), mirroring
+/// [`InlineLinkReplacer`]'s own angle path exactly. That path differs from the
+/// general one in three ways, each reproduced here:
+///
+/// - **The delimiters are consumed, not kept.** The replacer emits *only* the
+///   rendered link for the whole match, so the node's `consumed` range is the
+///   whole match – the `&lt;` prefix and `&gt;` terminator included – rather
+///   than starting at the scheme the way a boundary-prefixed non-angle link
+///   does.
+/// - **No trailing-punctuation strip and no "bare scheme with no body"
+///   rejection.** The target is simply the scheme plus the URL captured between
+///   the delimiters, which the pattern guarantees is non-empty. The link is
+///   always `bare` (the replacer passes `extra_roles: vec!["bare"]`), never
+///   carries a `window`, and folds through an empty attribute list.
+/// - **Both escapes are honored.** A `\` before the `&lt;` and a `\` before the
+///   scheme each drop that one backslash and leave the rest of the match
+///   literal – two [`Unescape`](MacroMatchKind::Unescape)s where the general
+///   path has only the scheme one.
+///
+/// Returns `None` for the ANGLE branch's remaining alternative – a URL with no
+/// closing `&gt;` (`<https://example.org`) – which the replacer emits unchanged.
+/// (Its third alternative, a `[…]` attribute list, never reaches here: the
+/// caller delegates only when `attrlist` did not participate, exactly as the
+/// replacer branches.)
+///
+/// Like the rest of this additive builder it performs no `register_link` side
+/// effect; [`apply_link_side_effects`] stages that for the cutover, and needs
+/// no angle-specific case – an angle node is `InlineLinkReplacer`'s own pass,
+/// so [`link_form`] already classifies it as
+/// [`AutoOrFormal`](LinkForm::AutoOrFormal) from its `location` and `target`.
+///
+/// [`InlineLinkReplacer`]: crate::content::macros
+fn build_angle_link_node<'src>(
+    n: &NormalizedCaps<'_, '_>,
+    scheme_m: &regex::Match<'_>,
+    full: &std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Option<MacroMatch<'src>> {
+    // An escaped `&lt;` (`\<https://…>`) drops that backslash and leaves the
+    // whole match literal, exactly as the replacer's `caps[0][1..]` does.
+    if n.prefix_str().starts_with('\\') {
+        return Some(MacroMatch {
+            kind: MacroMatchKind::Unescape {
+                backslash: full.start,
+            },
+            full: full.clone(),
+        });
+    }
+
+    // An escaped scheme (`<\https://…>`) keeps the `&lt;` and drops the
+    // backslash after it, leaving the rest literal.
+    if scheme_m.as_str().starts_with('\\') {
+        return Some(MacroMatch {
+            kind: MacroMatchKind::Unescape {
+                backslash: scheme_m.start(),
+            },
+            full: full.clone(),
+        });
+    }
+
+    // The `<url>` alternative did not participate: an unterminated
+    // angle-bracketed URL, which the replacer leaves wholly literal.
+    let angle_url = n.angle_url()?;
+
+    let target = format!(
+        "{scheme}{url}",
+        scheme = scheme_m.as_str(),
+        url = angle_url.as_str()
+    );
+
+    let link_text = hide_uri_scheme_text(&target, parser);
+
+    let location = source_slice(pieces, full.clone(), root);
+
+    let node = InlineNode::Ref(Ref {
+        variant: RefVariant::Link,
+        target: CowStr::from(target),
+
+        children: vec![InlineNode::Text {
+            value: CowStr::from(link_text),
+            location,
+        }],
+
+        roles: vec![CowStr::from("bare")],
+        window: None,
+        attrs: None,
+        resolved: None,
+        derived: None,
+        xrefstyle: None,
+        location,
+    });
+
+    Some(MacroMatch {
+        kind: MacroMatchKind::Node {
+            consumed: full.clone(),
+            node: Box::new(node),
+        },
+        full: full.clone(),
+    })
+}
+
 /// The display text for a bare link, dropping the URI scheme under
 /// `hide-uri-scheme` exactly as the string replacer's `URI_SNIFF` strip does.
-/// Unlike a bare `link:`/`mailto:` macro, [`INLINE_LINK`]'s bare branch does
-/// *not* fall back to the whole target when the strip leaves nothing – it
-/// cannot leave nothing, because a bare scheme with no body is rejected
-/// upstream.
+/// Neither of the two callers can be left with nothing by the strip:
+/// [`INLINE_LINK`]'s bare branch rejects a bare scheme with no body upstream,
+/// and its ANGLE branch's `<url>` alternative requires at least one character
+/// between the delimiters – so, unlike a bare `link:`/`mailto:` macro, this
+/// does *not* fall back to the whole target.
 fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
     if parser.is_attribute_set("hide-uri-scheme") {
         URI_SNIFF.replace_all(target, "").into_owned()
@@ -980,7 +1122,7 @@ mod tests {
     use crate::{
         Parser, Span,
         content::inline_builder::build,
-        inlines::{InlineNode, SpanForm, StyleVariant},
+        inlines::{CharRef, InlineNode, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
@@ -1360,9 +1502,10 @@ mod tests {
         // reproduces the string pipeline's output byte-for-byte. This is the
         // differential corpus (design §5.3) that pins the auto-link / formal-URL
         // link increment. Every fixture is a *verbatim* link – the boundary
-        // this increment claims (an angle form, a URL crossing a special, a
-        // multi-line attribute-list text, or a display text crossing a
-        // rendered span is deferred and lives in a divergence test below).
+        // this increment claims (a URL crossing a special, a multi-line
+        // attribute-list text, or a display text crossing a rendered span is
+        // deferred and lives in a divergence test below). The pattern's ANGLE
+        // branch has its own corpus, alongside its own structural tests.
         let fixtures = [
             // No auto-link despite a colon or a `//`.
             "plain text with a colon: but no scheme",
@@ -1455,6 +1598,11 @@ mod tests {
             "https://example.org[]",
             // A labeled link keeps its explicit text unchanged.
             "https://example.org[Example]",
+            // An angle-bracketed link is always bare, so it always drops the
+            // scheme (the replacer's angle path shares the same `URI_SNIFF`
+            // strip).
+            "<https://example.org>",
+            "see <https://example.org/path> ok",
         ];
 
         let renderer = HtmlSubstitutionRenderer {};
@@ -1634,19 +1782,179 @@ mod tests {
     }
 
     #[test]
-    fn an_angle_bracketed_url_is_a_documented_divergence() {
-        // `<https://example.org>` requires a leading `&lt;`, which is an escaped
-        // `CharRef` by the time macros run, so the match is never verbatim and
-        // the single-pass builder leaves it unrecognized for a later increment.
+    fn fold_matches_the_string_pipeline_through_angle_bracketed_links() {
+        // The differential corpus for `INLINE_LINK`'s ANGLE branch, whose
+        // `&lt;`/`&gt;` delimiters are escaped `CharRef`s by the time macros
+        // run – so these fixtures are exactly the ones the whole-match verbatim
+        // gate used to defer (see `build_inline_link_node`'s own note). Each is
+        // driven through the same fold-vs-string-pipeline comparison the
+        // non-angle corpus above uses.
+        let fixtures = [
+            // The `<url>` form, alone, mid-flow, and repeated.
+            "<https://example.org>",
+            "see <https://example.org> ok",
+            "a <https://example.org> b <ftp://x.example/y> c",
+            // Other schemes, paths, and fragments.
+            "<file:///etc/hosts>",
+            "<irc://irc.example.org/channel>",
+            "<https://example.org/path/to/page.html>",
+            // Unlike a bare auto-link, the angle form applies no
+            // trailing-punctuation strip and no bare-scheme rejection: the
+            // whole bracketed body is the target.
+            "<http://;>",
+            // A following `>` or `.` stays outside the link.
+            "<https://example.org>>",
+            "<https://example.org>.",
+            // Both escapes: a `\` before the `<` and one before the scheme each
+            // drop that backslash and leave the rest literal.
+            "\\<https://example.org>",
+            "<\\https://example.org>",
+            // The branch's `[…]` alternative keeps its `&lt;` as literal text
+            // before the link, including with an attribute list, an empty
+            // (bare) text, and an escaped `<`.
+            "<https://example.org[text]",
+            "<https://example.org[text]>",
+            "<https://example.org[]",
+            "<https://example.org[Docs,role=hl]",
+            "\\<https://example.org[text]",
+            // The branch's third alternative – no closing `>`, no `[…]` – is
+            // left wholly literal by both, and still honors both escapes
+            // (which the replacer's angle path checks before it reaches that
+            // alternative, so the builder must too).
+            "<https://example.org",
+            "\\<https://example.org",
+            "<\\https://example.org",
+            // A `<…>` that is not a URL at all stays literal.
+            "text <not a url> more",
+            // Beside and inside other constructs, including a footnote's own
+            // extracted text (which the tree recovers separately from the
+            // block's).
+            "*<https://example.org>*",
+            "a copyright (C) then <https://example.org>",
+            "A claim.footnote:[see <https://example.org> for the evidence]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_angle_bracketed_url_becomes_a_bare_ref_node_consuming_its_delimiters() {
+        // The string replacer emits *only* the rendered link for the whole
+        // match, so the node consumes its `&lt;`/`&gt;` delimiters rather than
+        // keeping them as literal text: one node, whose location covers the
+        // brackets too.
         let nodes = build_src(Span::new("<https://example.org>"));
+
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
+
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(link_text_of(reference), "https://example.org");
+        assert_eq!(reference.roles, [CowStr::from("bare")]);
+        assert_eq!(reference.window, None);
+        assert!(reference.attrs.is_none());
+
+        assert_eq!(reference.location.data(), "<https://example.org>");
+        assert_eq!(reference.location.line(), 1);
+        assert_eq!(reference.location.col(), 1);
+    }
+
+    #[test]
+    fn an_angle_bracketed_url_keeps_no_trailing_punctuation_strip() {
+        // A bare auto-link strips a trailing ';'/':' off its target; the angle
+        // form does not, because the replacer's angle path takes the bracketed
+        // body verbatim. `<http://;>` is therefore a link whose target *is*
+        // `http://;` – the very target the bare branch rejects as a bare
+        // scheme with no body.
+        let nodes = build_src(Span::new("<http://;>"));
+
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
+
+        assert_eq!(reference.target.as_ref(), "http://;");
+        assert_eq!(link_text_of(reference), "http://;");
+    }
+
+    #[test]
+    fn an_angle_bracketed_url_with_a_bracketed_text_keeps_its_opening_delimiter() {
+        // The ANGLE branch's `[…]` alternative goes through the *general* path,
+        // which keeps the match's boundary prefix – here the `&lt;` `CharRef` –
+        // as literal text before the link node.
+        let nodes = build_src(Span::new("<https://example.org[text]"));
+
+        assert_eq!(nodes.len(), 2);
+
+        match &nodes[0] {
+            InlineNode::CharRef { value, .. } => {
+                assert_eq!(*value, CharRef::Special('<'));
+            }
+
+            other => panic!("expected the kept `<` CharRef, got {other:?}"),
+        }
+
+        let reference = assert_link(&nodes[1]);
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(link_text_of(reference), "text");
+        assert_eq!(reference.location.data(), "https://example.org[text]");
+    }
+
+    #[test]
+    fn an_unterminated_angle_bracketed_url_is_left_literal() {
+        // The ANGLE branch's third alternative – no closing `&gt;` and no
+        // `[…]` – is emitted unchanged by the string replacer, so the builder
+        // builds no node for it either (and, because the branch's own match
+        // consumed the URL, no *non-angle* auto-link is found inside it).
+        let nodes = build_src(Span::new("<https://example.org"));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an angle-bracketed URL must be left unrecognized: {nodes:?}"
+            "an unterminated angle-bracketed URL must stay literal: {nodes:?}"
+        );
+    }
+
+    #[test]
+    fn an_angle_bracketed_url_over_a_special_character_is_a_documented_divergence() {
+        // The delimiters of an angle link may be escaped specials – that is the
+        // whole point of the relaxed gate – but the URL *between* them may not:
+        // a `&` in it is an atomic `CharRef` the node cannot slice from `'src`,
+        // exactly the boundary `an_auto_link_over_a_special_character_is_a_
+        // documented_divergence` pins for the non-angle branch.
+        let nodes = build_src(Span::new("<https://example.org/?a=1&b=2>"));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an angle URL crossing an escaped special must stay literal: {nodes:?}"
         );
 
         // The string pipeline, by contrast, *does* build a link here.
-        assert!(golden_macros("<https://example.org>").contains("<a href"));
+        assert!(golden_macros("<https://example.org/?a=1&b=2>").contains("<a href"));
+    }
+
+    #[test]
+    fn an_angle_bracketed_link_text_over_a_rendered_span_is_a_documented_divergence() {
+        // The `[…]` alternative inherits the general path's own deferral: a
+        // display text containing a quoted span is a `Styled` node by macro
+        // time, so the match is not verbatim.
+        let source = "<https://example.org[*bold*]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an angle link text crossing a rendered span must stay literal: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a link here.
+        assert!(golden_macros(source).contains("<a href"));
     }
 
     #[test]
@@ -2122,6 +2430,31 @@ mod tests {
             parser.catalog().links(),
             ["https://example.org", "https://example.org/docs"]
         );
+    }
+
+    #[test]
+    fn registers_an_angle_bracketed_target_in_the_auto_link_pass() {
+        // The angle form is `InlineLinkReplacer`'s own branch – the *first* of
+        // the three link passes – so it registers alongside (and in source
+        // order with) the auto-links and formal-URL links, before any
+        // `link:`/`mailto:` macro. `link_form` reaches that classification with
+        // no angle-specific case: the node's location does not start with a
+        // `link:`/`mailto:` prefix, and its target is not a `mailto:` one.
+        let source = "link:b.html[B] then <https://a.example> then https://c.example";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(
+            parser.catalog().links(),
+            ["https://a.example", "https://c.example", "b.html"]
+        );
+
+        // The golden string pipeline agrees.
+        let golden_parser = Parser::default().with_catalog_assets(true);
+        golden_macros_with(source, &golden_parser);
+        assert_eq!(golden_parser.catalog().links(), parser.catalog().links());
     }
 
     #[test]
