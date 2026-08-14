@@ -1,13 +1,19 @@
 //! Auto-link, formal-URL-link, and `link:`/`mailto:` macro recognition.
 
-use super::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level};
+use super::{
+    MacroMatch, MacroMatchKind,
+    image::{range_is_verbatim, range_is_verbatim_or_synthesized},
+    rebuild_macro_level,
+};
 use crate::{
     Parser, Span,
     attributes::Attrlist,
     content::{
-        INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF, encode_uri_component,
-        extract_attributes_from_text,
-        inline_builder::quotes::{Piece, build_match_string, source_slice},
+        INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
+        encode_uri_component, extract_attributes_from_text,
+        inline_builder::quotes::{
+            Piece, SPAN_PLACEHOLDER, build_match_string, source_slice, text_slice,
+        },
     },
     inlines::{InlineNode, Ref, RefVariant},
     parser::has_dangerous_scheme,
@@ -611,16 +617,236 @@ pub(super) fn build_link_node<'src>(
     }))
 }
 
-/// Performs the recognition side effect the string pipeline's four link
-/// replacers (`InlineLinkReplacer`'s angle/formal/bare branches and
-/// `InlineLinkMacroReplacer`, plus `InlineEmailReplacer`'s own registration for
-/// the bare e-mail form this module does not yet build) attach to a matched
+/// The bare e-mail auto-link pass at a level: matches [`INLINE_EMAIL`] over the
+/// level's escaped text and replaces each recognized address with the
+/// [`Ref`](InlineNode::Ref)`{Link}` node it produces – the same node kind the
+/// two URL-link passes above build, so it folds through the identical
+/// `render_link`.
+///
+/// # Scope
+///
+/// This is the **last** of the link family's spellings: a bare address written
+/// in the flow (`doc.writer@example.com`), which the string pipeline turns into
+/// a `mailto:` link whose display text is the address itself (no `bare` role,
+/// unlike an auto-linked URL – see [`build_email_node`]). It reuses the string
+/// pipeline's *exact* recognition, so only the recognition *sink* differs
+/// (design §4.1), including the pattern's own "prefix that causes a mismatch"
+/// group: a `\` escape drops its backslash and leaves the address literal,
+/// while a `>`, `:`, or `/` before the address means it is not a bare address
+/// at all (it is the tail of a URL, or a `mailto:` macro's own target) and the
+/// whole match is left untouched.
+///
+/// It runs **after** both URL-link passes and before the anchor pass, exactly
+/// where the string step runs `InlineEmailReplacer` – which matters, because by
+/// then a `mailto:`/`link:` macro and an auto-linked URL are already opaque
+/// nodes here (they are already-rendered `<a …>` markup there), so an address
+/// *inside* one is never re-recognized.
+///
+/// Two forms are left **unrecognized** for a later increment, each documented
+/// and pinned by its own divergence test:
+///
+/// - An address carrying a literal `&` (`a&b@example.org`), which reaches this
+///   pass as an atomic [`CharRef`](InlineNode::CharRef) (`&amp;`, admitted by
+///   the pattern's own local-part class) that a node cannot carry as text – the
+///   same escaped-special boundary every other macro family documents.
+/// - An address **abutting an already-recognized construct**
+///   (`**bold**doc@example.org`, `link:x[y]doc@example.org`,
+///   `image:x.png[]doc@example.org`). The mismatch-prefix group reads the
+///   character immediately before the address; in the string pipeline that is
+///   the preceding construct's *rendered* last character (`</strong>`, `</a>`,
+///   and `<img …>` all end in `>`, a mismatch character, so the address stays
+///   literal there), while here [`build_match_string`] stands the construct in
+///   as one opaque [`SPAN_PLACEHOLDER`] belonging to no mismatch class. A tree
+///   whose markup exists only at fold time cannot reproduce that decision, so
+///   the address is left literal rather than recognized into a link the string
+///   pipeline does not build. The sibling auto-link family reaches the same
+///   outcome structurally – [`INLINE_LINK`]'s own boundary-prefix group is
+///   *required*, so a placeholder simply fails its match
+///   (`**bold**https://example.org` is already deferred for exactly this
+///   reason, independently of this pass). The deferral is deliberately
+///   unconditional rather than keyed on what the preceding node *would* render
+///   to: a construct that renders to nothing (a concealed index term) or to
+///   text not ending in a mismatch character (a STEM expression, a
+///   passthrough) is one the string pipeline *does* link, so those defer too –
+///   reading that would mean invoking a renderer while building the tree.
+///
+/// An address's bytes *may*, by contrast, come from a
+/// [`synthesized`](Piece::synthesized) run (an attribute expansion, or –
+/// reached at a tree's root – a filtered multi-line block's own joined seed):
+/// like an anchor's id, and unlike a URL link's own target, an e-mail node
+/// needs no `Span`-typed field, so [`build_email_node`] recovers the exact
+/// address text there too rather than deferring.
+pub(super) fn email_level<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let (s, pieces) = build_match_string(&nodes);
+
+    // Cheap pre-filter mirroring the string step's own `text.contains('@')`
+    // guard.
+    if !s.contains('@') {
+        return nodes;
+    }
+
+    let matches = find_email_matches(&nodes, &s, &pieces, root);
+
+    if matches.is_empty() {
+        return nodes;
+    }
+
+    rebuild_macro_level(&nodes, &pieces, &s, matches)
+}
+
+/// Finds every recognized bare e-mail address at this level, honoring the
+/// pattern's own mismatch-prefix group and skipping any address
+/// [`build_email_node`] defers (see [`email_level`]).
+fn find_email_matches<'src>(
+    nodes: &[InlineNode<'src>],
+    s: &str,
+    pieces: &[Piece],
+    root: Span<'src>,
+) -> Vec<MacroMatch<'src>> {
+    let mut matches = Vec::new();
+
+    for caps in INLINE_EMAIL.captures_iter(s) {
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let whole = caps.get(0).unwrap();
+
+        let full = whole.start()..whole.end();
+
+        // Group 1 is the optional "prefix that causes a mismatch".
+        let prefix = caps.get(1).map_or("", |m| m.as_str());
+
+        if !prefix.is_empty() {
+            if prefix == "\\" {
+                // The escape drops its single backslash and keeps the rest of
+                // the match literal, mirroring the string replacer's
+                // `caps[0][1..]`.
+                matches.push(MacroMatch {
+                    kind: MacroMatchKind::Unescape {
+                        backslash: full.start,
+                    },
+                    full,
+                });
+            }
+
+            // Any other prefix (`>`, `:`, `/`) makes the string replacer emit
+            // the whole match unchanged – which is exactly what recording no
+            // match at all does here.
+            continue;
+        }
+
+        // The mismatch-prefix group above read an *empty* prefix – but that
+        // decision is only faithful when the tree can actually see the
+        // character the string pipeline reads there. When the address abuts an
+        // already-recognized construct (`**bold**doc@example.org`,
+        // `link:x[y]doc@example.org`), the string pipeline reads that
+        // construct's *rendered* last character – `</strong>`, `</a>`, and
+        // `<img …>` all end in `>`, one of the three mismatch characters – and
+        // suppresses the address, while [`build_match_string`] stands the
+        // construct in as one opaque [`SPAN_PLACEHOLDER`], which no mismatch
+        // class contains. Recognizing here would build a link the string
+        // pipeline does not, so this defers instead – leaving the address as
+        // literal text, never a wrong node, exactly as the sibling auto-link
+        // family already behaves for the same input ([`INLINE_LINK`]'s own
+        // boundary-prefix group is *required*, so a placeholder simply fails
+        // its match). See [`email_level`]'s own scope note.
+        if s.get(..full.start)
+            .is_some_and(|before| before.ends_with(SPAN_PLACEHOLDER))
+        {
+            continue;
+        }
+
+        match build_email_node(&caps, pieces, root, nodes) {
+            Some(node) => matches.push(MacroMatch {
+                kind: MacroMatchKind::Node {
+                    consumed: full.clone(),
+                    node: Box::new(node),
+                },
+                full,
+            }),
+
+            // An address crossing an atomic piece (an escaped `&`); left as
+            // literal source, exactly as every other macro family defers a
+            // match it cannot recover the text of.
+            None => continue,
+        }
+    }
+
+    matches
+}
+
+/// Builds one [`Ref`](InlineNode::Ref)`{Link}` node from a bare e-mail match,
+/// computing the target and display text exactly as `InlineEmailReplacer` does
+/// so the fold reproduces the same bytes: the target is the address prefixed
+/// with `mailto:`, and the display text is the address as written. Unlike a
+/// bare *URL* auto-link, no `bare` role is added and `hide-uri-scheme` plays no
+/// part – the string replacer passes `extra_roles: vec![]` and the raw address
+/// as its `link_text`.
+///
+/// The address is recovered with [`text_slice`] rather than
+/// [`source_slice`]`.data()`, so it is exact even when its bytes come from a
+/// [`synthesized`](Piece::synthesized) run – the same treatment an anchor's id
+/// receives, and available for the same reason: an e-mail node carries no
+/// `Span`-typed field (no [`Attrlist`] parsed out of `'src`), only plain text,
+/// so only the node's `location` needs design §4.4's coarse fallback. Returns
+/// `None` when the address crosses an [`atomic`](Piece::atomic) piece – an
+/// escaped `&`, the one form [`email_level`] defers.
+///
+/// As in the additive builder generally, this performs *no* recognition side
+/// effect: it does **not** `register_link` the target, which
+/// `InlineEmailReplacer` does. [`apply_link_side_effects`] is that deferred
+/// piece, staged for the cutover alongside the other link forms'.
+fn build_email_node<'src>(
+    caps: &regex::Captures<'_>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    nodes: &[InlineNode<'src>],
+) -> Option<InlineNode<'src>> {
+    // Group 2 is the address itself. The `unwrap` is safe: the group is the
+    // pattern's one mandatory capture, so it participates in every match (the
+    // same reason the overall-match `unwrap` above is safe).
+    #[allow(clippy::unwrap_used)]
+    let address_m = caps.get(2).unwrap();
+
+    let range = address_m.start()..address_m.end();
+
+    if !range_is_verbatim_or_synthesized(pieces, &range) {
+        return None;
+    }
+
+    let address = text_slice(nodes, pieces, range.clone())?;
+    let location = source_slice(pieces, range, root);
+
+    Some(InlineNode::Ref(Ref {
+        variant: RefVariant::Link,
+        target: CowStr::from(format!("mailto:{address}")),
+
+        children: vec![InlineNode::Text {
+            value: address,
+            location,
+        }],
+
+        roles: vec![],
+        window: None,
+        attrs: None,
+        resolved: None,
+        derived: None,
+        xrefstyle: None,
+        location,
+    }))
+}
+
+/// Performs the recognition side effect the string pipeline's five link
+/// replacers (`InlineLinkReplacer`'s angle/formal/bare branches,
+/// `InlineLinkMacroReplacer`, and `InlineEmailReplacer`) attach to a matched
 /// link – registering the target in the document's asset catalog – by walking
 /// an already-built tree and reading each [`Ref`](InlineNode::Ref)`{Link}`
 /// node's own stored `target` instead of a regex capture. `target` already
 /// holds exactly the string the string pipeline registers (see
-/// [`build_inline_link_node`] and [`build_link_node`]), so no recomputation is
-/// needed.
+/// [`build_inline_link_node`], [`build_link_node`], and [`build_email_node`]),
+/// so no recomputation is needed.
 ///
 /// Every macro family this module recognizes defers exactly this kind of side
 /// effect (see
@@ -636,31 +862,35 @@ pub(super) fn build_link_node<'src>(
 /// real parse yet – it is exercised only by this module's own tests, against
 /// their own `Parser`.
 ///
-/// # Registration order across the two link forms
+/// # Registration order across the three link forms
 ///
 /// The string pipeline registers a link's target *when its own replacer's
 /// regex pass matches it* – `InlineLinkReplacer` (auto-links and formal-URL
 /// links, `INLINE_LINK`'s non-angle branch) runs as one whole-string pass, then
 /// `InlineLinkMacroReplacer` (`link:`/`mailto:`, `INLINE_LINK_MACRO`) runs as a
-/// *second*, later pass – exactly the order [`inline_link_level`] and
-/// [`link_macro_level`] apply the two families in. So the catalog ends up in
-/// **family-pass order, not true source order**: every auto-link/formal-URL
-/// link in the content registers before every `link:`/`mailto:` macro in it,
+/// *second*, later pass, then `InlineEmailReplacer` (a bare address,
+/// `INLINE_EMAIL`) as a *third* – exactly the order [`inline_link_level`],
+/// [`link_macro_level`], and [`email_level`] apply the three families in. So
+/// the catalog ends up in **family-pass order, not true source order**: every
+/// auto-link/formal-URL link in the content registers before every
+/// `link:`/`mailto:` macro in it, and both before every bare address,
 /// regardless of which appears first in the source (see
 /// `catalog_records_link_targets_when_catalog_assets_enabled` in
 /// `tests/asciidoctor_rb/substitutions_test.rs`, which pins this exact
 /// behavior). A single tree walk in document order would get this wrong for a
-/// content that interleaves the two forms out of that relative order (for
+/// content that interleaves the forms out of that relative order (for
 /// example `link:b.html[B] then https://a.example`, which the golden pipeline
 /// registers as `["https://a.example", "b.html"]`, not `["b.html",
-/// "https://a.example"]`), so this function makes **two** passes over the
+/// "https://a.example"]`), so this function makes **three** passes over the
 /// tree – all auto-link/formal-URL matches first, then all `link:`/`mailto:`
-/// macro matches – rather than one. [`link_form`] tells the two apart from the
-/// node's own `location` (a `link:`/`mailto:` macro's location always starts
-/// with its literal prefix; [`inline_link_level`] never builds a node for
-/// `INLINE_LINK`'s own link-macro branch, deferring that whole form to
-/// [`link_macro_level`] – see [`inline_link_level`]'s own doc comment – so this
-/// is a reliable, no-recomputation signal, not a heuristic).
+/// macro matches, then all bare addresses – rather than one. [`link_form`]
+/// tells them apart from the node's own `location` and `target` (a
+/// `link:`/`mailto:` macro's location always starts with its literal prefix,
+/// and only a bare address yields a `mailto:` target without one;
+/// [`inline_link_level`] never builds a node for `INLINE_LINK`'s own
+/// link-macro branch, deferring that whole form to [`link_macro_level`] – see
+/// [`inline_link_level`]'s own doc comment – so this is a reliable,
+/// no-recomputation signal, not a heuristic).
 ///
 /// Recurses into every container a `Ref` node can be nested inside –
 /// [`Styled`](InlineNode::Styled), another [`Ref`](InlineNode::Ref) (a link's
@@ -674,10 +904,12 @@ pub(super) fn build_link_node<'src>(
 pub(crate) fn apply_link_side_effects(nodes: &[InlineNode<'_>], parser: &Parser) {
     register_links_of_form(nodes, parser, LinkForm::AutoOrFormal);
     register_links_of_form(nodes, parser, LinkForm::Macro);
+    register_links_of_form(nodes, parser, LinkForm::Email);
 }
 
-/// Which of the two link-recognizing passes built a [`Ref`](InlineNode::Ref)
-/// node – see [`apply_link_side_effects`]'s own "Registration order" note.
+/// Which of the three link-recognizing passes built a
+/// [`Ref`](InlineNode::Ref) node – see [`apply_link_side_effects`]'s own
+/// "Registration order" note.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum LinkForm {
     /// An auto-link or formal-URL link, built by [`inline_link_level`].
@@ -685,6 +917,9 @@ enum LinkForm {
 
     /// A `link:`/`mailto:` macro, built by [`link_macro_level`].
     Macro,
+
+    /// A bare e-mail address, built by [`email_level`].
+    Email,
 }
 
 /// Walks `nodes`, registering only the [`Ref`](InlineNode::Ref)`{Link}` nodes
@@ -714,14 +949,19 @@ fn register_links_of_form(nodes: &[InlineNode<'_>], parser: &Parser, form: LinkF
 }
 
 /// Tells which pass built a link [`Ref`](InlineNode::Ref) node from its own
-/// `location`: only [`link_macro_level`] ever builds a node whose matched
-/// source starts with a literal `link:`/`mailto:` prefix (see
-/// [`apply_link_side_effects`]'s own doc comment).
+/// `location` and `target`: only [`link_macro_level`] ever builds a node whose
+/// matched source starts with a literal `link:`/`mailto:` prefix, and – of the
+/// two passes left – only [`email_level`] builds one whose target carries the
+/// `mailto:` scheme ([`inline_link_level`]'s own targets always carry one of
+/// [`INLINE_LINK`]'s `https?`/`file`/`ftp`/`irc` schemes instead). See
+/// [`apply_link_side_effects`]'s own doc comment.
 fn link_form(reference: &Ref<'_>) -> LinkForm {
     let text = reference.location.data();
 
     if text.starts_with("link:") || text.starts_with("mailto:") {
         LinkForm::Macro
+    } else if reference.target.starts_with("mailto:") {
+        LinkForm::Email
     } else {
         LinkForm::AutoOrFormal
     }
@@ -1514,6 +1754,328 @@ mod tests {
         assert!(golden_macros(source).contains("<strong>bold</strong>"));
     }
 
+    // ---- bare e-mail addresses (`INLINE_EMAIL`) ---------------------------
+
+    #[test]
+    fn fold_matches_the_string_pipeline_through_bare_emails() {
+        // For each fixture, folding the single-pass tree (all five steps)
+        // reproduces the string pipeline's output byte-for-byte. This is the
+        // differential corpus (design §5.3) that pins the bare e-mail
+        // increment: the address forms the pattern claims, the prefixes it
+        // treats as mismatches, and the escape.
+        let fixtures = [
+            // No address despite an `@`.
+            "an @ sign on its own",
+            "@example.org has no local part",
+            "user@ has no domain",
+            // Plain addresses, in and out of surrounding flow.
+            "doc.writer@example.com",
+            "Write to doc.writer@example.com today.",
+            "doc_writer@example.com",
+            "doc-writer+tag@example.com",
+            "doc%writer@example.com",
+            "a@b.io",
+            // Subdomains, hyphens, and digits in the domain.
+            "info@mail.example.co.uk",
+            "info@my-host.example.com",
+            "info@example2.com",
+            // Two addresses in one content.
+            "first@example.org and second@example.org",
+            // A TLD outside the pattern's 2–5 letter range is not an address.
+            "user@example.c",
+            "user@example.toolongtld",
+            // The mismatch prefixes: a `mailto:` macro's own target (`:`), a
+            // URL's user-info or path (`/`), and a `>` right before the local
+            // part.
+            "mailto:hello@example.org[Email us]",
+            "mailto:hello@example.org[]",
+            "https://example.org/x@y.com",
+            "see https://user@example.org/path here",
+            // Escapes: the address stays literal, minus the backslash.
+            "\\doc.writer@example.com",
+            "a \\doc@example.com b",
+            // An address beside and inside other constructs.
+            "*bold* then doc@example.com and _em_",
+            "*write to doc@example.com*",
+            "a copyright (C) then doc@example.com",
+            "link:index.html[Docs] then doc@example.com",
+            "https://example.org then doc@example.com",
+            // An address inside a footnote's own text (extracted after the
+            // e-mail pass has already recognized it, exactly as the string
+            // pipeline substitutes it before the footnote text is pulled out).
+            "A claim.footnote:[write to doc@example.com]",
+            // An address inside an anchor's reference text and beside an
+            // anchor (both later passes).
+            "[[the-anchor]]doc@example.com",
+        ];
+
+        for fixture in fixtures {
+            let nodes = build_src(Span::new(fixture));
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_macros(fixture),
+                "fold diverged for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_email_becomes_a_ref_node() {
+        // The address is the node's display text and, prefixed with `mailto:`,
+        // its target; unlike a bare URL auto-link it takes no `bare` role. The
+        // node's own location is the address itself, sliced precisely from
+        // `'src`.
+        let source = "Write to doc.writer@example.com today.";
+        let nodes = build_src(Span::new(source));
+
+        let reference = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Ref(reference) => Some(reference),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected a Ref node: {nodes:?}"));
+
+        assert_eq!(reference.target.as_ref(), "mailto:doc.writer@example.com");
+        assert_eq!(link_text_of(reference), "doc.writer@example.com");
+        assert!(reference.roles.is_empty());
+        assert!(reference.window.is_none());
+        assert!(reference.attrs.is_none());
+
+        assert_eq!(reference.location.data(), "doc.writer@example.com");
+        assert_eq!(reference.location.line(), 1);
+        assert_eq!(reference.location.col(), 10);
+
+        // The display text borrows the very bytes its location covers.
+        assert_text(&reference.children[0], "doc.writer@example.com", 1, 10);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn an_escaped_email_stays_literal() {
+        // `\doc@example.com` drops the single backslash and leaves the address
+        // as literal text – no link node – mirroring the string replacer's
+        // `caps[0][1..]`.
+        let source = "\\doc@example.com";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an escaped address must stay literal: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+        assert_eq!(golden_macros(source), "doc@example.com");
+    }
+
+    #[test]
+    fn a_mailto_macro_target_is_not_re_recognized_as_a_bare_email() {
+        // The e-mail pass runs *after* the `link:`/`mailto:` macro pass, so by
+        // then the macro is one opaque node here (already-rendered `<a …>`
+        // markup in the string pipeline, whose `mailto:` prefix the pattern's
+        // own `:` mismatch group rejects). Either way exactly one link node
+        // results, and it is the macro's.
+        let source = "mailto:hello@example.org[Email us]";
+        let nodes = build_src(Span::new(source));
+
+        let refs: Vec<_> = nodes
+            .iter()
+            .filter(|n| matches!(n, InlineNode::Ref(_)))
+            .collect();
+
+        assert_eq!(refs.len(), 1, "expected exactly one link node: {nodes:?}");
+
+        let reference = assert_link(refs[0]);
+        assert_eq!(reference.target.as_ref(), "mailto:hello@example.org");
+        assert_eq!(link_text_of(reference), "Email us");
+    }
+
+    #[test]
+    fn an_email_is_recognized_inside_a_span() {
+        // The macros step descends into a `Styled` span's children before
+        // matching at its own level, so an address inside a quoted span is
+        // recognized there.
+        let source = "*write to doc@example.com*";
+        let nodes = build_src(Span::new(source));
+
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+
+        assert!(
+            children.iter().any(|n| matches!(n, InlineNode::Ref(_))),
+            "expected an address inside the span: {children:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn an_email_inside_an_expanded_attribute_value_is_recognized() {
+        // An address whose bytes come from a *synthesized* run (an attribute
+        // reference's resolved value). Unlike a URL link – whose node bakes an
+        // `Attrlist`/target straight out of `'src` – an e-mail node carries
+        // only plain text, so `text_slice` recovers the address exactly here,
+        // the same lift the anchor family already has (design §3.4.1's "a
+        // macro inside an expanded value" boundary). Byte-parity for this
+        // shape is pinned by the whole-pipeline corpus in this module's
+        // `mod.rs`, which runs the real `AttributeReferences` step.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute(
+            "contact",
+            "doc@example.com",
+            ModificationContext::Anywhere,
+        );
+
+        let source = "write to {contact} now";
+        let nodes = build(Span::new(source), &parser, None);
+
+        let reference = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Ref(reference) => Some(reference),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected a Ref node: {nodes:?}"));
+
+        assert_eq!(reference.target.as_ref(), "mailto:doc@example.com");
+        assert_eq!(link_text_of(reference), "doc@example.com");
+
+        // The address has no honest `'src` slice of its own, so its location
+        // falls back to the enclosing synthesized run's coarse span (design
+        // §4.4) while its text stays exact.
+        assert_eq!(reference.location.data(), "{contact}");
+    }
+
+    #[test]
+    fn an_email_abutting_a_rendered_construct_stays_literal() {
+        // The mismatch-prefix group reads the character immediately before the
+        // address. The string pipeline reads it out of already-rendered markup
+        // – `</strong>`, `</a>`, and `<img …>` all end in `>`, a mismatch
+        // character – and so leaves the address literal. The tree stands the
+        // construct in as one opaque placeholder, which belongs to no mismatch
+        // class, so `find_email_matches` defers explicitly instead of building
+        // a link the string pipeline does not: parity, not a divergence, for
+        // every construct whose rendering ends in one of `\`, `>`, `:`, `/`.
+        for source in [
+            "**bold**doc@example.com",
+            "__em__doc@example.com",
+            "link:index.html[Docs]doc@example.com",
+            "https://example.org[Site]doc@example.com",
+            "image:x.png[]doc@example.com",
+            "icon:home[]doc@example.com",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                !nodes.iter().any(
+                    |n| matches!(n, InlineNode::Ref(reference) if reference.target.starts_with("mailto:"))
+                ),
+                "an address abutting a rendered construct must stay literal: {nodes:?}"
+            );
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_email_abutting_a_construct_that_hides_its_boundary_is_a_documented_divergence() {
+        // What the unconditional deferral above costs, pinned exactly. In each
+        // of these the string pipeline's mismatch-prefix group does *not* see a
+        // mismatch character before the address, so it links it – a concealed
+        // index term renders to nothing, and a passthrough or STEM expression
+        // is still masked by its own sentinel when the macros step runs (it is
+        // restored afterwards), so neither presents rendered markup there. The
+        // tree cannot tell those apart from a construct that *did* render
+        // markup without folding the preceding node while building, so all of
+        // them defer – see `email_level`'s own scope note.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let concealed_term = "indexterm:[a]doc@example.com";
+        let nodes = build_src(Span::new(concealed_term));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an address abutting an opaque construct must stay literal: {nodes:?}"
+        );
+        assert!(golden_macros(concealed_term).contains(r#"href="mailto:doc@example.com""#));
+
+        // A passthrough and a STEM expression, whose goldens need the
+        // extract/restore pass around the steps.
+        for source in [
+            "+++raw/+++doc@example.com",
+            "pass:[x]doc@example.com",
+            "stem:[x]doc@example.com",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "an address abutting an opaque construct must stay literal: {nodes:?}"
+            );
+
+            assert!(
+                golden_passthroughs(source).contains(r#"href="mailto:doc@example.com""#),
+                "golden fixture stopped linking the address for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_auto_link_abutting_a_rendered_span_is_a_documented_divergence() {
+        // The mirror image of the boundary above, in the sibling auto-link
+        // family, which predates the e-mail pass: `INLINE_LINK`'s own
+        // boundary-prefix group *requires* one of `^`, a blank, or
+        // `[>()\[\];"']`. The string pipeline reads `</strong>`'s own `>`
+        // there and builds a link; the placeholder standing in for the span
+        // here belongs to no such class, so the pattern simply fails to match
+        // and the URL is left literal. Pinned here so the two directions of
+        // this one boundary are recorded together.
+        let source = "**bold**https://example.org";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a URL abutting a rendered span must be left unrecognized: {nodes:?}"
+        );
+
+        assert!(golden_macros(source).contains(r#"href="https://example.org""#));
+    }
+
+    #[test]
+    fn an_email_over_a_special_character_is_a_documented_divergence() {
+        // The pattern's local-part class admits `&amp;`, so the string
+        // pipeline matches an address carrying a literal `&` over its own
+        // *escaped* text. That `&amp;` is an atomic `CharRef` by the time
+        // macros run, so the builder cannot recover the address as text and
+        // leaves it unrecognized for a later increment – the same boundary the
+        // auto-link and image families document.
+        let source = "a&b@example.com";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an address crossing an escaped special must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build a link here.
+        assert!(golden_macros(source).contains("<a href"));
+    }
+
     // ---- `apply_link_side_effects` (staged for the eventual cutover) ------
 
     use super::apply_link_side_effects;
@@ -1588,6 +2150,41 @@ mod tests {
     }
 
     #[test]
+    fn registers_a_bare_email_target_with_its_scheme() {
+        let source = "write to doc@example.com";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(parser.catalog().links(), ["mailto:doc@example.com"]);
+    }
+
+    #[test]
+    fn registers_a_bare_email_after_both_url_link_forms() {
+        // The e-mail pass is the *third* of the three link-recognizing passes,
+        // so a bare address registers after every auto-link/formal-URL link
+        // and every `link:`/`mailto:` macro in the content – regardless of
+        // where it appears in the source (see `apply_link_side_effects`'s own
+        // "Registration order" doc note).
+        let source = "first@example.org then link:b.html[B] then https://a.example";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(
+            parser.catalog().links(),
+            ["https://a.example", "b.html", "mailto:first@example.org"]
+        );
+
+        // The golden string pipeline agrees.
+        let golden_parser = Parser::default().with_catalog_assets(true);
+        golden_macros_with(source, &golden_parser);
+        assert_eq!(golden_parser.catalog().links(), parser.catalog().links());
+    }
+
+    #[test]
     fn does_not_register_a_cross_reference_as_a_link() {
         // A cross-reference is also a `Ref` node, but only a `Link` variant has
         // an asset-catalog entry.
@@ -1645,6 +2242,12 @@ mod tests {
             // passes that register them (see `apply_link_side_effects`'s own
             // "Registration order" doc note).
             "link:b.html[B]{sp}then{sp}https://a.example",
+            // The bare e-mail form, alone and interleaved with both URL-link
+            // forms – it registers last of the three, wherever it appears.
+            "doc@example.com",
+            "\\doc@example.com",
+            "doc@example.com{sp}then{sp}link:b.html[B]",
+            "a@example.org{sp}link:b.html[B]{sp}https://c.example{sp}d@example.org",
         ];
 
         for fixture in fixtures {

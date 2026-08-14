@@ -73,7 +73,8 @@
 //!   `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
 //!   the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
 //!   **auto-links and formal-URL links** (`https://example.org`,
-//!   `https://example.org[text]`), **cross-references** in both the
+//!   `https://example.org[text]`), **bare e-mail addresses**
+//!   (`doc@example.org`), **cross-references** in both the
 //!   `xref:` macro form (`xref:id[text]`) and the `<<id>>` shorthand, and
 //!   **inline anchors** (`[[id]]`, `[[id,reftext]]`, `anchor:id[reftext]`) and
 //!   **index terms** (`((term))`, `(((primary, secondary)))`, `indexterm:[…]`,
@@ -92,9 +93,18 @@
 //!   whenever that text has no embedded newline, so it can be sliced honestly
 //!   from `'src` rather than a synthesized copy; a `mailto:` text's own
 //!   comma-delimited subject/body is encoded straight into the target, the same
-//!   way. Each family reuses the shared pattern the string step
+//!   way. A bare address needs no attribute list at all – it folds through the
+//!   same `render_link` with a `mailto:` target and the address as its display
+//!   text – so, like an anchor's id, it is recognized even inside a
+//!   [`synthesized`](quotes::Piece::synthesized) run; an address carrying an
+//!   escaped `&`, or one abutting an already-recognized construct (whose
+//!   *rendered* last character the pattern's mismatch-prefix group reads and a
+//!   placeholder hides – the same boundary the auto-link family's own required
+//!   prefix already enforces), is deferred. Each family reuses the shared
+//!   pattern the string step
 //!   matches with ([`INLINE_IMAGE_MACRO`](crate::content::INLINE_IMAGE_MACRO), [`INLINE_KBD_BTN_MACRO`](crate::content::INLINE_KBD_BTN_MACRO),
 //!   [`INLINE_MENU_MACRO`](crate::content::INLINE_MENU_MACRO), [`INLINE_LINK_MACRO`](crate::content::INLINE_LINK_MACRO), [`INLINE_LINK`](crate::content::INLINE_LINK),
+//!   [`INLINE_EMAIL`](crate::content::INLINE_EMAIL),
 //!   [`INLINE_XREF`](crate::content::INLINE_XREF), [`INLINE_ANCHOR`](crate::content::INLINE_ANCHOR), [`INLINE_INDEXTERM`](crate::content::INLINE_INDEXTERM)), builds
 //!   `'src`-borrowing nodes for verbatim macros only (see [`apply_macros`] for
 //!   the boundary the escaped-content case defers), and – for the UI macros – is
@@ -216,7 +226,7 @@
 //! registration the string pipeline already performs. Each family's own
 //! deferred side effects are staged as their own reviewable building block –
 //! `register_image` and the `link=` dangerous-scheme/self-href warning for
-//! `image:`/`icon:`, `register_link` for the four link-macro forms, and the
+//! `image:`/`icon:`, `register_link` for the five link forms, and the
 //! `register_ref` pair for anchors and id-carrying attributed spans – and
 //! [`apply_macro_side_effects`] composes all three, in the string pipeline's
 //! own family-pass order, into the single call the cutover's remaining half
@@ -599,6 +609,9 @@ mod tests {
             "See https://example.org for details.",
             "A link:https://example.org[example] link.",
             "mailto:a@b.com[email me]",
+            "write to doc.writer@example.com today",
+            "**bold**doc@example.com",
+            "link:index.html[Docs]doc@example.com",
             "an image:photo.png[Alt Text] inline",
             "image:pic.png[Scaled,200,100]",
             "see <<target>> for more",
@@ -711,6 +724,28 @@ mod tests {
              then see <<conclusion,the conclusion>>.",
         );
 
+        // All three link-recognizing passes in one sentence, the bare address
+        // last (its own pass runs after both URL-link families).
+        assert_parity(
+            "Visit https://example.org or link:docs.html[the docs], \
+             or just write to doc@example.org.",
+        );
+
+        // A bare e-mail address spliced in by an attribute reference – a
+        // *synthesized* run, which the e-mail family recognizes exactly the
+        // way the anchor family does (see `links.rs`'s own note). The real
+        // `AttributeReferences` step runs here, unlike the family-scoped
+        // corpora.
+        assert_parity_with("Write to {contact} about *{product}*.", || {
+            Parser::default()
+                .with_intrinsic_attribute(
+                    "contact",
+                    "doc@example.com",
+                    ModificationContext::Anywhere,
+                )
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+        });
+
         // A `counter` directive beside a quoted span carrying an attribute
         // reference and a STEM expression – the ordering fix documented in
         // this module's `attribute_refs.rs` follow-up note.
@@ -799,6 +834,15 @@ mod tests {
                 "A claim.footnote:[the *evidence*]\ncontinues here.",
             ),
             ("  first line +\n  second line", "first line +\nsecond line"),
+            // A bare e-mail address in a wholly-synthesized seed: like an
+            // anchor's id, and unlike a URL link's own target, an address is
+            // recovered exactly by `text_slice` rather than deferred (see
+            // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
+            // below for the families that still defer here).
+            (
+                "  write to doc@example.com\n  today",
+                "write to doc@example.com\ntoday",
+            ),
         ];
 
         for (source, filtered) in fixtures {

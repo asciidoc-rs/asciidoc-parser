@@ -734,6 +734,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "See https://example.org for details.",
         "A link:https://example.org[example] link.",
         "mailto:a@b.com[email me]",
+        "write to doc.writer@example.com today",
         "an image:photo.png[Alt Text] inline",
         "image:pic.png[Scaled,200,100]",
         "see <<target>> for more",
@@ -842,6 +843,11 @@ fn shapes_match_across_combined_constructs() {
     assert_shapes(
         "Visit https://example.org[the site] or mailto:a@example.org[email us], \
          then see <<conclusion,the conclusion>>.",
+    );
+
+    assert_shapes(
+        "Visit https://example.org or link:docs.html[the docs], \
+         or just write to doc@example.org.",
     );
 
     assert_shapes_with(

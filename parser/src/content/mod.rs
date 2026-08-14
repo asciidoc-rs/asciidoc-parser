@@ -24,7 +24,7 @@ pub(crate) mod inline_tree;
 
 mod macros;
 pub(crate) use macros::{
-    INLINE_ANCHOR, INLINE_FOOTNOTE_MACRO, INLINE_IMAGE_MACRO, INLINE_INDEXTERM,
+    INLINE_ANCHOR, INLINE_EMAIL, INLINE_FOOTNOTE_MACRO, INLINE_IMAGE_MACRO, INLINE_INDEXTERM,
     INLINE_KBD_BTN_MACRO, INLINE_LINK, INLINE_LINK_MACRO, INLINE_MENU_MACRO, INLINE_XREF,
     NormalizedCaps, URI_SNIFF, apply_macros_with_leading_anchor_registered, basename,
     document_xrefstyle, encode_uri_component, extract_attributes_from_text,
