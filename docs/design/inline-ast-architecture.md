@@ -2142,6 +2142,58 @@ Each phase is a reviewable unit with a clear exit gate.
   corpus, the broad general-purpose sweep, and the structural recorder cross-check. As with every prep
   piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (`Macros` → the `&gt;`-submenu menu form, the third of that map's
+  divergences):* the builder now recognizes the **submenu spelling of the menu UI macro**
+  (`menu:View[Zoom > Reset]`, `menu:View[Tools > Options > Advanced]`) as the same
+  [`Ui`](../../parser/src/inlines/ui.rs) node its comma-delimited and bare/single-item siblings
+  build, folding through the identical `render_menu` so the output is byte-for-byte identical.
+  Nothing about the *split* changed: [`split_menu_items`](../../parser/src/content/inline_builder/macros/ui.rs)
+  has always reproduced `InlineMenuMacroReplacer`'s own delimiter handling in full – a `&gt;` taking
+  precedence over a comma, the last part the menu item and any earlier ones submenus – and was
+  covered by its own unit test precisely because no *fixture* could reach that branch.
+
+  What blocked it is the same thing the angle-bracketed URL increment directly above hit, in the
+  one other family whose match legitimately carries a delimiter it never slices. A menu's level
+  delimiter is written `>`, so by the time the macros step runs it is an escaped
+  [`CharRef`](../../parser/src/inlines/char_ref.rs) – an *atomic* piece
+  [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) rejects outright,
+  which is why the whole-match gate refused the form whatever its item texts looked like. But a
+  caret carries no value the node ever reads back out: like the `<<id>>` shorthand's own
+  `&lt;&lt;`/`&gt;&gt;` delimiters, the string replacer *consumes* it as the item list's delimiter
+  and emits it nowhere (the rendered caret between levels comes from `render_menu`, not from the
+  source character). A new [`menu_match_is_sliceable`](../../parser/src/content/inline_builder/macros/ui.rs)
+  gate – applied inside [`build_menu_node`](../../parser/src/content/inline_builder/macros/ui.rs),
+  where the match's own capture groups are already resolved, exactly as the angle branch moved its
+  gate into `build_inline_link_node` – therefore admits one atomic piece and one only: a `&gt;`
+  *inside the item list*. Everything else is unchanged and still deferred, each pinned by its own
+  divergence test: any other escaped special in an item text (`menu:File[A & B]`), a `&`- or
+  `>`-carrying menu **name** (`menu:A&B[Save]`, `menu:a>b[Save]` – the pattern admits both, and
+  neither is a delimiter the node consumes), an item text crossing a rendered span
+  (`menu:File[*S* > As]`), and a match crossing a [`synthesized`](../../parser/src/content/inline_builder/quotes.rs)
+  run (`menu:View[{zoom} > Reset]` – the relaxation is for an *atomic* piece, not for a run with no
+  `'src` slice for the name and item texts to borrow). The admitted caret is identified from its own
+  match-string bytes rather than a new node lookup, which is unambiguous: a rendered span contributes
+  a single placeholder character, and the only other atomic pieces are the two remaining
+  special-character entities.
+
+  Landing this also closed a small latent gap of exactly the kind the `footnoteref:` increment
+  closed for its own family: the menu pass ran its escape branch *after* the verbatim gate, so an
+  escaped macro whose match the gate rejected (`\menu:View[Zoom > Reset]`, and still today
+  `\menu:File[A & B]`) was left fully unrecognized – backslash and all – where the string replacer
+  drops the backslash and keeps the rest. The check is hoisted ahead of the gate, and needs no gate
+  of its own: dropping the backslash keeps the rest of the match as its *own original nodes* (an
+  escaped special or a rendered span among them), which fold back to exactly the bytes
+  `caps[0][1..]` emits. A differential corpus pins the submenu form with and without spaces, at one
+  and several levels, taking precedence over a comma, with a leading caret, with an escaped closing
+  bracket, beside a second menu macro, inside a rendered span, and escaped – plus the escaped
+  non-sliceable match the hoist fixes; a structural test pins the node's own levels and its
+  source-accurate `location` (the carets are one byte each there, four in the match string); and
+  fixtures are added to the whole-pipeline combined-constructs corpus and to the structural recorder
+  cross-check, which compares the two constructions' *splitting* of the item list rather than only
+  the HTML they fold to. The UI family performs no recognition side effect in either pipeline (a
+  menu registers nothing), so there is none to stage. As with every prep piece before it, nothing
+  further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2299,6 +2351,17 @@ Each phase is a reviewable unit with a clear exit gate.
        always `bare`); see the step's own "landed as" note above. The branch's third alternative (an
        unterminated `<url`) stays literal in both pipelines, and an interior crossing an escaped
        special or a rendered span still defers, each with its own divergence test.
+     - ✅ **prep (`&gt;`-submenu menu form).** The third of that audit's divergences is closed:
+       `menu:View[Zoom > Reset]` is recognized as the same `Ui` node the comma-delimited and
+       bare/single-item forms build, via a new
+       [`menu_match_is_sliceable`](../../parser/src/content/inline_builder/macros/ui.rs) gate that
+       admits one atomic piece – a `&gt;` caret *inside the item list*, which the node consumes as
+       the list's delimiter and neither pipeline emits – applied inside `build_menu_node` exactly as
+       the angle branch moved its own gate; see the step's own "landed as" note above. Any other
+       escaped special, a caret or `&` in the menu *name*, a rendered span, and a synthesized run all
+       still defer, each with its own divergence test. The family's escape check is hoisted ahead of
+       the gate (the `footnoteref:` increment's own fix, for the identical reason), so an escaped
+       macro the gate rejects still drops its backslash.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

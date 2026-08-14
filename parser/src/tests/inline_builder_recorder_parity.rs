@@ -831,15 +831,26 @@ fn shapes_match_across_combined_constructs() {
 
     assert_shapes("Equation stem:[x^2+y^2=z^2] appears in *bold* text with (C) 2024.");
 
+    let with_experimental = || {
+        Parser::default().with_intrinsic_attribute_bool(
+            "experimental",
+            true,
+            ModificationContext::Anywhere,
+        )
+    };
+
     assert_shapes_with(
         "kbd:[Ctrl+Alt+Del] opens the *Task Manager* via menu:File[Save].",
-        || {
-            Parser::default().with_intrinsic_attribute_bool(
-                "experimental",
-                true,
-                ModificationContext::Anywhere,
-            )
-        },
+        with_experimental,
+    );
+
+    // A menu's `&gt;` submenu form: the recorder recovers the submenu path
+    // from the render params it intercepts, so this compares the two
+    // constructions' own splitting of the item list, not just the HTML they
+    // fold to.
+    assert_shapes_with(
+        "Choose menu:View[Zoom > Reset] in the *Task Manager* (C) 2024.",
+        with_experimental,
     );
 
     assert_shapes(

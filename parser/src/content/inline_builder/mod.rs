@@ -710,15 +710,25 @@ mod tests {
         assert_parity("Equation stem:[x^2+y^2=z^2] appears in *bold* text with (C) 2024.");
 
         // UI macros (kbd/menu, gated on `experimental`) beside a quoted span.
+        let with_experimental = || {
+            Parser::default().with_intrinsic_attribute_bool(
+                "experimental",
+                true,
+                ModificationContext::Anywhere,
+            )
+        };
+
         assert_parity_with(
             "kbd:[Ctrl+Alt+Del] opens the *Task Manager* via menu:File[Save].",
-            || {
-                Parser::default().with_intrinsic_attribute_bool(
-                    "experimental",
-                    true,
-                    ModificationContext::Anywhere,
-                )
-            },
+            with_experimental,
+        );
+
+        // A menu's `&gt;` submenu form beside a quoted span and a character
+        // replacement – its caret delimiters are escaped specials, so this
+        // crosses the relaxed gate with the other families live.
+        assert_parity_with(
+            "Choose menu:View[Zoom > Reset] in the *Task Manager* (C) 2024.",
+            with_experimental,
         );
 
         // Several link forms and a cross-reference in one sentence.
