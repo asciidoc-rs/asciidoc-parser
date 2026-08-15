@@ -52,15 +52,15 @@
 //!   [`build_match_string`](quotes::build_match_string) to look inside a
 //!   [`synthesized`](quotes::Piece::synthesized) run instead of treating it as
 //!   opaque; a **macro** needing an honest `'src` slice for its own
-//!   target/attribute list (a link, image, or cross-reference) still defers
-//!   when that slice sits inside one, since a synthesized run's bytes have no
-//!   source counterpart to slice for a type that requires a real `Span` (see
-//!   [`range_is_verbatim`](macros::image::range_is_verbatim)) – but a macro
-//!   needing only its own *text* (no `Span`-typed field) – an anchor's id, a
-//!   bare e-mail address, a UI macro's keys/label/menu path, or an index term's
-//!   shown text – can now be recovered exactly via
-//!   [`text_slice`](quotes::text_slice) or straight out of the match string
-//!   instead (see
+//!   target/attribute list (a link or an image, the two that are left) still
+//!   defers when that slice sits inside one, since a synthesized run's bytes
+//!   have no source counterpart to slice for a type that requires a real `Span`
+//!   (see [`range_is_verbatim`](macros::image::range_is_verbatim)) – but a
+//!   macro needing only its own *text* (no `Span`-typed field) – an anchor's
+//!   id, a bare e-mail address, a UI macro's keys/label/menu path, an index
+//!   term's shown text, or a cross-reference's target and reference text – can
+//!   now be recovered exactly via [`text_slice`](quotes::text_slice) or
+//!   straight out of the match string instead (see
 //!   [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized)).
 //! - [`apply_character_replacements`] recognizes [character replacements] –
 //!   `(C)`, `--`, `...`, arrows, apostrophes, and restored entities – replacing
@@ -115,8 +115,12 @@
 //!   inter-document, and document-as-a-whole target forms in both spellings
 //!   (`xref:id[text]` and `<<id>>` / `<<id,text>>`), and the `xref:` macro's own
 //!   attribute-list text, so what a cross-reference defers is decided entirely
-//!   by the verbatim gate that precedes both builders. A display/reference text
-//!   crossing a rendered span
+//!   by the gate that precedes both builders – and that gate now admits a
+//!   [`synthesized`](quotes::Piece::synthesized) run, since nothing on a
+//!   `Ref{Xref}` node is `Span`-typed (its own attribute list is parsed from a
+//!   normalized copy, never a source slice), so a cross-reference inside an
+//!   expanded attribute value is recognized with its exact target and text.
+//!   A display/reference text crossing a rendered span
 //!   (`link:x[*bold*]`, `xref:id[*bold*]`, `<<id,*bold*>>`) remains deferred for
 //!   every reference-bearing family, since a rendered span is an opaque piece
 //!   the node's single `Text` child cannot absorb without becoming structured
@@ -135,11 +139,12 @@
 //!   Likewise a *concealed* index term (`indexterm:[…]`, `(((…)))`) renders
 //!   nothing, so it too is always recognized; a *visible* term (`indexterm2:[…]`,
 //!   `((term))`) is deferred only when its shown text crosses a rendered span or
-//!   carries an attribute list. The **UI** and **index-term** families share the
-//!   anchor's synthesized-run lift, and for the same reason – neither node
-//!   carries a `Span`-typed field, so a `kbd:`/`btn:`/`menu:` macro or an index
-//!   term inside an expanded attribute value is recognized with its exact text
-//!   (only the node's `location` taking design §4.4's coarse fallback).
+//!   carries an attribute list. The **UI**, **index-term**, and
+//!   **cross-reference** families share the anchor's synthesized-run lift, and
+//!   for the same reason – none of those nodes carries a `Span`-typed field, so
+//!   a `kbd:`/`btn:`/`menu:` macro, an index term, or a cross-reference inside
+//!   an expanded attribute value is recognized with its exact text (only the
+//!   node's `location` taking design §4.4's coarse fallback).
 //! - [`apply_footnotes`] recognizes **footnotes** (`footnote:[…]`,
 //!   `footnote:id[…]`, `footnote:id[]`), replacing each with a
 //!   [`Footnote`](InlineNode::Footnote) node, folding through the shared
@@ -915,6 +920,23 @@ mod tests {
             "The (({product})) index term beside *bold* text and indexterm:[{product}, docs].",
             with_product,
         );
+
+        // Cross-references spliced in by attribute references, in both
+        // spellings and in both halves (target and reference text) – the same
+        // synthesized-run lift, for the family whose attribute list is parsed
+        // from a normalized copy rather than a source slice, so nothing on its
+        // node is `Span`-typed.
+        let with_xref_attributes = || {
+            Parser::default()
+                .with_intrinsic_attribute("id", "install", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("label", "Install Now", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+        };
+
+        assert_parity_with(
+            "See *xref:{id}[{label}]* and <<{id},the {product} steps>> plus a (C) mark.",
+            with_xref_attributes,
+        );
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
@@ -975,6 +997,17 @@ mod tests {
             (
                 "  a ((flow term)) here\n  and a (((c1, c2))) one",
                 "a ((flow term)) here\nand a (((c1, c2))) one",
+            ),
+            // A cross-reference in a wholly-synthesized seed, in both
+            // spellings: nothing on a `Ref{Xref}` node is `Span`-typed, so its
+            // target and reference text come from the match string (or
+            // `text_slice`) rather than an `'src` slice. The link and image
+            // families, which hold a real `Attrlist<'src>`, still defer – see
+            // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
+            // below.
+            (
+                "  see <<target>> and\n  xref:other[the other one]",
+                "see <<target>> and\nxref:other[the other one]",
             ),
         ];
 
@@ -1328,33 +1361,37 @@ mod tests {
         }
     }
 
-    /// A documented divergence, not a bug: a macro family whose recognition
-    /// needs an honest `'src` slice for its own target/id (a link, image, or
-    /// cross-reference) is left unrecognized when the *whole* seed is
-    /// synthesized – the same
+    /// A documented divergence, not a bug: a macro family that holds a real
+    /// [`Attrlist`](crate::attributes::Attrlist)`<'src>` – a link or an image,
+    /// the two that are left – is still unrecognized when the *whole* seed is
+    /// synthesized, because
+    /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) reads its
+    /// `source: Span<'src>`'s bytes as content, not merely as a location tag,
+    /// so a real `'src` slice is not optional there. This is the same
     /// [`range_is_verbatim`](macros::image::range_is_verbatim) boundary that
-    /// already defers a macro *nested inside* an attribute expansion's
-    /// spliced value (see [`apply_attribute_references`]'s own doc comment),
-    /// now reached at the tree's root instead of a nested splice.
+    /// defers those families *nested inside* an attribute expansion's spliced
+    /// value (see [`apply_attribute_references`]'s own doc comment), now
+    /// reached at the tree's root instead of a nested splice.
+    ///
     /// [`build_from_value`] does not lift this boundary: it only unblocks a
-    /// synthesized (filtered/joined multi-line) seed for the steps that
-    /// never needed a verbatim slice in the first place (quotes,
+    /// synthesized (filtered/joined multi-line) seed for the steps and
+    /// families that never needed a verbatim slice in the first place (quotes,
     /// specialcharacters, attribute references, character replacements,
-    /// post-replacement, and a macro family – like a bare `footnote:[…]` –
-    /// whose own content is captured as children rather than a literal
-    /// value). Lifting it for link/image/xref/anchor/index-term targets, so a
-    /// real multi-line block carrying one of those still folds identically
-    /// through `build_from_value`, remains a later increment's job.
+    /// post-replacement, and the anchor / bare-e-mail / UI / index-term /
+    /// cross-reference families, each of which computes every value it holds
+    /// from the match string or [`text_slice`](quotes::text_slice) – all
+    /// exercised by the parity sweep above). Lifting it for a link's or an
+    /// image's own target remains a later increment's job.
     #[test]
     fn a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized() {
-        let filtered = "see <<target>> here";
-        let source = "  see <<target>> here";
+        let filtered = "see link:https://example.org[Example] here";
+        let source = "  see link:https://example.org[Example] here";
 
         let golden_parser = Parser::default();
         let golden = golden(filtered, &golden_parser);
         assert!(
-            golden.contains("href=\"#target\""),
-            "golden fixture stopped recognizing the xref: {golden:?}"
+            golden.contains(r#"href="https://example.org""#),
+            "golden fixture stopped recognizing the link: {golden:?}"
         );
 
         let built_parser = Parser::default();
@@ -1371,6 +1408,6 @@ mod tests {
             "expected the documented divergence to still reproduce; the boundary may have \
              been lifted – if so, fold this fixture back into the parity sweep above"
         );
-        assert_eq!(built, "see &lt;&lt;target&gt;&gt; here");
+        assert_eq!(built, "see link:https://example.org[Example] here");
     }
 }

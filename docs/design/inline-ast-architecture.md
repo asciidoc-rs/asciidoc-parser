@@ -2453,6 +2453,56 @@ Each phase is a reviewable unit with a clear exit gate.
   divergence tests pinned are gone and no new one appeared. As with every prep piece before it,
   nothing further is wired in.
 
+  *Step 6 prep landed as (cross-references inside an expanded attribute value, closing the third
+  family of that same divergence):* the increment directly above closed "a macro inside an expanded
+  attribute value" for the two families whose nodes carry no `Span`-typed field, and named the
+  families that hold an [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` "or another
+  `Span`-typed field (image, link, cross-reference)" as still deferring. Auditing that grouping
+  found the **cross-reference** family does not belong in it: a
+  [`Ref`](../../parser/src/inlines/ref_node.rs)`{Xref}` node is built with `attrs: None` in both
+  spellings, because the `xref:` macro's own attribute-list text is parsed from a *newline-normalized
+  copy* rather than a source slice
+  ([`xref_macro_text`](../../parser/src/content/inline_builder/macros/xref.rs), mirroring
+  `InlineXrefReplacer`, which parses that same copy) – and every other value the node holds is a
+  computed `String` or a display text. So the family needs no honest `'src` slice at all, and the
+  same lift the anchor, bare-e-mail, UI, and index-term families made applies to it unchanged.
+
+  As with those, the change is **one gate per family**:
+  [`find_xref_matches`](../../parser/src/content/inline_builder/macros/xref.rs) swaps
+  [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) for
+  [`range_is_verbatim_or_synthesized`](../../parser/src/content/inline_builder/macros/image.rs), and
+  the two builders read what used to come from an `'src` slice out of the level's **match string**
+  instead – which carries a [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run's
+  bytes exactly, and is the very text the string replacer's own `inner.split_once(',')` /
+  `raw_text.contains('=')` see. `build_xref_shorthand_node` splits the shorthand's inner on the match
+  string rather than on the inner's source slice, and both builders take a display text's value from
+  the match string when it crosses a synthesized run while still *borrowing* it from `'src`
+  (via the location `source_slice` gives) when it does not, so the common case allocates nothing
+  (§4.5). Only the node's `location` (and its children's) takes §4.4's coarse enclosing-span
+  fallback; every value is exact.
+  Every other boundary the family draws is untouched: an [`atomic`](../../parser/src/content/inline_builder/quotes.rs)
+  piece – an escaped special, a rendered span, or an expanded value's own unescaped `<` (a
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf, §3.4.1) – still defers, each with its own
+  divergence test, and the string pipeline's own `id.contains('<')` guard leaves that last one
+  literal too, so the two agree.
+
+  Differential corpora drive both spellings' expanded-value forms – an expanded id, reference text,
+  attribute-list text, and inter-document target; an expanded shorthand id and trimmed reference
+  text; a present-but-empty text behind an expanded id; a cross-reference inside a rendered span –
+  through the real, public `SubstitutionGroup::Normal::apply` as the golden, since these need the
+  `AttributeReferences` step the family-scoped `golden_xref_with` helper deliberately omits.
+  Structural tests pin the exact-value/coarse-location split for both spellings; a whole-document
+  test drives the real parse path end to end; and fixtures are added to the whole-pipeline
+  combined-constructs corpus and to the structural recorder cross-check. The wholly-synthesized
+  **seed** path ([`build_from_value`](../../parser/src/content/inline_builder/mod.rs)) gains
+  cross-reference fixtures too, and the test that pinned that path's deferral – which used an
+  `<<target>>` fixture – now pins it with a `link:` macro, the family for which
+  [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs) genuinely does read its `source:
+  Span<'src>`'s bytes as content, so a real `'src` slice is not optional. Re-running the corpus-wide
+  fold-parity audit (tree building forced on for every parse in the suite) confirms the divergence
+  set strictly **shrank**: four whole-corpus sources are gone and no new one appeared. As with every
+  prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2678,6 +2728,15 @@ Each phase is a reviewable unit with a clear exit gate.
        The families that carry an [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` or
        another `Span`-typed field (image, link, cross-reference) still defer here, so that half of
        the map item remains open.
+     - ✅ **prep (cross-references inside an expanded value).** The same map item, closed for a
+       third family: a `Ref{Xref}` node is built with `attrs: None` in both spellings – the `xref:`
+       macro's own attribute list is parsed from a newline-normalized *copy*, not a source slice –
+       so the cross-reference family never needed an honest `'src` slice either, and
+       [`find_xref_matches`](../../parser/src/content/inline_builder/macros/xref.rs) makes the same
+       one-gate swap to `range_is_verbatim_or_synthesized`, reading its target and reference text
+       out of the match string and through `text_slice`; see the step's own "landed as" note above.
+       The `Attrlist<'src>`-bearing families (image, link) still defer, so that last part of the map
+       item remains open.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
