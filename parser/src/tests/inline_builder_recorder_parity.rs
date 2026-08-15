@@ -918,4 +918,26 @@ fn shapes_match_across_combined_constructs() {
         "[[[gof]]] An entry with an https://example.org link.",
         in_bibliography_list_item,
     );
+
+    // A UI macro and an index term spliced in by attribute references. The
+    // recorder has always recovered these (it reads the string pipeline's own
+    // render params, and the pipeline expands the reference before matching);
+    // the builder now recognizes them too, so the two constructions'
+    // *structures* – not just the HTML they fold to – can finally be compared
+    // for this shape.
+    assert_shapes_with(
+        "Press kbd:[{key}] then choose menu:{view}[Zoom > Reset] in *{product}*.",
+        || {
+            Parser::default()
+                .with_intrinsic_attribute_bool("experimental", true, ModificationContext::Anywhere)
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("view", "View", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("key", "Ctrl+T", ModificationContext::Anywhere)
+        },
+    );
+
+    assert_shapes_with(
+        "The (({product})) index term beside *bold* text and indexterm:[{product}, docs].",
+        with_product,
+    );
 }

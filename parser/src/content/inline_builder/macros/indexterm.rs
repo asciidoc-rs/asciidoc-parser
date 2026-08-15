@@ -6,9 +6,7 @@ use crate::{
     Span,
     content::{
         INLINE_INDEXTERM,
-        inline_builder::quotes::{
-            Piece, SPAN_PLACEHOLDER, build_match_string, range_overlaps_synthesized, source_slice,
-        },
+        inline_builder::quotes::{Piece, SPAN_PLACEHOLDER, build_match_string, source_slice},
         normalize_index_text, strip_see_and_seealso,
     },
     inlines::{IndexTerm, InlineNode},
@@ -144,6 +142,15 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// term), is **deferred** – the match is left as literal source for a later
 /// increment, each pinned by a divergence test.
 ///
+/// A term crossing a [`synthesized`](Piece::synthesized) run (an attribute
+/// expansion, or – reached at a tree's root – a filtered multi-line block's
+/// own joined seed) is **not** deferred. The match string carries such a run's
+/// bytes exactly, and this family reads its term from nowhere else – it never
+/// slices `'src`, and an [`IndexTerm`] node carries no `Span`-typed field – so
+/// the shown text is recovered precisely; only the node's `location` takes
+/// design §4.4's coarse fallback. This is the same lift the anchor and
+/// bare-e-mail families already made, for the same reason.
+///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect; the string replacer records nothing in a catalog either (the HTML
 /// backend generates no index), so there is none to skip here.
@@ -242,10 +249,11 @@ fn build_indexterm_macro_match<'src>(
     let (node, rendered_nonempty) = if is_visible {
         // A visible flow term crossing an opaque span cannot be reconstructed
         // from this level's escaped string (a span is a placeholder here, not
-        // its markup), so it is deferred; one crossing a synthesized run (an
-        // attribute expansion) is deferred too – design §3.4.1 leaves a macro
-        // *inside* such a run for a later increment.
-        if arg.contains(SPAN_PLACEHOLDER) || range_overlaps_synthesized(pieces, &full) {
+        // its markup), so it is deferred. A term crossing a
+        // [`synthesized`](Piece::synthesized) run is *not*: the match string
+        // carries such a run's bytes exactly, which is the only thing this
+        // family ever reads a term from (see [`find_indexterm_matches`]).
+        if arg.contains(SPAN_PLACEHOLDER) {
             return None;
         }
 
@@ -375,10 +383,10 @@ fn build_indexterm_shorthand_match<'src>(
 
     let (node, rendered_nonempty) = if visible {
         // A visible term crossing an opaque span cannot be reconstructed from
-        // the escaped string; defer it (see [`find_indexterm_matches`]), and
-        // likewise for one crossing a synthesized run (see the macro form's
-        // own check above).
-        if term_src.contains(SPAN_PLACEHOLDER) || range_overlaps_synthesized(pieces, &full) {
+        // the escaped string; defer it (see [`find_indexterm_matches`]). One
+        // crossing a synthesized run is recognized, exactly as in the macro
+        // form's own check above.
+        if term_src.contains(SPAN_PLACEHOLDER) {
             return None;
         }
 
@@ -750,21 +758,68 @@ mod tests {
     }
 
     #[test]
-    fn a_visible_term_inside_an_expanded_value_is_a_documented_divergence() {
-        // A visible term whose shown text crosses a *synthesized* run (an
-        // attribute expansion) cannot be reconstructed from this level's
-        // escaped match string any more honestly than one crossing a rendered
-        // span can – its bytes have no source counterpart of their own – so
-        // `range_overlaps_synthesized` defers it too, the same boundary every
-        // other macro family draws around a synthesized run (see
-        // `attribute_refs::apply_attribute_references`'s own doc comment).
-        // Unlike a *character replacement* inside such a run – recognized as
-        // of this increment, since its leaf needs no `'src` slice of its own –
-        // an index term's macro-family recognition is still deferred.
+    fn fold_matches_the_string_pipeline_for_index_terms_inside_expanded_values() {
+        // A term whose shown text crosses a *synthesized* run (an attribute
+        // expansion) is now recognized: this family reads a term from the
+        // match string alone – which carries such a run's bytes exactly – and
+        // an [`IndexTerm`] node carries no `Span`-typed field, so nothing on
+        // it needs an `'src` slice. The same lift the anchor and bare-e-mail
+        // families already made; it closes the two divergences
+        // `a_visible_term_inside_an_expanded_value_is_a_documented_divergence`
+        // and its `indexterm2:` twin used to pin.
         use crate::{
             Parser,
             content::{Content, SubstitutionGroup, inline_builder::build},
             parser::{HtmlSubstitutionRenderer, ModificationContext},
+        };
+
+        let parser = Parser::default()
+            .with_intrinsic_attribute("term", "coffee", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("second", "brewing", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("shorthand", "((tea))", ModificationContext::Anywhere);
+
+        let fixtures = [
+            // The visible shorthand and macro spellings, whole and partial.
+            "x (({term})) y",
+            "x ((hot {term})) y",
+            "x indexterm2:[{term}] y",
+            "x indexterm2:[hot {term}] y",
+            // The concealed spellings (always recognized, but now over an
+            // expanded value too).
+            "x ((({term}, {second}))) y",
+            "x indexterm:[{term}, {second}] y",
+            // The whole construct arriving from an expanded value.
+            "x {shorthand} y",
+            // A kept literal parenthesis beside an expanded term.
+            "x (((({term}))) y",
+        ];
+
+        for source in fixtures {
+            let nodes = build(Span::new(source), &parser, None);
+
+            let mut golden = Content::from(Span::new(source));
+            SubstitutionGroup::Normal.apply(&mut golden, &parser, None);
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    &nodes,
+                    &HtmlSubstitutionRenderer {},
+                    &parser
+                ),
+                golden.rendered_str(),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_term_inside_an_expanded_value_keeps_a_coarse_location() {
+        // The shown term is exact – and necessarily owned, since an expanded
+        // value's bytes have no `'src` counterpart – while the node's
+        // `location` falls back to the whole match's source span (design
+        // §4.4), exactly as an anchor's does.
+        use crate::{
+            Parser, content::inline_builder::build, parser::ModificationContext, strings::CowStr,
         };
 
         let parser = Parser::default().with_intrinsic_attribute(
@@ -776,68 +831,22 @@ mod tests {
         let source = "x (({term})) y";
         let nodes = build(Span::new(source), &parser, None);
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::IndexTerm(_))),
-            "a term crossing a synthesized run must be left unrecognized: {nodes:?}"
-        );
+        let term = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::IndexTerm(term) => Some(term),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected an IndexTerm node: {nodes:?}"));
 
-        // The string pipeline, by contrast, recognizes it (the attribute
-        // expands before the index-term shorthand is matched), showing the
-        // term text in place of the whole shorthand.
-        let mut golden = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut golden, &parser, None);
+        assert!(term.visible);
+        assert_eq!(term.terms.len(), 1);
+        assert_eq!(term.terms[0].as_ref(), "coffee");
+        assert!(matches!(term.terms[0], CowStr::Boxed(_)), "{term:?}");
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        assert_eq!(folded, "x ((coffee)) y", "builder output for {source:?}");
-        assert_eq!(
-            golden.rendered_str(),
-            "x coffee y",
-            "golden output for {source:?}"
-        );
-        assert_ne!(folded, golden.rendered_str());
-    }
-
-    #[test]
-    fn a_visible_macro_term_inside_an_expanded_value_is_a_documented_divergence() {
-        // The same boundary as
-        // `a_visible_term_inside_an_expanded_value_is_a_documented_divergence`,
-        // for the `indexterm2:[…]` *macro* spelling – its own, separate
-        // `range_overlaps_synthesized` call site in
-        // `build_indexterm_macro_match`.
-        use crate::{
-            Parser,
-            content::{Content, SubstitutionGroup, inline_builder::build},
-            parser::{HtmlSubstitutionRenderer, ModificationContext},
-        };
-
-        let parser = Parser::default().with_intrinsic_attribute(
-            "term",
-            "coffee",
-            ModificationContext::Anywhere,
-        );
-
-        let source = "x indexterm2:[{term}] y";
-        let nodes = build(Span::new(source), &parser, None);
-
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::IndexTerm(_))),
-            "a macro term crossing a synthesized run must be left unrecognized: {nodes:?}"
-        );
-
-        let mut golden = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut golden, &parser, None);
-
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        assert_eq!(
-            folded, "x indexterm2:[coffee] y",
-            "builder output for {source:?}"
-        );
-        assert_eq!(
-            golden.rendered_str(),
-            "x coffee y",
-            "golden output for {source:?}"
-        );
-        assert_ne!(folded, golden.rendered_str());
+        assert_eq!(term.location.data(), "(({term}))");
+        assert_eq!(term.location.line(), 1);
+        assert_eq!(term.location.col(), 3);
     }
 
     #[test]
