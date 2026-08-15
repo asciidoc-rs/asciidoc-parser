@@ -103,8 +103,8 @@ pub(super) fn xref_macros_level<'src>(
 
 /// Finds every recognized cross-reference at this level – the `xref:` macro
 /// form and the `<<id>>` shorthand – skipping any match that is not verbatim
-/// enough to slice from `'src` or that this increment defers (see
-/// [`build_xref_node`] and [`build_xref_shorthand_node`]).
+/// enough to slice from `'src`. That gate is now the family's *only* deferral:
+/// both builders claim every target and text shape a verbatim match can carry.
 fn find_xref_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -156,25 +156,21 @@ fn find_xref_matches<'src>(
             continue;
         }
 
+        // Both builders claim every shape they are handed, so a verbatim match
+        // always yields a node: what a cross-reference *defers* is decided by
+        // the verbatim gate above, not by the builders.
         let node = match &shorthand_inner {
             Some(inner) => build_xref_shorthand_node(inner.clone(), &full, pieces, root, parser),
             None => build_xref_node(&caps, &full, pieces, root, parser),
         };
 
-        match node {
-            Some(node) => matches.push(MacroMatch {
-                kind: MacroMatchKind::Node {
-                    consumed: full.clone(),
-                    node: Box::new(node),
-                },
-                full,
-            }),
-
-            // A form this increment defers (an attribute-list-in-text macro or
-            // a degenerate shorthand – see the two builders) is left as
-            // literal source for a later increment.
-            None => continue,
-        }
+        matches.push(MacroMatch {
+            kind: MacroMatchKind::Node {
+                consumed: full.clone(),
+                node: Box::new(node),
+            },
+            full,
+        });
     }
 
     matches
@@ -182,8 +178,7 @@ fn find_xref_matches<'src>(
 
 /// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a verbatim `xref:`
 /// macro match, computing the target and display text exactly as the string
-/// replacer does so the fold reproduces the same bytes. Returns `None` for a
-/// form this increment defers.
+/// replacer does so the fold reproduces the same bytes.
 ///
 /// The scope this builder claims is every macro-form target, including a text
 /// carrying an attribute list; the `<<id>>` shorthand is built by
@@ -213,10 +208,13 @@ fn build_xref_node<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
-) -> Option<InlineNode<'src>> {
-    // Group 3 is the `xref:` macro target; when it is absent the match is the
-    // shorthand form, which this increment defers.
-    let raw_target = caps.get(3)?.as_str();
+) -> InlineNode<'src> {
+    // Group 3 is the `xref:` macro target. It always participates here: the
+    // pattern's two branches are mutually exclusive, and the caller routes a
+    // match whose group 2 (the shorthand's inner) participated to
+    // [`build_xref_shorthand_node`] instead.
+    #[allow(clippy::unwrap_used)]
+    let raw_target = caps.get(3).unwrap().as_str();
 
     let (target, derived) = xref_target_and_derived(raw_target, true, parser);
 
@@ -226,7 +224,7 @@ fn build_xref_node<'src>(
 
     let location = source_slice(pieces, full.clone(), root);
 
-    Some(InlineNode::Ref(Ref {
+    InlineNode::Ref(Ref {
         variant: RefVariant::Xref,
         target: CowStr::from(target),
         children,
@@ -237,7 +235,7 @@ fn build_xref_node<'src>(
         xrefstyle,
         attrs: None,
         location,
-    }))
+    })
 }
 
 /// Interprets the bracketed display text of an `xref:` macro, mirroring
@@ -368,32 +366,33 @@ fn plain_xref_text<'src>(
 /// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a `<<id>>` shorthand
 /// cross-reference, computing the target and display text exactly as the string
 /// replacer's shorthand branch does so the fold reproduces the same bytes.
-/// Returns `None` for a form this increment defers.
 ///
 /// `inner` is the shorthand's inner text (`INLINE_XREF` group 2) in
 /// match-string coordinates; the caller guarantees it is verbatim, so its
 /// match-string bytes coincide with source. It is split on the first `,` into
 /// an id and an optional reference text, each trimmed – mirroring the string
 /// replacer's `inner.split_once(',')` with `id.trim()` / `text.trim()`. The
-/// reference text becomes the node's single [`Text`](InlineNode::Text) child
-/// (an empty text yields no children, which the fold reads as "no text
-/// provided" – the bracketed `[id]` fallback), and the whole `<<…>>` – its
-/// `CharRef` delimiters included – is the node's `location`.
+/// reference text becomes the node's single [`Text`](InlineNode::Text) child,
+/// and the whole `<<…>>` – its `CharRef` delimiters included – is the node's
+/// `location`.
 ///
-/// The scope this builder claims is every shorthand target *except* one whose
-/// reference text is present but empty. A same-document shorthand
-/// (`<<install>>`) resolves through the catalog later (`derived: None`); an
-/// inter-document shorthand (`<<other#frag>>`) and the document-as-a-whole
-/// shorthand (`<<>>`, an empty id) both carry a destination *derived* from the
-/// target itself, computed by [`xref_target_and_derived`] exactly as the macro
-/// form's – so this builder no longer defers any target shape. One form
-/// remains deferred, left as literal source for a later increment and pinned
-/// by a divergence test:
+/// **A comma is what makes a text *present*, not what it contains.** The
+/// string replacer's own split records `<<id,>>` (and `<<id,   >>`) as a
+/// *present-but-empty* text – `Some("")`, which renders an empty `<a>…</a>`
+/// rather than the bracketed `[id]` fallback `None` renders – so a shorthand
+/// carrying a comma always builds exactly one `Text` child, empty value and
+/// all (a zero-length `'src` borrow at the position the trim left). The fold
+/// keys "was a text provided?" on the *presence* of a child rather than on
+/// what it folds to, so the two cases stay distinct end to end; see
+/// [`fold_xref`](super::super::fold). A shorthand with no comma keeps an empty
+/// child vector, which the fold reads as "no text provided".
 ///
-/// - a **`<<id,>>` with an empty reference text**: the string replacer records
-///   this as a *present-but-empty* text (rendering an empty `<a>…</a>`), which
-///   an empty child vector cannot distinguish from "no text provided" – so the
-///   whole shorthand is deferred rather than rendered with the wrong fallback.
+/// The scope this builder claims is every shorthand target. A same-document
+/// shorthand (`<<install>>`) resolves through the catalog later (`derived:
+/// None`); an inter-document shorthand (`<<other#frag>>`) and the
+/// document-as-a-whole shorthand (`<<>>`, an empty id) both carry a
+/// destination *derived* from the target itself, computed by
+/// [`xref_target_and_derived`] exactly as the macro form's.
 ///
 /// A shorthand whose id already carries a rendered `<` (an earlier-substituted
 /// macro, e.g. `<<link:https://example.com[], Example>>`) – which the string
@@ -410,7 +409,7 @@ fn build_xref_shorthand_node<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
-) -> Option<InlineNode<'src>> {
+) -> InlineNode<'src> {
     // The inner is verbatim (the caller checked), so its source slice's bytes
     // coincide with the match string's – a byte offset within `inner_data` maps
     // to a match-string offset by adding `inner.start`.
@@ -436,15 +435,10 @@ fn build_xref_shorthand_node<'src>(
             let raw_text = &inner_data[index + 1..];
             let trimmed = raw_text.trim();
 
-            // A `<<id,>>` with an empty (or whitespace-only) reference text is a
-            // present-but-empty text the node cannot represent (see the doc
-            // comment); defer the whole shorthand.
-            if trimmed.is_empty() {
-                return None;
-            }
-
             // Locate the trimmed reference text at its source. It is verbatim, so
-            // the `Text` child borrows the very bytes its location covers.
+            // the `Text` child borrows the very bytes its location covers – a
+            // zero-length borrow when the text is empty (or whitespace-only),
+            // which is the present-but-empty text the doc comment describes.
             let lead = raw_text.len() - raw_text.trim_start().len();
 
             let text_start = inner.start + index + 1 + lead;
@@ -457,7 +451,7 @@ fn build_xref_shorthand_node<'src>(
         }
     };
 
-    Some(InlineNode::Ref(Ref {
+    InlineNode::Ref(Ref {
         variant: RefVariant::Xref,
         target: CowStr::from(target),
         children,
@@ -468,7 +462,7 @@ fn build_xref_shorthand_node<'src>(
         xrefstyle: None,
         attrs: None,
         location,
-    }))
+    })
 }
 
 #[cfg(test)]
@@ -586,6 +580,16 @@ mod tests {
             "<<a.b.c>>",
             // The id and reference text are each trimmed around the comma.
             "<< spaced , Trimmed Text >>",
+            // A *present-but-empty* reference text: the comma makes the text
+            // present, so this renders an empty `<a>…</a>` rather than the
+            // bracketed `[id]` fallback a comma-less shorthand renders. A
+            // whitespace-only text trims to the same thing.
+            "<<install,>>",
+            "<<install,   >>",
+            // The same, with a target carrying its own derived destination
+            // (the branch of `render_xref` an empty text reaches differently
+            // from the unresolved one).
+            "<<other#frag,>>",
             // An inter-document shorthand – with and without a fragment – and
             // the document-as-a-whole shorthand (an empty id).
             "<<other#frag,Elsewhere>>",
@@ -859,24 +863,104 @@ mod tests {
     }
 
     #[test]
-    fn an_xref_shorthand_with_empty_text_is_a_documented_divergence() {
+    fn an_xref_shorthand_with_an_empty_text_keeps_it_present() {
         // `<<id,>>` records a *present-but-empty* reference text: the string
-        // replacer renders an empty `<a href="#id"></a>`, whereas an empty child
-        // vector is indistinguishable from "no text provided" (the `[id]`
-        // fallback). The builder cannot represent the distinction, so it defers
-        // the whole shorthand (left literal).
+        // replacer renders an empty `<a href="#install"></a>`, not the
+        // bracketed `[install]` fallback a comma-less shorthand renders. The
+        // node keeps the distinction structurally – the text is present as one
+        // empty `Text` child – so the fold reproduces the same bytes.
         let source = "<<install,>>";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a shorthand with an empty text must be left unrecognized: {nodes:?}"
-        );
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(reference.children.len(), 1);
+        assert_text(&reference.children[0], "", 1, 11);
 
-        // The string pipeline builds an anchor with an empty body, which the
-        // bracketed fallback the builder would produce does not match.
-        assert!(golden_xref(source).contains(r##"href="#install">"##));
-        assert!(!golden_xref(source).contains("[install]"));
+        let golden = golden_xref(source);
+        assert!(golden.contains(r##"href="#install">"##), "{golden}");
+        assert!(!golden.contains("[install]"), "{golden}");
+        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), golden);
+    }
+
+    #[test]
+    fn an_xref_shorthand_without_a_comma_provides_no_text() {
+        // The complement of the test above, and what makes the empty `Text`
+        // child load-bearing rather than noise: with no comma there is no text
+        // to provide, so the node carries *no* child and the fold renders the
+        // bracketed fallback. Both shorthands fold to an `<a>` element; only
+        // the presence of a child tells the two bodies apart.
+        let source = "<<install>>";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_xref(&nodes[0]);
+        assert!(reference.children.is_empty());
+
+        assert!(golden_xref(source).contains("[install]"));
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
+    }
+
+    #[test]
+    fn a_real_documents_empty_shorthand_text_reaches_its_tree() {
+        // End-to-end, through the real parse path, and with the reference
+        // *resolved*: this is the shape that makes the form a blocker for the
+        // authoritative fold rather than an unclaimed one – a golden test
+        // already exercises it (`xref_should_use_title_of_target_as_link_text_
+        // when_explicit_link_text_is_empty` in `tests/asciidoctor_rb/
+        // links_test.rs`, design §5.3's oracle). Resolution reaches the node
+        // too: the positional mirror skips a list whose node count diverges
+        // from the string pipeline's deferred segments, so leaving the
+        // shorthand unrecognized used to cost the whole content its resolved
+        // destinations.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default()
+            .with_inline_tree(true)
+            .parse("<<tigers,>>\n\n[#tigers]\n== Tigers");
+
+        let blocks: Vec<_> = doc.descendant_blocks().collect();
+        let rendered = blocks[0].rendered_html_content().unwrap();
+        let inlines = blocks[0].inlines().unwrap();
+
+        // The empty explicit text falls back to the target's own reference
+        // text, exactly as Asciidoctor's resolved branch does.
+        assert_eq!(rendered, r##"<a href="#tigers">Tigers</a>"##);
+
+        let reference = assert_xref(&inlines[0]);
+        assert_eq!(reference.children.len(), 1);
+        assert!(reference.resolved.is_some(), "{reference:?}");
+
+        assert_eq!(
+            super::super::super::fold_html(
+                inlines,
+                &HtmlSubstitutionRenderer {},
+                &Parser::default()
+            ),
+            rendered,
+            "fold diverged from the rendered string for {inlines:?}"
+        );
+    }
+
+    #[test]
+    fn a_whitespace_only_xref_shorthand_text_trims_to_an_empty_present_text() {
+        // The reference text is trimmed exactly as the string replacer trims
+        // it, so a whitespace-only text is the same present-but-empty text –
+        // its zero-length span sitting where the trim left it, after the
+        // leading whitespace.
+        let source = "<<install,   >>";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.children.len(), 1);
+        assert_text(&reference.children[0], "", 1, 14);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
     }
 
     #[test]

@@ -2345,6 +2345,66 @@ Each phase is a reviewable unit with a clear exit gate.
   whole-pipeline combined-constructs corpus; and a whole-document test drives the real parse path
   end to end. As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (`<<id,>>`'s present-but-empty reference text, the sixth of that map's
+  divergences – and its fourth real blocker):* the builder now recognizes the one cross-reference
+  form it still deferred, closing out the `Ref{Xref}` family. A shorthand's reference text is made
+  *present* by its **comma**, not by what follows it: `InlineXrefReplacer`'s own
+  `inner.split_once(',')` records `<<id,>>` (and `<<id,   >>`) as `Some("")`, which renders an
+  empty `<a href="#id"></a>`, where a comma-less `<<id>>` records `None` and falls back to the
+  target's own reference text (or a bracketed `[id]` when it resolves to none). Like `hardbreaks`,
+  the unescaped-specials classification, and the `attribute-missing` drop modes before it, this is
+  a **blocker** rather than an unclaimed form: a golden test already exercises it
+  (`xref_should_use_title_of_target_as_link_text_when_explicit_link_text_is_empty` in
+  `tests/asciidoctor_rb/links_test.rs`, design §5.3's oracle), so an authoritative fold over a tree
+  that left the shorthand literal would silently regress it.
+
+  What had blocked it was the *representation*, not the recognition, and closing it needed no new
+  node field. The step-3b note reads "an empty child vector cannot distinguish a present-but-empty
+  text from no text provided" – true, but the distinction was never the *vector's* to carry:
+  [`build_xref_shorthand_node`](../../parser/src/content/inline_builder/macros/xref.rs) now builds
+  exactly one [`Text`](../../parser/src/inlines/inline_node.rs) child whenever the shorthand carries
+  a comma, empty value and all (a zero-length `'src` borrow where the trim left it, so even the
+  degenerate case keeps an honest span), and
+  [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) keys `XrefRenderParams::provided_text`
+  on the **presence of a child** rather than on the bytes the children fold to. Every text the
+  builder recognizes is baked into exactly one child, so the two cases cannot collide – the
+  `xref:` macro form's own empty text (`xref:id[]`, and an attribute list whose positional value is
+  absent or empty) records `None` in the string replacer too, and correspondingly builds no child.
+  With this the shorthand builder is **total**: what a cross-reference defers is now decided
+  entirely by the verbatim gate that precedes both builders, so the family's own
+  `Option`-returning "this increment defers" machinery is removed rather than left as an
+  unreachable branch.
+
+  That representation has one invariant to keep, and it is the one thing outside the family this
+  step touched: an empty `Text` node must survive the steps that walk one. Both splitters in
+  [`special_chars`](../../parser/src/content/inline_builder/special_chars.rs) deliberately never
+  emit an empty run (there is nothing in one to escape), so splitting an empty node *deletes* it –
+  which is exactly what happened to a shorthand recognized under an effective order that omits
+  `specialcharacters` and therefore ends in
+  [`classify_unescaped_specials`](../../parser/src/content/inline_builder/special_chars.rs) (a
+  `subs=macros` block whose source spells the delimiters out as `&lt;&lt;install,&gt;&gt;`, which
+  the string pipeline matches as written). [`split_text`](../../parser/src/content/inline_builder/special_chars.rs)
+  now keeps an empty value as the node it already is. The one place an empty `Text` is *not*
+  wanted is the tree's root seed for empty content, where it would be a leaf carrying nothing for
+  every consumer to skip; [`build_for_group`](../../parser/src/content/inline_builder/mod.rs) now
+  declines to seed one at all, which also makes the empty-content tree the same (`[]`) under every
+  group rather than only under those that ran a splitting step.
+
+  A differential corpus extends the existing xref fixtures with both spellings of the empty text
+  (bare and whitespace-only) and one over a *derived* destination – `render_xref`'s
+  `(None, Some(derived))` branch, which unlike the resolved branch renders `Some("")` as an empty
+  body rather than falling back – alongside structural tests pinning the empty child's own
+  zero-length span, its absence for a comma-less shorthand, and the classification fixture above;
+  fixtures are added to the whole-pipeline combined-constructs corpus, the broad general-purpose
+  sweep, and the structural recorder cross-check. A whole-document test drives the real parse path
+  end to end on the golden test's own shape, where the reference **resolves**: reaching resolution
+  is itself part of the fix, since the positional mirror
+  ([`mirror_tree_xref_resolution`](../../parser/src/content/content.rs)) skips a list whose node
+  count diverges from the string pipeline's deferred segments, so an unrecognized shorthand used to
+  cost its whole content the resolved destinations. The [`Ref::children`](../../parser/src/inlines/ref_node.rs)
+  field docs record the distinction for a tree consumer. As with every prep piece before it,
+  nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2542,6 +2602,19 @@ Each phase is a reviewable unit with a clear exit gate.
        straddling a line break disables the drop for the whole content (its interior newlines are
        hidden behind one placeholder), with its own divergence test; the `drop-line` diagnostic is
        deferred to the cutover like every other family's warning.
+     - ✅ **prep (`<<id,>>`'s present-but-empty text).** The sixth of that audit's divergences is
+       closed – a **blocker** like the three before it, since a golden test exercises it – and with
+       it the `Ref{Xref}` family: a shorthand's comma is what makes its reference text *present*,
+       so [`build_xref_shorthand_node`](../../parser/src/content/inline_builder/macros/xref.rs)
+       always builds one [`Text`](../../parser/src/inlines/inline_node.rs) child for a
+       comma-carrying shorthand (empty value and all) and
+       [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) keys `provided_text` on that
+       child's *presence* rather than on what it folds to – no new node field, and the family's
+       "this increment defers" machinery removed, its verbatim gate now the only deferral. Keeping
+       the marker alive made [`split_text`](../../parser/src/content/inline_builder/special_chars.rs)
+       preserve an empty `Text` node instead of splitting it away to nothing, and
+       [`build_for_group`](../../parser/src/content/inline_builder/mod.rs) stop seeding one for
+       empty content. See the step's own "landed as" note above.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

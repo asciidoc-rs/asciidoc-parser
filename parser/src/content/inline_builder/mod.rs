@@ -405,7 +405,13 @@ pub(crate) fn build_from_value<'src>(
 /// A group whose steps are empty ([`Pass`](SubstitutionGroup::Pass) /
 /// [`None`](SubstitutionGroup::None), or an empty custom list) yields the
 /// untouched seed: a single [`Text`](InlineNode::Text) node holding `value`,
-/// exactly as the string pipeline leaves such content's text unchanged.
+/// exactly as the string pipeline leaves such content's text unchanged. Empty
+/// content is seeded with **no** node at all rather than an empty one: a leaf
+/// carrying nothing is not something a consumer should have to skip, and the
+/// steps would have nothing to do with it anyway. (The distinction matters
+/// because an empty `Text` node *elsewhere* in the tree is meaningful – a
+/// `<<id,>>` cross-reference's present-but-empty reference text is exactly one
+/// – so the steps themselves preserve one where they find it.)
 pub(crate) fn build_for_group<'src>(
     group: &SubstitutionGroup,
     value: CowStr<'src>,
@@ -414,6 +420,10 @@ pub(crate) fn build_for_group<'src>(
     attrlist: Option<&Attrlist<'src>>,
 ) -> Vec<InlineNode<'src>> {
     let steps = group.steps();
+
+    if value.is_empty() {
+        return vec![];
+    }
 
     let mut nodes = vec![InlineNode::Text { value, location }];
 
@@ -656,7 +666,7 @@ mod tests {
             "visit https://example.org/path?q=1 now",
             "image:a.png[An image with spaces,role=thumb]",
             "before image:b.svg[Vector] after",
-            "<<a>> and <<b>> and <<c,C text>>",
+            "<<a>> and <<b>> and <<c,C text>> and <<d,>>",
             "a ((flow term)) and (((c1, c2, c3))) end",
             "indexterm:[primary, secondary]",
             "indexterm2:[shown]",
@@ -735,6 +745,15 @@ mod tests {
         assert_parity(
             "Visit https://example.org[the site] or mailto:a@example.org[email us], \
              then see <<conclusion,the conclusion>>.",
+        );
+
+        // Both shorthand cross-reference bodies in one sentence – a
+        // present-but-empty reference text (`<<id,>>`, an empty `<a>…</a>`)
+        // beside one with no text at all (`<<id>>`, the bracketed fallback) –
+        // with the other families live around them.
+        assert_parity_with(
+            "See <<intro,>> and <<intro>> about *{product}*, or <<intro,the intro>>.",
+            with_product,
         );
 
         // All three link-recognizing passes in one sentence, the bare address
@@ -1237,6 +1256,15 @@ mod tests {
                 // so these pin that the classification does not perturb (or
                 // depend on) recognition.
                 "<<tigers>> stays literal",
+                // The converse: a source-written `&lt;&lt;…&gt;&gt;` *is* the
+                // shorthand's escaped spelling, so the group that runs
+                // `macros` recognizes it (the string pipeline matches the very
+                // bytes the author wrote). Its present-but-empty reference
+                // text is one empty `Text` child, which the classification
+                // must carry through rather than split away – splitting emits
+                // no empty run, and the fold reads an absent child as "no text
+                // provided" (a different rendering entirely).
+                "&lt;&lt;install,&gt;&gt;",
                 "&#169; stays literal",
                 "-> and <- stay literal",
                 // Specials beside each construct these orders *can*
