@@ -643,6 +643,7 @@ mod tests {
             InlineNode::Anchor(Anchor {
                 id: CowStr::from("id"),
                 reftext: Some(child()),
+                is_bibliography: false,
                 location: loc,
             }),
             InlineNode::Footnote(Footnote {

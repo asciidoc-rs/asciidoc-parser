@@ -935,6 +935,7 @@ fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
         LeafNode::Anchor { id } => InlineNode::Anchor(Anchor {
             id: CowStr::from(id.clone()),
             reftext: None,
+            is_bibliography: false,
             location: span,
         }),
 

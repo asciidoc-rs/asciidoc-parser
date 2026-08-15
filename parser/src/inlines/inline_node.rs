@@ -187,6 +187,7 @@ mod tests {
             InlineNode::Anchor(Anchor {
                 id: CowStr::from("intro"),
                 reftext: None,
+                is_bibliography: false,
                 location,
             }),
             InlineNode::Ui(Ui {

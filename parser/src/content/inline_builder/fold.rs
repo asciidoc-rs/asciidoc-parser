@@ -426,17 +426,30 @@ fn fold_xref(
 /// the same verbatim boundary the node documents; a custom backend that needs
 /// the full reference text unconditionally will get it once a re-flow consumer
 /// pins richer `reftext` population.
+///
+/// A **bibliography** anchor (`[[[label]]]`) passes `None` regardless of what
+/// its node carries, mirroring its own replacer exactly: that pass calls
+/// `render_anchor(id, None, …)` and pushes the bracketed label into the flow
+/// itself. The label is in the flow here too – as the sibling nodes following
+/// this one (see `biblio_anchor_level`) – so folding the node's `reftext`,
+/// which holds that same bracketed label as the entry's *registered* reference
+/// text, into `render_anchor` would hand a custom backend a reference text the
+/// string pipeline never passes it.
 fn fold_anchor(
     anchor: &Anchor<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
     parser: &Parser,
     out: &mut String,
 ) {
-    let reftext = anchor.reftext.as_ref().map(|children| {
-        let mut s = String::new();
-        fold_into_html(children, renderer, parser, &mut s);
-        s
-    });
+    let reftext = if anchor.is_bibliography {
+        None
+    } else {
+        anchor.reftext.as_ref().map(|children| {
+            let mut s = String::new();
+            fold_into_html(children, renderer, parser, &mut s);
+            s
+        })
+    };
 
     renderer.render_anchor(&anchor.id, reftext, out);
 }
