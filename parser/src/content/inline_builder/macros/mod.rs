@@ -70,11 +70,13 @@ use crate::{Parser, Span, inlines::InlineNode};
 /// cannot carry that escaped text as an `'src` slice. Such a macro is therefore
 /// **left unrecognized** here for a later increment (the attribute-references
 /// step and the cutover), mirroring how the quotes step documents its own
-/// cross-span boundary (crossed delimiters). For a menu this notably defers the
-/// `&gt;`-submenu form (`menu:View[Zoom > Reset]`), whose `>` is always an
-/// escaped [`CharRef`](InlineNode::CharRef) by the time macros run; the
-/// comma-delimited and bare/single-item forms are verbatim and covered. The
-/// differential corpus pins the verbatim cases this increment claims.
+/// cross-span boundary (crossed delimiters). A family relaxes that gate only
+/// where the escaped piece is a delimiter *it consumes and never slices* – the
+/// angle-bracketed URL's own `&lt;`/`&gt;` (see
+/// `links::build_inline_link_node`) and a menu's `&gt;` submenu caret (see
+/// `ui::menu_match_is_sliceable`) – not where the escaped text would have to
+/// ride on the node. The differential corpus pins the cases each increment
+/// claims.
 pub(super) fn apply_macros<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,

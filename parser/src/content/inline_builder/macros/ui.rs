@@ -12,6 +12,13 @@ use crate::{
     strings::CowStr,
 };
 
+/// The delimiter a menu macro's item list is split on: the *escaped* form of
+/// the source `>` submenu caret, which is what the string replacer sees (the
+/// special-characters step runs long before macros) and therefore what this
+/// module's own match string presents too – as an atomic
+/// [`CharRef`](InlineNode::CharRef) piece.
+const SUBMENU_DELIMITER: &str = "&gt;";
+
 /// The keyboard/button UI macro pass at a level: matches
 /// [`INLINE_KBD_BTN_MACRO`] over the level's escaped text and replaces each
 /// verbatim match with the [`Ui`](InlineNode::Ui) node it produces.
@@ -121,16 +128,21 @@ fn build_kbd_btn_node<'src>(
 }
 
 /// The menu UI macro pass at a level: matches [`INLINE_MENU_MACRO`] over the
-/// level's escaped text and replaces each verbatim match with the
+/// level's escaped text and replaces each recognized match with the
 /// [`Ui`](InlineNode::Ui) node it produces.
 ///
 /// The caller runs this only under the `experimental` document attribute (see
 /// [`apply_macros`](super::apply_macros)); a cheap prefilter still skips the
-/// pattern sweep when no `menu:` prefix with an opening bracket is present. The
-/// `&gt;`-submenu form is always non-verbatim (its `>` is an escaped
-/// [`CharRef`](InlineNode::CharRef) by the time macros run) and is therefore
-/// deferred; the comma-delimited and bare/single-item forms are verbatim and
-/// handled here.
+/// pattern sweep when no `menu:` prefix with an opening bracket is present.
+///
+/// All three item-list spellings are handled: the bare/single-item form, the
+/// comma-delimited form, and the `&gt;`-submenu form
+/// (`menu:View[Zoom > Reset]`), whose delimiters are escaped
+/// [`CharRef`](InlineNode::CharRef)s by the time macros run and so need the
+/// relaxed gate [`menu_match_is_sliceable`] applies (see its own doc comment).
+/// A name or item text crossing any *other* escaped special, or a rendered
+/// [`Styled`](crate::inlines::Styled) span, is still deferred – the verbatim
+/// boundary every macro family documents.
 pub(super) fn menu_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -150,8 +162,10 @@ pub(super) fn menu_macros_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every menu macro at this level, skipping any whose match is not wholly
-/// verbatim source (see [`apply_macros`](super::apply_macros)).
+/// Finds every menu macro at this level, skipping any whose name or item text
+/// cannot be sliced from `'src` (see [`menu_match_is_sliceable`], which
+/// [`build_menu_node`] applies once the match's own capture groups are
+/// resolved).
 fn find_menu_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
@@ -162,11 +176,13 @@ fn find_menu_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
 
         let full = whole.start()..whole.end();
 
-        if !range_is_verbatim(pieces, &full) {
-            continue;
-        }
-
-        // The menu pattern's escape is an uncaptured leading `\?`.
+        // The menu pattern's escape is an uncaptured leading `\?`. It is
+        // checked *before* the sliceability gate – and needs no gate of its
+        // own – because dropping the backslash keeps the rest of the match as
+        // its own original nodes (an escaped special or a rendered span among
+        // them), which fold back to exactly the bytes the string replacer's
+        // `caps[0][1..]` emits. Mirrors the same hoist the `footnoteref:`
+        // increment made for the identical reason.
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
@@ -178,7 +194,12 @@ fn find_menu_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
             continue;
         }
 
-        let node = build_menu_node(&caps, &full, pieces, root);
+        let Some(node) = build_menu_node(&caps, &full, s, pieces, root) else {
+            // A name or item text this increment cannot slice from `'src`:
+            // left unrecognized, so the surrounding gap reproduces the source
+            // unchanged (see [`menu_macros_level`]).
+            continue;
+        };
 
         matches.push(MacroMatch {
             kind: MacroMatchKind::Node {
@@ -192,48 +213,126 @@ fn find_menu_matches<'src>(s: &str, pieces: &[Piece], root: Span<'src>) -> Vec<M
     matches
 }
 
-/// Builds one [`Ui`](InlineNode::Ui) menu node from a verbatim match. The menu
-/// name borrows from `'src`; the submenu path and trailing item are split
-/// exactly as the string replacer splits them (owned, because a split part is
-/// trimmed).
+/// Reports whether a menu match's own text maps back onto `'src`, the menu
+/// family's counterpart of [`range_is_verbatim`].
+///
+/// It differs from that check in exactly one admitted case: a
+/// [`SUBMENU_DELIMITER`] (`&gt;`) *inside the item list*. Every other macro
+/// family requires its whole match to be verbatim before it will build a
+/// self-describing node, and an escaped special is an atomic piece that check
+/// rejects outright – which is what made the `&gt;`-submenu form
+/// (`menu:View[Zoom > Reset]`) unrecognizable, whatever its item texts looked
+/// like. But a submenu caret carries no value the node ever slices: like the
+/// `<<id>>` shorthand's own `&lt;&lt;`/`&gt;&gt;` delimiters, the string
+/// replacer *consumes* it as the list's delimiter and emits it nowhere (the
+/// rendered caret between levels comes from `render_menu`, not from the source
+/// character). Only the item texts on either side of it need to be verbatim,
+/// and they are checked here exactly as before.
+///
+/// Everything else is unchanged: an atomic piece that is *not* an item-list
+/// caret – another escaped special (`menu:File[A & B]`, and a `&`/`>` in the
+/// menu *name*, which the pattern admits) or a rendered
+/// [`Styled`](crate::inlines::Styled) span – still fails, as does a
+/// [`synthesized`](Piece::synthesized) run, whose bytes have no `'src` slice
+/// for the name to borrow.
+fn menu_match_is_sliceable(
+    s: &str,
+    pieces: &[Piece],
+    full: &std::ops::Range<usize>,
+    items: Option<&std::ops::Range<usize>>,
+) -> bool {
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the match.
+        if p_end <= full.start || p_start >= full.end {
+            continue;
+        }
+
+        if piece.synthesized {
+            return false;
+        }
+
+        if !piece.atomic {
+            continue;
+        }
+
+        // The one admitted atomic piece: a submenu caret the node consumes as
+        // the item list's delimiter. Its match-string bytes identify it
+        // unambiguously – a rendered span contributes a single placeholder
+        // character, and the only other atomic pieces are the two remaining
+        // special-character entities.
+        if s.get(p_start..p_end) != Some(SUBMENU_DELIMITER) {
+            return false;
+        }
+
+        let inside_items = items.is_some_and(|items| p_start >= items.start && p_end <= items.end);
+
+        if !inside_items {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Builds one [`Ui`](InlineNode::Ui) menu node from a match whose own text
+/// [`menu_match_is_sliceable`] accepts – the gate lives here rather than in
+/// [`find_menu_matches`] because it needs the match's own capture groups to
+/// know which sub-range may carry a submenu caret. Returns `None` for a match
+/// it rejects, which the caller leaves unrecognized.
+///
+/// The menu name borrows from `'src`; the submenu path and trailing item are
+/// split exactly as the string replacer splits them (owned, because a split
+/// part is trimmed).
 fn build_menu_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
+    s: &str,
     pieces: &[Piece],
     root: Span<'src>,
-) -> InlineNode<'src> {
-    let location = source_slice(pieces, full.clone(), root);
-
-    // Group 1 (the menu name) is mandatory in the pattern, and on a verbatim
-    // match it slices straight from `'src`, so the name borrows.
-    // `unwrap` is safe: the pattern cannot match without group 1.
+) -> Option<InlineNode<'src>> {
+    // Group 1 (the menu name) is mandatory in the pattern; group 2 (the items)
+    // is optional. `unwrap` is safe: the pattern cannot match without group 1.
     #[allow(clippy::unwrap_used)]
     let name = caps.get(1).unwrap();
 
+    let items = caps.get(2).map(|m| m.start()..m.end());
+
+    if !menu_match_is_sliceable(s, pieces, full, items.as_ref()) {
+        return None;
+    }
+
+    let location = source_slice(pieces, full.clone(), root);
+
     let menu = CowStr::from(source_slice(pieces, name.start()..name.end(), root).data());
 
-    // Group 2 (the items) is optional.
     let (submenus, item) = split_menu_items(caps.get(2).map(|m| m.as_str()));
 
-    InlineNode::Ui(Ui {
+    Some(InlineNode::Ui(Ui {
         kind: UiKind::Menu {
             menu,
             submenus,
             item,
         },
         location,
-    })
+    }))
 }
 
 /// Splits a menu macro's item list into its submenu path and trailing item,
-/// reproducing the string replacer's delimiter handling: a `&gt;` (from a
-/// source `>`) takes precedence over a comma, the last part is the menu item,
-/// and any earlier parts are submenus. With no delimiter the whole
-/// (right-trimmed) list is a single item, and an absent list (an empty `[]`) is
-/// a bare menu reference. Because a `&gt;` never survives into a *verbatim*
-/// match (see [`menu_macros_level`]), only the comma / single-item / bare
-/// branches run in practice; the `&gt;` branch is kept so the split stays
-/// faithful.
+/// reproducing the string replacer's delimiter handling: a
+/// [`SUBMENU_DELIMITER`] (from a source `>`) takes precedence over a comma,
+/// the last part is the menu item, and any earlier parts are submenus. With no
+/// delimiter the whole (right-trimmed) list is a single item, and an absent
+/// list (an empty `[]`) is a bare menu reference.
+///
+/// The list it splits is the *match string* text – the same escaped text the
+/// string replacer splits – so the caret branch keys off `&gt;` here exactly as
+/// it does there. Every part the split yields is verbatim source text (the
+/// carets are the only non-source pieces a match may carry, and they are
+/// consumed by the split itself – see [`menu_match_is_sliceable`]), so each
+/// part is the very text `render_menu` receives from the string pipeline.
 fn split_menu_items<'src>(items: Option<&str>) -> (Vec<CowStr<'src>>, Option<CowStr<'src>>) {
     let Some(items) = items else {
         return (vec![], None);
@@ -244,8 +343,8 @@ fn split_menu_items<'src>(items: Option<&str>) -> (Vec<CowStr<'src>>, Option<Cow
         items = items.replace("\\]", "]");
     }
 
-    let delim = if items.contains("&gt;") {
-        Some("&gt;")
+    let delim = if items.contains(SUBMENU_DELIMITER) {
+        Some(SUBMENU_DELIMITER)
     } else if items.contains(',') {
         Some(",")
     } else {
@@ -330,6 +429,26 @@ mod tests {
             "menu:File[Save As]",
             "menu:Tools[Project, Build]",
             "menu:View[Tool Windows, Project, Structure]",
+            // Menu: the `&gt;` submenu form, whose delimiters are escaped
+            // `CharRef`s by the time macros run (the relaxed gate this
+            // increment adds), with and without surrounding spaces, at one and
+            // several levels, and taking precedence over a comma.
+            "menu:View[Zoom > Reset]",
+            "menu:View[Zoom>Reset]",
+            "menu:File[Save As > PDF]",
+            "menu:View[Tools > Options > Advanced]",
+            "menu:File[Save, As > PDF]",
+            "menu:File[> Leading caret]",
+            "menu:File[Save a\\] file > Now]",
+            "Choose menu:View[Zoom > Reset] to reset the zoom.",
+            "menu:View[Zoom > Reset] and menu:File[Save]",
+            "*menu:View[Zoom > Reset]*",
+            "\\menu:View[Zoom > Reset]",
+            // An escaped macro the gate would *reject* (its item list crosses
+            // an escaped `&`): the escape is honored ahead of the gate, so the
+            // backslash is dropped here exactly as the string replacer drops
+            // it.
+            "\\menu:File[A & B]",
             // Several UI macros together, and next to another macro family.
             "See kbd:[F1] for help and btn:[Go] to run.",
             "kbd:[A] then image:x.png[X]",
@@ -530,24 +649,75 @@ mod tests {
     }
 
     #[test]
-    fn a_menu_with_a_submenu_caret_is_a_documented_divergence() {
-        // The submenu form `menu:View[Zoom > Reset]` uses `>` as the level
-        // delimiter, but by the time macros run the special-characters step has
-        // turned `>` into a `&gt;` `CharRef`. A self-describing node cannot carry
-        // that escaped text as an `'src` slice, so the single-pass builder leaves
-        // the macro *unrecognized* here (deferred to a later increment), exactly
-        // as the image increment defers a macro over a special character.
-        let source = "menu:View[Zoom > Reset]";
-        let nodes = build_ui(Span::new(source));
+    fn a_menu_with_a_submenu_caret_splits_into_levels() {
+        // The submenu form uses `>` as the level delimiter, and by the time
+        // macros run the special-characters step has turned each one into a
+        // `&gt;` `CharRef` – an atomic piece the family's verbatim gate used to
+        // reject outright. A caret carries no value the node slices (the string
+        // replacer consumes it as the delimiter and emits it nowhere), so the
+        // relaxed gate admits it and the node splits into its levels, with only
+        // the item texts around it required to be verbatim.
+        let nodes = build_ui(Span::new("menu:View[Tools > Options > Advanced]"));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ui(_))),
-            "a menu crossing an escaped `>` must be left unrecognized: {nodes:?}"
-        );
+        assert_eq!(nodes.len(), 1);
+        let ui = assert_ui(&nodes[0]);
 
-        // The string pipeline, by contrast, *does* build a menuseq with a
-        // submenu here – the divergence this test documents.
-        assert!(golden_macros_with(source, &experimental_parser()).contains(r#"class="submenu""#));
+        match &ui.kind {
+            UiKind::Menu {
+                menu,
+                submenus,
+                item,
+            } => {
+                assert!(matches!(menu, CowStr::Borrowed(_)));
+                assert_eq!(menu.as_ref(), "View");
+                assert_eq!(submenus, &[CowStr::from("Tools"), CowStr::from("Options")]);
+                assert_eq!(item.as_deref(), Some("Advanced"));
+            }
+
+            other => panic!("expected Menu, got {other:?}"),
+        }
+
+        // Its location covers the whole macro in *source* terms – the carets
+        // are one byte each there, four in the match string.
+        assert_eq!(ui.location.data(), "menu:View[Tools > Options > Advanced]");
+        assert_eq!(ui.location.line(), 1);
+        assert_eq!(ui.location.col(), 1);
+    }
+
+    #[test]
+    fn a_menu_over_a_special_character_is_a_documented_divergence() {
+        // A submenu caret is the *only* escaped special a menu match may carry
+        // (the node consumes it as the item list's delimiter). Any other one –
+        // an `&` in the item list, or in the menu name the pattern also admits
+        // it in – is matched by the string pipeline over the *escaped* text
+        // (`menu:File[A &amp; B]`), which a self-describing node cannot carry
+        // as an `'src` slice, so the single-pass builder leaves the macro
+        // *unrecognized* here (deferred to a later increment), exactly as the
+        // image increment defers a macro over a special character.
+        for source in [
+            "menu:File[A & B]",
+            "menu:A&B[Save]",
+            // A caret in the *name* – which the pattern admits – is not a
+            // delimiter the node consumes, so it is not admitted either: the
+            // name would have to carry the escaped `&gt;` the node cannot
+            // slice from `'src`.
+            "menu:a>b[Save]",
+            "menu:File[*S* > As]",
+        ] {
+            let nodes = build_ui(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ui(_))),
+                "a menu crossing a non-caret special must be left unrecognized: {nodes:?}"
+            );
+
+            // The string pipeline, by contrast, *does* build a menu here – the
+            // divergence this test documents.
+            assert!(
+                golden_macros_with(source, &experimental_parser()).contains(r#"class="menu"#),
+                "expected the golden pipeline to build a menu for {source:?}"
+            );
+        }
     }
 
     #[test]
@@ -556,8 +726,10 @@ mod tests {
         // matched by the string pipeline over the *escaped* text (`kbd:[a&lt;b]`),
         // but a self-describing node cannot carry that escaped text as an `'src`
         // slice, so the single-pass builder leaves the macro *unrecognized* here
-        // (deferred to a later increment), exactly as it defers the `&gt;`-submenu
-        // menu form and the image increment defers a macro over a special.
+        // (deferred to a later increment), exactly as the image increment defers
+        // a macro over a special. Unlike a menu's own submenu caret, a keyboard
+        // macro's specials are part of a key the node *does* slice, so there is
+        // nothing here to relax.
         let nodes = build_ui(Span::new("kbd:[a<b]"));
 
         assert!(
@@ -567,6 +739,47 @@ mod tests {
 
         // The string pipeline, by contrast, *does* build a keyboard macro here.
         assert!(golden_macros_with("kbd:[a<b]", &experimental_parser()).contains("<kbd>"));
+    }
+
+    #[test]
+    fn a_menu_inside_an_expanded_value_is_a_documented_divergence() {
+        // Admitting the submenu caret relaxes the gate for an *atomic* piece
+        // only. A menu whose item list crosses a *synthesized* run (an
+        // attribute expansion) is still deferred, exactly as
+        // `range_is_verbatim` defers one for every other macro family that
+        // slices its own text from `'src` – the menu name and item texts have
+        // no source counterpart there (see
+        // `attribute_refs::apply_attribute_references`'s own doc comment).
+        use crate::{
+            content::{Content, SubstitutionGroup},
+            parser::ModificationContext,
+        };
+
+        let parser = experimental_parser().with_intrinsic_attribute(
+            "zoom",
+            "Zoom",
+            ModificationContext::Anywhere,
+        );
+
+        let source = "menu:View[{zoom} > Reset]";
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ui(_))),
+            "a menu crossing a synthesized run must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, recognizes it (the attribute
+        // expands before the menu macro is matched) – the divergence this test
+        // documents.
+        let mut golden = Content::from(Span::new(source));
+        SubstitutionGroup::Normal.apply(&mut golden, &parser, None);
+
+        assert!(
+            golden.rendered_str().contains(r#"class="submenu""#),
+            "golden output for {source:?}: {}",
+            golden.rendered_str()
+        );
     }
 
     #[test]
@@ -601,11 +814,9 @@ mod tests {
             (vec!["a]b".to_string()], Some("c".to_string()))
         );
 
-        // The `&gt;` submenu delimiter takes precedence over a comma. This form
-        // never reaches [`build_menu_node`] through the verbatim boundary (its
-        // source `>` is an escaped `CharRef` by macro time), so it is exercised
-        // directly here to keep [`split_menu_items`] a faithful reproduction of
-        // the string replacer's splitting.
+        // The `&gt;` submenu delimiter takes precedence over a comma – checked
+        // directly here on the escaped text the split actually receives, since
+        // a fixture's own source spells the delimiter `>`.
         assert_eq!(
             go(Some("View &gt; Zoom &gt; Reset")),
             (
