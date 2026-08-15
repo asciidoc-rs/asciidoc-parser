@@ -56,8 +56,10 @@
 //!   when that slice sits inside one, since a synthesized run's bytes have no
 //!   source counterpart to slice for a type that requires a real `Span` (see
 //!   [`range_is_verbatim`](macros::image::range_is_verbatim)) – but a macro
-//!   needing only its own *text* (no `Span`-typed field), like an anchor's id,
-//!   can now be recovered exactly via [`text_slice`](quotes::text_slice)
+//!   needing only its own *text* (no `Span`-typed field) – an anchor's id, a
+//!   bare e-mail address, a UI macro's keys/label/menu path, or an index term's
+//!   shown text – can now be recovered exactly via
+//!   [`text_slice`](quotes::text_slice) or straight out of the match string
 //!   instead (see
 //!   [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized)).
 //! - [`apply_character_replacements`] recognizes [character replacements] –
@@ -112,8 +114,9 @@
 //!   string step gates them. The cross-reference pass claims the same-document,
 //!   inter-document, and document-as-a-whole target forms in both spellings
 //!   (`xref:id[text]` and `<<id>>` / `<<id,text>>`), and the `xref:` macro's own
-//!   attribute-list text; only the shorthand's own `,>`-empty-text form remains
-//!   deferred. A display/reference text crossing a rendered span
+//!   attribute-list text, so what a cross-reference defers is decided entirely
+//!   by the verbatim gate that precedes both builders. A display/reference text
+//!   crossing a rendered span
 //!   (`link:x[*bold*]`, `xref:id[*bold*]`, `<<id,*bold*>>`) remains deferred for
 //!   every reference-bearing family, since a rendered span is an opaque piece
 //!   the node's single `Text` child cannot absorb without becoming structured
@@ -132,7 +135,11 @@
 //!   Likewise a *concealed* index term (`indexterm:[…]`, `(((…)))`) renders
 //!   nothing, so it too is always recognized; a *visible* term (`indexterm2:[…]`,
 //!   `((term))`) is deferred only when its shown text crosses a rendered span or
-//!   carries an attribute list.
+//!   carries an attribute list. The **UI** and **index-term** families share the
+//!   anchor's synthesized-run lift, and for the same reason – neither node
+//!   carries a `Span`-typed field, so a `kbd:`/`btn:`/`menu:` macro or an index
+//!   term inside an expanded attribute value is recognized with its exact text
+//!   (only the node's `location` taking design §4.4's coarse fallback).
 //! - [`apply_footnotes`] recognizes **footnotes** (`footnote:[…]`,
 //!   `footnote:id[…]`, `footnote:id[]`), replacing each with a
 //!   [`Footnote`](InlineNode::Footnote) node, folding through the shared
@@ -885,6 +892,29 @@ mod tests {
             "A {nope} in *bold {product}* text.\n{nope}\nlink:docs.html[Docs] {nope} tail.",
             missing_mode("drop"),
         );
+
+        // UI macros and index terms spliced in by attribute references –
+        // *synthesized* runs, which those two families now recognize exactly
+        // the way the anchor and bare-e-mail families do (neither node carries
+        // a `Span`-typed field). The real `AttributeReferences` step runs
+        // here, unlike the family-scoped corpora.
+        let with_ui_attributes = || {
+            Parser::default()
+                .with_intrinsic_attribute_bool("experimental", true, ModificationContext::Anywhere)
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("view", "View", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("key", "Ctrl+T", ModificationContext::Anywhere)
+        };
+
+        assert_parity_with(
+            "Press kbd:[{key}] then choose menu:{view}[Zoom > Reset] in *{product}*.",
+            with_ui_attributes,
+        );
+
+        assert_parity_with(
+            "The (({product})) index term beside *bold* text and indexterm:[{product}, docs].",
+            with_product,
+        );
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
@@ -935,6 +965,16 @@ mod tests {
             (
                 "  write to doc@example.com\n  today",
                 "write to doc@example.com\ntoday",
+            ),
+            // An index term in a wholly-synthesized seed: like an anchor's id
+            // and a bare address, its shown text is recovered exactly (from
+            // the match string) rather than deferred. The UI macros need the
+            // `experimental` attribute, so they are exercised by `ui.rs`'s own
+            // `ui_macros_are_recognized_when_the_whole_seed_is_synthesized`
+            // instead.
+            (
+                "  a ((flow term)) here\n  and a (((c1, c2))) one",
+                "a ((flow term)) here\nand a (((c1, c2))) one",
             ),
         ];
 

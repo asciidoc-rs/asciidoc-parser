@@ -2405,6 +2405,54 @@ Each phase is a reviewable unit with a clear exit gate.
   field docs record the distinction for a tree consumer. As with every prep piece before it,
   nothing further is wired in.
 
+  *Step 6 prep landed as (the UI and index-term families inside an expanded attribute value, the
+  seventh of that map's divergences):* the audit's map names "a macro inside an expanded attribute
+  value" as one of its remaining items, and the two macro families whose nodes carry **no
+  `Span`-typed field at all** – [`Ui`](../../parser/src/inlines/ui.rs) (`kbd:`/`btn:`/`menu:`) and
+  [`IndexTerm`](../../parser/src/inlines/index_term.rs) – now close their half of it. This is the
+  *same* lift the anchor family made for its id (the "prep (anchor synthesized boundary lifted)"
+  note above) and the bare-e-mail family made for its address, applied to the two families that
+  were left: a family that never needs a real `'src` slice has no reason to defer inside a
+  [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run, and each of these
+  computes every value it holds either straight out of the level's **match string** – which carries
+  a synthesized run's bytes exactly – or, for the one exception, through
+  [`text_slice`](../../parser/src/content/inline_builder/quotes.rs).
+
+  The change is correspondingly small, which is the point: the boundary was drawn by *one gate per
+  family*, not by anything structural. `kbd:`/`btn:` swaps
+  [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) for
+  [`range_is_verbatim_or_synthesized`](../../parser/src/content/inline_builder/macros/image.rs)
+  (its keys and label already came from the match string via `split_kbd_keys` /
+  `normalize_index_text`); `menu:` drops the `piece.synthesized` rejection from
+  [`menu_match_is_sliceable`](../../parser/src/content/inline_builder/macros/ui.rs) and reads its
+  one `'src`-sliced value – the menu *name* – through `text_slice` instead of
+  [`source_slice`](../../parser/src/content/inline_builder/quotes.rs), which would have offered
+  only that run's coarse span (§4.4) rather than the name's exact bytes; and both index-term
+  spellings drop their `range_overlaps_synthesized` check, keeping only the
+  `SPAN_PLACEHOLDER` one, since a term's shown text is reconstructed from the match string and
+  nowhere else. Every other boundary each family draws is untouched: an escaped special or a
+  rendered span in a `kbd:`/`btn:` bracket, in a menu *name* or item text (the admitted `&gt;`
+  submenu caret aside), or in a visible term still defers, as does an `indexterm2:` term carrying
+  an attribute list. As throughout, only the node's **`location`** takes the coarse enclosing-span
+  fallback (§4.4); the values themselves are exact.
+
+  Differential corpora drive each family's expanded-value forms – an expanded menu name, item
+  list, and submenu path; expanded keyboard keys and button labels; a whole macro arriving from an
+  expanded value; both index-term spellings, visible and concealed, whole and partial, and a kept
+  literal parenthesis beside an expanded term – through the real, public
+  `SubstitutionGroup::Normal::apply` as the golden, since these need the `AttributeReferences`
+  step the family-scoped `golden_macros` helper deliberately omits. Structural tests pin the
+  exact-value/coarse-location split; the wholly-synthesized **seed** path
+  ([`build_from_value`](../../parser/src/content/inline_builder/mod.rs), a filtered multi-line
+  block) is covered for both families; a whole-document test drives the real parse path end to end;
+  and fixtures are added to the whole-pipeline combined-constructs corpus and to the structural
+  recorder cross-check – where the recorder side, which has always recovered these from the string
+  pipeline's own render params, can now be compared *structurally* against a builder that
+  recognizes them too. Re-running the corpus-wide fold-parity audit (tree building forced on for
+  every parse in the suite) confirms the divergence set strictly **shrank**: the three sources the
+  divergence tests pinned are gone and no new one appeared. As with every prep piece before it,
+  nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2615,6 +2663,21 @@ Each phase is a reviewable unit with a clear exit gate.
        preserve an empty `Text` node instead of splitting it away to nothing, and
        [`build_for_group`](../../parser/src/content/inline_builder/mod.rs) stop seeding one for
        empty content. See the step's own "landed as" note above.
+     - ✅ **prep (UI + index terms inside an expanded value).** The seventh of that audit's
+       divergences – "a macro inside an expanded attribute value" – is closed for the two macro
+       families whose nodes carry no `Span`-typed field, which is the same reason the anchor and
+       bare-e-mail families already lifted it: `kbd:`/`btn:`/`menu:`
+       ([`ui`](../../parser/src/content/inline_builder/macros/ui.rs)) and index terms
+       ([`indexterm`](../../parser/src/content/inline_builder/macros/indexterm.rs)) now recognize a
+       macro sitting inside a [`synthesized`](../../parser/src/content/inline_builder/quotes.rs)
+       run, computing every value from the level's match string (or, for the menu *name*, through
+       [`text_slice`](../../parser/src/content/inline_builder/quotes.rs)) with only the node's
+       `location` taking §4.4's coarse fallback; see the step's own "landed as" note above. Every
+       other boundary the two families draw – an escaped special or a rendered span in a bracket,
+       a menu name, or a visible term, and an `indexterm2:` attribute-list term – is unchanged.
+       The families that carry an [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` or
+       another `Span`-typed field (image, link, cross-reference) still defer here, so that half of
+       the map item remains open.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
