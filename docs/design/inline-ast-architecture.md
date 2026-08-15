@@ -2315,6 +2315,22 @@ Each phase is a reviewable unit with a clear exit gate.
   `drop` the nested case needs no such detection at all, since removing a reference is a purely
   local edit and a span keeps its enclosing line non-empty either way.
 
+  That detection has an ordering constraint of its own, caught in review:
+  [`styled_drop_indices`](../../parser/src/content/inline_builder/attribute_refs.rs) must run
+  **before** the splicing recursion, not from inside the level that consumes it. The string
+  pipeline replaces every reference on a line in one `replace_all` pass, which never re-scans its
+  own replacements – so an attribute whose value happens to *be* reference-shaped (`:x: {nope}`,
+  then `{x}`) leaves that text in the output literally, and it neither is nor arms a missing
+  reference. Run after the recursion, the walk would have read the already-spliced value as one and
+  dropped a line the string pipeline keeps. Hoisting the whole detection to
+  `apply_attribute_references` – which then hands the resulting node indices down, translated to
+  match-string offsets at the level that uses them (sound because the recursion only rewrites a
+  span's *children*, and a span contributes one placeholder piece whatever they are) – is what keeps
+  the two in step, and it keeps a synthesized *seed* scanned, since its text is pre-expansion
+  content in its own right. The corpus gains fixtures for both halves of this: a reference-shaped
+  value, and a value carrying a newline (where the two pipelines agree by construction, since both
+  split into lines *before* expanding).
+
   As with every macro family's own catalog/warning side effect, the `drop-line` mode's *diagnostic*
   (Asciidoctor's "dropping line containing reference to missing attribute", a
   `SkippingReferenceToMissingAttribute` warning) is **not** raised here: it does not change the

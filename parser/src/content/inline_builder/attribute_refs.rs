@@ -103,15 +103,29 @@ pub(super) fn apply_attribute_references<'src>(
 
     let missing = MissingHandling::for_content(&nodes, parser);
 
-    apply_attribute_references_recursive(nodes, root, parser, &counters, missing)
+    // Which top-level nodes carry a missing reference *inside a span* – found
+    // here, ahead of the recursion below, precisely because it must read the
+    // content's own **pre-expansion** text (see [`styled_drop_indices`]).
+    let span_drops = if missing == MissingHandling::DropLine {
+        styled_drop_indices(&nodes, parser)
+    } else {
+        Vec::new()
+    };
+
+    apply_attribute_references_recursive(nodes, root, parser, &counters, missing, &span_drops)
 }
 
+/// `span_drops` names this level's own [`Styled`](crate::inlines::Styled)
+/// nodes that force a line drop (see [`styled_drop_indices`]); a nested level
+/// never has any of its own, since a drop is only ever decided at the
+/// content's top level.
 fn apply_attribute_references_recursive<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
     counters: &HashMap<usize, String>,
     missing: MissingHandling,
+    span_drops: &[usize],
 ) -> Vec<InlineNode<'src>> {
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
@@ -123,6 +137,7 @@ fn apply_attribute_references_recursive<'src>(
                     parser,
                     counters,
                     missing.nested(),
+                    &[],
                 );
                 InlineNode::Styled(styled)
             }
@@ -131,7 +146,7 @@ fn apply_attribute_references_recursive<'src>(
         })
         .collect();
 
-    attribute_references_level(nodes, root, parser, counters, missing)
+    attribute_references_level(nodes, root, parser, counters, missing, span_drops)
 }
 
 /// How a level treats a reference to a **missing** attribute — this module's
@@ -375,28 +390,36 @@ enum AttributeMatchKind {
 /// each recognized match with the node(s) it produces and leaving everything
 /// else in place. `counters` supplies each `counter`/`counter2` directive's
 /// already-resolved value (see [`resolve_counters`]); `missing` decides what a
-/// reference to an unset attribute becomes (see [`MissingHandling`]).
+/// reference to an unset attribute becomes (see [`MissingHandling`]), and
+/// `span_drops` names the nodes whose spans force a line drop (see
+/// [`styled_drop_indices`]).
+#[allow(clippy::too_many_arguments)]
 fn attribute_references_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
     counters: &HashMap<usize, String>,
     missing: MissingHandling,
+    span_drops: &[usize],
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
-    // Under `DropLine`, a missing reference nested inside a span drops *this*
-    // level's line, so this level has work to do even when its own match
-    // string carries no reference at all.
-    let span_drops = if missing == MissingHandling::DropLine {
-        styled_line_drops(&nodes, &pieces, parser)
-    } else {
-        Vec::new()
-    };
+    // A span that forces a line drop is named by node index; the line decision
+    // works in match-string offsets. Translating here (rather than in
+    // `styled_drop_indices`, which must run before the recursion) is safe
+    // because that recursion only ever rewrites a `Styled` node's *children*,
+    // and a `Styled` node contributes exactly one placeholder piece whatever
+    // they are – so this level's piece layout is the same before and after it.
+    let span_drop_offsets: Vec<usize> = pieces
+        .iter()
+        .filter(|piece| span_drops.contains(&piece.node_index))
+        .map(|piece| piece.s_start)
+        .collect();
 
     // Cheap pre-filter: skip the pattern sweep when no reference can be
-    // present at this level.
-    if !s.contains('{') && span_drops.is_empty() {
+    // present at this level. A span drop is still work even with no reference
+    // of this level's own.
+    if !s.contains('{') && span_drop_offsets.is_empty() {
         return nodes;
     }
 
@@ -406,7 +429,15 @@ fn attribute_references_level<'src>(
         Vec::new()
     };
 
-    let lines = surviving_lines(&s, &matches, &span_drops, missing, &pieces, root, counters);
+    let lines = surviving_lines(
+        &s,
+        &matches,
+        &span_drop_offsets,
+        missing,
+        &pieces,
+        root,
+        counters,
+    );
 
     if matches.is_empty() && lines.is_none() {
         return nodes;
@@ -421,21 +452,34 @@ fn attribute_references_level<'src>(
     rebuild_attribute_level(&nodes, &pieces, &matches, root, counters, &lines)
 }
 
-/// The match-string offsets of every [`Styled`](crate::inlines::Styled) span
-/// at this level whose own subtree carries a live reference to a missing
-/// attribute — the positions that force this level's enclosing line to be
-/// dropped under [`MissingHandling::DropLine`], since the string pipeline
-/// drops the line the span's rendered markup sits on.
-fn styled_line_drops(nodes: &[InlineNode<'_>], pieces: &[Piece], parser: &Parser) -> Vec<usize> {
-    pieces
+/// The indices into `nodes` of every [`Styled`](crate::inlines::Styled) span
+/// whose own subtree carries a live reference to a missing attribute — the
+/// spans that force their enclosing line to be dropped under
+/// [`MissingHandling::DropLine`], since the string pipeline drops the line the
+/// span's rendered markup sits on.
+///
+/// # Why this runs before the splicing recursion
+///
+/// It must read the content's **pre-expansion** text. The string pipeline
+/// replaces every reference on a line in one `replace_all` pass, which never
+/// re-scans its own replacements: a value that happens to expand *to*
+/// `{something}` leaves that text in the output literally, and it neither is
+/// nor arms a missing reference. Run after the recursion, this walk would see
+/// the already-spliced value and read it as one — dropping a line the string
+/// pipeline keeps. Hoisting the whole detection to
+/// [`apply_attribute_references`], before anything is spliced, is what keeps
+/// the two in step; it also means a synthesized *seed* (a filtered multi-line
+/// block, reached through `build_from_value`) is still scanned, since its text
+/// is pre-expansion content in its own right.
+fn styled_drop_indices(nodes: &[InlineNode<'_>], parser: &Parser) -> Vec<usize> {
+    nodes
         .iter()
-        .filter(|piece| match nodes.get(piece.node_index) {
-            Some(InlineNode::Styled(styled)) => {
-                subtree_has_missing_reference(&styled.children, parser)
-            }
+        .enumerate()
+        .filter(|(_, node)| match node {
+            InlineNode::Styled(styled) => subtree_has_missing_reference(&styled.children, parser),
             _ => false,
         })
-        .map(|piece| piece.s_start)
+        .map(|(index, _)| index)
         .collect()
 }
 
@@ -1333,15 +1377,18 @@ mod tests {
 
     // ---- `attribute-missing` drop / drop-line ------------------------------
 
-    /// A default parser with `attribute-missing` set to `mode`, plus a
-    /// `greeting` attribute so a fixture can mix a resolvable reference with a
-    /// missing one.
+    /// A default parser with `attribute-missing` set to `mode`, plus three
+    /// resolvable attributes a fixture can mix with a missing reference:
+    /// an ordinary one, one whose value carries a **newline**, and one whose
+    /// value is itself **reference-shaped**.
     fn parser_with_missing_mode(mode: &str) -> Parser {
         use crate::parser::ModificationContext;
 
         Parser::default()
             .with_intrinsic_attribute("attribute-missing", mode, ModificationContext::Anywhere)
             .with_intrinsic_attribute("greeting", "Hello", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("two-lines", "a\nb", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("looks-like-a-ref", "{nope}", ModificationContext::Anywhere)
     }
 
     /// Asserts that folding the single-pass tree for `source` reproduces the
@@ -1408,6 +1455,20 @@ mod tests {
             "*{undefined-thing}*",
             "_text {undefined-thing} more_",
             "a line with *{undefined-thing}* in it",
+            // An expanded value carrying a newline of its own: both pipelines
+            // split into lines *before* expanding, so the newline the value
+            // introduces is never a line boundary either drop decision sees.
+            "{two-lines} {undefined-thing}",
+            "{two-lines}\n{undefined-thing}",
+            "{undefined-thing}\n{two-lines}",
+            "*{two-lines}* {undefined-thing}",
+            // A value that is itself reference-shaped: neither pipeline
+            // re-scans its own replacement, so the spliced `{nope}` stays
+            // literal and arms nothing.
+            "{looks-like-a-ref}",
+            "_{looks-like-a-ref}_",
+            "keep\n_{looks-like-a-ref}_\nkeep",
+            "_{looks-like-a-ref}_ and {undefined-thing}",
         ];
 
         for fixture in fixtures {
@@ -1443,11 +1504,53 @@ mod tests {
             "*{undefined-thing}*",
             "keep\na *{undefined-thing}* span\nkeep too",
             "keep\n_outer *{undefined-thing}* inner_\nkeep too",
+            // An expanded value carrying a newline of its own: both pipelines
+            // split into lines *before* expanding, so the newline the value
+            // introduces is never a line boundary either drop decision sees.
+            "{two-lines} {undefined-thing}",
+            "{two-lines}\n{undefined-thing}",
+            "{undefined-thing}\n{two-lines}",
+            "*{two-lines}* {undefined-thing}",
+            "keep\n{two-lines} {undefined-thing}\nkeep too",
+            // A value that is itself reference-shaped. Neither pipeline
+            // re-scans its own replacement – `replace_all` never does – so the
+            // spliced `{nope}` stays literal and is *not* a missing reference:
+            // it neither drops its own line nor, from inside a span, the
+            // enclosing one. This is why the span-drop detection runs ahead of
+            // the splicing recursion (see `styled_drop_indices`).
+            "{looks-like-a-ref}",
+            "_{looks-like-a-ref}_",
+            "keep\n_{looks-like-a-ref}_\nkeep",
+            "keep\n{looks-like-a-ref}\nkeep",
+            "_{looks-like-a-ref}_ and {undefined-thing}",
+            "keep\n_a {looks-like-a-ref} b_\nkeep too",
         ];
 
         for fixture in fixtures {
             assert_missing_mode_parity(fixture, "drop-line");
         }
+    }
+
+    #[test]
+    fn a_reference_shaped_expansion_inside_a_span_does_not_drop_its_line() {
+        // The regression the span-drop detection's own ordering guards
+        // against, asserted directly rather than only through the corpus: the
+        // spliced `{nope}` must reach the output literally, with its line
+        // intact, exactly as the string pipeline's single `replace_all` pass
+        // leaves it.
+        let source = "keep\n_{looks-like-a-ref}_\nkeep too";
+
+        let nodes = build(
+            Span::new(source),
+            &parser_with_missing_mode("drop-line"),
+            None,
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "keep\n<em>{nope}</em>\nkeep too",
+            "{nodes:?}"
+        );
     }
 
     #[test]
