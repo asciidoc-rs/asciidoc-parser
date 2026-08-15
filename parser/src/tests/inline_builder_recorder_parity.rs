@@ -778,7 +778,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "visit https://example.org/path?q=1 now",
         "image:a.png[An image with spaces,role=thumb]",
         "before image:b.svg[Vector] after",
-        "<<a>> and <<b>> and <<c,C text>>",
+        "<<a>> and <<b>> and <<c,C text>> and <<d,>>",
         "a ((flow term)) and (((c1, c2, c3))) end",
         "indexterm:[primary, secondary]",
         "indexterm2:[shown]",

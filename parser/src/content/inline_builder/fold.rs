@@ -387,7 +387,14 @@ fn fold_xref(
     let mut provided = String::new();
     fold_into_html(&reference.children, renderer, parser, &mut provided);
 
-    let provided_text = if provided.is_empty() {
+    // Whether a display text was *provided* is the presence of a child, not
+    // what that child folds to: the `<<id,>>` shorthand records a
+    // present-but-empty text (one empty `Text` child) that the string replacer
+    // carries as `Some("")` – an empty `<a>…</a>` – which an absent text
+    // (`None`, the bracketed `[id]` / reference-text fallback) renders quite
+    // differently. Every text the builder recognizes is baked into exactly one
+    // child, so the two cases never collide.
+    let provided_text = if reference.children.is_empty() {
         None
     } else {
         Some(provided.as_str())

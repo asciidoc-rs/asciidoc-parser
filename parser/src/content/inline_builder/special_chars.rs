@@ -140,13 +140,23 @@ pub(super) fn classify_unescaped_specials<'src>(
 /// `'src`. When `value` is *synthesized* – it has no source of its own – the
 /// runs are owned slices of the value and every sub-node falls back to the
 /// whole `location` span, the documented coarse fallback (design §4.4).
+///
+/// An **empty** value is kept as the node it already is rather than split.
+/// Neither splitter ever emits an empty run (there is nothing in one to
+/// escape), so splitting an empty node would silently delete it – and an empty
+/// `Text` can be load-bearing: a `<<id,>>` cross-reference's present-but-empty
+/// reference text is exactly one, and the fold tells it from an absent text by
+/// the child's *presence* (see `build_xref_shorthand_node` in
+/// [`macros`](super::macros)).
 fn split_text<'src>(
     value: CowStr<'src>,
     location: Span<'src>,
     leaf: SpecialLeaf,
     out: &mut Vec<InlineNode<'src>>,
 ) {
-    if value.as_ref() == location.data() {
+    if value.is_empty() {
+        out.push(InlineNode::Text { value, location });
+    } else if value.as_ref() == location.data() {
         split_verbatim(location, leaf, out);
     } else {
         split_synthesized(value.as_ref(), location, leaf, out);

@@ -36,6 +36,14 @@ pub struct Ref<'src> {
     pub target: CowStr<'src>,
 
     /// The display text, as child inline nodes. Empty when none was supplied.
+    ///
+    /// "None was supplied" is a distinct state from "an empty one was": a
+    /// `<<id,>>` cross-reference supplies a *present-but-empty* reference text
+    /// – one [`Text`](InlineNode::Text) child whose value is empty – and
+    /// renders an empty `<a>…</a>`, where a `<<id>>` with no text at all falls
+    /// back to the target's own reference text (or a bracketed `[id]` when it
+    /// resolves to none). A consumer that needs the distinction should test
+    /// whether a child is *present*, not whether the text it carries is empty.
     pub children: Vec<InlineNode<'src>>,
 
     /// The roles (CSS classes) assigned to the reference.
